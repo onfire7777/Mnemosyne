@@ -18,6 +18,12 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+Provider usage accounting now preserves per-call reported tokens/timing and
+unknown counters for incomplete attempts. The retained 22-call prompt experiment
+reports 18,180 input and 3,788 generated tokens; this is not monetary cost or
+full M12 cost acceptance. Eight accounting checks pass. Existing CI at
+`30184aeb` was still active when this work began; newer commits remain local.
+
 A paired Qwen3 1.7B diagnostic at clean `cccb4b24` completed all 22 first-turn
 calls across the first 11 frozen cases. Semantic instructions fixed one
 recurrence proposal but left event/condition timer substitutions and introduced

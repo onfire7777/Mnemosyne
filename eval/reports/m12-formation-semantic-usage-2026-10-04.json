@@ -1,0 +1,403 @@
+{
+  "schema": "m12-provider-usage-diagnostic/v1",
+  "invocations": 22,
+  "calls": [
+    {
+      "file": "eval/reports/m12-formation-semantic-diagnostic-2026-10-04/00-contract-v1/0e4f0646652041369f15fecc5de21298.jsonl",
+      "sha256": "82ae6af6d3b365744a59e714b715af84ab687be20dd0d2e05008d3a56418df5e",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "contract-v1",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 726,
+        "eval_count": 131,
+        "total_duration": 3000294916,
+        "load_duration": 781175625,
+        "prompt_eval_duration": 699969000,
+        "eval_duration": 1508064000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-semantic-diagnostic-2026-10-04/00-semantics-v2/ab39a6c37a144794b899f2d693649ed1.jsonl",
+      "sha256": "a76108970ebba74d7c4eb271e4ed69d40b5a802990922f762636ef8b099dd7ed",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 942,
+        "eval_count": 131,
+        "total_duration": 3258774083,
+        "load_duration": 784571166,
+        "prompt_eval_duration": 915390000,
+        "eval_duration": 1549851000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-semantic-diagnostic-2026-10-04/01-contract-v1/f4f8792ff63647b2ba7b65b9e40c1954.jsonl",
+      "sha256": "beecb105f76c26269427725b74b73a7f9d6cddbcaa07c3b5df39090f3ac306f0",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "contract-v1",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 711,
+        "eval_count": 131,
+        "total_duration": 3010636583,
+        "load_duration": 780344125,
+        "prompt_eval_duration": 698146000,
+        "eval_duration": 1523245000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-semantic-diagnostic-2026-10-04/01-semantics-v2/eb87362d6d95471fac86fbd66c20753c.jsonl",
+      "sha256": "5bba9d923966f7b4d61480fec1640f925ad37fa977731aee9edecd74ae56c411",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 927,
+        "eval_count": 131,
+        "total_duration": 3242415292,
+        "load_duration": 785597792,
+        "prompt_eval_duration": 897353000,
+        "eval_duration": 1550145000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-semantic-diagnostic-2026-10-04/02-contract-v1/8e97ade969cb4ebe90f1a2240e0c6a4a.jsonl",
+      "sha256": "31714d818733b3b4e5a85ee0383c829ba0d069a222dae9d0996637dca0fe95ef",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "contract-v1",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 729,
+        "eval_count": 351,
+        "total_duration": 5615308958,
+        "load_duration": 784305583,
+        "prompt_eval_duration": 694607000,
+        "eval_duration": 4128291000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-semantic-diagnostic-2026-10-04/02-semantics-v2/e04a34b5cb72411f8fa3ffb1f1cd3c33.jsonl",
+      "sha256": "e02289b168a18a373feb4c096c3e3891f61accd379939aa726d28c9b578b4371",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 945,
+        "eval_count": 175,
+        "total_duration": 3792304875,
+        "load_duration": 782041875,
+        "prompt_eval_duration": 917218000,
+        "eval_duration": 2084272000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-semantic-diagnostic-2026-10-04/03-contract-v1/517e5d3778bf4acd97f0bdccb8536c62.jsonl",
+      "sha256": "44c3ac39271325a54864000100ee15a3088794e551ebb3626744d0e0ee38a47e",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "contract-v1",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 696,
+        "eval_count": 146,
+        "total_duration": 3151740708,
+        "load_duration": 786455625,
+        "prompt_eval_duration": 658394000,
+        "eval_duration": 1699131000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-semantic-diagnostic-2026-10-04/03-semantics-v2/cc8e5c9168d64924ab36fee79d824f8d.jsonl",
+      "sha256": "51c6c9491c09ca74c1ef3a9ead69d64c563d6e08b21e6d5736235509374ceef9",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 912,
+        "eval_count": 147,
+        "total_duration": 3484619792,
+        "load_duration": 784893083,
+        "prompt_eval_duration": 889834000,
+        "eval_duration": 1795274000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-semantic-diagnostic-2026-10-04/04-contract-v1/55152887d9fe4556be9a16d0269778e1.jsonl",
+      "sha256": "a08b2dcfdeb7ea0b9f4c7faba5eff12685ecb6547c81bf7d10feeced51e358e5",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "contract-v1",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 711,
+        "eval_count": 131,
+        "total_duration": 2998480292,
+        "load_duration": 784041084,
+        "prompt_eval_duration": 694897000,
+        "eval_duration": 1507893000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-semantic-diagnostic-2026-10-04/04-semantics-v2/bc31d2b6c6044a13a5fbd54a7a8607c2.jsonl",
+      "sha256": "2e6eb5fdd2672f57b00b8987b493cb11c7f0472a02a306bf03a0d030e2064bf0",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 927,
+        "eval_count": 244,
+        "total_duration": 4573459584,
+        "load_duration": 788301959,
+        "prompt_eval_duration": 892594000,
+        "eval_duration": 2878651000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-semantic-diagnostic-2026-10-04/05-contract-v1/37e1240981b845368823fa70cb8530e8.jsonl",
+      "sha256": "abe37f3e1d325caeb157a7e5894eaea8f4003ec7258cccaa2f8dbeb26c6948c1",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "contract-v1",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 720,
+        "eval_count": 130,
+        "total_duration": 2982481375,
+        "load_duration": 784792791,
+        "prompt_eval_duration": 691043000,
+        "eval_duration": 1492256000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-semantic-diagnostic-2026-10-04/05-semantics-v2/aee2c6d1c8a847a19157c33d1ab4111c.jsonl",
+      "sha256": "8114d09e323c3870ad04f048a6e57940bec5f333fbce563e578eaa9dd016c823",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 936,
+        "eval_count": 129,
+        "total_duration": 3225090958,
+        "load_duration": 786936625,
+        "prompt_eval_duration": 915387000,
+        "eval_duration": 1509904000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-semantic-diagnostic-2026-10-04/06-contract-v1/a950601f1cef4ab8aa9799a32d2bfd15.jsonl",
+      "sha256": "d1a5f338df1d6ae4e0323566dbd8b2359651b4b39a65675278d8f04a99050831",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "contract-v1",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 753,
+        "eval_count": 161,
+        "total_duration": 3414669292,
+        "load_duration": 787957959,
+        "prompt_eval_duration": 720004000,
+        "eval_duration": 1892054000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-semantic-diagnostic-2026-10-04/06-semantics-v2/f829bcfe5afb45e8b079a67567a3623a.jsonl",
+      "sha256": "342611699a753197b292fa17bb3b68c86244c3e5613c33c208fdce85f13e0c4c",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 969,
+        "eval_count": 161,
+        "total_duration": 3640754541,
+        "load_duration": 789461416,
+        "prompt_eval_duration": 947916000,
+        "eval_duration": 1888435000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-semantic-diagnostic-2026-10-04/07-contract-v1/f448df94a6524b758ed657b3c6f41689.jsonl",
+      "sha256": "c0ea173c4897d1f3ea644bbae385f24e85ed1cec41b8fcb63f678f13dc20cfab",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "contract-v1",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 733,
+        "eval_count": 150,
+        "total_duration": 3240192375,
+        "load_duration": 784281542,
+        "prompt_eval_duration": 693661000,
+        "eval_duration": 1751230000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-semantic-diagnostic-2026-10-04/07-semantics-v2/41cc4481bd324c2183bef102ac156142.jsonl",
+      "sha256": "d46241678e1fce09558e787343b2c7b6405ba41856c3f8979d9eaf49cefdfacf",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 949,
+        "eval_count": 131,
+        "total_duration": 3259722500,
+        "load_duration": 788751833,
+        "prompt_eval_duration": 913842000,
+        "eval_duration": 1541661000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-semantic-diagnostic-2026-10-04/08-contract-v1/187b1c037f8345428c36fe62579b64c7.jsonl",
+      "sha256": "fda3d33f0c8ec90b684d906f135e921ad89014a81a8bd4fa18d74ca29e3309c9",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "contract-v1",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 710,
+        "eval_count": 147,
+        "total_duration": 3205261666,
+        "load_duration": 784694916,
+        "prompt_eval_duration": 693435000,
+        "eval_duration": 1714314000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-semantic-diagnostic-2026-10-04/08-semantics-v2/1c3a0a1c755047a59e10a6c6f7ce973c.jsonl",
+      "sha256": "9f065cbf1875df8ec1e58351e97b0ac5adbcbf41590be95689a761893671378f",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 926,
+        "eval_count": 147,
+        "total_duration": 3414415083,
+        "load_duration": 787056208,
+        "prompt_eval_duration": 887631000,
+        "eval_duration": 1724386000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-semantic-diagnostic-2026-10-04/09-contract-v1/92f0cd64968b43b5a00d7c130653183e.jsonl",
+      "sha256": "c7522cfcd30f1fa1679390eb7a8e85d76893946e0fb7cea07fc277235928e177",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "contract-v1",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 714,
+        "eval_count": 262,
+        "total_duration": 4571663708,
+        "load_duration": 788862333,
+        "prompt_eval_duration": 691981000,
+        "eval_duration": 3077421000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-semantic-diagnostic-2026-10-04/09-semantics-v2/3022a33069f849c3a7c22976974247f9.jsonl",
+      "sha256": "a7158a0a2b8a002f6dba37c2f1711f7b77c2049ff4c2cdfa79ec6e7eb3758705",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 930,
+        "eval_count": 264,
+        "total_duration": 4840303959,
+        "load_duration": 789849834,
+        "prompt_eval_duration": 904289000,
+        "eval_duration": 3130705000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-semantic-diagnostic-2026-10-04/10-contract-v1/a5c647f1ea8f438ca8878b82017903b6.jsonl",
+      "sha256": "aac0ab11929299581a587cca9c53ebc9769164e56f501a7fe988a56cadc5bd10",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "contract-v1",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 699,
+        "eval_count": 239,
+        "total_duration": 4219162417,
+        "load_duration": 781141167,
+        "prompt_eval_duration": 666382000,
+        "eval_duration": 2761425000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-semantic-diagnostic-2026-10-04/10-semantics-v2/d81794034bed4260ae1c9527a75f54c2.jsonl",
+      "sha256": "ae8cc0aca9acd650f5117e4416c4fba2a9a53aee1f0baeb9f8f2983e21b36954",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 915,
+        "eval_count": 149,
+        "total_duration": 3450420708,
+        "load_duration": 791179583,
+        "prompt_eval_duration": 888352000,
+        "eval_duration": 1757578000
+      }
+    }
+  ],
+  "totals": {
+    "prompt_eval_count": {
+      "known_sum": 18180,
+      "known_calls": 22,
+      "missing_calls": 0,
+      "complete_total": 18180
+    },
+    "eval_count": {
+      "known_sum": 3788,
+      "known_calls": 22,
+      "missing_calls": 0,
+      "complete_total": 3788
+    },
+    "total_duration": {
+      "known_sum": 79592173665,
+      "known_calls": 22,
+      "missing_calls": 0,
+      "complete_total": 79592173665
+    },
+    "load_duration": {
+      "known_sum": 17286694124,
+      "known_calls": 22,
+      "missing_calls": 0,
+      "complete_total": 17286694124
+    },
+    "prompt_eval_duration": {
+      "known_sum": 17572325000,
+      "known_calls": 22,
+      "missing_calls": 0,
+      "complete_total": 17572325000
+    },
+    "eval_duration": {
+      "known_sum": 44466186000,
+      "known_calls": 22,
+      "missing_calls": 0,
+      "complete_total": 44466186000
+    }
+  },
+  "duration_unit": "nanoseconds",
+  "wall_elapsed_seconds": null,
+  "monetary_cost": null,
+  "provider_reported_not_attested": true,
+  "publishable": false,
+  "resource_admission_verified": false,
+  "ranking_eligible": false
+}

@@ -15,7 +15,7 @@ replace the original specification or promote development evidence to admission.
 | Overloaded-trigger cases | Versioned bounded fan-out generator: 2/4/8/16 actions per explicit type; full run from c7a9d05a completed/replayed with 750 expected firings | Define actual overload behavior and resource envelope; bounded fan-out is not saturation evidence |
 | Every firing targets harness-owned idempotent sink | Retained full trigger-sink and recovery-sink captures; exact annex replay | Integrate sink into the admitted full corpus and every candidate adapter; no external payload execution |
 | Recovery and retry correctness | 360-operation capture: 50 response losses, 50 adapter resets, 10 eligible firings, 10 cancelled controls; 10 sink receipts and 10 deliberate duplicate deliveries | Local response loss is not arbitrary crash recovery or external-service exactly-once behavior |
-| Precision, recall, F1, false alarms, misses, lateness, duplicate execution, cancellation correctness and cost | Window scorer and per-case/per-load reports; sink attempt records | Cost remains unmeasured; extend full-corpus reports without pooling away load-specific failures |
+| Precision, recall, F1, false alarms, misses, lateness, duplicate execution, cancellation correctness and cost | Window scorer and per-case/per-load reports; sink attempt records | Provider token/time counters are now reported for one 22-call formation diagnostic; full-corpus and end-to-end cost remain unmeasured. Extend reports without pooling away load-specific failures |
 | Zero duplicate and cancelled-intention executions | No violations in retained development captures | Verify on full registered corpus; finite local success is not universal certification |
 | Preregistered absolute floor and non-inferiority to exact reference | Draft independent explicit-action reference with retained explicit, fan-out and durable recovery executions plus paired replay diagnostics; no calibrated/admitted baseline claim | Resolve the verified nested-condition policy difference and complete broader semantic/recovery validation; calibrate on disjoint development data; freeze floor/margin before candidate ranking |
 | At least five virtual-week seeds | Five-seed, four-week explicit and recovery captures | Retain same repeat/replay guarantees across full workload and adapters |
@@ -169,3 +169,20 @@ incorrect exact-time proposal when schema key order changed. Future comparisons
 must bind actual request bytes and adapter order, not just semantically equal
 JSON. This finding does not replace the failed full attempts or establish correct
 formation. The original HTTP cause remains unresolved after one successful repeat.
+
+
+## Provider usage accounting
+
+`python -m eval.public.action_formation_usage LOG.jsonl ...` derives descriptive
+usage from retained Ollama responses. It preserves each call, its model/prompt
+profile and source hash, and exposes missing counters rather than filling them
+with zero. A failed call with a retained response still contributes its reported
+usage. Missing responses have unknown usage. Monetary cost, wall elapsed time,
+resource admission and ranking eligibility are not inferred from token counters.
+
+The [22-call usage report](../../eval/reports/m12-formation-semantic-usage-2026-10-04.json)
+contains 18,180 reported input tokens and 3,788 generated tokens, with
+79.592173665 seconds of summed provider-reported duration. This is distinct from
+the monitor's 80.544-second elapsed time and excludes unreported engine, energy,
+and infrastructure costs. It is neither a full M12 cost result nor independent
+verification of the model server's counters. Full-corpus cost remains open.
