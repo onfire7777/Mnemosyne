@@ -18,6 +18,12 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+The evaluation ActionCLI now rejects reuse of an already-known unkeyed task ID
+before scheduling. Three regression cases reproduced the gap before the fix;
+105 identity/retry/recurrence/dependency/BurnOS checks passed afterward. Original
+keyed retries remain supported, and production/BurnOS APIs are unchanged.
+Historical failed model captures retain their original source and results.
+
 A real Qwen3 1.7B dependency attempt from `1fbaa7de` is retained: one case
 completed, the second failed on keyed task rebinding, and 98 were not attempted.
 Four responses are retained. The completed case failed final state comparison

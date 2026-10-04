@@ -228,6 +228,8 @@ class ActionCLI:
         task_id = _require_str(task.get("task_id"), "task_id")
         action_id = _require_str(task.get("action_id"), "action_id")
         creation_key = task.get("idempotency_key")
+        if task_id in state.intention_by_task and task_id not in state.creation_key_by_task:
+            raise ActionCLIError("an unkeyed task cannot be recreated; update it or use a new task_id")
         if task_id in state.creation_key_by_task and state.creation_key_by_task[task_id] != creation_key:
             raise ActionCLIError("a keyed task cannot be rebound to a different creation key")
         if creation_key is not None and any(

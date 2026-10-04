@@ -447,3 +447,20 @@ validation; all 11 schema outputs passed it. The first JSON output still replace
 the event gate with a timer. Removing constraints therefore did not fix that
 observed semantic error. All 22 outputs and their consumed usage are retained;
 no tasks were executed and no default or acceptance gate changed.
+
+
+## Task identity guard after dependency attempt
+
+The failed dependency attempt exposed an evaluation-adapter identity gap:
+`task.create` could previously reuse an unkeyed symbolic task ID and replace
+its mapping to an intention. The adapter now rejects that reuse before invoking
+the public schedule command, including attempts to add a key retroactively.
+Use `task.update` for mutation or a new task ID for a distinct reminder. An
+original keyed creation can still be retried with the same key; existing
+backend idempotency-conflict checks remain authoritative for changed payloads.
+
+This guard does not change the production engine or BurnOS HTTP contract.
+Historical captures retain their original source hashes and observations; the
+failed dependency run is not repaired or reclassified. New public-CLI tests
+check unchanged store bytes, stable inspection and exactly one original firing
+after rejection, plus preservation of valid keyed retries.
