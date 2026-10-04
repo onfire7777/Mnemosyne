@@ -148,3 +148,82 @@ def test_runtime_execution_cannot_drift_installed_tree(tmp_path: Path) -> None:
         stat.S_IMODE(path.stat().st_mode) & stat.S_IWUSR == 0
         for path in (destination, *(item for item in destination.rglob("*") if item.is_dir()))
     )
+
+
+def test_native_artifacts_bind_candidate_files_without_claiming_execution(tmp_path: Path, monkeypatch) -> None:
+    from copy import deepcopy
+    from eval.harness.cli_driver import MnemoCLI
+    from eval.public.adapters.locomo_config import build_native_run_config, verify_native_artifacts
+    from eval.public.adapters import locomo_replay
+    from eval.public.reader_policy import candidate_reader_policy
+    from eval.public.runner import build_candidate_manifest
+
+    repo = tmp_path / "native-repo"
+    repo.mkdir()
+    _repo(repo)
+    # Keep the real protocol's decomposer content pin; the other runtime files
+    # are synthetic Git-owned fixtures and are never executed by this test.
+    decomposer = repo / "src/mnemosyne/providers/extractive_decomposer.py"
+    decomposer.write_bytes((INSTALLER.parents[2] / "src/mnemosyne/providers/extractive_decomposer.py").read_bytes())
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "bind decomposer fixture"], cwd=repo, check=True)
+    commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo,
+                            check=True, capture_output=True, text=True).stdout.strip()
+    runtime = _module().install(repo, tmp_path / "native-runtime")
+    candidate = build_candidate_manifest(model_content_sha256=MODEL_CONTENT_SHA256,
+                    git_sha=commit, created_at_utc="2026-10-04T00:00:00Z")
+    candidate_path, resource_path = tmp_path / "candidate.json", tmp_path / "resource.json"
+    candidate_path.write_bytes((json.dumps(candidate, sort_keys=True, separators=(",", ":")) + "\n").encode())
+    # A hash-matched failed resource artifact must never become a passing gate.
+    resource_path.write_bytes(b'{"synthetic":true,"preflight_passed":false}\n')
+    artifacts = {"candidate": candidate_path, "runtime": runtime / "manifest.json", "resource": resource_path}
+    source = [{"sample_id": "synthetic", "conversation": {"session_1_date_time": "Synthetic date",
+        "session_1": [{"speaker": "A", "text": "synthetic", "dia_id": "D1:1"}]},
+        "qa": [{"question": "Synthetic?", "answer": "unused", "category": 4, "evidence": []}]}]
+    config = build_native_run_config(source, MnemoCLI(store="unused"), caption_policy="exclude-caption",
+                choice_draws={}, reader_policy=candidate_reader_policy(candidate),
+                runtime_manifest_sha256=hashlib.sha256(artifacts["runtime"].read_bytes()).hexdigest(),
+                resource_manifest_sha256=hashlib.sha256(resource_path.read_bytes()).hexdigest())
+    verified = verify_native_artifacts(config, artifacts, repo_root=repo)
+    assert verified["runtime_files_verified"] and verified["resource_artifact_hash_verified"]
+    assert not verified["resource_preflight_verified"] and not verified["model_execution_verified"]
+    assert not verified["publication_authorized"]
+
+    raw_resource = resource_path.read_bytes()
+    resource_path.write_bytes(b'{"synthetic":"changed"}\n')
+    with pytest.raises(ValueError, match="configuration references"):
+        verify_native_artifacts(config, artifacts, repo_root=repo)
+    resource_path.write_bytes(raw_resource)
+    link = tmp_path / "resource-link.json"
+    link.symlink_to(resource_path)
+    with pytest.raises(ValueError, match="symlink"):
+        verify_native_artifacts(config, {**artifacts, "resource": link}, repo_root=repo)
+    original = decomposer.read_bytes()
+    decomposer.write_bytes(original + b"\n# dirty\n")
+    with pytest.raises(ValueError, match="clean exact HEAD"):
+        verify_native_artifacts(config, artifacts, repo_root=repo)
+    decomposer.write_bytes(original)
+
+    # Fresh hashes cannot bless a runtime that differs from its committed source.
+    runtime.chmod(0o700)
+    target = runtime / "lib/mnemosyne/providers/grounded_reader.py"
+    target.chmod(0o600)
+    target.write_bytes(b"# forged runtime\n")
+    manifest_path = artifacts["runtime"]
+    manifest_path.chmod(0o600)
+    manifest = json.loads(manifest_path.read_bytes())
+    manifest["files"]["lib/mnemosyne/providers/grounded_reader.py"] = hashlib.sha256(target.read_bytes()).hexdigest()
+    manifest_path.write_bytes((json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n").encode())
+    forged = deepcopy(config)
+    forged["runtime_manifest_sha256"] = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    with pytest.raises(ValueError, match="candidate git custody"):
+        verify_native_artifacts(forged, artifacts, repo_root=repo)
+
+    # The public saved-report path rejects artifacts before invoking the scorer.
+    def forbidden(*args, **kwargs):
+        pytest.fail("invalid artifacts must fail before scorer execution")
+
+    monkeypatch.setattr(locomo_replay, "replay_in_environment", forbidden)
+    with pytest.raises(ValueError, match="configuration references"):
+        locomo_replay.verify_report_in_environment({}, source, [], caption_policy="exclude-caption",
+            choice_draws={}, python="unused", run_config=config, runtime_artifacts=artifacts)

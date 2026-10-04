@@ -101,3 +101,58 @@ def bind_native_run_config(config, samples, *, caption_policy, choice_policy, re
     if any(_canonical(config[key]) != _canonical(value) for key, value in expected.items()):
         raise LoCoMoError("native run configuration does not match inputs or replay policy")
     return digest
+
+
+def verify_native_artifacts(config: dict, artifacts: dict, *, repo_root=None) -> dict:
+    """Verify referenced bytes and candidate-owned runtime files without running them.
+
+    The resource file is hash-bound only: its contents do not discharge resource
+    admission, and file custody does not attest model execution or registration.
+    """
+    from pathlib import Path
+    from eval.public.reader_policy import candidate_reader_policy
+    from eval.public.runner import _current_clean_head, _reject_symlink_components, validate_candidate_manifest
+    from eval.public.runtime_custody import grounded_runtime_environment
+    from .locomo_replay import _decode
+
+    validate_native_run_config(config)
+    if not isinstance(artifacts, dict) or set(artifacts) != {"candidate", "runtime", "resource"}:
+        raise LoCoMoError("native artifact verification requires candidate, runtime and resource paths")
+    root = Path(repo_root) if repo_root is not None else Path(__file__).resolve().parents[3]
+    paths, raw, parsed = {}, {}, {}
+    for name, value in artifacts.items():
+        path = Path(value).expanduser().absolute()
+        _reject_symlink_components(path)
+        if not path.is_file():
+            raise LoCoMoError("native artifact must be a regular file")
+        with path.open("rb") as handle:
+            content = handle.read(16 * 1024 * 1024 + 1)
+        if len(content) > 16 * 1024 * 1024:
+            raise LoCoMoError("native artifact exceeds 16 MiB")
+        payload = _decode(content)
+        if not isinstance(payload, dict):
+            raise LoCoMoError("native artifact must be a JSON object")
+        paths[name], raw[name], parsed[name] = path, content, payload
+    expected_hashes = {"candidate": config["reader_policy"]["candidate_manifest_sha256"],
+                       "runtime": config["runtime_manifest_sha256"],
+                       "resource": config["resource_manifest_sha256"]}
+    if any(sha256(raw[name]).hexdigest() != digest for name, digest in expected_hashes.items()):
+        raise LoCoMoError("native artifact bytes do not match configuration references")
+    candidate = parsed["candidate"]
+    validate_candidate_manifest(candidate, expected_git_sha=_current_clean_head(root))
+    if _canonical(candidate_reader_policy(candidate)) != _canonical(config["reader_policy"]):
+        raise LoCoMoError("native candidate does not match reader policy")
+    # This existing verifier compares every installed file with candidate Git
+    # content; a forged tree plus a freshly hashed manifest cannot pass.
+    grounded_runtime_environment(paths["runtime"], candidate, "http://127.0.0.1:11434", repo_root=root)
+    for name, path in paths.items():
+        _reject_symlink_components(path)
+        with path.open("rb") as handle:
+            if handle.read(16 * 1024 * 1024 + 1) != raw[name]:
+                raise LoCoMoError("native artifacts changed during verification")
+    return {"candidate_manifest_sha256": expected_hashes["candidate"],
+            "runtime_manifest_sha256": expected_hashes["runtime"],
+            "resource_manifest_sha256": expected_hashes["resource"],
+            "runtime_files_verified": True, "resource_artifact_hash_verified": True,
+            "resource_preflight_verified": False, "model_execution_verified": False,
+            "publication_authorized": False}

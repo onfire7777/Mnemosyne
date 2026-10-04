@@ -99,13 +99,18 @@ def _main():
 
 
 def verify_report_in_environment(report, samples, records, *, caption_policy, choice_draws=None,
-                                 python: str | Path, timeout_s: float = 120, reader_policy: dict | None = None, choice_seed: int | None = None, run_config: dict | None = None) -> dict:
+                                 python: str | Path, timeout_s: float = 120, reader_policy: dict | None = None, choice_seed: int | None = None, run_config: dict | None = None, runtime_artifacts: dict | None = None) -> dict:
     """Verify every saved report field against source, records and current policy.
 
     Changed replay source must be verified in its original checkout rather
     than silently treated as the same protocol. Success is local consistency,
     not proof of model execution or authorization to publish.
     """
+    if runtime_artifacts is not None:
+        if run_config is None:
+            raise LoCoMoError("native artifact verification requires a run configuration")
+        from .locomo_config import verify_native_artifacts
+        verify_native_artifacts(run_config, runtime_artifacts)
     expected = replay_in_environment(samples, records, caption_policy=caption_policy,
                                      choice_draws=choice_draws, python=python, timeout_s=timeout_s, reader_policy=reader_policy, choice_seed=choice_seed, run_config=run_config)
     if _encode(report) != _encode(expected):
