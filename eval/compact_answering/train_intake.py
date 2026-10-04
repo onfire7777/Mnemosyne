@@ -88,6 +88,7 @@ def intake(destination: Path) -> dict:
     The destination parent must be operator-owned (not an adversarial shared tree).
     No credentials or ambient Hugging Face tokens are read or sent.
     """
+    transform_sha256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     destination.mkdir(parents=True, exist_ok=False)
     assets = []
     for repo, revision, path, size, digest in ASSETS:
@@ -111,7 +112,7 @@ def intake(destination: Path) -> dict:
         )
     receipt = {
         "schema": "mnemosyne.compact-train-intake.v1",
-        "transform_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        "transform_sha256": transform_sha256,
         "assets": assets,
         "license": "CC-BY-SA-4.0 (upstream cards; preserve attribution and share-alike)",
         "status": "quarantined-raw-train-only",
@@ -124,9 +125,14 @@ def intake(destination: Path) -> dict:
             "complete attribution and derivative license review",
         ],
     }
-    with (destination / "intake.json").open("x") as stream:
+    pending_receipt = destination / "intake.json.partial"
+    with pending_receipt.open("x") as stream:
         json.dump(receipt, stream, indent=2)
         stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.link(pending_receipt, destination / "intake.json")
+    pending_receipt.unlink()
     return receipt
 
 
