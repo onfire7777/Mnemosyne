@@ -271,3 +271,23 @@ survival 1.0. Measured admission receipt required; no asserted L16 budget.
 Corpus scale and official-track coverage stay disclosed deferrals. No
 registry row exists, so this cell is not runnable.
 ```
+
+## Extended public-calendar prerequisite — 2026-10-04
+
+`tests/test_public_lifecycle_clock.py` now checks five fixed calendar starts,
+including month-end, year-end and leap-day boundaries. Each isolated store
+advances one protected item through eight successful rehearsals using the
+literal documented next-interval sequence 3, 7, 14, 30, 60, 120, 240, 240 days.
+At each due date the public queue/forgetter path is invoked first one second
+early and then exactly on time. The early call must not rehearse; the due call
+must increment the count and persist the expected next date. All operations
+run through fresh public CLI subprocesses without importing the lifecycle
+oracle, and each result must report no model-backed role, no failed item and
+no demotion. Each calendar spans over one virtual year without sleeps.
+
+All six clock tests (the original three-day case plus these five calendars)
+passed in 25.51 seconds; Ruff passed. These fixed calendar regressions are not
+the five seeded M07 corpora. They establish broader scheduling persistence,
+not the global clock contract, successful retrieval/answering, interference,
+resource admission, survival over the complete corpus or storage/cost Pareto
+acceptance. Those original obligations remain open.
