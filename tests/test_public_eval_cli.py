@@ -739,12 +739,14 @@ def test_evaluation_query_batch_matches_public_search_explain_and_is_read_only(
     assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before
 
 
+@pytest.mark.parametrize("synthesis", [False, True])
 def test_public_answer_and_batch_are_ordered_grounded_and_store_immutable(
-    tmp_path: Path,
+    tmp_path: Path, synthesis: bool,
 ) -> None:
     store = tmp_path / "store.json"
     ordinary = MnemoCLI(store=str(store))
-    ordinary.capture("answer-tenant", "user-a", "Ada owns project Zephyr.")
+    ordinary.capture("answer-tenant", "user-a", "Ada has amounts 1.20 and 2.80." if synthesis
+                     else "Ada owns project Zephyr.")
     provider = tmp_path / "grounded-provider.py"
     provider.write_text(
         """#!/usr/bin/env python3
@@ -761,8 +763,11 @@ if role == "query_decomposer":
     response = {"queries": ([] if evidence else [request["question"]]), "metadata": metadata}
 else:
     evidence = request.get("evidence") or []
-    response = ({"claims": [{"spans": [{"cid": evidence[0]["cid"],
-                "quote": evidence[0]["content"]}]}],
+    claims = ([{"synthesis": {"operation": "add", "spans": [
+                {"cid": evidence[0]["cid"], "quote": quote} for quote in ("1.20", "2.80")]}}]
+              if evidence and "1.20" in evidence[0]["content"] else
+              [{"spans": [{"cid": evidence[0]["cid"], "quote": evidence[0]["content"]}]}] if evidence else [])
+    response = ({"claims": claims,
                 "unresolved": False, "metadata": metadata} if evidence else
                 {"claims": [], "unresolved": True, "metadata": metadata})
 json.dump(response, sys.stdout)
@@ -788,9 +793,14 @@ json.dump(response, sys.stdout)
     assert answer["claims"] and answer["claims"][0]["evidence_cids"]
     assert set(answer["claims"][0]) == {"text", "evidence_cids", "spans"}
     assert set(answer["claims"][0]["spans"][0]) == {"cid", "start", "end", "slice_sha256"}
-    assert answer["claims"][0]["spans"][0]["slice_sha256"] == hashlib.sha256(
-        answer["answer"].encode("utf-8")
-    ).hexdigest()
+    if synthesis:
+        assert answer["answer"] == "4"
+        assert [span["slice_sha256"] for span in answer["claims"][0]["spans"]] == [
+            hashlib.sha256(quote.encode()).hexdigest() for quote in ("1.20", "2.80")]
+    else:
+        assert answer["claims"][0]["spans"][0]["slice_sha256"] == hashlib.sha256(
+            answer["answer"].encode("utf-8")
+        ).hexdigest()
     assert "Ada owns project Zephyr." not in json.dumps(answer["claims"][0]["spans"])
     assert set(answer) == {"answer", "claims", "abstained", "hops", "reader"}
     assert set(answer["reader"]) == {"query_decomposer", "grounded_reader"}
@@ -807,6 +817,14 @@ json.dump(response, sys.stdout)
     before[rows.name] = rows.read_bytes()
     batch = read_only.eval_answer_batch(rows)
     assert [row["question_id"] for row in batch["results"]] == ["q2", "q1"]
+    detailed = read_only.eval_answer_batch(rows, include_derivation=True)
+    for result in detailed["results"]:
+        for claim in result["claims"]:
+            assert claim.pop("derivation") == {
+                "schema_version": "mnemosyne.claim-derivation/v1",
+                "kind": "synthesis" if synthesis else "quotation", "operation": "add" if synthesis else None,
+            }
+    assert detailed == batch
     assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before
 
 

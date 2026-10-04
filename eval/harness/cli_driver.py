@@ -229,9 +229,10 @@ class MnemoCLI:
             json.dumps(dict(context), sort_keys=True, separators=(",", ":")),
         ).json
 
-    def eval_answer_batch(self, input_jsonl: Path | str) -> dict[str, Any]:
+    def eval_answer_batch(self, input_jsonl: Path | str, *, include_derivation: bool = False) -> dict[str, Any]:
         """Run a prevalidated ordered grounded-answer shard in one process."""
-        return self.run("eval-answer-batch", "--input-jsonl", str(input_jsonl)).json
+        flags = ["--include-derivation"] if include_derivation else []
+        return self.run("eval-answer-batch", "--input-jsonl", str(input_jsonl), *flags).json
 
     def search(
         self,

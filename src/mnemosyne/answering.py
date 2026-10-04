@@ -441,6 +441,7 @@ class AnswerClaim:
     text: str
     evidence_cids: tuple[str, ...]
     spans: tuple[AnswerSpan, ...] = ()
+    synthesis_operation: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -802,7 +803,8 @@ class GroundedAnswerOrchestrator:
                 rendered = " ".join(evidence[span.cid][span.start:span.end] for span in spans)
             if not isinstance(rendered, str) or not rendered.strip() or len(rendered) > 2_000:
                 raise ValueError("claim span rendering is invalid")
-            claims.append(AnswerClaim(rendered, tuple(dict.fromkeys(span.cid for span in spans)), tuple(spans)))
+            claims.append(AnswerClaim(rendered, tuple(dict.fromkeys(span.cid for span in spans)), tuple(spans),
+                                      synthesis["operation"] if synthesis is not None else None))
         return tuple(claims)
 
     @staticmethod
