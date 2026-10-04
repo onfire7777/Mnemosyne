@@ -41,3 +41,29 @@ def validate_receipt(request: dict, receipt: dict) -> None:
     if (request["kind"] == "restore-request"
             and receipt["delete_operation_id"] != request["delete_receipt"]["operation_id"]):
         raise ValueError("M08 receipt references a different deletion")
+
+
+def validate_operation_sequence(exchanges: list[dict]) -> None:
+    """Check ordered operation custody without inferring successful forgetting.
+
+    Missing terminal receipts remain invalid here; a runner must record a failed
+    or aborted receipt rather than erase an attempted operation from its ledger.
+    """
+    if not isinstance(exchanges, list) or len(exchanges) > 10_000:
+        raise ValueError("M08 operation sequence must be a bounded list")
+    exchanges = deepcopy(exchanges)
+    receipts = {}
+    for exchange in exchanges:
+        if not isinstance(exchange, dict) or set(exchange) != {"request", "receipt"}:
+            raise ValueError("M08 exchange requires request and terminal receipt")
+        request, receipt = exchange["request"], exchange["receipt"]
+        validate_receipt(request, receipt)
+        operation_id = request["operation_id"]
+        if operation_id in receipts:
+            raise ValueError("M08 operation identity is duplicated")
+        if request["kind"] == "restore-request":
+            deleted = request["delete_receipt"]
+            prior = receipts.get(deleted["operation_id"])
+            if prior is None or prior != deleted:
+                raise ValueError("M08 restoration requires its exact preceding delete receipt")
+        receipts[operation_id] = receipt
