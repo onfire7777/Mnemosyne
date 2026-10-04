@@ -64,9 +64,12 @@ mismatch, gold leakage, payload execution, or unsupported semantics.
 
 The M12 fixtures are deliberately small: `pm-bench-development` has one seed
 (`7`), one case, five tasks, and seven steps; `triggerbench-development` has
-one seed (`7`), twenty one-step cases, and no calibrated baseline. Recurrence
-is represented in fixture metadata but is not forwarded as production
-recurrence plumbing. Lateness is scored only as a binary `late` safety counter,
+one seed (`7`), twenty one-step cases, and no calibrated baseline. The action
+CLI now forwards an explicit `recurrence_policy` on task creation or update;
+subprocess tests cover bounded repeated firing and invalid-policy rejection.
+The committed fixtures still carry only regularity metadata, so these suites
+do not yet exercise recurrence or establish calibrated recurrence performance.
+Lateness is scored only as a binary `late` safety counter,
 which is zero on both committed fixtures because they are easy rather than
 because the counter is inert; neither suite measures lateness magnitude or
 cost.
@@ -278,10 +281,11 @@ Bundle metadata names the backend the public CLI actually exercised
 (`backend`; `MnemoCLI` defaults to `local`). A missing or fabricated
 backend fails `test_m02_bundle_declares_backend_explicitly`. That is a
 store disclosure, including an omitted PostgreSQL path, not a
-portability claim. `verify_bundle` still has no `allowed_profile` or
-canonical-replay-seed row for `wmbs-m02-retrieval-v1` because
-`bundle.py` is outside this lease; Stage B scores through
-`score_profile` instead.
+portability claim. `bundle.py` now verifies `wmbs-m02-retrieval-v1`
+by recomputing `score_profile` against the registry-bound fixture and
+`_scoring_labels`; canonical replay binds seed `20260801`. Reproduction
+still requires the configured grounded reader used by `mnemo answer`;
+bundle tests with a synthetic CLI are plumbing checks, not measured QA evidence.
 
 ### M03 valid-time development
 
@@ -352,11 +356,12 @@ Bundle metadata names the backend the public CLI actually exercised
 (`backend`; `MnemoCLI` defaults to `local`). A missing or fabricated
 backend fails `test_m04_bundle_declares_backend_explicitly`. That is a
 store disclosure, including an omitted PostgreSQL path, not a
-portability claim. `verify_bundle` still has no `allowed_profile` or
-canonical-replay-seed row for `wmbs-m04-v1` because
-`bundle.py` is outside this lease; Stage B scores through
-`score_profile` instead. The runner passes the fixture as scoring labels
-because `bundle._scoring_labels` rejects this case-based schema.
+portability claim. `bundle.py` now verifies `wmbs-m04-v1` with the
+registry-bound fixture supplied by `_scoring_labels`, preserving each
+case/permutation/source-ablation identity and recomputing the closed scorer.
+Canonical replay binds seeds `11`, `23`, `37`, `53`, `71`. Reproduction still
+requires the configured grounded reader used by `mnemo answer`; synthetic
+CLI bundle tests establish plumbing only, not measured conflict resolution.
 
 
 ### M05 provenance development
@@ -458,13 +463,13 @@ private consolidation API. No headline. No `PILOT-READY-DEV`. Source
 `docs/plans/wmb-m06-consolidation-learning-implementation-plan.md` remains
 a PROPOSED planning artifact.
 
-`verify_bundle` still has no `allowed_profile` or
-canonical-replay-seed row for `wmbs-m06-v1` because
-`bundle.py` is outside this lease; Stage B scores through
-`score_profile` instead. The runner passes the fixture as scoring labels
-because `bundle._scoring_labels` rejects this case-based schema. The
-adapter does not call `mnemo answer`, because that command is not a
-model-free path and this cell admits no provider budget.
+`bundle.py` now supports `verify_bundle` and reproduction for
+`wmbs-m06-v1`: `_scoring_labels` supplies the registry-bound fixture and
+`score_profile` validates the complete case/cycle matrix. Canonical replay
+binds seeds `17`, `31`, `43`, `61`, `79`. The adapter does not call
+`mnemo answer`, because that command is not a model-free path and this
+cell admits no provider budget. Successful reproduction does not change
+its PROPOSED admission state or false publication flags.
 
 ### M10 calibration and abstention
 
@@ -580,4 +585,3 @@ bundle, operator/custody approval, and human approval. Independent third-party
 reproduction is an optional separately signed receipt; its absence does not
 block an otherwise operator-run claim, and its presence does not relabel the
 operator or imply certification.
-

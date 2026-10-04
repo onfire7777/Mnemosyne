@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from eval.public.adapters import whole_memory_reference
-from eval.public.bundle import BundleError, _canonical, _scoring_labels
+from eval.public.bundle import _canonical, _scoring_labels
 from eval.public.runner import (
     _ADAPTERS,
     _PROFILE_CONTRACTS,
@@ -802,8 +802,7 @@ def test_stage_b_runner_passes_fixture_labels_and_records_backend(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
-    with pytest.raises(BundleError, match="unknown case-based benchmark schema"):
-        _scoring_labels(fixture)
+    assert _scoring_labels(fixture) == [{"fixture": fixture}]
     captured: dict = {}
 
     def fake_adapter(benchmark, cli):

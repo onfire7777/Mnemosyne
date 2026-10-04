@@ -197,7 +197,7 @@ def run_m02_retrieval_development(
         question_id = question["question_id"]
         search_result = cli.search(tenant, question["text"])
         ranked_ids = _m02_ranked_ids(search_result, corpus_ids, content_by_id)
-        payload = cli.answer(question["text"], context) or {}
+        payload = _m04_answer(cli, question["text"], context)
         traces.append(_m02_trace_from_cli(question_id, ranked_ids, payload))
     return traces, {"backend": getattr(cli, "backend", "local")}
 
