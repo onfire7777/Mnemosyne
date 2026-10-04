@@ -269,3 +269,19 @@ The native regression now pauses after the first yielded record, confirms the
 store is live, closes the sequence and verifies immediate cleanup with no
 additional answer invocation. All 24 native tests and Ruff passed after this
 addition. A plain loop `break` alone is not documented as immediate cleanup.
+
+## Sequential store lifetime
+
+The native sequence now captures and answers one conversation at a time, closing
+its temporary store before capturing the next. The entire supplied population
+and option map are still validated before the first public capture; question
+order and full denominators are unchanged. The input population is copied at
+iterator startup so caller changes between yields cannot alter later captures
+or questions. This bounds simultaneously live conversation stores to one; it is
+not a measured RAM ceiling or a successful grounded-model resource preflight.
+
+All 24 native tests and Ruff passed. The public-CLI sequence test verifies that
+previous conversation stores no longer exist when a later conversation answers,
+that post-start source mutations do not change offline replay, and that failures
+and explicit early closure still release stores. Neutral bundle integration,
+real-dataset admission, runtime preflight and official measurements remain open.

@@ -27,6 +27,7 @@ def iter_native_answers(samples: object, cli: MnemoCLI, *, caption_policy: str,
     Consumers that may stop early must use contextlib.closing on this iterator
     or call close() explicitly to release the capture stores immediately.
     """
+    samples = deepcopy(samples)
     source = split_samples(samples)
     normalize_dialogs(samples, caption_policy=caption_policy)
     annotations = {row["question_id"]: row["annotation"] for row in source["annotations"]}
@@ -38,12 +39,15 @@ def iter_native_answers(samples: object, cli: MnemoCLI, *, caption_policy: str,
         prepared = prepare_upstream_question(annotation, choice_draw=choice_draws.get(qid))
         if not prepared["query"].strip() or len(prepared["query"]) > 2000:
             raise LoCoMoError("native transformed question exceeds the public query contract")
-    with captured_conversations(samples, cli, caption_policy=caption_policy) as captured:
-        by_sample = {row["sample_id"]: row for row in captured}
-        for question in source["questions"]:
-            qid = question["question_id"]
-            yield answer_captured_question(by_sample[question["sample_id"]], question,
-                                           annotations[qid], choice_draw=choice_draws.get(qid))
+    questions_by_sample = {sample["sample_id"]: [] for sample in samples}
+    for question in source["questions"]:
+        questions_by_sample[question["sample_id"]].append(question)
+    for sample in samples:
+        with captured_conversations([sample], cli, caption_policy=caption_policy) as captured:
+            for question in questions_by_sample[sample["sample_id"]]:
+                qid = question["question_id"]
+                yield answer_captured_question(captured[0], question,
+                                               annotations[qid], choice_draw=choice_draws.get(qid))
 
 
 def answer_captured_question(conversation: dict, question: dict, annotation: dict, *,

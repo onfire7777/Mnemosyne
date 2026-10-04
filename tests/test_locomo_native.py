@@ -223,6 +223,7 @@ def test_native_sequence_preserves_full_population_and_stops_without_retry(tmp_p
 
     def answer(cli, path):
         request = json.loads(Path(path).read_text())
+        assert all(not store.exists() for store in stores if store != Path(cli.store))
         calls.append(request["question_id"])
         stores.append(Path(cli.store))
         if should_fail and len(calls) == 2:
@@ -245,8 +246,17 @@ def test_native_sequence_preserves_full_population_and_stops_without_retry(tmp_p
     should_fail = False
     calls.clear()
     stores.clear()
-    records = list(iter_native_answers(source, MnemoCLI(store=str(tmp_path / "untouched")),
-                                       caption_policy="exclude-caption", choice_draws=draws))
+    from copy import deepcopy
+    from eval.public.adapters.locomo_native import verify_native_answer_record
+    original_second = deepcopy(source[1])
+    successful = iter_native_answers(source, MnemoCLI(store=str(tmp_path / "untouched")),
+                                     caption_policy="exclude-caption", choice_draws=draws)
+    records = [next(successful)]
+    source[1]["conversation"]["session_1"][0]["text"] = "changed after startup"
+    source[1]["qa"][0]["question"] = "changed question"
+    records.extend(successful)
+    verify_native_answer_record(original_second, 0, records[-1], caption_policy="exclude-caption")
+    source[1] = original_second
     assert [row["question_id"] for row in records] == [row["question_id"] for row in questions]
     assert calls == [row["question_id"] for row in questions]
     assert all(not store.exists() for store in stores)
