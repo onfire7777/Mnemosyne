@@ -9,7 +9,12 @@ from tempfile import TemporaryDirectory
 
 from eval.harness.cli_driver import MnemoCLI
 from eval.public.custody import capture_cid
-from .locomo import LoCoMoError, decode_upstream_category5, normalize_dialogs, prepare_upstream_question
+from .locomo import LoCoMoError, decode_upstream_category5, normalize_dialogs, prepare_upstream_question, split_samples
+
+
+def _evidence_digest(evidence):
+    return sha256(json.dumps(evidence, sort_keys=True, separators=(",", ":"),
+                             allow_nan=False).encode()).hexdigest()
 
 
 def answer_captured_question(conversation: dict, question: dict, annotation: dict, *,
@@ -43,6 +48,7 @@ def answer_captured_question(conversation: dict, question: dict, annotation: dic
     projection = project_native_response(results[0], annotation, conversation["evidence"],
                                          choice_draw=choice_draw)
     return {**projection, "question_id": question["question_id"],
+            "capture_digest": _evidence_digest(conversation["evidence"]),
             "request": request, "request_jsonl": raw_request,
             "request_sha256": sha256(raw_request.encode()).hexdigest(),
             "raw_batch_response": deepcopy(payload)}
@@ -112,6 +118,68 @@ def project_native_response(response: dict, annotation: dict, evidence: dict, *,
     return result
 
 
+def _capture_plan(records, tenant):
+    rows, expected = [], {}
+    for record in records:
+        content = json.dumps({key: record[key] for key in
+                              ("source_timestamp", "speaker", "text", "caption")},
+                             sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        capture = {"tenant_id": tenant, "user_id": "locomo", "actor": "user",
+                   "source_type": "locomo:dialog:" + record["record_id"],
+                   "source_identity": record["record_id"], "content": content,
+                   "content_pointer": None, "modality": "text", "sensitivity": 0}
+        cid = capture_cid(capture)
+        if cid in expected:
+            raise LoCoMoError("native capture produced duplicate expected evidence IDs")
+        expected[cid] = {"capture": capture, "record_id": record["record_id"],
+                         "dialog_id": record["dialog_id"], "session_id": record["session_id"]}
+        rows.append({"tenant": tenant, "user": "locomo", "content": content,
+                     "source_type": capture["source_type"],
+                     "source_identity": capture["source_identity"]})
+    return rows, expected
+
+
+def verify_native_answer_record(sample: dict, question_index: int, record: dict, *,
+                                caption_policy: str, choice_draw: float | None = None) -> dict:
+    """Recompute request and projection from source; never trust saved derived fields.
+
+    This checks internal replay consistency, not that a model really produced
+    the response. Signed run and provider custody remain external prerequisites.
+    """
+    separated = split_samples([sample])
+    if type(question_index) is not int or not 0 <= question_index < len(separated["questions"]):
+        raise LoCoMoError("native replay question index is invalid")
+    if not isinstance(record, dict):
+        raise LoCoMoError("native replay record must be an object")
+    question = separated["questions"][question_index]
+    annotation = sample["qa"][question_index]
+    tenant = "locomo:" + sha256(sample["sample_id"].encode()).hexdigest()
+    dialogs = normalize_dialogs([sample], caption_policy=caption_policy)["records"]
+    _, evidence = _capture_plan(dialogs, tenant)
+    prepared = prepare_upstream_question(annotation, choice_draw=choice_draw)
+    request = {"question_id": question["question_id"], "question": prepared["query"],
+               "context": {"tenant_id": tenant, "user_id": "locomo", "role": "reader"}}
+    raw_request = json.dumps(request, sort_keys=True, ensure_ascii=False, separators=(",", ":")) + "\n"
+    payload = record.get("raw_batch_response")
+    results = payload.get("results") if isinstance(payload, dict) else None
+    if (not isinstance(results, list) or len(results) != 1 or not isinstance(results[0], dict)
+            or results[0].get("question_id") != question["question_id"]):
+        raise LoCoMoError("native replay response identity mismatch")
+    expected = {**project_native_response(results[0], annotation, evidence, choice_draw=choice_draw),
+                "capture_digest": _evidence_digest(evidence),
+                "question_id": question["question_id"], "request": request,
+                "request_jsonl": raw_request, "request_sha256": sha256(raw_request.encode()).hexdigest(),
+                "raw_batch_response": deepcopy(payload)}
+    try:
+        actual_json = json.dumps(record, sort_keys=True, allow_nan=False)
+        expected_json = json.dumps(expected, sort_keys=True, allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        raise LoCoMoError("native replay requires finite JSON records") from exc
+    if actual_json != expected_json:
+        raise LoCoMoError("native replay request or projection mismatch")
+    return expected
+
+
 @contextmanager
 def captured_conversations(samples: object, cli: MnemoCLI, *, caption_policy: str):
     """Yield public CLI handles and verified evidence maps for isolated stores.
@@ -131,23 +199,7 @@ def captured_conversations(samples: object, cli: MnemoCLI, *, caption_policy: st
         for index, (sample_id, records) in enumerate(by_sample.items()):
             tenant = "locomo:" + sha256(sample_id.encode()).hexdigest()
             child = replace(cli, store=str(Path(directory) / f"{index}.store.json"))
-            rows, expected = [], {}
-            for record in records:
-                content = json.dumps({key: record[key] for key in
-                                      ("source_timestamp", "speaker", "text", "caption")},
-                                     sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-                capture = {"tenant_id": tenant, "user_id": "locomo", "actor": "user",
-                           "source_type": "locomo:dialog:" + record["record_id"],
-                           "source_identity": record["record_id"], "content": content,
-                           "content_pointer": None, "modality": "text", "sensitivity": 0}
-                cid = capture_cid(capture)
-                if cid in expected:
-                    raise LoCoMoError("native capture produced duplicate expected evidence IDs")
-                expected[cid] = {"capture": capture, "record_id": record["record_id"],
-                                 "dialog_id": record["dialog_id"], "session_id": record["session_id"]}
-                rows.append({"tenant": tenant, "user": "locomo", "content": content,
-                             "source_type": capture["source_type"],
-                             "source_identity": capture["source_identity"]})
+            rows, expected = _capture_plan(records, tenant)
             path = Path(directory) / f"{index}.capture.jsonl"
             path.write_text("".join(json.dumps(row, sort_keys=True) + "\n" for row in rows))
             results = child.capture_batch(path).get("results")

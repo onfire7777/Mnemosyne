@@ -171,3 +171,24 @@ All 20 native tests passed, including valid span projection, changed span hashes
 foreign/malformed citations and registered-but-unretrieved evidence. Ruff passed.
 These checks establish structural evidence custody, not semantic entailment or
 truth of a claim. Full replay and provider custody remain separate requirements.
+
+## Offline per-question replay checkpoint
+
+`verify_native_answer_record` reconstructs the complete expected capture map,
+tenant, transformed question, request JSONL/hash and response projection from
+the source conversation, selected source question, caption policy and explicit
+choice draw. Capture generation and replay share the same pure capture planner.
+The retained record now binds a digest of the complete capture map, so changes
+to unreturned as well as retrieved evidence are detected. Canonical finite-JSON
+comparison rejects changed derived values, extra fields and forged verification
+flags. Replay does not require the original temporary store or a model call.
+
+All 21 native tests passed, including a real capture followed by a synthetic
+answer and offline replay after store cleanup. Mutations to predictions, request
+hashes, verification flags, extra fields, retrieved source content and unreturned
+source content were rejected. Ruff passed.
+
+This establishes per-question internal consistency. A fully consistent forged
+response is not authenticated by recomputation: signed registration, original
+provider execution evidence, whole-population score replay and neutral bundle
+integration remain required. No benchmark or publication gate is closed here.
