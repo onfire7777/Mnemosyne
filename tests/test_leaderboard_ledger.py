@@ -1118,10 +1118,10 @@ def test_verified_snapshot_is_self_contained_after_ledger_grows(
     assert snapshot['publication_authorized'] is False
     copied = tmp_path / 'snapshot.jsonl'
     copied.write_text(''.join(json.dumps(entry, sort_keys=True, separators=(',', ':'), ensure_ascii=False) + '\n'
-                              for entry in snapshot['entries']))
-    copied.with_suffix('.jsonl.head.json').write_text(json.dumps(snapshot['head'], sort_keys=True, separators=(',', ':'), ensure_ascii=False) + '\n')
+                              for entry in snapshot['entries']), encoding='utf-8', newline='\n')
+    copied.with_suffix('.jsonl.head.json').write_text(json.dumps(snapshot['head'], sort_keys=True, separators=(',', ':'), ensure_ascii=False) + '\n', encoding='utf-8', newline='\n')
     copied_key = tmp_path / 'snapshot-public.pem'
-    copied_key.write_text(snapshot['public_key_pem'])
+    copied_key.write_text(snapshot['public_key_pem'], encoding='ascii', newline='\n')
     assert verify_ledger(copied, copied_key) == [first]
     assert len(verify_ledger(ledger_path, public)) == 2
 
@@ -1135,6 +1135,6 @@ def test_verified_snapshot_rejects_tampered_signed_head(
     head_path = ledger_path.with_suffix('.jsonl.head.json')
     head = json.loads(head_path.read_text())
     head['roster'].append('omitted-competitor')
-    head_path.write_text(json.dumps(head, sort_keys=True, separators=(',', ':'), ensure_ascii=False) + '\n')
+    head_path.write_text(json.dumps(head, sort_keys=True, separators=(',', ':'), ensure_ascii=False) + '\n', encoding='utf-8', newline='\n')
     with pytest.raises(LedgerError, match='head signature'):
         verified_ledger_snapshot(ledger_path, public)

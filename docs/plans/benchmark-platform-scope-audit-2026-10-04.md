@@ -8,14 +8,24 @@ statements below where explicitly updated. The original scope and acceptance
 criteria remain unchanged. The product name is now Mnemetric; OpenMemBench
 technical identifiers and signed historical artifacts retain their original names.
 
-Verification of the accumulated source at `a458bcea`: the combined invocation
+Historical verification of the accumulated source at `a458bcea`: the combined invocation
 of `tests/test_leaderboard*.py`, `tests/test_burnos_http_compatibility.py` and
 `tests/test_public_development_bundle_lifecycle.py` completed successfully with
 452 collected tests, all passing. This includes the real M06 development-bundle
 round trip; M02/M04 plumbing explicitly uses the synthetic transport described
 in that test. The separate LoCoMo environment passed 102 tests. These are local
 regression results, not benchmark quality measurements or full-project closure.
-GitHub validation of the accumulated unpushed changes remains pending.
+Latest checkpoint: the platform changes were pushed through `046f08a8`. Its
+CI run `37224190672` passed the LoCoMo, lint, provider, native wheel, Postgres and
+Windows portability/bounded-command jobs; unit/drift checks remained running.
+The Windows file-lock job found two new snapshot-test fixtures using platform
+newline conversion. Those fixtures now explicitly write UTF-8/LF (ASCII/LF for
+the public key); the real exporter already writes LF. Local file-lock, ledger
+and history checks passed 86 tests with one native Windows-only check skipped.
+The existing CRLF-rejection test still passes; no canonical-byte or signature
+verification was relaxed. A new Windows CI run must verify this correction.
+Subsequent local LoCoMo/derivation work passed 135 isolated checks and 41
+production-environment integration checks; it awaits synchronization and CI.
 
 ## Owner's intended product
 
@@ -214,7 +224,9 @@ and external validity also remain research gaps declared by the standard.
   not establish delivery of every website interaction envisioned by WMBS §9.5.
 - The signed retrieval registration is now public at `bad975f7`; the recorded
   pre-execution public-file checks matched all three registration/key/signature
-  files. No retrieval score or comparison has been produced by this effort.
+  files. The 500-question retrieval run and its exact nine-file reproduction
+  are now complete and visible in the local preview. No official upstream QA
+  or matched multi-system superiority result has been produced by this effort.
 
 No result, target, acceptance threshold or frozen scorer is changed by this
 audit. The next website specification and implementation must remain traceable

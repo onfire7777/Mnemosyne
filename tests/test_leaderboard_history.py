@@ -57,7 +57,7 @@ def test_history_rejects_bad_signature_before_replacing_site(tmp_path, key_paths
     render_site(records, {}, site)
     before = (site/'attempts.html').read_bytes()
     data = ledger.read_text().replace('run-a','forged')
-    ledger.write_text(data)
+    ledger.write_text(data, encoding='utf-8', newline='\n')
     with pytest.raises(RenderError, match='invalid attempt history'):
         render_site(records, {}, site, ledger_source=(ledger,public))
     assert (site/'attempts.html').read_bytes() == before
