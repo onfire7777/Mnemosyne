@@ -2055,6 +2055,14 @@ Quarantine
 
 ## Owner-directed documentation consolidation — PR #120
 
+- PR #214: the 2026-10-04 successor repairs development bundle verification/
+  replay and recurrence forwarding, adds bounded local M16 conformance, and
+  reconciles source status and installation guidance. Its exact head, checks
+  and integration state are tracked at
+  `https://github.com/onfire7777/Mnemosyne/pull/214`. This tracking entry makes
+  no pre-merge success or measured-admission claim; the original source and
+  documentation ancestry is retained on the single development branch.
+
 - PR #213: dependency lock update merged on 2026-10-04 at
   `8c103f0f383994cbc5753601fef804278ff5e6d2`, from exact reviewed head
   `17a68580da4b33ddcdf5d37290270840d39cca5b`. The only changed file was
