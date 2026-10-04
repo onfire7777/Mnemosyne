@@ -22,8 +22,9 @@ FEATURES = (
         "Memory for what to do next",
         "TTL-bounded working memory can be promoted or expired. Signed, session-bound "
         "intentions support triggers and explicit recurrence policies.",
-        "Implemented and locally tested. M12 and M13 remain partial: multiweek recurrence, "
-        "calibrated controls, lateness magnitude and capacity evidence remain unfinished.",
+        "Implemented and locally tested, with four-week recurrence regressions and an "
+        "exact-time lateness diagnostic. M12 and M13 remain partial: registered multiweek "
+        "benchmarks, calibrated controls, full trigger timing/cost and capacity evidence remain unfinished.",
         "Letta documents editable, shareable in-context memory blocks. MemOS documents "
         "asynchronous ingestion scheduling. Neither description by itself establishes "
         "the same intention-firing contract; this is not proof those products lack it.",

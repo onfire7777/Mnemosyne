@@ -9,10 +9,11 @@ CLI verifies the token without any private coupling.
 
 ``ActionCLI`` translates the deterministic-action probe's symbolic seam
 (``task.create``/``task.update``/``clock.inject``/``event.inject``/
-``intention.query``/``action.select``) into authenticated production intention
+``intention.query``/``intention.observe``/``action.select``) into authenticated production intention
 subprocess commands (``intention-schedule``/``intention-update``/
-``intention-cancel``/``intention-evaluate``).  It only ever returns the opaque
-data-only action IDs the production evaluator fires; it never sees or forwards
+``intention-cancel``/``intention-evaluate``). The default query returns opaque
+data-only action IDs; the opt-in observation also returns public firing timing
+and identity fields. It never sees or forwards
 fixture gold, and it never executes an observation payload — the narrative and
 channel observations are treated as inert data.
 """
@@ -23,7 +24,9 @@ import base64
 import hashlib
 import hmac
 import json
+import math
 from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
 from typing import Any, Mapping, Sequence
 
 from eval.harness.cli_driver import MnemoCLI
@@ -136,6 +139,7 @@ class ActionCLI:
             "clock.inject": self._clock_inject,
             "event.inject": self._event_inject,
             "intention.query": self._intention_query,
+            "intention.observe": self._intention_observe,
             "action.select": self._action_select,
         }.get(command)
         if handler is None:
@@ -294,7 +298,7 @@ class ActionCLI:
         return {}
 
     def _intention_query(
-        self, state: _ScopeState, observations: Mapping[str, Any]
+        self, state: _ScopeState, observations: Mapping[str, Any], *, include_observations: bool = False,
     ) -> dict[str, Any]:
         if not state.now:
             raise ActionCLIError("intention.query requires an injected clock")
@@ -311,13 +315,14 @@ class ActionCLI:
             "measured_recall": 1.0,
             "measurement_cid": state.evidence_cid,
         }
-        result = state.cli.run(
+        invocation = state.cli.run(
             "intention-evaluate",
             "--tenant", state.tenant_id,
             "--evaluated-at", state.now,
             "--trigger-context", _json(trigger_context),
             "--operating-point", _json(operating_point),
-        ).json
+        )
+        result = invocation.json
         fired = result.get("intentions") if isinstance(result, Mapping) else None
         if not isinstance(fired, list):
             raise ActionCLIError("intention-evaluate omitted fired intentions")
@@ -326,10 +331,24 @@ class ActionCLI:
         # Each occurrence fires once; per-step signals are consumed with it.
         state.events = []
         state.conditions = {}
-        return {
+        response = {
             "action_ids": action_ids,
             "queried_channels": _channels(observations.get("channel_observations", [])),
         }
+        if include_observations:
+            wall_ms = invocation.wall_ms
+            if type(wall_ms) not in (int, float) or not math.isfinite(wall_ms) or wall_ms < 0:
+                raise ActionCLIError("invalid evaluation command duration")
+            response.update({
+                "evaluated_at": state.now,
+                "evaluation_wall_ms": wall_ms,
+                "firing_observations": [_firing_observation(item, state) for item in fired],
+            })
+        return response
+
+    def _intention_observe(self, state: _ScopeState, observations: Mapping[str, Any]) -> dict[str, Any]:
+        """Opt-in development timing evidence from the same public evaluation."""
+        return self._intention_query(state, observations, include_observations=True)
 
     def _action_select(self, state: _ScopeState, payload: Mapping[str, Any]) -> dict[str, Any]:
         del state
@@ -385,6 +404,45 @@ def _fired_action_id(intention: Any) -> str:
     if not isinstance(ref, str) or not ref:
         raise ActionCLIError("fired intention omitted its opaque action reference")
     return ref
+
+
+def _firing_observation(item: Mapping[str, Any], state: _ScopeState) -> dict[str, Any]:
+    if item.get("tenant_id") != state.tenant_id or item.get("session_id") != state.session_id:
+        raise ActionCLIError("firing observation crossed its tenant/session scope")
+    if item.get("user_id") != _EVAL_USER_ID or item.get("agent_id") != _EVAL_AGENT_ID:
+        raise ActionCLIError("firing observation crossed its principal scope")
+    if item.get("status") != "fired" or item.get("intention_id") not in state.intention_by_task.values():
+        raise ActionCLIError("firing observation is not a known fired intention")
+    recurrence = item.get("recurrence_state")
+    if not isinstance(recurrence, Mapping):
+        raise ActionCLIError("firing observation omitted recurrence state")
+    occurrence = recurrence.get("occurrence")
+    if type(occurrence) is not int or occurrence < 0:
+        raise ActionCLIError("invalid firing occurrence")
+    due = _observation_time(item.get("due_at"))
+    evaluated = _observation_time(state.now)
+    reported = recurrence.get("last_evaluated_at")
+    if reported is not None and _observation_time(reported) != evaluated:
+        raise ActionCLIError("provider evaluation time differs from requested clock")
+    return {
+        "action_id": _fired_action_id(item),
+        "intention_id": item["intention_id"],
+        "occurrence": occurrence,
+        "trigger_type": _require_str(item.get("trigger_type"), "trigger_type"),
+        "due_at": due.isoformat(),
+        "evaluated_at": evaluated.isoformat(),
+        "provider_evaluated_at": _observation_time(reported).isoformat() if reported is not None else None,
+    }
+
+
+def _observation_time(value: Any) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None:
+            raise ValueError("missing timezone")
+        return parsed.astimezone(UTC)
+    except (TypeError, ValueError) as error:
+        raise ActionCLIError("observation time must be timezone-aware ISO-8601") from error
 
 
 def _channels(observations: Any) -> list[str]:

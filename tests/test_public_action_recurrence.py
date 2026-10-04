@@ -1,11 +1,13 @@
 from pathlib import Path
 from datetime import UTC, datetime, timedelta
 import random
+from types import SimpleNamespace
 
 import pytest
 
 from eval.harness.cli_driver import CLIError, MnemoCLI
-from eval.public.action_cli import ActionCLI
+from eval.public.action_cli import ActionCLI, ActionCLIError
+from eval.public.action_timing import score_exact_time
 
 
 @pytest.mark.parametrize("set_on_update", [False, True])
@@ -63,9 +65,13 @@ def test_weekly_recurrence_survives_delayed_polls_and_midstream_cancellation(tmp
     def stamp(now):
         return now.isoformat().replace("+00:00", "Z")
 
+    ticks = []
+
     def poll(now):
         cli.run("clock.inject", scope, {"now": stamp(now)})
-        return cli.run("intention.query", scope, {})["action_ids"]
+        result = cli.run("intention.observe", scope, {})
+        ticks.append(result)
+        return result["action_ids"]
 
     for name in ("keep", "cancel"):
         cli.run("task.create", scope, {
@@ -84,3 +90,52 @@ def test_weekly_recurrence_survives_delayed_polls_and_midstream_cancellation(tmp
         if index == 1:
             cli.run("task.update", scope, {"type": "cancel", "task_id": "cancel"})
     assert poll(start + timedelta(weeks=4)) == []
+    expected = [
+        {"action_id": name, "occurrence": index,
+         "due_at": stamp(start + timedelta(weeks=index)),
+         "cancelled": name == "cancel" and index >= 2}
+        for name in ("keep", "cancel") for index in range(4)
+    ]
+    report = score_exact_time(expected, ticks)
+    assert report["duplicate_observations"] == report["reported_due_drift_observations"] == 0
+    assert report["unexpected_observations"] == []
+    assert report["status_counts"]["cancelled-unfired"] == 2
+    assert report["status_counts"]["cancelled-fired"] == report["status_counts"]["missed"] == 0
+    assert report["lateness_observed_denominator"] == 6
+    assert report["mean_lateness_seconds"] == (2 * delays[0] + 2 * delays[1] + delays[2] + delays[3]) / 6
+    assert report["max_lateness_seconds"] == 86400
+    assert report["evaluation_command_wall_ms"] > 0
+    assert report["cost_usd"] is None and report["publishable"] is False
+
+
+@pytest.mark.parametrize("field,value", [
+    ("tenant_id", "other"), ("session_id", "other"), ("user_id", "other"),
+    ("agent_id", "other"), ("intention_id", "unknown"), ("status", "scheduled"),
+    ("due_at", "2030-01-01T00:00:00"), ("recurrence_state", {"occurrence": True}),
+    ("recurrence_state", {"occurrence": 0, "last_evaluated_at": "2030-01-02T00:00:00Z"}),
+])
+def test_observation_rejects_misbound_public_firing(tmp_path, monkeypatch, field, value):
+    def fake_run(self, command, *args, **kwargs):
+        if command == "capture":
+            return SimpleNamespace(json={"cid": "origin"})
+        if command == "intention-schedule":
+            return SimpleNamespace(json={"intention_id": "known"})
+        assert command == "intention-evaluate"
+        item = {
+            "tenant_id": "tenant", "session_id": "session",
+            "user_id": "mnemosyne-public-eval-user", "agent_id": "mnemosyne-public-eval-agent",
+            "intention_id": "known", "status": "fired", "action": {"ref": "action"},
+            "due_at": "2030-01-01T00:00:00Z", "trigger_type": "exact_time",
+            "recurrence_state": {"occurrence": 0},
+        }
+        item[field] = value
+        return SimpleNamespace(json={"intentions": [item]}, wall_ms=1.0)
+
+    monkeypatch.setattr(MnemoCLI, "run", fake_run)
+    cli = ActionCLI(MnemoCLI(store=str(tmp_path / "unused.json")))
+    scope = {"store": str(tmp_path / "case.json"), "tenant_id": "tenant", "session_id": "session"}
+    cli.run("task.create", scope, {"task_id": "task", "action_id": "action",
+        "trigger": {"type": "exact_time", "payload": {"at": "2030-01-01T00:00:00Z"}}})
+    cli.run("clock.inject", scope, {"now": "2030-01-01T00:00:00Z"})
+    with pytest.raises(ActionCLIError):
+        cli.run("intention.observe", scope, {})
