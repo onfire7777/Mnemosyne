@@ -171,3 +171,28 @@ def test_exact_wire_bytes_preserve_selected_schema_order(tmp_path, order, first)
     assert record['request_body_sha256'] == hashlib.sha256(sent[0]).hexdigest()
     assert body == record['body']
     assert logs(tmp_path)[0]['wire_order'] == order
+
+
+@pytest.mark.parametrize('profile', ['contract-v1', 'semantics-v2'])
+def test_prompt_profile_is_explicit_and_bound_to_retained_bytes(tmp_path, profile):
+    import hashlib
+    from eval.public.action_formation_ollama import PROMPT_PROFILES
+
+    transport = Transport()
+    supplied = request()
+    complete(supplied, model=MODEL, digest=DIGEST, evidence_dir=tmp_path,
+             prompt_profile=profile, transport=transport)
+    body = transport.calls[1][2]
+    assert body['messages'][0]['content'] == PROMPT_PROFILES[profile]
+    assert json.loads(body['messages'][1]['content']) == supplied
+    config = logs(tmp_path)[0]
+    assert config['prompt_profile'] == profile
+    assert config['prompt_sha256'] == hashlib.sha256(PROMPT_PROFILES[profile].encode()).hexdigest()
+
+
+def test_unknown_prompt_profile_never_calls_provider(tmp_path):
+    transport = Transport()
+    with pytest.raises(ValueError, match='configuration'):
+        complete(request(), model=MODEL, digest=DIGEST, evidence_dir=tmp_path,
+                 prompt_profile='unknown', transport=transport)
+    assert not transport.calls
