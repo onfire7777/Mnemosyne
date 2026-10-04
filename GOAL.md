@@ -1,6 +1,42 @@
 # Goal: Whole-Memory Pilot and Dependency-Ready Mnemosyne Continuation
 
-## Objective
+Current work follows `docs/plans/completion-2026-10-04.md`; current module
+counts and next steps are in `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md`.
+
+The owner’s 2026-10-04 directive authorizes reconciling stale plans and all
+roadmaps, and continuing work on an isolated development branch with multiple
+subagents. It supersedes the older prohibition on plan edits below. Preserve
+specification requirements and truthful evidence gates while updating status.
+
+
+## Status reconciliation — 2026-10-04
+
+Source inspected at `3c21be5d`. This dated reconciliation supersedes older
+prospective status statements below; historical receipts and candidate SHAs
+remain unchanged. Source delivery is distinct from measured acceptance.
+
+- N12 result-v2 dispatch landed in PR #139 (`4af5b20c`); REPRO-001 bundle
+  standard landed in PR #144 (`54dea434`). REPRO-002 remains evidence-blocked.
+- Phase 15 S2 source/development closure landed through PR #160 (`cccc2700`),
+  S3 through #162/#164 (`7db0c810`, `8691bbd6`), S4 report through #177
+  (`336d34b4`), and S5 research-only go/no-go through #199 (`118f1e51`).
+  These deliveries do not satisfy official security/calibration, real provider,
+  protected QA, exact-scale, or physical Windows/Linux 8 GiB acceptance.
+- M06 Stage A landed in #202 (`cff84192`) and Stage B registry reachability
+  in #205 (`74f23509`). The development cell remains PROPOSED, non-publishable,
+  and does not establish whole-memory capability or public admission.
+- Phase 12 protected QA, official dataset/provider evidence, REPRO-002,
+  physical 8 GiB acceptance, and publication/launch gates remain open.
+
+Evidence sources: `eval/public/bundle.py`, `leaderboard/validate.py`,
+`eval/public/security_calibration.py`, `eval/public/wmbs_m06.py`,
+`eval/reports/phase-15-s2-capabilities.md`,
+`eval/reports/phase-15-s4-performance-scale.md`, and
+`research/activation-memory/GO-NO-GO.md`. Existing contract tests are evidence
+of implementation coverage, not a new execution or measurement receipt.
+
+
+## Historical Objective (superseded by 2026-10-04 continuation)
 
 Continuously advance the authoritative Mnemosyne program from this dedicated
 GoalEx worktree. First land and implement the smallest trustworthy whole-memory
@@ -12,7 +48,7 @@ dependency-ready, lease-disjoint source task.
 GoalEx is the cross-task coordinator. RalphEx may execute one bounded round
 under GoalEx, but RalphEx never selects the program direction.
 
-## Current Priority (operator directive, 2026-08-03)
+## Historical Priority (operator directive, 2026-08-03)
 
 **Build the benchmark itself. The Whole-Memory Benchmark Standard specifies
 modules M01-M20; only five are implemented.** Everything downstream — Phase 12

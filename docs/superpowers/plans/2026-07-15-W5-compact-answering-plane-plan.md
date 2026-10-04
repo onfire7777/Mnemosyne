@@ -6,6 +6,11 @@
 **Depends on:** W1 (headline QA numbers depend on the retrieval fix). The sidecar and bakeoff may be built in parallel with W1.
 **Governed by:** `.planning/runbooks/COMPACT-MODEL-8GB-ACCEPTANCE.md` and the compact-reader design doc — unchanged; this plan implements, it does not relax them.
 
+
+## Status reconciliation — 2026-10-04
+
+Source inspection at `3c21be5d`; historical instructions below describe the original execution contract, not a request to repeat landed work. The compact acceptance harness exists in `eval/compact_answering/acceptance.py` and Phase 15 S4 records explicit missing physical evidence. Model selection, sidecar promotion, production parity and physical 8 GiB Windows/Linux acceptance remain open. Receipt files are not proof of a successful physical acceptance run.
+
 ## Goal
 
 Build the compact grounded-answering plane — embedder + cross-encoder reranker +

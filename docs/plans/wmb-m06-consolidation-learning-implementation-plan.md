@@ -1,5 +1,15 @@
 # WMB M06 — Consolidation and Learning Implementation Contract
 
+## Delivery checkpoint — 2026-10-04
+
+This original PROPOSED contract remains historical. Its statements that Stage
+A/B are missing or unadmitted are superseded for source delivery by approved
+phase plans `15-05-PLAN.md` and `15-06-PLAN.md`, delivered in PRs #202 and #205.
+`eval/public/wmbs_m06.py` and the `wmbs-m06-development` registry entry exist.
+Registration is development-only reachability; public admission remains
+PROPOSED and publication flags remain false.
+
+
 Status: `PROPOSED` / **PLANNING ARTIFACT ONLY — NOT CODE-READY.**
 This file authorizes no source, fixture, registry, scorer, measurement,
 admission-state, publication change, or GitHub PR.

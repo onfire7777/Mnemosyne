@@ -8,6 +8,11 @@ Author lane: M02 retrieval-and-organization planning lane.
 Verified base: `origin/main@effc5e039505c09e575ca5e4aeb2b96949676366`.
 Written: 2026-08-01.
 
+
+## Status reconciliation — 2026-10-04
+
+Source inspection at `3c21be5d`; historical instructions below describe the original execution contract, not a request to repeat landed work. M02 now has its fixture, scorer, tests and registry-reachable development adapter. See `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md` for exact paths. Original missing-source and pre-Stage-B statements are historical. Full module admission remains PROPOSED, publication flags remain false, and remaining official/custody/measurement requirements are not discharged by development reachability.
+
 ## 0. What this document is, and what it is not
 
 This is the exact implementation contract the dependency/write-lease map
