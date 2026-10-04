@@ -71,6 +71,11 @@ items; no generic claim that all real benchmarking is externally blocked.
 
 ## 3. Prepare the visible proof site
 
+The [platform experience contract](benchmark-platform-experience-2026-10-04.md)
+now defines the information architecture, data boundaries, interactions and
+implementation sequence for this work. It is not evidence that those surfaces
+have been built or that the launch requirements are met.
+
 - Complete the detailed benchmark-platform interaction and data-projection
   contract required by WMBS §9.5. The main experience must let readers explore
   systems, benchmark versions and compatible results, compare systems side by
