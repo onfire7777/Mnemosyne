@@ -1,0 +1,41 @@
+{
+  "schema_version": "mnemosyne.local-verification/v1",
+  "source_commit": "ad8b1ac5",
+  "environment": "fresh isolated environment; Mnemosyne distribution not installed",
+  "python": "3.11.16",
+  "architecture": "arm64",
+  "lock_path": "eval/public/requirements-locomo-tokenizer.lock",
+  "lock_sha256": "a62b7ce23a321cf240b4608db3d254ed6bca336883747f2c9505d1cb22476344",
+  "installed_packages": {
+    "Pygments": "2.21.0",
+    "certifi": "2026.7.22",
+    "charset-normalizer": "3.5.2",
+    "click": "8.5.0",
+    "cloudpickle": "3.1.2",
+    "idna": "3.20",
+    "iniconfig": "2.3.0",
+    "joblib": "1.6.0",
+    "nltk": "3.8.1",
+    "numpy": "1.26.0",
+    "packaging": "26.3",
+    "pluggy": "1.6.0",
+    "pytest": "9.1.1",
+    "regex": "2022.10.31",
+    "requests": "2.34.2",
+    "tiktoken": "0.5.2",
+    "tqdm": "4.70.1",
+    "urllib3": "2.8.0"
+  },
+  "test_files": [
+    "tests/test_locomo_scoring.py",
+    "tests/test_locomo_ingestion.py",
+    "tests/test_locomo_tokenizer.py"
+  ],
+  "observed_outcome": {
+    "exit_code": 0,
+    "passed": 103,
+    "skipped": 0
+  },
+  "vocabulary_sha256": "223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7",
+  "scope": "Synthetic scorer, ingestion, replay and tokenizer tests; not a benchmark run or production installation"
+}

@@ -438,3 +438,17 @@ skipped. A subsequent isolated PyYAML 6.0.3 check parsed the workflow and
 verified its timeout, required vocabulary environment and positive-test command;
 no parser dependency was added to the project runtime. Remote CI still requires a run
 on the pushed commit; local success is not remote validation.
+
+## Clean-environment verification
+
+At source `ad8b1ac5`, a newly created Python 3.11.16 environment installed only
+the 18 packages from `requirements-locomo-tokenizer.lock`, with hash checking.
+All 103 synthetic ingestion, scoring, native-population replay and tokenizer
+tests passed without skips using the already verified local vocabulary. The
+Mnemosyne distribution was not installed into this environment; its production
+Python >=3.12 requirement remains unchanged. Native subprocess tests run in the
+separate installed project environment, not this scorer-only environment.
+[Clean-environment receipt](../research/benchmark-intake/locomo-clean-environment-2026-10-04.json)
+records the actual package versions, lock hash, interpreter and test scope.
+This checks dependency isolation on this Mac; remote Linux CI and real benchmark
+acceptance still require their own results.
