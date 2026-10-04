@@ -1984,12 +1984,17 @@ def _parse_answer_context_json(raw: str) -> Any:
         raise ValueError("answer context is invalid JSON") from exc
 
 
-def _public_answer(result: Any, disclosure: dict[str, object]) -> dict[str, object]:
+def _public_answer(result: Any, disclosure: dict[str, object], *, include_derivation: bool = False) -> dict[str, object]:
     return {
         "answer": result.answer,
         "claims": [
             {
                 "text": claim.text,
+                **({"derivation": {
+                    "schema_version": "mnemosyne.claim-derivation/v1",
+                    "kind": "synthesis" if claim.synthesis_operation is not None else "quotation",
+                    "operation": claim.synthesis_operation,
+                }} if include_derivation else {}),
                 "evidence_cids": list(claim.evidence_cids),
                 "spans": [
                     {
@@ -2017,13 +2022,13 @@ def _public_answer(result: Any, disclosure: dict[str, object]) -> dict[str, obje
     }
 
 
-def _answer_one(tools: Any, question: str, context: Any, provider: Any) -> dict[str, object]:
+def _answer_one(tools: Any, question: str, context: Any, provider: Any, *, include_derivation: bool = False) -> dict[str, object]:
     from mnemosyne.answering import AnswerRequest, GroundedAnswerOrchestrator
 
     result = GroundedAnswerOrchestrator(tools.engine, provider).answer(
         AnswerRequest(question=question, context=context), provider
     )
-    return _public_answer(result, provider.disclosure)
+    return _public_answer(result, provider.disclosure, include_derivation=include_derivation)
 
 
 def cmd_answer(args: argparse.Namespace) -> None:
@@ -2110,7 +2115,7 @@ def cmd_eval_answer_batch(args: argparse.Namespace) -> None:
     results = []
     for question_id, question, context in rows:
         provider = CommandGroundedProvider.from_environment()
-        value = _answer_one(tools, question, context, provider)
+        value = _answer_one(tools, question, context, provider, include_derivation=args.include_derivation)
         if set(provider.disclosure) not in (
             {"query_decomposer"},
             {"query_decomposer", "grounded_reader"},
@@ -19332,6 +19337,8 @@ def build_parser() -> argparse.ArgumentParser:
     eval_answer_batch = sub.add_parser("eval-answer-batch")
     eval_answer_batch.add_argument("--input-jsonl", type=Path, required=True)
     eval_answer_batch.add_argument("--max-records", type=int, default=10_000)
+    eval_answer_batch.add_argument("--include-derivation", action="store_true",
+                                   help="include versioned quotation/synthesis provenance in each claim")
     eval_answer_batch.set_defaults(func=cmd_eval_answer_batch)
 
     ingest = sub.add_parser("ingest")

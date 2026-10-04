@@ -372,3 +372,27 @@ passed. The native recall test now uses a valid quoted answer from a different
 source turn than the annotated gold evidence, retaining the zero-recall case
 without constructing an impossible successful answer with no claims. No
 product API, BurnOS contract, quality target or publication gate was changed.
+
+## Opt-in public derivation trace
+
+The public `eval-answer-batch` command now accepts `--include-derivation`.
+`MnemoCLI.eval_answer_batch(..., include_derivation=True)` forwards the option.
+Without it, claim and response keys remain unchanged. The option adds one
+`derivation` object per claim with schema `mnemosyne.claim-derivation/v1`,
+`kind` (`quotation` or `synthesis`) and `operation` (null for quotations or the
+validated synthesis operation). Existing span offsets and hashes remain the
+source of operands; raw evidence content is not added to the trace.
+
+The grounded answer host now retains the operation after it validates and
+executes the synthesis proposal. This closes the public-observability gap noted
+above without changing the reader protocol, model invocation, default answer
+serialization or BurnOS endpoints. The native LoCoMo adapter does not yet opt
+into this field; consuming it and independently replaying derivations remains
+the next integration step. The field alone is not proof of provider authenticity.
+
+Validation: the existing 133-test grounded-answer/public-CLI/BurnOS group passed.
+The public-CLI roundtrip was then expanded to cover both quotation and arithmetic
+synthesis, and both cases passed: the latter derived 4 from source operands 1.20
+and 2.80. In each case, removing the opted-in provenance gave the exact default
+response; input stores remained byte-for-byte unchanged. Unit checks also
+retained arithmetic/date operations through the public serializer. Ruff passed.
