@@ -79,6 +79,35 @@ def test_dialog_normalization_requires_explicit_caption_policy():
         normalize_dialogs([sample()], caption_policy="automatic")
 
 
+@pytest.mark.parametrize("category", range(1, 6))
+def test_single_question_prompt_preserves_upstream_whitespace_and_custody(category):
+    from hashlib import sha256
+    from eval.public.adapters.locomo import prepare_single_question_prompt
+    annotation = sample()["qa"][category - 1]
+    before = deepcopy(annotation)
+    draw = 0.75 if category == 5 else None
+    record = prepare_single_question_prompt("Synthetic context Ω.\n", annotation, choice_draw=draw)
+    prompt = record["prompt"]
+    assert prompt.startswith("Synthetic context Ω.\n\n\n\nBased on the above context,")
+    assert prompt.endswith(" Short answer:\n")
+    assert ("SCORER_SECRET" in prompt) == (category == 5)
+    assert "KEEP_LABEL" not in prompt and "D1:1" not in prompt
+    assert ("Use DATE" in prompt) == (category == 2)
+    assert ("exact words" in prompt) == (category != 5)
+    assert record["prompt_sha256"] == sha256(prompt.encode()).hexdigest()
+    assert record["context_sha256"] == sha256("Synthetic context Ω.\n".encode()).hexdigest()
+    assert record["generation"] == {"num_gen": 1, "num_tokens_request": 32, "temperature": 0}
+    assert not record["context_conformance_verified"]
+    assert record == prepare_single_question_prompt("Synthetic context Ω.\n", annotation, choice_draw=draw)
+    assert annotation == before
+
+
+def test_single_question_prompt_rejects_non_text_context():
+    from eval.public.adapters.locomo import prepare_single_question_prompt
+    with pytest.raises(LoCoMoError, match="context"):
+        prepare_single_question_prompt(None, sample()["qa"][0])
+
+
 def test_separates_inputs_without_rewriting_or_dropping_source_annotations():
     source = [sample()]
     before = deepcopy(source)

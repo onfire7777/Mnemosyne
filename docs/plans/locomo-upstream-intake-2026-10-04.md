@@ -285,3 +285,41 @@ environment, including numerical session ordering, stable scoped identity, capti
 policy, label/URL exclusion, input immutability and malformed-input rejection.
 Ruff passed. The existing focused CI job includes these tests, but remote validation
 of this unpushed batch remains pending.
+
+## Single-question prompt assembly and remaining context contract
+
+`prepare_single_question_prompt` reproduces the pinned GPT runner's batch-size-one
+concatenation using a caller-supplied context. It retains exact prompt bytes and
+SHA-256, context SHA-256, the explicit question transformation/choice draw and the
+upstream request settings (one generation, 32 requested output tokens, temperature
+zero). It does not select a provider or model, run a tokenizer, retrieve context,
+or claim arbitrary supplied context conforms to upstream behavior. Category 5
+intentionally places its source answer in the prompt as the upstream distractor;
+that transformation still does not permit answers in stored conversation inputs.
+
+Validation: 79 synthetic ingestion/scoring tests passed. An independent local
+check verified the pinned `gpt_utils.py` hash, read only its literal prompt
+constants through AST, and compared 18 assembled prompts across all five
+categories, both adversarial option orders and empty/Unicode/multiline contexts.
+All matched byte-for-byte. No upstream module was imported or executed.
+The local receipt is `locomo-prompt-parity.json`. Ruff passed.
+
+The source review identifies further requirements before full prompt parity:
+
+- The non-RAG start prompt orders speakers using `list(set(...))` from session 1.
+  Reproducible execution must retain the observed speaker order and Python hash
+  seed/runtime, or label deterministic ordering as an explicit adaptation.
+- Non-RAG truncation computes its question budget from the batch prompt even
+  when the final request uses the single-question prompt. Its reserved budget
+  is 50 tokens per configured batch member, although the single request asks
+  for 32 output tokens. Replacing these with a cleaner formula changes parity.
+- Context assembly traverses sessions ascending but prepends each session's
+  turns/header to the accumulated string. It stops at the first budget failure,
+  with a strict less-than comparison. Do not silently sort the resulting text
+  into a different chronology or reinterpret timestamps.
+- RAG and non-RAG context paths differ; the RAG branch does not prepend the
+  non-RAG conversation start prompt. Pin the selected mode, tokenizer/model
+  contents, retrieval inputs and budget before registration.
+
+These are reproducibility constraints, not permission to repair the official
+protocol in place. Any corrected successor must retain its separate track.
