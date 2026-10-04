@@ -366,3 +366,29 @@ This composes the non-RAG single-question path only. It does not establish real
 tokenizer parity, model/provider mapping, dataset admission, a memory-system
 adapter, resource feasibility or official benchmark results. Publication remains
 explicitly unauthorized in the returned request.
+
+## Real tokenizer characterization
+
+The isolated Python 3.11 environment now also contains the upstream-pinned
+`tiktoken==0.5.2`. A bounded download obtained the `cl100k_base` vocabulary from
+the URL referenced by that installed package. Its 1,681,126 bytes have SHA-256
+`223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7`.
+This older tiktoken release does not validate cached vocabulary hashes itself;
+future runnable integration must verify this pin before loading its cache.
+The scorer-only dependency lock remains unchanged; tokenizer installation was
+isolated exploratory characterization, not a new production dependency.
+
+Sixty synthetic composed requests using the actual tokenizer matched the pinned
+upstream templates and extracted context function byte-for-byte. The cases
+covered both explicit speaker orders, all five categories, Unicode text and
+six token budgets; 24 cases exercised truncation. No model weights, paid API
+call, held-out conversation or real benchmark scoring was involved.
+[Machine-readable receipt](../research/benchmark-intake/locomo-tokenizer-parity-2026-10-04.json).
+
+This resolves the tested path's character-tokenizer-only evidence limitation.
+It does not establish all-input equivalence, other encoding/model mappings,
+provider chat-wrapper token accounting or real runtime/resource acceptance.
+The public helper still accepts arbitrary token counters, so it correctly leaves
+its tokenizer-conformance flag false until a verified tokenizer integration
+contract exists. A hash-locked tokenizer environment and vocabulary loader are
+remaining implementation work.
