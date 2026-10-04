@@ -11,7 +11,7 @@ replace the original specification or promote development evidence to admission.
 | Typed scheduling, revision, authorization, idempotency and virtual tick | Public action adapter; revision-keyed recovery workload; public authorization and retry regression tests | Bind exact adapter/runtime identity into registered multi-system runs; do not infer authorization coverage from happy-path scheduling |
 | Exact-time, window, event, condition and dependency cases | Retained five-trigger, five-seed four-week capture; 525 operations | Incorporate in registered full corpus with pinned reference behavior |
 | Recurrence, cancellation and negative controls | Five-trigger capture includes recurring schedules, cancellation and unmatched/expired controls | Preserve these controls in the full corpus, including failures under load |
-| Implicit cases | Versioned 220-conversation development corpus with separate public inputs/evaluator labels, positive commitments, ambiguity, negatives and multi-turn cancellation/rescheduling | Pin and evaluate an actual formation provider through the development bridge; integrate downstream firing evaluation and broaden language/dependency coverage; never insert gold schedules on a candidate’s behalf |
+| Implicit cases | Frozen 220-conversation corpus; public formation bridge, state/firing diagnostics, saved-trace checks; failed 0.6B attempts and controlled 1.7B prompt/decoding diagnostics retained | Complete actual-provider full-corpus execution with identity/custody, broaden language/dependency coverage, and establish held-out evaluation; never insert gold schedules on a candidate’s behalf |
 | Overloaded-trigger cases | Versioned bounded fan-out generator: 2/4/8/16 actions per explicit type; full run from c7a9d05a completed/replayed with 750 expected firings | Define actual overload behavior and resource envelope; bounded fan-out is not saturation evidence |
 | Every firing targets harness-owned idempotent sink | Retained full trigger-sink and recovery-sink captures; exact annex replay | Integrate sink into the admitted full corpus and every candidate adapter; no external payload execution |
 | Recovery and retry correctness | 360-operation capture: 50 response losses, 50 adapter resets, 10 eligible firings, 10 cancelled controls; 10 sink receipts and 10 deliberate duplicate deliveries | Local response loss is not arbitrary crash recovery or external-service exactly-once behavior |
@@ -115,10 +115,11 @@ The [implicit-formation development protocol](m12-implicit-formation-development
 now defines 220 conversations across five seeds and four weekly dates. Public
 inputs and evaluator labels are separately materialized with byte hashes;
 turn-prefix projection prevents revealing later cancellations prematurely.
-This is corpus availability, not execution evidence. The current structured
-action adapter does not implement formation from these conversations. Agent
-integration, measured execution, broader language coverage
-and held-out/calibration splits remain required.
+The structured action adapter is now connected to a separate bounded formation
+provider through the public bridge. Failed actual-model attempts and small
+controlled first-turn diagnostics are retained, alongside per-turn state and
+fixed-probe firing evaluation. No actual-provider full-corpus run has completed.
+Broader language/dependency coverage and held-out/calibration splits remain required.
 
 
 The natural-language development path now has an opt-in bounded command
@@ -186,3 +187,24 @@ contains 18,180 reported input tokens and 3,788 generated tokens, with
 the monitor's 80.544-second elapsed time and excludes unreported engine, energy,
 and infrastructure costs. It is neither a full M12 cost result nor independent
 verification of the model server's counters. Full-corpus cost remains open.
+
+
+## Reconciled next implementation work — source `c86f99eb`
+
+Controlled prompt and JSON/schema comparisons are complete as development
+experiments, not acceptance gates. Repeating these unchanged variants is not
+next-step evidence. Their failures must remain visible in subsequent reporting.
+
+The next corpus implementation gap is dependency-aware natural-language
+formation. Add a separately versioned extension with public task prerequisites,
+multiple turns and evaluator-only labels across the existing five virtual-week
+seeds. Preserve the frozen 220-case corpus and its historical hashes. Cover a
+satisfied prerequisite, an unsatisfied prerequisite, cancellation, unrelated
+completion and duplicate observation. Extend firing/scoring/replay together;
+corpus source alone must not close the implicit or dependency acceptance rows.
+
+Actual overload remains a separate gap: a higher fan-out count or deliberately
+late virtual tick is not evidence of saturation. A future measured workload must
+retain offered load, admitted/rejected work, service time, outstanding work and
+recovery after pressure, with bounded execution on this host. Do not silently
+rename the existing fan-out evidence as overload completion.

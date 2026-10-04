@@ -11,7 +11,7 @@ intermediate work. The [scope audit](../docs/plans/benchmark-platform-scope-audi
 maps original requirements to missing platform surfaces and module work.
 No phase, acceptance target or progress counter changes from this clarification.
 
-## Development evidence checkpoint — `dec91100`
+## Development evidence checkpoint — `c86f99eb`
 
 The Mnemetric website now presents benchmark families, coverage, memory systems,
 methods and explicit evidence limits. M12 development work includes real public
@@ -23,6 +23,14 @@ not a completed benchmark or admitted result. A schema-constrained provider
 variant completed 21 cases before an HTTP error, with no task writes and 17
 missed eligible occurrences in that prefix. This incomplete attempt does not
 establish full-corpus performance or engine scheduling accuracy.
+
+Subsequent paired 1.7B prompt and decoding diagnostics retain all outputs,
+including format and semantic failures, and provider-reported token/time usage.
+They process first turns only and execute no tasks. Failed-attempt accounting
+now lists every planned case as completed, incomplete or not attempted. The
+next corpus gap is a separately versioned dependency-formation extension;
+full actual-provider execution, overload, reference calibration and admission
+remain open. No model-quality or phase-completion claim follows from these tools.
 
 The [scope audit](../docs/plans/benchmark-platform-scope-audit-2026-10-04.md)
 records the current local-versus-pushed source and CI boundary. These additions

@@ -28,6 +28,23 @@ Windows file-lock job at `55ae2ef9` (see the checkpoint below).
 Subsequent local LoCoMo/derivation work passed 135 isolated checks and 41
 production-environment integration checks before its subsequent synchronization.
 
+## Current integration checkpoint — source `c86f99eb`
+
+Local development includes the website refinement, all-case failed-attempt
+accounting, named semantic prompt profile, paired prompt/decoding captures and
+provider usage reporting. The 1.7B diagnostics completed 22 first-turn calls each;
+they did not execute tasks or complete the 220-conversation benchmark. Plain JSON
+failed all 11 format checks in the controlled decoding comparison; schema passed
+format checks while semantic failures remained. No performance winner is inferred.
+
+At this inspection, the local remote-tracking development ref is `30184aeb`, and
+GitHub CI run `37238287825` reports that exact head still in progress. Local and
+remote main remain `8c103f0f`; no new merge or complete synchronization is claimed.
+Only `main` and `codex/development` exist locally. Earlier checkpoints below are
+historical. The current [M12 ledger](m12-acceptance-evidence-2026-10-04.md) explicitly
+separates delivered formation plumbing from unfinished full-corpus, dependency,
+overload, calibration and admission work.
+
 ## Integration checkpoint at development `dec91100`
 
 Only `main` and `codex/development` are retained. At this checkpoint, local
