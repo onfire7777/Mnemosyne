@@ -1,0 +1,2460 @@
+{
+  "cases": [
+    {
+      "case_id": "41fb0e1dbe846ef4d2d5b0e3",
+      "state": {
+        "case_id": "41fb0e1dbe846ef4d2d5b0e3",
+        "firing_evaluated": false,
+        "provenance_verified": false,
+        "publishable": false,
+        "ranking_eligible": false,
+        "schema": "m12-formation-state-diagnostic/v1",
+        "track": "DEVELOPMENT",
+        "turns": [
+          {
+            "clarification_expected": false,
+            "clarification_present": true,
+            "clarification_semantics": "not-evaluated",
+            "false_negatives": 1,
+            "false_positives": 0,
+            "observed_occurrence_advances": 0,
+            "premature_fired_tasks": 0,
+            "state_exact_match": false,
+            "true_positives": 0,
+            "turn": 0
+          }
+        ]
+      },
+      "timing": {
+        "by_trigger": {
+          "condition": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "dependency_completion": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "event": {
+            "f1": 0.0,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "precision": null,
+            "recall": 0.0,
+            "true_positives": 0
+          },
+          "exact_time": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "time_window": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          }
+        },
+        "case_id": "41fb0e1dbe846ef4d2d5b0e3",
+        "clarification_quality_evaluated": false,
+        "cost_status": "not-measured",
+        "cost_usd": null,
+        "duplicate_observations": 0,
+        "eligible_opportunities": 1,
+        "evaluation_command_wall_ms": 1919.4170830596704,
+        "horizon": "2030-12-19T01:00:00+00:00",
+        "invalid_observations": [],
+        "lateness_observed_denominator": 0,
+        "max_lateness_seconds": null,
+        "mean_lateness_seconds": null,
+        "metrics": {
+          "f1": 0.0,
+          "false_negatives": 1,
+          "false_positives": 0,
+          "precision": null,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "no_observed_opportunity": 0,
+        "publishable": false,
+        "ranking_eligible": false,
+        "reported_due_drift_observations": 0,
+        "rows": [
+          {
+            "action_id": "73fb2b5f07f78b62",
+            "f1": 0.0,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "lateness_seconds": null,
+            "observations": [],
+            "observed_opportunity": true,
+            "occurrence": 0,
+            "precision": null,
+            "recall": 0.0,
+            "trigger_type": "event",
+            "true_positives": 0
+          }
+        ],
+        "schema": "m12-trigger-window-diagnostic/v1",
+        "trace_replay_verified": false,
+        "track": "DEVELOPMENT",
+        "uncertainty": "not-estimated; descriptive finite observations only",
+        "unexpected_observations": [],
+        "workload_completeness_verified": false
+      }
+    },
+    {
+      "case_id": "7e897c88ddd8aa38ce6c3e4a",
+      "state": {
+        "case_id": "7e897c88ddd8aa38ce6c3e4a",
+        "firing_evaluated": false,
+        "provenance_verified": false,
+        "publishable": false,
+        "ranking_eligible": false,
+        "schema": "m12-formation-state-diagnostic/v1",
+        "track": "DEVELOPMENT",
+        "turns": [
+          {
+            "clarification_expected": false,
+            "clarification_present": true,
+            "clarification_semantics": "not-evaluated",
+            "false_negatives": 1,
+            "false_positives": 0,
+            "observed_occurrence_advances": 0,
+            "premature_fired_tasks": 0,
+            "state_exact_match": false,
+            "true_positives": 0,
+            "turn": 0
+          },
+          {
+            "clarification_expected": false,
+            "clarification_present": true,
+            "clarification_semantics": "not-evaluated",
+            "false_negatives": 1,
+            "false_positives": 0,
+            "observed_occurrence_advances": 0,
+            "premature_fired_tasks": 0,
+            "state_exact_match": false,
+            "true_positives": 0,
+            "turn": 1
+          }
+        ]
+      },
+      "timing": {
+        "by_trigger": {
+          "condition": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "dependency_completion": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "event": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "exact_time": {
+            "f1": 0.0,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "precision": null,
+            "recall": 0.0,
+            "true_positives": 0
+          },
+          "time_window": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          }
+        },
+        "case_id": "7e897c88ddd8aa38ce6c3e4a",
+        "clarification_quality_evaluated": false,
+        "cost_status": "not-measured",
+        "cost_usd": null,
+        "duplicate_observations": 0,
+        "eligible_opportunities": 1,
+        "evaluation_command_wall_ms": 3052.2955839696806,
+        "horizon": "2030-12-19T01:00:00+00:00",
+        "invalid_observations": [],
+        "lateness_observed_denominator": 0,
+        "max_lateness_seconds": null,
+        "mean_lateness_seconds": null,
+        "metrics": {
+          "f1": 0.0,
+          "false_negatives": 1,
+          "false_positives": 0,
+          "precision": null,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "no_observed_opportunity": 0,
+        "publishable": false,
+        "ranking_eligible": false,
+        "reported_due_drift_observations": 0,
+        "rows": [
+          {
+            "action_id": "73fb2b5f07f78b62",
+            "f1": 0.0,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "lateness_seconds": null,
+            "observations": [],
+            "observed_opportunity": true,
+            "occurrence": 0,
+            "precision": null,
+            "recall": 0.0,
+            "trigger_type": "exact_time",
+            "true_positives": 0
+          }
+        ],
+        "schema": "m12-trigger-window-diagnostic/v1",
+        "trace_replay_verified": false,
+        "track": "DEVELOPMENT",
+        "uncertainty": "not-estimated; descriptive finite observations only",
+        "unexpected_observations": [],
+        "workload_completeness_verified": false
+      }
+    },
+    {
+      "case_id": "aa732ec718eecf56e4f992b6",
+      "state": {
+        "case_id": "aa732ec718eecf56e4f992b6",
+        "firing_evaluated": false,
+        "provenance_verified": false,
+        "publishable": false,
+        "ranking_eligible": false,
+        "schema": "m12-formation-state-diagnostic/v1",
+        "track": "DEVELOPMENT",
+        "turns": [
+          {
+            "clarification_expected": false,
+            "clarification_present": true,
+            "clarification_semantics": "not-evaluated",
+            "false_negatives": 1,
+            "false_positives": 0,
+            "observed_occurrence_advances": 0,
+            "premature_fired_tasks": 0,
+            "state_exact_match": false,
+            "true_positives": 0,
+            "turn": 0
+          }
+        ]
+      },
+      "timing": {
+        "by_trigger": {
+          "condition": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "dependency_completion": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "event": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "exact_time": {
+            "f1": 0.0,
+            "false_negatives": 3,
+            "false_positives": 0,
+            "precision": null,
+            "recall": 0.0,
+            "true_positives": 0
+          },
+          "time_window": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          }
+        },
+        "case_id": "aa732ec718eecf56e4f992b6",
+        "clarification_quality_evaluated": false,
+        "cost_status": "not-measured",
+        "cost_usd": null,
+        "duplicate_observations": 0,
+        "eligible_opportunities": 3,
+        "evaluation_command_wall_ms": 3511.041750985896,
+        "horizon": "2030-12-19T01:00:00+00:00",
+        "invalid_observations": [],
+        "lateness_observed_denominator": 0,
+        "max_lateness_seconds": null,
+        "mean_lateness_seconds": null,
+        "metrics": {
+          "f1": 0.0,
+          "false_negatives": 3,
+          "false_positives": 0,
+          "precision": null,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "no_observed_opportunity": 0,
+        "publishable": false,
+        "ranking_eligible": false,
+        "reported_due_drift_observations": 0,
+        "rows": [
+          {
+            "action_id": "73fb2b5f07f78b62",
+            "f1": 0.0,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "lateness_seconds": null,
+            "observations": [],
+            "observed_opportunity": true,
+            "occurrence": 0,
+            "precision": null,
+            "recall": 0.0,
+            "trigger_type": "exact_time",
+            "true_positives": 0
+          },
+          {
+            "action_id": "73fb2b5f07f78b62",
+            "f1": 0.0,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "lateness_seconds": null,
+            "observations": [],
+            "observed_opportunity": true,
+            "occurrence": 1,
+            "precision": null,
+            "recall": 0.0,
+            "trigger_type": "exact_time",
+            "true_positives": 0
+          },
+          {
+            "action_id": "73fb2b5f07f78b62",
+            "f1": 0.0,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "lateness_seconds": null,
+            "observations": [],
+            "observed_opportunity": true,
+            "occurrence": 2,
+            "precision": null,
+            "recall": 0.0,
+            "trigger_type": "exact_time",
+            "true_positives": 0
+          }
+        ],
+        "schema": "m12-trigger-window-diagnostic/v1",
+        "trace_replay_verified": false,
+        "track": "DEVELOPMENT",
+        "uncertainty": "not-estimated; descriptive finite observations only",
+        "unexpected_observations": [],
+        "workload_completeness_verified": false
+      }
+    },
+    {
+      "case_id": "6a02bb8c9e712f2fa69ae689",
+      "state": {
+        "case_id": "6a02bb8c9e712f2fa69ae689",
+        "firing_evaluated": false,
+        "provenance_verified": false,
+        "publishable": false,
+        "ranking_eligible": false,
+        "schema": "m12-formation-state-diagnostic/v1",
+        "track": "DEVELOPMENT",
+        "turns": [
+          {
+            "clarification_expected": false,
+            "clarification_present": true,
+            "clarification_semantics": "not-evaluated",
+            "false_negatives": 0,
+            "false_positives": 0,
+            "observed_occurrence_advances": 0,
+            "premature_fired_tasks": 0,
+            "state_exact_match": true,
+            "true_positives": 0,
+            "turn": 0
+          }
+        ]
+      },
+      "timing": {
+        "by_trigger": {
+          "condition": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "dependency_completion": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "event": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "exact_time": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "time_window": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          }
+        },
+        "case_id": "6a02bb8c9e712f2fa69ae689",
+        "clarification_quality_evaluated": false,
+        "cost_status": "not-measured",
+        "cost_usd": null,
+        "duplicate_observations": 0,
+        "eligible_opportunities": 0,
+        "evaluation_command_wall_ms": 3054.0750829677563,
+        "horizon": "2030-12-19T01:00:00+00:00",
+        "invalid_observations": [],
+        "lateness_observed_denominator": 0,
+        "max_lateness_seconds": null,
+        "mean_lateness_seconds": null,
+        "metrics": {
+          "f1": null,
+          "false_negatives": 0,
+          "false_positives": 0,
+          "precision": null,
+          "recall": null,
+          "true_positives": 0
+        },
+        "no_observed_opportunity": 0,
+        "publishable": false,
+        "ranking_eligible": false,
+        "reported_due_drift_observations": 0,
+        "rows": [],
+        "schema": "m12-trigger-window-diagnostic/v1",
+        "trace_replay_verified": false,
+        "track": "DEVELOPMENT",
+        "uncertainty": "not-estimated; descriptive finite observations only",
+        "unexpected_observations": [],
+        "workload_completeness_verified": false
+      }
+    },
+    {
+      "case_id": "585fae27b378ebae2281d9fe",
+      "state": {
+        "case_id": "585fae27b378ebae2281d9fe",
+        "firing_evaluated": false,
+        "provenance_verified": false,
+        "publishable": false,
+        "ranking_eligible": false,
+        "schema": "m12-formation-state-diagnostic/v1",
+        "track": "DEVELOPMENT",
+        "turns": [
+          {
+            "clarification_expected": false,
+            "clarification_present": true,
+            "clarification_semantics": "not-evaluated",
+            "false_negatives": 1,
+            "false_positives": 0,
+            "observed_occurrence_advances": 0,
+            "premature_fired_tasks": 0,
+            "state_exact_match": false,
+            "true_positives": 0,
+            "turn": 0
+          },
+          {
+            "clarification_expected": false,
+            "clarification_present": true,
+            "clarification_semantics": "not-evaluated",
+            "false_negatives": 0,
+            "false_positives": 0,
+            "observed_occurrence_advances": 0,
+            "premature_fired_tasks": 0,
+            "state_exact_match": true,
+            "true_positives": 0,
+            "turn": 1
+          }
+        ]
+      },
+      "timing": {
+        "by_trigger": {
+          "condition": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "dependency_completion": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "event": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "exact_time": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "time_window": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          }
+        },
+        "case_id": "585fae27b378ebae2281d9fe",
+        "clarification_quality_evaluated": false,
+        "cost_status": "not-measured",
+        "cost_usd": null,
+        "duplicate_observations": 0,
+        "eligible_opportunities": 0,
+        "evaluation_command_wall_ms": 4854.548039933434,
+        "horizon": "2030-12-19T01:00:00+00:00",
+        "invalid_observations": [],
+        "lateness_observed_denominator": 0,
+        "max_lateness_seconds": null,
+        "mean_lateness_seconds": null,
+        "metrics": {
+          "f1": null,
+          "false_negatives": 0,
+          "false_positives": 0,
+          "precision": null,
+          "recall": null,
+          "true_positives": 0
+        },
+        "no_observed_opportunity": 1,
+        "publishable": false,
+        "ranking_eligible": false,
+        "reported_due_drift_observations": 0,
+        "rows": [
+          {
+            "action_id": "73fb2b5f07f78b62",
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "lateness_seconds": null,
+            "observations": [],
+            "observed_opportunity": false,
+            "occurrence": 0,
+            "precision": null,
+            "recall": null,
+            "trigger_type": "exact_time",
+            "true_positives": 0
+          }
+        ],
+        "schema": "m12-trigger-window-diagnostic/v1",
+        "trace_replay_verified": false,
+        "track": "DEVELOPMENT",
+        "uncertainty": "not-estimated; descriptive finite observations only",
+        "unexpected_observations": [],
+        "workload_completeness_verified": false
+      }
+    },
+    {
+      "case_id": "9d2ca99439c4a42468867566",
+      "state": {
+        "case_id": "9d2ca99439c4a42468867566",
+        "firing_evaluated": false,
+        "provenance_verified": false,
+        "publishable": false,
+        "ranking_eligible": false,
+        "schema": "m12-formation-state-diagnostic/v1",
+        "track": "DEVELOPMENT",
+        "turns": [
+          {
+            "clarification_expected": false,
+            "clarification_present": true,
+            "clarification_semantics": "not-evaluated",
+            "false_negatives": 1,
+            "false_positives": 0,
+            "observed_occurrence_advances": 0,
+            "premature_fired_tasks": 0,
+            "state_exact_match": false,
+            "true_positives": 0,
+            "turn": 0
+          }
+        ]
+      },
+      "timing": {
+        "by_trigger": {
+          "condition": {
+            "f1": 0.0,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "precision": null,
+            "recall": 0.0,
+            "true_positives": 0
+          },
+          "dependency_completion": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "event": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "exact_time": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "time_window": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          }
+        },
+        "case_id": "9d2ca99439c4a42468867566",
+        "clarification_quality_evaluated": false,
+        "cost_status": "not-measured",
+        "cost_usd": null,
+        "duplicate_observations": 0,
+        "eligible_opportunities": 1,
+        "evaluation_command_wall_ms": 4754.829334968235,
+        "horizon": "2030-12-19T01:00:00+00:00",
+        "invalid_observations": [],
+        "lateness_observed_denominator": 0,
+        "max_lateness_seconds": null,
+        "mean_lateness_seconds": null,
+        "metrics": {
+          "f1": 0.0,
+          "false_negatives": 1,
+          "false_positives": 0,
+          "precision": null,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "no_observed_opportunity": 0,
+        "publishable": false,
+        "ranking_eligible": false,
+        "reported_due_drift_observations": 0,
+        "rows": [
+          {
+            "action_id": "73fb2b5f07f78b62",
+            "f1": 0.0,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "lateness_seconds": null,
+            "observations": [],
+            "observed_opportunity": true,
+            "occurrence": 0,
+            "precision": null,
+            "recall": 0.0,
+            "trigger_type": "condition",
+            "true_positives": 0
+          }
+        ],
+        "schema": "m12-trigger-window-diagnostic/v1",
+        "trace_replay_verified": false,
+        "track": "DEVELOPMENT",
+        "uncertainty": "not-estimated; descriptive finite observations only",
+        "unexpected_observations": [],
+        "workload_completeness_verified": false
+      }
+    },
+    {
+      "case_id": "e687590a3979eb93a8829810",
+      "state": {
+        "case_id": "e687590a3979eb93a8829810",
+        "firing_evaluated": false,
+        "provenance_verified": false,
+        "publishable": false,
+        "ranking_eligible": false,
+        "schema": "m12-formation-state-diagnostic/v1",
+        "track": "DEVELOPMENT",
+        "turns": [
+          {
+            "clarification_expected": false,
+            "clarification_present": true,
+            "clarification_semantics": "not-evaluated",
+            "false_negatives": 1,
+            "false_positives": 0,
+            "observed_occurrence_advances": 0,
+            "premature_fired_tasks": 0,
+            "state_exact_match": false,
+            "true_positives": 0,
+            "turn": 0
+          }
+        ]
+      },
+      "timing": {
+        "by_trigger": {
+          "condition": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "dependency_completion": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "event": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "exact_time": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "time_window": {
+            "f1": 0.0,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "precision": null,
+            "recall": 0.0,
+            "true_positives": 0
+          }
+        },
+        "case_id": "e687590a3979eb93a8829810",
+        "clarification_quality_evaluated": false,
+        "cost_status": "not-measured",
+        "cost_usd": null,
+        "duplicate_observations": 0,
+        "eligible_opportunities": 1,
+        "evaluation_command_wall_ms": 6938.368248054758,
+        "horizon": "2030-12-19T01:00:00+00:00",
+        "invalid_observations": [],
+        "lateness_observed_denominator": 0,
+        "max_lateness_seconds": null,
+        "mean_lateness_seconds": null,
+        "metrics": {
+          "f1": 0.0,
+          "false_negatives": 1,
+          "false_positives": 0,
+          "precision": null,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "no_observed_opportunity": 0,
+        "publishable": false,
+        "ranking_eligible": false,
+        "reported_due_drift_observations": 0,
+        "rows": [
+          {
+            "action_id": "73fb2b5f07f78b62",
+            "f1": 0.0,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "lateness_seconds": null,
+            "observations": [],
+            "observed_opportunity": true,
+            "occurrence": 0,
+            "precision": null,
+            "recall": 0.0,
+            "trigger_type": "time_window",
+            "true_positives": 0
+          }
+        ],
+        "schema": "m12-trigger-window-diagnostic/v1",
+        "trace_replay_verified": false,
+        "track": "DEVELOPMENT",
+        "uncertainty": "not-estimated; descriptive finite observations only",
+        "unexpected_observations": [],
+        "workload_completeness_verified": false
+      }
+    },
+    {
+      "case_id": "563c75b6a6b2f389e4461455",
+      "state": {
+        "case_id": "563c75b6a6b2f389e4461455",
+        "firing_evaluated": false,
+        "provenance_verified": false,
+        "publishable": false,
+        "ranking_eligible": false,
+        "schema": "m12-formation-state-diagnostic/v1",
+        "track": "DEVELOPMENT",
+        "turns": [
+          {
+            "clarification_expected": false,
+            "clarification_present": true,
+            "clarification_semantics": "not-evaluated",
+            "false_negatives": 0,
+            "false_positives": 0,
+            "observed_occurrence_advances": 0,
+            "premature_fired_tasks": 0,
+            "state_exact_match": true,
+            "true_positives": 0,
+            "turn": 0
+          }
+        ]
+      },
+      "timing": {
+        "by_trigger": {
+          "condition": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "dependency_completion": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "event": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "exact_time": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "time_window": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          }
+        },
+        "case_id": "563c75b6a6b2f389e4461455",
+        "clarification_quality_evaluated": false,
+        "cost_status": "not-measured",
+        "cost_usd": null,
+        "duplicate_observations": 0,
+        "eligible_opportunities": 0,
+        "evaluation_command_wall_ms": 3903.898833988933,
+        "horizon": "2030-12-19T01:00:00+00:00",
+        "invalid_observations": [],
+        "lateness_observed_denominator": 0,
+        "max_lateness_seconds": null,
+        "mean_lateness_seconds": null,
+        "metrics": {
+          "f1": null,
+          "false_negatives": 0,
+          "false_positives": 0,
+          "precision": null,
+          "recall": null,
+          "true_positives": 0
+        },
+        "no_observed_opportunity": 0,
+        "publishable": false,
+        "ranking_eligible": false,
+        "reported_due_drift_observations": 0,
+        "rows": [],
+        "schema": "m12-trigger-window-diagnostic/v1",
+        "trace_replay_verified": false,
+        "track": "DEVELOPMENT",
+        "uncertainty": "not-estimated; descriptive finite observations only",
+        "unexpected_observations": [],
+        "workload_completeness_verified": false
+      }
+    },
+    {
+      "case_id": "dd3feb06b69964589070b212",
+      "state": {
+        "case_id": "dd3feb06b69964589070b212",
+        "firing_evaluated": false,
+        "provenance_verified": false,
+        "publishable": false,
+        "ranking_eligible": false,
+        "schema": "m12-formation-state-diagnostic/v1",
+        "track": "DEVELOPMENT",
+        "turns": [
+          {
+            "clarification_expected": false,
+            "clarification_present": true,
+            "clarification_semantics": "not-evaluated",
+            "false_negatives": 1,
+            "false_positives": 0,
+            "observed_occurrence_advances": 0,
+            "premature_fired_tasks": 0,
+            "state_exact_match": false,
+            "true_positives": 0,
+            "turn": 0
+          }
+        ]
+      },
+      "timing": {
+        "by_trigger": {
+          "condition": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "dependency_completion": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "event": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "exact_time": {
+            "f1": 0.0,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "precision": null,
+            "recall": 0.0,
+            "true_positives": 0
+          },
+          "time_window": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          }
+        },
+        "case_id": "dd3feb06b69964589070b212",
+        "clarification_quality_evaluated": false,
+        "cost_status": "not-measured",
+        "cost_usd": null,
+        "duplicate_observations": 0,
+        "eligible_opportunities": 1,
+        "evaluation_command_wall_ms": 5149.6927099942695,
+        "horizon": "2030-12-19T01:00:00+00:00",
+        "invalid_observations": [],
+        "lateness_observed_denominator": 0,
+        "max_lateness_seconds": null,
+        "mean_lateness_seconds": null,
+        "metrics": {
+          "f1": 0.0,
+          "false_negatives": 1,
+          "false_positives": 0,
+          "precision": null,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "no_observed_opportunity": 0,
+        "publishable": false,
+        "ranking_eligible": false,
+        "reported_due_drift_observations": 0,
+        "rows": [
+          {
+            "action_id": "73fb2b5f07f78b62",
+            "f1": 0.0,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "lateness_seconds": null,
+            "observations": [],
+            "observed_opportunity": true,
+            "occurrence": 0,
+            "precision": null,
+            "recall": 0.0,
+            "trigger_type": "exact_time",
+            "true_positives": 0
+          }
+        ],
+        "schema": "m12-trigger-window-diagnostic/v1",
+        "trace_replay_verified": false,
+        "track": "DEVELOPMENT",
+        "uncertainty": "not-estimated; descriptive finite observations only",
+        "unexpected_observations": [],
+        "workload_completeness_verified": false
+      }
+    },
+    {
+      "case_id": "9cb30c37e61734a7275d7d25",
+      "state": {
+        "case_id": "9cb30c37e61734a7275d7d25",
+        "firing_evaluated": false,
+        "provenance_verified": false,
+        "publishable": false,
+        "ranking_eligible": false,
+        "schema": "m12-formation-state-diagnostic/v1",
+        "track": "DEVELOPMENT",
+        "turns": [
+          {
+            "clarification_expected": false,
+            "clarification_present": true,
+            "clarification_semantics": "not-evaluated",
+            "false_negatives": 1,
+            "false_positives": 0,
+            "observed_occurrence_advances": 0,
+            "premature_fired_tasks": 0,
+            "state_exact_match": false,
+            "true_positives": 0,
+            "turn": 0
+          }
+        ]
+      },
+      "timing": {
+        "by_trigger": {
+          "condition": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "dependency_completion": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "event": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "exact_time": {
+            "f1": 0.0,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "precision": null,
+            "recall": 0.0,
+            "true_positives": 0
+          },
+          "time_window": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          }
+        },
+        "case_id": "9cb30c37e61734a7275d7d25",
+        "clarification_quality_evaluated": false,
+        "cost_status": "not-measured",
+        "cost_usd": null,
+        "duplicate_observations": 0,
+        "eligible_opportunities": 1,
+        "evaluation_command_wall_ms": 4166.782167972997,
+        "horizon": "2030-12-19T01:00:00+00:00",
+        "invalid_observations": [],
+        "lateness_observed_denominator": 0,
+        "max_lateness_seconds": null,
+        "mean_lateness_seconds": null,
+        "metrics": {
+          "f1": 0.0,
+          "false_negatives": 1,
+          "false_positives": 0,
+          "precision": null,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "no_observed_opportunity": 0,
+        "publishable": false,
+        "ranking_eligible": false,
+        "reported_due_drift_observations": 0,
+        "rows": [
+          {
+            "action_id": "73fb2b5f07f78b62",
+            "f1": 0.0,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "lateness_seconds": null,
+            "observations": [],
+            "observed_opportunity": true,
+            "occurrence": 0,
+            "precision": null,
+            "recall": 0.0,
+            "trigger_type": "exact_time",
+            "true_positives": 0
+          }
+        ],
+        "schema": "m12-trigger-window-diagnostic/v1",
+        "trace_replay_verified": false,
+        "track": "DEVELOPMENT",
+        "uncertainty": "not-estimated; descriptive finite observations only",
+        "unexpected_observations": [],
+        "workload_completeness_verified": false
+      }
+    },
+    {
+      "case_id": "3f85f91223b866cc95d19ad9",
+      "state": {
+        "case_id": "3f85f91223b866cc95d19ad9",
+        "firing_evaluated": false,
+        "provenance_verified": false,
+        "publishable": false,
+        "ranking_eligible": false,
+        "schema": "m12-formation-state-diagnostic/v1",
+        "track": "DEVELOPMENT",
+        "turns": [
+          {
+            "clarification_expected": true,
+            "clarification_present": true,
+            "clarification_semantics": "not-evaluated",
+            "false_negatives": 0,
+            "false_positives": 0,
+            "observed_occurrence_advances": 0,
+            "premature_fired_tasks": 0,
+            "state_exact_match": true,
+            "true_positives": 0,
+            "turn": 0
+          }
+        ]
+      },
+      "timing": {
+        "by_trigger": {
+          "condition": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "dependency_completion": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "event": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "exact_time": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "time_window": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          }
+        },
+        "case_id": "3f85f91223b866cc95d19ad9",
+        "clarification_quality_evaluated": false,
+        "cost_status": "not-measured",
+        "cost_usd": null,
+        "duplicate_observations": 0,
+        "eligible_opportunities": 0,
+        "evaluation_command_wall_ms": 3992.48279092717,
+        "horizon": "2030-12-19T01:00:00+00:00",
+        "invalid_observations": [],
+        "lateness_observed_denominator": 0,
+        "max_lateness_seconds": null,
+        "mean_lateness_seconds": null,
+        "metrics": {
+          "f1": null,
+          "false_negatives": 0,
+          "false_positives": 0,
+          "precision": null,
+          "recall": null,
+          "true_positives": 0
+        },
+        "no_observed_opportunity": 0,
+        "publishable": false,
+        "ranking_eligible": false,
+        "reported_due_drift_observations": 0,
+        "rows": [],
+        "schema": "m12-trigger-window-diagnostic/v1",
+        "trace_replay_verified": false,
+        "track": "DEVELOPMENT",
+        "uncertainty": "not-estimated; descriptive finite observations only",
+        "unexpected_observations": [],
+        "workload_completeness_verified": false
+      }
+    },
+    {
+      "case_id": "7cdae92951384c8e6d094b30",
+      "state": {
+        "case_id": "7cdae92951384c8e6d094b30",
+        "firing_evaluated": false,
+        "provenance_verified": false,
+        "publishable": false,
+        "ranking_eligible": false,
+        "schema": "m12-formation-state-diagnostic/v1",
+        "track": "DEVELOPMENT",
+        "turns": [
+          {
+            "clarification_expected": false,
+            "clarification_present": true,
+            "clarification_semantics": "not-evaluated",
+            "false_negatives": 1,
+            "false_positives": 0,
+            "observed_occurrence_advances": 0,
+            "premature_fired_tasks": 0,
+            "state_exact_match": false,
+            "true_positives": 0,
+            "turn": 0
+          }
+        ]
+      },
+      "timing": {
+        "by_trigger": {
+          "condition": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "dependency_completion": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "event": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "exact_time": {
+            "f1": 0.0,
+            "false_negatives": 3,
+            "false_positives": 0,
+            "precision": null,
+            "recall": 0.0,
+            "true_positives": 0
+          },
+          "time_window": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          }
+        },
+        "case_id": "7cdae92951384c8e6d094b30",
+        "clarification_quality_evaluated": false,
+        "cost_status": "not-measured",
+        "cost_usd": null,
+        "duplicate_observations": 0,
+        "eligible_opportunities": 3,
+        "evaluation_command_wall_ms": 4934.047042974271,
+        "horizon": "2030-12-26T01:00:00+00:00",
+        "invalid_observations": [],
+        "lateness_observed_denominator": 0,
+        "max_lateness_seconds": null,
+        "mean_lateness_seconds": null,
+        "metrics": {
+          "f1": 0.0,
+          "false_negatives": 3,
+          "false_positives": 0,
+          "precision": null,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "no_observed_opportunity": 0,
+        "publishable": false,
+        "ranking_eligible": false,
+        "reported_due_drift_observations": 0,
+        "rows": [
+          {
+            "action_id": "3dfcbaae405855b0",
+            "f1": 0.0,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "lateness_seconds": null,
+            "observations": [],
+            "observed_opportunity": true,
+            "occurrence": 0,
+            "precision": null,
+            "recall": 0.0,
+            "trigger_type": "exact_time",
+            "true_positives": 0
+          },
+          {
+            "action_id": "3dfcbaae405855b0",
+            "f1": 0.0,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "lateness_seconds": null,
+            "observations": [],
+            "observed_opportunity": true,
+            "occurrence": 1,
+            "precision": null,
+            "recall": 0.0,
+            "trigger_type": "exact_time",
+            "true_positives": 0
+          },
+          {
+            "action_id": "3dfcbaae405855b0",
+            "f1": 0.0,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "lateness_seconds": null,
+            "observations": [],
+            "observed_opportunity": true,
+            "occurrence": 2,
+            "precision": null,
+            "recall": 0.0,
+            "trigger_type": "exact_time",
+            "true_positives": 0
+          }
+        ],
+        "schema": "m12-trigger-window-diagnostic/v1",
+        "trace_replay_verified": false,
+        "track": "DEVELOPMENT",
+        "uncertainty": "not-estimated; descriptive finite observations only",
+        "unexpected_observations": [],
+        "workload_completeness_verified": false
+      }
+    },
+    {
+      "case_id": "9aca33f1ec6f53fecd22dc20",
+      "state": {
+        "case_id": "9aca33f1ec6f53fecd22dc20",
+        "firing_evaluated": false,
+        "provenance_verified": false,
+        "publishable": false,
+        "ranking_eligible": false,
+        "schema": "m12-formation-state-diagnostic/v1",
+        "track": "DEVELOPMENT",
+        "turns": [
+          {
+            "clarification_expected": false,
+            "clarification_present": true,
+            "clarification_semantics": "not-evaluated",
+            "false_negatives": 1,
+            "false_positives": 0,
+            "observed_occurrence_advances": 0,
+            "premature_fired_tasks": 0,
+            "state_exact_match": false,
+            "true_positives": 0,
+            "turn": 0
+          }
+        ]
+      },
+      "timing": {
+        "by_trigger": {
+          "condition": {
+            "f1": 0.0,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "precision": null,
+            "recall": 0.0,
+            "true_positives": 0
+          },
+          "dependency_completion": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "event": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "exact_time": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "time_window": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          }
+        },
+        "case_id": "9aca33f1ec6f53fecd22dc20",
+        "clarification_quality_evaluated": false,
+        "cost_status": "not-measured",
+        "cost_usd": null,
+        "duplicate_observations": 0,
+        "eligible_opportunities": 1,
+        "evaluation_command_wall_ms": 7413.0721659748815,
+        "horizon": "2030-12-26T01:00:00+00:00",
+        "invalid_observations": [],
+        "lateness_observed_denominator": 0,
+        "max_lateness_seconds": null,
+        "mean_lateness_seconds": null,
+        "metrics": {
+          "f1": 0.0,
+          "false_negatives": 1,
+          "false_positives": 0,
+          "precision": null,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "no_observed_opportunity": 0,
+        "publishable": false,
+        "ranking_eligible": false,
+        "reported_due_drift_observations": 0,
+        "rows": [
+          {
+            "action_id": "3dfcbaae405855b0",
+            "f1": 0.0,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "lateness_seconds": null,
+            "observations": [],
+            "observed_opportunity": true,
+            "occurrence": 0,
+            "precision": null,
+            "recall": 0.0,
+            "trigger_type": "condition",
+            "true_positives": 0
+          }
+        ],
+        "schema": "m12-trigger-window-diagnostic/v1",
+        "trace_replay_verified": false,
+        "track": "DEVELOPMENT",
+        "uncertainty": "not-estimated; descriptive finite observations only",
+        "unexpected_observations": [],
+        "workload_completeness_verified": false
+      }
+    },
+    {
+      "case_id": "4998ce03120555834f5458e3",
+      "state": {
+        "case_id": "4998ce03120555834f5458e3",
+        "firing_evaluated": false,
+        "provenance_verified": false,
+        "publishable": false,
+        "ranking_eligible": false,
+        "schema": "m12-formation-state-diagnostic/v1",
+        "track": "DEVELOPMENT",
+        "turns": [
+          {
+            "clarification_expected": true,
+            "clarification_present": true,
+            "clarification_semantics": "not-evaluated",
+            "false_negatives": 0,
+            "false_positives": 0,
+            "observed_occurrence_advances": 0,
+            "premature_fired_tasks": 0,
+            "state_exact_match": true,
+            "true_positives": 0,
+            "turn": 0
+          }
+        ]
+      },
+      "timing": {
+        "by_trigger": {
+          "condition": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "dependency_completion": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "event": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "exact_time": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "time_window": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          }
+        },
+        "case_id": "4998ce03120555834f5458e3",
+        "clarification_quality_evaluated": false,
+        "cost_status": "not-measured",
+        "cost_usd": null,
+        "duplicate_observations": 0,
+        "eligible_opportunities": 0,
+        "evaluation_command_wall_ms": 3936.446542968042,
+        "horizon": "2030-12-26T01:00:00+00:00",
+        "invalid_observations": [],
+        "lateness_observed_denominator": 0,
+        "max_lateness_seconds": null,
+        "mean_lateness_seconds": null,
+        "metrics": {
+          "f1": null,
+          "false_negatives": 0,
+          "false_positives": 0,
+          "precision": null,
+          "recall": null,
+          "true_positives": 0
+        },
+        "no_observed_opportunity": 0,
+        "publishable": false,
+        "ranking_eligible": false,
+        "reported_due_drift_observations": 0,
+        "rows": [],
+        "schema": "m12-trigger-window-diagnostic/v1",
+        "trace_replay_verified": false,
+        "track": "DEVELOPMENT",
+        "uncertainty": "not-estimated; descriptive finite observations only",
+        "unexpected_observations": [],
+        "workload_completeness_verified": false
+      }
+    },
+    {
+      "case_id": "7dd7a45a49fa048a750f620e",
+      "state": {
+        "case_id": "7dd7a45a49fa048a750f620e",
+        "firing_evaluated": false,
+        "provenance_verified": false,
+        "publishable": false,
+        "ranking_eligible": false,
+        "schema": "m12-formation-state-diagnostic/v1",
+        "track": "DEVELOPMENT",
+        "turns": [
+          {
+            "clarification_expected": false,
+            "clarification_present": true,
+            "clarification_semantics": "not-evaluated",
+            "false_negatives": 1,
+            "false_positives": 0,
+            "observed_occurrence_advances": 0,
+            "premature_fired_tasks": 0,
+            "state_exact_match": false,
+            "true_positives": 0,
+            "turn": 0
+          },
+          {
+            "clarification_expected": false,
+            "clarification_present": true,
+            "clarification_semantics": "not-evaluated",
+            "false_negatives": 0,
+            "false_positives": 0,
+            "observed_occurrence_advances": 0,
+            "premature_fired_tasks": 0,
+            "state_exact_match": true,
+            "true_positives": 0,
+            "turn": 1
+          }
+        ]
+      },
+      "timing": {
+        "by_trigger": {
+          "condition": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "dependency_completion": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "event": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "exact_time": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "time_window": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          }
+        },
+        "case_id": "7dd7a45a49fa048a750f620e",
+        "clarification_quality_evaluated": false,
+        "cost_status": "not-measured",
+        "cost_usd": null,
+        "duplicate_observations": 0,
+        "eligible_opportunities": 0,
+        "evaluation_command_wall_ms": 5493.490377062699,
+        "horizon": "2030-12-26T01:00:00+00:00",
+        "invalid_observations": [],
+        "lateness_observed_denominator": 0,
+        "max_lateness_seconds": null,
+        "mean_lateness_seconds": null,
+        "metrics": {
+          "f1": null,
+          "false_negatives": 0,
+          "false_positives": 0,
+          "precision": null,
+          "recall": null,
+          "true_positives": 0
+        },
+        "no_observed_opportunity": 1,
+        "publishable": false,
+        "ranking_eligible": false,
+        "reported_due_drift_observations": 0,
+        "rows": [
+          {
+            "action_id": "3dfcbaae405855b0",
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "lateness_seconds": null,
+            "observations": [],
+            "observed_opportunity": false,
+            "occurrence": 0,
+            "precision": null,
+            "recall": null,
+            "trigger_type": "exact_time",
+            "true_positives": 0
+          }
+        ],
+        "schema": "m12-trigger-window-diagnostic/v1",
+        "trace_replay_verified": false,
+        "track": "DEVELOPMENT",
+        "uncertainty": "not-estimated; descriptive finite observations only",
+        "unexpected_observations": [],
+        "workload_completeness_verified": false
+      }
+    },
+    {
+      "case_id": "8a4d36c5cc10ccc870697b96",
+      "state": {
+        "case_id": "8a4d36c5cc10ccc870697b96",
+        "firing_evaluated": false,
+        "provenance_verified": false,
+        "publishable": false,
+        "ranking_eligible": false,
+        "schema": "m12-formation-state-diagnostic/v1",
+        "track": "DEVELOPMENT",
+        "turns": [
+          {
+            "clarification_expected": false,
+            "clarification_present": true,
+            "clarification_semantics": "not-evaluated",
+            "false_negatives": 1,
+            "false_positives": 0,
+            "observed_occurrence_advances": 0,
+            "premature_fired_tasks": 0,
+            "state_exact_match": false,
+            "true_positives": 0,
+            "turn": 0
+          }
+        ]
+      },
+      "timing": {
+        "by_trigger": {
+          "condition": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "dependency_completion": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "event": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "exact_time": {
+            "f1": 0.0,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "precision": null,
+            "recall": 0.0,
+            "true_positives": 0
+          },
+          "time_window": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          }
+        },
+        "case_id": "8a4d36c5cc10ccc870697b96",
+        "clarification_quality_evaluated": false,
+        "cost_status": "not-measured",
+        "cost_usd": null,
+        "duplicate_observations": 0,
+        "eligible_opportunities": 1,
+        "evaluation_command_wall_ms": 5082.226457976503,
+        "horizon": "2030-12-26T01:00:00+00:00",
+        "invalid_observations": [],
+        "lateness_observed_denominator": 0,
+        "max_lateness_seconds": null,
+        "mean_lateness_seconds": null,
+        "metrics": {
+          "f1": 0.0,
+          "false_negatives": 1,
+          "false_positives": 0,
+          "precision": null,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "no_observed_opportunity": 0,
+        "publishable": false,
+        "ranking_eligible": false,
+        "reported_due_drift_observations": 0,
+        "rows": [
+          {
+            "action_id": "3dfcbaae405855b0",
+            "f1": 0.0,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "lateness_seconds": null,
+            "observations": [],
+            "observed_opportunity": true,
+            "occurrence": 0,
+            "precision": null,
+            "recall": 0.0,
+            "trigger_type": "exact_time",
+            "true_positives": 0
+          }
+        ],
+        "schema": "m12-trigger-window-diagnostic/v1",
+        "trace_replay_verified": false,
+        "track": "DEVELOPMENT",
+        "uncertainty": "not-estimated; descriptive finite observations only",
+        "unexpected_observations": [],
+        "workload_completeness_verified": false
+      }
+    },
+    {
+      "case_id": "3c8d16542dc03b647546bd81",
+      "state": {
+        "case_id": "3c8d16542dc03b647546bd81",
+        "firing_evaluated": false,
+        "provenance_verified": false,
+        "publishable": false,
+        "ranking_eligible": false,
+        "schema": "m12-formation-state-diagnostic/v1",
+        "track": "DEVELOPMENT",
+        "turns": [
+          {
+            "clarification_expected": false,
+            "clarification_present": true,
+            "clarification_semantics": "not-evaluated",
+            "false_negatives": 1,
+            "false_positives": 0,
+            "observed_occurrence_advances": 0,
+            "premature_fired_tasks": 0,
+            "state_exact_match": false,
+            "true_positives": 0,
+            "turn": 0
+          },
+          {
+            "clarification_expected": false,
+            "clarification_present": true,
+            "clarification_semantics": "not-evaluated",
+            "false_negatives": 1,
+            "false_positives": 0,
+            "observed_occurrence_advances": 0,
+            "premature_fired_tasks": 0,
+            "state_exact_match": false,
+            "true_positives": 0,
+            "turn": 1
+          }
+        ]
+      },
+      "timing": {
+        "by_trigger": {
+          "condition": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "dependency_completion": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "event": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "exact_time": {
+            "f1": 0.0,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "precision": null,
+            "recall": 0.0,
+            "true_positives": 0
+          },
+          "time_window": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          }
+        },
+        "case_id": "3c8d16542dc03b647546bd81",
+        "clarification_quality_evaluated": false,
+        "cost_status": "not-measured",
+        "cost_usd": null,
+        "duplicate_observations": 0,
+        "eligible_opportunities": 1,
+        "evaluation_command_wall_ms": 3174.604377039941,
+        "horizon": "2030-12-26T01:00:00+00:00",
+        "invalid_observations": [],
+        "lateness_observed_denominator": 0,
+        "max_lateness_seconds": null,
+        "mean_lateness_seconds": null,
+        "metrics": {
+          "f1": 0.0,
+          "false_negatives": 1,
+          "false_positives": 0,
+          "precision": null,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "no_observed_opportunity": 0,
+        "publishable": false,
+        "ranking_eligible": false,
+        "reported_due_drift_observations": 0,
+        "rows": [
+          {
+            "action_id": "3dfcbaae405855b0",
+            "f1": 0.0,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "lateness_seconds": null,
+            "observations": [],
+            "observed_opportunity": true,
+            "occurrence": 0,
+            "precision": null,
+            "recall": 0.0,
+            "trigger_type": "exact_time",
+            "true_positives": 0
+          }
+        ],
+        "schema": "m12-trigger-window-diagnostic/v1",
+        "trace_replay_verified": false,
+        "track": "DEVELOPMENT",
+        "uncertainty": "not-estimated; descriptive finite observations only",
+        "unexpected_observations": [],
+        "workload_completeness_verified": false
+      }
+    },
+    {
+      "case_id": "bfd9294d785c574810b66079",
+      "state": {
+        "case_id": "bfd9294d785c574810b66079",
+        "firing_evaluated": false,
+        "provenance_verified": false,
+        "publishable": false,
+        "ranking_eligible": false,
+        "schema": "m12-formation-state-diagnostic/v1",
+        "track": "DEVELOPMENT",
+        "turns": [
+          {
+            "clarification_expected": false,
+            "clarification_present": true,
+            "clarification_semantics": "not-evaluated",
+            "false_negatives": 0,
+            "false_positives": 0,
+            "observed_occurrence_advances": 0,
+            "premature_fired_tasks": 0,
+            "state_exact_match": true,
+            "true_positives": 0,
+            "turn": 0
+          }
+        ]
+      },
+      "timing": {
+        "by_trigger": {
+          "condition": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "dependency_completion": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "event": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "exact_time": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "time_window": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          }
+        },
+        "case_id": "bfd9294d785c574810b66079",
+        "clarification_quality_evaluated": false,
+        "cost_status": "not-measured",
+        "cost_usd": null,
+        "duplicate_observations": 0,
+        "eligible_opportunities": 0,
+        "evaluation_command_wall_ms": 2287.8320420277305,
+        "horizon": "2030-12-26T01:00:00+00:00",
+        "invalid_observations": [],
+        "lateness_observed_denominator": 0,
+        "max_lateness_seconds": null,
+        "mean_lateness_seconds": null,
+        "metrics": {
+          "f1": null,
+          "false_negatives": 0,
+          "false_positives": 0,
+          "precision": null,
+          "recall": null,
+          "true_positives": 0
+        },
+        "no_observed_opportunity": 0,
+        "publishable": false,
+        "ranking_eligible": false,
+        "reported_due_drift_observations": 0,
+        "rows": [],
+        "schema": "m12-trigger-window-diagnostic/v1",
+        "trace_replay_verified": false,
+        "track": "DEVELOPMENT",
+        "uncertainty": "not-estimated; descriptive finite observations only",
+        "unexpected_observations": [],
+        "workload_completeness_verified": false
+      }
+    },
+    {
+      "case_id": "ab2f7b089f48bdf78b958629",
+      "state": {
+        "case_id": "ab2f7b089f48bdf78b958629",
+        "firing_evaluated": false,
+        "provenance_verified": false,
+        "publishable": false,
+        "ranking_eligible": false,
+        "schema": "m12-formation-state-diagnostic/v1",
+        "track": "DEVELOPMENT",
+        "turns": [
+          {
+            "clarification_expected": false,
+            "clarification_present": true,
+            "clarification_semantics": "not-evaluated",
+            "false_negatives": 1,
+            "false_positives": 0,
+            "observed_occurrence_advances": 0,
+            "premature_fired_tasks": 0,
+            "state_exact_match": false,
+            "true_positives": 0,
+            "turn": 0
+          }
+        ]
+      },
+      "timing": {
+        "by_trigger": {
+          "condition": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "dependency_completion": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "event": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "exact_time": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "time_window": {
+            "f1": 0.0,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "precision": null,
+            "recall": 0.0,
+            "true_positives": 0
+          }
+        },
+        "case_id": "ab2f7b089f48bdf78b958629",
+        "clarification_quality_evaluated": false,
+        "cost_status": "not-measured",
+        "cost_usd": null,
+        "duplicate_observations": 0,
+        "eligible_opportunities": 1,
+        "evaluation_command_wall_ms": 3318.476584041491,
+        "horizon": "2030-12-26T01:00:00+00:00",
+        "invalid_observations": [],
+        "lateness_observed_denominator": 0,
+        "max_lateness_seconds": null,
+        "mean_lateness_seconds": null,
+        "metrics": {
+          "f1": 0.0,
+          "false_negatives": 1,
+          "false_positives": 0,
+          "precision": null,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "no_observed_opportunity": 0,
+        "publishable": false,
+        "ranking_eligible": false,
+        "reported_due_drift_observations": 0,
+        "rows": [
+          {
+            "action_id": "3dfcbaae405855b0",
+            "f1": 0.0,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "lateness_seconds": null,
+            "observations": [],
+            "observed_opportunity": true,
+            "occurrence": 0,
+            "precision": null,
+            "recall": 0.0,
+            "trigger_type": "time_window",
+            "true_positives": 0
+          }
+        ],
+        "schema": "m12-trigger-window-diagnostic/v1",
+        "trace_replay_verified": false,
+        "track": "DEVELOPMENT",
+        "uncertainty": "not-estimated; descriptive finite observations only",
+        "unexpected_observations": [],
+        "workload_completeness_verified": false
+      }
+    },
+    {
+      "case_id": "da6c726f504c668a7ceaa3ed",
+      "state": {
+        "case_id": "da6c726f504c668a7ceaa3ed",
+        "firing_evaluated": false,
+        "provenance_verified": false,
+        "publishable": false,
+        "ranking_eligible": false,
+        "schema": "m12-formation-state-diagnostic/v1",
+        "track": "DEVELOPMENT",
+        "turns": [
+          {
+            "clarification_expected": false,
+            "clarification_present": true,
+            "clarification_semantics": "not-evaluated",
+            "false_negatives": 0,
+            "false_positives": 0,
+            "observed_occurrence_advances": 0,
+            "premature_fired_tasks": 0,
+            "state_exact_match": true,
+            "true_positives": 0,
+            "turn": 0
+          }
+        ]
+      },
+      "timing": {
+        "by_trigger": {
+          "condition": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "dependency_completion": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "event": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "exact_time": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "time_window": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          }
+        },
+        "case_id": "da6c726f504c668a7ceaa3ed",
+        "clarification_quality_evaluated": false,
+        "cost_status": "not-measured",
+        "cost_usd": null,
+        "duplicate_observations": 0,
+        "eligible_opportunities": 0,
+        "evaluation_command_wall_ms": 2715.226372005418,
+        "horizon": "2030-12-26T01:00:00+00:00",
+        "invalid_observations": [],
+        "lateness_observed_denominator": 0,
+        "max_lateness_seconds": null,
+        "mean_lateness_seconds": null,
+        "metrics": {
+          "f1": null,
+          "false_negatives": 0,
+          "false_positives": 0,
+          "precision": null,
+          "recall": null,
+          "true_positives": 0
+        },
+        "no_observed_opportunity": 0,
+        "publishable": false,
+        "ranking_eligible": false,
+        "reported_due_drift_observations": 0,
+        "rows": [],
+        "schema": "m12-trigger-window-diagnostic/v1",
+        "trace_replay_verified": false,
+        "track": "DEVELOPMENT",
+        "uncertainty": "not-estimated; descriptive finite observations only",
+        "unexpected_observations": [],
+        "workload_completeness_verified": false
+      }
+    },
+    {
+      "case_id": "1c1b2a610f661444bb85bbbf",
+      "state": {
+        "case_id": "1c1b2a610f661444bb85bbbf",
+        "firing_evaluated": false,
+        "provenance_verified": false,
+        "publishable": false,
+        "ranking_eligible": false,
+        "schema": "m12-formation-state-diagnostic/v1",
+        "track": "DEVELOPMENT",
+        "turns": [
+          {
+            "clarification_expected": false,
+            "clarification_present": true,
+            "clarification_semantics": "not-evaluated",
+            "false_negatives": 1,
+            "false_positives": 0,
+            "observed_occurrence_advances": 0,
+            "premature_fired_tasks": 0,
+            "state_exact_match": false,
+            "true_positives": 0,
+            "turn": 0
+          }
+        ]
+      },
+      "timing": {
+        "by_trigger": {
+          "condition": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "dependency_completion": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "event": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          },
+          "exact_time": {
+            "f1": 0.0,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "precision": null,
+            "recall": 0.0,
+            "true_positives": 0
+          },
+          "time_window": {
+            "f1": null,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": null,
+            "recall": null,
+            "true_positives": 0
+          }
+        },
+        "case_id": "1c1b2a610f661444bb85bbbf",
+        "clarification_quality_evaluated": false,
+        "cost_status": "not-measured",
+        "cost_usd": null,
+        "duplicate_observations": 0,
+        "eligible_opportunities": 1,
+        "evaluation_command_wall_ms": 3068.9650430285838,
+        "horizon": "2030-12-26T01:00:00+00:00",
+        "invalid_observations": [],
+        "lateness_observed_denominator": 0,
+        "max_lateness_seconds": null,
+        "mean_lateness_seconds": null,
+        "metrics": {
+          "f1": 0.0,
+          "false_negatives": 1,
+          "false_positives": 0,
+          "precision": null,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "no_observed_opportunity": 0,
+        "publishable": false,
+        "ranking_eligible": false,
+        "reported_due_drift_observations": 0,
+        "rows": [
+          {
+            "action_id": "3dfcbaae405855b0",
+            "f1": 0.0,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "lateness_seconds": null,
+            "observations": [],
+            "observed_opportunity": true,
+            "occurrence": 0,
+            "precision": null,
+            "recall": 0.0,
+            "trigger_type": "exact_time",
+            "true_positives": 0
+          }
+        ],
+        "schema": "m12-trigger-window-diagnostic/v1",
+        "trace_replay_verified": false,
+        "track": "DEVELOPMENT",
+        "uncertainty": "not-estimated; descriptive finite observations only",
+        "unexpected_observations": [],
+        "workload_completeness_verified": false
+      }
+    }
+  ],
+  "complete_benchmark": false,
+  "publishable": false,
+  "ranking_eligible": false,
+  "schema": "m12-partial-formation-diagnostics/v1",
+  "selection": "completed prefix before first transport error; not full-corpus estimate",
+  "trace_consistency_verified": false
+}

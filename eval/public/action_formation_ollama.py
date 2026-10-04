@@ -14,6 +14,7 @@ from pathlib import Path
 import re
 import sys
 import time
+from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 import uuid
@@ -143,7 +144,20 @@ def complete(request, *, model, digest, evidence_dir, base_url='http://127.0.0.1
         def call(stage, route, payload):
             record({'stage': stage + '_request', 'route': route, 'body': payload})
             started = time.perf_counter()
-            response = transport(base, route, deepcopy(payload), timeout)
+            try:
+                response = transport(base, route, deepcopy(payload), timeout)
+            except HTTPError as error:
+                # Preserve bounded server diagnostics without retrying or turning
+                # a transport failure into a model response.
+                try:
+                    limit = 2 * 1024 * 1024
+                    error_body = error.read(limit + 1)
+                    record({'stage': stage + '_http_error', 'status': error.code,
+                            'raw_base64': base64.b64encode(error_body[:limit]).decode(),
+                            'body_truncated': len(error_body) > limit})
+                finally:
+                    error.close()
+                raise
             record({'stage': stage + '_response', 'raw_base64': base64.b64encode(response).decode(),
                     'wall_ms': (time.perf_counter() - started) * 1000})
             return _parsed(response)
