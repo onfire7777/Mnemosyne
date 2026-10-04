@@ -157,7 +157,7 @@ No unchanged failed eight-billion-parameter reader probe is repeated here.
 Validation currently uses explicitly identified scripted test doubles and real
 public CLI calls, including revision-keyed cancellation. That proves plumbing,
 not natural-language understanding. No real formation-provider run has been
-retained. Full state-equivalence scoring, downstream firing/sink evaluation,
+retained. Broader state-equivalence policy, downstream firing/sink evaluation,
 resource/cost capture, provider pinning and calibrated comparisons remain open.
 The formation runner now calls the opt-in public `evidence.capture` seam before
 each provider request. It captures the canonical conversation prefix through
@@ -182,3 +182,50 @@ argument. This change does not claim that mutation evidence is independently
 bound inside each backend intention record or that provenance admission is
 complete. Public-CLI regressions inspect the returned intention evidence IDs,
 including a creation retry after a later source capture.
+
+
+## Stored-state diagnostic
+
+Formation now requests `task.inspect` with `include_schedule: true`. The adapter
+returns a detached projection of the authenticated public `intention-list`
+record: trigger, due time, dependencies, recurrence policy/state and evidence
+IDs. The default inspection response remains unchanged. Both projections use
+the same tenant, session, principal, revision and status checks.
+
+`action_formation_scoring.py` compares these stored snapshots to the evaluator's
+labels after each turn. It imports neither the product engine nor the provider
+proposal/translator. Schedules are compared as multisets: a second distinct
+intention with identical content is an extra schedule, not a deduplicated success.
+Duplicate snapshot identities are rejected as malformed evidence instead.
+
+Equivalent timezone spellings normalize to UTC. Other JSON values retain their
+exact types, including nested booleans versus numbers. Nonrecurrence normalizes
+the label's null to the public `type: none` policy. Differences in trigger
+content, action, due time, recurrence or dependencies remain visible. This is a
+versioned structural equivalence policy, not proof of all behavioral equivalences;
+the previously documented nested-condition semantics question remains open.
+
+The diagnostic reports per-turn true-positive/extra/missing active schedules,
+exact active-state match, premature fired tasks, and occurrence advances. The
+current corpus's turns precede their requested due times, so firing or advancing
+recurrence during formation is a separate violation even if no active schedule
+remains. Cancelled records may remain as history without counting as active.
+
+Clarification expectation and observed question presence are separate fields.
+No claim is made that a present question asks the right thing. State match is not
+an overall correctness score and cannot offset premature firing or an inadequate
+clarification. Missing turns, incomplete schedule inspection, wrong case IDs or
+out-of-order snapshots fail rather than yielding fabricated zero scores.
+
+The runner writes `formation-state.json` beside its execution log and identifies
+it from the new `m12-formation-execution/v2` artifact. The existing `scored: false`
+flag continues to mean that the full benchmark has not been scored; `scoring_scope`
+explicitly identifies the descriptive active-state diagnostic. No confidence
+interval, aggregate winner, acceptance floor or rank is produced. The complete
+ordered trace is retained, but an independent trace-replay verifier is still
+required before admission. A scripted-provider integration check that only asks
+questions correctly produces a missing intended schedule on the first turn.
+
+No real-model run is claimed. Firing/sink evaluation, clarification quality,
+broader semantic policy, cost, resource admission and calibrated comparisons
+remain unfinished.

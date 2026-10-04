@@ -1,6 +1,7 @@
-"""Retain development formation execution; no scores or model-quality claims."""
+"""Retain formation execution and descriptive state checks, not benchmark ranks."""
 
 import argparse
+from copy import deepcopy
 import hashlib
 import json
 import os
@@ -10,6 +11,7 @@ import tempfile
 from eval.harness.cli_driver import MnemoCLI
 from eval.public.action_cli import ActionCLI
 from eval.public.action_formation import CommandFormationProvider, run_case
+from eval.public.action_formation_scoring import score_case
 from eval.public.action_implicit_plan import make_corpus, public_case
 from eval.public.action_timing_run import _source_receipt, _write
 from eval.public.bundle import _canonical
@@ -27,10 +29,11 @@ def run_development(output, provider):
         'filesystem_isolation_verified': False, 'publishable': False,
     })
     source = _source_receipt(False)
-    for name in ('action_formation.py', 'action_formation_run.py', 'action_implicit_plan.py'):
+    for name in ('action_formation.py', 'action_formation_run.py', 'action_implicit_plan.py',
+                 'action_formation_scoring.py'):
         source['harness_files']['eval/public/' + name] = hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
     _write(output / 'source.json', source)
-    completed, records = [], 0
+    completed, diagnostics, snapshots, records = [], [], [], 0
     try:
         with (output / 'operations.jsonl').open('xb') as log, \
                 tempfile.TemporaryDirectory(prefix='m12-formation-') as temp:
@@ -40,8 +43,11 @@ def run_development(output, provider):
                 log.flush()
                 os.fsync(log.fileno())
                 records += 1
+                if record['stage'] == 'turn_completed':
+                    snapshots.append(deepcopy(record))
 
             for case in corpus['cases']:
+                snapshots.clear()
                 identity = case['public']['case_id']
                 # Isolate harness task maps and stores per case. This does not
                 # attest isolation inside the separately configured provider.
@@ -51,6 +57,7 @@ def run_development(output, provider):
                     scope={'store': str(Path(temp) / (identity + '.json')),
                            'tenant_id': identity, 'session_id': 'formation'}, emit=emit,
                 ))
+                diagnostics.append(score_case(case, snapshots))
     except BaseException as error:
         _write(output / 'status.json', {
             'status': 'failed', 'exception_type': type(error).__name__,
@@ -58,9 +65,15 @@ def run_development(output, provider):
             'publishable': False, 'scored': False,
         })
         raise
-    result = {'schema': 'm12-formation-execution/v1', 'track': 'DEVELOPMENT',
+    _write(output / 'formation-state.json', {
+        'schema': 'm12-formation-state-report/v1', 'publishable': False,
+        'ranking_eligible': False, 'cases': diagnostics,
+    })
+    result = {'schema': 'm12-formation-execution/v2', 'track': 'DEVELOPMENT',
               'publishable': False, 'scored': False, 'cases': completed,
               'firing_evaluation': 'not-run', 'model_quality': 'not-evaluated',
+              'formation_state_diagnostics': 'formation-state.json',
+              'scoring_scope': 'descriptive-active-state-only; full benchmark unscored',
               'filesystem_isolation_verified': False}
     _write(output / 'execution.json', result)
     _write(output / 'status.json', {'status': 'completed', 'completed_cases': len(completed),

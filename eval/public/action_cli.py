@@ -315,6 +315,9 @@ class ActionCLI:
 
     def _task_inspect(self, state: _ScopeState, payload: Mapping[str, Any]) -> dict[str, Any]:
         """Read a provider-issued revision; never refresh a retry's precondition."""
+        include_schedule = payload.get("include_schedule", False)
+        if type(include_schedule) is not bool:
+            raise ActionCLIError("include_schedule must be boolean")
         task_id = _require_str(payload.get("task_id"), "task_id")
         intention_id = state.intention_by_task.get(task_id)
         if intention_id is None:
@@ -338,8 +341,23 @@ class ActionCLI:
             raise ActionCLIError("inspection returned an invalid intention status")
         action = row.get("action")
         action_id = _require_str(action.get("ref") if isinstance(action, Mapping) else None, "action ref")
-        return {"task_id": task_id, "intention_id": intention_id, "revision": revision,
-                "status": row["status"], "action_id": action_id}
+        result = {"task_id": task_id, "intention_id": intention_id, "revision": revision,
+                  "status": row["status"], "action_id": action_id}
+        if include_schedule:
+            _observation_time(row.get("due_at"))
+            _require_str(row.get("trigger_type"), "trigger type")
+            for key in ("trigger_expression", "recurrence_policy", "recurrence_state"):
+                if not isinstance(row.get(key), dict):
+                    raise ActionCLIError(f"inspection omitted {key}")
+            for key in ("dependencies", "evidence_ids"):
+                if (not isinstance(row.get(key), list)
+                        or any(not isinstance(value, str) or not value for value in row[key])):
+                    raise ActionCLIError(f"inspection omitted valid {key}")
+            result["schedule"] = json.loads(json.dumps({key: row[key] for key in (
+                "trigger_type", "trigger_expression", "due_at", "dependencies",
+                "recurrence_policy", "recurrence_state", "evidence_ids",
+            )}, allow_nan=False))
+        return result
 
     def _clock_inject(self, state: _ScopeState, payload: Mapping[str, Any]) -> dict[str, Any]:
         state.now = _require_str(payload.get("now"), "clock now")

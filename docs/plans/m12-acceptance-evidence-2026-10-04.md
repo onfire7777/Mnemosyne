@@ -128,4 +128,12 @@ exercise real public creation and revision-keyed cancellation; these tests are
 not model quality measurements. New creations now bind to public CIDs of their available conversation prefixes;
 mutation provenance remains in ordered per-turn records. Actual provider
 identity/custody, complete provenance admission, filesystem isolation,
-state-equivalence scoring and downstream firing remain unverified or unfinished. No formation score has been admitted.
+broader state-equivalence policy and downstream firing remain unverified or unfinished. No formation score has been admitted.
+
+
+Stored-state diagnostics now compare complete public inspection snapshots to
+per-turn formation labels, preserving duplicate schedules, wrong due times,
+premature firing and missing intentions. Clarification presence is reported
+without claiming semantic correctness. The runner retains the separate
+`formation-state.json` artifact; no real-model score or complete M12 ranking
+has been established.

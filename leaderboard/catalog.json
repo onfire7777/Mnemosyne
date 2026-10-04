@@ -259,7 +259,7 @@
     {
       "id": "M12",
       "name": "Prospective action",
-      "status": "Development captures include 130 five-trigger receipts, recovery with 50 injected response losses, and 1,220 bounded fan-out operations with 750 receipts and exact replay. A separate resource run sampled at most 88 MiB RSS; this is not resource admission. A 220-conversation natural-language corpus is available but has not been executed by a formation adapter. Draft reference captures remain unadmitted, with a verified nested-condition policy difference. Live PostgreSQL retry/BurnOS checks passed at 55ae2ef9. Full overload/implicit execution, reference calibration, cost and admission remain open."
+      "status": "Development captures include 130 five-trigger receipts, recovery with 50 injected response losses, and 1,220 bounded fan-out operations with 750 receipts and exact replay. A separate resource run sampled at most 88 MiB RSS; this is not resource admission. The 220-conversation corpus has a public formation bridge and stored-state diagnostics, but no real-model result. Draft reference captures remain unadmitted, with a verified nested-condition policy difference. Live PostgreSQL retry/BurnOS checks passed at 55ae2ef9. Full overload/implicit execution, reference calibration, cost and admission remain open."
     },
     {
       "id": "M13",
