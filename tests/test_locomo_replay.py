@@ -10,7 +10,7 @@ import pytest
 from eval.harness.cli_driver import MnemoCLI
 from eval.public.adapters.locomo import LoCoMoError, split_samples
 from eval.public.adapters.locomo_native import _prepare_native_replay, answer_captured_question
-from eval.public.adapters.locomo_replay import _decode, replay_in_environment
+from eval.public.adapters.locomo_replay import _decode, replay_in_environment, verify_report_in_environment
 
 
 def test_cross_environment_native_replay(tmp_path, monkeypatch):
@@ -40,6 +40,18 @@ def test_cross_environment_native_replay(tmp_path, monkeypatch):
     assert report["categories"]["4"]["qa_source_denominator_mean"] == 1
     assert report["source_population_complete"] and not report["complete"]
     assert not report["publication_authorized"] and not report["runtime_custody_verified"]
+    saved = tmp_path / "report.json"
+    saved.write_text(json.dumps(report))
+    assert verify_report_in_environment(json.loads(saved.read_text()), [sample], [record], **kwargs) == report
+    assert report["protocol"]["id"] == "mnemosyne.locomo-native-scoring/v1"
+    assert len(report["protocol"]["replay_source_sha256"]) == 7
+    for field, changed in (
+        ("categories", {}), ("caption_policy", "include-source-caption"),
+        ("protocol", {**report["protocol"], "scorer_dependencies": {}}),
+        ("protocol_sha256", "0" * 64), ("publication_authorized", 0),
+    ):
+        with pytest.raises(LoCoMoError, match="saved native report"):
+            verify_report_in_environment({**report, field: changed}, [sample], [record], **kwargs)
     missing = replay_in_environment([sample], [], **kwargs)
     assert missing["categories"]["4"]["missing_count"] == 1
     record["decoded_prediction"] = "tampered"
