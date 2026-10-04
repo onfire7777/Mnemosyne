@@ -43,7 +43,7 @@ it does not close W4 or any measured acceptance requirement.
 | 1. Freeze track/configuration | Optional native configuration binds full and normalized source hashes, replay policy, reader/choice policies, CLI settings and runtime/resource artifact references. Its digest is retained in each answer and the replay report. | Candidate/installed-runtime file checks are available through the optional artifact verifier. Admit the resource artifact, effective model/provider/tokenizer/context settings and preregistered choice policy, then integrate these gates into registered execution; file consistency is not execution or resource proof. |
 | 2. Native public adapter | `iter_native_answers` validates the population first, captures one isolated conversation at a time, invokes public read-only answers, retains command options and cleans stores. Public capture tests exercise actual subprocesses. | Full admitted population under the registered runtime and resource envelope; signed attempt persistence. |
 | 3. Response conversion | Raw outputs, missing reader execution, explicit abstention, category-5 decoding, citations, spans, answer rendering and opt-in synthesis derivations are retained/validated. The independent derivation checker does not call the product synthesizer. | Optional candidate-bound reader policy now checks exact model, prompt, serializer and decoding disclosures and is retained in offline replay. Authenticate that candidate and actual runtime through the registered bundle path; a matching disclosure is not proof of provider execution. |
-| 4. Neutral bundle/replay | Full-population offline scoring and exact saved-report replay work across interpreters. Versioned development category summaries now fit result-v2, render counts/missingness and preserve absent categories without invented intervals. | Assemble complete result records and neutral bundles with configuration/registry anchors and verifier dispatch; implement preregistered uncertainty before claiming that acceptance gate. Generic QA semantics remain separate. |
+| 4. Neutral bundle/replay | Full-population offline scoring and exact saved-report replay work across interpreters. Versioned development category summaries fit result-v2 and render missingness. The development assembler binds one atomic QA record to exact source/configuration/trace/report bytes after replay; full and partial five-category synthetic populations are covered. | Integrate registered result records and neutral bundles with configuration/registry anchors and verifier dispatch; implement preregistered uncertainty before claiming that acceptance gate. Generic QA semantics remain separate. |
 | 5. Registry/scoring dispatch | No real LoCoMo registry entry or runnable official suite has been added. | Dedicated native scoring profile plus coordinated runner/verifier dispatch; resolve dataset rights/admission before real data enters the registry. |
 | 6. Model/resource preflight | Two retained synthetic reader probes stopped at warning memory pressure; the latest receipt is linked in project state. | Required-setting feasibility and complete context coverage, then the original scale gate. Tokenizer/scorer success does not discharge this requirement. |
 | 7. Registered run/public evidence | No real LoCoMo run or ranking is claimed. | Pre-execution registration, retained attempts, full execution, reproducible bundle and accurate website presentation. |
@@ -657,3 +657,19 @@ included in both 13-test passes. Rejections cover mutated/rehashed source and
 reports, identities, seeds, manifest bytes and promoted evidence claims. Ruff,
 diff whitespace and workflow YAML parsing passed. CI now includes the assembly
 suite; this local validation does not claim a completed GitHub run.
+
+
+## Five-category assembly acceptance coverage
+
+The assembly regression now exercises all five categories in one source
+population, including two category-5 questions whose seeded draws put the
+adversarial options in opposite orders. A paired partial-population case omits
+the category-3 response: the source denominator remains one, missingness remains
+visible and the category is incomplete. A complete synthetic response set still
+cannot promote the result to measured execution or publication.
+
+All 15 assembler tests passed in both the isolated scorer and the production
+interpreter calling that scorer. Ruff and diff whitespace checks passed. These
+responses are synthetic transport stubs, not live reader execution. The common
+bundle verifier still requires canonical registry anchoring; no dispatch or
+registry admission was relaxed to make this development path pass.
