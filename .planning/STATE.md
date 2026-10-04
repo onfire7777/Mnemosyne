@@ -31,7 +31,8 @@ These remain components, not an admitted complete native benchmark runner. The
 [neutral integration contract](../docs/plans/locomo-neutral-integration-contract-2026-10-04.md)
 separates upstream model baselines from public memory-system execution and lists
 the remaining bundle, resource and admission gates. Dataset rights/admission,
-grounded-model preflight, official measurements and broader original acceptance
+grounded-model preflight (the [latest synthetic retry](../docs/research/benchmark-intake/local-reader-feasibility-2026-10-04-repeat.json)
+again stopped on memory pressure), official measurements and broader original acceptance
 criteria remain open. CI passed on `df99593b`; the accumulated development
 changes require synchronization and new-head validation; no phase counter or measured-acceptance status changes here.
 

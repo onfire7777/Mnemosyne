@@ -432,3 +432,24 @@ Added a ten-minute, synthetic-only LoCoMo conformance job to the existing CI wor
 ## M07 public-clock prerequisite characterization
 
 Reconciled stale N12/P14-B/P15-S2 predecessor claims against delivered source. Verified an existing public path using isolated `ingest`, queue enqueue and consolidation CLI processes: protected rehearsal states were false/true/false across before-due/due/after-due virtual dates, with persisted schedule and no model-backed roles. Added and passed a public-boundary regression plus a compact response-hash receipt. This is a one-item prerequisite probe, not M07 admission or a months-long benchmark. Global clock semantics, full fixture/scorer, resources and calibration remain unresolved.
+
+## Reader feasibility recheck after local suite completion
+
+At `4c4c9021`, repeated the unchanged 24,000-character synthetic request after
+the long local test suite had finished. The pinned `qwen3:8b` model was initially
+unloaded, Ollama reported 0.35.1, and macOS pressure was normal. The existing
+outer guard sampled pressure every 0.5 seconds and retained a fresh attempt,
+without overwriting the earlier failed probe or accessing protected questions.
+
+Pressure became warning level 2 at 3.612 seconds; the caller was terminated and
+the attempt ended after 3.780 seconds with return code -15. Explicit unload
+succeeded, `/api/ps` was empty, and pressure returned to normal. Swap remained
+714.56 MiB before and after. No answer was produced and no full-context or
+benchmark acceptance is established. This is evidence about the current host
+conditions, not proof that the model can never run on a 16 GiB computer.
+
+The compact [repeat receipt](../research/benchmark-intake/local-reader-feasibility-2026-10-04-repeat.json)
+binds the input, source files, samples and retained local log hashes. Avoid
+repeating model-load attempts without a meaningful resource/runtime change.
+Continue scorer, adapter, source and lightweight regression work; the required
+model/resource and 24-case scale gates remain open without lowering settings.
