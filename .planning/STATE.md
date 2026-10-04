@@ -22,6 +22,10 @@ W5 native tensor execution is now implemented behind the optional Rust `onnx`
 feature. A 314-byte synthetic graph has exact Rust/Python output parity for
 lengths 1/64/128/384/512, with clean process exit on ONNX Runtime 1.28.0 and
 ort rc.13. The earlier 1.22.1/rc.10 trial aborted at shutdown and is not a pass.
+The clean-source validation at `5cce12c6` passed 48 native tests, 23 Python
+compatibility/provider tests, Clippy and formatting. Raw evidence is retained in
+`eval/reports/compact-onnx-native-development-2026-10-04`. The new Linux CI job
+is prepared but not yet remotely executed.
 This advances the missing execution layer, not learned QA, decoded-span parity
 or physical 8 GiB acceptance. Next: tokenizer/offset-preserving integration and
 complete reader decoding behind the existing bounded runtime; authorized

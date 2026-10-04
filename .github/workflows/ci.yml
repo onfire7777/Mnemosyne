@@ -195,6 +195,42 @@ jobs:
       - name: Rust provider sidecar contract
         run: cargo test --manifest-path rust/mneme-providers/Cargo.toml
 
+  compact-onnx-parity:
+    name: Compact ONNX tensor parity
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CARGO_BUILD_JOBS: "2"
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: "3.11"
+      - name: Install isolated parity dependencies
+        run: python -m pip install onnx==1.18.0 onnxruntime==1.28.0
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal --component clippy,rustfmt
+      - name: Generate synthetic graph and Python reference
+        shell: bash
+        run: |
+          python eval/compact_answering/onnx_span_parity.py "$RUNNER_TEMP/onnx-span-parity"
+          python - <<'PYTHON'
+          import os
+          from pathlib import Path
+          import onnxruntime
+          library = Path(onnxruntime.__file__).parent / "capi/libonnxruntime.so.1.28.0"
+          assert library.is_file(), "pinned native runtime library is missing"
+          with open(os.environ["GITHUB_ENV"], "a") as output:
+              output.write(f"ORT_DYLIB_PATH={library}\n")
+              output.write(f"MNEMOSYNE_ONNX_PARITY_FIXTURE={os.environ['RUNNER_TEMP']}/onnx-span-parity\n")
+          PYTHON
+      - name: Verify real native execution and clean exit
+        run: cargo +1.98.1 test --locked --manifest-path services/answering-ort/Cargo.toml --features onnx -- --include-ignored
+      - name: Check optional native source
+        run: |
+          cargo +1.98.1 fmt --check --manifest-path services/answering-ort/Cargo.toml
+          cargo +1.98.1 clippy --locked --manifest-path services/answering-ort/Cargo.toml --all-targets --features onnx -- -D warnings
+
   postgres:
     name: Postgres integration
     runs-on: ubuntu-latest
