@@ -348,3 +348,21 @@ of session counts, budget boundaries and batch sizes produced identical context
 bytes using a character-count test tokenizer. This isolates assembly parity;
 it is not evidence for real tiktoken/model parity or an official scored run.
 The local receipt is `locomo-context-parity.json`. Ruff passed.
+
+## Composed non-RAG request
+
+`prepare_nonrag_request` joins source-question selection, explicit speaker order,
+the upstream conversation-start text, batch-question token accounting, context
+assembly and final single-question prompt. It binds the source question ID and
+retains both the context construction and full request digests. Speaker order
+must explicitly match the two speakers in session 1; malformed selections fail
+closed. The upstream start text's spelling and whitespace remain unchanged.
+
+Validation: 94 synthetic tests passed. Forty composed requests spanning both
+speaker orders, all five categories and four budgets matched the pinned source
+constants and reviewed context function byte-for-byte with a character-count
+test tokenizer. The local receipt is `locomo-request-parity.json`. Ruff passed.
+This composes the non-RAG single-question path only. It does not establish real
+tokenizer parity, model/provider mapping, dataset admission, a memory-system
+adapter, resource feasibility or official benchmark results. Publication remains
+explicitly unauthorized in the returned request.

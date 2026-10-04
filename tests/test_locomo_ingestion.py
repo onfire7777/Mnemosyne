@@ -147,6 +147,35 @@ def test_nonrag_context_rejects_invalid_token_counter(value):
                                num_question_tokens=10, batch_size=1)
 
 
+def test_nonrag_request_composes_source_question_and_preserves_speaker_order():
+    from eval.public.adapters.locomo import prepare_nonrag_request
+    source = sample()
+    source["conversation"]["session_1"].append({"dia_id": "D1:2", "speaker": "B", "text": "Reply."})
+    result = prepare_nonrag_request(source, 4, speaker_order=["B", "A"], token_count=len,
+                                    max_length=10000, choice_draw=0.1)
+    assert result["prompt"].startswith("Below is a conversation between two people: B and A.")
+    assert result["speaker_order"] == ["B", "A"]
+    assert result["question_id"] == split_samples([source])["questions"][4]["question_id"]
+    assert "SCORER_SECRET" not in result["context_assembly"]["context"]
+    assert "SCORER_SECRET" in result["prompt"]
+    assert not result["publication_authorized"]
+    assert not result["context_assembly"]["truncated"]
+
+
+@pytest.mark.parametrize("speakers", [["A", "A"], ["B", "C"], ["A"], None])
+def test_nonrag_request_rejects_implicit_or_invalid_speaker_order(speakers):
+    from eval.public.adapters.locomo import prepare_nonrag_request
+    with pytest.raises(LoCoMoError, match="speaker_order"):
+        prepare_nonrag_request(sample(), 0, speaker_order=speakers, token_count=len, max_length=1000)
+
+
+@pytest.mark.parametrize("index", [-1, 5, True, 0.5])
+def test_nonrag_request_rejects_invalid_question_selection(index):
+    from eval.public.adapters.locomo import prepare_nonrag_request
+    with pytest.raises(LoCoMoError, match="question_index"):
+        prepare_nonrag_request(sample(), index, speaker_order=["A", "B"], token_count=len, max_length=1000)
+
+
 def test_separates_inputs_without_rewriting_or_dropping_source_annotations():
     source = [sample()]
     before = deepcopy(source)
