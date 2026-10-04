@@ -1,0 +1,95 @@
+{
+  "benchmark_completed": false,
+  "completed_cases": 0,
+  "failure": "clarification cannot also perform writes",
+  "files": {
+    "cleanup.json": {
+      "bytes": 234,
+      "sha256": "7181712dc84f13a99289a0519b11d7fc044b2f85f561b7d9ca36052841f622ed"
+    },
+    "launch.py": {
+      "bytes": 2283,
+      "sha256": "4e5d520bbdb4323226c9ebf1f673fc4decce608d84a9aee4f71632f7de739ed5"
+    },
+    "monitor/pressure.jsonl": {
+      "bytes": 167,
+      "sha256": "8cf8d06e1a8e3c67946559e80314d9fb7d04f6e176ed254b05c8179ca37151be"
+    },
+    "monitor/start.json": {
+      "bytes": 1653,
+      "sha256": "1efad2fdaab47999f01548c67f2584f2ab5008c24620d5406defdb3a365b795b"
+    },
+    "monitor/stderr.log": {
+      "bytes": 1091,
+      "sha256": "b5677b9a8f303a609ee6a710b9511c1bf0d833bf1aa6730e00e278515941d42b"
+    },
+    "monitor/stdout.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "monitor/terminal.json": {
+      "bytes": 1783,
+      "sha256": "b939ca6b5d69f712dc82964cfc452795e2b0242d9587a55babc606fd54f9987f"
+    },
+    "monitor/usage.jsonl": {
+      "bytes": 414,
+      "sha256": "2d8473968f9875f62319b9de1d4aa5f30e3ddedf1fee1ce0e8f7a96cae1e60b0"
+    },
+    "plan.json": {
+      "bytes": 1266,
+      "sha256": "2600b6030253463c152c3d36a5c0b85c216df1a33fef7c1c708f177456a711c0"
+    },
+    "server-samples.jsonl": {
+      "bytes": 522,
+      "sha256": "558d5663941c36e3e199123c13f027277a3adcc0dbde29cf7890774eebc4ef7d"
+    },
+    "workload/inputs.json": {
+      "bytes": 182912,
+      "sha256": "8f6c5cefdd25b511692ad7ee48239d2c4e6db92ec57eb9639ca8462223a3e64b"
+    },
+    "workload/observation-plan.json": {
+      "bytes": 233027,
+      "sha256": "87cf7f6514a6168bfa1aaec4100b1c5d745b243135d7f8f44d4b6ee91696e211"
+    },
+    "workload/operations.jsonl": {
+      "bytes": 3688,
+      "sha256": "8b4b957613b0343c8a095206720154188913fee0bf5412fcac5f8f2caa15ebb9"
+    },
+    "workload/provider-http/9ffc6942ae2c43499bafd413c107bd1e.jsonl": {
+      "bytes": 7797,
+      "sha256": "eb5297cb1ba4afd43ea2285ebb95076b163ff210ab5b15b0bbcde90b06fb8e9f"
+    },
+    "workload/provider.json": {
+      "bytes": 642,
+      "sha256": "8c12f7a4c5ca476b95ca880628e4fca322e9c1673a83986b829daf4b00cb4dfd"
+    },
+    "workload/source.json": {
+      "bytes": 1634,
+      "sha256": "c85b65756cfb96e6f0054906c8def3c90a59ef92a6e97a08a937c140076ef363"
+    },
+    "workload/status.json": {
+      "bytes": 126,
+      "sha256": "e8fa0073a6b204fdaf2ead8fe84007959eda644fdb8fad6bd58abfd239f82501"
+    }
+  },
+  "local_evidence_directory": "/Users/admin/.local/state/mnemosyne/formation-runs/2026-10-04-88a56f24",
+  "model": "qwen3:0.6b",
+  "model_reported_output_tokens": 140,
+  "model_reported_prompt_tokens": 726,
+  "model_reported_total_duration_ns": 2144786292,
+  "model_responses": 1,
+  "monitor_elapsed_seconds": 4.062235249992227,
+  "normal_pressure_samples": 3,
+  "planned_cases": 220,
+  "publishable": false,
+  "rank_eligible": false,
+  "resource_admission": false,
+  "schema": "m12-formation-feasibility/v1",
+  "server_reported_digest": "7df6b6e09427a769808717c0a93cadc4ae99ed4eb8bf5ca557c90846becea435",
+  "server_sampled_size_bytes": 1507747430,
+  "server_size_is_peak_rss": false,
+  "source_commit": "88a56f24c6ae95fe2fd992beef080bf0a93fd86d",
+  "source_dirty": false,
+  "status": "failed-invalid-formation-response",
+  "task_writes": 0
+}

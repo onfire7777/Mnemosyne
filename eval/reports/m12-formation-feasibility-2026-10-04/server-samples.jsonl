@@ -1,0 +1,3 @@
+{"pressure": 1, "server": {"models": []}}
+{"pressure": 1, "server": {"models": []}}
+{"pressure": 1, "server": {"models": [{"name": "qwen3:0.6b", "model": "qwen3:0.6b", "size": 1507747430, "digest": "7df6b6e09427a769808717c0a93cadc4ae99ed4eb8bf5ca557c90846becea435", "details": {"parent_model": "", "format": "gguf", "family": "qwen3", "families": ["qwen3"], "parameter_size": "751.63M", "quantization_level": "Q4_K_M"}, "expires_at": "2026-10-04T13:06:35.044118-07:00", "size_vram": 1507747430, "context_length": 8192}]}}

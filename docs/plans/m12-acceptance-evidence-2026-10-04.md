@@ -145,4 +145,11 @@ including cancellation and recurrence. Saved-trace recomputation checks ordered
 requests/responses, both reports and the SQLite receipt rows, and binds input
 hashes without executing the recorded provider command. This is internal
 consistency checking, not authenticated model/engine execution or independent
-reproduction. No actual-model formation capture or M12 admission is claimed.
+reproduction. No completed actual-model formation benchmark or M12 admission is claimed.
+
+
+A [retained Qwen3 0.6B attempt](../../eval/reports/m12-formation-feasibility-2026-10-04/README.md)
+now provides one actual local model response. The intended 220-case run stopped
+on the first invalid response, before any task write. All three pressure samples
+were normal and the model was unloaded afterward. This is a failed development
+attempt, not a zero accuracy estimate or a successful M12 measurement.

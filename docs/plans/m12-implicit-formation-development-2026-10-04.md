@@ -227,7 +227,7 @@ ordered trace is retained. A separate command now recomputes trace consistency,
 while independent reproduction and provider custody remain required before admission. A scripted-provider integration check that only asks
 questions correctly produces a missing intended schedule on the first turn.
 
-No real-model run is claimed. Independent reproduction, clarification quality,
+No completed real-model benchmark is claimed. Independent reproduction, clarification quality,
 broader semantic policy, cost, resource admission and calibrated comparisons
 remain unfinished.
 
@@ -253,7 +253,7 @@ and treats event/condition eligibility as the matching stimulus tick only.
 Negative and ambiguous cases have no expected firings; extra outputs remain
 false positives. Three recurrence occurrences are scored individually. No
 model-quality result, admission or rank is implied. Independent reproduction remains open.
-There is no actual model run associated with this implementation. Tests use an
+The first real-model attempt below failed before downstream execution. Tests use an
 explicitly scripted command or manually created intention to validate plumbing.
 The fixed schedule is specific to corpus v1 and must be revised together with any
 change in that corpus's timing; it is not a general natural-language time parser.
@@ -319,3 +319,20 @@ smaller model for local feasibility does not change those protocols. The
 its resource and quality suitability must be measured, not inferred from size.
 The outer Mac memory-pressure guard still applies. Its process-group RSS does
 not include the separately running Ollama server or prove total model memory.
+
+
+## Retained first local-model attempt
+
+The [Qwen3 0.6B feasibility capture](../../eval/reports/m12-formation-feasibility-2026-10-04/README.md)
+at clean source `88a56f24` attempted all 220 conversations in frozen order.
+The model returned one response; the bridge rejected it for combining a
+clarification question with a write. No task was created and no case completed.
+Raw HTTP output, failed trace, monitor samples and cleanup are retained.
+All three pressure samples were normal; this supports feasibility of that small
+invocation only, not full-run resource admission or the prior 8B reader workload.
+
+The next protocol-development step is schema-constrained decoding of the public
+operation envelope, without inserting labels or repairing model answers.
+Any changed provider variant must retain this initial failure and identify its
+new settings. A full valid run, semantic accuracy, independent custody and all
+original M12 admission/calibration requirements remain open.
