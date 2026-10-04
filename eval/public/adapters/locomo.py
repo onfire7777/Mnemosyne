@@ -211,3 +211,58 @@ def prepare_single_question_prompt(context: str, annotation: dict, *,
             "context_sha256": sha256(context.encode("utf-8")).hexdigest(),
             "generation": {"num_gen": 1, "num_tokens_request": 32, "temperature": 0},
             "context_conformance_verified": False}
+
+
+def prepare_nonrag_context(sample: dict, *, token_count, max_length: int,
+                           num_question_tokens: int, batch_size: int) -> dict:
+    """Preserve pinned non-RAG context ordering and strict budget comparison.
+
+    token_count must use the registered tokenizer. num_question_tokens must
+    include upstream's batch-question prompt and conversation-start prompt.
+    This function does not prepend the start prompt or enforce a final model
+    limit: upstream may emit headers even when the first turn does not fit.
+    """
+    for name, value, minimum in (("max_length", max_length, 1),
+                                  ("num_question_tokens", num_question_tokens, 0),
+                                  ("batch_size", batch_size, 1)):
+        if type(value) is not int or value < minimum:
+            raise LoCoMoError(f"{name} must be an integer >= {minimum}")
+    if not callable(token_count):
+        raise LoCoMoError("token_count must be callable")
+
+    def count(text):
+        value = token_count(text)
+        if type(value) is not int or value < 0:
+            raise LoCoMoError("token_count must return a non-negative integer")
+        return value
+
+    records = normalize_dialogs([sample], caption_policy="include-source-caption")["records"]
+    sessions = {}
+    for record in records:
+        sessions.setdefault(record["session_id"], []).append(record)
+    context, included, omitted_at = "", [], None
+    for session in sessions.values():
+        context += "\n\n"
+        header = "DATE: " + session[0]["source_timestamp"] + "\nCONVERSATION:\n"
+        for record in reversed(session):
+            turn = record["speaker"] + ' said, "' + record["text"] + '"\n'
+            if record["caption"] is not None:
+                turn += " and shared " + record["caption"] + "."
+            turn += "\n"
+            if count(header + turn) + count(context) + num_question_tokens < max_length - 50 * batch_size:
+                context = turn + context
+                included.insert(0, record["record_id"])
+            else:
+                omitted_at = record["record_id"]
+                break
+        context = header + context
+        if omitted_at is not None:
+            break
+    return {"schema_version": "mnemosyne.locomo-nonrag-context/v1",
+            "upstream_revision": UPSTREAM_REVISION, "context": context,
+            "context_sha256": sha256(context.encode()).hexdigest(),
+            "included_record_ids": included, "first_omitted_record_id": omitted_at,
+            "truncated": omitted_at is not None,
+            "budget": {"max_length": max_length, "num_question_tokens": num_question_tokens,
+                       "batch_size": batch_size, "reserved_answer_tokens": 50 * batch_size},
+            "tokenizer_conformance_verified": False}

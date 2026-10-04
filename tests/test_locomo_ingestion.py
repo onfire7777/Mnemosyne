@@ -108,6 +108,45 @@ def test_single_question_prompt_rejects_non_text_context():
         prepare_single_question_prompt(None, sample()["qa"][0])
 
 
+def test_nonrag_context_retains_upstream_reverse_session_assembly_and_caption():
+    from eval.public.adapters.locomo import prepare_nonrag_context
+    source = sample()
+    source["conversation"]["session_1"][0]["blip_caption"] = "A scene"
+    source["conversation"]["session_3"] = [{"dia_id": "D3:1", "speaker": "B", "text": "Later."}]
+    source["conversation"]["session_3_date_time"] = "later date"
+    output = prepare_nonrag_context(source, token_count=len, max_length=10000,
+                                    num_question_tokens=10, batch_size=1)
+    assert output["context"] == ('DATE: later date\nCONVERSATION:\nB said, "Later."\n\n'
+                                 'DATE: test date\nCONVERSATION:\nA said, "Input conversation."\n'
+                                 ' and shared A scene.\n\n\n\n\n')
+    assert not output["truncated"]
+    records = normalize_dialogs([source], caption_policy="include-source-caption")["records"]
+    assert output["included_record_ids"] == [row["record_id"] for row in reversed(records)]
+
+
+def test_nonrag_context_strict_boundary_keeps_header_even_when_no_turn_fits():
+    from eval.public.adapters.locomo import prepare_nonrag_context
+    source = sample()
+    header = "DATE: test date\nCONVERSATION:\n"
+    turn = 'A said, "Input conversation."\n\n'
+    threshold = len(header + turn) + 2 + 10 + 50
+    exact = prepare_nonrag_context(source, token_count=len, max_length=threshold,
+                                   num_question_tokens=10, batch_size=1)
+    assert exact["truncated"] and exact["included_record_ids"] == []
+    assert exact["context"] == header + "\n\n"
+    extra = prepare_nonrag_context(source, token_count=len, max_length=threshold + 1,
+                                   num_question_tokens=10, batch_size=1)
+    assert not extra["truncated"] and len(extra["included_record_ids"]) == 1
+
+
+@pytest.mark.parametrize("value", [-1, True, 0.5, None])
+def test_nonrag_context_rejects_invalid_token_counter(value):
+    from eval.public.adapters.locomo import prepare_nonrag_context
+    with pytest.raises(LoCoMoError, match="token_count"):
+        prepare_nonrag_context(sample(), token_count=lambda _: value, max_length=1000,
+                               num_question_tokens=10, batch_size=1)
+
+
 def test_separates_inputs_without_rewriting_or_dropping_source_annotations():
     source = [sample()]
     before = deepcopy(source)
