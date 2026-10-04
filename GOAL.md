@@ -4,8 +4,11 @@ Current work follows `docs/plans/completion-2026-10-04.md`; current module
 counts and next steps are in `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md`.
 
 The owner’s 2026-10-04 directive authorizes reconciling stale plans and all
-roadmaps, and continuing work on an isolated development branch with multiple
-subagents. It supersedes the older prohibition on plan edits below. Preserve
+roadmaps, and continuing work on `codex/development`, regularly merging tested
+and reviewed work to `main` and synchronizing GitHub with the Desktop checkout.
+Keep only these two branches. The owner's latest directive is solo execution
+in this chat: all subagents and scheduled continuation have been canceled.
+It supersedes the older prohibition on plan edits below. Preserve
 specification requirements and truthful evidence gates while updating status.
 
 
