@@ -416,3 +416,22 @@ the pinned upstream encoding. All token sequences matched. All five special
 tokens retained the upstream default rejection behavior.
 [Offline-loader receipt](../research/benchmark-intake/locomo-offline-tokenizer-2026-10-04.json).
 Ruff passed. No model, held-out dataset or measured benchmark result was involved.
+
+## Positive tokenizer checks in CI
+
+The existing ten-minute LoCoMo job now installs the tokenizer-inclusive hash lock,
+downloads only the 1.7 MB encoding vocabulary with a 30-second request timeout and
+a bounded read, and verifies its exact size/hash before writing or loading it.
+`MNEMOSYNE_TEST_TOKENIZER_VOCAB` points the positive tests to that verified file.
+The explicit preparation step fails on missing, changed or unloadable bytes;
+these checks cannot become a green skip-only job. This updates the earlier
+scorer-only CI description without changing production dependencies or adding
+a schedule, model download, held-out dataset or paid request.
+
+`tests/test_locomo_tokenizer.py` compares 505 synthetic token sequences and five
+special-token rejection cases against the original pinned constructor, using
+verified local bytes and blocking its file/cache loaders during our loader call.
+It also exercises composed requests and wrong-runtime rejection. All 102 focused
+tests passed locally with the vocabulary environment variable set; no tests
+skipped. The workflow YAML parsed successfully. Remote CI still requires a run
+on the pushed commit; local success is not remote validation.

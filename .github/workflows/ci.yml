@@ -82,6 +82,8 @@ jobs:
     name: LoCoMo scorer conformance
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      MNEMOSYNE_TEST_TOKENIZER_VOCAB: ${{ runner.temp }}/cl100k_base.tiktoken
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
       # Isolated upstream scoring environment, not the Mnemosyne runtime.
@@ -90,12 +92,27 @@ jobs:
           python-version: "3.11"
       - name: Install uv
         run: python -m pip install pip==26.1.2 uv==0.11.16
-      - name: Install hash-locked scoring dependencies
-        run: uv pip install --system --require-hashes -r eval/public/requirements-locomo-test.lock
+      - name: Install hash-locked scoring and tokenizer dependencies
+        run: uv pip install --system --require-hashes -r eval/public/requirements-locomo-tokenizer.lock
+      - name: Obtain and verify pinned tokenizer vocabulary
+        run: |
+          python - <<'PY'
+          import hashlib, os, urllib.request
+          from pathlib import Path
+          from eval.public.adapters.locomo_tokenizer import VOCABULARY_BYTES, VOCABULARY_SHA256, load_verified_encoding
+          url = "https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken"
+          with urllib.request.urlopen(url, timeout=30) as response:
+              data = response.read(VOCABULARY_BYTES + 1)
+          assert len(data) == VOCABULARY_BYTES
+          assert hashlib.sha256(data).hexdigest() == VOCABULARY_SHA256
+          path = Path(os.environ["MNEMOSYNE_TEST_TOKENIZER_VOCAB"])
+          path.write_bytes(data)
+          load_verified_encoding(path)
+          PY
       - name: Require the pinned scorer runtime
         run: python -c "from eval.public.adapters.locomo_scoring import _runtime; _runtime()"
       - name: Run synthetic scorer and ingestion conformance
-        run: python -m pytest tests/test_locomo_scoring.py tests/test_locomo_ingestion.py -q
+        run: python -m pytest tests/test_locomo_scoring.py tests/test_locomo_ingestion.py tests/test_locomo_tokenizer.py -q
 
   windows-file-lock:
     name: Windows file lock
