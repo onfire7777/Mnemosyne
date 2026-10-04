@@ -850,3 +850,22 @@ runners, failed-delivery retention, tampered receipt/scope/retry rejection and
 sink concurrency/rollback cases. All four historical captures replay unchanged.
 Ruff and whitespace checks passed. Full clean-source workload captures follow
 separately; this implementation alone is not a measured admission result.
+
+## Mixed-trigger load extension
+
+The preceding `0a03fd76` turn added sink wiring and launched the two full
+sink-enabled workloads. Session `45044` remained live at inspection; it must
+not be restarted based on an observation timeout. While it runs, the new
+`m12-trigger-fanout-run/v1` generator advances the original overload requirement
+with bounded mixed-trigger groups at 2/4/8/16 actions per type, plus nonmatching
+event decoys, repeated polls and separate per-load reports. This is not a
+saturation or capacity result. The original workload and captures remain intact.
+The first real-CLI development slice exercises all five trigger types at fan-out
+2, including sink delivery. Full-load execution and acceptance are still pending.
+
+The final fan-out/generator/replay check passed 18 tests in 5.18 seconds,
+including the real first-week fan-out run with ten valid firings and ten
+receipts/twenty attempts. The full sink-enabled standard trigger execution
+completed 525 operations; the same live session then began recovery. Completed
+artifacts must be replayed and inspected before being promoted into retained
+development evidence; no full fan-out result is claimed yet.

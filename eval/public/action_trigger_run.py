@@ -11,6 +11,7 @@ import uuid
 
 from eval.harness.cli_driver import MnemoCLI
 from eval.public.action_cli import ActionCLI
+from eval.public.action_fanout_plan import make_fanout_plan
 from eval.public.action_timing_run import (
     SEEDS, _deliver, _sink_for, _source_receipt, _validate_sink_annex, _write,
 )
@@ -87,13 +88,15 @@ def make_plan():
 
 
 def reports(plan, records):
-    if _canonical(plan) != _canonical(make_plan()):
+    fanout = isinstance(plan, dict) and plan.get('schema') == 'm12-trigger-fanout-run/v1'
+    expected_plan = make_fanout_plan() if fanout else make_plan()
+    if _canonical(plan) != _canonical(expected_plan):
         raise ValueError('saved plan differs from the versioned workload')
     if len(records) != sum(len(case['operations']) for case in plan['cases']):
         raise ValueError('missing or extra operation records')
     cursor, results = 0, []
     for case in plan['cases']:
-        ticks, now = [], None
+        ticks, now, case_start = [], None, cursor
         for step, operation in enumerate(case['operations']):
             record = records[cursor]
             cursor += 1
@@ -111,17 +114,25 @@ def reports(plan, records):
             elif record['response'] != {}:
                 raise ValueError('unexpected non-observation response')
         results.append({'case_id': case['case_id'], 'report': score_trigger_windows(case['expected'], ticks)})
-    return {'schema': 'm12-explicit-trigger-reports/v1', 'publishable': False,
+        if fanout:
+            results[-1]['by_load'] = []
+            for phase in case['phases']:
+                phase_records = records[case_start + phase['operation_start']:case_start + phase['operation_end']]
+                phase_ticks = [row['response'] for row in phase_records if row['command'] == 'intention.observe']
+                phase_expected = [row for row in case['expected'] if row['action_id'] in phase['action_ids']]
+                results[-1]['by_load'].append({'week': phase['week'], 'fanout_per_trigger': phase['fanout_per_trigger'],
+                    'report': score_trigger_windows(phase_expected, phase_ticks)})
+    return {'schema': 'm12-trigger-fanout-reports/v1' if fanout else 'm12-explicit-trigger-reports/v1', 'publishable': False,
             'ordered_workload_verified': True, 'cases': results}
 
 
-def run_development(output, *, with_sink=False):
+def run_development(output, *, with_sink=False, fanout=False):
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
-    plan, records = make_plan(), []
+    plan, records = make_fanout_plan() if fanout else make_plan(), []
     _write(output / 'plan.json', plan)
     source = _source_receipt(with_sink)
-    for name in ('action_trigger_run.py', 'action_trigger_timing.py'):
+    for name in ('action_trigger_run.py', 'action_trigger_timing.py', 'action_fanout_plan.py'):
         path = Path(__file__).with_name(name)
         source['harness_files']['eval/public/' + name] = hashlib.sha256(path.read_bytes()).hexdigest()
     _write(output / 'source.json', source)
@@ -184,9 +195,12 @@ if __name__ == '__main__':
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--recompute', action='store_true')
     mode.add_argument('--sink', action='store_true', help='retain inert delivery receipts and deliberate retries')
+    parser.add_argument('--fanout', action='store_true', help='run bounded mixed-trigger fan-out workload')
     args = parser.parse_args()
+    if args.recompute and args.fanout:
+        parser.error('--recompute selects the workload from the saved plan; omit --fanout')
     try:
-        result = recompute(args.output) if args.recompute else run_development(args.output, with_sink=args.sink)
+        result = recompute(args.output) if args.recompute else run_development(args.output, with_sink=args.sink, fanout=args.fanout)
     except Exception as error:
         print(f'Development diagnostic failed: {type(error).__name__}', file=sys.stderr)
         raise SystemExit(1) from None

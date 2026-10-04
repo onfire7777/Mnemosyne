@@ -163,3 +163,25 @@ A deliberately repeated sink attempt tests idempotent recording, not an
 independent external service's exactly-once guarantee. Current separate
 workloads still need overload/implicit cases, integrated cross-module recovery,
 calibration and resource/cost admission before full M12 acceptance.
+
+## Bounded mixed-trigger fan-out
+
+`python -m eval.public.action_trigger_run OUTPUT --fanout --sink` selects the
+separate versioned `m12-trigger-fanout-run/v1` workload. Five seeded start dates
+span four virtual weeks. The weeks schedule 2, 4, 8 and 16 actions of each
+explicit trigger type, with an equal-sized group of never-matching event
+decoys. Shared event and condition inputs exercise fan-out; exact-time,
+exclusive windows and dependency completions retain their distinct timing.
+Negative signals precede matching signals, and a repeated signal-free tick
+checks repeat firing. Each seed has 180 expected occurrences and 244 operations.
+
+Reports retain both case totals and one separately scored phase per load level,
+so failures at higher loads cannot disappear into a single average. Phase
+boundaries and action identities are part of the exact versioned plan. Gold is
+never forwarded to the candidate. The existing standard workload remains the
+default; replay selects the exact generator from the saved schema.
+
+This is bounded trigger fan-out, not demonstrated saturation, maximum capacity,
+or the full overloaded/implicit-intention corpus. It supplies explicit load
+conditions for later reference comparison and resource measurement. Its results
+remain development-only and cannot set an admission floor or ranking by themselves.
