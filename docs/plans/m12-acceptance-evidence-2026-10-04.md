@@ -208,3 +208,12 @@ late virtual tick is not evidence of saturation. A future measured workload must
 retain offered load, admitted/rejected work, service time, outstanding work and
 recovery after pressure, with bounded execution on this host. Do not silently
 rename the existing fan-out evidence as overload completion.
+
+
+The [dependency extension](m12-dependency-formation-development-2026-10-04.md)
+now supplies a separate frozen 100-conversation corpus with evaluator-only
+prerequisite identities and firing expectations. Ten corpus/projection/fixture
+checks pass, including preservation of the original 220-case fixture. This
+closes corpus source availability only. Dependency-aware scorer, executable
+observation bridge and saved-trace integration remain next; no candidate
+execution, cost or acceptance result is claimed for the extension.
