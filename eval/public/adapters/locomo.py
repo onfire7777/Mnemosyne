@@ -266,3 +266,48 @@ def prepare_nonrag_context(sample: dict, *, token_count, max_length: int,
             "budget": {"max_length": max_length, "num_question_tokens": num_question_tokens,
                        "batch_size": batch_size, "reserved_answer_tokens": 50 * batch_size},
             "tokenizer_conformance_verified": False}
+
+
+def prepare_nonrag_request(sample: dict, question_index: int, *, speaker_order: list[str],
+                           token_count, max_length: int, choice_draw: float | None = None) -> dict:
+    """Compose the upstream single-question non-RAG path with explicit ordering.
+
+    The caller must record the upstream speaker order rather than silently sort
+    the original set. Tokenizer identity/model mapping and execution remain the
+    runner's responsibility; this request is not an admitted benchmark result.
+    """
+    separated = split_samples([sample])
+    if type(question_index) is not int or not 0 <= question_index < len(separated["questions"]):
+        raise LoCoMoError("question_index must select a source question")
+    normalize_dialogs([sample], caption_policy="include-source-caption")
+    first_session = sample["conversation"].get("session_1")
+    if not isinstance(first_session, list) or not first_session:
+        raise LoCoMoError("upstream start prompt requires session_1")
+    source_speakers = {turn["speaker"] for turn in first_session}
+    if (not isinstance(speaker_order, list) or len(speaker_order) != 2
+            or any(not isinstance(speaker, str) for speaker in speaker_order)
+            or len(set(speaker_order)) != 2 or set(speaker_order) != source_speakers):
+        raise LoCoMoError("speaker_order must explicitly order the two session_1 speakers")
+    start = (f"Below is a conversation between two people: {speaker_order[0]} and {speaker_order[1]}. "
+             "The conversation takes place over multiple days and the date of each conversation "
+             "is wriiten at the beginning of the conversation.\n\n")
+    annotation = sample["qa"][question_index]
+    question = prepare_upstream_question(annotation, choice_draw=choice_draw)
+    batch_prompt = ('\nBased on the above conversations, write short answers for each of the following '
+                    'questions in a few words. \nWrite the answers in the form of a json dictionary where '
+                    'each entry contains the question number as "key" and the short answer as "value". \n'
+                    'Use single-quote characters for named entities and double-quote characters for '
+                    'enclosing json elements. Answer with exact words from the conversations whenever possible.\n\n')
+    if not callable(token_count):
+        raise LoCoMoError("token_count must be callable")
+    counts = [token_count(start), token_count(batch_prompt + "0: " + question["query"])]
+    if any(type(count) is not int or count < 0 for count in counts):
+        raise LoCoMoError("token_count must return a non-negative integer")
+    context = prepare_nonrag_context(sample, token_count=token_count, max_length=max_length,
+                                     num_question_tokens=sum(counts), batch_size=1)
+    request = prepare_single_question_prompt(start + context["context"], annotation,
+                                              choice_draw=choice_draw)
+    request.update({"question_id": separated["questions"][question_index]["question_id"],
+                    "speaker_order": list(speaker_order), "context_assembly": context,
+                    "mode": "nonrag-single-question", "publication_authorized": False})
+    return request
