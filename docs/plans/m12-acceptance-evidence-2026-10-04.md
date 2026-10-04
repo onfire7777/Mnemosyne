@@ -117,7 +117,7 @@ inputs and evaluator labels are separately materialized with byte hashes;
 turn-prefix projection prevents revealing later cancellations prematurely.
 This is corpus availability, not execution evidence. The current structured
 action adapter does not implement formation from these conversations. Agent
-integration, measured execution, downstream firing, broader language coverage
+integration, measured execution, broader language coverage
 and held-out/calibration splits remain required.
 
 
@@ -128,7 +128,7 @@ exercise real public creation and revision-keyed cancellation; these tests are
 not model quality measurements. New creations now bind to public CIDs of their available conversation prefixes;
 mutation provenance remains in ordered per-turn records. Actual provider
 identity/custody, complete provenance admission, filesystem isolation,
-broader state-equivalence policy and downstream firing remain unverified or unfinished. No formation score has been admitted.
+broader state-equivalence policy and independent reproduction remain unverified or unfinished. No formation score has been admitted.
 
 
 Stored-state diagnostics now compare complete public inspection snapshots to
@@ -137,3 +137,12 @@ premature firing and missing intentions. Clarification presence is reported
 without claiming semantic correctness. The runner retains the separate
 `formation-state.json` artifact; no real-model score or complete M12 ranking
 has been established.
+
+
+The formation runner also retains twelve fixed virtual-time probes and inert
+receipts per conversation. Evaluator-only diagnostics score labeled eligibility,
+including cancellation and recurrence. Saved-trace recomputation checks ordered
+requests/responses, both reports and the SQLite receipt rows, and binds input
+hashes without executing the recorded provider command. This is internal
+consistency checking, not authenticated model/engine execution or independent
+reproduction. No actual-model formation capture or M12 admission is claimed.

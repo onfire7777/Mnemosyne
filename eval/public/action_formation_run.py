@@ -34,7 +34,7 @@ def run_development(output, provider):
     source = _source_receipt(True)
     for name in ('action_formation.py', 'action_formation_run.py', 'action_implicit_plan.py',
                  'action_formation_scoring.py', 'action_formation_observe.py', 'action_formation_timing.py',
-                 'action_trigger_timing.py'):
+                 'action_trigger_timing.py', 'action_formation_replay.py'):
         source['harness_files']['eval/public/' + name] = hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
     _write(output / 'source.json', source)
     completed, diagnostics, snapshots, observations, timing, records = [], [], [], [], [], 0

@@ -22,14 +22,15 @@ The formation runner now retains twelve fixed public-input virtual probes per
 conversation and scoped inert receipts for every observed firing. No actual
 model run is claimed. Evaluator-only timing diagnostics now score complete
 probe sequences against labeled eligibility, retaining misses, false alarms,
-duplicates and cancellation violations. Independent trace replay and actual
-provider measurements remain open.
+duplicates and cancellation violations. A saved-trace verifier now checks full
+protocol consistency, report recomputation and durable sink rows without running
+a provider. Independent reproduction and actual provider measurements remain open.
 
 Formation execution now retains complete opt-in public schedule inspection and
 per-turn stored-state diagnostics. Extra/missing schedules, duplicate intentions,
 wrong timing and premature firing remain visible; clarification presence is not
-clarification quality. The execution artifact is v2 and the full benchmark remains
-unscored. No real-model formation result or downstream firing result is claimed.
+clarification quality. The execution artifact is v4 and the full benchmark remains
+unscored. No real-model formation result is claimed.
 
 The formation development runner now accepts an explicitly configured bounded
 command provider and applies only allowed operations through the public action

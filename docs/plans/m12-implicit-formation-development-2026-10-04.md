@@ -223,11 +223,11 @@ it from the new `m12-formation-execution/v2` artifact. The existing `scored: fal
 flag continues to mean that the full benchmark has not been scored; `scoring_scope`
 explicitly identifies the descriptive active-state diagnostic. No confidence
 interval, aggregate winner, acceptance floor or rank is produced. The complete
-ordered trace is retained, but an independent trace-replay verifier is still
-required before admission. A scripted-provider integration check that only asks
+ordered trace is retained. A separate command now recomputes trace consistency,
+while independent reproduction and provider custody remain required before admission. A scripted-provider integration check that only asks
 questions correctly produces a missing intended schedule on the first turn.
 
-No real-model run is claimed. Independent timing replay, clarification quality,
+No real-model run is claimed. Independent reproduction, clarification quality,
 broader semantic policy, cost, resource admission and calibrated comparisons
 remain unfinished.
 
@@ -252,8 +252,33 @@ retains misses, false alarms, duplicates, due-date drift and per-trigger timing,
 and treats event/condition eligibility as the matching stimulus tick only.
 Negative and ambiguous cases have no expected firings; extra outputs remain
 false positives. Three recurrence occurrences are scored individually. No
-model-quality result, admission or rank is implied. Independent replay remains open.
+model-quality result, admission or rank is implied. Independent reproduction remains open.
 There is no actual model run associated with this implementation. Tests use an
 explicitly scripted command or manually created intention to validate plumbing.
 The fixed schedule is specific to corpus v1 and must be revised together with any
 change in that corpus's timing; it is not a general natural-language time parser.
+
+
+## Saved-trace recomputation
+
+`python -m eval.public.action_formation_replay /path/to/completed-run` checks a
+complete current-version capture without invoking the recorded executable or
+running the product engine. It requires the full frozen corpus and exact public
+prefixes, replays successful raw provider outputs through the versioned protocol,
+checks the ordered public-operation and observation trace, recomputes stored-state
+and timing reports, and reconstructs inert deliveries in a temporary database.
+The reconstructed receipt and attempt rows must match both the JSON snapshots
+and the saved SQLite database. Every declared source-file hash must match the
+replay checkout. The result binds all eleven input artifacts with SHA-256 hashes.
+Input artifacts are snapshotted with file/total/record bounds and checked again
+for changes before a successful return; the verifier never edits them.
+
+This is internal consistency verification using the same protocol driver and
+scorers, not an independent implementation or cryptographic execution proof.
+It can reject inconsistent or incomplete edits; a coherently fabricated trace
+cannot be authenticated by these checks. Wall durations are validated as bounded
+numbers but not remeasured. The result explicitly leaves provider execution,
+engine execution, independent implementation, ranking eligibility and publication
+unverified/false. Failed and partial captures remain diagnostic evidence and are
+not accepted as completed runs. Actual model measurement, independent custody,
+clarification quality, broader semantics and calibration remain open.
