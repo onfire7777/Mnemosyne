@@ -21,6 +21,9 @@ malformed-output and non-finite rejection checks also passed. The first native
 runtime configuration failed at process teardown; the replacement pin passed
 including clean process exit. See `services/answering-ort/README.md` for the
 exact reproduction command and limitations.
+[Raw validation evidence](../../../eval/reports/compact-onnx-native-development-2026-10-04/README.md)
+retains successful clean-source checks plus the failed SDK invocation. A
+bounded Linux CI job exercises native parity; its remote outcome is pending.
 
 Phase 1 remains incomplete: tokenizer/source-offset integration, complete
 multi-task decoding, actual encoder serving and end-to-end decoded parity are

@@ -1,0 +1,74 @@
+   Compiling answering-ort v0.1.0 (/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne/services/answering-ort)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.66s
+     Running unittests src/lib.rs (services/answering-ort/target/debug/deps/answering_ort-933d804915cc69ab)
+
+running 46 tests
+test embed::tests::ranking_empty_candidates_returns_empty ... ok
+test embed::tests::vectors_must_be_finite_nonzero_and_exactly_padded ... ok
+test embed::tests::native_and_zero_padded_cosine_have_the_same_result ... ok
+test reader::tests::expired_deadline_is_fail_closed_by_caller ... ok
+test embed::tests::ranking_ties_are_broken_by_candidate_id ... ok
+test reader::tests::logits_are_validated_before_return ... ok
+test reader::tests::rejects_drifted_identity_nonfinite_and_bad_utf8_offsets ... ok
+test reader::tests::span_reconstructs_exact_source_bytes ... ok
+test reader::tests::spans_must_be_grounded_in_supporting_facts ... ok
+test embed::tests::request_and_response_require_version_and_all_identities ... ok
+test reader::tests::windows_must_cover_the_full_source_context ... ok
+test reader::tests::null_yes_no_and_unsupported_types_are_bounded ... ok
+test protocol::tests::responses_have_exact_common_schema_and_one_payload ... ok
+test rerank::tests::orders_scores_descending_then_by_evidence_id_and_caps_width ... ok
+test rerank::tests::rejects_expired_deadline_before_admitting_scores ... ok
+test rerank::tests::rejects_duplicate_and_unknown_json_fields ... ok
+test rerank::tests::parses_exact_versioned_request_and_response ... ok
+test protocol::tests::preserves_recursive_duplicate_and_existing_limit_rejection ... ok
+test rerank::tests::rejects_limits_identity_drift_and_nonfinite_scores ... ok
+test rerank::tests::rejects_unknown_duplicate_and_incomplete_scores ... ok
+test runtime::tests::configuration_enforces_the_resource_contract ... ok
+test protocol::tests::exact_versioned_request_schema_accepts_all_operations ... ok
+test runtime::tests::expired_deadline_fails_before_session_access ... ok
+test runtime::tests::component_identity_drift_is_typed_and_fail_closed ... ok
+test protocol::tests::wrong_version_and_malformed_identity_are_rejected ... ok
+test runtime::tests::custody_identity_is_configured_not_adopted_from_requests ... ok
+test runtime::tests::malformed_custody_environment_fails_closed ... ok
+test runtime::tests::partial_custody_environment_fails_closed ... ok
+test runtime::tests::process_runtime_is_shared_and_unavailable_fails_closed ... ok
+test runtime::tests::runtime_config_loads_trusted_custody_identity_from_environment ... ok
+test runtime::tests::one_in_flight_is_enforced_and_permit_is_released ... ok
+test runtime::tests::unset_custody_environment_keeps_development_identity ... ok
+test tests::admission_is_bounded_to_one_active_and_one_queued_connection ... ok
+test runtime::tests::session_success_and_error_are_propagated ... ok
+test tests::rejects_non_loopback_before_binding ... ok
+test runtime::tests::invalid_session_outputs_fail_closed ... ok
+test runtime::tests::synthetic_components_share_protocol_runtime_and_preserve_identity ... ok
+test tests::unix_bind_does_not_remove_non_socket_paths ... ok
+test tests::unix_bind_preserves_live_socket ... ok
+test tests::loopback_transport_returns_deterministic_fail_closed_response ... ok
+test tests::unix_bind_replaces_stale_socket_and_sets_owner_only_permissions ... ok
+test runtime::tests::late_session_result_fails_closed ... ok
+test tests::unix_probe_timeout_is_bounded_and_treated_as_live ... ok
+test tests::framing_accepts_crlf_and_rejects_oversized_bodies ... ok
+test tests::request_deadline_covers_incomplete_frames ... ok
+test runtime::tests::hard_deadline_returns_while_blocked_session_remains_busy ... ok
+
+test result: ok. 46 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running unittests src/main.rs (services/answering-ort/target/debug/deps/answering_ort-d26d1bf07eaa6b2e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/onnx_span.rs (services/answering-ort/target/debug/deps/onnx_span-81aab1965603895e)
+
+running 2 tests
+test invalid_tokens_fail_before_runtime_loading ... ok
+test real_onnx_execution_matches_python_reference ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+   Doc-tests answering_ort
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
