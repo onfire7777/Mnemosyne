@@ -2055,10 +2055,22 @@ Quarantine
 
 ## Owner-directed documentation consolidation — PR #120
 
+- PR #213: dependency lock update merged on 2026-10-04 at
+  `8c103f0f383994cbc5753601fef804278ff5e6d2`, from exact reviewed head
+  `17a68580da4b33ddcdf5d37290270840d39cca5b`. The only changed file was
+  `uv.lock`: PyJWT 2.15.0, AnyIO 4.15.1 and typing-extensions 4.16.0.
+  PR workflow `36962578172` completed with all nine applicable jobs passing;
+  its nightly-only chaos job was skipped. This receipt does not claim a
+  post-merge main run, advance the historical canonical baseline, or close
+  any product measurement/admission gate. GitHub removed the merged
+  dependency branch; the Desktop main checkout was fast-forwarded to this merge.
+
 - PR #212: receipt repair, contributor README and AnyIO lockfile consolidation;
-  pending exact-head CI and review before merge. Records this follow-up so
-  its eventual merge remains accounted for by the unchanged lapse detector;
-  no success, implementation admission or baseline advancement is claimed.
+  MERGED on 2026-10-02 at 03:57:07 UTC, merge commit
+  `3c21be5d480f0b47c80046cfe10aa86775f4d537`, head
+  `746842ba40a4d6d26382bf6d2142dd31df0df8c0`. GitHub merge metadata was
+  verified on 2026-10-04. This records delivery without claiming new measured
+  capability, implementation admission or historical baseline advancement.
 
 - Source PR #198 — contributor README history consolidated into PR #212 under the
   owner's branch-reduction request; preserve current package version and

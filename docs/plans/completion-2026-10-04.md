@@ -3,7 +3,9 @@
 ## Objective and authority
 
 Owner request on 2026-10-04: continuously complete the remaining project plans
-on a separate development branch, using Ponytail and multiple sub-agents.
+on a separate development branch, using Ponytail. Initial work used multiple
+subagents; the owner's latest directive cancels them and scheduled work and
+requires continued solo execution in this chat.
 This slice starts at `3c21be5d` on `codex/development`.
 
 The product remains the local-first memory compiler described in the blueprint.
@@ -25,8 +27,9 @@ remain separate from source completion.
 - Reuse existing CLI, scoring, registry, and bundle contracts.
 - Write a failing regression first for each behavior change, then implement the
   smallest correct fix and run relevant integration tests.
-- Give agents disjoint file/function ownership. The controller integrates,
-  runs the full suite, commits, and commissions a fresh final review.
+- Continue directly in this chat without subagents or scheduled work. Preserve
+  completed agent work, integrate it, run the full suite and explicitly
+  self-review the final changes before merging.
 - Keep a per-task evidence and rulings ledger in
   `.superpowers/sdd/completion-2026-10-04/progress.md`.
 - No historical cleanup/reset plan execution or publication. The owner subsequently
@@ -98,8 +101,8 @@ Keep paired Plan A/Plan B PDFs synchronized with their Markdown sources.
 
 Run focused tests and `uv run --locked python -m pytest`, inspecting every
 failure. Record environmental skips explicitly. Check formatting/lint for the
-changed Python files. Have a fresh reviewer inspect the whole branch against
-the contracts above, fix important findings with a failing regression, and
+changed Python files. Inspect the whole branch in a separate self-review pass
+against the contracts above, fix important findings with a failing regression, and
 commit the verified slice. Reconcile the existing remote development history,
 merge the reviewed and verified work to main, then synchronize the Desktop
 checkout and GitHub. Keep only main and codex/development; preserve existing
