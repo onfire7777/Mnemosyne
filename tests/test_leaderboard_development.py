@@ -40,3 +40,28 @@ def test_modified_or_escaping_evidence_cannot_be_exported(tmp_path, damage):
         (root / 'manifest.json').write_text(json.dumps(manifest))
     with pytest.raises(ValueError):
         evidence_pages(tmp_path)
+
+
+@pytest.mark.parametrize('damage', ['large_manifest', 'duplicate_key', 'alias_path', 'manifest_symlink'])
+def test_manifest_bounds_and_unambiguous_archive_paths(tmp_path, damage):
+    source = Path(__file__).resolve().parents[1] / 'eval/reports'
+    name = CAPTURES[0][0]
+    shutil.copytree(source / name, tmp_path / name)
+    path = tmp_path / name / 'manifest.json'
+    if damage == 'large_manifest':
+        path.write_bytes(b' ' * (1024 * 1024 + 1))
+    elif damage == 'duplicate_key':
+        path.write_text('{"files":{},"files":{"README.md":"x"}}')
+    elif damage == 'alias_path':
+        manifest = json.loads(path.read_text())
+        manifest['files']['./README.md'] = manifest['files']['README.md']
+        path.write_text(json.dumps(manifest))
+    else:
+        target = tmp_path / 'outside.json'
+        path.rename(target)
+        try:
+            path.symlink_to(target)
+        except OSError:
+            pytest.skip('symlinks unavailable')
+    with pytest.raises(ValueError):
+        evidence_pages(tmp_path)
