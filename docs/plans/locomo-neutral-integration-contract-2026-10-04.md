@@ -285,3 +285,29 @@ previous conversation stores no longer exist when a later conversation answers,
 that post-start source mutations do not change offline replay, and that failures
 and explicit early closure still release stores. Neutral bundle integration,
 real-dataset admission, runtime preflight and official measurements remain open.
+
+## Isolated scorer process boundary
+
+`eval.public.adapters.locomo_replay.replay_in_environment` now invokes the
+existing pinned scorer with an explicitly supplied Python executable. Isolated
+Python mode ignores ambient Python paths and user packages, while the bootstrap
+loads the repository's evaluation code and public identity helper. This leaves
+Mnemosyne's production dependencies unchanged; it installs no packages and
+performs no model execution. The worker checks all scorer dependency pins even
+when every answer is missing, then runs the existing native population replay.
+
+Requests and responses use finite, duplicate-key-free JSON with a 64 MiB
+transport bound. A SHA-256 receipt binds the returned report to the exact
+request bytes. The parent enforces a finite positive subprocess timeout, reads
+bounded output from a temporary file, and fails on worker errors, invalid JSON
+or receipt mismatch. This is local consistency checking with a trusted selected
+interpreter, not interpreter attestation, signed custody or a memory/RSS bound.
+
+Validation: all 110 isolated ingestion/scoring/tokenizer/process tests passed;
+all five categories matched the in-process report through the subprocess. Seven
+process-boundary tests also passed from the production Python 3.14 environment
+using the pinned Python 3.11 scorer, including a scored synthetic answer,
+missingness, tamper rejection, malformed JSON and timeout propagation. Ruff and
+CI YAML parsing passed. CI includes this boundary in the isolated scorer job.
+The prior remote CI head `df99593b` passed all nine gating jobs; a new-head CI run
+is still required for the accumulated local changes.
