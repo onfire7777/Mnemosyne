@@ -2,6 +2,8 @@
 
 ## Current source reconciliation — 2026-10-04
 
+[Candidate development protocol and remaining freeze decisions](wmb-m08-development-protocol-2026-10-04.md) now specifies selector/receipt semantics, case ordering and metric denominators. It is not an admitted or frozen protocol.
+
 The current owner authorizes solo implementation on the existing development
 branch; historical lane/write-slot restrictions below do not require creating
 new branches or resurrecting old PRs. Technical capability and benchmark gates
