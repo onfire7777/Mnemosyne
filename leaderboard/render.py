@@ -291,6 +291,7 @@ def _export_json(value: object) -> str:
 def _render_pages(
     records: list[dict[str, Any]],
     traces: dict[str, list[dict[str, Any]]],
+    verified_artifact_ids: set[str],
 ) -> dict[Path, str]:
     pages: dict[Path, str] = {}
     pages[Path("data/results.json")] = _export_json(records)
@@ -303,7 +304,7 @@ def _render_pages(
             '<h2>Download evidence</h2><ul>'
             f'<li><a href="../data/{record_digest}/result.json" download>Result record (JSON)</a></li>'
         )
-        if record.get("schema_version") == SCHEMA_VERSION_V2:
+        if record_id in verified_artifact_ids:
             downloads += "".join(
                 f'<li><a href="../data/{record_digest}/{filename}" download>{label}</a></li>'
                 for filename, label in (
@@ -524,7 +525,7 @@ def _publish(pages: dict[Path, str | bytes], destination: Path) -> None:
             shutil.rmtree(backup, ignore_errors=True)
 
 
-def _verify_v2_artifacts(
+def _verify_artifacts(
     records: list[dict[str, Any]],
     traces: dict[str, str | Path],
     artifacts: dict[str, dict[str, str | Path]] | None,
@@ -532,9 +533,9 @@ def _verify_v2_artifacts(
     bound = artifacts or {}
     snapshots: dict[str, dict[str, bytes]] = {}
     for record in records:
-        if record.get("schema_version") != SCHEMA_VERSION_V2:
-            continue
         record_id = str(record["record_id"])
+        if record.get("schema_version") != SCHEMA_VERSION_V2 and record_id not in bound:
+            continue
         files = bound.get(record_id)
         if not isinstance(files, dict):
             raise RenderError(f"missing artifact source: {record_id}")
@@ -588,7 +589,7 @@ def render_site(
     unlinked = sorted(trace_ids - record_ids)
     if unlinked:
         raise RenderError("unlinked trace source: " + ", ".join(unlinked))
-    verified_artifacts = _verify_v2_artifacts(records, traces, artifacts)
+    verified_artifacts = _verify_artifacts(records, traces, artifacts)
     loaded_traces = {
         record_id: (
             _load_traces_from_bytes(verified_artifacts[record_id]["traces.jsonl"], Path(traces[record_id]))
@@ -597,7 +598,7 @@ def render_site(
         )
         for record_id in sorted(record_ids)
     }
-    pages: dict[Path, str | bytes] = dict(_render_pages(records, loaded_traces))
+    pages: dict[Path, str | bytes] = dict(_render_pages(records, loaded_traces, set(verified_artifacts)))
     comparison_index = build_comparison_index(records, verified_artifacts)
     pages[Path("data/comparison-index.json")] = _export_json(comparison_index)
     pages[Path("compare.html")] = _page("Compare", comparison_body(comparison_index))

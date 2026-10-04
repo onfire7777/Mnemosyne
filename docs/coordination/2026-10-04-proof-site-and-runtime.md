@@ -394,3 +394,9 @@ The registered 500-question retrieval result completed exact local reproduction:
 ## Combined platform verification at d7b810d2
 
 Ran the complete `tests/test_leaderboard*` selection with the installed verified virtual environment: all 439 tests passed (exit 0). Ruff passed for the leaderboard package and the changed grouping, history, workspace, ledger and rendering tests. Reviewed the accumulated comparison/history changes against artifact verification, duplicate atomic-cell rejection, compatibility grouping, signed-result membership and explicit local-only publication status. GitHub run 37222196669 remains active at df99593b: eight jobs passed, the full unit/drift job is still executing, and the optional nightly soak is skipped. These results do not claim full-suite coverage of the newer local commits; they are held for a single subsequent push so the active integration run can finish.
+
+## Verified raw downloads for retained legacy results
+
+The renderer now accepts optional bound raw artifacts for v1 results, while keeping them mandatory for v2. A supplied legacy artifact set must pass all four recorded SHA-256 digests before any page replacement; the same captured bytes are used for trace rendering and downloads. Download links are derived from verified artifact presence, not schema version. Existing v1 callers without artifacts remain supported. Original records, signed configurations and comparison eligibility remain unchanged.
+
+All 111 rendering/publication/history/grouping tests passed, including byte tampering in each legacy artifact with preservation of the prior destination. Ruff and diff checks passed. Re-rendered the actual registered retrieval result and verified all four download URLs over localhost HTTP against its signed digests. Browser inspection confirmed build, configuration, manifest and raw-trace links. This is a local evidence preview, not release approval.

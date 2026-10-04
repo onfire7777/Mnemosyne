@@ -918,3 +918,37 @@ def test_catalog_preserves_original_capability_to_module_contract() -> None:
     assert {row['id']: row['modules'] for row in catalog['capabilities']} == expected
     assert len(catalog['joint_scenarios']) == 6
     assert all(len(row['modules']) >= 3 for row in catalog['joint_scenarios'])
+
+
+@pytest.mark.parametrize("tampered", [None, *DIGEST_PAYLOAD_NAMES.values()])
+def test_legacy_artifact_downloads_require_exact_bound_bytes(tmp_path: Path, tampered) -> None:
+    record = _result()
+    paths = _bind_v2_artifacts(tmp_path, record)
+    results = _write_json(tmp_path / "results.json", record)
+    output = tmp_path / "site"
+    output.mkdir()
+    (output / "existing.txt").write_text("preserve on failure")
+    if tampered:
+        paths[tampered].write_bytes(paths[tampered].read_bytes() + b" ")
+    kwargs = dict(
+        results=results, traces={record["record_id"]: paths["traces.jsonl"]},
+        destination=output, artifacts={record["record_id"]: {
+            "build": paths["build.json"], "config": paths["config.json"],
+            "bundle": paths["bundle-manifest.json"],
+        }},
+    )
+    if tampered:
+        with pytest.raises(RenderError, match="digest mismatch"):
+            render_site(**kwargs)
+        assert (output / "existing.txt").read_text() == "preserve on failure"
+        return
+    render_site(**kwargs)
+    data = output / "data" / _digest(record["record_id"])
+    page = (output / "results" / f"{_digest(record['record_id'])}.html").read_text()
+    assert json.loads((data / "result.json").read_text()) == record
+    for name in DIGEST_PAYLOAD_NAMES.values():
+        assert (data / name).read_bytes() == paths[name].read_bytes()
+        assert f'/{name}" download' in page
+    index = json.loads((output / "data/comparison-index.json").read_text())
+    assert index["groups"] == []
+    assert index["exclusions"][0]["reason"] == "legacy-comparison-metadata-unavailable"
