@@ -6,9 +6,10 @@ publish = false
 
 [features]
 default = []
-onnx = ["dep:ort", "dep:sha2"]
+onnx = ["dep:ort", "dep:sha2", "dep:tokenizers"]
 
 [dependencies]
+tokenizers = { version = "=0.22.1", default-features = false, features = ["fancy-regex"], optional = true }
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "load-dynamic", "api-27"], optional = true }
 sha2 = { version = "0.10", optional = true }
 num_cpus = "1"

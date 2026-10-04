@@ -207,13 +207,14 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install isolated parity dependencies
-        run: python -m pip install onnx==1.18.0 onnxruntime==1.28.0
+        run: python -m pip install onnx==1.18.0 onnxruntime==1.28.0 tokenizers==0.22.1
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.98.1 --profile minimal --component clippy,rustfmt
       - name: Generate synthetic graph and Python reference
         shell: bash
         run: |
           python eval/compact_answering/onnx_span_parity.py "$RUNNER_TEMP/onnx-span-parity"
+          python eval/compact_answering/onnx_reader_parity.py "$RUNNER_TEMP/onnx-span-parity"
           python - <<'PYTHON'
           import os
           from pathlib import Path

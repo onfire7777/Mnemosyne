@@ -25,9 +25,16 @@ exact reproduction command and limitations.
 retains successful clean-source checks plus the failed SDK invocation. A
 bounded Linux CI job exercises native parity; its remote outcome is pending.
 
-Phase 1 remains incomplete: tokenizer/source-offset integration, complete
-multi-task decoding, actual encoder serving and end-to-end decoded parity are
-not established by tensor parity. Corpus decontamination, model bakeoffs,
+A subsequent experimental span-only `InferenceSession` now connects the native
+tensor adapter to a digest-checked tokenizer and exact source-byte offsets.
+Ten generated cases match a separate Python reference's decoded spans/nulls,
+including Unicode, later windows and multi-document ties. The original tensor
+result alone did not prove these properties. The named window/null policy is
+explicitly uncalibrated; no learned quality score is reported.
+
+Phase 1 and the broader plane remain incomplete: full multi-task heads, actual
+encoder serving, admitted artifact/configuration custody and learned-model
+end-to-end parity remain open. Corpus decontamination, model bakeoffs,
 quantization and physical acceptance remain open. No protected data or learned
 weights were used, and candidate v19 / BurnOS behavior is unchanged.
 

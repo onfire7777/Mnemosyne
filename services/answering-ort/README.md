@@ -110,10 +110,10 @@ It rejects invalid masks, unexpected inputs/outputs, incorrect shapes and NaN/In
 CPU arena allocation, memory patterns and parallel graph execution are disabled;
 intra-op threads use the existing physical-core clamp (maximum two), inter-op one.
 
-The caller supplies already tokenized inputs. Tokenizer/window/offset custody,
-answer-type and supporting-fact heads, calibrated no-answer decoding, real model
-selection, authenticated serving integration, and physical resource admission
-remain unfinished. Model loading is from bytes, **not memory-mapped**. The byte
+The tensor adapter accepts already tokenized inputs. The experimental reader
+below now adds tokenizer/window/offset mapping. Answer-type and supporting-fact
+heads, calibrated no-answer thresholds, real model selection, authenticated
+serving integration, and physical resource admission remain unfinished. Model loading is from bytes, **not memory-mapped**. The byte
 limit is not a peak-RSS guarantee. Deadline checks reject expired requests and
 late results; native cancellation is not implemented here. Integration must use
 the existing outer `Runtime` timeout/capacity boundary. Never advertise this
@@ -140,3 +140,55 @@ additional graphs exercise segment IDs, extra outputs, short outputs and NaN/Inf
 This is exact tensor parity only, not decoded-answer parity or measured QA quality.
 The earlier 1.22.1 / rc.10 trial matched tensors but aborted during native teardown;
 that configuration is not the supported development pin.
+
+
+## Experimental decoded span reader
+
+`onnx_reader::OnnxSpanReader` implements the existing `InferenceSession` trait
+for read requests. It combines the native tensor session with a digest-checked
+local tokenizer (tokenizers 0.22.1, no HTTP feature). It is not installed into the
+default server or the frozen candidate-v19 configuration. Hosts must continue
+using the existing Runtime identity, capacity, output-validation and deadline
+boundary; tokenizer work and native inference are not independently interruptible.
+
+The baseline uses the explicit `window-null-margin-v1` policy:
+
+- windows have at most 512 tokens including the question and special tokens;
+  context starts advance by 128 tokens, with question-dependent overlap;
+- serialized truncation/padding is replaced by that policy, and the union of
+  window token IDs/offsets must match the full untruncated context sequence;
+- the question is limited to 256 tokens; at most 128 windows are processed per
+  request, within the unchanged protocol's row/character limits;
+- only attended context tokens with valid monotonic UTF-8 byte offsets can
+  start or end an answer; questions, padding and processor special tokens cannot;
+- the configured null token must occur exactly once as a processor special
+  token in each window; stochastic BPE dropout is rejected;
+- each candidate's score is start-logit plus end-logit minus that window's null
+  start/end score; only a margin strictly above the configured threshold answers;
+- ties use document input order, then earliest start/end byte offsets; the
+  configured maximum answer-token length is enforced; and
+- output is one exact source span and its evidence ID, or canonical null.
+
+This span-only baseline supplies no learned yes/no or multi-hop supporting-fact
+head. Its one supporting ID identifies the selected source, not an independently
+predicted explanation. Thresholds, null-token ID and answer length must be frozen
+in future candidate custody; the constructor has no quality-tuned defaults.
+Full model/tokenizer/configuration/runtime manifest admission remains unfinished.
+
+To extend the synthetic check to exact decoded-output parity, install
+`tokenizers==0.22.1` in the isolated parity environment and run
+`eval/compact_answering/onnx_reader_parity.py /path/to/new-fixture` after the
+existing tensor fixture generator. Then run all native checks:
+
+```sh
+ORT_DYLIB_PATH=/absolute/path/to/libonnxruntime \
+MNEMOSYNE_ONNX_PARITY_FIXTURE=/path/to/new-fixture \
+cargo test --manifest-path services/answering-ort/Cargo.toml --features onnx \
+  -- --include-ignored
+```
+
+Ten Python-reference cases cover composed/decomposed Unicode, CJK, repeated
+answers, multi-document ordering, later-window answers, null and empty evidence.
+They use a generated WordLevel tokenizer and the same 314-byte arithmetic graph;
+no learned model, training corpus or protected test data is involved. Passing
+these fixtures establishes neither QA quality nor arbitrary-model parity.

@@ -117,6 +117,10 @@ impl OnnxSpanSession {
         })
     }
 
+    pub(crate) fn uses_token_types(&self) -> bool {
+        self.has_token_types
+    }
+
     pub fn run(
         &mut self,
         inputs: &TokenInputs,
