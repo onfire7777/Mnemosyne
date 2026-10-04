@@ -869,3 +869,11 @@ receipts/twenty attempts. The full sink-enabled standard trigger execution
 completed 525 operations; the same live session then began recovery. Completed
 artifacts must be replayed and inspected before being promoted into retained
 development evidence; no full fan-out result is claimed yet.
+
+The full standard trigger/sink run is now retained at
+`eval/reports/m12-trigger-sink-development-2026-10-04/`. It completed 525 operations
+from clean source `0a03fd76`, with 130 valid firings, 130 inert receipts and
+260 delivery attempts. All deliberate retries were duplicates. Source hashes
+match the exact commit; timing reports and sink annex replay. The local SQLite
+size/hash are documented with the artifact. The recovery half of session
+`45044` is still active and must be polled rather than restarted.
