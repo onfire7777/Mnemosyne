@@ -17,6 +17,7 @@ from collections.abc import Collection
 from typing import Any, Iterator
 
 from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import serialization
 
 from leaderboard.validate import validate_record
 from mnemosyne._file_lock import exclusive_file_lock
@@ -381,8 +382,12 @@ def _validate_entry(
         raise LedgerError(f"ledger supersedes must be null for status {status}")
 
 
-def verify_ledger(ledger_path: Path, public_key_path: Path) -> list[dict[str, object]]:
-    """Verify every entry, link, digest, and signature in a ledger."""
+def verified_ledger_snapshot(ledger_path: Path, public_key_path: Path) -> dict[str, Any]:
+    """Capture a verified ledger, signed roster/head and public key under one lock.
+
+    The wrapper is not signed; original entry and head signatures are retained.
+    Verification is not publication authorization for the captured contents.
+    """
     try:
         public_key = load_public_key(Path(public_key_path))
     except EvidenceSignatureError as exc:
@@ -396,14 +401,30 @@ def verify_ledger(ledger_path: Path, public_key_path: Path) -> list[dict[str, ob
         if not entries:
             raise LedgerError("ledger is empty")
         _verify_entries(entries, public_key, expected_fingerprint)
-        _verify_head(
-            _load_head(path),
+        head = _load_head(path)
+        roster = _verify_head(
+            head,
             entries,
             public_key,
             expected_fingerprint,
             require_complete_roster=True,
         )
-    return entries
+        return {
+            "schema_version": "mnemosyne.leaderboard.verified-snapshot/v1",
+            "entries": entries,
+            "head": head,
+            "roster": roster,
+            "public_key_pem": public_key.public_bytes(
+                serialization.Encoding.PEM,
+                serialization.PublicFormat.SubjectPublicKeyInfo,
+            ).decode("ascii"),
+            "publication_authorized": False,
+        }
+
+
+def verify_ledger(ledger_path: Path, public_key_path: Path) -> list[dict[str, object]]:
+    """Verify every entry, link, digest, and signature in a ledger."""
+    return verified_ledger_snapshot(ledger_path, public_key_path)["entries"]
 
 
 def _repair_pending_torn_tail(
