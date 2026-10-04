@@ -182,6 +182,8 @@ jobs:
         run: psql "$MNEMOSYNE_POSTGRES_DSN" -f sql/schema.sql
       - name: Run Postgres-backed live tests
         run: uv run --locked python -m pytest tests/test_postgres_engine_live.py -q
+      - name: Verify BurnOS session compatibility on Postgres
+        run: uv run --locked python -m pytest tests/test_session_aware_reads.py -k postgres -q
 
   native-wheels:
     name: Native wheels (${{ matrix.os }})
