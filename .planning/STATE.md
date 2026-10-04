@@ -18,6 +18,13 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+Authorized TRAIN intake now retains five hash-verified raw assets (348,175,076
+bytes), outside Git. `eval/reports/compact-train-intake-2026-10-04` records exact
+pins, independent rehashing and an original receipt source-identity defect fixed
+in the downloader. This is quarantine only: row validation, entity/document
+clusters, pre/post protected-overlap checks and frozen grouped partitions are
+next; no training corpus or model quality gate is complete.
+
 W5 native tensor execution is now implemented behind the optional Rust `onnx`
 feature. A 314-byte synthetic graph has exact Rust/Python output parity for
 lengths 1/64/128/384/512, with clean process exit on ONNX Runtime 1.28.0 and
