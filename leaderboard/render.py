@@ -14,6 +14,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from leaderboard.grouping import build_comparison_index
 from leaderboard.explainers import systems_body
 from leaderboard.comparisons import comparisons_body
 from leaderboard.catalog import benchmarks_body, coverage_body, load_catalog
@@ -575,6 +576,9 @@ def render_site(
         for record_id in sorted(record_ids)
     }
     pages: dict[Path, str | bytes] = dict(_render_pages(records, loaded_traces))
+    pages[Path("data/comparison-index.json")] = _export_json(
+        build_comparison_index(records, verified_artifacts)
+    )
     for record_id, payloads in verified_artifacts.items():
         for name, content in payloads.items():
             pages[Path("data") / _digest(record_id) / name] = content
