@@ -64,6 +64,21 @@ baseline non-inferiority or ranking is fabricated.
 
 ## Integration evidence and remaining work
 
+The `eval.public.action_timing_run` entry point now persists a fixed five-seed
+development workload, all public operation inputs/outputs and its per-case
+reports. Each case has 29 operations and eight expected occurrences; no gold
+expectation is sent through the adapter. The replay path requires the exact
+plan and full ordered operation log, binds each observation to its planned
+clock, and recomputes the saved report. It rejects missing operations, plan
+changes, clock mismatches and report drift, including numeric/boolean type
+substitution. This is observation replay, not a fresh execution or signed
+custody validation. Harness hashes and source commit are descriptive metadata;
+the receipt explicitly leaves production runtime matching unverified.
+
+The initial runner/scorer validation passed 20 tests in 13.49 seconds, including
+a real local run, report recomputation, overwrite refusal, artifact mutations
+and a deliberately failed test-double run retaining its partial operation log.
+
 Five seeded four-week regressions now feed real public CLI observations into
 this scorer: weekly recurrences; 0, 60, 300 and 86,400-second injected poll
 delays; before-due negative polls; same-time retries; midstream cancellation;

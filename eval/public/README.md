@@ -91,6 +91,25 @@ unexpected outcomes. It is a separate development diagnostic, not a change to
 the two registered suites. See the [exact-time diagnostic contract](../../docs/plans/m12-exact-time-development-protocol-2026-10-04.md)
 for denominators, clock semantics and the remaining M12 requirements.
 
+Run and retain the five-seed exact-time diagnostic in a new directory:
+
+```sh
+uv run --locked python -m eval.public.action_timing_run /tmp/m12-timing-new-run
+uv run --locked python -m eval.public.action_timing_run /tmp/m12-timing-new-run --recompute
+```
+
+The runner writes its deterministic plan before execution, captures all 145
+planned operations across five isolated cases, and saves per-case reports,
+source metadata and completion status. A failed run retains completed
+operations and a failure status without copying exception text that could
+contain session tokens. Existing output directories are never overwritten.
+An abrupt process termination may leave no status file; that is incomplete.
+Recomputation checks the complete operation sequence, planned clocks and exact
+reports from saved observations. It does not execute the system again, verify
+production-runtime custody or grant benchmark admission. Fresh executions may
+have different intention IDs and command wall times. This directory is not a
+registered `eval-public` bundle and supplies no publication eligibility.
+
 ### M13 working memory
 
 **PROPOSED.**
