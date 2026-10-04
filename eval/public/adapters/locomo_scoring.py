@@ -181,14 +181,14 @@ def replay_native_population(samples: list[dict], records: list[dict], *,
     """
     from hashlib import sha256
     import json
-    from .locomo import normalize_dialogs, prepare_upstream_question, split_samples
-    from .locomo_native import verify_native_answer_record
+    from .locomo import prepare_upstream_question, split_samples
+    from .locomo_native import _prepare_native_replay, _verify_prepared_native_record
 
     source = split_samples(samples)
-    normalize_dialogs(samples, caption_policy=caption_policy)
     questions = {row["question_id"]: row for row in source["questions"]}
     annotations = {row["question_id"]: row for row in source["annotations"]}
-    by_sample = {row["sample_id"]: row for row in samples}
+    contexts = {row["sample_id"]: _prepare_native_replay(row, caption_policy=caption_policy)
+                for row in samples}
     required_draws = {qid for qid, row in annotations.items() if row["annotation"]["category"] == 5}
     if not isinstance(choice_draws, dict) or set(choice_draws) != required_draws:
         raise LoCoMoError("native replay requires exactly the category-5 choice draws")
@@ -201,9 +201,9 @@ def replay_native_population(samples: list[dict], records: list[dict], *,
         qid = record.get("question_id") if isinstance(record, dict) else None
         if not isinstance(qid, str) or qid not in questions or qid in verified:
             raise LoCoMoError("native replay record IDs must be unique source questions")
-        verified[qid] = verify_native_answer_record(
-            by_sample[questions[qid]["sample_id"]], annotations[qid]["source_index"], record,
-            caption_policy=caption_policy, choice_draw=choice_draws.get(qid))
+        verified[qid] = _verify_prepared_native_record(
+            contexts[questions[qid]["sample_id"]], annotations[qid]["source_index"], record,
+            choice_draw=choice_draws.get(qid))
     groups = {str(i): {"source_count": 0, "scored_count": 0, "missing_count": 0,
                        "rounded_qa_sum": 0.0, "native_recall_sum": 0.0,
                        "native_recall_count": 0} for i in range(1, 6)}

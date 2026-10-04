@@ -146,16 +146,29 @@ def verify_native_answer_record(sample: dict, question_index: int, record: dict,
     This checks internal replay consistency, not that a model really produced
     the response. Signed run and provider custody remain external prerequisites.
     """
+    context = _prepare_native_replay(sample, caption_policy=caption_policy)
+    return _verify_prepared_native_record(context, question_index, record, choice_draw=choice_draw)
+
+
+def _prepare_native_replay(sample: dict, *, caption_policy: str) -> dict:
+    """Build a local, independently owned context once per conversation."""
     separated = split_samples([sample])
-    if type(question_index) is not int or not 0 <= question_index < len(separated["questions"]):
-        raise LoCoMoError("native replay question index is invalid")
-    if not isinstance(record, dict):
-        raise LoCoMoError("native replay record must be an object")
-    question = separated["questions"][question_index]
-    annotation = sample["qa"][question_index]
     tenant = "locomo:" + sha256(sample["sample_id"].encode()).hexdigest()
     dialogs = normalize_dialogs([sample], caption_policy=caption_policy)["records"]
     _, evidence = _capture_plan(dialogs, tenant)
+    return {"questions": separated["questions"], "annotations": separated["annotations"],
+            "tenant": tenant, "evidence": evidence, "capture_digest": _evidence_digest(evidence)}
+
+
+def _verify_prepared_native_record(context: dict, question_index: int, record: dict, *,
+                                    choice_draw: float | None = None) -> dict:
+    if type(question_index) is not int or not 0 <= question_index < len(context["questions"]):
+        raise LoCoMoError("native replay question index is invalid")
+    if not isinstance(record, dict):
+        raise LoCoMoError("native replay record must be an object")
+    question = context["questions"][question_index]
+    annotation = context["annotations"][question_index]["annotation"]
+    tenant, evidence = context["tenant"], context["evidence"]
     prepared = prepare_upstream_question(annotation, choice_draw=choice_draw)
     request = {"question_id": question["question_id"], "question": prepared["query"],
                "context": {"tenant_id": tenant, "user_id": "locomo", "role": "reader"}}
@@ -166,7 +179,7 @@ def verify_native_answer_record(sample: dict, question_index: int, record: dict,
             or results[0].get("question_id") != question["question_id"]):
         raise LoCoMoError("native replay response identity mismatch")
     expected = {**project_native_response(results[0], annotation, evidence, choice_draw=choice_draw),
-                "capture_digest": _evidence_digest(evidence),
+                "capture_digest": context["capture_digest"],
                 "question_id": question["question_id"], "request": request,
                 "request_jsonl": raw_request, "request_sha256": sha256(raw_request.encode()).hexdigest(),
                 "raw_batch_response": deepcopy(payload)}
