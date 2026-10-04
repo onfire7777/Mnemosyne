@@ -23,6 +23,11 @@ def _check_payloads(payloads):
         raise BundleError("secret-like material detected")
 
 
+def _signature(info):
+    return tuple(getattr(info, field) for field in
+                 ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns"))
+
+
 def _no_links(path):
     if any(parent.is_symlink() for parent in (path, *path.parents)):
         raise BundleError("native evidence paths must not contain links")
@@ -38,10 +43,12 @@ def verify_native_development_bundle(root, *, scorer_python):
     _no_links(root)
     if not root.is_dir():
         raise BundleError("native evidence must be a directory")
+    root_signature = _signature(root.stat())
     entries = sorted(root.iterdir())
     if len(entries) > 64:
         raise BundleError("native evidence exceeds bounded package size")
     payloads = {}
+    signatures = {}
     for entry in entries:
         _no_links(entry)
         if not entry.is_file():
@@ -55,11 +62,10 @@ def verify_native_development_bundle(root, *, scorer_python):
             after = os.fstat(stream.fileno())
         current = entry.stat()
         # Reading may update atime; only identity/content metadata must stay fixed.
-        fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
-        if any(getattr(before, field) != getattr(item, field)
-               for item in (after, current) for field in fields):
+        if any(_signature(before) != _signature(item) for item in (after, current)):
             raise BundleError("native evidence changed during verification")
         _no_links(entry)
+        signatures[entry] = _signature(before)
         payloads[entry.name] = raw
         _check_payloads(payloads)
     _no_links(root)
@@ -81,6 +87,13 @@ def verify_native_development_bundle(root, *, scorer_python):
         raise BundleError(str(exc)) from exc
     if _canonical(result) != _canonical(expected):
         raise BundleError("saved native result does not match artifact replay")
+    _no_links(root)
+    if _signature(root.stat()) != root_signature or sorted(root.iterdir()) != entries:
+        raise BundleError("native evidence inventory changed during verification")
+    for entry, signature in signatures.items():
+        _no_links(entry)
+        if _signature(entry.stat()) != signature:
+            raise BundleError("native evidence changed during verification")
     return {"valid": True, "registered": False, "model_execution_verified": False,
             "publication_authorized": False, "result": expected}
 

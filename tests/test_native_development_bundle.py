@@ -81,3 +81,28 @@ def test_native_writer_cleans_up_failed_creation(native_inputs, tmp_path, monkey
     with pytest.raises(OSError, match="synthetic disk failure"):
         write_native_development_bundle(destination, metadata, payloads, scorer_python=python)
     assert not destination.exists()
+
+
+@pytest.mark.parametrize("mutation", ["content", "replace", "extra"])
+def test_native_package_rejects_changes_during_scorer_replay(native_inputs, tmp_path, monkeypatch, mutation):
+    from eval.public import native_bundle
+    metadata, payloads, python = native_inputs
+    destination = tmp_path / "native"
+    write_native_development_bundle(destination, metadata, payloads, scorer_python=python)
+    original = native_bundle.assemble_development_result
+
+    def mutate_after_replay(*args, **kwargs):
+        result = original(*args, **kwargs)
+        path = destination / "traces.jsonl"
+        if mutation == "content":
+            path.write_bytes(b'changed after snapshot')
+        elif mutation == "replace":
+            path.unlink()
+            path.write_bytes(b'')
+        else:
+            (destination / "unexpected.txt").write_bytes(b'extra')
+        return result
+
+    monkeypatch.setattr(native_bundle, "assemble_development_result", mutate_after_replay)
+    with pytest.raises(BundleError, match="changed during verification"):
+        verify_native_development_bundle(destination, scorer_python=python)
