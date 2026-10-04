@@ -16,3 +16,15 @@ stage filters, result announcements, reset and disclosure deep links. Do not loa
 remote assets or invent scores, rankings, admission badges or charts. Scope counts
 are not measured performance; development components are not admitted results.
 Keep protocol limitations and operator affiliation visible.
+
+## Catalog refinement
+
+The catalog uses a dark editorial header, a framed search/filter toolbar and
+stage-accented cards. Stage badges describe implementation only. Mobile navigation
+uses an inline disclosure with all eight destinations, explicit expanded state and
+Escape-to-close; without JavaScript every destination remains visible. Desktop
+retains the navigation rail. Shared changes must preserve evidence and protocol
+limitations, and must not add runtime dependencies to the memory engine.
+
+Validation: 57 rendering/workspace checks passed; browser verified menu access,
+Escape dismissal, search narrowing and 1440px desktop layout without page overflow.

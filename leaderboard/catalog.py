@@ -146,14 +146,14 @@ def benchmarks_body(catalog: dict) -> str:
         cards.append(
             f'<article class="benchmark-card" data-benchmark data-stage="{stage}">'
             f'<div class="card-meta"><span class="card-number">{number:02d}</span>'
-            f'<span class="badge {stage}">{label}</span></div>'
+            f'<span class="badge badge-{stage}">{label}</span></div>'
             f'<h3>{escape(row["name"])}</h3><p>{escape(row["status"])}</p>'
             '<details><summary>Reporting rules</summary>'
             f'<p>{escape(row["policy"])}</p></details></article>'
         )
     count = len(cards)
     return (
-        '<div class="hero"><div><p class="eyebrow">BENCHMARK LIBRARY</p>'
+        '<div class="hero catalog-hero"><div><p class="eyebrow">BENCHMARK LIBRARY</p>'
         '<h1>A broader view<br>of AI memory.</h1>'
         '<p class="intro">Explore established benchmarks and the behaviors that a '
         'complete memory system needs to prove.</p></div>'
@@ -166,13 +166,13 @@ def benchmarks_body(catalog: dict) -> str:
         '<div class="callout"><strong>Coverage is not compatibility.</strong> '
         'Existing benchmarks can evaluate Mnemosyne. Our current runs measure only part '
         'of its memory lifecycle. <a href="#protocol-fit">Understand the limits →</a></div>'
-        '<section aria-labelledby="library-title"><div class="library-heading">'
+        '<section class="benchmark-library" aria-labelledby="library-title"><div class="library-heading">'
         '<div><p class="eyebrow">THE EVALUATION LANDSCAPE</p><h2 id="library-title">Find a benchmark</h2></div>'
         '<a class="subtle-link" href="data/catalog.json" download>Download catalog ↓</a></div>'
-        '<p>These are scope and implementation labels, not admission badges or performance '
+        '<p class="library-description">These are scope and implementation labels, not admission badges or performance '
         'results. A catalog entry is not a result or proof that its full workload runs on this computer.</p>'
         '<div class="library-controls" id="library-controls" hidden>'
-        '<label class="search-field"><span class="sr-only">Search benchmarks</span>'
+        '<label class="search-field"><span class="search-symbol" aria-hidden="true">⌕</span><span class="sr-only">Search benchmarks</span>'
         '<input type="search" id="benchmark-search" placeholder="Search benchmarks, behaviors, or evidence…"></label>'
         '<fieldset class="filter-group"><legend class="sr-only">Implementation stage</legend>'
         '<label><input type="radio" name="stage" value="all" checked><span>All families</span></label>'
