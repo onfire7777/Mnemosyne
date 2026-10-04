@@ -58,19 +58,40 @@ def project_native_response(response: dict, annotation: dict, evidence: dict, *,
     prepared = prepare_upstream_question(annotation, choice_draw=choice_draw)
     if not isinstance(response, dict) or type(response.get("abstained")) is not bool:
         raise LoCoMoError("native response requires explicit boolean abstained")
-    reader, hops = response.get("reader"), response.get("hops")
-    if not isinstance(reader, dict) or not isinstance(hops, list):
-        raise LoCoMoError("native response requires reader and hop records")
+    reader, hops, claims = response.get("reader"), response.get("hops"), response.get("claims")
+    if not isinstance(reader, dict) or not isinstance(hops, list) or not isinstance(claims, list):
+        raise LoCoMoError("native response requires reader, hop and claim records")
+    for claim in claims:
+        if (not isinstance(claim, dict) or not isinstance(claim.get("text"), str)
+                or not isinstance(claim.get("evidence_cids"), list)
+                or not isinstance(claim.get("spans"), list)):
+            raise LoCoMoError("native claim is malformed")
+        cited = claim["evidence_cids"]
+        if any(not isinstance(cid, str) or cid not in evidence for cid in cited):
+            raise LoCoMoError("native claim references unregistered evidence")
+        for span in claim["spans"]:
+            if not isinstance(span, dict) or not isinstance(span.get("cid"), str) or span["cid"] not in cited:
+                raise LoCoMoError("native span must refer to the claim's registered evidence")
+            content = evidence[span["cid"]].get("capture", {}).get("content")
+            start, end = span.get("start"), span.get("end")
+            if (not isinstance(content, str) or type(start) is not int or type(end) is not int
+                    or not 0 <= start < end <= len(content)
+                    or span.get("slice_sha256") != sha256(content[start:end].encode()).hexdigest()):
+                raise LoCoMoError("native span does not match captured content")
     retrieved = []
+    retrieved_cids = set()
     for hop in hops:
         if not isinstance(hop, dict) or not isinstance(hop.get("retrieved_cids"), list):
             raise LoCoMoError("native retrieval hop is malformed")
         for cid in hop["retrieved_cids"]:
             if not isinstance(cid, str) or cid not in evidence:
                 raise LoCoMoError("native response references unregistered evidence")
+            retrieved_cids.add(cid)
             dialog = evidence[cid]["dialog_id"]
             if dialog not in retrieved:
                 retrieved.append(dialog)
+    if any(cid not in retrieved_cids for claim in claims for cid in claim["evidence_cids"]):
+        raise LoCoMoError("native claim cites evidence absent from retrieval trace")
     result = {"raw_response": deepcopy(response), "question_transformation": prepared,
               "retrieved_dialog_ids": retrieved, "decoded_prediction": None,
               "projection_policy": "native-explicit-abstention-v1",
