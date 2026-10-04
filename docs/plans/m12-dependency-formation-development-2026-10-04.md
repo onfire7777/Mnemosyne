@@ -77,3 +77,15 @@ reproduction, provenance admission or a ranking result. Deliberately coherent
 fabrication is outside this check's guarantees. Tests reject altered dependency
 snapshots, probes, timing counts, source hashes, sink attempts and truncated
 traces, and ensure the input directory remains unchanged during successful replay.
+
+
+## First actual-provider attempt
+
+The [retained attempt](../../eval/reports/m12-dependency-attempt-2026-10-04/README.md)
+from clean `1fbaa7de` completed one case before a keyed-task rebinding rejection
+on the second case. Four model responses are preserved. The completed case
+failed its final stored-state comparison and missed one expected firing. One
+case is incomplete and 98 were not attempted. No full-corpus result or completed
+trace replay is claimed. The run lasted 18.652 seconds under normal sampled
+pressure and cleanup found no loaded models. The failure is candidate proposal
+behavior, not evidence that the host cannot run the workload.
