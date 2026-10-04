@@ -79,6 +79,25 @@ def test_nonzero_exit_is_failure_not_a_score(tmp_path: Path) -> None:
     assert result["returncode"] == 7
 
 
+def test_slow_initial_probe_cannot_start_work_after_deadline(tmp_path: Path) -> None:
+    import time
+    marker = tmp_path / "started"
+
+    def slow_probe():
+        time.sleep(0.05)
+        return 1
+
+    result = run_monitored(
+        [sys.executable, "-c", f"open({str(marker)!r}, 'w').close()"],
+        cwd=tmp_path, output_dir=tmp_path / "attempt", wall_seconds=0.01,
+        pressure_probe=slow_probe,
+    )
+    assert result["status"] == "no_run"
+    assert result["reason"] == "wall-time-limit"
+    assert "pid" not in result
+    assert not marker.exists()
+
+
 def test_cleanup_error_retains_failed_terminal_receipt(tmp_path: Path, monkeypatch) -> None:
     def broken_cleanup(process):
         process.wait(timeout=5)

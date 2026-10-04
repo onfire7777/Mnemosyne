@@ -115,6 +115,11 @@ def run_monitored(
                 pressure = pressure_probe()
                 samples.write(json.dumps({"elapsed_seconds": elapsed, "pressure": pressure}) + "\n")
                 samples.flush()
+                # The probe can block. Never launch after it consumes the
+                # remaining budget, even when it reports normal pressure.
+                if time.monotonic() - start >= wall_seconds:
+                    receipt.update(status="aborted" if process else "no_run", reason="wall-time-limit")
+                    break
                 if type(pressure) is not int or pressure != 1:
                     receipt.update(status="aborted" if process else "no_run",
                                    reason="memory-pressure" if pressure in (2, 4) else "unknown-pressure")
