@@ -224,3 +224,25 @@ separate evidence, and the final development revision still needs its own CI.
 The complete local log is retained in the ignored completion evidence directory
 as `final-suite.log`. This establishes that the ordinary test workload can finish
 on this Mac. It does not establish that the full model benchmark fits in memory.
+
+## Full program catalog and coverage pages
+
+The renderer now supplies `benchmarks.html` and `coverage.html`, with primary
+navigation from every page and a downloadable `data/catalog.json`. The versioned
+catalog separates program scope from result records. It maps all 24 original
+capabilities to 20 modules, retains the six joint scenarios and groups the
+original external slate into 14 benchmark families. Scope and status links are
+pinned to source commit `963a56e6a0617aff72fb3029efee9a7b4215ad08`.
+
+The coverage page reports implemented development work and remaining evidence;
+it does not assign unsupported competitor capabilities or quality scores. The
+live preview still contains zero result records. Measured per-system coverage,
+compatible comparison controls and the real evidence pipeline remain open.
+
+Validation: 87 rendering/publication/policy checks passed, including original
+capability-to-module mapping and empty-result preservation; Ruff passed. Browser
+navigation from Results to Coverage, a capability-to-module anchor, and the
+benchmark catalog were verified. At a 390px viewport both pages had 390px
+document width, with the 24 rows and 20 module cards present. The temporary
+viewport override was reset. The local screenshot is retained as
+`whole-memory-coverage-preview.png` in the ignored completion evidence directory.
