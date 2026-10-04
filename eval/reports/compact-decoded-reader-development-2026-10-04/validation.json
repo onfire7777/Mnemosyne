@@ -1,0 +1,106 @@
+{
+  "schema": "decoded-reader-development-validation/v1",
+  "source_commit": "fe753290ee31a4d822d00d625d9d1541095b0045",
+  "source_dirty": false,
+  "runtime_version": "1.28.0",
+  "tokenizers_version": "0.22.1",
+  "runtime_library_sha256": "99909e99214e31fe2296c9f7fae5abc2eaf0145342efe8b0a6ed82e9ddb0a0a0",
+  "commands": {
+    "tensor-fixture": {
+      "argv": [
+        "/Users/admin/.local/state/mnemosyne/onnx-parity-128-venv/bin/python",
+        "eval/compact_answering/onnx_span_parity.py",
+        "/Users/admin/.local/state/mnemosyne/decoded-reader-validation-fe753290/fixture"
+      ],
+      "returncode": 0,
+      "elapsed_seconds": 0.17905370899825357,
+      "log_sha256": "d01720234590e19d59789be6f3d59e22fd09634d01849f8e8bfae3d0b3ee2f3e"
+    },
+    "reader-fixture": {
+      "argv": [
+        "/Users/admin/.local/state/mnemosyne/onnx-parity-128-venv/bin/python",
+        "eval/compact_answering/onnx_reader_parity.py",
+        "/Users/admin/.local/state/mnemosyne/decoded-reader-validation-fe753290/fixture"
+      ],
+      "returncode": 0,
+      "elapsed_seconds": 0.182441375014605,
+      "log_sha256": "1ea9ffde75cb68a5e678b0588136adb903ff6bad562047bde5e47ab2146a73c3"
+    },
+    "native": {
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "services/answering-ort/Cargo.toml",
+        "--features",
+        "onnx",
+        "--",
+        "--include-ignored"
+      ],
+      "returncode": 0,
+      "elapsed_seconds": 0.39602600000216626,
+      "log_sha256": "23656d266b26dfde378d38f41db23934a65023266c5d7afdbf66221c0aba88be"
+    },
+    "default": {
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "services/answering-ort/Cargo.toml"
+      ],
+      "returncode": 0,
+      "elapsed_seconds": 2.4851122919935733,
+      "log_sha256": "832e43a1ff34530b5e621623ba94498d1ed570ce47bf76bb3fdc74d291c55ce5"
+    },
+    "clippy": {
+      "argv": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--manifest-path",
+        "services/answering-ort/Cargo.toml",
+        "--all-targets",
+        "--features",
+        "onnx",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "returncode": 0,
+      "elapsed_seconds": 0.23777670797426254,
+      "log_sha256": "4cf86278c1e6d659943a46a3d7e3da429ac15be90f0f17742e24ef85228e7d3e"
+    },
+    "format": {
+      "argv": [
+        "cargo",
+        "fmt",
+        "--check",
+        "--manifest-path",
+        "services/answering-ort/Cargo.toml"
+      ],
+      "returncode": 0,
+      "elapsed_seconds": 0.12427891697734594,
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "compatibility": {
+      "argv": [
+        ".superpowers/sdd/completion-2026-10-04/verified-venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-o",
+        "addopts=",
+        "tests/test_burnos_http_compatibility.py",
+        "tests/test_compact_answering_provider.py"
+      ],
+      "returncode": 0,
+      "elapsed_seconds": 0.9909170420141891,
+      "log_sha256": "57c368fbf8b1e826a5f71165fee062631201cc2a6823f2af0dc1f73992012096"
+    }
+  },
+  "learned_quality_verified": false,
+  "physical_acceptance_verified": false,
+  "publishable": false
+}

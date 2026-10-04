@@ -26,11 +26,12 @@ The clean-source validation at `5cce12c6` passed 48 native tests, 23 Python
 compatibility/provider tests, Clippy and formatting. Raw evidence is retained in
 `eval/reports/compact-onnx-native-development-2026-10-04`. The new Linux CI job
 is prepared but not yet remotely executed.
-This advances the missing execution layer, not learned QA, decoded-span parity
-or physical 8 GiB acceptance. The experimental span-only reader now implements tokenizer/offset-preserving
+This advances the missing execution layer, not learned QA or physical 8 GiB acceptance. The experimental span-only reader now implements tokenizer/offset-preserving
 integration behind the existing Runtime interface. Ten synthetic decoded
 outputs match a separate Python reference; 51 Rust tests and 23 Python
-compatibility/provider tests passed. This does not close learned QA quality,
+compatibility/provider tests passed. Clean-source logs, exact generated fixtures and
+a hash manifest are retained in `eval/reports/compact-decoded-reader-development-2026-10-04`.
+This does not close learned QA quality,
 multi-task heads or artifact admission. Next: authorized TRAIN-only data
 preparation, full artifact/configuration custody, and real compact-model
 selection; keep the default server and candidate-v19 configuration unpromoted.
