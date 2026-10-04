@@ -17,7 +17,7 @@ replace the original specification or promote development evidence to admission.
 | Recovery and retry correctness | 360-operation capture: 50 response losses, 50 adapter resets, 10 eligible firings, 10 cancelled controls; 10 sink receipts and 10 deliberate duplicate deliveries | Local response loss is not arbitrary crash recovery or external-service exactly-once behavior |
 | Precision, recall, F1, false alarms, misses, lateness, duplicate execution, cancellation correctness and cost | Window scorer and per-case/per-load reports; sink attempt records | Cost remains unmeasured; extend full-corpus reports without pooling away load-specific failures |
 | Zero duplicate and cancelled-intention executions | No violations in retained development captures | Verify on full registered corpus; finite local success is not universal certification |
-| Preregistered absolute floor and non-inferiority to exact reference | Draft independent explicit-action reference and two retained five-seed executions; no calibrated/admitted baseline claim | Complete semantic review and durable revision recovery; calibrate on disjoint development data; freeze floor/margin before candidate ranking |
+| Preregistered absolute floor and non-inferiority to exact reference | Draft independent explicit-action reference and two retained five-seed executions; no calibrated/admitted baseline claim | Complete semantic review and broader recovery validation; calibrate on disjoint development data; freeze floor/margin before candidate ranking |
 | At least five virtual-week seeds | Five-seed, four-week explicit and recovery captures | Retain same repeat/replay guarantees across full workload and adapters |
 | Measured resource admission | Current run has wall-time and macOS pressure guard | Measure specified RSS and disk as well as elapsed time; pressure=normal does not establish RSS <=4 GiB; 30 min/4 GiB/1 GiB remains a planning hypothesis |
 | Licensed pinned official variants | Development captures carry no official label | License and pin upstream PM-Bench/TriggerBench datasets and scorers before official evaluation |
@@ -77,5 +77,15 @@ The reference remains unadmitted; no calibration or superiority claim is made.
 replay both roles on identical explicit/fan-out requests and bind their source
 artifacts. All observed count and precision/recall/F1 differences are zero in
 these fixtures. This is neither superiority evidence nor an approved
-non-inferiority result. Full reference semantics, durable revision recovery,
+non-inferiority result. Full reference semantics, broader recovery coverage,
 implicit/overloaded cases, disjoint calibration and admission remain open.
+
+## Durable reference recovery evidence
+
+The [committed reference recovery capture](../../eval/reports/m12-reference-recovery-development-2026-10-04/README.md)
+completed 360 operations with 50 post-commit discarded responses and 50 adapter
+resets. Original revision retries preserved identity and final state; ten eligible
+actions produced ten inert receipts while cancelled controls remained unfired.
+Full trace/semantic/sink replay passed against recorded source fb6731fc. This
+closes the missing durable reference-workload execution step, not broad crash
+recovery, calibrated baseline approval or M12 admission.
