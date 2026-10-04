@@ -18,6 +18,12 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+The proof site now links to development evidence with the dependency failure
+and paired prompt/decoding experiments. Deterministic ZIP downloads include
+manifest-checked raw files. The page explicitly separates these captures from
+admitted results and signed attempts. Fifty-seven rendering/export checks passed;
+local browser rendering verified. No deployment or admission claim follows.
+
 The evaluation ActionCLI now rejects reuse of an already-known unkeyed task ID
 before scheduling. Three regression cases reproduced the gap before the fix;
 105 identity/retry/recurrence/dependency/BurnOS checks passed afterward. Original

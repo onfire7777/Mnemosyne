@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from leaderboard.ui import page_shell
+from leaderboard.development import evidence_pages
 from leaderboard.grouping import build_comparison_index
 from leaderboard.workspace import comparison_body
 from leaderboard.history import history_body
@@ -408,6 +409,9 @@ def _render_pages(
     )
     pages[Path("systems.html")] = _page("Memory systems", systems_body())
     pages[Path("comparisons.html")] = _page("Capabilities and benchmark coverage", comparisons_body())
+    development_body, development_files = evidence_pages()
+    pages[Path("development.html")] = _page("Development evidence", development_body)
+    pages.update(development_files)
     catalog = load_catalog()
     pages[Path("benchmarks.html")] = _page("Benchmark catalog", benchmarks_body(catalog))
     pages[Path("coverage.html")] = _page("Whole-memory coverage", coverage_body(catalog))

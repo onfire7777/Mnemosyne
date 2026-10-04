@@ -18,7 +18,7 @@ def icon(path):
 
 
 def page_shell(title, body, root=''):
-    active = {'Leaderboard': 'Results', 'Benchmark catalog': 'Benchmarks', 'Whole-memory coverage': 'Coverage',
+    active = {'Development evidence': 'Benchmarks', 'Leaderboard': 'Results', 'Benchmark catalog': 'Benchmarks', 'Whole-memory coverage': 'Coverage',
               'Compare': 'Compare runs', 'Memory systems': 'Memory systems',
               'Capabilities and benchmark coverage': 'Feature landscape', 'Attempt history': 'Attempt history',
               'Methods': 'Methodology'}.get(title, 'Results')

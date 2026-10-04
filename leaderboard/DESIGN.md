@@ -28,3 +28,10 @@ limitations, and must not add runtime dependencies to the memory engine.
 
 Validation: 57 rendering/workspace checks passed; browser verified menu access,
 Escape dismissal, search narrowing and 1440px desktop layout without page overflow.
+
+
+Development evidence is available at `development.html`, linked from the
+benchmark library. It keeps incomplete attempts and completed diagnostic
+experiments distinct from admitted result records and the signed attempt ledger.
+Each curated capture offers deterministic ZIP and manifest downloads. Every
+file is hash-checked before export; failed validation aborts the build.
