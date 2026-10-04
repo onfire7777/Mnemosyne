@@ -317,3 +317,31 @@ CI correction: GitHub rejected workflow head `3d132c74` before dispatch because
 The earlier YAML parse only proved syntax, not GitHub's context rules. Moved the
 same vocabulary path into the download/test step environments, where runner
 context is supported. No test, runtime pin or acceptance gate was removed.
+
+## Replay policy and saved-report verification
+
+Native reports now disclose `mnemosyne.locomo-native-scoring/v1`, the pinned
+upstream revision and scorer dependencies, source-dialog capture format,
+question/abstention transformations, per-case rounding, separate QA/recall
+denominators and the absence of an overall rank. The policy includes SHA-256
+hashes for its seven listed replay/public-boundary source files and is itself
+digest-bound. Caption policy and exact category-5 choices remain explicit in
+each report. These are replay-policy identifiers, not a SUT/model manifest or
+proof that the listed files cover an entire runtime.
+
+`verify_report_in_environment` recomputes the report in the selected scorer
+interpreter and compares every field using canonical finite JSON. Modified
+metrics, caption policy, dependency declarations, policy digest and even a
+boolean replaced by numeric zero are rejected. A changed implementation must
+be replayed in its original checkout rather than silently treated as identical.
+The returned record still denies runtime-custody verification and publication.
+Actual dataset admission, candidate/model bindings, signed attempts and neutral
+bundle dispatch remain separate unfinished integration requirements.
+
+Validation: all 110 isolated tests passed, including all-category subprocess
+parity and saved JSON report roundtrip/tamper checks. Seven process tests also
+passed from the installed production Python 3.14 environment into the pinned
+Python 3.11 scorer. Ruff and diff checks passed. Remote CI at `046f08a8` now
+successfully executes the LoCoMo scorer job and lint; the full suite/platform
+jobs were still running at this checkpoint. This local policy change waits
+for that run to finish before another push.

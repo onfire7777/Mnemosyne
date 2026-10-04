@@ -98,5 +98,20 @@ def _main():
     sys.stdout.buffer.write(_encode({"request_sha256": sha256(raw).hexdigest(), "report": report}))
 
 
+def verify_report_in_environment(report, samples, records, *, caption_policy, choice_draws,
+                                 python: str | Path, timeout_s: float = 120) -> dict:
+    """Verify every saved report field against source, records and current policy.
+
+    Changed replay source must be verified in its original checkout rather
+    than silently treated as the same protocol. Success is local consistency,
+    not proof of model execution or authorization to publish.
+    """
+    expected = replay_in_environment(samples, records, caption_policy=caption_policy,
+                                     choice_draws=choice_draws, python=python, timeout_s=timeout_s)
+    if _encode(report) != _encode(expected):
+        raise LoCoMoError("saved native report does not match source-bound replay")
+    return expected
+
+
 if __name__ == "__main__":
     _main()
