@@ -136,8 +136,8 @@ class _RecordedProvider:
         return row['returncode'], raw
 
 
-def _verify_source(source):
-    paths = {'eval/public/' + name for name in HARNESS_FILES} | {'eval/harness/cli_driver.py'}
+def _verify_source(source, harness_files=None):
+    paths = {'eval/public/' + name for name in (HARNESS_FILES if harness_files is None else harness_files)} | {'eval/harness/cli_driver.py'}
     if (not isinstance(source, dict)
             or set(source) != {'source_commit', 'source_dirty', 'python_version', 'harness_files',
                                'production_runtime_match_verified', 'sink_enabled'}
@@ -168,16 +168,19 @@ def _database_rows(path):
         connection.close()
 
 
-def recompute(output):
-    """Require the full frozen corpus; return only verified consistency claims."""
+def _recompute(output, *, corpus_factory, plan_factory, observer, state_scorer,
+               timing_scorer, harness_files, schema_prefix, execution_version, session_id):
+    """Shared bounded trace verifier, with explicit versioned protocol functions."""
+    make_corpus, observation_plan, observe_case = corpus_factory, plan_factory, observer
+    score_case, score_observations = state_scorer, timing_scorer
     output = Path(output)
     saved = _snapshot(output)
     parsed = {name: _json(raw, name) for name, raw in saved.items() if name.endswith('.json')}
-    _verify_source(parsed['source.json'])
+    _verify_source(parsed['source.json'], harness_files)
     corpus = make_corpus()
     _same(parsed['inputs.json'], {'schema': corpus['schema'],
           'cases': [public_case(case) for case in corpus['cases']]}, 'frozen public inputs')
-    _same(parsed['observation-plan.json'], {'schema': 'm12-formation-probes/v1', 'cases': [
+    _same(parsed['observation-plan.json'], {'schema': schema_prefix + '-probes/v1', 'cases': [
         {'case_id': case['public']['case_id'], 'probes': observation_plan(case)}
         for case in corpus['cases']]}, 'fixed observation plan')
     provider = parsed['provider.json']
@@ -205,7 +208,7 @@ def recompute(output):
                                       actions=trace, scope={}, emit=trace.emit))
             states.append(score_case(case, trace.snapshots))
             observed = observe_case(case, actions=trace, scope={}, emit=trace.emit,
-                                    sink=_sink_for(replay_db, run_id, case['public']['case_id'], 'formation'))
+                                    sink=_sink_for(replay_db, run_id, case['public']['case_id'], session_id))
             observations.append(observed)
             timings.append(score_observations(case, observed))
         if trace.position != len(trace.records):
@@ -213,13 +216,13 @@ def recompute(output):
         original_db = root / 'original.sqlite3'
         original_db.write_bytes(saved['sink.sqlite3'])
         _same(_database_rows(original_db), _database_rows(replay_db), 'durable sink rows')
-    _same(parsed['formation-state.json'], {'schema': 'm12-formation-state-report/v1',
+    _same(parsed['formation-state.json'], {'schema': schema_prefix + '-state-report/v1',
           'publishable': False, 'ranking_eligible': False, 'cases': states}, 'stored-state report')
-    _same(parsed['formation-timing.json'], {'schema': 'm12-formation-timing-report/v1',
+    _same(parsed['formation-timing.json'], {'schema': schema_prefix + '-timing-report/v1',
           'publishable': False, 'ranking_eligible': False, 'cases': timings}, 'timing report')
-    _same(parsed['observations.json'], {'schema': 'm12-formation-observations/v1', 'run_id': run_id,
+    _same(parsed['observations.json'], {'schema': schema_prefix + '-observations/v1', 'run_id': run_id,
           'scored': False, 'publishable': False, 'cases': observations}, 'observations and receipts')
-    _same(parsed['execution.json'], {'schema': 'm12-formation-execution/v4', 'track': 'DEVELOPMENT',
+    _same(parsed['execution.json'], {'schema': schema_prefix + '-execution/' + execution_version, 'track': 'DEVELOPMENT',
           'publishable': False, 'scored': False, 'cases': completed,
           'firing_evaluation': 'development-timing-diagnostic', 'firing_diagnostics': 'formation-timing.json',
           'observations': 'observations.json', 'model_quality': 'not-evaluated',
@@ -228,14 +231,22 @@ def recompute(output):
           'filesystem_isolation_verified': False}, 'execution summary')
     _same(parsed['status.json'], {'status': 'completed', 'completed_cases': len(completed),
           'retained_records': len(lines), 'publishable': False, 'scored': False}, 'completion status')
-    _verify_source(parsed['source.json'])
+    _verify_source(parsed['source.json'], harness_files)
     if saved != _snapshot(output):
         raise ValueError('formation artifacts changed during replay')
-    return {'schema': 'm12-formation-replay/v1', 'trace_consistency_verified': True,
+    return {'schema': schema_prefix + '-replay/v1', 'trace_consistency_verified': True,
             'source_files_match_checkout': True, 'cases': len(completed), 'records': len(lines),
             'files': {name: hashlib.sha256(raw).hexdigest() for name, raw in saved.items()},
             'provider_execution_verified': False, 'engine_execution_verified': False,
             'independent_implementation': False, 'publishable': False, 'ranking_eligible': False}
+
+
+def recompute(output):
+    """Require the full frozen v1 corpus; return only consistency claims."""
+    return _recompute(output, corpus_factory=make_corpus, plan_factory=observation_plan,
+                      observer=observe_case, state_scorer=score_case, timing_scorer=score_observations,
+                      harness_files=HARNESS_FILES, schema_prefix='m12-formation',
+                      execution_version='v4', session_id='formation')
 
 
 if __name__ == '__main__':
