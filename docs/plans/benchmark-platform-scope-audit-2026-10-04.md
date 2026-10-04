@@ -257,3 +257,12 @@ host while retaining exact wire-byte/hash checks. All 37 native tests and 34
 isolated replay/scoring checks pass; Ruff passes. A fresh native Windows CI run
 must verify the correction. Unit/drift on the earlier head remained running at
 inspection; it was not counted as passing.
+
+### CI correction verified on Windows
+
+For pushed source `762f12c8`, CI run `37225669534` has now passed both Windows
+portability (including the Unicode native-request check) and Windows file-lock
+jobs. Bounded native Windows commands, provider conformance, both native-wheel
+jobs and lint also passed at inspection. Unit/drift, LoCoMo and Postgres were
+still running and are not recorded as successful here. Later local plan/test
+commits remain outside that CI head.
