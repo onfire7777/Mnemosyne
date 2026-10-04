@@ -11,6 +11,24 @@ intermediate work. The [scope audit](../docs/plans/benchmark-platform-scope-audi
 maps original requirements to missing platform surfaces and module work.
 No phase, acceptance target or progress counter changes from this clarification.
 
+## Development evidence checkpoint — `dec91100`
+
+The Mnemetric website now presents benchmark families, coverage, memory systems,
+methods and explicit evidence limits. M12 development work includes real public
+CLI trigger/recovery/fan-out captures, a draft reference, resource observations,
+and a natural-language formation pipeline with stored-state/timing diagnostics
+and saved-trace consistency verification. The first local small-model invocation
+is [retained as a failed attempt](../eval/reports/m12-formation-feasibility-2026-10-04/README.md),
+not a completed benchmark or admitted result. A schema-constrained provider
+variant is available; its existence is not a measurement.
+
+The [scope audit](../docs/plans/benchmark-platform-scope-audit-2026-10-04.md)
+records the current local-versus-pushed source and CI boundary. These additions
+do not close Phase 12 protected QA, full Phase 13 upstream evidence, Phase 14
+reproduction/admission, Phase 15 exact-scale/hardware acceptance, or Phase 16
+multi-system measured launch. The phase counters below retain their original
+acceptance scope; source components alone do not complete those phases.
+
 ## Status reconciliation — 2026-10-04
 
 Source inspected at `3c21be5d`. This dated reconciliation supersedes older

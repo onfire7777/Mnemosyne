@@ -3,7 +3,7 @@
 Date: 2026-10-04. Source baseline: `bad975f7` on `codex/development`.
 Status: execution reconciliation, not benchmark admission or a result.
 
-Current reconciliation at `a458bcea` supersedes the baseline-only missing-work
+The reconciliation begun at `a458bcea` supersedes the baseline-only missing-work
 statements below where explicitly updated. The original scope and acceptance
 criteria remain unchanged. The product name is now Mnemetric; OpenMemBench
 technical identifiers and signed historical artifacts retain their original names.
@@ -15,7 +15,7 @@ of `tests/test_leaderboard*.py`, `tests/test_burnos_http_compatibility.py` and
 round trip; M02/M04 plumbing explicitly uses the synthetic transport described
 in that test. The separate LoCoMo environment passed 102 tests. These are local
 regression results, not benchmark quality measurements or full-project closure.
-Latest checkpoint: the platform changes were pushed through `046f08a8`. Its
+Historical checkpoint: the platform changes were pushed through `046f08a8`. Its
 CI run `37224190672` passed the LoCoMo, lint, provider, native wheel, Postgres and
 Windows portability/bounded-command jobs; unit/drift checks remained running.
 The Windows file-lock job found two new snapshot-test fixtures using platform
@@ -23,9 +23,31 @@ newline conversion. Those fixtures now explicitly write UTF-8/LF (ASCII/LF for
 the public key); the real exporter already writes LF. Local file-lock, ledger
 and history checks passed 86 tests with one native Windows-only check skipped.
 The existing CRLF-rejection test still passes; no canonical-byte or signature
-verification was relaxed. A new Windows CI run must verify this correction.
+verification was relaxed. This correction was subsequently verified by the
+Windows file-lock job at `55ae2ef9` (see the checkpoint below).
 Subsequent local LoCoMo/derivation work passed 135 isolated checks and 41
-production-environment integration checks; it awaits synchronization and CI.
+production-environment integration checks before its subsequent synchronization.
+
+## Integration checkpoint at development `dec91100`
+
+Only `main` and `codex/development` are retained. At this checkpoint, local
+`codex/development` contains additional tested commits beyond the pushed
+`55ae2ef9`; local/Desktop and remote `main` remain at `8c103f0f`.
+CI run `37229007622` at `55ae2ef9` has nine successful gating jobs, including
+Windows file lock and PostgreSQL; its unit/drift job is still running. This is
+not exact-head CI coverage for the newer local commits and does not authorize
+claiming them merged or fully synchronized.
+
+The website redesign, M12 explicit/fan-out/recovery evidence, draft reference,
+resource diagnostics, formation bridge, stored-state/timing diagnostics and
+saved-trace verifier are implemented as development work. Formation now has an
+opt-in local Ollama role and a distinct schema-constrained output variant.
+The [first small-model attempt](../../eval/reports/m12-formation-feasibility-2026-10-04/README.md)
+is retained as a failure: one invalid response, no task writes and no completed
+cases. Its normal pressure samples prove neither full-run feasibility nor
+resource admission. The [M12 ledger](m12-acceptance-evidence-2026-10-04.md)
+continues to separate implementation, retained measurements and unmet gates.
+All original Plan A/B, 20-module, multi-system and launch requirements remain.
 
 ## Owner's intended product
 
