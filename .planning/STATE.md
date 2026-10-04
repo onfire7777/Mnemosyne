@@ -19,9 +19,14 @@ progress:
 ## Current local integration checkpoint — 2026-10-04
 
 M12 now includes a [five-trigger eligibility-window scorer](../docs/plans/m12-trigger-window-development-2026-10-04.md)
-with explicit transient-signal and endpoint rules. It distinguishes missed
-observed opportunities from windows no tick visited; workload completeness
-is not inferred. The real-CLI regressions cover all five explicit trigger
+with explicit transient-signal and endpoint rules, plus a versioned four-week
+five-seed public-CLI workload with complete ordered operation logs and replay.
+It distinguishes missed observed opportunities from windows no tick visited;
+operation completeness is verified separately from scoring. The
+[retained development execution](../eval/reports/m12-explicit-trigger-development-2026-10-04/README.md)
+completed all 525 operations with 130 valid firings, no false positives or
+misses, and 70 occurrences without eligible observed windows left unfired.
+The dirty-source capture replays exactly and does not prove admission. The real-CLI regressions cover all five explicit trigger
 types and the exclusive time-window endpoint. The registered multiweek
 corpus, calibration and complete M12 acceptance remain open.
 
