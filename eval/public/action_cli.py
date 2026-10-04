@@ -213,6 +213,10 @@ class ActionCLI:
             if intention_id is None:
                 raise ActionCLIError(f"dependency {dependency!r} scheduled out of order")
             dependency_args += ["--dependency", intention_id]
+        recurrence_args = (
+            ["--recurrence-policy", _json(task["recurrence_policy"])]
+            if "recurrence_policy" in task else []
+        )
         result = state.cli.run(
             "intention-schedule",
             "--tenant", state.tenant_id,
@@ -224,6 +228,7 @@ class ActionCLI:
             "--due-at", due_at,
             "--evidence-cid", state.evidence_cid,
             *dependency_args,
+            *recurrence_args,
         ).json
         intention_id = result.get("intention_id") if isinstance(result, Mapping) else None
         if not isinstance(intention_id, str) or not intention_id:
@@ -256,6 +261,8 @@ class ActionCLI:
         ]
         if update_type == "reschedule":
             args += ["--due-at", _require_str(update.get("due_at"), "reschedule due_at")]
+        if "recurrence_policy" in update:
+            args += ["--recurrence-policy", _json(update["recurrence_policy"])]
         state.cli.run(*args)
         return {}
 
@@ -315,7 +322,7 @@ class ActionCLI:
         if not isinstance(fired, list):
             raise ActionCLIError("intention-evaluate omitted fired intentions")
         action_ids = sorted({_fired_action_id(intention) for intention in fired})
-        # Each intention fires once; per-step signals are consumed with it.
+        # Each occurrence fires once; per-step signals are consumed with it.
         state.events = []
         state.conditions = {}
         return {
