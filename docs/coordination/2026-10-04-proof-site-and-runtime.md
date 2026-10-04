@@ -765,3 +765,26 @@ The next dependency-ready M12 deliverable is a versioned multiweek plan with
 complete ordered input/observation logs feeding candidate and reference through
 these definitions. This scorer alone is not that corpus, its calibration,
 resource admission, implicit-intent evaluation or a comparative quality result.
+
+## Four-week five-trigger execution continuation
+
+The preceding user-facing turn verified the protocol-fit website explanation;
+it did not change authoritative implementation state. This continuation adds
+`eval.public.action_trigger_run`: a versioned five-seed, four-week structured
+workload and complete ordered-operation replay. It uses existing public CLI
+translation and window scoring without changing production APIs or BurnOS.
+The [retained execution](../../eval/reports/m12-explicit-trigger-development-2026-10-04/README.md)
+completed 525 operations: 130 eligible occurrences fired once, 70 without
+eligible observed windows remained unfired, and no false positives, misses,
+duplicates or due drift were observed. All reports replayed exactly. Source was
+dirty at launch and is explicitly identified by harness hashes, not presented
+as a clean-checkout or independently authenticated capture.
+
+Forty-one focused tests passed, including the retained-capture replay regression;
+48 website renderer tests passed. The existing CI run `37225669534` was observed
+live in unit/drift, with the other nine gating jobs green; later local commits
+are outside that run. No restart, push or merge interrupted it. Full M12 scope,
+including overload, implicit formation, calibrated references, registered
+mutation/recovery and resource/admission remains open. The next extension is
+versioned revision-keyed mutation/recovery and overload workloads, followed by
+reference comparison; do not substitute this small development result for them.

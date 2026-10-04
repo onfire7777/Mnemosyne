@@ -166,3 +166,14 @@ eval/
 Design rule honored throughout: **drive only the public CLI**; never import
 `mnemosyne.engine` / `retrieval` / `belief` / etc. If the agent-facing contract
 (§30.7 ABI) breaks, the harness breaks — which is the point.
+
+### Four-week explicit-trigger development run
+
+Run `python -m eval.public.action_trigger_run OUTPUT` using the installed
+production CLI environment, then add `--recompute` to replay its saved
+observations. Five seeded dates cover exact-time, window, event, condition and
+dependency actions, recurring schedules, cancellation, negative signals and
+repeated ticks. The runner binds every ordered operation before scoring.
+See the [versioned workload contract](../docs/plans/m12-trigger-window-development-2026-10-04.md).
+This is a development diagnostic, not a calibrated reference comparison,
+independent reproduction or admitted benchmark result.

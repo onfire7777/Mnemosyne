@@ -67,3 +67,40 @@ and malformed intervals. This is not implicit natural-language intention
 formation, an overloaded multiweek corpus or calibrated baseline evidence.
 Those requirements and registered recovery, resource/cost and admission remain
 open. The existing exact-time saved captures remain replayable unchanged.
+
+## Versioned four-week development workload
+
+`python -m eval.public.action_trigger_run OUTPUT` now writes the immutable
+`m12-explicit-trigger-run/v1` plan before running it through the public action
+CLI. Five seeded start dates each span four virtual weeks, with 40 expected
+occurrences per case. Each week exercises the five explicit trigger types,
+a mismatching event, a false condition followed by a matching signal,
+a deliberately expired window, a cancelled action and a repeated signal-free
+tick. Two interval schedules cover recurrence retention and cancellation after
+the second occurrence. Identical keyed creation retries must not add schedules.
+This is structured intention creation, not implicit natural-language formation.
+
+Every operation and response is flushed to `operations.jsonl`. The report
+validator requires the exact versioned plan, every ordered operation, matching
+payloads, clock-bound observations and empty acknowledgements for other
+operations. `--recompute` independently regenerates reports from those saved
+observations and checks the completion record. Complete execution with no
+firings produces 26 false negatives per case, not a passing empty result.
+The remaining 14 occurrences per case have no observed eligible opportunity:
+expired windows, never-matching events and cancelled occurrences. They remain
+visible; any firing from them counts against precision.
+
+The outer report marks `ordered_workload_verified=true` only after these checks.
+The standalone scorer's `workload_completeness_verified=false` remains unchanged:
+it cannot establish the operation sequence itself. Neither flag authenticates
+execution or proves an independent reproduction. Source and harness hashes are
+recorded; production runtime matching is explicitly unverified. Failure records
+contain the exception type and completed-operation count, never exception text
+that might contain a session token. Existing output directories are not reused.
+
+This small deterministic workload does not yet satisfy the full original M12
+corpus: overload, implicit intention formation, revision-keyed mutation recovery,
+calibrated reference comparison, measured resource/cost gates and admission remain
+open. The earlier public retry integration tests cover mutation response loss
+separately; they are not silently included in this workload's result. The
+existing exact-time captures and registered benchmark formats remain unchanged.
