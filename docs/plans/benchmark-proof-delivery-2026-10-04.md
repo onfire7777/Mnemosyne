@@ -42,6 +42,32 @@ passed. This is runtime availability, not benchmark evidence. See the
 [delivery receipt](../coordination/2026-10-04-proof-site-and-runtime.md).
 Do not reconstruct missing evidence from report numbers.
 
+## Current execution status — 2026-10-04
+
+The platform is named **Mnemetric**; its own suite is the **Mnemetric Whole-Memory
+Benchmark**. The [naming decision](benchmark-platform-naming-2026-10-04.md) leaves
+all signed evidence and technical identifiers unchanged.
+
+The local preview now includes sourced system profiles, the full benchmark
+catalog, all 24 capabilities and 20 modules, six joint scenarios, methods,
+compatible comparison groups with shareable filters, and a signed attempt-history
+view. The comparison index only establishes declared-context compatibility;
+policy admission and real cross-system evidence remain necessary. Public history
+release must account for every historical record's publication eligibility.
+
+The registered retrieval-only experiment on exact source `b0cdbd89` completed
+all 500 questions in 312.304 seconds with normal memory pressure. Its bundle
+passed verification and its result/outcome were retained in a signed ledger.
+This is new retained evidence, not recovery of the missing historical artifact
+folder. Exact local reproduction is in progress; independent external
+reproduction, public release and superiority claims are not established.
+The grounded-reader model workload remains blocked by its separate resource
+preflight; the retrieval-only result does not waive that requirement.
+
+The ranking dataset remains empty while those release gates are open. Detailed
+receipts and current limitations remain in the
+[delivery record](../coordination/2026-10-04-proof-site-and-runtime.md).
+
 ## 1. Finish the current verified integration
 
 Resolve or precisely account for every current local-suite failure; complete
