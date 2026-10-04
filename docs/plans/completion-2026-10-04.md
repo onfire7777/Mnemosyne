@@ -109,6 +109,12 @@ checkout and GitHub. Keep only main and codex/development; preserve existing
 work before removing merged branches. Keep the goal and ledger active for
 remaining work.
 
+During integration, investigate concrete dependency alerts. The observed
+distribution-name collision is recorded in
+`docs/coordination/2026-10-04-distribution-name-collision.md`; fix the CLI's
+ambiguous package-index installation hint using a failing regression, and
+retain the separate package-identity prerequisite for any future public release.
+
 ## Remaining program after this slice
 
 - M12 multi-week seeded recurrence experiment, lateness magnitude, calibrated
