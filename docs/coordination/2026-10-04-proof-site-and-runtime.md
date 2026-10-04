@@ -145,3 +145,57 @@ start receipt remain execution gates. No scoring attempt has started.
 publication requirements. Neither this draft nor the single-system retrieval
 registration replaces the original comparative roster, QA evaluation,
 adversarial report, independent review or public website requirements.
+
+## Feature comparison and coverage review
+
+At the owner's request, the homepage links a new `comparisons.html` page.
+It highlights evidence-ledger/branch semantics, working and prospective memory,
+gated learning/deletion, and local access boundaries. Each section distinguishes
+implemented primitives from remaining validation. It cites the pinned Mnemosyne
+source and the relevant peer's documentation. It does not infer that a peer
+lacks a capability merely because its overview does not document it.
+
+Primary sources reviewed on 2026-10-04 include the official repositories/docs
+for Mem0, Graphiti, Letta, Cognee, MemOS, Supermemory and HippoRAG, linked in the
+page and the existing system profiles. Shared features are explicitly credited.
+No verified exclusive feature or comparative superiority claim was established.
+
+The benchmark table reviews the official sources for
+[LongMemEval](https://github.com/xiaowu0162/LongMemEval),
+[LoCoMo](https://github.com/snap-research/locomo),
+[MemoryAgentBench](https://github.com/HUST-AI-HYZ/MemoryAgentBench),
+[LoCoMo-Plus](https://github.com/xjtuleeyf/Locomo-Plus),
+[MemLens](https://github.com/xrenaf/MEMLENS), and
+[OmniMemEval](https://github.com/MemTensor/OmniMemEval).
+These form a scoped review, not an exhaustive catalog. Broader work such as
+OmniMemEval is included rather than treating conversational QA as the entire
+field. The additional-evidence column is our inference from the documented
+task boundary and the original project traceability requirements. It does not
+claim that no good memory benchmark exists or that every listed benchmark
+lacks every listed capability.
+
+Browser checks verified homepage navigation, the coverage anchor and primary
+source links in the rendered page. At a 390px viewport, the page remains 390px
+wide; the 540px comparison table scrolls inside its 350px region. Desktop and
+mobile screenshots are retained in the completion evidence directory.
+
+## Downloadable evidence
+
+The renderer exports validated result records as JSON. For v2 records it also
+exports the exact verified bytes of build/config JSON, the bundle manifest and
+raw traces, using the same in-memory snapshots as validation and rendering.
+These are individual artifacts, not a complete downloadable benchmark bundle.
+Legacy v1 records without verified artifact bindings get only result JSON.
+Full raw-data mirrors and public hosting remain separate unfinished delivery.
+
+The JSON projection retains array order for record identity; HTML metric order
+remains deterministic. Generated record JSON escapes markup characters without
+changing decoded values, while digest-bound files remain byte-for-byte intact.
+Production hosting must serve these files as JSON/JSONL downloads with correct
+content types and `X-Content-Type-Options: nosniff`; rendering alone does not
+configure a host. All source rights and publication gates still apply.
+
+Validation: 85 focused render/publication/policy checks and Ruff passed. The
+tests cover exported digest equality and the verified trace snapshot even when
+the original file changes after its first read. The full older-source suite
+remains running; this is not an all-suite pass claim.

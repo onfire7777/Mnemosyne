@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from leaderboard.explainers import systems_body
+from leaderboard.comparisons import comparisons_body
 from leaderboard.validate import (
     SCHEMA_VERSION,
     SCHEMA_VERSION_V2,
@@ -261,15 +262,40 @@ def _record_details(record: dict[str, Any]) -> str:
     )
 
 
+def _export_json(value: object) -> str:
+    # Preserve record array order for its canonical identity while preventing
+    # literal markup in generated JSON. Bound raw artifacts are never rewritten.
+    return json.dumps(
+        value, sort_keys=True, indent=2, ensure_ascii=False, allow_nan=False
+    ).replace("&", "\\u0026").replace("<", "\\u003c").replace(">", "\\u003e") + "\n"
+
+
 def _render_pages(
     records: list[dict[str, Any]],
     traces: dict[str, list[dict[str, Any]]],
 ) -> dict[Path, str]:
     pages: dict[Path, str] = {}
+    pages[Path("data/results.json")] = _export_json(records)
     index_items: list[str] = []
     for record in records:
         record_id = record["record_id"]
         record_digest = _digest(record_id)
+        pages[Path("data") / record_digest / "result.json"] = _export_json(record)
+        downloads = (
+            '<h2>Download evidence</h2><ul>'
+            f'<li><a href="../data/{record_digest}/result.json" download>Result record (JSON)</a></li>'
+        )
+        if record.get("schema_version") == SCHEMA_VERSION_V2:
+            downloads += "".join(
+                f'<li><a href="../data/{record_digest}/{filename}" download>{label}</a></li>'
+                for filename, label in (
+                    ("build.json", "Build (JSON)"),
+                    ("config.json", "Configuration (JSON)"),
+                    ("bundle-manifest.json", "Bundle manifest (JSON)"),
+                    ("traces.jsonl", "Raw traces (JSONL)"),
+                )
+            )
+        downloads += "</ul>"
         for metric in sorted(record["metrics"], key=lambda value: json.dumps(value, sort_keys=True)):
             index_items.append(
                 f"<tr><td>{_escape(record['system'])}"
@@ -331,6 +357,7 @@ def _render_pages(
             f"<h1>Result {_escape(record_id)}</h1>"
             '<p><a href="../index.html">Leaderboard</a></p>'
             f"{_record_details(record)}"
+            f"{downloads}"
             f"<h2>Disclosed traces</h2><ul>{''.join(trace_items)}</ul>",
             root="../",
         )
@@ -351,13 +378,15 @@ def _render_pages(
         "Leaderboard",
         '<h1>Memory benchmarks, with evidence.</h1>'
         '<p class="intro">Compare measured results. Inspect the traces behind every number.</p>'
+        '<p><a href="comparisons.html">Compare memory capabilities and benchmark coverage</a></p>'
         '<section aria-labelledby="results-heading"><h2 id="results-heading">Results</h2>'
         '<div class="table-scroll" role="region" aria-label="Benchmark results" tabindex="0">'
         f'<table class="{"" if index_items else "empty-results"}"><thead><tr>'
         '<th scope="col">System</th><th scope="col">Benchmark</th><th scope="col">Metric</th>'
         '<th scope="col">Result</th><th scope="col">Evidence</th></tr></thead><tbody>'
         + ("".join(index_items) or empty)
-        + '</tbody></table></div></section>' + overview,
+        + '</tbody></table></div><p><a href="data/results.json" download>'
+        'Download result data (JSON)</a></p></section>' + overview,
     )
     pages[Path("methods.html")] = _page(
         "Methods",
@@ -387,10 +416,11 @@ def _render_pages(
         '<p><a href="systems.html">Explore memory system architectures</a></p></article>',
     )
     pages[Path("systems.html")] = _page("Memory systems", systems_body())
+    pages[Path("comparisons.html")] = _page("Capabilities and benchmark coverage", comparisons_body())
     return pages
 
 
-def _publish(pages: dict[Path, str], destination: Path) -> None:
+def _publish(pages: dict[Path, str | bytes], destination: Path) -> None:
     destination = destination.absolute()
     temporary: Path | None = None
     backup: Path | None = None
@@ -415,7 +445,10 @@ def _publish(pages: dict[Path, str], destination: Path) -> None:
         for relative, content in sorted(pages.items(), key=lambda item: str(item[0])):
             target = temporary / relative
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(content, encoding="utf-8", newline="\n")
+            if isinstance(content, bytes):
+                target.write_bytes(content)
+            else:
+                target.write_text(content, encoding="utf-8", newline="\n")
         if destination.exists():
             os.replace(destination, backup)
         try:
@@ -469,9 +502,9 @@ def _verify_v2_artifacts(
     records: list[dict[str, Any]],
     traces: dict[str, str | Path],
     artifacts: dict[str, dict[str, str | Path]] | None,
-) -> dict[str, bytes]:
+) -> dict[str, dict[str, bytes]]:
     bound = artifacts or {}
-    snapshots: dict[str, bytes] = {}
+    snapshots: dict[str, dict[str, bytes]] = {}
     for record in records:
         if record.get("schema_version") != SCHEMA_VERSION_V2:
             continue
@@ -496,7 +529,7 @@ def _verify_v2_artifacts(
         errors = verify_result_digests(record, payloads)
         if errors:
             raise RenderError("digest mismatch: " + ", ".join(errors))
-        snapshots[record_id] = payloads["traces.jsonl"]
+        snapshots[record_id] = payloads
     return snapshots
 
 
@@ -516,16 +549,20 @@ def render_site(
     unlinked = sorted(trace_ids - record_ids)
     if unlinked:
         raise RenderError("unlinked trace source: " + ", ".join(unlinked))
-    verified_traces = _verify_v2_artifacts(records, traces, artifacts)
+    verified_artifacts = _verify_v2_artifacts(records, traces, artifacts)
     loaded_traces = {
         record_id: (
-            _load_traces_from_bytes(verified_traces[record_id], Path(traces[record_id]))
-            if record_id in verified_traces
+            _load_traces_from_bytes(verified_artifacts[record_id]["traces.jsonl"], Path(traces[record_id]))
+            if record_id in verified_artifacts
             else _load_traces(Path(traces[record_id]))
         )
         for record_id in sorted(record_ids)
     }
-    _publish(_render_pages(records, loaded_traces), Path(destination))
+    pages: dict[Path, str | bytes] = dict(_render_pages(records, loaded_traces))
+    for record_id, payloads in verified_artifacts.items():
+        for name, content in payloads.items():
+            pages[Path("data") / _digest(record_id) / name] = content
+    _publish(pages, Path(destination))
 
 
 def main(argv: list[str] | None = None) -> int:
