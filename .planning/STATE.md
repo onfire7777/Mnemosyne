@@ -18,6 +18,12 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+Dependency saved-trace verification now reconstructs the full frozen protocol,
+state/timing reports and inert sink rows without invoking provider or public CLI.
+Both protocols share a bounded interpreter with explicit protocol functions.
+155 dependency/formation checks passed in 34.50 seconds. Replay proves internal
+consistency only; actual full-corpus model execution and M12 admission remain open.
+
 The 100-case dependency extension now has a complete bounded-provider runner
 retaining public inputs, source identity, partial failures, state/timing reports
 and inert receipts. Four runner checks passed, including a scripted command

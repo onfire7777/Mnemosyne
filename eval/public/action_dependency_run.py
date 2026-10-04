@@ -36,6 +36,7 @@ def run_development(output, provider):
     source = _source_receipt(True)
     for name in ('action_formation.py', 'action_dependency_run.py', 'action_implicit_plan.py',
                  'action_dependency_plan.py', 'action_dependency_scoring.py', 'action_dependency_observe.py',
+                 'action_dependency_replay.py',
                  'action_formation_scoring.py', 'action_formation_observe.py', 'action_formation_timing.py',
                  'action_trigger_timing.py', 'action_formation_replay.py', 'action_formation_ollama.py', 'action_formation_schema.py'):
         source['harness_files']['eval/public/' + name] = hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()

@@ -34,8 +34,8 @@ receipts now execute through the real ActionCLI. Evaluator-only timing compariso
 retains all previously requested schedules, including cancelled and ineligible
 ones, so unexpected firings remain false positives. Repeated probes cannot earn
 extra correct firings. Integration tests explicitly provision golden tasks to
-verify plumbing; they are not model runs. The complete provider-to-report runner is now available; saved-trace replay
-and actual model measurements remain before claiming measured dependency formation. Full model execution,
+verify plumbing; they are not model runs. The complete provider-to-report runner and saved-trace verifier are now
+available; actual model measurements remain before claiming measured dependency formation. Full model execution,
 broader language, held-out calibration and M12 admission remain open.
 
 
@@ -58,5 +58,22 @@ own execution/report schemas; it does not rewrite original-corpus receipts.
 Four runner tests cover a scripted successful dependency through actual public
 commands, an always-clarifying provider with visible misses, malformed output,
 and observation failure. Scripted tests are pipeline conformance, not model
-quality. Full-corpus real-provider execution and saved-trace verification remain
-open, alongside the original M12 acceptance requirements.
+quality. Full-corpus real-provider execution remains open, alongside the original M12
+acceptance requirements.
+
+
+## Saved-trace consistency
+
+`python -m eval.public.action_dependency_replay CAPTURE` checks the full frozen
+100-case input set, exact source hashes, ordered formation/observation records,
+state and timing reports, and all durable inert receipt/attempt rows. It shares
+the bounded trace interpreter with the original formation verifier but supplies
+explicit dependency corpus, probe, scorer and scope functions. The original
+protocol still uses its own version and unchanged corpus.
+
+Replay never executes the recorded provider command or public CLI. It verifies
+internal consistency, not authentic model or engine execution, independent
+reproduction, provenance admission or a ranking result. Deliberately coherent
+fabrication is outside this check's guarantees. Tests reject altered dependency
+snapshots, probes, timing counts, source hashes, sink attempts and truncated
+traces, and ensure the input directory remains unchanged during successful replay.
