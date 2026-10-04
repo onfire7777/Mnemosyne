@@ -138,3 +138,56 @@ def test_answered_replay_does_not_become_verified_model_execution(inputs, tmp_pa
     assert result["metrics"][3]["observed_count"] == 1
     assert result["attempt_outcome"] == "not-measured"
     assert result["resources"]["treatment"] == "resource-unverified"
+
+
+@pytest.mark.parametrize("missing_index", [None, 2])
+def test_full_category_population_preserves_missingness_and_option_orders(inputs, tmp_path, monkeypatch, missing_index):
+    from pathlib import Path
+    from eval.public.adapters.locomo import split_samples
+    from eval.public.adapters.locomo_native import _prepare_native_replay, answer_captured_question
+
+    metadata, payloads, python = inputs
+    source = json.loads(payloads["benchmark.json"])["data"]
+    source[0]["qa"] = [{"question": f"Synthetic question {i}?", "answer": "synthetic distractor",
+                        "category": category, "evidence": []}
+                       for i, category in enumerate([1, 2, 3, 4, 5, 5])]
+    old_config = json.loads(payloads["config.json"])["native_run"]
+    store = tmp_path / "synthetic-store"
+    store.write_bytes(b"synthetic transport only")
+    cli = MnemoCLI(store=str(store))
+    config = build_native_run_config(source, cli, caption_policy="exclude-caption", choice_seed=1,
+        reader_policy=old_config["reader_policy"], runtime_manifest_sha256="1" * 64,
+        resource_manifest_sha256="2" * 64)
+    context = _prepare_native_replay(source[0], caption_policy=config["caption_policy"])
+    conversation = {"sample_id": source[0]["sample_id"], "tenant_id": context["tenant"],
+                    "evidence": context["evidence"], "cli": cli}
+
+    def answer(cli, path, *, include_derivation=False):
+        request = json.loads(Path(path).read_bytes())
+        return {"results": [{"question_id": request["question_id"], "answer": None,
+            "abstained": True, "claims": [], "hops": [], "reader": config["reader_policy"]["reader"]}]}
+
+    monkeypatch.setattr(MnemoCLI, "eval_answer_batch", answer)
+    records = [answer_captured_question(conversation, question, annotation,
+        choice_draw=config["choice_policy"]["draws"].get(question["question_id"]),
+        reader_policy=config["reader_policy"], run_config=config)
+        for i, (question, annotation) in enumerate(zip(split_samples(source)["questions"], source[0]["qa"], strict=True))
+        if i != missing_index]
+    option_draws = [record["question_transformation"]["choice_draw"] for record in records[-2:]]
+    assert option_draws[0] < 0.5 <= option_draws[1]
+    report = replay_in_environment(source, records, caption_policy=config["caption_policy"], choice_seed=1,
+        reader_policy=config["reader_policy"], run_config=config, python=python)
+    metadata["identity"]["dataset_split_digest"] = "sha256:" + report["source_sha256"]
+    payloads["benchmark.json"] = encode({"data": source, "metadata": {"synthetic": True}})
+    payloads["config.json"] = encode({"family": "native-memory-qa", "scoring_profile": "locomo-native-v1", "native_run": config})
+    payloads["traces.jsonl"] = b"".join(encode(record) for record in records)
+    payloads["native-replay.json"] = encode(report)
+    inventory(payloads)
+    result = assemble_development_result(metadata, payloads, scorer_python=python)
+    assert [metric["source_count"] for metric in result["metrics"]] == [1, 1, 1, 1, 2]
+    assert sum(metric["missing_count"] for metric in result["metrics"]) == (missing_index is not None)
+    assert report["source_population_complete"] == (missing_index is None)
+    assert result["metrics"][2]["denominator"] == 1
+    assert result["metrics"][2]["status"] == ("measured" if missing_index is None else "incomplete")
+    assert result["attempt_outcome"] == "not-measured"
+    assert not result["publication"]["publishable"]
