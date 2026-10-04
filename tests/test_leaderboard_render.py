@@ -258,7 +258,14 @@ def test_metric_ties_are_deterministic_for_logically_identical_orderings(
         tmp_path / "second-site",
     )
 
-    assert _tree(tmp_path / "first-site") == _tree(tmp_path / "second-site")
+    first_tree, second_tree = _tree(tmp_path / "first-site"), _tree(tmp_path / "second-site")
+    # Display order is canonical; exported records retain their input array
+    # order so that consumers can reproduce the signed record identity.
+    assert {k: v for k, v in first_tree.items() if k.endswith(".html")} == {
+        k: v for k, v in second_tree.items() if k.endswith(".html")
+    }
+    assert json.loads(first_tree["data/results.json"]) == [first_record]
+    assert json.loads(second_tree["data/results.json"]) == [second_record]
 
 
 def test_escapes_hostile_values_and_uses_only_safe_relative_links(
@@ -698,6 +705,14 @@ def test_renders_v2_record_fields_and_safety_gates(tmp_path: Path) -> None:
     assert "failed" in page
     assert "operator" in page
     assert "trace-001" in page
+    data_root = output / "data" / _digest(str(record["record_id"]))
+    assert json.loads((data_root / "result.json").read_text()) == record
+    assert json.loads((output / "data" / "results.json").read_text()) == [record]
+    for field, filename in DIGEST_PAYLOAD_NAMES.items():
+        exported = (data_root / filename).read_bytes()
+        assert exported == artifacts[filename].read_bytes()
+        assert "sha256:" + hashlib.sha256(exported).hexdigest() == record[field]
+        assert f'/{filename}" download' in page
 
 
 def test_rejects_mixed_v1_and_v2_rendering(tmp_path: Path) -> None:
@@ -828,6 +843,8 @@ def test_v2_render_uses_verified_trace_snapshot(
     )
     assert "question-001" in pages
     assert "MUTATED" not in pages
+    exported = output / "data" / _digest(str(record["record_id"])) / "traces.jsonl"
+    assert "sha256:" + hashlib.sha256(original_read_bytes(exported)).hexdigest() == record["trace_index_digest"]
 
 
 def test_rejects_remote_artifact_uri_without_network(tmp_path: Path) -> None:
