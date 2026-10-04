@@ -35,6 +35,10 @@ truth; typed projections make it useful for retrieval and reasoning.
 
 ## Source Blueprint
 
+Install this project from its cloned repository. The public PyPI name
+`mnemosyne-memory` currently identifies a different project; see the
+[distribution identity note](docs/coordination/2026-10-04-distribution-name-collision.md).
+
 The implementation target is the Mnemosyne v2 blueprint. The repo keeps a
 self-contained documentation mirror under [`docs/blueprint/`](docs/blueprint/)
 so GitHub, CI, and future agents can audit implementation claims without
