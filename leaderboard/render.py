@@ -137,13 +137,59 @@ def _escape(value: object) -> str:
     return html.escape(str(value), quote=True)
 
 
-def _page(title: str, body: str) -> str:
+def _page(title: str, body: str, root: str = "") -> str:
     return (
         "<!doctype html>\n"
         '<html lang="en"><head><meta charset="utf-8">'
-        f"<title>{_escape(title)}</title></head><body>\n"
-        f"{body}\n"
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        f"<title>{_escape(title)} · OpenMemBench</title>"
+        "<style>"
+        ":root{color-scheme:light;--ink:#0c1938;--muted:#59667c;--line:#cbd3df}"
+        "*{box-sizing:border-box}body{margin:0;background:#fff;color:var(--ink);"
+        "font:20px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}"
+        "body>header,main,body>footer{max-width:1440px;margin:auto;padding:0 64px}"
+        "body>header{display:flex;align-items:center;justify-content:space-between;"
+        "gap:24px;padding-top:16px;padding-bottom:18px;border-bottom:1px solid var(--line)}"
+        "a{color:#005bd3;text-underline-offset:4px}a:focus-visible{outline:3px solid #005bd3;"
+        "outline-offset:5px}.brand{font:32px Georgia,serif;color:var(--ink);text-decoration:none}"
+        "nav{display:flex;gap:48px}nav a{text-decoration:none}main{padding-top:48px;"
+        "padding-bottom:40px}h1,h2{font-family:Georgia,serif;letter-spacing:-.025em;line-height:1.15}"
+        "h1{font-size:56px;font-weight:500;margin:4px 0 14px}h2{font-size:36px;font-weight:500;margin:0 0 24px}"
+        "p{margin:0 0 24px}.intro{font-size:28px;color:var(--muted);margin-bottom:48px}"
+        ".table-scroll{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:18px}"
+        "th,td{text-align:left;border:1px solid var(--line);padding:18px;vertical-align:top}"
+        "th{font-weight:500;background:#f7f9fc}th:first-child{width:21%}"
+        ".empty{text-align:center;padding:66px 24px}.empty p:last-child{margin:0;"
+        "color:var(--muted);font-size:17px}.overview{display:grid;grid-template-columns:1fr 1fr;"
+        "gap:72px;border-top:1px solid var(--line);margin-top:40px;padding-top:38px}"
+        ".overview h2{font-size:32px}.overview p,small{color:var(--muted)}small{display:block;"
+        "font-size:15px}body>footer{border-top:1px solid var(--line);padding-top:16px;"
+        "padding-bottom:24px;font-size:16px;color:var(--muted)}pre{white-space:pre-wrap;"
+        "overflow-wrap:anywhere;padding:20px;background:#f7f9fc;font-size:15px}"
+        "li{overflow-wrap:anywhere}.prose{max-width:880px}.prose h2{margin-top:36px}"
+        "@media(max-width:700px){body{font-size:17px}body>header,main,body>footer{padding-left:20px;"
+        "padding-right:20px}.brand{font-size:25px}nav{gap:18px;font-size:16px}"
+        "main{padding-top:32px}h1{font-size:39px}.intro{font-size:21px;margin-bottom:34px}"
+        "h2{font-size:29px}.overview{grid-template-columns:1fr;gap:24px}.overview h2{font-size:28px}"
+        "th,td{padding:12px}table{min-width:540px}.empty{padding:40px 18px}"
+        ".empty-results{min-width:0}.empty-results thead{display:none}}"
+        "</style></head><body>\n"
+        f'<header><a class="brand" href="{root}index.html">OpenMemBench</a>'
+        f'<nav aria-label="Main"><a href="{root}index.html">Results</a>'
+        f'<a href="{root}methods.html">Methods</a></nav></header>'
+        f"<main>{body}</main>\n"
+        "<footer>Open, operator-run. Mnemosyne is the operator entry.</footer>"
         "</body></html>\n"
+    )
+
+
+def _interval(metric: dict[str, Any]) -> str:
+    interval = metric.get("confidence_interval")
+    if interval is None:
+        return "<small>Interval not supplied</small>"
+    return (
+        f"<small>Interval: {_escape(interval['low'])} to "
+        f"{_escape(interval['high'])}</small>"
     )
 
 
@@ -157,7 +203,8 @@ def _record_details(record: dict[str, Any]) -> str:
         "<li>"
         f"{_escape(metric['family'])}: {_escape(metric['name'])} = "
         f"{_escape(metric['value'])} {_escape(metric['unit'])}"
-        "</li>"
+        + _interval(metric)
+        + "</li>"
         for metric in sorted(
             record["metrics"],
             key=lambda metric: (
@@ -222,12 +269,22 @@ def _render_pages(
     for record in records:
         record_id = record["record_id"]
         record_digest = _digest(record_id)
-        index_items.append(
-            "<li>"
-            f"<a href=\"results/{record_digest}.html\">{_escape(record_id)}</a>"
-            f"{_record_details(record)}"
-            "</li>"
-        )
+        for metric in sorted(record["metrics"], key=lambda value: json.dumps(value, sort_keys=True)):
+            index_items.append(
+                f"<tr><td>{_escape(record['system'])}"
+                f"<small>{_escape(record['track'])}</small></td>"
+                f"<td>{_escape(record['benchmark'])}<small>"
+                f"{_escape(record['benchmark_version'])}</small></td>"
+                f"<td>{_escape(metric['name'])}<small>{_escape(metric['family'])}</small></td>"
+                f"<td>{_escape(metric['value'])} {_escape(metric['unit'])}{_interval(metric)}</td>"
+                f'<td><a href="results/{record_digest}.html">View run</a>'
+                f"<small>{_escape(record_id)}</small>"
+                f"<small>{_escape(record['publication']['label'])}; "
+                f"{'publishable' if record['publication']['publishable'] else 'not publishable'}</small>"
+                f"<small>Operator: {_escape(record['operator_entry']['operator'])}</small>"
+                f"<details><summary>Run disclosures</summary>{_record_details(record)}</details>"
+                "</td></tr>"
+            )
         trace_items: list[str] = []
         for trace in traces[record_id]:
             question_id = trace["question_id"]
@@ -259,6 +316,7 @@ def _render_pages(
                 f'<p><a href="../../results/{record_digest}.html">'
                 "Back to result</a></p>"
                 f"{evidence}",
+                root="../../",
             )
         pages[Path("results") / f"{record_digest}.html"] = _page(
             f"Result {record_id}",
@@ -266,10 +324,58 @@ def _render_pages(
             '<p><a href="../index.html">Leaderboard</a></p>'
             f"{_record_details(record)}"
             f"<h2>Disclosed traces</h2><ul>{''.join(trace_items)}</ul>",
+            root="../",
         )
+    empty = (
+        '<tr><td colspan="5" class="empty"><p>No verified results published yet.</p>'
+        '<p>Development tests are not benchmark rankings. Real results appear here '
+        'only with reproducible evidence.</p></td></tr>'
+    )
+    overview = (
+        '<section class="overview"><div><h2>Retrieval is not answer quality</h2>'
+        '<p>Recall measures whether useful evidence was found. Answer quality measures '
+        'whether the response was correct. We report them separately.</p>'
+        '<a href="methods.html">Read the methods</a></div>'
+        '<div><h2>Follow the evidence</h2><p>Every published run links its configuration, '
+        'uncertainty and question-level traces. Missing measurements stay missing.</p></div></section>'
+    )
     pages[Path("index.html")] = _page(
         "Leaderboard",
-        "<h1>Leaderboard</h1><ul>" + "".join(index_items) + "</ul>",
+        '<h1>Memory benchmarks, with evidence.</h1>'
+        '<p class="intro">Compare measured results. Inspect the traces behind every number.</p>'
+        '<section aria-labelledby="results-heading"><h2 id="results-heading">Results</h2>'
+        '<div class="table-scroll" role="region" aria-label="Benchmark results" tabindex="0">'
+        f'<table class="{"" if index_items else "empty-results"}"><thead><tr>'
+        '<th scope="col">System</th><th scope="col">Benchmark</th><th scope="col">Metric</th>'
+        '<th scope="col">Result</th><th scope="col">Evidence</th></tr></thead><tbody>'
+        + ("".join(index_items) or empty)
+        + '</tbody></table></div></section>' + overview,
+    )
+    pages[Path("methods.html")] = _page(
+        "Methods",
+        '<article class="prose"><h1>How to read the evidence</h1>'
+        '<p class="intro">A score is useful only when you can inspect how it was produced.</p>'
+        '<h2>Retrieval is not answer quality</h2><p>Retrieval recall measures how much '
+        'relevant evidence a system found within a stated result limit. It does not show '
+        'that a generated answer was correct. Answer quality, security, calibration, '
+        'latency and cost are separate metric families.</p>'
+        '<h2>Compare like with like</h2><p>Compare runs only when their dataset version, '
+        'split, protocol, model and resource budgets support that comparison. An interval '
+        'shows the uncertainty supplied by the run; its confidence level is not inferred. '
+        'Missing intervals and missing measurements are not zero. This site does not '
+        'calculate a universal winner across different tasks.</p>'
+        '<h2>Inspect a run</h2><p>Open a result to inspect its build and configuration '
+        'digests, publication status and individual question traces. Trace pages show '
+        'only stored evidence, retrieved evidence and answers actually disclosed in '
+        'the source. Development results are not public benchmark rankings.</p>'
+        '<h2>Publication requires more than rendering</h2><p>A local preview may contain '
+        'non-publishable development records. Rendering does not approve publication. '
+        'Public release requires the signed ledger, registered experiment, reproducible '
+        'bundle, permitted assets and governance evidence to pass the separate release gates.</p>'
+        '<h2>Who operates this site</h2><p>Mnemosyne is the operator entry. The project '
+        'must run supported competitors under the same disclosed protocol, retain failed '
+        'attempts, and explain missing systems. Operator-run does not mean independent '
+        'or neutral evaluation.</p></article>',
     )
     return pages
 
@@ -415,9 +521,9 @@ def render_site(
 def main(argv: list[str] | None = None) -> int:
     """Render RESULTS with RECORD_ID=TRACES mappings into DESTINATION."""
     args = sys.argv[1:] if argv is None else argv
-    if len(args) < 3:
+    if len(args) < 2:
         print(
-            "usage: render.py RESULTS DESTINATION RECORD_ID=TRACES [...]",
+            "usage: render.py RESULTS DESTINATION [RECORD_ID=TRACES ...]",
             file=sys.stderr,
         )
         return 2
