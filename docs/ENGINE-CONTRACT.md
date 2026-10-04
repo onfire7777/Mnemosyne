@@ -50,7 +50,7 @@ five-method surface with byte-identical signatures:
 
 - `schedule_intention(self, intention: Intention, *, idempotent: bool = False) -> str`
 - `update_intention(self, tenant_id, intention_id, *, user_id, agent_id, session_id, due_at=None, action=None, recurrence_policy=None, expected_revision=None, idempotency_key=None) -> Intention`
-- `cancel_intention(self, tenant_id, intention_id, *, cancelled_by, session_id) -> None`
+- `cancel_intention(self, tenant_id, intention_id, *, cancelled_by, session_id, expected_revision=None, idempotency_key=None) -> None`
 - `evaluate_due_intentions(self, tenant_id, *, evaluated_at, trigger_context, operating_point) -> list[Intention]`
 - `list_intentions(self, tenant_id) -> list[Intention]`
 
@@ -117,6 +117,21 @@ edit, cancellation or firing. This differs deliberately from the creation
 acknowledgement: update returns a state snapshot, not a replayed response body.
 Erased intentions cannot be recreated by update retries. Calls without the new
 arguments retain their existing behavior and response fields.
+
+**Cancellation retries.** `cancel_intention` / `intention-cancel` accept the
+same paired revision/key arguments. Their receipt namespace is separate from
+updates and binds the intention, tenant, authenticated cancellation principal
+and session. A new request must match current state; a repeated key must retain
+its original revision. The cancellation and digest-only receipt commit
+atomically. A recognized retry rechecks current provenance and requires the
+intention still to be cancelled. A new key targeting already-cancelled current
+state records a no-op receipt; retrying that key adds no second receipt.
+
+A concurrent update or firing can win before cancellation. In that case a stale
+revision or fired state rejects cancellation; no successful cancellation is
+reported. When cancellation wins, evaluation cannot fire that intention. Keyed
+CLI/MCP replies include the current `revision`; unkeyed replies remain unchanged.
+The public action adapter forwards these fields without refreshing them.
 
 These are opt-in public operation contracts. Their use in a registered M12
 workload, live backend validation, recovery and full benchmark admission remain

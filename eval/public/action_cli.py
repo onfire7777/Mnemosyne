@@ -261,13 +261,18 @@ class ActionCLI:
         intention_id = state.intention_by_task.get(task_id)
         if intention_id is None:
             raise ActionCLIError(f"update references unscheduled task {task_id!r}")
+        retry_args = []
+        if "idempotency_key" in update or "expected_revision" in update:
+            retry_args = [
+                "--idempotency-key", _require_str(update.get("idempotency_key"), "idempotency_key"),
+                "--expected-revision", _require_str(update.get("expected_revision"), "expected_revision"),
+            ]
         if update_type == "cancel":
-            if "idempotency_key" in update or "expected_revision" in update:
-                raise ActionCLIError("cancel does not yet support keyed revision preconditions")
             state.cli.run(
                 "intention-cancel",
                 "--tenant", state.tenant_id,
                 "--intention-id", intention_id,
+                *retry_args,
             )
             return {}
         if update_type not in {"override", "reschedule"}:
@@ -284,12 +289,7 @@ class ActionCLI:
             args += ["--due-at", _require_str(update.get("due_at"), "reschedule due_at")]
         if "recurrence_policy" in update:
             args += ["--recurrence-policy", _json(update["recurrence_policy"])]
-        if "idempotency_key" in update or "expected_revision" in update:
-            args += [
-                "--idempotency-key", _require_str(update.get("idempotency_key"), "idempotency_key"),
-                "--expected-revision", _require_str(update.get("expected_revision"), "expected_revision"),
-            ]
-        state.cli.run(*args)
+        state.cli.run(*args, *retry_args)
         return {}
 
     def _task_inspect(self, state: _ScopeState, payload: Mapping[str, Any]) -> dict[str, Any]:

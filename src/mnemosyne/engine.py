@@ -701,55 +701,88 @@ def intention_revision(intention: Intention) -> str:
     return content_cid("prospective_intention_state/v1", intention.to_dict())
 
 
+def _intention_request_receipt(
+    current: Intention, *, operation: str, scope: dict[str, str], patch: dict[str, Any],
+    expected_revision: str | None, idempotency_key: str | None,
+    previous_diffs: list[dict[str, Any]],
+) -> tuple[dict[str, str] | None, bool]:
+    """Check a locked current-state precondition or recognize a durable request."""
+    if idempotency_key is None and expected_revision is None:
+        return None, False
+    validate_intention_idempotency_key(idempotency_key)
+    if (type(expected_revision) is not str or len(expected_revision) != 64
+            or any(char not in "0123456789abcdef" for char in expected_revision)):
+        raise ValueError("expected_revision must be a 64-character lowercase SHA-256 token")
+    key_digest = content_cid(f"intention_{operation}_key/v1", {**scope, "key": idempotency_key})
+    request_digest = content_cid(f"intention_{operation}_request/v1", {
+        **scope, "expected_revision": expected_revision, **patch,
+    })
+    field = f"{operation}_request"
+    matching = [diff[field] for diff in previous_diffs
+                if isinstance(diff.get(field), dict) and diff[field].get("key_digest") == key_digest]
+    if matching:
+        if (len(matching) != 1 or matching[0].get("request_digest") != request_digest
+                or set(matching[0]) != {"key_digest", "request_digest", "result_revision"}
+                or type(matching[0]["result_revision"]) is not str
+                or len(matching[0]["result_revision"]) != 64
+                or any(char not in "0123456789abcdef" for char in matching[0]["result_revision"])):
+            raise ValueError(f"intention {operation} idempotency conflict")
+        return None, True
+    if expected_revision != intention_revision(current):
+        raise ValueError("intention revision conflict")
+    return {"key_digest": key_digest, "request_digest": request_digest}, False
+
+
 def prepare_intention_update(
     current: Intention, *, user_id: str, agent_id: str, session_id: str,
     due_at: datetime | None, action: dict[str, Any] | None,
     recurrence_policy: dict[str, Any] | None, expected_revision: str | None,
     idempotency_key: str | None, previous_diffs: list[dict[str, Any]],
 ) -> tuple[Intention, dict[str, str] | None, bool]:
-    """Validate a patch or recognize its receipt while the backend holds its lock.
-
-    A recognized retry returns current state, including terminal state. The caller
-    must still check live provenance before returning and atomically audit any new
-    receipt alongside the mutation (even for a keyed no-op).
-    """
+    """Prepare a locked mutation/replay; caller checks provenance and commits its receipt."""
     _authorize_intention_update(current, user_id=user_id, agent_id=agent_id, session_id=session_id)
-    receipt = None
-    if idempotency_key is not None or expected_revision is not None:
-        validate_intention_idempotency_key(idempotency_key)
-        if (type(expected_revision) is not str or len(expected_revision) != 64
-                or any(char not in "0123456789abcdef" for char in expected_revision)):
-            raise ValueError("expected_revision must be a 64-character lowercase SHA-256 token")
-        if due_at is not None and (not isinstance(due_at, datetime) or due_at.tzinfo is None):
-            raise ValueError("due_at must be timezone-aware")
-        scope = dict(tenant_id=current.tenant_id, intention_id=current.intention_id,
-                     user_id=user_id, agent_id=agent_id, session_id=session_id)
-        key_digest = content_cid("intention_update_key/v1", {**scope, "key": idempotency_key})
-        request_digest = content_cid("intention_update_request/v1", {
-            **scope, "expected_revision": expected_revision,
-            "due_at": due_at.astimezone(UTC).isoformat() if due_at is not None else None,
-            "action": action, "recurrence_policy": recurrence_policy,
-        })
-        matching = [diff["update_request"] for diff in previous_diffs
-                    if isinstance(diff.get("update_request"), dict)
-                    and diff["update_request"].get("key_digest") == key_digest]
-        if matching:
-            if (len(matching) != 1 or matching[0].get("request_digest") != request_digest
-                    or set(matching[0]) != {"key_digest", "request_digest", "result_revision"}
-                    or type(matching[0]["result_revision"]) is not str
-                    or len(matching[0]["result_revision"]) != 64
-                    or any(char not in "0123456789abcdef" for char in matching[0]["result_revision"])):
-                raise ValueError("intention update idempotency conflict")
-            return copy.deepcopy(current), None, True
-        if expected_revision != intention_revision(current):
-            raise ValueError("intention revision conflict")
-        receipt = {"key_digest": key_digest, "request_digest": request_digest}
+    if due_at is not None and (not isinstance(due_at, datetime) or due_at.tzinfo is None):
+        raise ValueError("due_at must be timezone-aware")
+    receipt, replay = _intention_request_receipt(
+        current, operation="update",
+        scope=dict(tenant_id=current.tenant_id, intention_id=current.intention_id,
+                   user_id=user_id, agent_id=agent_id, session_id=session_id),
+        patch={"due_at": due_at.astimezone(UTC).isoformat() if due_at is not None else None,
+               "action": action, "recurrence_policy": recurrence_policy},
+        expected_revision=expected_revision, idempotency_key=idempotency_key,
+        previous_diffs=previous_diffs,
+    )
+    if replay:
+        return copy.deepcopy(current), None, True
     updated = _updated_intention(current, user_id=user_id, agent_id=agent_id,
                                  session_id=session_id, due_at=due_at, action=action,
                                  recurrence_policy=recurrence_policy)
     if receipt is not None:
         receipt["result_revision"] = intention_revision(updated)
     return updated, receipt, False
+
+
+def prepare_intention_cancel(
+    current: Intention, *, cancelled_by: str, session_id: str,
+    expected_revision: str | None, idempotency_key: str | None,
+    previous_diffs: list[dict[str, Any]],
+) -> tuple[Intention, dict[str, str] | None, bool]:
+    """Preserve cancellation authority and terminality for keyed retries."""
+    cancelled = _cancelled_intention(current, cancelled_by=cancelled_by, session_id=session_id)
+    receipt, replay = _intention_request_receipt(
+        current, operation="cancel",
+        scope=dict(tenant_id=current.tenant_id, intention_id=current.intention_id,
+                   cancelled_by=cancelled_by, session_id=session_id), patch={},
+        expected_revision=expected_revision, idempotency_key=idempotency_key,
+        previous_diffs=previous_diffs,
+    )
+    if replay:
+        if current.status != "cancelled":
+            raise ValueError("cancellation receipt conflicts with current state")
+        return copy.deepcopy(current), None, True
+    if receipt is not None:
+        receipt["result_revision"] = intention_revision(cancelled)
+    return cancelled, receipt, False
 
 
 def _updated_intention(
@@ -1832,7 +1865,8 @@ class MemoryEngine(Protocol):
         raise NotImplementedError
 
     def cancel_intention(
-        self, tenant_id: str, intention_id: str, *, cancelled_by: str, session_id: str
+        self, tenant_id: str, intention_id: str, *, cancelled_by: str, session_id: str,
+        expected_revision: str | None = None, idempotency_key: str | None = None,
     ) -> None:
         raise NotImplementedError
 
@@ -2201,30 +2235,41 @@ class LocalMemoryEngine:
             return stored.intention_id
 
     def cancel_intention(
-        self, tenant_id: str, intention_id: str, *, cancelled_by: str, session_id: str
+        self, tenant_id: str, intention_id: str, *, cancelled_by: str, session_id: str,
+        expected_revision: str | None = None, idempotency_key: str | None = None,
     ) -> None:
         with self._lock:
             key = (tenant_id, intention_id)
             current = self.intentions.get(key)
             if current is None:
                 raise KeyError(intention_id)
-            intention = _cancelled_intention(
-                current, cancelled_by=cancelled_by, session_id=session_id
+            previous_diffs = ([row["diff"] for row in self.audit_log
+                               if row.get("tenant_id") == tenant_id
+                               and row.get("target_id") == intention_id and row.get("op") == "cancel_intention"]
+                              if idempotency_key is not None else [])
+            intention, receipt, replay = prepare_intention_cancel(
+                current, cancelled_by=cancelled_by, session_id=session_id,
+                expected_revision=expected_revision, idempotency_key=idempotency_key,
+                previous_diffs=previous_diffs,
             )
-            if intention == current:
+            if replay:
+                self._intention_provenance(current)
+                return
+            if intention == current and receipt is None:
                 return
             was_scheduled = current.status == "scheduled"
             provenance = self._intention_provenance(intention)
             trust_tier, capability_tags = intention_audit_context(provenance)
             with self._prospective_transaction():
                 self.intentions[key] = intention
-                if was_scheduled:
+                if was_scheduled or receipt is not None:
                     self._audit(
                         tenant_id,
                         cancelled_by,
                         "cancel_intention",
                         intention_id,
-                        intention_audit_diff(intention, status="cancelled"),
+                        {**intention_audit_diff(intention, status="cancelled"),
+                         **({"cancel_request": receipt} if receipt is not None else {})},
                         source="prospective_memory",
                         trust_tier=trust_tier,
                         capability_tags=capability_tags,
