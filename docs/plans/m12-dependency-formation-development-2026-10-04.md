@@ -23,9 +23,12 @@ so results do not assume same-tick ordering of engine evaluations. Cancellation
 turns occur before all probes. Public projections preserve prefixes and exclude
 all evaluator labels. Public inputs and labels are stored separately with hashes.
 
-Current status: corpus and hand-checked golden expectations only. The existing
-formation bridge can supply these public conversations, but the original state
-and timing scorers are not yet extension-aware. Add dependency identity
-normalization, per-case execution, inert receipts, timing comparison and saved
-trace replay before claiming measured dependency formation. Full model execution,
+Current status: corpus, hand-checked golden expectations and a separate
+dependency-aware state scorer are implemented. The scorer resolves stored
+intention IDs through full public snapshots, compares prerequisite action
+identities, preserves duplicate schedules, and refuses missing-reference
+evidence. Ambiguous duplicate prerequisite actions cannot earn dependency
+credit. A real public-CLI creation/inspection regression verifies the mapping.
+The original scorer is unchanged. Add per-case execution, inert receipts, timing
+comparison and saved-trace replay before claiming measured dependency formation. Full model execution,
 broader language, held-out calibration and M12 admission remain open.
