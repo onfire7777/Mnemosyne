@@ -82,8 +82,6 @@ jobs:
     name: LoCoMo scorer conformance
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      MNEMOSYNE_TEST_TOKENIZER_VOCAB: ${{ runner.temp }}/cl100k_base.tiktoken
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
       # Isolated upstream scoring environment, not the Mnemosyne runtime.
@@ -95,6 +93,8 @@ jobs:
       - name: Install hash-locked scoring and tokenizer dependencies
         run: uv pip install --system --require-hashes -r eval/public/requirements-locomo-tokenizer.lock
       - name: Obtain and verify pinned tokenizer vocabulary
+        env:
+          MNEMOSYNE_TEST_TOKENIZER_VOCAB: ${{ runner.temp }}/cl100k_base.tiktoken
         run: |
           python - <<'PY'
           import hashlib, os, urllib.request
@@ -112,6 +112,8 @@ jobs:
       - name: Require the pinned scorer runtime
         run: python -c "from eval.public.adapters.locomo_scoring import _runtime; _runtime()"
       - name: Run synthetic scorer and ingestion conformance
+        env:
+          MNEMOSYNE_TEST_TOKENIZER_VOCAB: ${{ runner.temp }}/cl100k_base.tiktoken
         run: MNEMOSYNE_TEST_LOCOMO_PYTHON="$(command -v python)" python -m pytest tests/test_locomo_scoring.py tests/test_locomo_ingestion.py tests/test_locomo_tokenizer.py tests/test_locomo_replay.py -q
 
   windows-file-lock:
