@@ -8728,6 +8728,7 @@ def cmd_intention_schedule(args: argparse.Namespace) -> None:
             evidence_ids=args.evidence_cid,
             priority=args.priority,
             dependencies=args.dependency,
+            idempotency_key=args.idempotency_key,
             recurrence_policy=(
                 parse_json_arg(args.recurrence_policy, None)
                 if args.recurrence_policy is not None
@@ -20050,6 +20051,7 @@ def build_parser() -> argparse.ArgumentParser:
     intention_schedule.add_argument("--priority", default="normal")
     intention_schedule.add_argument("--dependency", action="append", default=[])
     intention_schedule.add_argument("--recurrence-policy")
+    intention_schedule.add_argument("--idempotency-key")
     intention_schedule.set_defaults(func=cmd_intention_schedule)
 
     intention_cancel = sub.add_parser("intention-cancel")

@@ -232,6 +232,8 @@ jobs:
         run: uv run --locked python -m pytest tests/test_postgres_engine_live.py -q
       - name: Verify BurnOS session compatibility on Postgres
         run: uv run --locked python -m pytest tests/test_session_aware_reads.py -k postgres -q
+      - name: Verify prospective-memory transitions and durable retries on Postgres
+        run: uv run --locked python -m pytest tests/test_postgres_prospective_memory.py tests/test_prospective_idempotency.py -q
 
   native-wheels:
     name: Native wheels (${{ matrix.os }})

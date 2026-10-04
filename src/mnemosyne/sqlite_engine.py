@@ -100,6 +100,7 @@ from mnemosyne.engine import (
     canonicalize_intention,
     intention_audit_context,
     intention_audit_diff,
+    validate_intention_retry,
     intention_fire_receipt_id,
     validate_intention_dependencies,
     validate_intention_evaluation_inputs,
@@ -4336,13 +4337,35 @@ class SqliteEngine:
             for intention in [Intention.from_dict(json.loads(row["record"]))]
         }
 
-    def schedule_intention(self, intention: Intention) -> str:
+    def schedule_intention(self, intention: Intention, *, idempotent: bool = False) -> str:
         """Store an intention after tenant, provenance, trust, and taint checks."""
         intention = canonicalize_intention(intention, require_scheduled=True)
         with self._lock:
             conn = self._connect(intention.tenant_id)
             conn.execute("BEGIN IMMEDIATE")
             try:
+                if idempotent:
+                    # ponytail: audit JSON scan; index operation/target if retry volume warrants it.
+                    rows = conn.execute(
+                        "SELECT record FROM audit_log WHERE tenant_id = ?",
+                        (intention.tenant_id,),
+                    )
+                    creation_diffs = [
+                        record["diff"] for row in rows
+                        for record in [json.loads(row["record"])]
+                        if record.get("op") == "schedule_intention"
+                        and record.get("target_id") == intention.intention_id
+                    ]
+                    if conn.execute(
+                        "SELECT 1 FROM intentions WHERE tenant_id = ? AND intention_id = ?",
+                        (intention.tenant_id, intention.intention_id),
+                    ).fetchone() is not None:
+                        self._intention_provenance_rows(conn, intention)
+                        validate_intention_retry(intention, creation_diffs)
+                        conn.commit()
+                        return intention.intention_id
+                    if creation_diffs:
+                        raise ValueError("cannot retry a removed intention")
                 receipt = conn.execute(
                     "SELECT 1 FROM intention_fire_receipts "
                     "WHERE tenant_id = ? AND intention_id = ?",

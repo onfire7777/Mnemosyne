@@ -192,6 +192,23 @@ def _cli_schedule(
     return arguments
 
 
+def test_cli_and_mcp_schedule_retries_share_durable_creation(tmp_path, capsys):
+    store = tmp_path / "mcp-store.json"
+    engine = LocalMemoryEngine(store)
+    evidence_id = _seed_evidence(engine)
+    engine.close()
+    due = "2026-10-04T12:00:00+00:00"
+    arguments = [*_cli_schedule(evidence_id, due), "--idempotency-key", "request-1"]
+    first = _run_cli(capsys, store, _token(), *arguments)
+    assert _run_cli(capsys, store, _token(), *arguments) == first
+    server = _server(tmp_path)
+    replay = _mcp_call(server, "schedule_intention", {
+        **_schedule_arguments(evidence_id, due), "idempotency_key": "request-1",
+    })
+    assert replay["isError"] is False
+    assert replay["structuredContent"] == first
+
+
 def test_cli_requires_signed_identity_and_preserves_timezone(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
