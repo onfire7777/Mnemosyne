@@ -115,6 +115,15 @@ jobs:
         env:
           MNEMOSYNE_TEST_TOKENIZER_VOCAB: ${{ runner.temp }}/cl100k_base.tiktoken
         run: MNEMOSYNE_TEST_LOCOMO_PYTHON="$(command -v python)" python -m pytest tests/test_locomo_scoring.py tests/test_locomo_ingestion.py tests/test_locomo_tokenizer.py tests/test_locomo_replay.py tests/test_locomo_results.py tests/test_derivation_replay.py -q
+      - name: Retain the isolated scorer executable
+        run: printf 'MNEMOSYNE_TEST_LOCOMO_PYTHON=%s\n' "$(command -v python)" >> "$GITHUB_ENV"
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: "3.12"
+      - name: Verify native development packages from the production environment
+        run: |
+          uv sync --locked --group dev
+          uv run --locked python -m pytest tests/test_native_development_bundle.py tests/test_locomo_results.py -q
 
   windows-file-lock:
     name: Windows file lock
