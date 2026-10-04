@@ -63,3 +63,48 @@ def test_rejects_malformed_annotations(field, value):
     source["qa"][0][field] = value
     with pytest.raises(LoCoMoError):
         split_samples([source])
+
+
+def test_question_transformation_is_replayable_and_does_not_use_global_randomness(monkeypatch):
+    from eval.public.adapters.locomo import prepare_upstream_question
+    import random
+
+    def forbidden():
+        raise AssertionError("hidden randomness")
+    monkeypatch.setattr(random, "random", forbidden)
+    annotation = sample()["qa"][4]
+    for draw in (0, 0.499999, 0.5, 0.999999):
+        prepared = prepare_upstream_question(annotation, choice_draw=draw)
+        assert prepared == prepare_upstream_question(annotation, choice_draw=draw)
+        abstain = "a" if draw < 0.5 else "b"
+        assert prepared["answer_key"][abstain] == "Not mentioned in the conversation"
+        assert prepared["choice_draw"] == draw
+        assert prepared["query"].endswith(f"(a) {prepared['answer_key']['a']} (b) {prepared['answer_key']['b']}. ")
+
+
+@pytest.mark.parametrize("draw", [None, True, -0.1, 1, float("nan"), float("inf"), "0.2"])
+def test_adversarial_choice_requires_valid_recorded_draw(draw):
+    from eval.public.adapters.locomo import prepare_upstream_question
+    with pytest.raises(LoCoMoError):
+        prepare_upstream_question(sample()["qa"][4], choice_draw=draw)
+
+
+def test_non_adversarial_transformation_does_not_expose_answer():
+    from eval.public.adapters.locomo import prepare_upstream_question
+    for annotation in sample()["qa"][:4]:
+        result = prepare_upstream_question(annotation)
+        assert "SCORER_SECRET" not in json.dumps(result)
+        assert result["answer_key"] is None
+        assert ("Use DATE" in result["query"]) == (annotation["category"] == 2)
+        with pytest.raises(LoCoMoError):
+            prepare_upstream_question(annotation, choice_draw=0.1)
+
+
+@pytest.mark.parametrize("raw,expected", [(" A ", "first"), ("(A)", "first"), ("b", "second"),
+                                         ("x", "second"), ("yes", "second"), ("(b)", "second"),
+                                         ("", ""), (" No Information Available ", "no information available")])
+def test_upstream_decoder_retains_raw_and_short_output_semantics(raw, expected):
+    from eval.public.adapters.locomo import decode_upstream_category5
+    result = decode_upstream_category5(raw, {"a": "first", "b": "second"})
+    assert result["raw_prediction"] == raw
+    assert result["decoded_prediction"] == expected
