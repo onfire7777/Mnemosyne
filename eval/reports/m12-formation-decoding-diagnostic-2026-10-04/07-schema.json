@@ -1,0 +1,27 @@
+{
+  "case_id": "563c75b6a6b2f389e4461455",
+  "output_mode": "schema",
+  "prompt_profile": "semantics-v2",
+  "task_execution": false,
+  "publishable": false,
+  "status": "valid-envelope",
+  "response": {
+    "operations": [
+      {
+        "command": "task.create",
+        "payload": {
+          "task_id": "release_packet_reminder",
+          "action_id": "73fb2b5f07f78b62",
+          "trigger": {
+            "type": "exact_time",
+            "payload": {
+              "at": "2030-11-28T01:00:00Z"
+            }
+          },
+          "idempotency_key": "release_packet_reminder"
+        }
+      }
+    ],
+    "clarification": null
+  }
+}
