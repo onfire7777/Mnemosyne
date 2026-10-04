@@ -215,3 +215,24 @@ three-decimal per-case accumulation, submission-order invariance, separate
 fallback counts and malformed/ambiguous prediction populations. Ruff passed.
 Adapter execution, asset admission, surrounding prompts and immutable neutral
 bundles are still required before any real benchmark result.
+
+## Asset hash verified; license admission remains closed
+
+The exact upstream `data/locomo10.json` was streamed for hashing only. Its
+2,805,274 bytes match Git blob `d95b872480b413d935821fdc3c84f8a8f5f29e73`;
+SHA-256 is `79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4`.
+The downloaded payload was not retained, parsed, used for question inspection
+or scored. [Machine-readable intake evidence](../research/benchmark-intake/locomo-2026-10-04.json)
+records the immutable URL, hashes and exact current loader rejection.
+
+`eval/public/assets.py::validate_asset_spec` rejects `CC-BY-NC-4.0` because it
+is outside the current license allowlist. This is a concrete admission gate,
+not an absent-data problem and not permission to substitute a permissive
+license label. No runtime registry entry was added and no allowlist was widened.
+Resolving rights and the project's admission policy for the intended use is
+required before this asset enters the benchmark runner. Synthetic component
+work may continue; full LoCoMo measurement cannot be claimed from those tests.
+
+The existing bundle writer also requires admitted suite/scoring contracts and
+QA reader custody. Do not wrap the standalone replay report in an existing
+retrieval bundle or generic QA profile to bypass those requirements.

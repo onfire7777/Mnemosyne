@@ -1,0 +1,17 @@
+{
+  "schema_version": "mnemosyne.benchmark-intake/v1",
+  "benchmark": "locomo",
+  "upstream_revision": "3eb6f2c585f5e1699204e3c3bdf7adc5c28cb376",
+  "url": "https://raw.githubusercontent.com/snap-research/locomo/3eb6f2c585f5e1699204e3c3bdf7adc5c28cb376/data/locomo10.json",
+  "filename": "locomo10.json",
+  "bytes": 2805274,
+  "sha256": "79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4",
+  "git_blob_sha1": "d95b872480b413d935821fdc3c84f8a8f5f29e73",
+  "license": "CC-BY-NC-4.0",
+  "status": "not-admitted",
+  "reason": "asset license must be an allowlisted canonical SPDX identifier",
+  "content_parsed": false,
+  "questions_inspected": false,
+  "scored": false,
+  "download_retained": false
+}
