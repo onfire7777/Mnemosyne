@@ -17,7 +17,7 @@ replace the original specification or promote development evidence to admission.
 | Recovery and retry correctness | 360-operation capture: 50 response losses, 50 adapter resets, 10 eligible firings, 10 cancelled controls; 10 sink receipts and 10 deliberate duplicate deliveries | Local response loss is not arbitrary crash recovery or external-service exactly-once behavior |
 | Precision, recall, F1, false alarms, misses, lateness, duplicate execution, cancellation correctness and cost | Window scorer and per-case/per-load reports; sink attempt records | Cost remains unmeasured; extend full-corpus reports without pooling away load-specific failures |
 | Zero duplicate and cancelled-intention executions | No violations in retained development captures | Verify on full registered corpus; finite local success is not universal certification |
-| Preregistered absolute floor and non-inferiority to exact reference | No calibrated/admitted baseline claim | Implement and verify independent public-protocol reference; calibrate on disjoint development data; freeze floor/margin before candidate ranking |
+| Preregistered absolute floor and non-inferiority to exact reference | Draft independent explicit-action reference and two retained five-seed executions; no calibrated/admitted baseline claim | Complete semantic review and durable revision recovery; calibrate on disjoint development data; freeze floor/margin before candidate ranking |
 | At least five virtual-week seeds | Five-seed, four-week explicit and recovery captures | Retain same repeat/replay guarantees across full workload and adapters |
 | Measured resource admission | Current run has wall-time and macOS pressure guard | Measure specified RSS and disk as well as elapsed time; pressure=normal does not establish RSS <=4 GiB; 30 min/4 GiB/1 GiB remains a planning hypothesis |
 | Licensed pinned official variants | Development captures carry no official label | License and pin upstream PM-Bench/TriggerBench datasets and scorers before official evaluation |
@@ -61,3 +61,12 @@ field. `peak_rss_verified` and `admission_verified` remain false.
 The completed fan-out run did not enable these probes. Do not backfill its
 receipt with later samples or claim it measured these resources. Future runs
 can collect these diagnostics to inform the separately required admission work.
+
+## Retained draft reference executions
+
+The [explicit reference capture](../../eval/reports/m12-reference-explicit-development-2026-10-04/README.md)
+and [fan-out reference capture](../../eval/reports/m12-reference-fanout-development-2026-10-04/README.md)
+retain 525/1,220 operations and 130/750 inert receipts respectively. Both replay
+semantically and through the sink, with clean recorded harness hashes matching
+44d578fa. These are draft reference outputs, not additional candidate runs.
+The reference remains unadmitted; no calibration or superiority claim is made.

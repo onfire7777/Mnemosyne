@@ -68,3 +68,16 @@ def test_reference_failure_retains_completed_operations_without_exception_text(t
     assert len((output / 'operations.jsonl').read_text().splitlines()) == 2
     assert 'sensitive-content' not in (output / 'status.json').read_text()
     assert not (output / 'reports.json').exists()
+
+
+@pytest.mark.parametrize('name,count', [('explicit', 130), ('fanout', 750)])
+def test_retained_committed_source_reference_capture_replays(name, count):
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / 'eval/reports' / f'm12-reference-{name}-development-2026-10-04'
+    result = action_reference_run.recompute(root)
+    assert result['reference_id'] == action_reference_run.REFERENCE_ID
+    assert result['baseline_admitted'] is False and result['publishable'] is False
+    assert sum(c['report']['metrics']['true_positives'] for c in result['workload']['cases']) == count
+    assert all(c['report']['metrics']['false_positives'] == c['report']['metrics']['false_negatives'] == 0
+               for c in result['workload']['cases'])
