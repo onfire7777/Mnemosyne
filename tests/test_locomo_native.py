@@ -1,4 +1,5 @@
 """Synthetic native capture tests through the public subprocess boundary."""
+from hashlib import sha256
 import json
 from pathlib import Path
 
@@ -50,14 +51,16 @@ def test_native_capture_rejects_invalid_receipts_before_yield(monkeypatch, resul
 
 def response(answer="violet", abstained=False, reader=None):
     return {"answer": answer, "abstained": abstained,
-            "claims": [],
+            "claims": [] if abstained or not answer else [{"text": answer, "evidence_cids": ["cid"],
+                "spans": [{"cid": "cid", "start": 0, "end": len(answer),
+                           "slice_sha256": sha256(answer.encode()).hexdigest()}]}],
             "reader": {"grounded_reader": {"provider": "synthetic"}} if reader is None else reader,
             "hops": [{"retrieved_cids": ["cid", "cid"]}]}
 
 
 def test_native_timeout_cannot_become_correct_abstention():
     raw = response(None, True, {})
-    result = project_native_response(raw, sample("one")["qa"][0], {"cid": {"dialog_id": "D1:1"}})
+    result = project_native_response(raw, sample("one")["qa"][0], {"cid": {"dialog_id": "D1:1", "capture": {"content": "violet"}}})
     assert result["status"] == "incomplete-reader-execution"
     assert result["decoded_prediction"] is None
     assert result["raw_response"] == raw
@@ -66,7 +69,7 @@ def test_native_timeout_cannot_become_correct_abstention():
 
 def test_native_explicit_abstention_conversion_is_disclosed_and_raw_retained():
     raw = response(None, True)
-    result = project_native_response(raw, sample("one")["qa"][0], {"cid": {"dialog_id": "D1:1"}})
+    result = project_native_response(raw, sample("one")["qa"][0], {"cid": {"dialog_id": "D1:1", "capture": {"content": "violet"}}})
     assert result["decoded_prediction"] == "No information available"
     assert result["projection_policy"] == "native-explicit-abstention-v1"
     assert not result["runtime_custody_verified"]
@@ -76,7 +79,7 @@ def test_native_explicit_abstention_conversion_is_disclosed_and_raw_retained():
 
 def test_native_category5_uses_recorded_option_mapping():
     annotation = {"question": "Synthetic?", "answer": "distractor", "category": 5}
-    result = project_native_response(response("(b)"), annotation, {"cid": {"dialog_id": "D1:1"}},
+    result = project_native_response(response("(b)"), annotation, {"cid": {"dialog_id": "D1:1", "capture": {"content": "(b)"}}},
                                      choice_draw=0.75)
     assert result["decoded_prediction"] == "Not mentioned in the conversation"
     assert result["raw_response"]["answer"] == "(b)"
@@ -87,7 +90,7 @@ def test_native_category5_uses_recorded_option_mapping():
                                   {**response(), "hops": [{"retrieved_cids": ["foreign"]}]}])
 def test_native_projection_rejects_ambiguous_answers_and_foreign_evidence(raw):
     with pytest.raises(LoCoMoError):
-        project_native_response(raw, sample("one")["qa"][0], {"cid": {"dialog_id": "D1:1"}})
+        project_native_response(raw, sample("one")["qa"][0], {"cid": {"dialog_id": "D1:1", "capture": {"content": "violet"}}})
 
 
 def test_native_question_uses_read_only_public_boundary_and_retains_request(tmp_path, monkeypatch):
@@ -107,7 +110,7 @@ def test_native_question_uses_read_only_public_boundary_and_retains_request(tmp_
     store = tmp_path / "synthetic-store"
     store.write_text("synthetic transport test only")
     conversation = {"sample_id": "one", "tenant_id": "tenant-one", "cli": MnemoCLI(store=str(store)),
-                    "evidence": {"cid": {"dialog_id": "D1:1"}}}
+                    "evidence": {"cid": {"dialog_id": "D1:1", "capture": {"content": "violet"}}}}
     result = answer_captured_question(conversation, question, source["qa"][0])
     assert result["decoded_prediction"] == "violet"
     assert result["request"]["context"]["tenant_id"] == "tenant-one"
@@ -165,15 +168,14 @@ def test_native_claim_cannot_introduce_foreign_or_malformed_evidence(claim):
     raw = response()
     raw["claims"] = [claim]
     with pytest.raises(LoCoMoError):
-        project_native_response(raw, sample("one")["qa"][0], {"cid": {"dialog_id": "D1:1"}})
+        project_native_response(raw, sample("one")["qa"][0], {"cid": {"dialog_id": "D1:1", "capture": {"content": "violet"}}})
 
 
 def test_native_claim_must_cite_an_observed_retrieval():
     raw = response()
     raw["hops"] = []
-    raw["claims"] = [{"text": "violet", "evidence_cids": ["cid"], "spans": []}]
     with pytest.raises(LoCoMoError, match="retrieval trace"):
-        project_native_response(raw, sample("one")["qa"][0], {"cid": {"dialog_id": "D1:1"}})
+        project_native_response(raw, sample("one")["qa"][0], {"cid": {"dialog_id": "D1:1", "capture": {"content": "violet"}}})
 
 
 def test_native_replay_rebuilds_capture_request_and_projection(tmp_path, monkeypatch):
@@ -189,6 +191,10 @@ def test_native_replay_rebuilds_capture_request_and_projection(tmp_path, monkeyp
             request = json.loads(Path(path).read_text())
             raw = response()
             raw["hops"] = [{"retrieved_cids": [cid]}]
+            claim = raw["claims"][0]
+            claim["evidence_cids"] = [cid]
+            start = conversation["evidence"][cid]["capture"]["content"].index("violet")
+            claim["spans"][0].update(cid=cid, start=start, end=start + 6)
             return {"results": [{**raw, "question_id": request["question_id"]}]}
 
         monkeypatch.setattr(MnemoCLI, "eval_answer_batch", answer)
@@ -287,3 +293,40 @@ def test_native_sequence_prevalidates_before_any_capture(tmp_path, monkeypatch, 
     with pytest.raises(LoCoMoError):
         list(iter_native_answers(source, MnemoCLI(store=str(tmp_path / "unused")),
                                  caption_policy="exclude-caption", choice_draws={}))
+
+
+@pytest.mark.parametrize("fault", ["missing-claims", "answer-drift", "duplicate-citations",
+                                  "overlap", "unused-citation", "too-many-claims", "empty-text"])
+def test_native_claim_rendering_and_citation_structure(fault):
+    raw = response()
+    evidence = {cid: {"dialog_id": "D1:1", "capture": {"content": "violet"}}
+                for cid in ("cid", "unused")}
+    if fault == "missing-claims":
+        raw["claims"] = []
+    elif fault == "answer-drift":
+        raw["answer"] = "invented answer"
+    elif fault == "duplicate-citations":
+        raw["claims"][0]["evidence_cids"].append("cid")
+    elif fault == "overlap":
+        raw["claims"][0]["spans"] *= 2
+    elif fault == "unused-citation":
+        raw["claims"][0]["evidence_cids"].append("unused")
+    elif fault == "too-many-claims":
+        raw["claims"] *= 21
+    else:
+        raw["claims"][0]["text"] = ""
+    with pytest.raises(LoCoMoError):
+        project_native_response(raw, sample("one")["qa"][0], evidence)
+
+
+def test_native_synthesis_text_is_preserved_without_claiming_derivation_replay():
+    raw = response()
+    evidence = {"cid": {"dialog_id": "D1:1", "capture": {"content": "violet"}}}
+    quoted = project_native_response(raw, sample("one")["qa"][0], evidence)
+    assert quoted["claim_text_custody"] == ["exact-quoted-spans"]
+    raw["claims"][0]["text"] = raw["answer"] = "A derived synthetic answer"
+    derived = project_native_response(raw, sample("one")["qa"][0], evidence)
+    assert derived["status"] == "projected"
+    assert derived["decoded_prediction"] == "A derived synthetic answer"
+    assert derived["claim_text_custody"] == ["derived-text-unverified"]
+    assert not derived["runtime_custody_verified"]

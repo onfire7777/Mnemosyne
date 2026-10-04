@@ -1,4 +1,5 @@
 """Cross-interpreter replay uses synthetic responses, never a model or real data."""
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
@@ -29,8 +30,12 @@ def test_cross_environment_native_replay(tmp_path, monkeypatch):
 
     def answer(cli, path):
         request = json.loads(Path(path).read_text())
+        cid = next(iter(context["evidence"]))
+        start = context["evidence"][cid]["capture"]["content"].index("violet")
+        claim = {"text": "violet", "evidence_cids": [cid], "spans": [{"cid": cid,
+                 "start": start, "end": start + 6, "slice_sha256": sha256(b"violet").hexdigest()}]}
         return {"results": [{"question_id": request["question_id"], "answer": "violet",
-                             "abstained": False, "claims": [], "hops": [],
+                             "abstained": False, "claims": [claim], "hops": [{"retrieved_cids": [cid]}],
                              "reader": {"grounded_reader": {"provider": "synthetic"}}}]}
 
     monkeypatch.setattr(MnemoCLI, "eval_answer_batch", answer)
