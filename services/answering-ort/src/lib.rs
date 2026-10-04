@@ -1,4 +1,6 @@
 pub mod embed;
+#[cfg(feature = "onnx")]
+pub mod onnx_span;
 pub mod protocol;
 pub mod reader;
 pub mod rerank;
