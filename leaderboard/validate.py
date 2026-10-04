@@ -849,6 +849,38 @@ def validate_projection(projection: object, records: list[object]) -> list[str]:
     for field in _PROJECTION_REQUIRED_FIELDS:
         if field not in projection:
             errors.append(f"/{field}")
+    errors.extend(_unexpected_keys(
+        projection, (*_PROJECTION_REQUIRED_FIELDS, "weighting"), ""
+    ))
+    for field in ("projection_id", "uncertainty_method"):
+        if not _nonempty_string(projection.get(field)):
+            errors.append(f"/{field}")
+    if not isinstance(projection.get("filters"), dict):
+        errors.append("/filters")
+    exclusions = projection.get("exclusions")
+    if not isinstance(exclusions, list) or any(
+        not _nonempty_string(item) for item in exclusions
+    ):
+        errors.append("/exclusions")
+    for field in ("numerator", "denominator"):
+        if not _is_number(projection.get(field)):
+            errors.append(f"/{field}")
+    for field in _OUTCOME_COUNT_FIELDS.values():
+        value = projection.get(field)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            errors.append(f"/{field}")
+    if not isinstance(projection.get("safety_failures_visible"), bool):
+        errors.append("/safety_failures_visible")
+    weighting = projection.get("weighting")
+    if weighting is not None:
+        if not isinstance(weighting, dict):
+            errors.append("/weighting")
+        else:
+            errors.extend(_unexpected_keys(weighting, ("formula", "disclosed"), "/weighting"))
+            if "formula" in weighting and not _nonempty_string(weighting["formula"]):
+                errors.append("/weighting/formula")
+            if "disclosed" in weighting and not isinstance(weighting["disclosed"], bool):
+                errors.append("/weighting/disclosed")
     if projection.get("schema_version") != _PROJECTION_VERSION:
         errors.append("/schema_version")
     if projection.get("kind") != "exploratory":

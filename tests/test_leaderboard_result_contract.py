@@ -1372,3 +1372,26 @@ def test_projection_rejects_duplicate_source_selection_and_ambiguous_records() -
     assert '/source_record_ids' in validate_projection(
         _projection([record['record_id']]), [record, copy.deepcopy(record)]
     )
+
+
+@pytest.mark.parametrize(('field', 'value'), [
+    ('projection_id', ''), ('projection_id', 123),
+    ('filters', None), ('filters', []),
+    ('exclusions', 'hidden'), ('exclusions', ['']), ('exclusions', [1]),
+    ('numerator', True), ('numerator', float('nan')),
+    ('denominator', '4'), ('denominator', float('inf')),
+    ('uncertainty_method', ''), ('uncertainty_method', None),
+    ('missing_count', False), ('failed_count', 0.0),
+    ('safety_failures_visible', 0),
+    ('weighting', []), ('weighting', {'formula': ''}),
+    ('weighting', {'disclosed': 'yes'}), ('weighting', {'secret': 1}),
+])
+def test_projection_enforces_declared_field_types(field, value) -> None:
+    projection = _projection(['synthetic-v2-dev-001'], **{field: value})
+    errors = validate_projection(projection, [_v2_development_record()])
+    assert any(error == f'/{field}' or error.startswith(f'/{field}/') for error in errors)
+
+
+def test_projection_rejects_undeclared_fields() -> None:
+    projection = _projection(['synthetic-v2-dev-001'], hidden_override=True)
+    assert '/hidden_override' in validate_projection(projection, [_v2_development_record()])
