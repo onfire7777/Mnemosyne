@@ -18,6 +18,11 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+The [M12 acceptance evidence ledger](../docs/plans/m12-acceptance-evidence-2026-10-04.md)
+preserves every original requirement, including implicit/overloaded cases,
+reference calibration and measured resource admission. Bounded fan-out is now
+running with a pressure guard; it is not yet a completed result.
+
 The [recovery run with its durable inert sink](../eval/reports/m12-recovery-sink-development-2026-10-04/README.md)
 completed 360 operations and 50 injected response losses. Ten eligible firings
 produced ten receipts; ten deliberate delivery retries were duplicates. Exact

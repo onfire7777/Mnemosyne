@@ -99,10 +99,12 @@ contain the exception type and completed-operation count, never exception text
 that might contain a session token. Existing output directories are not reused.
 
 This small deterministic workload does not yet satisfy the full original M12
-corpus: overload, implicit intention formation, revision-keyed mutation recovery,
-calibrated reference comparison, measured resource/cost gates and admission remain
-open. The earlier public retry integration tests cover mutation response loss
-separately; they are not silently included in this workload's result. The
+corpus: overload, implicit intention formation, calibrated reference comparison,
+measured resource/cost gates and admission remain open. Revision-keyed mutation
+recovery now has a separate retained four-week capture, including a sink-enabled
+variant; those measurements are not silently included in this workload's result.
+The [acceptance evidence ledger](m12-acceptance-evidence-2026-10-04.md) maps each
+original requirement to current evidence and remaining work. The
 existing exact-time captures and registered benchmark formats remain unchanged.
 
 ## Versioned operation response-loss recovery
