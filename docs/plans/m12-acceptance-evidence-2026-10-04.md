@@ -17,9 +17,9 @@ replace the original specification or promote development evidence to admission.
 | Recovery and retry correctness | 360-operation capture: 50 response losses, 50 adapter resets, 10 eligible firings, 10 cancelled controls; 10 sink receipts and 10 deliberate duplicate deliveries | Local response loss is not arbitrary crash recovery or external-service exactly-once behavior |
 | Precision, recall, F1, false alarms, misses, lateness, duplicate execution, cancellation correctness and cost | Window scorer and per-case/per-load reports; sink attempt records | Cost remains unmeasured; extend full-corpus reports without pooling away load-specific failures |
 | Zero duplicate and cancelled-intention executions | No violations in retained development captures | Verify on full registered corpus; finite local success is not universal certification |
-| Preregistered absolute floor and non-inferiority to exact reference | Draft independent explicit-action reference and two retained five-seed executions; no calibrated/admitted baseline claim | Complete semantic review and broader recovery validation; calibrate on disjoint development data; freeze floor/margin before candidate ranking |
+| Preregistered absolute floor and non-inferiority to exact reference | Draft independent explicit-action reference with retained explicit, fan-out and durable recovery executions plus paired replay diagnostics; no calibrated/admitted baseline claim | Resolve the verified nested-condition policy difference and complete broader semantic/recovery validation; calibrate on disjoint development data; freeze floor/margin before candidate ranking |
 | At least five virtual-week seeds | Five-seed, four-week explicit and recovery captures | Retain same repeat/replay guarantees across full workload and adapters |
-| Measured resource admission | Current run has wall-time and macOS pressure guard | Measure specified RSS and disk as well as elapsed time; pressure=normal does not establish RSS <=4 GiB; 30 min/4 GiB/1 GiB remains a planning hypothesis |
+| Measured resource admission | Retained full fan-out resource observation: 304.701 seconds, 292 samples, maximum sampled RSS 88 MiB and logical files 3,913,523 bytes | Sampling is not certified peak RSS/disk or an enforced admission limit; 30 min/4 GiB/1 GiB remains a planning hypothesis |
 | Licensed pinned official variants | Development captures carry no official label | License and pin upstream PM-Bench/TriggerBench datasets and scorers before official evaluation |
 
 ## Capture custody
@@ -58,9 +58,15 @@ stop the monitored run and retain a monitor-error receipt rather than inventing
 zero usage. Neither diagnostic maximum populates the ABI's certified peak RSS
 field. `peak_rss_verified` and `admission_verified` remain false.
 
-The completed fan-out run did not enable these probes. Do not backfill its
-receipt with later samples or claim it measured these resources. Future runs
-can collect these diagnostics to inform the separately required admission work.
+The original c7a9d05a fan-out run did not enable these probes. Its receipt is
+unchanged. A [separate complete resource observation](../../eval/reports/m12-fanout-resource-development-2026-10-04/README.md)
+from clean source 421a1fcd now retains 292 samples: maximum sampled process-group
+RSS 88 MiB, maximum logical files 3,913,523 bytes and 304.701 monotonic seconds.
+All 1,220 operations and the sink annex replay; all 291 pressure samples are
+normal. Its temporary stores were inside the measured root. The host had 16 GiB
+physical memory. This establishes local execution of this bounded structured
+workload, not full-corpus admission or feasibility of model-heavy QA. The initial
+argument-validation failure is retained separately and supplies no workload metric.
 
 ## Retained draft reference executions
 

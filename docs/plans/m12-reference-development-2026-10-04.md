@@ -9,11 +9,13 @@ One object represents one isolated case. It emits semantic firing observations;
 it does not invent evaluation wall time, resource use, receipts or a system score.
 
 Current supported requests are explicit task creation, identical keyed creation
-retry, cancellation, forward-only injected clocks, transient event/condition
-input and observation. Exact-time, half-open window, event-match, equality
-condition and all-dependencies-completed triggers are implemented. JSON equality
-preserves bool/number distinctions. Dependencies must already exist, so creation
-cannot introduce a cycle. Each observation sees dependency completions from
+retry, inspection, revision-guarded override/cancellation/exact-time rescheduling,
+forward-only injected clocks, transient event/condition input and observation.
+Exact-time, half-open window, event-match, condition and all-dependencies-completed
+triggers are implemented. Conditions support `eq`, `ne`, `in`, `lt`, `lte`, `gt`
+and `gte`. Recursive JSON equality preserves bool/number distinctions; the
+verified difference from current product nested-value behavior is documented
+below. Dependencies must already exist, so creation cannot introduce a cycle. Each observation sees dependency completions from
 before that tick, not iteration-order-dependent same-tick completions.
 
 Exact-time interval recurrence supports a bounded occurrence count. An observation
@@ -36,19 +38,24 @@ existing full five-trigger and fan-out generators: resulting totals are 130 and
 750 respectively. This checks development consistency, not independence of the
 benchmark design or successful execution by a real memory system.
 
-## Remaining work before reference comparisons
+## Remaining work before admitted reference comparisons
 
 - Review/freeze timing policies, including missed recurrence, simultaneous
   dependencies, all condition operators and update semantics against the full
   public contract; expand hand-computed golden vectors and negative cases.
-- Implement revision-keyed update/cancel acknowledgements and recoverable durable
-  reference state; the current in-memory object is not recovery certification.
+- Extend the implemented revision-keyed mutations and durable journal beyond the
+  retained response-loss/reset workload where the full contract requires it.
+  Recurrence-policy mutation, non-exact rescheduling and arbitrary crash recovery
+  are not established by that development capture.
 - Define implicit-intent and actual overload fixtures without replacing inputs
   with expected schedules or tailoring the benchmark to this implementation.
-- Integrate the reference with the same sink and retained raw-operation protocol,
-  measuring actual execution/resources separately from semantic output.
-- Validate per-occurrence outcomes and exact replay, then calibrate on disjoint
-  data and preregister absolute floors/margins before any candidate ranking.
+- Preserve the implemented shared sink and raw-operation replay across the full
+  corpus; measure comparable execution boundaries and resources before latency
+  or resource comparisons. Existing explicit, fan-out and recovery captures are
+  development evidence, not an admitted baseline.
+- Extend existing per-occurrence and exact replay checks to new corpus cases;
+  calibrate on disjoint data and preregister absolute floors/margins before any
+  candidate ranking.
 
 Existing official protocols, registered fixture bytes, production APIs and
 BurnOS behavior are unchanged.
@@ -188,8 +195,9 @@ current product helper checks outer types then uses Python equality, which can
 treat nested booleans and numbers as equal, whereas the draft distinguishes them.
 The present retained workloads do not exercise that difference. Do not infer
 full semantic equivalence from their matched scores or silently change either
-side's results. Add explicit public-boundary vectors and settle the intended
-nested-value contract before admitting broader condition comparisons.
+side's results. The explicit public-boundary vectors below characterize that
+difference. Settle the intended nested-value contract before admitting broader
+condition comparisons.
 
 The [public condition boundary characterization](../../eval/reports/m12-condition-reference-boundary-2026-10-04.md)
 now confirms the nested bool/number difference through authenticated public CLI

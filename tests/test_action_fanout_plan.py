@@ -54,10 +54,14 @@ def test_real_first_week_fanout_delivers_all_types_once(tmp_path, monkeypatch):
         action_trigger_run.reports(changed, records)
 
 
-def test_retained_full_fanout_capture_replays_with_per_load_evidence():
+@pytest.mark.parametrize('capture', [
+    'm12-fanout-sink-development-2026-10-04',
+    'm12-fanout-resource-development-2026-10-04',
+])
+def test_retained_full_fanout_capture_replays_with_per_load_evidence(capture):
     from pathlib import Path
 
-    root = Path(__file__).resolve().parents[1] / 'eval/reports/m12-fanout-sink-development-2026-10-04'
+    root = Path(__file__).resolve().parents[1] / 'eval/reports' / capture
     result = action_trigger_run.recompute(root)
     for load, count in ((2, 50), (4, 100), (8, 200), (16, 400)):
         reports = [p['report'] for c in result['cases'] for p in c['by_load']

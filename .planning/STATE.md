@@ -18,6 +18,22 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+A [separate full fan-out resource observation](../eval/reports/m12-fanout-resource-development-2026-10-04/README.md)
+from 421a1fcd completed and replayed all 1,220 operations in 304.701 monotonic
+seconds. Its 292 samples recorded at most 88 MiB process-group RSS and 3,913,523
+logical file bytes, including temporary stores under the measured root. All
+pressure samples were normal. These sampled maxima are not certified resource
+admission and do not establish feasibility of model-heavy QA.
+
+The [draft reference plan](../docs/plans/m12-reference-development-2026-10-04.md)
+now includes explicit/fan-out sink execution, revision-guarded mutations and a
+scoped durable journal with a retained 360-operation recovery capture. Paired
+candidate/reference diagnostics replay identical plans and preserve per-case
+results; they are not calibrated non-inferiority decisions. The authenticated
+public condition regression confirms a nested boolean/number semantics difference
+that must be resolved before reference admission. Original implicit/overloaded
+corpus requirements and resource admission remain open.
+
 The [M12 acceptance evidence ledger](../docs/plans/m12-acceptance-evidence-2026-10-04.md)
 preserves every original requirement, including implicit/overloaded cases,
 reference calibration and measured resource admission. The [full bounded fan-out capture](../eval/reports/m12-fanout-sink-development-2026-10-04/README.md)
@@ -62,8 +78,12 @@ Public intention creation, updates and cancellation support opt-in, session-scop
 idempotency keys through CLI/MCP and all three engine implementations. New keyed
 updates and cancellations also require a current-state content revision;
 recognized retries never reapply the mutation. Creation returns its original
-acknowledgement; update and cancellation return current state. Local/SQLite regressions passed; live PostgreSQL
-verification is pending in the expanded CI job. The public adapter now forwards
+acknowledgement; update and cancellation return current state. Local/SQLite
+regressions passed. At `55ae2ef9`, CI run `37229007622`
+completed the live PostgreSQL job, including BurnOS session compatibility and
+prospective transitions/durable retries. The full unit-and-drift job was still
+in progress at the 2026-10-04 resource-capture checkpoint, so this evidence does
+not establish overall merge readiness. The public adapter now forwards
 keys/revisions and passes response-loss regressions after rebuilding its task
 map. Registered retry/recovery workload integration and full M12 admission
 remain open. See
