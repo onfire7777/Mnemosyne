@@ -26,20 +26,21 @@ model benchmark completed. Evaluator-only timing diagnostics now score complete
 probe sequences against labeled eligibility, retaining misses, false alarms,
 duplicates and cancellation violations. A saved-trace verifier now checks full
 protocol consistency, report recomputation and durable sink rows without running
-a provider. Independent reproduction and actual provider measurements remain open.
+a provider. Independent reproduction and complete provider measurements remain open.
 
 Formation execution now retains complete opt-in public schedule inspection and
 per-turn stored-state diagnostics. Extra/missing schedules, duplicate intentions,
 wrong timing and premature firing remain visible; clarification presence is not
 clarification quality. The execution artifact is v4 and the full benchmark remains
-unscored. No real-model formation result is claimed.
+unscored. No completed real-model formation benchmark is claimed.
 
 The formation development runner now accepts an explicitly configured bounded
 command provider and applies only allowed operations through the public action
 adapter. It retains incremental requests, raw responses, public outcomes and
-partial-failure status. Scripted command/public-CLI tests pass; no completed actual model
-quality or downstream firing result is claimed. Provider pinning/isolation,
-complete provenance admission and scoring remain open. New formation creations
+partial-failure status. Scripted command/public-CLI tests pass. The local model
+role checks the server-reported digest and offers plain JSON or schema-constrained
+output; neither establishes independent identity or isolation. Complete provenance
+admission, semantic policy and successful full-model measurement remain open. New formation creations
 now bind to public evidence CIDs of the available conversation prefix; keyed
 retries preserve the original creation CID within the adapter session. Mutation
 source context remains linked through ordered per-turn records.
@@ -48,9 +49,10 @@ The [natural-language formation corpus](../docs/plans/m12-implicit-formation-dev
 now contains 220 conversations with separate input/label files and incremental
 turn projection. Positive commitments, timing ambiguity, negatives, quoted
 instructions and multi-turn cancellation/rescheduling are represented. The
-current structured action adapter does not execute this corpus; no candidate
-score or implicit-formation capability is claimed. Public formation integration,
-firing evaluation and broader/held-out coverage remain open.
+public formation bridge can execute this corpus and diagnose stored state and
+firing timing. The first plain-JSON model attempt failed before its first task
+write; no completed candidate score or general implicit-formation capability is
+claimed. Broader/held-out coverage and full measured acceptance remain open.
 
 A [separate full fan-out resource observation](../eval/reports/m12-fanout-resource-development-2026-10-04/README.md)
 from 421a1fcd completed and replayed all 1,220 operations in 304.701 monotonic
