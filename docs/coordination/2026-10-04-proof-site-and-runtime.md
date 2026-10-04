@@ -261,3 +261,23 @@ This is shape enforcement, not proof that a declared numerator, denominator or
 uncertainty calculation is scientifically valid. No result schema, scorer,
 BurnOS interface or public benchmark result changed. Dataset/model/resource
 comparison metadata and reproducible grouping remain the next platform work.
+
+## Mnemetric naming rollout
+
+The local website now uses Mnemetric in every generated page title and header,
+with “Evidence for AI memory” on the homepage. Coverage and methods identify
+our suite as the Mnemetric Whole-Memory Benchmark and distinguish it from hosted
+upstream benchmarks. The naming rationale and preliminary collision search are
+recorded in `docs/plans/benchmark-platform-naming-2026-10-04.md`. Technical
+identifiers, signed registration bytes and BurnOS interfaces are unchanged.
+All 87 rendering/publication checks passed after updating the expected display
+title; Ruff and diff checks passed. Real-browser homepage and coverage were
+verified; screenshots are retained in the ignored completion directory as
+`mnemetric-home-preview.png` and `mnemetric-preview.png`. This is a local preview,
+not a public deployment.
+
+The registered 500-question retrieval run is now executing under the resource
+guard. Its exclusive signed start is outside the repository in the registered
+run root. Session 66073 must be polled rather than restarted. Terminal evidence,
+bundle verification/reproduction and the signed attempt ledger remain required.
+No measured score is asserted by this naming change.
