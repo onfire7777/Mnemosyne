@@ -250,6 +250,15 @@ def test_native_sequence_preserves_full_population_and_stops_without_retry(tmp_p
     assert [row["question_id"] for row in records] == [row["question_id"] for row in questions]
     assert calls == [row["question_id"] for row in questions]
     assert all(not store.exists() for store in stores)
+    calls.clear()
+    stores.clear()
+    interrupted = iter_native_answers(source, MnemoCLI(store=str(tmp_path / "untouched")),
+                                      caption_policy="exclude-caption", choice_draws=draws)
+    next(interrupted)
+    assert stores and all(store.exists() for store in stores)
+    interrupted.close()
+    assert len(calls) == 1
+    assert all(not store.exists() for store in stores)
 
 
 @pytest.mark.parametrize("fault", ["missing-draw", "long-query"])

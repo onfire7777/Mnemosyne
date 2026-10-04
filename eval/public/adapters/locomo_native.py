@@ -24,6 +24,8 @@ def iter_native_answers(samples: object, cli: MnemoCLI, *, caption_policy: str,
     The caller must admit the data/runtime and persist each yielded record in
     its attempt ledger. An exception stops the attempt without retries or an
     invented completion result. No source question is silently truncated.
+    Consumers that may stop early must use contextlib.closing on this iterator
+    or call close() explicitly to release the capture stores immediately.
     """
     source = split_samples(samples)
     normalize_dialogs(samples, caption_policy=caption_policy)
