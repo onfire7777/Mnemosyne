@@ -703,3 +703,15 @@ round trips, no-overwrite, common-verifier rejection, result/trace/inventory
 tampering, symlinks, secret-like data, bounded reads and failed-write cleanup.
 Ruff, diff whitespace and workflow YAML parsing passed. GitHub CI on the new
 head is still required; no native Windows disk-package result is claimed.
+
+### Package verification race correction
+
+Review found that a package could change after its initial bounded snapshot
+while the isolated scorer ran. Three regression cases (content mutation,
+replacement with identical bytes, and an added file) failed against the first
+implementation. Verification now compares retained directory/file identities,
+sizes and nanosecond modification/change times again after replay, and repeats
+link/inventory checks before returning success. Access-time changes from normal
+reads are excluded. All 12 disk-package checks now pass; Ruff and diff whitespace
+checks pass. This is a local consistency check, not a lock against mutations
+made after verification returns or an immutable external-custody guarantee.
