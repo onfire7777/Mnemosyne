@@ -190,3 +190,9 @@ The present retained workloads do not exercise that difference. Do not infer
 full semantic equivalence from their matched scores or silently change either
 side's results. Add explicit public-boundary vectors and settle the intended
 nested-value contract before admitting broader condition comparisons.
+
+The [public condition boundary characterization](../../eval/reports/m12-condition-reference-boundary-2026-10-04.md)
+now confirms the nested bool/number difference through authenticated public CLI
+requests for `eq`, `ne` and `in`, with scalar and exact-value controls. The
+regression records both outcomes explicitly. It does not alter the product or
+retroactively assign a preferred policy to prior captures.
