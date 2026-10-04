@@ -72,7 +72,7 @@ def _assert_leaderboard_site(output: Path, record_id: str) -> Path:
     index = index_path.read_text(encoding="utf-8")
     assert index.startswith("<!doctype html>")
     assert "<html" in index
-    assert "<title>Leaderboard · OpenMemBench</title>" in index
+    assert "<title>Leaderboard · Mnemetric</title>" in index
     assert "<h1>Memory benchmarks, with evidence.</h1>" in index
     assert html.escape(record_id) in index
 

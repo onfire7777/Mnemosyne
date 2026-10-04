@@ -145,7 +145,7 @@ def _page(title: str, body: str, root: str = "") -> str:
         "<!doctype html>\n"
         '<html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
-        f"<title>{_escape(title)} · OpenMemBench</title>"
+        f"<title>{_escape(title)} · Mnemetric</title>"
         "<style>"
         ":root{color-scheme:light;--ink:#0c1938;--muted:#59667c;--line:#cbd3df}"
         "*{box-sizing:border-box}body{margin:0;background:#fff;color:var(--ink);"
@@ -182,7 +182,7 @@ def _page(title: str, body: str, root: str = "") -> str:
         "th,td{padding:12px}table{min-width:540px}.empty{padding:40px 18px}"
         ".empty-results{min-width:0}.empty-results thead{display:none}}"
         "</style></head><body>\n"
-        f'<header><a class="brand" href="{root}index.html">OpenMemBench</a>'
+        f'<header><a class="brand" href="{root}index.html">Mnemetric</a>'
         f'<nav aria-label="Main"><a href="{root}index.html">Results</a>'
         f'<a href="{root}benchmarks.html">Benchmarks</a><a href="{root}coverage.html">Coverage</a>'
         f'<a href="{root}systems.html">Systems</a>'
@@ -385,7 +385,7 @@ def _render_pages(
     pages[Path("index.html")] = _page(
         "Leaderboard",
         '<h1>Memory benchmarks, with evidence.</h1>'
-        '<p class="intro">Compare measured results. Inspect the traces behind every number.</p>'
+        '<p class="intro">Evidence for AI memory. Compare measured results and inspect the traces behind every number.</p>'
         '<p><a href="benchmarks.html">Explore benchmark families</a> · '
         '<a href="coverage.html">See the whole-memory coverage map</a></p>'
         '<section aria-labelledby="results-heading"><h2 id="results-heading">Results</h2>'
@@ -418,6 +418,9 @@ def _render_pages(
         'non-publishable development records. Rendering does not approve publication. '
         'Public release requires the signed ledger, registered experiment, reproducible '
         'bundle, permitted assets and governance evidence to pass the separate release gates.</p>'
+        '<h2>About the name</h2><p>Mnemetric (neh-MET-rik) combines memory with measurement. '
+        'The platform hosts multiple benchmarks; our own suite is the Mnemetric Whole-Memory '
+        'Benchmark. Each upstream benchmark retains its own name and methods.</p>'
         '<h2>Who operates this site</h2><p>Mnemosyne is the operator entry. The project '
         'must run supported competitors under the same disclosed protocol, retain failed '
         'attempts, and explain missing systems. Operator-run does not mean independent '

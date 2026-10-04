@@ -54,7 +54,8 @@ def coverage_body(catalog: dict) -> str:
     return (
         '<h1>What complete memory needs to prove</h1>'
         '<p class="intro">24 capabilities. 20 modules. Evidence for how they work together.</p>'
-        '<div class="prose"><p>This is the scope of the benchmark program, '
+        '<div class="prose"><p>The Mnemetric Whole-Memory Benchmark is our own suite within '
+        'this multi-benchmark platform. This is the scope of the benchmark program, '
         'not a measured system score. It does not certify Mnemosyne or any other system. '
         'Per-system support and quality need separately verified adapters and runs.</p>'
         f'<p>Reviewed {escape(catalog["reviewed_at"])}. '

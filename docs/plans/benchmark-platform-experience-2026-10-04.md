@@ -5,6 +5,8 @@ Parent: [full original-plan scope audit](benchmark-platform-scope-audit-2026-10-
 Authority: Plan B L1–L4 and WMBS §§7, 9.5, 9.6, 15. This contract describes
 the product surface those plans deferred; it changes no scorer or acceptance gate.
 
+Naming direction: [Mnemetric platform and whole-memory suite](benchmark-platform-naming-2026-10-04.md). Existing technical identifiers remain unchanged.
+
 ## Main experience
 
 The homepage is a benchmark workspace. Its first choices are the benchmark,
