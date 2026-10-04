@@ -61,6 +61,8 @@ a weak category.
 
 ## Phase 1 — Conversational + agent-experience adapters
 
+Current LoCoMo prerequisite review: [pinned source and protocol intake](../../plans/locomo-upstream-intake-2026-10-04.md). Category-specific scoring and missing-context recall behavior require explicit parity work; the adapter remains open.
+
 - [ ] LoCoMo adapter (deterministic where possible; disclose judge).
 - [ ] LongMemEval-V2 adapter over the W3 working/prospective planes; report the
   five categories separately; target ≥72.5% at lower latency than the baseline.
