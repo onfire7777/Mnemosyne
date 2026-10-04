@@ -30,6 +30,36 @@ This projection contains no action payload, secret or private engine field.
 
 ## Descriptive scorer
 
+### Optional inert delivery sink
+
+The runner's `--sink` variant sends every firing observation to a
+harness-owned SQLite sink, then deliberately retries that delivery once.
+This addition has its own `m12-inert-sink-annex/v1` schema and does not change
+the fixed timing workload or the existing timing report. A new run UUID plus
+case, tenant, session, intention ID and occurrence identify each receipt;
+the action ID is bound content. These scope values come from the trusted
+harness case, not a candidate-selected destination.
+
+SQLite transactions commit the receipt and delivery attempt together. The
+database retains one receipt and every attempt, classified as accepted,
+duplicate or conflict. A repeated identity with changed action content is
+a conflict. Candidate-observation attempts and intentional harness-retry
+attempts remain separate. Sink deduplication never removes a duplicate from
+the original timing observations or suppresses the scorer's duplicate count.
+Snapshots read receipts and attempts within one read transaction.
+
+The sink stores only inert action IDs, never executes payloads, and rejects
+foreign database formats. Reopening preserves identities; concurrent delivery
+and injected transaction failure are covered by regressions. The JSON annex
+is checked against saved firing observations using a temporary sink during
+recomputation. This is not cryptographic database authentication, power-loss
+certification or proof of external side-effect delivery. The original
+SQLite file remains local evidence. Public schedule/update request revisions
+and idempotency, calibrated baselines, full trigger coverage and admission
+remain separate unmet requirements.
+
+### Timing formulas
+
 `eval.public.action_timing.score_exact_time(expected, ticks)` consumes one
 isolated case. All rows use a closed schema; each list and the total number of
 observed firings are bounded at 10,000. Expected occurrences have exactly

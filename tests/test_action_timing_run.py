@@ -1,6 +1,7 @@
 import json
 import random
 import shutil
+from pathlib import Path
 
 import pytest
 
@@ -22,7 +23,7 @@ def test_plan_is_stable_and_does_not_consume_ambient_randomness():
 @pytest.fixture(scope="module")
 def completed(tmp_path_factory):
     output = tmp_path_factory.mktemp("timing") / "run"
-    result = run_development(output)
+    result = run_development(output, with_sink=True)
     return output, result
 
 
@@ -42,11 +43,18 @@ def test_real_public_run_recomputes_all_five_cases(completed):
         assert report["evaluation_command_wall_ms"] > 0
     status = json.loads((output / "status.json").read_text())
     assert status == {"status": "completed", "completed_operations": 145, "publishable": False}
+    annex = json.loads((output / "sink.json").read_text())
+    for case in annex["cases"]:
+        assert len(case["snapshot"]["receipts"]) == 6
+        attempts = case["snapshot"]["attempts"]
+        assert len(attempts) == 12
+        assert sum(row["outcome"] == "accepted" for row in attempts) == 6
+        assert sum(row["origin"] == "harness-retry" and row["outcome"] == "duplicate" for row in attempts) == 6
     with pytest.raises(FileExistsError):
         run_development(output)
 
 
-@pytest.mark.parametrize("change", ["omit", "clock", "report", "plan"])
+@pytest.mark.parametrize("change", ["omit", "clock", "report", "plan", "sink"])
 def test_recompute_rejects_missing_or_inconsistent_evidence(completed, tmp_path, change):
     original, _ = completed
     output = tmp_path / "run"
@@ -65,10 +73,15 @@ def test_recompute_rejects_missing_or_inconsistent_evidence(completed, tmp_path,
         value = json.loads(path.read_text())
         value["cases"][0]["report"]["duplicate_observations"] = False
         path.write_text(json.dumps(value), encoding="utf-8")
-    else:
+    elif change == "plan":
         path = output / "plan.json"
         value = json.loads(path.read_text())
         value["cases"][0]["expected"].pop()
+        path.write_text(json.dumps(value), encoding="utf-8")
+    else:
+        path = output / "sink.json"
+        value = json.loads(path.read_text())
+        value["cases"][0]["snapshot"]["attempts"].pop()
         path.write_text(json.dumps(value), encoding="utf-8")
     with pytest.raises(ValueError):
         recompute(output)
@@ -96,3 +109,9 @@ def test_failed_run_retains_partial_operations_without_exception_secrets(tmp_pat
     assert all("sensitive exception text" not in path.read_text() for path in output.iterdir())
     with pytest.raises(ValueError, match="did not complete"):
         recompute(output)
+
+
+def test_pre_sink_saved_capture_still_recomputes():
+    root = Path(__file__).resolve().parents[1]
+    result = recompute(root / "eval/reports/m12-exact-time-development-2026-10-04")
+    assert len(result["cases"]) == 5
