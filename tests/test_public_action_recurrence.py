@@ -1,4 +1,6 @@
 from pathlib import Path
+from datetime import UTC, datetime, timedelta
+import random
 
 import pytest
 
@@ -41,3 +43,44 @@ def test_invalid_explicit_recurrence_rejected_by_public_cli(tmp_path: Path) -> N
             "trigger": {"type": "exact_time", "payload": {"at": "2026-01-01T12:00:00Z"}},
             "recurrence_policy": {"type": "interval", "interval_seconds": 0},
         })
+
+
+@pytest.mark.parametrize("seed", [7, 19, 41, 73, 101])
+def test_weekly_recurrence_survives_delayed_polls_and_midstream_cancellation(tmp_path, seed):
+    """Real public subprocesses; seeded timing controls, not a full M12 corpus.
+
+    Poll delays are harness inputs, not measured scheduler latency. This checks
+    that delayed observations do not shift the next occurrence, duplicate a
+    firing, or revive a cancelled recurring intention.
+    """
+    rng = random.Random(seed)
+    start = datetime(2030, 1, 1, tzinfo=UTC) + timedelta(
+        days=rng.randrange(730), seconds=rng.randrange(86400),
+    )
+    cli = ActionCLI(MnemoCLI(store=str(tmp_path / "unused.json"), timeout_s=30))
+    scope = {"store": str(tmp_path / "memory.json"), "tenant_id": "tenant", "session_id": "session"}
+
+    def stamp(now):
+        return now.isoformat().replace("+00:00", "Z")
+
+    def poll(now):
+        cli.run("clock.inject", scope, {"now": stamp(now)})
+        return cli.run("intention.query", scope, {})["action_ids"]
+
+    for name in ("keep", "cancel"):
+        cli.run("task.create", scope, {
+            "task_id": name, "action_id": name,
+            "trigger": {"type": "exact_time", "payload": {"at": stamp(start)}},
+            "recurrence_policy": {"type": "interval", "interval_seconds": 604800, "max_occurrences": 4},
+        })
+    delays = [0, 60, 300, 86400]
+    rng.shuffle(delays)
+    for index, delay in enumerate(delays):
+        due = start + timedelta(weeks=index)
+        assert poll(due - timedelta(seconds=1)) == []
+        observed_at = due + timedelta(seconds=delay)
+        assert poll(observed_at) == (["cancel", "keep"] if index < 2 else ["keep"])
+        assert poll(observed_at) == []
+        if index == 1:
+            cli.run("task.update", scope, {"type": "cancel", "task_id": "cancel"})
+    assert poll(start + timedelta(weeks=4)) == []

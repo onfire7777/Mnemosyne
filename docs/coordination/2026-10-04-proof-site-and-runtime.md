@@ -5,6 +5,15 @@ preparation; it does not close those deliverables or replace Plans A/B.
 
 ## Implemented and checked
 
+Latest action continuation: the preceding offline-tokenizer turn made progress
+at `b8a8dc7a`. The [M12 follow-up](../../eval/reports/m12-action-observation-integrity-2026-10-04.md)
+fixes a real observation-integrity bug: the public adapter silently deduplicated
+firing evidence before the benchmark could reject it. Two regressions prove
+the fix, and five seeded four-week real-CLI cases cover delayed polling,
+duplicate polling, cancellation and termination. Validation and the one fixed
+stale documentation assertion are recorded in the report. Lateness magnitude
+and cost remain unimplemented; no registered result or acceptance gate changes.
+
 Latest continuation: the preceding website turn made verified progress
 (`4f240e36`, clearer benchmark-coverage example, live page checked, 54 rendering
 tests passed). This turn advances the Plan A S1 / native-run context prerequisite:

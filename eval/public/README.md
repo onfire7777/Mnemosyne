@@ -56,9 +56,9 @@ uv run --locked mneme eval-public --suite triggerbench-development --out-dir /tm
 repository-authored fixtures into authenticated `intention-schedule`,
 `intention-update`, `intention-cancel`, and `intention-evaluate` subprocess
 commands, and route the fixtures' time, event, and condition observations
-through the production evaluator's `intention-evaluate` arguments. Selection is
-the evaluator-side intersection of the production evaluator's fired data-only
-action IDs with the available opaque IDs; the harness never executes or exposes
+through the production evaluator's `intention-evaluate` arguments. Selection
+filters the production evaluator's fired data-only action IDs against the
+available opaque IDs while preserving duplicates for rejection; the harness never executes or exposes
 an action payload or fixture gold, and it fails closed on missing auth, scope
 mismatch, gold leakage, payload execution, or unsupported semantics.
 
@@ -73,6 +73,15 @@ Lateness is scored only as a binary `late` safety counter,
 which is zero on both committed fixtures because they are easy rather than
 because the counter is inert; neither suite measures lateness magnitude or
 cost.
+
+The adapter preserves duplicate firing observations so the benchmark's existing
+duplicate-ID check can reject them; it must not normalize a duplicate execution
+into a successful single action. Separate public-subprocess regressions use five
+seeded calendars over four virtual weeks, with weekly recurrence, delayed polls,
+same-time retries, a midstream cancellation and a surviving control intention.
+These are implementation regressions, not expanded registered fixtures or an
+admitted M12 result. Injected poll delays do not measure real scheduler latency,
+and no external action payload or production scheduler runs in these tests.
 
 ### M13 working memory
 
