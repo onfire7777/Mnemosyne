@@ -1,9 +1,9 @@
 # Answering ORT sidecar skeleton
 
 `answering-ort` is a bounded, local-only Rust sidecar skeleton for future ONNX
-embed, rerank, and grounded-read inference. It does not yet load an ONNX model,
-produce model outputs, or establish parity with another runtime. Requests
-therefore fail closed with `runtime_unavailable`.
+embed, rerank, and grounded-read inference. The default server has no configured
+model session and fails closed with `runtime_unavailable`. An optional native
+span-tensor execution layer is described below; it is not yet a served reader.
 
 ## Build and validate
 
@@ -94,3 +94,49 @@ owned by the service account so another local user cannot replace its path.
 This crate is a transport, protocol, and resource-configuration placeholder.
 The validation commands above test those properties only; they do not provide
 measured quality, memory, latency, model parity, or production-readiness evidence.
+
+## Optional native span-tensor execution
+
+The `onnx` Cargo feature adds `onnx_span::OnnxSpanSession`, using pinned
+`ort = 2.0.0-rc.13` and an explicitly installed ONNX Runtime 1.28 library. Default
+builds still have no ONNX dependency and the server remains unconfigured. This
+is the tensor-execution step of W5, not a promoted `GroundedReader` backend.
+
+The adapter verifies the supplied graph's SHA-256 before loading, allows at most
+1 GiB of model bytes, and enforces batch one with 1–512 tokens. Its graph ABI is
+INT64 `input_ids` and `attention_mask`, optional INT64 `token_type_ids`, and exactly
+two FLOAT32 outputs: `start_logits` and `end_logits`, both shaped `[1, tokens]`.
+It rejects invalid masks, unexpected inputs/outputs, incorrect shapes and NaN/Inf.
+CPU arena allocation, memory patterns and parallel graph execution are disabled;
+intra-op threads use the existing physical-core clamp (maximum two), inter-op one.
+
+The caller supplies already tokenized inputs. Tokenizer/window/offset custody,
+answer-type and supporting-fact heads, calibrated no-answer decoding, real model
+selection, authenticated serving integration, and physical resource admission
+remain unfinished. Model loading is from bytes, **not memory-mapped**. The byte
+limit is not a peak-RSS guarantee. Deadline checks reject expired requests and
+late results; native cancellation is not implemented here. Integration must use
+the existing outer `Runtime` timeout/capacity boundary. Never advertise this
+low-level method alone as a hard-interrupt deadline.
+
+A 314-byte synthetic graph exercises real native execution without learned
+weights. To reproduce in an isolated Python environment (no Python-core extras):
+
+```sh
+uv venv --python 3.11 /path/to/parity-venv
+uv pip install --python /path/to/parity-venv/bin/python onnx==1.18.0 onnxruntime==1.28.0
+/path/to/parity-venv/bin/python eval/compact_answering/onnx_span_parity.py /path/to/new-fixture
+ORT_DYLIB_PATH=/absolute/path/to/libonnxruntime \
+MNEMOSYNE_ONNX_PARITY_FIXTURE=/path/to/new-fixture \
+cargo test --manifest-path services/answering-ort/Cargo.toml --features onnx \
+  --test onnx_span -- --include-ignored
+```
+
+Use the actual platform library filename installed by the pinned runtime, e.g.
+`libonnxruntime.1.28.0.dylib` on this Mac. No runtime/model download is performed
+by the Rust adapter. Without explicit integration prerequisites the real test is
+ignored, not passed. Reference cases cover lengths 1/64/128/384/512 and padding;
+additional graphs exercise segment IDs, extra outputs, short outputs and NaN/Inf.
+This is exact tensor parity only, not decoded-answer parity or measured QA quality.
+The earlier 1.22.1 / rc.10 trial matched tensors but aborted during native teardown;
+that configuration is not the supported development pin.

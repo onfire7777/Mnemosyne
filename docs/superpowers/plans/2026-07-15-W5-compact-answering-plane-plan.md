@@ -11,6 +11,23 @@
 
 Source inspection at `3c21be5d`; historical instructions below describe the original execution contract, not a request to repeat landed work. The compact acceptance harness exists in `eval/compact_answering/acceptance.py` and Phase 15 S4 records explicit missing physical evidence. Model selection, sidecar promotion, production parity and physical 8 GiB Windows/Linux acceptance remain open. Receipt files are not proof of a successful physical acceptance run.
 
+### Native execution checkpoint — 2026-10-04
+
+The default sidecar is still a fail-closed skeleton, not a working learned
+reader. An opt-in Rust ONNX span-tensor adapter now loads digest-checked local
+graph bytes and executes a bounded batch-one transformer tensor ABI. A real
+314-byte synthetic graph matched Python ONNX Runtime at five input lengths;
+malformed-output and non-finite rejection checks also passed. The first native
+runtime configuration failed at process teardown; the replacement pin passed
+including clean process exit. See `services/answering-ort/README.md` for the
+exact reproduction command and limitations.
+
+Phase 1 remains incomplete: tokenizer/source-offset integration, complete
+multi-task decoding, actual encoder serving and end-to-end decoded parity are
+not established by tensor parity. Corpus decontamination, model bakeoffs,
+quantization and physical acceptance remain open. No protected data or learned
+weights were used, and candidate v19 / BurnOS behavior is unchanged.
+
 ## Goal
 
 Build the compact grounded-answering plane — embedder + cross-encoder reranker +

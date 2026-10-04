@@ -18,6 +18,16 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+W5 native tensor execution is now implemented behind the optional Rust `onnx`
+feature. A 314-byte synthetic graph has exact Rust/Python output parity for
+lengths 1/64/128/384/512, with clean process exit on ONNX Runtime 1.28.0 and
+ort rc.13. The earlier 1.22.1/rc.10 trial aborted at shutdown and is not a pass.
+This advances the missing execution layer, not learned QA, decoded-span parity
+or physical 8 GiB acceptance. Next: tokenizer/offset-preserving integration and
+complete reader decoding behind the existing bounded runtime; authorized
+TRAIN-only data preparation remains required before model selection.
+
+
 The paired v2 public-transport pressure capture at `d59949ed` completed and
 passed full source-bound replay: MCP stdio 320/320 correct, CLI 200/320 with
 120 missed short windows. Both recovered every exact-time intention and had
