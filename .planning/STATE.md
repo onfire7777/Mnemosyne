@@ -22,13 +22,14 @@ At `4a0e4c4c`, the Mnemetric comparison/coverage/attempt surfaces and real local
 retrieval preview are implemented; the single retrieval run has an exact
 nine-file clean-checkout reproduction. It is nonpublishable and not an official
 QA or multi-system comparison. Local combined platform/BurnOS/bundle regression
-checks passed 452 tests. The latest isolated LoCoMo checks passed 144 tests;
-48 production native/reader/replay tests and an additional cross-interpreter
-seeded-policy test passed.
+checks passed 452 tests. The latest isolated LoCoMo checks passed 145 tests;
+49 production native/reader/replay tests and the expanded 15-test reader/configuration
+suite passed.
 
 LoCoMo now includes ingestion, scoring, non-RAG prompt construction, a verified
 tokenizer, sequential native capture/answer execution, candidate-bound reader
-disclosure matching, explicit/seeded option ordering and isolated scorer replay.
+disclosure matching, explicit/seeded option ordering, native configuration binding
+and isolated scorer replay.
 These remain components, not an admitted complete native benchmark runner. The
 [neutral integration contract](../docs/plans/locomo-neutral-integration-contract-2026-10-04.md)
 separates upstream model baselines from public memory-system execution and lists

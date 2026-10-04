@@ -51,7 +51,7 @@ def test_cross_environment_native_replay(tmp_path, monkeypatch):
     saved.write_text(json.dumps(report))
     assert verify_report_in_environment(json.loads(saved.read_text()), [sample], [record], **kwargs) == report
     assert report["protocol"]["id"] == "mnemosyne.locomo-native-scoring/v1"
-    assert len(report["protocol"]["replay_source_sha256"]) == 9
+    assert len(report["protocol"]["replay_source_sha256"]) == 10
     for field, changed in (
         ("categories", {}), ("caption_policy", "include-source-caption"),
         ("protocol", {**report["protocol"], "scorer_dependencies": {}}),
@@ -75,6 +75,50 @@ def test_cross_environment_native_replay(tmp_path, monkeypatch):
     assert bound_record["reader_policy_matched"] and not bound_record["runtime_custody_verified"]
     bound_report = replay_in_environment([sample], [bound_record], reader_policy=policy, **kwargs)
     assert bound_report["reader_policy"] == policy
+
+    from copy import deepcopy
+    from eval.public.adapters.locomo_config import build_native_run_config, validate_native_run_config
+    from eval.public.adapters.locomo_native import iter_native_answers
+    config = build_native_run_config([sample], conversation["cli"], reader_policy=policy,
+              caption_policy="exclude-caption", choice_draws={},
+              runtime_manifest_sha256="1" * 64, resource_manifest_sha256="2" * 64)
+    config_digest = validate_native_run_config(config)
+    configured_record = answer_captured_question(conversation, split_samples([sample])["questions"][0],
+                        sample["qa"][0], reader_policy=policy, run_config=config)
+    assert configured_record["run_config_sha256"] == config_digest
+    configured_report = replay_in_environment([sample], [configured_record], reader_policy=policy,
+                                               run_config=config, **kwargs)
+    assert configured_report["run_config"] == config
+    assert configured_report["run_config_sha256"] == config_digest
+    assert not configured_report["runtime_custody_verified"]
+    assert verify_report_in_environment(configured_report, [sample], [configured_record],
+                        reader_policy=policy, run_config=config, **kwargs) == configured_report
+    for field in ("source_sha256", "normalized_sha256", "replay_protocol_sha256",
+                  "runtime_manifest_sha256", "resource_manifest_sha256"):
+        damaged = {**config, field: "f" * 64}
+        with pytest.raises(LoCoMoError, match="rejected replay"):
+            replay_in_environment([sample], [configured_record], reader_policy=policy,
+                                    run_config=damaged, **kwargs)
+    with pytest.raises(LoCoMoError, match="rejected replay"):
+        replay_in_environment([sample], [configured_record], reader_policy=policy, **kwargs)
+
+    def forbidden_capture(*args, **kwargs):
+        pytest.fail("configuration drift must fail before public capture")
+
+    monkeypatch.setattr(MnemoCLI, "capture_batch", forbidden_capture)
+    for fault in ("timeout", "flags", "source", "choice"):
+        damaged = deepcopy(config)
+        if fault == "timeout":
+            damaged["cli"]["timeout_seconds"] += 1
+        elif fault == "flags":
+            damaged["cli"]["global_flags_sha256"] = "0" * 64
+        elif fault == "source":
+            damaged["source_sha256"] = "0" * 64
+        else:
+            damaged["choice_policy"] = {"id": "python-random-source-order/v1", "seed": 1, "draws": {}}
+        with pytest.raises(LoCoMoError):
+            list(iter_native_answers([sample], conversation["cli"], caption_policy="exclude-caption",
+                    choice_draws={}, reader_policy=policy, run_config=damaged))
     with pytest.raises(LoCoMoError, match="rejected replay"):
         replay_in_environment([sample], [bound_record], **kwargs)
     changed = {**policy, "candidate_manifest_sha256": "f" * 64}

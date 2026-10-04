@@ -172,7 +172,8 @@ def score_prediction_set(samples: list[dict], predictions: list[dict]) -> dict:
 
 def replay_native_population(samples: list[dict], records: list[dict], *,
                              caption_policy: str, choice_draws: dict[str, float] | None = None,
-                             reader_policy: dict | None = None, choice_seed: int | None = None) -> dict:
+                             reader_policy: dict | None = None, choice_seed: int | None = None,
+                             run_config: dict | None = None) -> dict:
     """Verify native records and report every source question without ranking.
 
     QA scoring retains the pinned category scorer. Native evidence recall is
@@ -198,6 +199,11 @@ def replay_native_population(samples: list[dict], records: list[dict], *,
                 for row in samples}
     choice_policy = native_choice_policy(samples, choice_draws=choice_draws, choice_seed=choice_seed)
     choice_draws = choice_policy["draws"]
+    from .locomo_config import bind_native_run_config
+    run_config = deepcopy(run_config)
+    config_digest = (bind_native_run_config(run_config, samples, caption_policy=caption_policy,
+                    choice_policy=choice_policy, reader_policy=reader_policy)
+                    if run_config is not None else None)
     if not isinstance(records, list):
         raise LoCoMoError("native replay records must be a list")
     verified = {}
@@ -207,7 +213,7 @@ def replay_native_population(samples: list[dict], records: list[dict], *,
             raise LoCoMoError("native replay record IDs must be unique source questions")
         verified[qid] = _verify_prepared_native_record(
             contexts[questions[qid]["sample_id"]], annotations[qid]["source_index"], record,
-            choice_draw=choice_draws.get(qid), reader_policy=reader_policy)
+            choice_draw=choice_draws.get(qid), reader_policy=reader_policy, run_config_sha256=config_digest)
     groups = {str(i): {"source_count": 0, "scored_count": 0, "missing_count": 0,
                        "rounded_qa_sum": 0.0, "native_recall_sum": 0.0,
                        "native_recall_count": 0} for i in range(1, 6)}
@@ -245,7 +251,7 @@ def replay_native_population(samples: list[dict], records: list[dict], *,
     protocol = native_replay_protocol()
     return {"schema_version": "mnemosyne.locomo-native-replay/v1", "categories": groups,
             "protocol": protocol, "protocol_sha256": digest(protocol),
-            "reader_policy": reader_policy,
+            "reader_policy": reader_policy, "run_config": run_config, "run_config_sha256": config_digest,
             "cases": cases, "complete": all(row["complete"] for row in groups.values()),
             "source_population_complete": all(row["missing_count"] == 0 for row in groups.values()),
             "absent_categories": absent_categories,
@@ -269,6 +275,7 @@ def native_replay_protocol() -> dict:
     paths = (
         "eval/public/adapters/locomo.py", "eval/public/adapters/locomo_native.py",
         "eval/public/adapters/locomo_scoring.py", "eval/public/adapters/locomo_replay.py",
+        "eval/public/adapters/locomo_config.py",
         "eval/public/custody.py", "eval/public/derivation.py", "eval/public/reader_policy.py", "eval/harness/cli_driver.py", "src/mnemosyne/ids.py",
     )
     return {

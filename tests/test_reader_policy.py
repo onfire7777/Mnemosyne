@@ -64,3 +64,33 @@ def test_policy_matching_preserves_runtime_and_incomplete_boundaries(policy):
     raw["reader"] = {"unexpected": {}}
     with pytest.raises(LoCoMoError, match="policy"):
         project_native_response(raw, annotation, {}, reader_policy=policy)
+
+
+@pytest.mark.parametrize("fault", ["extra", "artifact", "timeout", "backend", "seed", "draw", "caption"])
+def test_native_run_config_rejects_malformed_declarations(policy, fault):
+    from eval.harness.cli_driver import MnemoCLI
+    from eval.public.adapters.locomo_config import build_native_run_config, validate_native_run_config
+    source = [{"sample_id": "synthetic", "conversation": {
+        "session_1_date_time": "Synthetic date", "session_1": [
+            {"speaker": "A", "text": "synthetic", "dia_id": "D1:1"}]},
+        "qa": [{"question": "Synthetic?", "category": 5, "answer": "distractor", "evidence": []}]}]
+    cli = MnemoCLI(store="unused", global_flags=["--embedding-api-key", "synthetic-secret"])
+    config = build_native_run_config(source, cli, reader_policy=policy, choice_seed=1,
+              caption_policy="exclude-caption", runtime_manifest_sha256="1" * 64, resource_manifest_sha256="2" * 64)
+    assert "synthetic-secret" not in json.dumps(config)
+    if fault == "extra":
+        config["runtime_verified"] = True
+    elif fault == "artifact":
+        config["runtime_manifest_sha256"] = "floating-tag"
+    elif fault == "timeout":
+        config["cli"]["timeout_seconds"] = True
+    elif fault == "backend":
+        config["cli"]["backend"] = "postgres"
+    elif fault == "seed":
+        config["choice_policy"]["seed"] = True
+    elif fault == "draw":
+        config["choice_policy"]["draws"][next(iter(config["choice_policy"]["draws"]))] = float("nan")
+    else:
+        config["caption_policy"] = "implicit"
+    with pytest.raises(LoCoMoError):
+        validate_native_run_config(config)
