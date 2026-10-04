@@ -89,3 +89,9 @@ actions produced ten inert receipts while cancelled controls remained unfired.
 Full trace/semantic/sink replay passed against recorded source fb6731fc. This
 closes the missing durable reference-workload execution step, not broad crash
 recovery, calibrated baseline approval or M12 admission.
+
+The paired diagnostic now also covers the retained candidate/reference recovery
+captures in `m12-paired-development-2026-10-04/recovery.json`. Both inputs replay
+before comparison; case-specific response-loss/reset counts are retained and
+observed metric differences are zero. The reference remains unadmitted and this
+is not the preregistered non-inferiority decision required for ranking.

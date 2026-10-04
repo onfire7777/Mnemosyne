@@ -7,6 +7,8 @@ import sys
 
 from eval.public.action_trigger_run import recompute as candidate_recompute
 from eval.public.action_reference_run import recompute as reference_recompute
+from eval.public.action_recovery_run import recompute as candidate_recovery_recompute
+from eval.public.action_reference_recovery import recompute as reference_recovery_recompute
 from eval.public.bundle import _canonical, _parse_json
 
 COUNTS = ('true_positives', 'false_positives', 'false_negatives')
@@ -42,8 +44,12 @@ def _pair(candidate, reference):
 def compare(candidate_dir, reference_dir):
     candidate_dir, reference_dir = Path(candidate_dir), Path(reference_dir)
     before = (_snapshot(candidate_dir), _snapshot(reference_dir))
-    candidate = candidate_recompute(candidate_dir)
-    reference = reference_recompute(reference_dir)
+    candidate_plan = _parse_json(before[0]['plan.json'].decode(), 'candidate plan')
+    if not isinstance(candidate_plan, dict):
+        raise ValueError('candidate plan must be an object')
+    recovery = candidate_plan.get('schema') == 'm12-operation-recovery-run/v1'
+    candidate = (candidate_recovery_recompute if recovery else candidate_recompute)(candidate_dir)
+    reference = (reference_recovery_recompute if recovery else reference_recompute)(reference_dir)
     if before != (_snapshot(candidate_dir), _snapshot(reference_dir)):
         raise ValueError('comparison artifacts changed during replay')
     plans = [_parse_json(snapshot['plan.json'].decode(), 'plan') for snapshot in before]
@@ -58,6 +64,11 @@ def compare(candidate_dir, reference_dir):
         raise ValueError('candidate and reference cases differ')
     for left, right in zip(candidate['cases'], reference_cases, strict=True):
         paired = {'case_id': left['case_id'], **_pair(left['report'], right['report'])}
+        if recovery:
+            paired['recovery_operations'] = {
+                field: {'candidate': left[field], 'draft_reference': right[field]}
+                for field in ('injected_response_losses', 'adapter_resets')
+            }
         if 'by_load' in left:
             paired['by_load'] = []
             for a, b in zip(left['by_load'], right['by_load'], strict=True):
