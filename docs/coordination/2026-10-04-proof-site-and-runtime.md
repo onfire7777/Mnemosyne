@@ -5,6 +5,23 @@ preparation; it does not close those deliverables or replace Plans A/B.
 
 ## Implemented and checked
 
+Latest continuation: the preceding website turn made verified progress
+(`4f240e36`, clearer benchmark-coverage example, live page checked, 54 rendering
+tests passed). This turn advances the Plan A S1 / native-run context prerequisite:
+the [offline Qwen diagnostic](../research/benchmark-intake/local-reader-reference-tokens-2026-10-04.md)
+matches actual model vocabulary, added IDs and ordered merges to a pinned
+reference and measures the unchanged probe's user/system message contents.
+Six actual-artifact tests passed in 1.69 seconds, including mismatch rejection.
+No model execution or production dependency change occurred. No acceptance
+target is lowered and no M07/M08 or official benchmark gate is closed.
+
+The specific live CI run `37225669534` was re-polled: nine gating jobs have
+succeeded and unit/drift remains in progress, currently in the test-suite step.
+It covers `762f12c8`, not subsequent local commits. Leave that run running;
+do not merge on partial checks. Next model-execution prerequisites remain
+effective context plus complete rendered-input coverage and a viable resource
+configuration. The full original platform/module slate remains in scope.
+
 The existing static renderer now supplies a responsive results table, explicit
 empty state, methods reading guide, and consistent result/trace navigation.
 Rows preserve record IDs, operator and publication disclosures, supplied
