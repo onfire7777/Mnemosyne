@@ -428,3 +428,7 @@ Verified the pinned 2,805,274-byte raw dataset against its Git blob SHA and reco
 ## Isolated scorer CI gate
 
 Added a ten-minute, synthetic-only LoCoMo conformance job to the existing CI workflow. It installs the complete hash-locked scorer/test dependency set into its own Python 3.11 environment and requires the pinned runtime before pytest, preventing skip-only success. Production dependencies and the existing workflow schedule are unchanged. Local hash-locked reinstall, runtime preflight and all 59 scorer/ingestion tests passed; all 40 planning-traceability tests passed. The new job is not claimed green on GitHub until the pending batch is pushed and executed.
+
+## M07 public-clock prerequisite characterization
+
+Reconciled stale N12/P14-B/P15-S2 predecessor claims against delivered source. Verified an existing public path using isolated `ingest`, queue enqueue and consolidation CLI processes: protected rehearsal states were false/true/false across before-due/due/after-due virtual dates, with persisted schedule and no model-backed roles. Added and passed a public-boundary regression plus a compact response-hash receipt. This is a one-item prerequisite probe, not M07 admission or a months-long benchmark. Global clock semantics, full fixture/scorer, resources and calibration remain unresolved.
