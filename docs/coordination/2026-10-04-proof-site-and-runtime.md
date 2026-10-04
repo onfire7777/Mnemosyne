@@ -806,3 +806,15 @@ recovery/timing check passed 55 tests; an added partial-failure/overwrite check
 also passed in the final 15-test recovery suite. A clean-source execution
 receipt will follow separately. CI `37225669534` remains live in unit/drift;
 no later local commit is certified by that earlier head.
+
+Recovery follow-up review exposed a shared payload-comparison defect: ordinary
+Python equality accepted a boolean signal rewritten as an integer, integer
+recurrence rewritten as a float, and an integer revision reference rewritten
+as a float. All three regressions failed before the fix. The exact-time,
+five-trigger and recovery validators now compare canonical JSON payloads;
+resolved recovery requests use the same exact comparison. Thirty-three focused
+checks passed, and all three prior retained captures replayed unchanged.
+This tightens evidence validation without changing input generation or the
+production API. The clean-source recovery run was already executing source
+`1fddb7d7`; its receipt must retain that actual source, while replay additionally
+applies these stricter checks.

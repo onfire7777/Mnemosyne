@@ -135,3 +135,11 @@ def test_failed_execution_retains_partial_log_without_error_secrets(tmp_path, mo
     assert all('sensitive-test-error' not in p.read_text() for p in output.iterdir())
     with pytest.raises(FileExistsError):
         run_development(output)
+
+
+def test_replay_requires_original_revision_reference_json_type():
+    plan, records = synthetic_trace()
+    update = next(r for r in records if 'expected_revision_from' in r['payload'])
+    update['payload']['expected_revision_from'] = float(update['payload']['expected_revision_from'])
+    with pytest.raises(ValueError):
+        reports(plan, records)

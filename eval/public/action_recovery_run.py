@@ -146,8 +146,8 @@ def reports(plan, records):
             }:
                 raise ValueError('invalid recovery record')
             if (record['case_id'] != case['case_id'] or type(record['step']) is not int or record['step'] != step
-                    or record['command'] != operation['command'] or record['payload'] != operation['payload']
-                    or record['resolved_payload'] != resolve_payload(operation, past)):
+                    or record['command'] != operation['command'] or _canonical(record['payload']) != _canonical(operation['payload'])
+                    or _canonical(record['resolved_payload']) != _canonical(resolve_payload(operation, past))):
                 raise ValueError('recovery record differs from plan or original revision')
             wanted = 'lost_response_after_success' if operation['lose_response'] else 'ok'
             if record['outcome'] != wanted:

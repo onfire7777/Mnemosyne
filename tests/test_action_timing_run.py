@@ -115,3 +115,14 @@ def test_pre_sink_saved_capture_still_recomputes():
     root = Path(__file__).resolve().parents[1]
     result = recompute(root / "eval/reports/m12-exact-time-development-2026-10-04")
     assert len(result["cases"]) == 5
+
+
+def test_replay_rejects_integer_recurrence_rewritten_as_float():
+    from eval.public.action_timing_run import _reports
+
+    root = Path(__file__).resolve().parents[1] / 'eval/reports/m12-exact-time-development-2026-10-04'
+    plan = json.loads((root / 'plan.json').read_text())
+    records = [json.loads(row) for row in (root / 'operations.jsonl').read_text().splitlines()]
+    records[0]['payload']['recurrence_policy']['max_occurrences'] = 4.0
+    with pytest.raises(ValueError):
+        _reports(plan, records)
