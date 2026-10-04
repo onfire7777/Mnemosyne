@@ -19,8 +19,10 @@ progress:
 ## Current local integration checkpoint — 2026-10-04
 
 The formation runner now retains twelve fixed public-input virtual probes per
-conversation and scoped inert receipts for every observed firing. No actual
-model run is claimed. Evaluator-only timing diagnostics now score complete
+conversation and scoped inert receipts for every observed firing. A real local
+Qwen3 0.6B attempt at clean 88a56f24 stopped on its first invalid response,
+before any task write; all three sampled pressure readings were normal. No
+model benchmark completed. Evaluator-only timing diagnostics now score complete
 probe sequences against labeled eligibility, retaining misses, false alarms,
 duplicates and cancellation violations. A saved-trace verifier now checks full
 protocol consistency, report recomputation and durable sink rows without running
@@ -35,7 +37,7 @@ unscored. No real-model formation result is claimed.
 The formation development runner now accepts an explicitly configured bounded
 command provider and applies only allowed operations through the public action
 adapter. It retains incremental requests, raw responses, public outcomes and
-partial-failure status. Scripted command/public-CLI tests pass; no actual model
+partial-failure status. Scripted command/public-CLI tests pass; no completed actual model
 quality or downstream firing result is claimed. Provider pinning/isolation,
 complete provenance admission and scoring remain open. New formation creations
 now bind to public evidence CIDs of the available conversation prefix; keyed
