@@ -1,0 +1,95 @@
+{
+  "artifacts": {
+    "attempt/pressure.jsonl": {
+      "bytes": 438,
+      "sha256": "8e7871aec0d95af9869a165868bc18bf7e6c09ce2a04dcf92237916ae93fbb8b"
+    },
+    "attempt/start.json": {
+      "bytes": 924,
+      "sha256": "e1a733f746c29ec2c8f6ce32b177d086598838c5dd271243987710aa203e5b8c"
+    },
+    "attempt/stderr.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "attempt/stdout.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "attempt/terminal.json": {
+      "bytes": 1047,
+      "sha256": "c123c26fbedb0d204cc2107a22a6bd0ce77363153af8e5092da96452176194f3"
+    },
+    "cleanup.json": {
+      "bytes": 301,
+      "sha256": "bf24ff0fd5ee0f1e7e451e3e6c081ae7316e708c9c0f272351a2f85e37b058bb"
+    },
+    "input.json": {
+      "bytes": 24158,
+      "sha256": "dfd8d31db70a6059a9d7dfc533164875bf09f74f23f9ce2ccb4535b6af4ec083"
+    },
+    "plan.json": {
+      "bytes": 1032,
+      "sha256": "35e483f874610e4f9246a2e4783d884d3e4ac88689d2d2eb7e15992afa213ec1"
+    }
+  },
+  "benchmark_verified": false,
+  "date": "2026-10-04",
+  "elapsed_seconds": 3.7802839579817373,
+  "evidence_characters": 24000,
+  "full_context_coverage_verified": false,
+  "input_sha256": "dfd8d31db70a6059a9d7dfc533164875bf09f74f23f9ce2ccb4535b6af4ec083",
+  "local_evidence_directory": "/Users/admin/.local/state/mnemosyne/model-preflights/2026-10-04T182650Z",
+  "model": "qwen3:8b",
+  "model_digest": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41",
+  "model_unloaded": true,
+  "post_pressure": 1,
+  "pressure_samples": [
+    {
+      "elapsed_seconds": 0.00035395799204707146,
+      "pressure": 1
+    },
+    {
+      "elapsed_seconds": 0.5091942909930367,
+      "pressure": 1
+    },
+    {
+      "elapsed_seconds": 1.022379165980965,
+      "pressure": 1
+    },
+    {
+      "elapsed_seconds": 1.5341444159857929,
+      "pressure": 1
+    },
+    {
+      "elapsed_seconds": 2.0427559579839,
+      "pressure": 1
+    },
+    {
+      "elapsed_seconds": 2.553773540974362,
+      "pressure": 1
+    },
+    {
+      "elapsed_seconds": 3.0678597079822794,
+      "pressure": 1
+    },
+    {
+      "elapsed_seconds": 3.611975249979878,
+      "pressure": 2
+    }
+  ],
+  "protected_data": false,
+  "purpose": "repeat unchanged synthetic feasibility probe after local test suite finished",
+  "reason": "memory-pressure",
+  "returncode": -15,
+  "schema": "mnemosyne.hardware-feasibility-receipt/v1",
+  "source_commit": "4c4c902129df2b9c018f3d63e9a02fcd5f2c0ee0",
+  "source_files": {
+    "eval/public/monitor.py": "d40d2d9bd20a2148afaf69a06d27e9a930b302125a4312f4679d927e1347c8ef",
+    "infra/providers/role-llm.py": "17c8764ba9863525be2dfcbedc32a1adfff656d18cd8a71d39e9307a90a981a2",
+    "src/mnemosyne/providers/grounded_protocol.py": "847c0a6ecc292693bf9c655c79080cf7e6e824edef70c9e5a827539c52f2cb88"
+  },
+  "status": "aborted",
+  "swap_after": "vm.swapusage: total = 2048.00M  used = 714.56M  free = 1333.44M  (encrypted)",
+  "swap_before": "vm.swapusage: total = 2048.00M  used = 714.56M  free = 1333.44M  (encrypted)"
+}
