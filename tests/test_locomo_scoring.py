@@ -123,3 +123,73 @@ def test_replay_rejects_ambiguous_prediction_population(mutation):
         outputs[0]["fabricated_score"] = 1
     with pytest.raises(LoCoMoError):
         score_prediction_set(source, outputs)
+
+
+def test_native_population_replays_missingness_empty_retrieval_and_tampering(tmp_path, monkeypatch):
+    from copy import deepcopy
+    from hashlib import sha256
+    import json
+    from pathlib import Path
+    from eval.harness.cli_driver import MnemoCLI
+    from eval.public.adapters.locomo import normalize_dialogs, split_samples
+    from eval.public.adapters.locomo_native import _capture_plan, answer_captured_question
+    from eval.public.adapters.locomo_scoring import replay_native_population
+
+    sample = {"sample_id": "synthetic", "conversation": {
+        "session_1_date_time": "Synthetic date", "session_1": [
+            {"speaker": "A", "text": "violet kite", "dia_id": "D1:1"}]},
+        "qa": [{"question": "Synthetic question?", "answer": "violet", "category": category,
+                "evidence": ["D1:1"] if category != 5 else []} for category in range(1, 6)]}
+    source = [sample]
+    questions = split_samples(source)["questions"]
+    tenant = "locomo:" + sha256(b"synthetic").hexdigest()
+    _, evidence = _capture_plan(normalize_dialogs(source, caption_policy="exclude-caption")["records"], tenant)
+    store = tmp_path / "synthetic-store"
+    store.write_text("synthetic transport; no engine or model execution")
+    conversation = {"sample_id": "synthetic", "tenant_id": tenant,
+                    "cli": MnemoCLI(store=str(store)), "evidence": evidence}
+
+    def answer(cli, path):
+        request = json.loads(Path(path).read_text())
+        return {"results": [{"question_id": request["question_id"], "answer": "violet",
+                             "abstained": False, "claims": [], "hops": [],
+                             "reader": {"grounded_reader": {"provider": "synthetic"}}}]}
+
+    monkeypatch.setattr(MnemoCLI, "eval_answer_batch", answer)
+    record = answer_captured_question(conversation, questions[0], sample["qa"][0])
+    draws = {questions[4]["question_id"]: 0.2}
+    report = replay_native_population(source, [record], caption_policy="exclude-caption", choice_draws=draws)
+    assert report["categories"]["1"]["qa_source_denominator_mean"] == 1
+    assert report["categories"]["1"]["native_observed_recall_mean"] == 0
+    assert report["categories"]["2"]["missing_count"] == 1
+    assert not report["complete"] and not report["publication_authorized"]
+    assert len(report["cases"]) == 5
+    corrupted = deepcopy(record)
+    corrupted["decoded_prediction"] = "changed"
+    for records in [[corrupted], [record, record]]:
+        with pytest.raises(LoCoMoError):
+            replay_native_population(source, records, caption_policy="exclude-caption", choice_draws=draws)
+    with pytest.raises(LoCoMoError, match="choice draws"):
+        replay_native_population(source, [record], caption_policy="exclude-caption", choice_draws={})
+    complete_records = [answer_captured_question(conversation, question, annotation,
+                        choice_draw=draws.get(question["question_id"]))
+                        for question, annotation in zip(questions, sample["qa"], strict=True)]
+    complete = replay_native_population(source, complete_records, caption_policy="exclude-caption", choice_draws=draws)
+    assert complete["complete"]
+    assert complete == replay_native_population(source, list(reversed(complete_records)),
+                                                caption_policy="exclude-caption", choice_draws=draws)
+    assert complete["categories"]["5"]["native_observed_recall_mean"] is None
+
+    def incomplete(cli, path):
+        request = json.loads(Path(path).read_text())
+        return {"results": [{"question_id": request["question_id"], "answer": None,
+                             "abstained": True, "claims": [], "hops": [], "reader": {}}]}
+
+    monkeypatch.setattr(MnemoCLI, "eval_answer_batch", incomplete)
+    failed = answer_captured_question(conversation, questions[4], sample["qa"][4], choice_draw=0.2)
+    failed_report = replay_native_population(source, [*complete_records[:4], failed],
+                                             caption_policy="exclude-caption", choice_draws=draws)
+    assert not failed_report["complete"]
+    assert failed_report["categories"]["5"]["missing_count"] == 1
+    assert failed_report["categories"]["5"]["scored_count"] == 0
+    assert failed_report["cases"][4]["status"] == "incomplete-reader-execution"

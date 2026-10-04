@@ -192,3 +192,31 @@ This establishes per-question internal consistency. A fully consistent forged
 response is not authenticated by recomputation: signed registration, original
 provider execution evidence, whole-population score replay and neutral bundle
 integration remain required. No benchmark or publication gate is closed here.
+
+## Native population score replay
+
+`locomo_scoring.replay_native_population` now verifies every supplied native
+record against its source question/capture and then recomputes per-category QA
+scores with the pinned scorer. Unknown/duplicate IDs, changed derived fields,
+and missing/extra category-5 choice draws are rejected. All source questions
+remain in the QA denominator; absent records and incomplete-reader execution
+retain explicit missing counts and null per-case scores. Record submission
+order does not change the report. Source and record-population digests are
+retained alongside caption policy and explicit choice draws.
+
+The new `mnemosyne.locomo-native-replay/v1` report intentionally separates
+`native_evidence_recall` from upstream retrieval reporting. It uses exact source
+dialog-ID membership, yields zero for an observed empty retrieval against
+nonempty evidence, and yields null for empty gold evidence. Its category mean
+includes only cases with an executed projection and applicable gold evidence;
+that count and missing QA count remain visible. No upstream fallback value of
+one is represented as observed retrieval. This is a disclosed native metric,
+not a retroactive change to the original upstream scorer.
+
+The combined isolated suite passed 103 tests. Extended population checks then
+passed all 26 scorer tests, covering all five categories, submission-order
+invariance, empty retrieval, no-gold applicability, timeout missingness,
+duplicate/tampered records and option-order custody. Ruff passed. The report
+keeps runtime custody and publication authorization false. It is offline
+structural/score replay, not signed execution evidence, registry admission,
+model-quality proof or a completed native adapter run.
