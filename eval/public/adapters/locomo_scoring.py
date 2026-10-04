@@ -98,3 +98,73 @@ def score_case(annotation: dict, prediction: str, *, retrieved_context: list[str
             "reported_upstream_recall": round(recall, 3),
             "measured_recall": recall if applicable else None,
             "recall_applicable": applicable, "upstream_revision": UPSTREAM_REVISION}
+
+
+def score_prediction_set(samples: list[dict], predictions: list[dict]) -> dict:
+    """Replay decoded predictions against a complete, explicit source population.
+
+    Missing outputs remain in denominators and case history. Upstream-style
+    aggregates are labeled separately from completeness and observed retrieval.
+    No aggregate across categories or publication eligibility is produced.
+    """
+    from hashlib import sha256
+    import json
+    from eval.public.adapters.locomo import split_samples
+
+    source = split_samples(samples)
+    if not isinstance(predictions, list):
+        raise LoCoMoError("predictions must be a list")
+    known = {row["question_id"] for row in source["annotations"]}
+    outputs = {}
+    for row in predictions:
+        if (not isinstance(row, dict)
+                or not {"question_id", "decoded_prediction"} <= set(row)
+                or set(row) - {"question_id", "decoded_prediction", "retrieved_context"}):
+            raise LoCoMoError("prediction fields must follow the decoded-output contract")
+        question_id = row["question_id"]
+        if not isinstance(question_id, str) or question_id not in known or question_id in outputs:
+            raise LoCoMoError("prediction IDs must be unique and present in the source population")
+        if "retrieved_context" in row and row["retrieved_context"] is None:
+            raise LoCoMoError("omit unavailable retrieved context; explicit null is not a context list")
+        outputs[question_id] = row
+    groups = {str(category): {"source_count": 0, "scored_count": 0, "missing_count": 0,
+                             "rounded_score_sum": 0.0, "upstream_recall_sum": 0.0,
+                             "observed_recall_count": 0, "fallback_recall_count": 0}
+              for category in range(1, 6)}
+    cases = []
+    # Keep source order: upstream sums rounded scores in that order.
+    for row in source["annotations"]:
+        question_id, annotation = row["question_id"], row["annotation"]
+        group = groups[str(annotation["category"])]
+        group["source_count"] += 1
+        if question_id not in outputs:
+            group["missing_count"] += 1
+            cases.append({"question_id": question_id, "category": annotation["category"],
+                          "status": "missing-prediction", "score": None})
+            continue
+        output = outputs[question_id]
+        scored = score_case(annotation, output["decoded_prediction"],
+                            retrieved_context=output.get("retrieved_context"))
+        group["scored_count"] += 1
+        group["rounded_score_sum"] += scored["reported_score"]
+        # evaluation_stats.py adds recall only for nonempty source evidence,
+        # but divides by all source questions in the category.
+        if annotation["evidence"]:
+            group["upstream_recall_sum"] += scored["reported_upstream_recall"]
+            group["observed_recall_count" if scored["recall_applicable"] else "fallback_recall_count"] += 1
+        cases.append({"question_id": question_id, "status": "scored", **scored})
+    for group in groups.values():
+        count = group["source_count"]
+        group["complete"] = count > 0 and group["missing_count"] == 0
+        group["upstream_denominator_mean"] = group["rounded_score_sum"] / count if count else None
+        group["upstream_recall_mean"] = group["upstream_recall_sum"] / count if count else None
+    def digest(value):
+        return "sha256:" + sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
+                                            allow_nan=False).encode()).hexdigest()
+    return {"schema_version": "mnemosyne.locomo-scoring-replay/v1",
+            "upstream_revision": UPSTREAM_REVISION, "source_digest": digest(samples),
+            "prediction_digest": digest(sorted(predictions, key=lambda row: row["question_id"])),
+            "categories": groups, "cases": cases,
+            "complete": all(group["complete"] for group in groups.values()),
+            "publication_authorized": False,
+            "scope": "decoded-prediction scoring replay; not a model execution or admission"}

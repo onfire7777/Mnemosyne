@@ -55,3 +55,71 @@ def test_empty_context_with_evidence_is_rejected():
 def test_invalid_category_is_rejected(category):
     with pytest.raises(LoCoMoError):
         score_case(annotation(category), "cat")
+
+
+def replay_source():
+    return [{"sample_id": "synthetic", "conversation": {"session_1": []},
+             "qa": [dict(annotation(category, "red blue"), question="Synthetic?")
+                    for category in range(1, 6)]}]
+
+
+def replay_predictions(source):
+    from eval.public.adapters.locomo import split_samples
+    return [{"question_id": row["question_id"], "decoded_prediction": "red",
+             "retrieved_context": ["D1:1"]} for row in split_samples(source)["questions"]]
+
+
+def test_replay_preserves_all_categories_and_missing_predictions():
+    from eval.public.adapters.locomo_scoring import score_prediction_set
+    source = replay_source()
+    predictions = replay_predictions(source)
+    result = score_prediction_set(source, predictions[:-1])
+    assert not result["complete"]
+    assert len(result["cases"]) == 5
+    assert result["cases"][-1]["status"] == "missing-prediction"
+    assert result["cases"][-1]["score"] is None
+    assert result["categories"]["5"]["source_count"] == 1
+    assert result["categories"]["5"]["missing_count"] == 1
+    assert result["categories"]["5"]["upstream_denominator_mean"] == 0
+    assert result["categories"]["4"]["upstream_denominator_mean"] == .667
+    assert "overall" not in result
+    assert not result["publication_authorized"]
+
+
+def test_replay_order_does_not_change_results_and_rounds_before_sum():
+    from eval.public.adapters.locomo_scoring import score_prediction_set
+    source = replay_source()
+    outputs = replay_predictions(source)
+    result = score_prediction_set(source, outputs)
+    assert result == score_prediction_set(source, outputs[::-1])
+    assert result["complete"]
+    assert result["categories"]["4"]["rounded_score_sum"] == .667
+
+
+def test_fallback_recall_is_counted_separately_from_observed_retrieval():
+    from eval.public.adapters.locomo_scoring import score_prediction_set
+    source = replay_source()
+    outputs = replay_predictions(source)
+    del outputs[0]["retrieved_context"]
+    result = score_prediction_set(source, outputs)
+    assert result["categories"]["1"]["fallback_recall_count"] == 1
+    assert result["categories"]["1"]["observed_recall_count"] == 0
+    assert result["cases"][0]["measured_recall"] is None
+    assert result["categories"]["2"]["observed_recall_count"] == 1
+
+
+@pytest.mark.parametrize("mutation", ["duplicate", "unknown", "extra-field", "null-context"])
+def test_replay_rejects_ambiguous_prediction_population(mutation):
+    from eval.public.adapters.locomo_scoring import score_prediction_set
+    source = replay_source()
+    outputs = replay_predictions(source)
+    if mutation == "duplicate":
+        outputs.append(outputs[0].copy())
+    elif mutation == "unknown":
+        outputs[0]["question_id"] = "unknown"
+    elif mutation == "null-context":
+        outputs[0]["retrieved_context"] = None
+    else:
+        outputs[0]["fabricated_score"] = 1
+    with pytest.raises(LoCoMoError):
+        score_prediction_set(source, outputs)

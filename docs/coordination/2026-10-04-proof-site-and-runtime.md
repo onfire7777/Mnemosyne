@@ -416,3 +416,7 @@ Implemented caller-recorded category-5 choice draws and option mappings, the cat
 ## LoCoMo per-case scoring parity
 
 Implemented the category-specific scorer in an isolated optional evaluation environment, preserving upstream normalization, stemming, category rules and rounding. Missing context/evidence now retains upstream fallback recall separately from a null measured-recall field. All 52 ingestion/scoring tests executed and passed; 2,000 synthetic cases matched the hash-verified upstream pure scoring functions exactly. No held-out data or model was run. Production dependencies and BurnOS contracts are unchanged. Full adapter, aggregate reporting, asset admission and actual evaluation remain open.
+
+## LoCoMo category replay reporting
+
+Added replay reports bound to source and decoded-prediction digests, preserving all five category rows and every source question. Missing outputs remain null-scored cases with explicit counts; upstream-style denominators and observed/fallback retrieval counts stay distinct. Duplicate/unknown IDs, extra fields and explicit null contexts are rejected. No overall rank or publication authorization is emitted. All 59 isolated ingestion/scoring tests and Ruff passed. This closes the category-reporting component, not full adapter execution or benchmark admission.
