@@ -1,0 +1,18 @@
+{
+  "argv": [
+    ".superpowers/sdd/completion-2026-10-04/verified-venv/bin/python",
+    "/Users/admin/.local/state/mnemosyne/formation-http-diagnostics/2026-10-04-wire-order-matrix/run.py"
+  ],
+  "benchmark_verified": false,
+  "cwd": "/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne",
+  "elapsed_seconds": 10.1452894579852,
+  "finished_at": "2026-10-04T22:02:08.027552+00:00",
+  "pid": 84491,
+  "poll_seconds": 1.0,
+  "reason": "process-exited",
+  "returncode": 0,
+  "schema": "mnemosyne.monitored-command.v1",
+  "started_at": "2026-10-04T22:01:57.882393+00:00",
+  "status": "succeeded",
+  "wall_seconds": 600.0
+}

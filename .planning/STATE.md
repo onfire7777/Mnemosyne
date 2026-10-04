@@ -18,6 +18,13 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+At `a927ee4e`, a four-cell diagnostic holds one public input fixed while varying
+compact model and schema wire order. Both models changed from clarification to
+an incorrect exact-time proposal when keys followed declaration order. Exact
+HTTP request bytes are now retained; canonical order remains the default.
+This is adapter sensitivity evidence, not successful formation. The earlier
+HTTP failure did not repeat once, but its cause remains unknown.
+
 The schema-constrained Qwen3 0.6B attempt at clean `dec91100` has ended: 21
 cases completed, then an HTTP error stopped the next request. Its 25 successful
 responses only requested clarification; no task writes occurred and 17 eligible

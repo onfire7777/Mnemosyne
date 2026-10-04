@@ -389,3 +389,14 @@ Each HTTP request record now retains its exact body bytes as base64 plus a
 SHA-256 digest, alongside the parsed body. This prevents canonical log encoding
 from concealing a wire-order difference. Both modes send the same public input
 and schema meaning. No labels, expected decisions or answer repair are added.
+
+
+The [four-cell wire-order diagnostic](../../eval/reports/m12-formation-wire-diagnostic-2026-10-04/README.md)
+now tests that hypothesis on one fixed public input. Both Qwen3 0.6B and 1.7B
+asked for clarification under canonical order and proposed an exact-time task
+under declared order. The input required an event condition, so neither proposal
+was correct. This establishes sensitivity on that input, not general causality
+or a completed benchmark. Earlier over-clarification is a result of the tested
+model-plus-adapter configuration, not evidence about model capability alone.
+The same failed HTTP input succeeded on a single diagnostic repeat; the earlier
+HTTP error's cause remains unknown. All variants and failures remain retained.
