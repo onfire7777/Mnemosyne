@@ -8,6 +8,7 @@ NAV = (
     ('compare.html', 'Compare runs', 'M8 4v16m8-16v16M4 8h8m0 8h8'),
     ('systems.html', 'Memory systems', 'M12 3l9 5-9 5-9-5zM3 12l9 5 9-5M3 16l9 5 9-5'),
     ('comparisons.html', 'Feature landscape', 'M4 4h16v16H4zM4 10h16M10 4v16'),
+    ('development.html', 'Development evidence', 'M9 3h6M10 3v6l-6 11h16L14 9V3M8 15h8'),
     ('attempts.html', 'Attempt history', 'M4 6v5h5M4 11a8 8 0 1 1 2 7M12 7v5l3 2'),
     ('methods.html', 'Methodology', 'M4 4h6l2 2 2-2h6v15h-6l-2 2-2-2H4zM12 6v15'),
 )
@@ -18,11 +19,11 @@ def icon(path):
 
 
 def page_shell(title, body, root=''):
-    active = {'Development evidence': 'Benchmarks', 'Leaderboard': 'Results', 'Benchmark catalog': 'Benchmarks', 'Whole-memory coverage': 'Coverage',
+    active = {'Development evidence': 'Development evidence', 'Leaderboard': 'Results', 'Benchmark catalog': 'Benchmarks', 'Whole-memory coverage': 'Coverage',
               'Compare': 'Compare runs', 'Memory systems': 'Memory systems',
               'Capabilities and benchmark coverage': 'Feature landscape', 'Attempt history': 'Attempt history',
               'Methods': 'Methodology'}.get(title, 'Results')
-    nav = ''.join(f'<a href="{root}{url}"' + (' aria-current="page"' if label == active else '') +
+    nav = ''.join(('<span class="nav-heading">Evidence &amp; methods</span>' if url == 'development.html' else '') + f'<a href="{root}{url}"' + (' aria-current="page"' if label == active else '') +
                   f'>{icon(path)}<span>{label}</span></a>' for url, label, path in NAV)
     return (
         '<!doctype html>\n<html lang="en"><head><meta charset="utf-8">'
@@ -33,7 +34,7 @@ def page_shell(title, body, root=''):
         '<aside class="sidebar" aria-label="Workspace">'
         f'<a class="brand" href="{root}index.html"><span class="brand-mark" aria-hidden="true">m</span>Mnemetric<span class="brand-dot">.</span></a>'
         '<button class="menu-toggle" type="button" aria-expanded="false" aria-controls="workspace-nav" hidden>Explore <span aria-hidden="true">☰</span></button>'
-        '<p class="workspace-label">MEMORY INTELLIGENCE</p>'
+        '<p class="workspace-label">EXPLORE MEMORY</p>'
         f'<nav id="workspace-nav" aria-label="Main">{nav}</nav>'
         '<div class="sidebar-note"><span class="preview-dot"></span> Research preview'
         '<p>Open evidence.<br>Visible limitations.</p>'

@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 import re
 
+from leaderboard.ui import icon
+
 
 def load_catalog() -> dict:
     catalog = json.loads(Path(__file__).with_name("catalog.json").read_text())
@@ -139,30 +141,46 @@ def _protocol_notes(catalog: dict) -> str:
 
 def benchmarks_body(catalog: dict) -> str:
     cards = []
-    for number, row in enumerate(catalog["benchmarks"], 1):
+    for row in catalog["benchmarks"]:
         planned = row["status"].startswith("Planned family;")
         stage = "planned" if planned else "development"
         label = "Planned family" if planned else "Development components"
         cards.append(
-            f'<article class="benchmark-card" data-benchmark data-stage="{stage}">'
-            f'<div class="card-meta"><span class="card-number">{number:02d}</span>'
+            f'<article class="benchmark-card" id="{escape(row["id"], quote=True)}" data-benchmark data-stage="{stage}">'
+            f'<div class="card-meta"><span class="card-number">{escape(row["id"])}</span>'
             f'<span class="badge badge-{stage}">{label}</span></div>'
-            f'<h3>{escape(row["name"])}</h3><p>{escape(row["status"])}</p>'
+            f'<h3><a href="#{escape(row["id"], quote=True)}">{escape(row["name"])}</a></h3>'
+            f'<p>{escape(row["status"])}</p>'
             '<details><summary>Reporting rules</summary>'
             f'<p>{escape(row["policy"])}</p></details></article>'
         )
     count = len(cards)
     return (
-        '<div class="hero catalog-hero"><div><p class="eyebrow">BENCHMARK LIBRARY</p>'
-        '<h1>A broader view<br>of AI memory.</h1>'
-        '<p class="intro">Explore established benchmarks and the behaviors that a '
-        'complete memory system needs to prove.</p></div>'
-        '<a class="button secondary hero-aside" href="coverage.html">Explore whole-memory coverage ↗</a></div>'
+        '<div class="hero catalog-hero"><div class="hero-copy"><p class="eyebrow">THE AI MEMORY OBSERVATORY</p>'
+        '<h1>Beyond recall.<br><span>The whole memory.</span></h1>'
+        '<p class="intro">Explore the benchmarks, inspect the evidence, and understand '
+        'what it takes to evaluate a complete AI memory system.</p>'
+        '<div class="hero-actions"><a class="button button-primary" href="#library-title">Explore benchmarks ↓</a>'
+        '<a class="hero-link" href="index.html">View measured results →</a></div>'
+        '<p class="hero-footnote">Research preview · Operator-run by Mnemosyne</p></div>'
+        '<figure class="memory-map"><figcaption><span>WHOLE-MEMORY SCOPE</span>'
+        '<span class="scope-label">Planned evaluation</span></figcaption>'
+        '<div class="memory-map-core"><span class="map-orbit" aria-hidden="true"></span>'
+        '<span class="map-core-mark" aria-hidden="true">m</span>'
+        '<strong>Memory is a lifecycle.</strong><span>Every stage needs evidence.</span></div>'
+        '<div class="memory-stages">'
+        '<a href="coverage.html#M01">01 <span>Capture</span> ↗</a>'
+        '<a href="coverage.html#M02">02 <span>Retrieve</span> ↗</a>'
+        '<a href="coverage.html#M06">03 <span>Consolidate</span> ↗</a>'
+        '<a href="coverage.html#M12">04 <span>Act</span> ↗</a>'
+        '<a href="coverage.html#M09">05 <span>Erase</span> ↗</a>'
+        '<a href="coverage.html#M11">06 <span>Protect</span> ↗</a></div>'
+        '<p>Selected dimensions of the proposed suite. Not measured performance.</p></figure></div>'
         '<div class="stats-strip" aria-label="Planned evaluation scope">'
-        f'<div class="stat"><strong>{count:02d}</strong><span>Benchmark families</span></div>'
-        f'<div class="stat"><strong>{len(catalog["capabilities"]):02d}</strong><span>Memory capabilities</span></div>'
-        f'<div class="stat"><strong>{len(catalog["modules"]):02d}</strong><span>Whole-memory modules</span></div>'
-        '<div class="stat"><strong>Open</strong><span>Methods &amp; evidence</span></div></div>'
+        f'<a class="stat" href="#library-title"><strong>{count:02d}</strong><span>Benchmark families<small>Explore the catalog ↗</small></span></a>'
+        f'<a class="stat" href="coverage.html"><strong>{len(catalog["capabilities"]):02d}</strong><span>Memory capabilities<small>Map the full lifecycle ↗</small></span></a>'
+        f'<a class="stat" href="coverage.html#M01"><strong>{len(catalog["modules"]):02d}</strong><span>Whole-memory modules<small>Inspect planned coverage ↗</small></span></a>'
+        '<a class="stat" href="development.html"><strong>Raw</strong><span>Development evidence<small>Inspect actual attempts ↗</small></span></a></div>'
         '<div class="callout"><strong>Coverage is not compatibility.</strong> '
         'Existing benchmarks can evaluate Mnemosyne. Our current runs measure only part '
         'of its memory lifecycle. <a href="#protocol-fit">Understand the limits →</a></div>'
@@ -172,12 +190,15 @@ def benchmarks_body(catalog: dict) -> str:
         '<p class="library-description">These are scope and implementation labels, not admission badges or performance '
         'results. A catalog entry is not a result or proof that its full workload runs on this computer.</p>'
         '<div class="library-controls" id="library-controls" hidden>'
-        '<label class="search-field"><span class="search-symbol" aria-hidden="true">⌕</span><span class="sr-only">Search benchmarks</span>'
+        '<label class="search-field">' + icon('M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0') + '<span class="sr-only">Search benchmarks</span>'
         '<input type="search" id="benchmark-search" placeholder="Search benchmarks, behaviors, or evidence…"></label>'
         '<fieldset class="filter-group"><legend class="sr-only">Implementation stage</legend>'
         '<label><input type="radio" name="stage" value="all" checked><span>All families</span></label>'
         '<label><input type="radio" name="stage" value="development"><span>Development</span></label>'
-        '<label><input type="radio" name="stage" value="planned"><span>Planned</span></label></fieldset></div>'
+        '<label><input type="radio" name="stage" value="planned"><span>Planned</span></label></fieldset>'
+        '<fieldset class="filter-group view-control"><legend class="sr-only">Catalog layout</legend>'
+        '<label><input type="radio" name="layout" value="grid" checked><span>Grid</span></label>'
+        '<label><input type="radio" name="layout" value="list"><span>List</span></label></fieldset></div>'
         f'<p id="benchmark-count" class="muted" role="status" aria-live="polite">{count} benchmark families</p>'
         '<div class="benchmark-grid">' + ''.join(cards) + '</div>'
         '<div id="search-empty" class="search-empty" hidden><h3>No matching benchmarks</h3>'
