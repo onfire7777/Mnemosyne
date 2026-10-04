@@ -176,6 +176,10 @@ def test_native_population_replays_missingness_empty_retrieval_and_tampering(tmp
                         for question, annotation in zip(questions, sample["qa"], strict=True)]
     complete = replay_native_population(source, complete_records, caption_policy="exclude-caption", choice_draws=draws)
     assert complete["complete"]
+    import sys
+    from eval.public.adapters.locomo_replay import replay_in_environment
+    assert complete == replay_in_environment(source, complete_records, caption_policy="exclude-caption",
+                                             choice_draws=draws, python=sys.executable)
     assert complete == replay_native_population(source, list(reversed(complete_records)),
                                                 caption_policy="exclude-caption", choice_draws=draws)
     assert complete["categories"]["5"]["native_observed_recall_mean"] is None

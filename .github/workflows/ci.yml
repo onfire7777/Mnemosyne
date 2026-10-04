@@ -112,7 +112,7 @@ jobs:
       - name: Require the pinned scorer runtime
         run: python -c "from eval.public.adapters.locomo_scoring import _runtime; _runtime()"
       - name: Run synthetic scorer and ingestion conformance
-        run: python -m pytest tests/test_locomo_scoring.py tests/test_locomo_ingestion.py tests/test_locomo_tokenizer.py -q
+        run: MNEMOSYNE_TEST_LOCOMO_PYTHON="$(command -v python)" python -m pytest tests/test_locomo_scoring.py tests/test_locomo_ingestion.py tests/test_locomo_tokenizer.py tests/test_locomo_replay.py -q
 
   windows-file-lock:
     name: Windows file lock

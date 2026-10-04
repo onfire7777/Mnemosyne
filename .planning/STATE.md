@@ -22,16 +22,18 @@ At `4a0e4c4c`, the Mnemetric comparison/coverage/attempt surfaces and real local
 retrieval preview are implemented; the single retrieval run has an exact
 nine-file clean-checkout reproduction. It is nonpublishable and not an official
 QA or multi-system comparison. Local combined platform/BurnOS/bundle regression
-checks passed 452 tests; the isolated LoCoMo checks passed 102 tests.
+checks passed 452 tests. The latest isolated LoCoMo checks passed 110 tests;
+24 native public-boundary tests and seven cross-environment replay tests passed.
 
-LoCoMo ingestion, scoring, non-RAG prompt construction and a verified tokenizer
-are components, not a complete native Mnemosyne adapter. The
+LoCoMo now includes ingestion, scoring, non-RAG prompt construction, a verified
+tokenizer, sequential native capture/answer execution and isolated scorer replay.
+These remain components, not an admitted complete native benchmark runner. The
 [neutral integration contract](../docs/plans/locomo-neutral-integration-contract-2026-10-04.md)
 separates upstream model baselines from public memory-system execution and lists
 the remaining bundle, resource and admission gates. Dataset rights/admission,
 grounded-model preflight, official measurements and broader original acceptance
-criteria remain open. Current development commits await GitHub synchronization
-and validation; no phase counter or measured-acceptance status changes here.
+criteria remain open. CI passed on `df99593b`; the accumulated development
+changes require synchronization and new-head validation; no phase counter or measured-acceptance status changes here.
 
 ## Benchmark-platform scope reaffirmed — 2026-10-04
 
