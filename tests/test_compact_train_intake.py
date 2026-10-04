@@ -59,3 +59,24 @@ def test_failed_intake_has_no_completed_receipt(tmp_path):
             subject.intake(destination)
     assert not (destination / "intake.json").exists()
     assert not list(destination.rglob("*.parquet"))
+
+
+def test_source_identity_is_captured_before_transfer(tmp_path):
+    data = b"train"
+    source = tmp_path / "source.py"
+    source.write_bytes(b"original source")
+    expected = hashlib.sha256(source.read_bytes()).hexdigest()
+    asset = (*subject.ASSETS[1][:3], len(data), hashlib.sha256(data).hexdigest())
+
+    def fetch(*args, **kwargs):
+        source.write_bytes(b"changed during download")
+        return io.BytesIO(data)
+
+    with (
+        patch.object(subject, "__file__", str(source)),
+        patch.object(subject, "ASSETS", (asset,)),
+        patch.object(subject.urllib.request, "urlopen", side_effect=fetch),
+    ):
+        receipt = subject.intake(tmp_path / "quarantine")
+    assert receipt["transform_sha256"] == expected
+    assert not (tmp_path / "quarantine" / "intake.json.partial").exists()

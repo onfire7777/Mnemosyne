@@ -1,0 +1,66 @@
+{
+  "schema": "mnemosyne.compact-train-intake.v1",
+  "transform_sha256": "88a67bb10a3384ef27d92f14712989d98ccbb3a61cc50f7b11904f4f1ed45a8b",
+  "assets": [
+    {
+      "repository": "rajpurkar/squad_v2",
+      "revision": "3ffb306f725f7d2ce8394bc1873b24868140c412",
+      "upstream_path": "README.md",
+      "local_path": "rajpurkar/squad_v2/3ffb306f725f7d2ce8394bc1873b24868140c412/README.md",
+      "bytes": 8916,
+      "sha256": "7a6726352072e8517318959fe0438d4f45880affc041ced6da3bf2e4dec94c68",
+      "source_url": "https://huggingface.co/datasets/rajpurkar/squad_v2/resolve/3ffb306f725f7d2ce8394bc1873b24868140c412/README.md",
+      "role": "license-card"
+    },
+    {
+      "repository": "rajpurkar/squad_v2",
+      "revision": "3ffb306f725f7d2ce8394bc1873b24868140c412",
+      "upstream_path": "squad_v2/train-00000-of-00001.parquet",
+      "local_path": "rajpurkar/squad_v2/3ffb306f725f7d2ce8394bc1873b24868140c412/squad_v2/train-00000-of-00001.parquet",
+      "bytes": 16369982,
+      "sha256": "f6da32ffb482ff463ad056477740d1bb284b96a45db3a08bee6a225ca6abf291",
+      "source_url": "https://huggingface.co/datasets/rajpurkar/squad_v2/resolve/3ffb306f725f7d2ce8394bc1873b24868140c412/squad_v2/train-00000-of-00001.parquet",
+      "role": "train"
+    },
+    {
+      "repository": "hotpotqa/hotpot_qa",
+      "revision": "1908d6afbbead072334abe2965f91bd2709910ab",
+      "upstream_path": "README.md",
+      "local_path": "hotpotqa/hotpot_qa/1908d6afbbead072334abe2965f91bd2709910ab/README.md",
+      "bytes": 9522,
+      "sha256": "3cfab003a856275d3198b031c6b2ac46c63178fb462a4123705f652b71b22813",
+      "source_url": "https://huggingface.co/datasets/hotpotqa/hotpot_qa/resolve/1908d6afbbead072334abe2965f91bd2709910ab/README.md",
+      "role": "license-card"
+    },
+    {
+      "repository": "hotpotqa/hotpot_qa",
+      "revision": "1908d6afbbead072334abe2965f91bd2709910ab",
+      "upstream_path": "distractor/train-00000-of-00002.parquet",
+      "local_path": "hotpotqa/hotpot_qa/1908d6afbbead072334abe2965f91bd2709910ab/distractor/train-00000-of-00002.parquet",
+      "bytes": 165624177,
+      "sha256": "76d3bb3048a7cc73c1958107c0c5872a00d7e7d00c105b81e92f6769e7822e68",
+      "source_url": "https://huggingface.co/datasets/hotpotqa/hotpot_qa/resolve/1908d6afbbead072334abe2965f91bd2709910ab/distractor/train-00000-of-00002.parquet",
+      "role": "train"
+    },
+    {
+      "repository": "hotpotqa/hotpot_qa",
+      "revision": "1908d6afbbead072334abe2965f91bd2709910ab",
+      "upstream_path": "distractor/train-00001-of-00002.parquet",
+      "local_path": "hotpotqa/hotpot_qa/1908d6afbbead072334abe2965f91bd2709910ab/distractor/train-00001-of-00002.parquet",
+      "bytes": 166162479,
+      "sha256": "713661628434fbb19fff7392e2e321e4ed107e3c7c7784d0690946e5f722763f",
+      "source_url": "https://huggingface.co/datasets/hotpotqa/hotpot_qa/resolve/1908d6afbbead072334abe2965f91bd2709910ab/distractor/train-00001-of-00002.parquet",
+      "role": "train"
+    }
+  ],
+  "license": "CC-BY-SA-4.0 (upstream cards; preserve attribution and share-alike)",
+  "status": "quarantined-raw-train-only",
+  "training_admitted": false,
+  "unresolved": [
+    "row provenance and exact-span validation",
+    "source-document/entity clustering",
+    "pre/post transformation protected-overlap checks",
+    "frozen grouped partitions",
+    "complete attribution and derivative license review"
+  ]
+}
