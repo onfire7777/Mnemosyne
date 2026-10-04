@@ -613,3 +613,31 @@ protocol used by the current run. No V2 coverage assessment is claimed.
 The existing signed retrieval preview was regenerated and its served benchmark
 page checked for both clarifications. Ruff passed. No measurements, source
 protocols or BurnOS contracts changed.
+
+## Public intention creation retries
+
+Added an optional session-scoped `idempotency_key` to schedule_intention and
+`--idempotency-key` to intention-schedule. No-key callers preserve their current
+behavior. All three engines use the existing atomic creation audit digest to
+recognize a matching retry, validate live provenance, and return the original
+creation acknowledgement without changing a later update, cancellation,
+firing or recurrence state. Conflicting requests and incomplete creation
+history fail closed. No new receipt table or runtime dependency was introduced.
+
+Local/SQLite retry coverage passed 32 checks, including concurrent calls,
+reopening, erased origins, session separation, missing records and default
+behavior. The combined prospective-memory, CLI/MCP, BurnOS HTTP, validation and
+session-read run passed 399 tests with 25 explicit prerequisite skips in 6.79s.
+Repository-wide Ruff passed. PostgreSQL is not listening on this computer;
+its 16 new cases are not claimed as locally verified. The live PostgreSQL CI
+job now runs the prospective-memory and retry suites in addition to its prior
+coverage. Review retained append-only audit enforcement: the orphan-history
+PostgreSQL test creates an unaudited intention identity rather than disabling
+or deleting audit protection.
+
+The engine contract, M12 protocol, scope audit, state checkpoint and site
+catalog distinguish creation retries from still-open update revisions and
+idempotency. Full M12 calibration, trigger/cost/resource and admission work
+remains. CI run 37225669534 at the earlier 762f12c8 head remains in progress;
+none of its results certify this new source, and no merge is authorized by
+partial checks.

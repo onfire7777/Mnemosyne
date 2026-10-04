@@ -57,6 +57,7 @@ from mnemosyne.engine import (
     canonicalize_intention,
     intention_audit_context,
     intention_audit_diff,
+    validate_intention_retry,
     intention_fire_receipt_id,
     validate_intention_evaluation_inputs,
     validate_intention_provenance_claim,
@@ -6052,12 +6053,30 @@ class PostgresEngine:
             }
         )
 
-    def schedule_intention(self, intention: Intention) -> str:
+    def _retry_scheduled_intention(self, cur: Any, db_tenant_id: Any, intention: Intention) -> bool:
+        # One snapshot binds row existence to creation history. The row lock
+        # protects it while provenance is checked; non-UUID legacy IDs live in diff.
+        cur.execute(
+            "SELECT a.diff FROM intentions i LEFT JOIN audit_log a "
+            "ON a.tenant_id = i.tenant_id AND a.op = 'schedule_intention' "
+            "AND (a.target_id = %s OR a.diff->>'target_id' = %s) "
+            "WHERE i.tenant_id = %s AND i.intention_id = %s FOR UPDATE OF i",
+            (_uuid_or_none(intention.intention_id), intention.intention_id,
+             db_tenant_id, intention.intention_id),
+        )
+        rows = cur.fetchall()
+        if rows:
+            self._intention_provenance_rows(cur, db_tenant_id=db_tenant_id, intention=intention)
+            validate_intention_retry(intention, [row["diff"] for row in rows if row["diff"] is not None])
+            return True
+        return False
+
+    def schedule_intention(self, intention: Intention, *, idempotent: bool = False) -> str:
         """Store an intention after tenant, provenance, trust, and taint checks.
 
         Validates all five trigger types, rejects cycles at schedule time for
         dependency_completion, and atomically persists + audits. Duplicates
-        raise ValueError and never mutate/audit.
+        raise ValueError unless an explicit idempotent retry matches creation.
         """
 
         intention = canonicalize_intention(intention, require_scheduled=True)
@@ -6067,6 +6086,8 @@ class PostgresEngine:
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
+                if idempotent and self._retry_scheduled_intention(cur, db_tenant_id, intention):
+                    return intention.intention_id
                 cur.execute(
                     """
                     SELECT 1 FROM (
@@ -6146,7 +6167,18 @@ class PostgresEngine:
                     ),
                 )
                 if cur.fetchone() is None:
+                    if idempotent and self._retry_scheduled_intention(cur, db_tenant_id, intention):
+                        return intention.intention_id
                     raise ValueError(f"intention {intention.intention_id!r} already exists")
+                if idempotent:
+                    cur.execute(
+                        "SELECT 1 FROM audit_log WHERE tenant_id = %s "
+                        "AND op = 'schedule_intention' "
+                        "AND (target_id = %s OR diff->>'target_id' = %s)",
+                        (db_tenant_id, _uuid_or_none(intention.intention_id), intention.intention_id),
+                    )
+                    if cur.fetchone() is not None:
+                        raise ValueError("cannot retry a removed intention")
                 # Recheck after the conflict-aware insert. Under READ COMMITTED,
                 # this closes a fire -> forget race where the first receipt read
                 # preceded the firing commit but the insert waited for deletion.

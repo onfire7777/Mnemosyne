@@ -21,6 +21,7 @@ from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from time import perf_counter
 from typing import Any, Literal, assert_never
+from uuid import NAMESPACE_URL, uuid5
 
 from mnemosyne.engine import (
     Intention,
@@ -28,6 +29,7 @@ from mnemosyne.engine import (
     ProspectiveOperatingPoint,
     TriggerEvaluationContext,
     WorkingMemoryItem,
+    canonicalize_intention,
     select_working_items,
 )
 from mnemosyne.ids import canonical_json, evidence_cid, new_id
@@ -268,7 +270,7 @@ TOOL_SPEC: list[dict[str, Any]] = [
     },
     {
         "name": "schedule_intention",
-        "description": "Schedule a data-only prospective-memory intention backed by originating evidence.",
+        "description": "Schedule a data-only prospective-memory intention backed by originating evidence. An optional session-scoped idempotency_key replays the original creation acknowledgement; use list_intentions for current state.",
         "arguments": [
             "tenant_id",
             "user_id",
@@ -282,6 +284,7 @@ TOOL_SPEC: list[dict[str, Any]] = [
             "dependencies",
             "reschedule_history",
             "recurrence_policy",
+            "idempotency_key",
         ],
     },
     {
@@ -1058,6 +1061,7 @@ class MemoryTools:
         reschedule_history: list[dict[str, Any]] | None = None,
         recurrence_policy: dict[str, Any] | None = None,
         session_identity: SessionIdentity | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         authorization = self._authorize_prospective(
             "schedule",
@@ -1072,8 +1076,21 @@ class MemoryTools:
             raise PermissionError(
                 "schedule intention denied: authenticated session identifier is required"
             )
+        intention_id = new_id()
+        if idempotency_key is not None:
+            if (type(idempotency_key) is not str or not 1 <= len(idempotency_key) <= 128
+                    or any(not 33 <= ord(char) <= 126 for char in idempotency_key)):
+                raise ValueError("idempotency_key must contain 1-128 printable non-space ASCII characters")
+            intention_id = str(uuid5(NAMESPACE_URL, canonical_json([
+                "mnemosyne/schedule-intention/v1",
+                authorization.tenant_id or tenant_id,
+                authorization.owner_id or user_id,
+                authorization.agent_id or agent_id,
+                session_identity.session_id,
+                idempotency_key,
+            ])))
         intention = Intention(
-            intention_id=new_id(),
+            intention_id=intention_id,
             tenant_id=authorization.tenant_id or tenant_id,
             user_id=authorization.owner_id or user_id,
             agent_id=authorization.agent_id or agent_id,
@@ -1088,7 +1105,12 @@ class MemoryTools:
             session_id=session_identity.session_id,
             recurrence_policy=recurrence_policy or {"type": "none"},
         )
-        self.engine.schedule_intention(intention)
+        if idempotency_key is None:
+            self.engine.schedule_intention(intention)
+        else:
+            # The response acknowledges creation, not the intention's current state.
+            intention = canonicalize_intention(intention, require_scheduled=True)
+            self.engine.schedule_intention(intention, idempotent=True)
         return intention.to_dict()
 
     def update_intention(

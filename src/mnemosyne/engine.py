@@ -1278,6 +1278,17 @@ def intention_audit_diff(intention: Intention, *, status: str) -> dict[str, Any]
     }
 
 
+def validate_intention_retry(intention: Intention, creation_diffs: list[dict[str, Any]]) -> None:
+    """Recognize the original creation without replaying its state transition.
+
+    Callers must validate current provenance and retain the intention row. Missing
+    or ambiguous creation history fails closed instead of creating another action.
+    """
+    expected = intention_audit_diff(intention, status="scheduled")["intention_digest"]
+    if [diff.get("intention_digest") for diff in creation_diffs] != [expected]:
+        raise ValueError("intention idempotency conflict or missing creation receipt")
+
+
 def intention_fire_receipt_id(
     tenant_id: str, intention_id: str, occurrence: int = 0
 ) -> str:
@@ -1751,7 +1762,7 @@ class MemoryEngine(Protocol):
     def discard(self, branch: str, tenant_id: str | None = None) -> None:
         raise NotImplementedError
 
-    def schedule_intention(self, intention: Intention) -> str:
+    def schedule_intention(self, intention: Intention, *, idempotent: bool = False) -> str:
         raise NotImplementedError
 
     def cancel_intention(
@@ -2071,11 +2082,25 @@ class LocalMemoryEngine:
             self._store_version = store_version_before
             raise
 
-    def schedule_intention(self, intention: Intention) -> str:
+    def schedule_intention(self, intention: Intention, *, idempotent: bool = False) -> str:
         """Store an intention after tenant, provenance, trust, and taint checks."""
 
         with self._lock:
             intention = canonicalize_intention(intention, require_scheduled=True)
+            key = (intention.tenant_id, intention.intention_id)
+            if idempotent:
+                creation_diffs = [
+                    row["diff"] for row in self.audit_log
+                    if row.get("tenant_id") == intention.tenant_id
+                    and row.get("target_id") == intention.intention_id
+                    and row.get("op") == "schedule_intention"
+                ]
+                if key in self.intentions:
+                    self._intention_provenance(intention)
+                    validate_intention_retry(intention, creation_diffs)
+                    return intention.intention_id
+                if creation_diffs:
+                    raise ValueError("cannot retry a removed intention")
             receipt_id = intention_fire_receipt_id(
                 intention.tenant_id, intention.intention_id
             )

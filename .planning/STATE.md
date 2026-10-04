@@ -18,11 +18,18 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+Public intention creation now supports an opt-in, session-scoped idempotency
+key through CLI/MCP and all three engine implementations. The original creation
+audit binds retries; later updates, cancellation and firing are not replayed.
+Local/SQLite regressions passed; live PostgreSQL verification is pending in
+the expanded CI job. Update revisions/idempotency and full M12 admission remain
+open. See [the contract](../docs/ENGINE-CONTRACT.md#prospective-memory-contract).
+
 M12 now also has a [sink-enabled development capture](../eval/reports/m12-inert-sink-development-2026-10-04/README.md)
 from `d2af156a`: 30 inert records and 60 attempts, with all 30 deliberate
 retries identified without extra records. Reports and the sink annex replay
-exactly; earlier capture compatibility is retained. Public operation
-idempotency, full trigger coverage, calibration, cost/resource and admission
+exactly; earlier capture compatibility is retained. Update request
+revisions/idempotency, full trigger coverage, calibration, cost/resource and admission
 remain open.
 
 The M12 exact-time diagnostic now has a [saved five-seed public-CLI execution](../eval/reports/m12-exact-time-development-2026-10-04/README.md)
