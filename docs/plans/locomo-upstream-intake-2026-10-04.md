@@ -323,3 +323,28 @@ The source review identifies further requirements before full prompt parity:
 
 These are reproducibility constraints, not permission to repair the official
 protocol in place. Any corrected successor must retain its separate track.
+
+## Non-RAG context construction
+
+`prepare_nonrag_context` now reproduces the reviewed context assembly on valid
+structured conversations. It preserves upstream's session-prepending behavior,
+reverse turn traversal, caption formatting, strict budget comparison, early
+stop, and header emission even if no turn fits. Its record includes the exact
+context and digest, included record IDs in rendered order, the first omitted
+record, truncation status and budget inputs. It does not silently impose a new
+chronology or repair upstream budget accounting.
+
+The tokenizer is caller-supplied. Its counts must be non-negative integers;
+invalid budget types/counts fail closed. The caller remains responsible for
+the registered tokenizer and the batch-question-plus-start-prompt token count.
+The result explicitly leaves tokenizer conformance unverified. It does not
+prepend the conversation-start prompt, choose speaker order, call a model or
+certify that the resulting full request fits a provider's actual token limit.
+
+Validation: 85 focused synthetic tests passed. A separate parity check verified
+the pinned source hash and extracted only the reviewed pure `get_input_context`
+function, without importing the upstream module. All 252 synthetic combinations
+of session counts, budget boundaries and batch sizes produced identical context
+bytes using a character-count test tokenizer. This isolates assembly parity;
+it is not evidence for real tiktoken/model parity or an official scored run.
+The local receipt is `locomo-context-parity.json`. Ruff passed.
