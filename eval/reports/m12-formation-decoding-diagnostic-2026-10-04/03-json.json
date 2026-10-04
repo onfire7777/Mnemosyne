@@ -1,0 +1,9 @@
+{
+  "case_id": "6a02bb8c9e712f2fa69ae689",
+  "output_mode": "json",
+  "prompt_profile": "semantics-v2",
+  "task_execution": false,
+  "publishable": false,
+  "status": "failed",
+  "error_type": "ValueError"
+}

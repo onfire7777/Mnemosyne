@@ -438,3 +438,12 @@ condition gates and introduced an unrelated task in another case. These mixed
 observations do not justify a default change or a quality claim. No tasks were
 executed. The next investigation should distinguish constrained-decoding bias
 from semantic model limitations while keeping public inputs and failures visible.
+
+
+The [paired decoding capture](../../eval/reports/m12-formation-decoding-diagnostic-2026-10-04/README.md)
+held the semantic prompt and all other request fields fixed across JSON/schema
+modes for 11 first-turn inputs. All 11 JSON outputs failed bridge envelope
+validation; all 11 schema outputs passed it. The first JSON output still replaced
+the event gate with a timer. Removing constraints therefore did not fix that
+observed semantic error. All 22 outputs and their consumed usage are retained;
+no tasks were executed and no default or acceptance gate changed.

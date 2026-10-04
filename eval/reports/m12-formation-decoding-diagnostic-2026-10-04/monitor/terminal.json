@@ -1,0 +1,29 @@
+{
+  "argv": [
+    ".superpowers/sdd/completion-2026-10-04/verified-venv/bin/python",
+    "/Users/admin/.local/state/mnemosyne/formation-decoding-diagnostic/2026-10-04-c4a9d32a/run.py"
+  ],
+  "benchmark_verified": false,
+  "cwd": "/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne",
+  "elapsed_seconds": 78.56390129201463,
+  "finished_at": "2026-10-04T22:09:11.049977+00:00",
+  "pid": 85395,
+  "poll_seconds": 1.0,
+  "reason": "process-exited",
+  "resource_diagnostics": {
+    "admission_verified": false,
+    "disk_roots": [
+      "/Users/admin/.local/state/mnemosyne/formation-decoding-diagnostic/2026-10-04-c4a9d32a"
+    ],
+    "max_sampled_logical_file_bytes": 600335,
+    "max_sampled_rss_bytes": 78266368,
+    "measurement": "sampled-process-group-rss-and-logical-regular-file-bytes",
+    "peak_rss_verified": false,
+    "samples": 77
+  },
+  "returncode": 0,
+  "schema": "mnemosyne.monitored-command.v1",
+  "started_at": "2026-10-04T22:07:52.487043+00:00",
+  "status": "succeeded",
+  "wall_seconds": 240.0
+}

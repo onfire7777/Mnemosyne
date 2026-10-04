@@ -18,6 +18,13 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+The `c4a9d32a` paired decoding diagnostic completed 22 first-turn calls: all
+11 plain-JSON outputs failed envelope validation; all 11 schema outputs passed.
+Plain JSON still substituted a timer for the first event request. No task was
+executed; semantic correctness and full M12 acceptance remain open. Evidence,
+including rejected-output usage, is retained in the decoding diagnostic folder.
+Nine capture/usage tests passed. Cleanup observed no models loaded.
+
 Provider usage accounting now preserves per-call reported tokens/timing and
 unknown counters for incomplete attempts. The retained 22-call prompt experiment
 reports 18,180 input and 3,788 generated tokens; this is not monetary cost or

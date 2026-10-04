@@ -1,0 +1,18 @@
+{
+  "operations": [
+    {
+      "command": "task.create",
+      "payload": {
+        "task_id": "6a02bb8c9e712f2fa69ae689",
+        "trigger": {
+          "type": "exact_time",
+          "payload": {
+            "at": "2030-11-28T00:00:00Z"
+          }
+        },
+        "dependencies": []
+      }
+    }
+  ],
+  "clarification": "What is the status of the release packet review?" 
+}
