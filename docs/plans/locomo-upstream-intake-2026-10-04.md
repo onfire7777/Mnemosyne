@@ -121,3 +121,24 @@ model content pins and transitive prompt/call helpers before run registration.
 
 Validation: all 17 synthetic ingestion tests passed. No held-out input, model
 execution, benchmark score or upstream parity result is represented by them.
+
+## Explicit question transformation and decoder
+
+`prepare_upstream_question` now applies the reviewed category-2 date instruction
+and category-5 answer-choice transformation. Category 5 requires a caller-supplied
+finite draw in [0, 1); the result retains that draw and the option mapping. It never
+uses hidden global randomness. This is the question fragment only, not the full
+model prompt, retrieval context, tokenizer or call configuration. The eventual
+runner must still record the registered RNG state, actual prompt and raw output.
+
+`decode_upstream_category5` preserves raw text alongside the decoded value. It
+intentionally preserves upstream's permissive one-/three-character behavior,
+including mapping `x` and `yes` to option B. It must not be advertised as semantic
+validation. An improved decoder belongs to a separately versioned enhanced track.
+
+Validation: all 34 ingestion/transformation tests passed. An additional local
+parity check first verified the pinned `gpt_utils.py` SHA-256, extracted only the
+reviewed pure `get_cat_5_answer` function, and compared 209 synthetic inputs; all
+matched. No module imports, model calls or dataset examples were executed by
+that parity check. The receipt is retained locally as `locomo-decoder-parity.json`.
+Full scoring parity, resource preflight and suite admission remain unverified.

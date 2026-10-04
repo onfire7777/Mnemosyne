@@ -408,3 +408,7 @@ Reviewed the official upstream scorer, runner, RAG script and license at commit 
 ## LoCoMo ingestion component
 
 Implemented separate conversation, query and annotation lanes with stable per-sample/question IDs, preserved source values and fail-closed structural validation. All 17 synthetic tests passed; no production dependencies or runtime contracts changed. Extended upstream review records prompt choice randomization, category denominator semantics, source hashes and the unchanged CUDA path incompatibility on this Mac. Full scorer parity, dataset admission, runnable adapter and real measurement remain open.
+
+## LoCoMo replayable question components
+
+Implemented caller-recorded category-5 choice draws and option mappings, the category-2 date instruction, and a raw-preserving upstream category-5 decoder. All 34 focused tests passed. Verified source hash and isolated-function parity matched on 209 synthetic decoder cases, without importing upstream model code or inspecting held-out data. Ruff passed. These components do not claim complete scorer, prompt or runnable-suite parity.

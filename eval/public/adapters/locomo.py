@@ -64,3 +64,62 @@ def split_samples(samples: object) -> dict:
     except (ValueError, TypeError, RecursionError) as exc:
         raise LoCoMoError("source must contain finite JSON values") from exc
     return result
+
+
+def prepare_upstream_question(annotation: dict, *, choice_draw: float | None = None) -> dict:
+    """Apply the pinned GPT question transformation with caller-owned randomness.
+
+    This is only the question transformation, not the surrounding model prompt.
+    The caller must retain this record and its registered RNG state for replay.
+    """
+    import math
+
+    if not isinstance(annotation, dict):
+        raise LoCoMoError("annotation must be an object")
+    query, category = annotation.get("question"), annotation.get("category")
+    if not isinstance(query, str) or not query:
+        raise LoCoMoError("question must be a non-empty string")
+    if type(category) is not int or category not in range(1, 6):
+        raise LoCoMoError("category must be an integer from 1 through 5")
+    answer_key = None
+    if category == 5:
+        if (type(choice_draw) not in (float, int) or not 0 <= choice_draw < 1
+                or not math.isfinite(choice_draw)):
+            raise LoCoMoError("category 5 requires a recorded choice draw in [0, 1)")
+        answer = annotation.get("answer")
+        if not isinstance(answer, str):
+            raise LoCoMoError("category 5 distractor must be a string")
+        choices = ["Not mentioned in the conversation", answer]
+        if choice_draw >= 0.5:
+            choices.reverse()
+        answer_key = dict(zip(("a", "b"), choices, strict=True))
+        query += f" Select the correct answer: (a) {choices[0]} (b) {choices[1]}. "
+    else:
+        if choice_draw is not None:
+            raise LoCoMoError("choice draw is only valid for category 5")
+        if category == 2:
+            query += " Use DATE of CONVERSATION to answer with an approximate date."
+    return {"upstream_revision": UPSTREAM_REVISION, "category": category,
+            "query": query, "choice_draw": choice_draw, "answer_key": answer_key}
+
+
+def decode_upstream_category5(raw_prediction: str, answer_key: dict) -> dict:
+    """Retain raw text and the upstream decoder's unusual short-output behavior.
+
+    This is not a robust semantic answer parser: parity deliberately maps any
+    one-character non-a or three-character non-(a) response to option b.
+    """
+    if not isinstance(raw_prediction, str):
+        raise LoCoMoError("prediction must be a string")
+    if (not isinstance(answer_key, dict) or set(answer_key) != {"a", "b"}
+            or any(not isinstance(value, str) for value in answer_key.values())):
+        raise LoCoMoError("answer key must contain string choices a and b")
+    normalized = raw_prediction.strip().lower()
+    if len(normalized) == 1:
+        decoded = answer_key["a" if normalized == "a" else "b"]
+    elif len(normalized) == 3:
+        decoded = answer_key["a" if normalized == "(a)" else "b"]
+    else:
+        decoded = normalized
+    return {"raw_prediction": raw_prediction, "decoded_prediction": decoded,
+            "upstream_revision": UPSTREAM_REVISION}
