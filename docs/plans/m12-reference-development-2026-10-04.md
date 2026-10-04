@@ -65,3 +65,30 @@ A hand-written maximum-timestamp case exposed an unnecessary date advance after
 the final recurrent occurrence. The interpreter now advances only if another
 occurrence remains, so a completed schedule cannot overflow while constructing
 an unused next due time. This correction changes no product engine code.
+
+## Retained reference execution
+
+`python -m eval.public.action_reference_run OUTPUT` runs the complete explicit
+five-trigger workload; add `--fanout` for the full bounded fan-out workload.
+Both always deliver every firing to the same durable inert sink implementation,
+with a deliberate retry, in a separately identified reference session.
+
+The runner retains the versioned plan, exact ordered requests/responses, source
+receipt, reports, sink annex and status. Its report uses a distinct
+`m12-draft-reference-report/v1` schema and reference identity, with
+`baseline_admitted:false` and `publishable:false`. It cannot be presented as a
+Mnemosyne candidate result. Runtime failure retains completed operation records
+and a failed status containing the exception type, never its potentially
+sensitive text. Existing output directories are never overwritten.
+
+`--recompute` first validates the exact workload and observations, independently
+re-executes the request stream to check every semantic response, then checks the
+saved report, completion count and reconstructed sink annex. The replay compares
+semantic output; it preserves recorded runtime measurements rather than claiming
+to regenerate them. Source hashes are descriptive provenance, not signatures or
+independent authentication. The interpreter still receives only request payloads.
+
+Evaluation time is measured with `perf_counter` around the in-process interpreter
+call. It excludes durable sink writes and differs from the candidate's CLI process
+boundary. These measurements must not be used for direct latency rankings.
+Cost, peak RSS and full resource admission are not supplied by this runner.
