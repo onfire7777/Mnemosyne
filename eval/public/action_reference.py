@@ -34,6 +34,25 @@ def _json(value):
     return json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False)
 
 
+def _condition_matches(observed, operator, expected):
+    if operator == 'eq':
+        return _json(observed) == _json(expected)
+    if operator == 'ne':
+        return _json(observed) != _json(expected)
+    if operator == 'in':
+        if not isinstance(expected, list):
+            raise ValueError('membership requires a list')
+        return any(_json(observed) == _json(item) for item in expected)
+    if operator not in ('lt', 'lte', 'gt', 'gte'):
+        raise ValueError('unsupported condition operator')
+    if type(observed) is not type(expected) or type(observed) not in (int, float, str):
+        raise ValueError('ordering requires same-type numbers or strings')
+    _json(observed)
+    _json(expected)
+    return {'lt': observed < expected, 'lte': observed <= expected,
+            'gt': observed > expected, 'gte': observed >= expected}[operator]
+
+
 class ExplicitActionReference:
     """Bounded, in-memory draft semantics; no inference from expected outcomes."""
 
@@ -162,8 +181,12 @@ class ExplicitActionReference:
                 raise ValueError('event match must be an object')
         if kind == 'condition':
             _text(spec['condition_id'])
-            if spec['operator'] != 'eq':
-                raise ValueError('draft reference supports equality conditions only')
+            if spec['operator'] not in ('eq', 'ne', 'in', 'lt', 'lte', 'gt', 'gte'):
+                raise ValueError('unsupported condition operator')
+            if spec['operator'] == 'in' and not isinstance(spec['value'], list):
+                raise ValueError('membership requires a list')
+            if spec['operator'] in ('lt', 'lte', 'gt', 'gte') and type(spec['value']) not in (int, float, str):
+                raise ValueError('ordering requires numbers or strings')
         deps = task.get('dependency_ids', [])
         if not isinstance(deps, list) or any(not isinstance(dep, str) or dep not in self.tasks for dep in deps):
             raise ValueError('dependencies must already exist')
@@ -214,7 +237,7 @@ class ExplicitActionReference:
             raise ValueError('clock required')
         # Dependencies see completion before this tick, independent of task order.
         completed = {key for key, task in self.tasks.items() if task['occurrence'] >= task['maximum']}
-        firings = []
+        firings, transitions = [], []
         for task_id, task in self.tasks.items():
             if task['cancelled'] or task['occurrence'] >= task['maximum'] or self.now < task['due']:
                 continue
@@ -229,7 +252,7 @@ class ExplicitActionReference:
                     for event in self.events)
             elif kind == 'condition':
                 signal = self.conditions.get(spec['condition_id'])
-                eligible = signal is not None and task['due'] <= _time(signal['observed_at']) <= self.now and _json(signal['value']) == _json(spec['value'])
+                eligible = signal is not None and task['due'] <= _time(signal['observed_at']) <= self.now and _condition_matches(signal['value'], spec['operator'], spec['value'])
             elif kind == 'dependency_completion':
                 eligible = set(task['dependencies']) <= completed
             if not eligible:
@@ -238,6 +261,8 @@ class ExplicitActionReference:
                             'occurrence': task['occurrence'], 'trigger_type': kind,
                             'due_at': task['due'].isoformat(), 'evaluated_at': self.now.isoformat(),
                             'provider_evaluated_at': None})
+            transitions.append(task)
+        for task in transitions:
             task['occurrence'] += 1
             if task['interval'] is not None and task['occurrence'] < task['maximum']:
                 task['due'] += timedelta(seconds=task['interval'])

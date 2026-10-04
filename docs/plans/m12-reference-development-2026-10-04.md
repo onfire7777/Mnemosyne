@@ -172,3 +172,21 @@ writes and is not comparable to candidate subprocess latency. A dropped returned
 acknowledgement is not a network outage or power-loss experiment. Process reopening
 is independently covered by store tests; each workload adapter reset reopens the
 store within the runner process. Full baseline calibration remains unfinished.
+
+## Extended conditions and atomic observations
+
+The draft now implements equality, inequality, membership and ordered conditions
+(`eq`, `ne`, `in`, `lt`, `lte`, `gt`, `gte`). Ordering requires matching numeric or
+string types, excluding booleans; membership requires a list. Invalid comparisons
+reject the observation without consuming any eligible task. All eligibility
+checks complete before occurrence counters advance, and signals remain available
+for correction after a rejected observation.
+
+Equality/membership retain the draft's strict recursive JSON comparison. Review
+found a contract question that must be resolved before baseline freeze: the
+current product helper checks outer types then uses Python equality, which can
+treat nested booleans and numbers as equal, whereas the draft distinguishes them.
+The present retained workloads do not exercise that difference. Do not infer
+full semantic equivalence from their matched scores or silently change either
+side's results. Add explicit public-boundary vectors and settle the intended
+nested-value contract before admitting broader condition comparisons.

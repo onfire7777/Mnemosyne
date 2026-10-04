@@ -223,3 +223,29 @@ def test_explicit_null_keys_cannot_bypass_revision_or_creation_validation():
         ref.run('task.update', {'type': 'cancel', 'task_id': 'a',
                                 'idempotency_key': None, 'expected_revision': None})
     assert ref.run('task.inspect', {'task_id': 'a'}) == before
+
+
+@pytest.mark.parametrize('operator,observed,expected,match', [
+    ('eq', True, 1, False), ('ne', True, 1, True),
+    ('lt', 2, 3, True), ('lte', 3, 3, True), ('gt', 3, 2, True),
+    ('gte', 'b', 'a', True), ('lt', 3, 2, False),
+    ('in', True, [1, False], False), ('in', 3, [2, 3], True),
+])
+def test_condition_operator_golden_vectors(operator, observed, expected, match):
+    from eval.public.action_reference import _condition_matches
+    assert _condition_matches(observed, operator, expected) is match
+
+
+def test_invalid_condition_evaluation_does_not_partially_consume_earlier_action():
+    ref = ExplicitActionReference()
+    ref.run('task.create', task())
+    ref.run('task.create', task('condition', 'condition', {
+        'condition_id': 'value', 'operator': 'gt', 'value': 2, 'due_at': stamp(10)}))
+    ref.run('event.inject', {'kind': 'condition', 'condition_id': 'value',
+                             'value': True, 'observed_at': stamp(10)})
+    with pytest.raises(ValueError, match='same-type'):
+        observe(ref, 10)
+    assert ref.run('task.inspect', {'task_id': 'a'})['status'] == 'scheduled'
+    ref.run('event.inject', {'kind': 'condition', 'condition_id': 'value',
+                             'value': 3, 'observed_at': stamp(10)})
+    assert {row['action_id'] for row in observe(ref, 10)} == {'a', 'condition'}
