@@ -14,12 +14,13 @@ public `intention-list --include-revision` and checks the returned principal,
 session, intention identity, status and revision format. It supplies no private
 engine state and does not replace an original update revision during retry.
 Replaying an original keyed creation can rebuild the adapter's task map.
-Cancellation revision/key fields remain unsupported and are explicitly rejected.
+Cancellation also forwards the original paired revision/key fields; partial
+pairs are rejected.
 
 Fault-injection regressions use actual CLI subprocess writes, discard their
-first successful create/update responses, reconstruct the adapter and replay
-the original requests. Five separate dates check one-shot firing and duplicate
-tick suppression. This is a response-loss regression, not arbitrary process
+first successful create/update/cancel responses, reconstruct the adapter and
+replay the original requests. Five separate dates with firing/cancellation
+variants check one-shot firing, cancellation and duplicate tick suppression. This is a response-loss regression, not arbitrary process
 crash/power-loss certification or the registered multiweek recovery workload.
 
 ### Firing observations
@@ -72,7 +73,7 @@ and injected transaction failure are covered by regressions. The JSON annex
 is checked against saved firing observations using a temporary sink during
 recomputation. This is not cryptographic database authentication, power-loss
 certification or proof of external side-effect delivery. The original
-SQLite file remains local evidence. Public creation/update retries and content revisions now have an
+SQLite file remains local evidence. Public creation/update/cancel retries and content revisions now have an
 [opt-in contract](../ENGINE-CONTRACT.md#prospective-memory-contract) and local/SQLite
 regressions; live PostgreSQL validation is pending CI. Registered retry/recovery
 workload integration, calibrated baselines, full trigger coverage and admission

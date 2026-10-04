@@ -700,3 +700,36 @@ whitespace checks passed. The served coverage page now names the response-loss
 evidence and still-open keyed-cancellation/recovery gates. Remote branch reads
 confirmed main at 8c103f0f and development at 762f12c8; newer local work is not
 represented as remote-verified or merged.
+
+## Cancellation revisions and durable retry receipts
+
+Completed the optional paired revision/key path for cancellation in all three
+engine implementations, CLI/MCP and the public action adapter. Update and
+cancellation share the existing digest-receipt validation logic, preserving
+update digest namespaces and payloads. Cancellation has its own operation
+namespace and binds the cancellation principal/session. New requests must
+match current state; recognized retries require retained cancelled state and
+live provenance. A new key against already-cancelled current state receives
+one no-op receipt. Existing unkeyed behavior and default response fields remain.
+
+Concurrent cancellation versus update admits only one change from the shared
+prior revision. Cancellation versus firing admits only one terminal transition;
+if firing wins, cancellation fails rather than reporting success. Injected
+audit failure rolls back the state change and its receipt. Reopening retains
+retry identities. CLI cancellation followed by MCP retry is covered. A missing
+post-cancellation record now produces KeyError rather than leaking StopIteration.
+
+The combined prospective-memory, CLI/MCP, validation, BurnOS HTTP and session
+checks passed 437 tests with 43 prerequisite skips in 7.05s. The retry module
+now contains 34 pending live PostgreSQL cases; no local PostgreSQL result is
+claimed. Full registered recovery/trigger workloads, calibration, resource/cost
+and M12 admission remain open.
+
+The expanded real-subprocess response-loss, recurrence, original action-probe
+and timing-runner suite passed 68 tests in 60.93s. On five separate dates, a
+cancellation variant discards its first successful cancellation response,
+rebuilds the adapter through keyed create/update replay, retries the original
+cancellation and observes no firing. The uncancelled variant still observes
+one firing and no duplicate tick. This remains successful-exit response-loss
+evidence, not an arbitrary-crash or power-loss certification. Repository-wide
+Ruff and whitespace checks passed.

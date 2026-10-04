@@ -10,8 +10,9 @@ from eval.public.action_cli import ActionCLI, ActionCLIError
 
 
 @pytest.mark.parametrize("seed", [7, 19, 41, 73, 101])
-def test_lost_create_and_update_responses_recover_through_public_cli(
-    tmp_path, monkeypatch, seed
+@pytest.mark.parametrize("cancel_before_due", [False, True])
+def test_lost_operation_responses_recover_through_public_cli(
+    tmp_path, monkeypatch, seed, cancel_before_due
 ):
     driver = MnemoCLI(store=str(tmp_path / "unused.json"), timeout_s=30)
     scope = {
@@ -32,7 +33,7 @@ def test_lost_create_and_update_responses_recover_through_public_cli(
     def lose_first_response(self, command, *args, **kwargs):
         result = original(self, command, *args, **kwargs)
         if (
-            command in {"intention-schedule", "intention-update"}
+            command in {"intention-schedule", "intention-update", "intention-cancel"}
             and command not in dropped
         ):
             assert result.ok
@@ -73,14 +74,35 @@ def test_lost_create_and_update_responses_recover_through_public_cli(
             "task.update", scope, {**update, "idempotency_key": "fresh-stale-request"}
         )
     assert adapter.run("task.inspect", scope, {"task_id": "reminder"}) == after
+    if cancel_before_due:
+        cancel = {
+            "type": "cancel",
+            "task_id": "reminder",
+            "idempotency_key": "cancel-1",
+            "expected_revision": after["revision"],
+        }
+        with pytest.raises(TimeoutError):
+            adapter.run("task.update", scope, cancel)
+        adapter = ActionCLI(driver)
+        adapter.run("task.create", scope, task)
+        adapter.run("task.update", scope, update)
+        assert adapter.run("task.update", scope, cancel) == {}
+        with pytest.raises(CLIError, match="revision conflict"):
+            adapter.run(
+                "task.update", scope, {**cancel, "idempotency_key": "cancel-stale"}
+            )
     adapter.run("clock.inject", scope, {"now": due})
-    assert adapter.run("intention.observe", scope, {})["action_ids"] == ["revised"]
+    assert adapter.run("intention.observe", scope, {})["action_ids"] == (
+        [] if cancel_before_due else ["revised"]
+    )
     assert adapter.run("intention.observe", scope, {})["action_ids"] == []
     adapter.run("task.update", scope, update)
-    assert (
-        adapter.run("task.inspect", scope, {"task_id": "reminder"})["status"] == "fired"
+    assert adapter.run("task.inspect", scope, {"task_id": "reminder"})["status"] == (
+        "cancelled" if cancel_before_due else "fired"
     )
-    assert dropped == ["intention-schedule", "intention-update"]
+    assert dropped == ["intention-schedule", "intention-update"] + (
+        ["intention-cancel"] if cancel_before_due else []
+    )
 
 
 @pytest.mark.parametrize(
@@ -169,7 +191,7 @@ def test_keyed_task_binding_and_cancel_preconditions_fail_before_writes(
     for changed in ({**task, "idempotency_key": "other"}, {**task, "task_id": "other"}):
         with pytest.raises(ActionCLIError):
             adapter.run("task.create", scope, changed)
-    with pytest.raises(ActionCLIError, match="cancel does not yet support"):
+    with pytest.raises(ActionCLIError, match="expected_revision"):
         adapter.run(
             "task.update",
             scope,
@@ -177,7 +199,6 @@ def test_keyed_task_binding_and_cancel_preconditions_fail_before_writes(
                 "type": "cancel",
                 "task_id": "task",
                 "idempotency_key": "cancel-1",
-                "expected_revision": "a" * 64,
             },
         )
     assert calls == ["capture", "intention-schedule"]

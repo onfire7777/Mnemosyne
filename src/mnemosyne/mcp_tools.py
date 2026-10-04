@@ -304,6 +304,8 @@ TOOL_SPEC: list[dict[str, Any]] = [
             "tenant_id",
             "intention_id",
             "cancelled_by",
+            "expected_revision",
+            "idempotency_key",
         ],
     },
     {
@@ -1152,6 +1154,8 @@ class MemoryTools:
         intention_id: str,
         cancelled_by: str,
         session_identity: SessionIdentity | None = None,
+        expected_revision: str | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         authorization = self._authorize_prospective(
             "cancel",
@@ -1206,12 +1210,17 @@ class MemoryTools:
             intention_id,
             cancelled_by=cancelled_by,
             session_id=session_identity.session_id,
+            **({"expected_revision": expected_revision, "idempotency_key": idempotency_key}
+               if expected_revision is not None or idempotency_key is not None else {}),
         )
-        return next(
-            intention.to_dict()
-            for intention in self.engine.list_intentions(authorized_tenant)
+        cancelled = next((
+            intention for intention in self.engine.list_intentions(authorized_tenant)
             if intention.intention_id == intention_id
-        )
+        ), None)
+        if cancelled is None:
+            raise KeyError(intention_id)
+        return {**cancelled.to_dict(), **({"revision": intention_revision(cancelled)}
+                                         if idempotency_key is not None else {})}
 
     def evaluate_intentions(
         self,

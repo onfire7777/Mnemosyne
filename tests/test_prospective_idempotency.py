@@ -435,10 +435,13 @@ def test_update_retry_requires_both_valid_key_and_revision(setup, overrides):
     assert setup["engine"].export_tenant(setup["tenant"]) == before
 
 
-def test_failed_update_rolls_back_state_and_receipt_then_allows_retry(
-    setup, monkeypatch
+@pytest.mark.parametrize("operation", ["update", "cancel"])
+def test_failed_mutation_rolls_back_state_and_receipt_then_allows_retry(
+    setup, monkeypatch, operation
 ):
-    arguments = _update_arguments(setup)
+    arguments = (
+        _update_arguments(setup) if operation == "update" else _cancel_arguments(setup)
+    )
     engine, tenant = setup["engine"], setup["tenant"]
     before = engine.export_tenant(tenant)
     method = "_audit_row" if isinstance(engine, SqliteEngine) else "_audit"
@@ -451,17 +454,173 @@ def test_failed_update_rolls_back_state_and_receipt_then_allows_retry(
     with monkeypatch.context() as patch:
         patch.setattr(engine, method, fail_after_audit)
         with pytest.raises(RuntimeError, match="injected before commit"):
-            MemoryTools(engine).update_intention(**arguments)
+            getattr(MemoryTools(engine), f"{operation}_intention")(**arguments)
     assert engine.export_tenant(tenant) == before
-    result = MemoryTools(engine).update_intention(**arguments)
-    assert result["action"] == arguments["action"]
+    result = getattr(MemoryTools(engine), f"{operation}_intention")(**arguments)
+    assert result["status"] == ("scheduled" if operation == "update" else "cancelled")
 
 
-def test_update_retry_rechecks_erased_provenance(setup):
-    arguments = _update_arguments(setup)
-    tools = MemoryTools(setup["engine"])
-    tools.update_intention(**arguments)
+@pytest.mark.parametrize("operation", ["update", "cancel"])
+def test_mutation_retry_rechecks_erased_provenance(setup, operation):
+    arguments = (
+        _update_arguments(setup) if operation == "update" else _cancel_arguments(setup)
+    )
+    mutate = getattr(MemoryTools(setup["engine"]), f"{operation}_intention")
+    mutate(**arguments)
     setup["engine"].forget(setup["tenant"], setup["arguments"]["evidence_ids"][0])
     with pytest.raises((KeyError, ValueError)):
-        tools.update_intention(**arguments)
+        mutate(**arguments)
     assert setup["engine"].list_intentions(setup["tenant"]) == []
+
+
+def _cancel_arguments(state):
+    update = _update_arguments(state)
+    return {
+        name: update[name]
+        for name in (
+            "tenant_id",
+            "intention_id",
+            "session_identity",
+            "expected_revision",
+        )
+    } | {
+        "cancelled_by": "owner",
+        "idempotency_key": "cancel-1",
+    }
+
+
+def test_concurrent_cancel_retries_survive_reopening_and_reject_changed_precondition(
+    setup,
+):
+    arguments = _cancel_arguments(setup)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(
+            pool.map(
+                lambda _: MemoryTools(setup["engine"]).cancel_intention(**arguments),
+                range(8),
+            )
+        )
+    assert all(result == results[0] for result in results)
+    assert results[0]["status"] == "cancelled"
+    assert results[0]["revision"] != arguments["expected_revision"]
+    before = setup["engine"].export_tenant(setup["tenant"])
+    cancellations = [
+        row for row in before["audit_log"] if row["op"] == "cancel_intention"
+    ]
+    assert len(cancellations) == 1
+    assert set(cancellations[0]["diff"]["cancel_request"]) == {
+        "key_digest",
+        "request_digest",
+        "result_revision",
+    }
+    setup["close"](setup["engine"])
+    setup["engine"] = setup["factory"]()
+    tools = MemoryTools(setup["engine"])
+    assert tools.cancel_intention(**arguments) == results[0]
+    with pytest.raises(ValueError, match="idempotency conflict"):
+        tools.cancel_intention(
+            **{**arguments, "expected_revision": results[0]["revision"]}
+        )
+    with pytest.raises(PermissionError):
+        tools.cancel_intention(
+            **{
+                **arguments,
+                "session_identity": replace(
+                    arguments["session_identity"], session_id="wrong"
+                ),
+            }
+        )
+    assert setup["engine"].export_tenant(setup["tenant"]) == before
+
+
+def test_cancel_and_update_cannot_both_accept_the_same_prior_state(setup):
+    cancel = _cancel_arguments(setup)
+    update = {
+        "tenant_id": cancel["tenant_id"],
+        "intention_id": cancel["intention_id"],
+        "user_id": "owner",
+        "agent_id": "agent",
+        "session_identity": cancel["session_identity"],
+        "expected_revision": cancel["expected_revision"],
+        "idempotency_key": "update-race",
+        "action": {"kind": "notify", "message": "Changed before cancel"},
+    }
+
+    def attempt(operation):
+        try:
+            getattr(MemoryTools(setup["engine"]), f"{operation}_intention")(
+                **(cancel if operation == "cancel" else update)
+            )
+            return operation
+        except ValueError as error:
+            assert "revision conflict" in str(error)
+            return None
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        winners = [
+            result for result in pool.map(attempt, ("cancel", "update")) if result
+        ]
+    assert len(winners) == 1
+    state = setup["engine"].list_intentions(setup["tenant"])[0]
+    assert state.status == ("cancelled" if winners[0] == "cancel" else "scheduled")
+    if winners[0] == "update":
+        assert state.action == update["action"]
+
+
+def test_cancel_and_fire_have_one_winning_transition(setup):
+    cancel = _cancel_arguments(setup)
+    engine, tenant = setup["engine"], setup["tenant"]
+
+    def attempt(operation):
+        if operation == "fire":
+            return len(
+                engine.evaluate_due_intentions(
+                    tenant,
+                    evaluated_at=datetime(2026, 10, 4, 13, tzinfo=UTC),
+                    trigger_context=TriggerEvaluationContext(
+                        tenant_id=tenant,
+                        infrastructure_available=True,
+                        events=[],
+                        conditions={},
+                    ),
+                    operating_point=ProspectiveOperatingPoint(
+                        operating_point_id="test",
+                        threshold=0.5,
+                        measured_precision=0.9,
+                        measured_recall=0.9,
+                        measurement_cid="test-only",
+                    ),
+                )
+            )
+        try:
+            MemoryTools(engine).cancel_intention(**cancel)
+            return True
+        except ValueError as error:
+            assert "fired intention" in str(error) or "revision conflict" in str(error)
+            return False
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        cancelled, firings = list(pool.map(attempt, ("cancel", "fire")))
+    assert int(cancelled) + firings == 1
+    assert engine.list_intentions(tenant)[0].status == (
+        "cancelled" if cancelled else "fired"
+    )
+
+
+def test_new_key_for_already_cancelled_state_is_an_audited_noop(setup):
+    arguments = _cancel_arguments(setup)
+    tools = MemoryTools(setup["engine"])
+    first = tools.cancel_intention(**arguments)
+    second_args = {
+        **arguments,
+        "expected_revision": first["revision"],
+        "idempotency_key": "cancel-2",
+    }
+    assert tools.cancel_intention(**second_args) == first
+    before = setup["engine"].export_tenant(setup["tenant"])
+    assert (
+        len([row for row in before["audit_log"] if row["op"] == "cancel_intention"])
+        == 2
+    )
+    assert tools.cancel_intention(**second_args) == first
+    assert setup["engine"].export_tenant(setup["tenant"]) == before

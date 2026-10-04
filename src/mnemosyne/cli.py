@@ -8746,6 +8746,7 @@ def cmd_intention_cancel(args: argparse.Namespace) -> None:
             tenant_id=args.tenant,
             intention_id=args.intention_id,
             cancelled_by=args.cancelled_by,
+            expected_revision=args.expected_revision, idempotency_key=args.idempotency_key,
             **_intention_auth_kwargs(args),
         )
     )
@@ -20059,6 +20060,8 @@ def build_parser() -> argparse.ArgumentParser:
     intention_cancel = sub.add_parser("intention-cancel")
     intention_cancel.add_argument("--tenant", required=True)
     intention_cancel.add_argument("--intention-id", required=True)
+    intention_cancel.add_argument("--expected-revision")
+    intention_cancel.add_argument("--idempotency-key")
     intention_cancel.add_argument("--cancelled-by")
     intention_cancel.set_defaults(func=cmd_intention_cancel)
 

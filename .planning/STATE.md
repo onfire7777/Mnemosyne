@@ -18,15 +18,15 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
-Public intention creation and updates now support opt-in, session-scoped
-idempotency keys through CLI/MCP and all three engine implementations. New
-updates also require a current-state content revision; recognized retries never
-reapply the mutation. Creation returns its original acknowledgement, while
-update returns current state. Local/SQLite regressions passed; live PostgreSQL
+Public intention creation, updates and cancellation support opt-in, session-scoped
+idempotency keys through CLI/MCP and all three engine implementations. New keyed
+updates and cancellations also require a current-state content revision;
+recognized retries never reapply the mutation. Creation returns its original
+acknowledgement; update and cancellation return current state. Local/SQLite regressions passed; live PostgreSQL
 verification is pending in the expanded CI job. The public adapter now forwards
 keys/revisions and passes response-loss regressions after rebuilding its task
-map. Keyed cancellation preconditions, registered retry/recovery workload
-integration and full M12 admission remain open. See
+map. Registered retry/recovery workload integration and full M12 admission
+remain open. See
 [the contract](../docs/ENGINE-CONTRACT.md#prospective-memory-contract).
 
 M12 now also has a [sink-enabled development capture](../eval/reports/m12-inert-sink-development-2026-10-04/README.md)
