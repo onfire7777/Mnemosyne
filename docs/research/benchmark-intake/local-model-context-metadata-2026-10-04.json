@@ -1,0 +1,25 @@
+{
+  "effective_request_context_verified": false,
+  "full_context_coverage_verified": false,
+  "model": "qwen3:8b",
+  "model_digest": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41",
+  "model_info": {
+    "general.architecture": "qwen3",
+    "qwen3.context_length": 40960,
+    "tokenizer.ggml.model": "gpt2",
+    "tokenizer.ggml.pre": "qwen2"
+  },
+  "model_size_bytes": 5225388164,
+  "ollama_version": "0.35.1",
+  "operation": "api/show metadata only; no generation request",
+  "parameters": "repeat_penalty                 1\nstop                           \"<|im_start|>\"\nstop                           \"<|im_end|>\"\ntemperature                    0.6\ntop_k                          20\ntop_p                          0.95",
+  "running_models_after": {
+    "models": []
+  },
+  "running_models_before": {
+    "models": []
+  },
+  "schema": "mnemosyne.local-model-context-metadata/v1",
+  "template_bytes": 1723,
+  "template_sha256": "ae370d884f108d16e7cc8fd5259ebc5773a0afa6e078b11f4ed7e39a27e0dfc4"
+}

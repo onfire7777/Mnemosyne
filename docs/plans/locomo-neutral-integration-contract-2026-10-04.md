@@ -737,3 +737,21 @@ claim that the full prompt fits or necessarily overflows is warranted. Changing
 candidate and fresh resource preflight, not mutation of historical receipts.
 The original 24,000-character requirement and stopped memory-pressure probes
 remain unchanged. This audit does not authorize another model load.
+
+### Installed model metadata, without generation
+
+The [local model metadata receipt](../research/benchmark-intake/local-model-context-metadata-2026-10-04.json)
+binds the installed `qwen3:8b` tag to the pinned model digest and records the
+Ollama version, chat-template hash and model parameters. `/api/show` reports
+`qwen3.context_length = 40960`. This is model metadata, not proof of the server's
+effective request window. The model parameters do not explicitly declare
+`num_ctx`, and the current candidate request omits it as noted above. Therefore
+neither 40,960 nor an assumed server default is admitted as a verified runtime
+context size. `/api/ps` was empty before and after the metadata request; no model
+was loaded and no generation or protected-data access occurred.
+
+The next context proof must bind the effective runtime window and exact
+tokenized/template input to this model/template identity, then establish that
+the original full-input request is not truncated. Model architecture capacity
+alone does not resolve the earlier memory-pressure failures or justify a new
+full-settings probe on the unchanged computer.
