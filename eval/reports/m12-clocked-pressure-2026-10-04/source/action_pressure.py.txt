@@ -77,11 +77,6 @@ def score_case(case, records):
     if records[-1]['dispatch_ns'] < DRAIN_NS:
         raise ValueError('missing final drain evaluation')
     conditional = score_trigger_windows(case['expected'], [r['response'] for r in records])
-    for row in records:
-        # The outer interval includes CLI execution, so it cannot be shorter.
-        # Allow one microsecond for the float/monotonic-nanosecond clock conversion.
-        if row['response']['evaluation_wall_ms'] > (row['response_ns']-row['dispatch_ns'])/1e6 + .001:
-            raise ValueError('command duration exceeds the observed response interval')
     live = {r['action_id']:r for r in case['expected'] if r['cancelled_at'] is None}
     valid = {r['action_id'] for r in conditional['rows'] if r['true_positives']}
     # Never reward missing a whole window because no poll visited it.

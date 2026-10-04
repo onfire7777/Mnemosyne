@@ -18,6 +18,19 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+A full five-seed clock-driven public-CLI pressure workload is retained from
+`04f99824`: 207/320 live intentions fired correctly; 113 short-window intentions
+were missed. All 160 exact-time intentions recovered; no duplicate or cancelled
+firings were observed. Ordered source-bound replay and durable sink comparison
+passed. The run completed in 71.889 seconds under normal sampled pressure.
+The benchmark website exposes its raw evidence. Next: identical workload through
+a long-lived authenticated public service. Native saturation, calibration and
+M12 admission remain open; phase completion counters are unchanged.
+
+The observatory UI refresh is committed at `327ba016`, with grid/list benchmark
+browsing and direct development-evidence navigation. Fifty-eight renderer/export
+checks and responsive keyboard/browser checks passed; this is not a new score.
+
 Development evidence export now bounds manifest/member reads and rejects
 duplicate manifest keys, final-component symlinks and ambiguous archive paths.
 61 rendering/export checks passed. All six existing preview downloads remain

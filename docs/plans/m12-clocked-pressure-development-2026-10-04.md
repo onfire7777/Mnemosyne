@@ -1,6 +1,6 @@
 # M12 clocked trigger-pressure development workload
 
-Status: implementation in progress. Original M12 acceptance remains PROPOSED.
+Status: implementation and first full development measurement retained. Original M12 acceptance remains PROPOSED.
 This supplements the fixed-tick fan-out workload; it does not replace it or
 claim to measure native scheduler maximum capacity.
 
@@ -63,5 +63,26 @@ attestation of elapsed time or execution.
 Nine new checks and 25 existing timing/sink checks passed (34 total). They
 include a real reduced public-CLI workload, never-polled expired windows,
 duplicate/cancelled firings, damaged clock records, incomplete drain, a corrupted
-sink database and failed-setup request retention. The complete five-seed real
-measurement is the next step; no measured full-workload result is claimed yet.
+sink database and failed-setup request retention. The complete five-seed measurement is now retained below; these original checks
+preceded it.
+
+
+## First complete clocked-pressure measurement
+
+[Raw capture](../../eval/reports/m12-clocked-pressure-2026-10-04/README.md) from
+clean `04f99824`: all five seeds completed in 71.889 seconds under normal sampled
+pressure. Of 320 live intentions, all 160 exact-time intentions and 47 of 160
+short-window intentions fired correctly. The other 113 windows were missed.
+Forty pre-cancelled controls never fired; no duplicates or false positives were
+observed. Pending exact-time work peaked at eight per seed and drained fully.
+
+Ordered replay, source hashes and the durable sink database were verified at the
+recorded source. A post-run verifier fix now also rejects command durations that
+exceed the enclosing response interval; all retained measurements pass it.
+Original source and artifact bytes remain unchanged. The maximum sampled RSS
+was 97,271,808 bytes; peak/resource admission remains unverified.
+
+Next work is an identical workload through a long-lived authenticated public
+service, to separate CLI process startup from native evaluation behavior. The
+current result is not native saturation, a complete overload acceptance gate,
+a calibrated deadline requirement or a competitor comparison.
