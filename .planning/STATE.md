@@ -18,6 +18,13 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+M12 now includes a [five-trigger eligibility-window scorer](../docs/plans/m12-trigger-window-development-2026-10-04.md)
+with explicit transient-signal and endpoint rules. It distinguishes missed
+observed opportunities from windows no tick visited; workload completeness
+is not inferred. The real-CLI regressions cover all five explicit trigger
+types and the exclusive time-window endpoint. The registered multiweek
+corpus, calibration and complete M12 acceptance remain open.
+
 Public intention creation, updates and cancellation support opt-in, session-scoped
 idempotency keys through CLI/MCP and all three engine implementations. New keyed
 updates and cancellations also require a current-state content revision;

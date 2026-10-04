@@ -733,3 +733,35 @@ cancellation and observes no firing. The uncancelled variant still observes
 one firing and no duplicate tick. This remains successful-exit response-loss
 evidence, not an arbitrary-crash or power-loss certification. Repository-wide
 Ruff and whitespace checks passed.
+
+## Five-trigger eligibility-window scoring
+
+Added a separate development scorer for all five explicit trigger families.
+It consumes independently declared, ordered eligibility windows; transient
+signals may have disjoint or point windows. Endpoint inclusion is explicit.
+Time-window triggers require finite exclusive ends to match the public
+[start, end) contract, verified against actual CLI behavior. Cancellation at a
+tick excludes firing at that tick. It never treats due_at alone as an event or
+condition becoming eligible.
+
+The scorer retains every firing and counts invalid/duplicate observations as
+false positives without double-penalizing the duplicate diagnostic. A missed
+occurrence requires an observed eligible tick; absent opportunities are
+reported separately. Lateness is measured from first declared eligibility.
+Null denominators, cost-not-measured and workload_completeness_verified=false
+prevent an incomplete observation list from becoming an admission claim.
+Bounds cover occurrences, ticks, firings and window counts; sorted-tick lookup
+avoids an opportunity cross-product scan.
+
+Shared observation validation was extracted from the exact-time scorer without
+changing its report. The combined initial timing/runner/recurrence checks passed
+51 tests in 31.16s. After refining endpoint inclusion, the final targeted scorer
+suite passed 26 tests in 2.17s, including real public-CLI cases for all five
+triggers and the exclusive end boundary. Both saved exact-time and inert-sink
+captures replayed unchanged. Ruff and whitespace checks passed. No production
+engine, public wire response or historical benchmark result was changed.
+
+The next dependency-ready M12 deliverable is a versioned multiweek plan with
+complete ordered input/observation logs feeding candidate and reference through
+these definitions. This scorer alone is not that corpus, its calibration,
+resource admission, implicit-intent evaluation or a comparative quality result.
