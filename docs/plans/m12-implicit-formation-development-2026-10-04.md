@@ -400,3 +400,20 @@ or a completed benchmark. Earlier over-clarification is a result of the tested
 model-plus-adapter configuration, not evidence about model capability alone.
 The same failed HTTP input succeeded on a single diagnostic repeat; the earlier
 HTTP error's cause remains unknown. All variants and failures remain retained.
+
+
+## Failed-attempt coverage accounting
+
+`python -m eval.public.action_formation_failure CAPTURE/workload` now emits
+all 220 planned cases, with completed, incomplete and not-attempted states.
+It recomputes state/timing diagnostics only for the completed prefix and checks
+frozen public inputs, diagnostic-source hashes, trace ordering, retained record
+counts and all observation probes. Inputs are bounded and checked for changes
+during analysis. It does not replay the full protocol or attest execution.
+
+Applied to the retained initial attempt, this reports 0 completed, 1 incomplete
+and 219 not attempted. The schema variant reports 21 completed, 1 incomplete
+and 198 not attempted, retaining the 17 missed eligible occurrences in the
+completed prefix. Neither report supplies a full-corpus score or permits ranking.
+This makes missing evidence explicit without treating unattempted cases as
+observed model failures or hiding failures behind a completed-case denominator.
