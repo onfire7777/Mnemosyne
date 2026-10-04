@@ -26,7 +26,11 @@ def test_real_command_and_public_cli_retained_without_claiming_model_quality(tmp
     result = action_formation_run.run_development(output, provider)
     assert result['scored'] is result['publishable'] is False
     assert result['model_quality'] == 'not-evaluated'
-    assert result['firing_evaluation'] == 'not-run'
+    assert result['firing_evaluation'] == 'observed-unscored'
+    observed = json.loads((output / 'observations.json').read_text())
+    assert len(observed['cases'][0]['ticks']) == 12
+    assert all(not tick['firing_observations'] for tick in observed['cases'][0]['ticks'])
+    assert (output / 'sink.sqlite3').exists()
     assert len(result['cases']) == 1
     assert result['cases'][0]['turns'] == 2
     diagnostic = json.loads((output / 'formation-state.json').read_text())
@@ -64,3 +68,21 @@ def test_provider_failure_keeps_partial_log_and_no_success_artifact(tmp_path, mo
     assert any(r['stage'] == 'formation_response' for r in records)
     assert not (output / 'execution.json').exists()
     assert not (output / 'formation-state.json').exists()
+
+
+def test_failed_observation_is_not_counted_as_completed_case(tmp_path, monkeypatch):
+    single_case(monkeypatch)
+    provider = CommandFormationProvider(
+        (sys.executable, '-c', 'print(\'{"operations":[],"clarification":null}\')'), 'test-double')
+
+    def fail(*args, **kwargs):
+        raise RuntimeError('observation failed')
+
+    monkeypatch.setattr(action_formation_run, 'observe_case', fail)
+    output = tmp_path / 'attempt'
+    with pytest.raises(RuntimeError, match='observation failed'):
+        action_formation_run.run_development(output, provider)
+    status = json.loads((output / 'status.json').read_text())
+    assert status['status'] == 'failed'
+    assert status['completed_cases'] == 0
+    assert not (output / 'execution.json').exists()
