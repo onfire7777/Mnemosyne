@@ -148,3 +148,27 @@ command rollback and unchanged foreign databases. This does not yet constitute
 the full registered recovery workload or arbitrary power-loss certification.
 Replaying the bounded journal on every call favors auditability over throughput;
 it is reference infrastructure, not a proposed production storage replacement.
+
+## Durable reference recovery workload
+
+`python -m eval.public.action_reference_recovery OUTPUT` executes the same
+versioned four-week, five-seed recovery plan as the candidate recovery runner.
+All 360 operations use the original symbolic revision references. Fifty
+successful write acknowledgements are deliberately discarded after journal
+commit; fifty adapter resets reopen the durable reference. The reset also clears
+the adapter's clock, requiring the plan to inject it again before evaluation.
+
+The runner retains raw resolved requests, original requests, outcomes, observed
+revisions, durable journal and inert sink. Ten eligible actions and ten cancelled
+controls remain separately scored. Replay regenerates reference semantics in a
+fresh temporary journal and checks the complete candidate-independent trace,
+then verifies the sink annex. It does not need the retained SQLite database to
+check the trace, and does not authenticate the original execution independently.
+
+The report has a separate `m12-reference-recovery-report/v1` schema and
+`draft-durable-action-reference/v1` identity, with admission/publication false.
+Measured evaluation time includes local journal replay/commit but excludes sink
+writes and is not comparable to candidate subprocess latency. A dropped returned
+acknowledgement is not a network outage or power-loss experiment. Process reopening
+is independently covered by store tests; each workload adapter reset reopens the
+store within the runner process. Full baseline calibration remains unfinished.
