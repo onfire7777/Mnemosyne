@@ -29,6 +29,11 @@ intention IDs through full public snapshots, compares prerequisite action
 identities, preserves duplicate schedules, and refuses missing-reference
 evidence. Ambiguous duplicate prerequisite actions cannot earn dependency
 credit. A real public-CLI creation/inspection regression verifies the mapping.
-The original scorer is unchanged. Add per-case execution, inert receipts, timing
-comparison and saved-trace replay before claiming measured dependency formation. Full model execution,
+The original scorer is unchanged. Fixed public-only observation probes and inert
+receipts now execute through the real ActionCLI. Evaluator-only timing comparison
+retains all previously requested schedules, including cancelled and ineligible
+ones, so unexpected firings remain false positives. Repeated probes cannot earn
+extra correct firings. Integration tests explicitly provision golden tasks to
+verify plumbing; they are not model runs. Full provider-to-report execution and
+saved-trace replay still remain before claiming measured dependency formation. Full model execution,
 broader language, held-out calibration and M12 admission remain open.
