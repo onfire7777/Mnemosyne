@@ -42,9 +42,12 @@
   const cards = [...document.querySelectorAll('[data-benchmark]')];
   const count = document.getElementById('benchmark-count');
   const empty = document.getElementById('search-empty');
+  const grid = document.querySelector('.benchmark-grid');
   const filter = () => {
     const query = search.value.trim().toLocaleLowerCase();
     const stage = controls.querySelector('input[name="stage"]:checked').value;
+    const layout = controls.querySelector('input[name="layout"]:checked').value;
+    grid.classList.toggle('is-list', layout === 'list');
     let visible = 0;
     cards.forEach(card => {
       const matches = (stage === 'all' || card.dataset.stage === stage)

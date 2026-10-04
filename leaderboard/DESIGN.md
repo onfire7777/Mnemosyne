@@ -9,7 +9,7 @@ React or a client build.
 
 Shared presentation lives in ui.py and site.css. Use semantic landmarks, visible
 focus, real links and native controls. Tables scroll inside their regions. The
-navigation becomes horizontal on small screens. Respect reduced motion.
+navigation becomes an inline disclosure on small screens. Respect reduced motion.
 
 The benchmark catalog is available without JavaScript. site.js adds local search,
 stage filters, result announcements, reset and disclosure deep links. Do not load
@@ -40,3 +40,29 @@ Evidence manifests are bounded to 1 MiB, members to 4 MiB and the export to
 20 MiB. Reads reject nonregular files and final-component symlinks. Duplicate
 manifest keys and noncanonical archive paths are rejected before packaging.
 These checks assume a caller-owned directory tree, not a hostile filesystem.
+
+
+## Observatory refresh
+
+The benchmark entry point uses an editorial two-column hero: a statement of
+purpose and a linked illustration of six selected lifecycle dimensions. The
+illustration is explicitly proposed scope, never a score or completion chart.
+At narrow widths the illustration yields to the primary catalog and results
+links. Navigation groups research pages and evidence pages, with a direct
+Development evidence destination and correct current-page state.
+
+Catalog cards separate identifier and stage, title, full implementation status,
+and reporting rules. Every original status and policy remains readable. Grid
+and list use the same records; native radio controls switch presentation without
+changing evidence, and filters announce their result count. Individual entries
+have stable catalog-ID links. JavaScript is optional for reading the full slate.
+
+Visual tokens: near-black rail and hero, neutral paper content, restrained
+lavender actions, thin borders, 10–16px panel radii, local system typography.
+No remote fonts, analytics, React migration or new runtime dependency. Patterns
+adapt the bundled Linear design study and shadcn Card/Badge/Toggle Group guidance
+to the static renderer; these are native controls, not installed React components.
+
+Validation for this refresh: 58 renderer, comparison workspace and evidence
+export checks passed. Browser checks covered desktop grid/list, search, empty
+state/reset and responsive layout. Evidence scoring and engine code are unchanged.
