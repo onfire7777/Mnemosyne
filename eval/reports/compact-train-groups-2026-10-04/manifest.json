@@ -1,0 +1,12 @@
+{
+  "schema": "compact-train-group-evidence/v1",
+  "files": {
+    "README.md": "de75c5d7c77f7b2f0d6faf256fcb77cb33c7ffa69f7d871a5ead5b29bdae30c8",
+    "audit_groups.py": "33675cadb30855505557f953c5638c656e619d1dc70d83b648fd8d7d33f53b28",
+    "edge-audit.json": "91674465224af8addbf4850705a34456829e85b94749b8b4adf4dab2b6280391",
+    "summary.json": "b435d126e08206370f1aad08ba3a6a0d4b6faa304f7249b39d05e51ee41650b8"
+  },
+  "publishable": false,
+  "ranking_eligible": false,
+  "training_admitted": false
+}
