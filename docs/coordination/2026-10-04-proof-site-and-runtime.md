@@ -368,3 +368,21 @@ reconstruction after an append and signed-head tampering. Ruff and diff checks
 passed. Rendering the history and deciding which historical contents satisfy
 release gates remain separate unfinished work. Retrieval reproduction session
 24553 remains active with normal pressure; its result is not inferred here.
+
+## Local attempt-history view
+
+`render_site` accepts an optional ledger/public-key source pair. It captures and
+verifies a consistent signed snapshot, rejects visible records absent from that
+history, and renders `attempts.html` with every recorded outcome, roster,
+supersession status, reason and available result link. The downloadable snapshot
+preserves the original signatures and public key. Without a supplied ledger,
+the page reports missing history instead of implying no attempts occurred.
+
+The local preview is connected to the real completed retrieval attempt while
+the ranking dataset remains empty. Generated snapshot reconstruction verified
+successfully against its exported key/head/entries. All 88 history/render/publish
+checks passed, with Ruff and diff checks clean. Real-browser verification showed
+the actual signed attempt and a 390px document at a 390px mobile viewport;
+`attempt-history-preview.png` retains the preview. Public history integration is
+still gated: the existing public publisher does not automatically export inactive
+or nonpublishable historical contents through this preview-only option.
