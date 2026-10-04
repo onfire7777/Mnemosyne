@@ -14,7 +14,7 @@ import time
 from mnemosyne.providers.bounded_command import run_bounded_command
 
 from eval.public.action_implicit_plan import public_turn
-from eval.public.bundle import _parse_json
+from eval.public.bundle import _canonical, _parse_json
 
 
 MAX_INPUT_BYTES = 256 * 1024
@@ -157,6 +157,7 @@ def run_case(case, *, provider, actions, scope, emit):
     for index in range(len(case['public']['turns'])):
         prefix = public_turn(case, index)
         call('clock.inject', {'now': prefix['turns'][-1]['now']}, index)
+        call('evidence.capture', {'content': _canonical(prefix).decode('utf-8')}, index)
         current = [call('task.inspect', {'task_id': task}, index) for task in sorted(tasks)]
         request = {'schema': 'm12-formation-request/v1', 'conversation': prefix,
                    'current_tasks': current, 'prior_responses': deepcopy(prior_responses),

@@ -23,7 +23,10 @@ command provider and applies only allowed operations through the public action
 adapter. It retains incremental requests, raw responses, public outcomes and
 partial-failure status. Scripted command/public-CLI tests pass; no actual model
 quality or downstream firing result is claimed. Provider pinning/isolation,
-natural-input evidence-CID binding and complete scoring remain open.
+complete provenance admission and scoring remain open. New formation creations
+now bind to public evidence CIDs of the available conversation prefix; keyed
+retries preserve the original creation CID within the adapter session. Mutation
+source context remains linked through ordered per-turn records.
 
 The [natural-language formation corpus](../docs/plans/m12-implicit-formation-development-2026-10-04.md)
 now contains 220 conversations with separate input/label files and incremental
