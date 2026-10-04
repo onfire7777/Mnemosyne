@@ -6,6 +6,24 @@ existing PM-Bench/TriggerBench fixtures, scoring rules and results.
 
 ## Observable interface
 
+### Public retry adapter
+
+The development symbolic adapter forwards caller-supplied create keys and
+paired update keys/content revisions. `task.inspect` obtains a revision via
+public `intention-list --include-revision` and checks the returned principal,
+session, intention identity, status and revision format. It supplies no private
+engine state and does not replace an original update revision during retry.
+Replaying an original keyed creation can rebuild the adapter's task map.
+Cancellation revision/key fields remain unsupported and are explicitly rejected.
+
+Fault-injection regressions use actual CLI subprocess writes, discard their
+first successful create/update responses, reconstruct the adapter and replay
+the original requests. Five separate dates check one-shot firing and duplicate
+tick suppression. This is a response-loss regression, not arbitrary process
+crash/power-loss certification or the registered multiweek recovery workload.
+
+### Firing observations
+
 `ActionCLI.run("intention.observe", scope, observations)` performs the same
 authenticated public `intention-evaluate` call as `intention.query`. It does
 not perform a second evaluation. The existing query response is unchanged.
