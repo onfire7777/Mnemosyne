@@ -1,5 +1,25 @@
 /* Progressive enhancement: the complete catalog remains readable without JS. */
 (() => {
+  const menu = document.querySelector('.menu-toggle');
+  if (menu) {
+    menu.hidden = false;
+    document.documentElement.classList.add('menu-enhanced');
+    const closeMenu = () => {
+      menu.setAttribute('aria-expanded', 'false');
+      document.querySelector('.sidebar').classList.remove('menu-open');
+    };
+    menu.addEventListener('click', () => {
+      const open = menu.getAttribute('aria-expanded') !== 'true';
+      menu.setAttribute('aria-expanded', String(open));
+      document.querySelector('.sidebar').classList.toggle('menu-open', open);
+    });
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && menu.getAttribute('aria-expanded') === 'true') {
+        closeMenu();
+        menu.focus();
+      }
+    });
+  }
   const revealAnchor = () => {
     let target;
     try { target = document.getElementById(decodeURIComponent(location.hash.slice(1))); }
