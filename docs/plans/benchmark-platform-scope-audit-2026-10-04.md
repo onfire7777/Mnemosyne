@@ -8,6 +8,15 @@ statements below where explicitly updated. The original scope and acceptance
 criteria remain unchanged. The product name is now Mnemetric; OpenMemBench
 technical identifiers and signed historical artifacts retain their original names.
 
+Verification of the accumulated source at `a458bcea`: the combined invocation
+of `tests/test_leaderboard*.py`, `tests/test_burnos_http_compatibility.py` and
+`tests/test_public_development_bundle_lifecycle.py` completed successfully with
+452 collected tests, all passing. This includes the real M06 development-bundle
+round trip; M02/M04 plumbing explicitly uses the synthetic transport described
+in that test. The separate LoCoMo environment passed 102 tests. These are local
+regression results, not benchmark quality measurements or full-project closure.
+GitHub validation of the accumulated unpushed changes remains pending.
+
 ## Owner's intended product
 
 The primary website product is **Mnemetric, a public memory-system benchmark
