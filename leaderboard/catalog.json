@@ -234,7 +234,7 @@
     {
       "id": "M07",
       "name": "Retention/rehearsal/decay",
-      "status": "Plan exists; dedicated benchmark fixture/scorer/integration missing."
+      "status": "Public CLI clock/rehearsal prerequisite characterized and regression-tested; the full multi-seed fixture, scorer, integration and resource admission remain open."
     },
     {
       "id": "M08",
@@ -336,7 +336,7 @@
     {
       "id": "B06",
       "name": "LoCoMo",
-      "status": "Planned family; complete official protocol, licensed input pins, adapter and measured evidence remain required.",
+      "status": "Ingestion, pinned scoring/tokenizer, native public capture/answer and offline replay components exist. Complete runner integration, dataset license admission, runtime verification and real measured runs remain open.",
       "policy": "Not for leading headline claims under the current publication policy."
     },
     {
