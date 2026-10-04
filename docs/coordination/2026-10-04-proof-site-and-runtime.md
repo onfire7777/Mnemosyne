@@ -5,6 +5,18 @@ preparation; it does not close those deliverables or replace Plans A/B.
 
 ## Implemented and checked
 
+Latest timing continuation: the prior `5882d192` turn made progress by fixing
+duplicate-observation suppression. The next [M12 diagnostic implementation](../../eval/reports/m12-exact-time-diagnostic-2026-10-04.md)
+adds opt-in public firing observations and an independent descriptive
+exact-time scorer, exercised by the five seeded four-week real-CLI sequences.
+57 action/scorer checks and 55 renderer/documentation checks passed. Missing,
+pending, early, late, duplicate, cancelled and unexpected outcomes remain
+distinct; no aggregate score, complete M12 claim or admission is implied.
+The website now describes this source state. CI run `37225669534` was polled
+again: unit/drift remains live; all other gating jobs passed on `762f12c8`.
+Later local commits remain outside that head. No push, restart or merge was
+used to interrupt the active run.
+
 Latest action continuation: the preceding offline-tokenizer turn made progress
 at `b8a8dc7a`. The [M12 follow-up](../../eval/reports/m12-action-observation-integrity-2026-10-04.md)
 fixes a real observation-integrity bug: the public adapter silently deduplicated

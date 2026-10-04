@@ -83,6 +83,14 @@ These are implementation regressions, not expanded registered fixtures or an
 admitted M12 result. Injected poll delays do not measure real scheduler latency,
 and no external action payload or production scheduler runs in these tests.
 
+An opt-in `intention.observe` command now captures public firing identities,
+occurrences, due dates, virtual evaluation clocks and command wall duration.
+`action_timing.score_exact_time` scores these against an independently supplied
+schedule, retaining missing, pending, early, late, duplicate, cancelled and
+unexpected outcomes. It is a separate development diagnostic, not a change to
+the two registered suites. See the [exact-time diagnostic contract](../../docs/plans/m12-exact-time-development-protocol-2026-10-04.md)
+for denominators, clock semantics and the remaining M12 requirements.
+
 ### M13 working memory
 
 **PROPOSED.**

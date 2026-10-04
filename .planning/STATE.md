@@ -18,6 +18,13 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+M12 now has an [exact-time development diagnostic](../eval/reports/m12-exact-time-diagnostic-2026-10-04.md)
+with opt-in public firing/timing observations, independent expected-schedule
+scoring and real-CLI coverage over five seeded four-week timelines. The
+existing registered suites are unchanged. This advances lateness observability
+but does not close the registered corpus, full trigger-family timing,
+calibrated baseline, sink, cost/resource or admission gates.
+
 Latest prerequisite work: [offline Qwen token measurement](../docs/research/benchmark-intake/local-reader-reference-tokens-2026-10-04.md)
 verified the installed vocabulary / added-token IDs / merges against a pinned
 reference and counted the unchanged synthetic probe's message contents. Six
