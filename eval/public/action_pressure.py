@@ -1,6 +1,7 @@
 """Clock-driven public-CLI trigger pressure; development evidence, not capacity certification."""
 
 import argparse
+from contextlib import ExitStack
 from datetime import UTC, datetime, timedelta
 import hashlib
 from pathlib import Path
@@ -59,8 +60,14 @@ def make_plan():
             'drain_horizon_ns':DRAIN_NS, 'max_dispatch_ns':MAX_NS, 'max_ticks':MAX_TICKS, 'cases':cases}
 
 
-def score_case(case, records):
-    if not isinstance(records, list) or not 1 <= len(records) <= MAX_TICKS:
+def make_service_plan():
+    """Same offered work, with a larger safety ceiling for both transports."""
+    plan = make_plan()
+    return {**plan, 'schema':'m12-clocked-pressure/v2', 'max_ticks':4096}
+
+
+def score_case(case, records, *, max_ticks=MAX_TICKS):
+    if not isinstance(records, list) or not 1 <= len(records) <= max_ticks:
         raise ValueError('missing or excessive pressure ticks')
     previous = 0
     for row in records:
@@ -120,20 +127,33 @@ def score_case(case, records):
             'native_capacity_verified':False, 'ranking_eligible':False}
 
 
-def run_development(output):
+def run_development(output, *, transport=None):
+    if transport not in (None, 'cli', 'mcp-stdio'):
+        raise ValueError('unsupported pressure transport')
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
-    plan, results, sink_cases, completed = make_plan(), [], [], 0
+    plan, results, sink_cases, completed = (make_service_plan() if transport else make_plan()), [], [], 0
+    commands = None
     run_id = str(uuid.uuid4())
     _write(output/'plan.json', plan)
     source = _source_receipt(True)
     for path in (Path(__file__), Path(__file__).with_name('action_trigger_timing.py'),
                  Path(__file__).with_name('action_formation_replay.py')):
         source['harness_files']['eval/public/'+path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
+    if transport:
+        source['transport'] = transport
+        for relative in ('action_mcp.py','adapters/backend_transport_parity.py'):
+            path = Path(__file__).parent/relative
+            source['harness_files']['eval/public/'+relative] = hashlib.sha256(path.read_bytes()).hexdigest()
     _write(output/'source.json', source)
     try:
-        with (output/'operations.jsonl').open('xb') as log, (output/'timings.jsonl').open('xb') as timing_log, tempfile.TemporaryDirectory(prefix='m12-pressure-', dir=output) as temp:
-            adapter = ActionCLI(MnemoCLI(store=str(Path(temp)/'unused.json'), timeout_s=10))
+        with (output/'operations.jsonl').open('xb') as log, (output/'timings.jsonl').open('xb') as timing_log, tempfile.TemporaryDirectory(prefix='m12-pressure-', dir=output) as temp, ExitStack() as cleanup:
+            from eval.public.action_mcp import PersistentActionCommands
+            command_type = PersistentActionCommands if transport == 'mcp-stdio' else MnemoCLI
+            commands = command_type(store=str(Path(temp)/'unused.json'), timeout_s=10)
+            if transport == 'mcp-stdio':
+                cleanup.callback(commands.close)
+            adapter = ActionCLI(commands)
             for case in plan['cases']:
                 scope = {'store':str(Path(temp)/(case['case_id']+'.json')), 'tenant_id':case['case_id'], 'session_id':SESSION}
                 sink = _sink_for(output/'sink.sqlite3', run_id, case['case_id'], SESSION)
@@ -154,7 +174,7 @@ def run_development(output):
                         raise ValueError('unexpected setup acknowledgement')
                 records = []
                 origin = time.perf_counter_ns()
-                for _ in range(MAX_TICKS):
+                for _ in range(plan['max_ticks']):
                     dispatch = time.perf_counter_ns()-origin
                     if dispatch > MAX_NS:
                         raise TimeoutError('pressure dispatch budget exceeded')
@@ -171,14 +191,19 @@ def run_development(output):
                         break
                 else:
                     raise TimeoutError('pressure tick budget exceeded')
-                results.append(score_case(case, records))
+                results.append(score_case(case, records, max_ticks=plan['max_ticks']))
                 sink_cases.append({'case_id':case['case_id'], 'snapshot':sink.snapshot()})
-        report = {'schema':'m12-clocked-pressure-report/v1', 'publishable':False, 'cases':results}
+                if transport == 'mcp-stdio':
+                    commands.close()
+        report = {'schema':'m12-clocked-pressure-report/v2' if transport else 'm12-clocked-pressure-report/v1', 'publishable':False, 'cases':results}
         _write(output/'reports.json', report)
         _write(output/'sink.json', {'schema':'m12-inert-sink-annex/v1', 'run_id':run_id, 'cases':sink_cases})
     except BaseException as error:
         _write(output/'status.json', {'status':'failed', 'exception_type':type(error).__name__, 'completed_operations':completed, 'completed_cases':len(results), 'publishable':False})
         raise
+    finally:
+        if transport == 'mcp-stdio' and commands is not None:
+            commands.close()
     _write(output/'status.json', {'status':'completed', 'completed_operations':completed, 'completed_cases':len(results), 'publishable':False})
     return report
 
@@ -195,9 +220,14 @@ def recompute(output):
     def read(name):
         return read_bytes(name).decode('utf-8')
     source = _parse_json(read('source.json'), 'source')
-    _closed(source, 'source_commit source_dirty python_version harness_files production_runtime_match_verified sink_enabled')
+    transport = source.get('transport')
+    _closed(source, 'source_commit source_dirty python_version harness_files production_runtime_match_verified sink_enabled' + (' transport' if 'transport' in source else ''))
+    if 'transport' in source and transport not in ('cli','mcp-stdio'):
+        raise ValueError('invalid recorded transport')
     paths = {'eval/public/'+name for name in ('action_timing_run.py','action_timing.py','action_cli.py','action_sink.py',
              'action_pressure.py','action_trigger_timing.py','action_formation_replay.py')} | {'eval/harness/cli_driver.py'}
+    if transport:
+        paths |= {'eval/public/action_mcp.py','eval/public/adapters/backend_transport_parity.py'}
     if (source['sink_enabled'] is not True or source['production_runtime_match_verified'] is not False
             or type(source['source_dirty']) is not bool or not isinstance(source['python_version'],str)
             or not isinstance(source['source_commit'],str) or re.fullmatch('[0-9a-f]{40}', source['source_commit']) is None
@@ -207,7 +237,7 @@ def recompute(output):
     if any(hashlib.sha256((root/name).read_bytes()).hexdigest()!=source['harness_files'][name] for name in paths):
         raise ValueError('pressure replay source differs from recorded source')
     plan = _parse_json(read('plan.json'), 'plan')
-    if _canonical(plan) != _canonical(make_plan()):
+    if _canonical(plan) != _canonical(make_service_plan() if transport else make_plan()):
         raise ValueError('pressure plan differs from the versioned workload')
     events = [_parse_json(line,'operation') for line in read('operations.jsonl').splitlines()]
     timings = [_parse_json(line,'timing') for line in read('timings.jsonl').splitlines()]
@@ -239,13 +269,13 @@ def recompute(output):
             if actual is None or type(actual['step']) is not int or _canonical(actual)!=_canonical({'case_id':case['case_id'],'step':step,**operation}):
                 raise ValueError('public operations differ from pressure inputs')
             cursor += 1
-        results.append(score_case(case,records))
+        results.append(score_case(case,records,max_ticks=plan['max_ticks']))
     if cursor!=len(operations) or time_cursor!=len(timings):
         raise ValueError('extra pressure records')
     status = {'status':'completed','completed_operations':len(operations),'completed_cases':len(results),'publishable':False}
     if _canonical(_parse_json(read('status.json'),'status'))!=_canonical(status):
         raise ValueError('pressure run did not complete')
-    report = {'schema':'m12-clocked-pressure-report/v1','publishable':False,'cases':results}
+    report = {'schema':'m12-clocked-pressure-report/v2' if transport else 'm12-clocked-pressure-report/v1','publishable':False,'cases':results}
     if _canonical(_parse_json(read('reports.json'),'reports'))!=_canonical(report):
         raise ValueError('pressure report does not recompute')
     _validate_sink_annex(output,read,plan,operations,SESSION)
@@ -271,9 +301,12 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('output',type=Path)
     parser.add_argument('--recompute',action='store_true')
+    parser.add_argument('--transport',choices=('cli','mcp-stdio'),help='v2 paired-service profile, same offered work with 4096-tick ceiling')
     args = parser.parse_args()
+    if args.recompute and args.transport:
+        parser.error('recompute reads the recorded transport; omit --transport')
     try:
-        result = recompute(args.output) if args.recompute else run_development(args.output)
+        result = recompute(args.output) if args.recompute else run_development(args.output,transport=args.transport)
     except Exception as error:
         print(f'Pressure diagnostic failed: {type(error).__name__}', file=sys.stderr)
         raise SystemExit(1) from None
