@@ -386,3 +386,7 @@ the actual signed attempt and a 390px document at a 390px mobile viewport;
 `attempt-history-preview.png` retains the preview. Public history integration is
 still gated: the existing public publisher does not automatically export inactive
 or nonpublishable historical contents through this preview-only option.
+
+## Exact reproduction and visible baseline
+
+The registered 500-question retrieval result completed exact local reproduction: all nine bundle files matched SHA-256. Source execution took 312.30 seconds and reproduction 303.39 seconds, with normal monitored memory pressure. The signed `verified-reproduction.json` receipt is retained under the local retrieval-run custody directory. The local Mnemetric preview now renders the signed operator result, two metrics, 500 trace pages and its signed attempt history. Recall@5 is 0.2806 and nDCG@5 is 0.2967188496001503. This remains non-publishable and is not an independent reproduction, official upstream comparison or superiority claim. The original signed v1 configuration is preserved and the result is excluded from new comparison groups because comparison-context metadata is unavailable.
