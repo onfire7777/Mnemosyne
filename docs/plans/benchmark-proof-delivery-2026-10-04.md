@@ -59,12 +59,21 @@ The registered retrieval-only experiment on exact source `b0cdbd89` completed
 all 500 questions in 312.304 seconds with normal memory pressure. Its bundle
 passed verification and its result/outcome were retained in a signed ledger.
 This is new retained evidence, not recovery of the missing historical artifact
-folder. Exact local reproduction is in progress; independent external
-reproduction, public release and superiority claims are not established.
+folder. Exact local reproduction completed: all nine retained bundle files matched
+byte-for-byte by SHA-256, including data, traces, configuration and metrics.
+The source run took 312.30 seconds; reproduction took 303.39 seconds, both
+under normal monitored memory pressure. Signed verification receipts are
+retained locally. Independent external reproduction, public release and
+superiority claims are not established.
 The grounded-reader model workload remains blocked by its separate resource
 preflight; the retrieval-only result does not waive that requirement.
 
-The ranking dataset remains empty while those release gates are open. Detailed
+The local Mnemetric preview now displays this one explicitly non-publishable
+operator result, its two retrieval metrics, 500 trace pages and signed attempt
+history. Public rankings remain unpopulated while release gates are open.
+The legacy result lacks the new comparison-context metadata and is correctly
+excluded from compatible comparison groups; its signed configuration is not
+retrofitted to imply comparability. Detailed
 receipts and current limitations remain in the
 [delivery record](../coordination/2026-10-04-proof-site-and-runtime.md).
 
