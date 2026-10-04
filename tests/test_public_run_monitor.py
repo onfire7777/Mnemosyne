@@ -135,3 +135,37 @@ def test_cleanup_kills_child_that_ignores_term_after_parent_exits(tmp_path: Path
     import time
     time.sleep(1.05)
     assert not marker.exists()
+
+
+def test_optional_resource_samples_are_retained_and_not_admission(tmp_path, monkeypatch):
+    monkeypatch.setattr(monitor, 'process_group_rss_bytes', lambda group: 4096)
+    data = tmp_path / 'data'
+    data.mkdir()
+    (data / 'file').write_bytes(b'abc')
+    attempt = tmp_path / 'attempt'
+    result = run_monitored([sys.executable, '-c', 'pass'], cwd=tmp_path,
+                           output_dir=attempt, wall_seconds=5, pressure_probe=lambda: 1,
+                           poll_seconds=0.01, usage_roots=[data])
+    assert result['status'] == 'succeeded'
+    measurement = result['resource_diagnostics']
+    assert measurement['peak_rss_verified'] is False
+    assert measurement['admission_verified'] is False
+    assert measurement['max_sampled_rss_bytes'] == 4096
+    assert measurement['max_sampled_logical_file_bytes'] == 3
+    rows = [json.loads(line) for line in (attempt / 'usage.jsonl').read_text().splitlines()]
+    assert len(rows) == measurement['samples']
+    assert all(row['logical_file_bytes'] == 3 for row in rows)
+
+
+def test_resource_probe_failure_is_recorded_and_does_not_run_child(tmp_path, monkeypatch):
+    def unavailable(roots):
+        raise PermissionError('private path must not appear in receipt')
+    monkeypatch.setattr(monitor, 'regular_file_bytes', unavailable)
+    result = run_monitored([sys.executable, '-c', 'raise SystemExit(99)'], cwd=tmp_path,
+                           output_dir=tmp_path / 'attempt', wall_seconds=5,
+                           pressure_probe=lambda: 1, usage_roots=[tmp_path])
+    assert result['status'] == 'no_run'
+    assert result['reason'] == 'monitor-error'
+    assert result['error_type'] == 'PermissionError'
+    assert result['returncode'] is None
+    assert 'private path' not in json.dumps(result)

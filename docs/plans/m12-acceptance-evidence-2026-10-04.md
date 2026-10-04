@@ -37,3 +37,25 @@ replace the original specification or promote development evidence to admission.
 Next dependency-ready work is reference semantics and full-corpus design alongside
 resource instrumentation. No result from the current run may retroactively choose
 an admission floor or be presented as evidence of superiority over another system.
+
+## Optional local resource diagnostics
+
+`eval.public.monitor` now accepts repeated `--usage-root PATH` options before
+its child command. This opt-in records `usage.jsonl` and terminal maxima for
+sampled process-group RSS and logical regular-file bytes beneath the explicit
+roots. Overlapping roots and hard links are deduplicated, and symbolic links
+are not intentionally followed. Use owned, quiescent directory structure;
+this live filesystem walk is not a hostile-filesystem sandbox.
+
+RSS is sampled with POSIX `ps` (KiB converted to bytes). It sums the monitored
+process group, including descendants that remain in that group, and can miss
+short-lived peaks or escaped descendants. Logical file sizes are not allocated
+blocks, quotas or peak disk use; unlisted temporary directories are not counted.
+A missing/deleted file contributes nothing to that snapshot. Other probe errors
+stop the monitored run and retain a monitor-error receipt rather than inventing
+zero usage. Neither diagnostic maximum populates the ABI's certified peak RSS
+field. `peak_rss_verified` and `admission_verified` remain false.
+
+The already-started fan-out run did not enable these probes. Do not backfill its
+receipt with later samples or claim it measured these resources. Future runs
+can collect these diagnostics to inform the separately required admission work.
