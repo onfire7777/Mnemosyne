@@ -18,11 +18,18 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+The first whole-component partition plan at `db54506a` is frozen in
+`eval/reports/compact-train-partitions-2026-10-04`: 176,595 train / 22,075
+selection / 22,074 calibration rows. Hotpot selection/calibration coverage is
+only 246/249 rows. This remains a quarantined plan: semantic entity resolution,
+pre/post protected overlap, whole-component exclusions and attribution custody
+are still required. Do not rebalance survivors after screening outcomes.
+
 TRAIN document connectivity at `51bb3975` now groups all 220,744 staged rows
 into 919 components. The largest has 152,706 rows (89,667 Hotpot and 63,039
 SQuAD); only 758 Hotpot rows remain outside it. See
 `eval/reports/compact-train-groups-2026-10-04`. Random row splits would violate
-source-document isolation. No partitions are assigned; semantic entity and
+source-document isolation. At that checkpoint no partitions were assigned; semantic entity and
 protected-overlap screening remain open before training admission.
 
 Exact-source TRAIN staging at `19b9e0b9` processed 220,766 upstream rows:
@@ -46,8 +53,9 @@ lengths 1/64/128/384/512, with clean process exit on ONNX Runtime 1.28.0 and
 ort rc.13. The earlier 1.22.1/rc.10 trial aborted at shutdown and is not a pass.
 The clean-source validation at `5cce12c6` passed 48 native tests, 23 Python
 compatibility/provider tests, Clippy and formatting. Raw evidence is retained in
-`eval/reports/compact-onnx-native-development-2026-10-04`. The new Linux CI job
-is prepared but not yet remotely executed.
+`eval/reports/compact-onnx-native-development-2026-10-04`. Linux CI job 111548962454 passed all 51 native tests, formatting and Clippy
+at `e1ad2d0c`; raw logs are retained in
+`eval/reports/compact-onnx-linux-ci-2026-10-04`. The full workflow remains pending.
 This advances the missing execution layer, not learned QA or physical 8 GiB acceptance. The experimental span-only reader now implements tokenizer/offset-preserving
 integration behind the existing Runtime interface. Ten synthetic decoded
 outputs match a separate Python reference; 51 Rust tests and 23 Python
