@@ -851,12 +851,12 @@ def test_v2_schema_aligns_metric_contract_with_runtime() -> None:
     )
     assert {
         rule["items"]["properties"]["family"]["const"] for rule in family_rules
-    } == families
+    } == families | {"reference_qa"}
     judge_rule = schema["$defs"]["metric"]["allOf"][0]
     assert judge_rule["if"]["properties"]["family"]["const"] == "judged_qa"
     assert judge_rule["then"]["required"] == ["judge"]
     assert judge_rule["else"]["not"]["required"] == ["judge"]
-    items = schema["properties"]["metrics"]["items"]
+    items = schema["properties"]["metrics"]["items"]["anyOf"][0]
     assert items["allOf"][0] == {"$ref": "#/$defs/metric"}
     published_judge = items["allOf"][1]
     assert published_judge["if"]["properties"]["family"]["const"] == "judged_qa"

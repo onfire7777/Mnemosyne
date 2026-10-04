@@ -30,6 +30,9 @@ LoCoMo now includes ingestion, scoring, non-RAG prompt construction, a verified
 tokenizer, sequential native capture/answer execution, candidate-bound reader
 disclosure matching, explicit/seeded option ordering, native configuration binding
 and isolated scorer replay with optional candidate/runtime artifact checks.
+Development-only category summaries now preserve absent/incomplete/inapplicable
+measurements in result-v2 and comparison/rendering surfaces (558 combined
+regression checks passed); full native result/bundle assembly remains open.
 These remain components, not an admitted complete native benchmark runner. The
 [neutral integration contract](../docs/plans/locomo-neutral-integration-contract-2026-10-04.md)
 separates upstream model baselines from public memory-system execution and lists

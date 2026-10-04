@@ -51,7 +51,7 @@ def test_cross_environment_native_replay(tmp_path, monkeypatch):
     saved.write_text(json.dumps(report))
     assert verify_report_in_environment(json.loads(saved.read_text()), [sample], [record], **kwargs) == report
     assert report["protocol"]["id"] == "mnemosyne.locomo-native-scoring/v1"
-    assert len(report["protocol"]["replay_source_sha256"]) == 10
+    assert len(report["protocol"]["replay_source_sha256"]) == 11
     for field, changed in (
         ("categories", {}), ("caption_policy", "include-source-caption"),
         ("protocol", {**report["protocol"], "scorer_dependencies": {}}),

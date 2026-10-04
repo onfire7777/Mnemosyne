@@ -33,7 +33,7 @@ Category 5's source-answer distractor belongs only in the registered question
 transformation, never in ingested memory. Category-specific scoring remains
 the pinned scorer, with missing predictions and recall applicability explicit.
 
-## Current integration audit — native artifact verification update
+## Current integration audit — descriptive result projection update
 
 This table supersedes the original sequence's prospective descriptions below;
 it does not close W4 or any measured acceptance requirement.
@@ -43,7 +43,7 @@ it does not close W4 or any measured acceptance requirement.
 | 1. Freeze track/configuration | Optional native configuration binds full and normalized source hashes, replay policy, reader/choice policies, CLI settings and runtime/resource artifact references. Its digest is retained in each answer and the replay report. | Candidate/installed-runtime file checks are available through the optional artifact verifier. Admit the resource artifact, effective model/provider/tokenizer/context settings and preregistered choice policy, then integrate these gates into registered execution; file consistency is not execution or resource proof. |
 | 2. Native public adapter | `iter_native_answers` validates the population first, captures one isolated conversation at a time, invokes public read-only answers, retains command options and cleans stores. Public capture tests exercise actual subprocesses. | Full admitted population under the registered runtime and resource envelope; signed attempt persistence. |
 | 3. Response conversion | Raw outputs, missing reader execution, explicit abstention, category-5 decoding, citations, spans, answer rendering and opt-in synthesis derivations are retained/validated. The independent derivation checker does not call the product synthesizer. | Optional candidate-bound reader policy now checks exact model, prompt, serializer and decoding disclosures and is retained in offline replay. Authenticate that candidate and actual runtime through the registered bundle path; a matching disclosure is not proof of provider execution. |
-| 4. Neutral bundle/replay | Full-population offline scoring and exact saved-report replay work across the production and pinned scorer interpreters; missing questions and absent categories remain visible. | Connect these components to the existing bundle inventory, configuration anchors, result schema and verifier without changing generic QA semantics. |
+| 4. Neutral bundle/replay | Full-population offline scoring and exact saved-report replay work across interpreters. Versioned development category summaries now fit result-v2, render counts/missingness and preserve absent categories without invented intervals. | Assemble complete result records and neutral bundles with configuration/registry anchors and verifier dispatch; implement preregistered uncertainty before claiming that acceptance gate. Generic QA semantics remain separate. |
 | 5. Registry/scoring dispatch | No real LoCoMo registry entry or runnable official suite has been added. | Dedicated native scoring profile plus coordinated runner/verifier dispatch; resolve dataset rights/admission before real data enters the registry. |
 | 6. Model/resource preflight | Two retained synthetic reader probes stopped at warning memory pressure; the latest receipt is linked in project state. | Required-setting feasibility and complete context coverage, then the original scale gate. Tokenizer/scorer success does not discharge this requirement. |
 | 7. Registered run/public evidence | No real LoCoMo run or ranking is claimed. | Pre-execution registration, retained attempts, full execution, reproducible bundle and accurate website presentation. |
@@ -559,3 +559,42 @@ report entry point rejects changed artifacts before the scorer starts. All 29
 runtime-installation, cross-interpreter replay and reader/configuration checks
 passed together; Ruff passed. Effective provider/model loading, context coverage,
 resource admission, signed attempts and registered neutral bundles remain open.
+
+
+## Development category-summary projection
+
+The existing result-v2 metric contract required a numeric value and interval for
+every entry. It could not accurately represent absent native categories or
+undefined evidence-recall means, and its `judged_qa` family requires a model
+judge. Native reference scoring does not use such a judge. Added an explicit,
+closed `locomo-native-category/v1` summary variant for development records only,
+with `reference_qa` and `retrieval` kept in separate homogeneous metric lists.
+The legacy metric shape and result-v1 contract are unchanged.
+
+Native replay now emits `category_metrics` for all five categories in both
+families. Each summary retains numerator, denominator, source/observed/missing/
+not-applicable counts, scorer digest and a derived status. QA preserves the
+original full-source denominator, including missing-answer zero contributions;
+its incomplete aggregate is labeled explicitly. Recall divides only by executed
+questions with applicable gold evidence. Zero denominators retain null values.
+Absent categories, incomplete observations and inapplicable recall remain
+separate states. Intervals are null with `uncertainty_method: not-estimated`;
+no fabricated CI or model-judge declaration is added.
+
+Both JSON Schema and runtime validation accept the development variant, while
+runtime checks enforce exact count/ratio/status arithmetic. It does not open an
+official/publication path. Rendering displays missing values as a dash plus
+status/counts, and explains missing-answer contributions to QA aggregates.
+Comparison groups retain excluded category names/reasons, require matching
+scorer context and keep descriptive summaries separate from legacy metrics.
+No overall score or rank is calculated.
+
+Validation: 145 isolated scorer tests passed, including native projection and
+replay; 558 leaderboard/rendering/comparison/native/reproducibility checks passed.
+The 21 new category-summary checks cover valid/absent/incomplete/inapplicable
+values, arithmetic tampering, schema agreement, v1 rejection, publication/track
+restrictions and visible comparison exclusions. Ruff passed. An initial schema
+rule was inserted at the wrong nesting level; the contract test caught it and
+the corrected root-level rule is covered by explicit official/publication
+rejection checks. Full result-record construction, registered bundle integration,
+preregistered uncertainty and real admitted execution remain open.

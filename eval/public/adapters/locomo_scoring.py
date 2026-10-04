@@ -249,7 +249,13 @@ def replay_native_population(samples: list[dict], records: list[dict], *,
         return sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
     absent_categories = [category for category, group in groups.items() if group["source_count"] == 0]
     protocol = native_replay_protocol()
+    from leaderboard.native_metrics import category_metric
+    category_metrics = {family: [category_metric(group, int(category), family=family,
+                                scorer_digest="sha256:" + digest(protocol))
+                                for category, group in groups.items()]
+                        for family in ("reference_qa", "retrieval")}
     return {"schema_version": "mnemosyne.locomo-native-replay/v1", "categories": groups,
+            "category_metrics": category_metrics,
             "protocol": protocol, "protocol_sha256": digest(protocol),
             "reader_policy": reader_policy, "run_config": run_config, "run_config_sha256": config_digest,
             "cases": cases, "complete": all(row["complete"] for row in groups.values()),
@@ -275,7 +281,7 @@ def native_replay_protocol() -> dict:
     paths = (
         "eval/public/adapters/locomo.py", "eval/public/adapters/locomo_native.py",
         "eval/public/adapters/locomo_scoring.py", "eval/public/adapters/locomo_replay.py",
-        "eval/public/adapters/locomo_config.py",
+        "eval/public/adapters/locomo_config.py", "leaderboard/native_metrics.py",
         "eval/public/custody.py", "eval/public/derivation.py", "eval/public/reader_policy.py", "eval/harness/cli_driver.py", "src/mnemosyne/ids.py",
     )
     return {

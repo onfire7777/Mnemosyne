@@ -204,6 +204,13 @@ def _page(title: str, body: str, root: str = "") -> str:
 
 
 def _interval(metric: dict[str, Any]) -> str:
+    if "summary_kind" in metric:
+        return (f"<small>{_escape(metric['status'])}; descriptive, uncertainty not estimated.</small>"
+                f"<small>Observed {_escape(metric['observed_count'])} / source {_escape(metric['source_count'])}; "
+                f"missing {_escape(metric['missing_count'])}; not applicable {_escape(metric['not_applicable_count'])}. "
+                f"Score denominator: {_escape(metric['denominator'])}.</small>"
+                + ("<small>Missing answers contribute zero to the source-denominator aggregate.</small>"
+                   if metric["family"] == "reference_qa" and metric["missing_count"] else ""))
     interval = metric.get("confidence_interval")
     if interval is None:
         return "<small>Interval not supplied</small>"
@@ -222,7 +229,7 @@ def _record_details(record: dict[str, Any]) -> str:
     metrics = "".join(
         "<li>"
         f"{_escape(metric['family'])}: {_escape(metric['name'])} = "
-        f"{_escape(metric['value'])} {_escape(metric['unit'])}"
+        f"{_escape('—' if metric['value'] is None else metric['value'])} {_escape(metric['unit'])}"
         + _interval(metric)
         + "</li>"
         for metric in sorted(
@@ -322,7 +329,7 @@ def _render_pages(
                 f"<td>{_escape(record['benchmark'])}<small>"
                 f"{_escape(record['benchmark_version'])}</small></td>"
                 f"<td>{_escape(metric['name'])}<small>{_escape(metric['family'])}</small></td>"
-                f"<td>{_escape(metric['value'])} {_escape(metric['unit'])}{_interval(metric)}</td>"
+                f"<td>{_escape('—' if metric['value'] is None else metric['value'])} {_escape(metric['unit'])}{_interval(metric)}</td>"
                 f'<td><a href="results/{record_digest}.html">View run</a>'
                 f"<small>{_escape(record_id)}</small>"
                 f"<small>{_escape(record['publication']['label'])}; "
