@@ -281,3 +281,17 @@ guard. Its exclusive signed start is outside the repository in the registered
 run root. Session 66073 must be polled rather than restarted. Terminal evidence,
 bundle verification/reproduction and the signed attempt ledger remain required.
 No measured score is asserted by this naming change.
+
+## Declared-context comparison index
+
+The renderer now derives `data/comparison-index.json` from atomic results and
+verified raw artifacts. The additive `comparison_context` contract is documented
+in `docs/plans/benchmark-comparison-context-2026-10-04.md`; old configurations
+remain visible with explicit missing-metadata exclusions. The index separates
+method/split/policy/judge differences, discloses backend/hardware and splits
+efficiency groups by those conditions. It never ranks, averages or authorizes
+publication. Independent policy verification and interactive comparison UI
+remain open. Validation: 301 grouping, contract, render, publish and policy
+checks passed; Ruff and diff checks passed. The registered retrieval run was
+still live with normal pressure during implementation; no second benchmark
+workload was launched.
