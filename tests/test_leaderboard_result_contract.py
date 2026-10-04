@@ -1332,3 +1332,43 @@ def test_v1_schema_bytes_are_not_reinterpreted_as_v2() -> None:
     assert Path("leaderboard/schema/result-v1.schema.json").read_bytes()
     v1["pbpp_headline_eligible"] = True
     assert "/pbpp_headline_eligible" in validate_record(v1)
+
+
+@pytest.mark.parametrize('key', [None, {}, [], {'track_kind': 'DEVELOPMENT'}])
+def test_projection_cannot_bypass_compatibility_with_malformed_key(key) -> None:
+    records = [_v2_official_record(), _v2_successor_record()]
+    projection = _projection([str(r['record_id']) for r in records], compatibility_key=key)
+    assert validate_projection(projection, records)
+
+
+@pytest.mark.parametrize('field', [
+    'track_kind', 'benchmark_id', 'benchmark_version', 'scorer_digest',
+    'division', 'metric', 'resource_treatment',
+])
+def test_projection_requires_each_compatibility_field(field: str) -> None:
+    projection = _projection(['synthetic-v2-dev-001'])
+    projection['compatibility_key'].pop(field)
+    assert f'/compatibility_key/{field}' in validate_projection(
+        projection, [_v2_development_record()]
+    )
+
+
+@pytest.mark.parametrize('field,value', [
+    ('scorer_digest', 'not-a-digest'), ('benchmark_id', ''),
+    ('benchmark_version', None), ('metric', {}), ('metric', None),
+    ('track_kind', None), ('division', []), ('resource_treatment', None),
+])
+def test_projection_rejects_invalid_compatibility_values(field, value) -> None:
+    projection = _projection(['synthetic-v2-dev-001'])
+    projection['compatibility_key'][field] = value
+    assert validate_projection(projection, [_v2_development_record()])
+
+
+def test_projection_rejects_duplicate_source_selection_and_ambiguous_records() -> None:
+    record = _v2_development_record()
+    assert '/source_record_ids' in validate_projection(
+        _projection([record['record_id'], record['record_id']]), [record]
+    )
+    assert '/source_record_ids' in validate_projection(
+        _projection([record['record_id']]), [record, copy.deepcopy(record)]
+    )
