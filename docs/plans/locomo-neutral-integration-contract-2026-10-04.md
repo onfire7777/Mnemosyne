@@ -598,3 +598,36 @@ rule was inserted at the wrong nesting level; the contract test caught it and
 the corrected root-level rule is covered by explicit official/publication
 rejection checks. Full result-record construction, registered bundle integration,
 preregistered uncertainty and real admitted execution remain open.
+
+
+## Atomic-result assembly boundary and trace visibility
+
+The accepted WMBS §9.5 identity contains no metric-family discriminator and
+requires one immutable record per full atomic attempt identity. The comparison
+contract rejects duplicate identities, while result-v2 keeps metric families
+homogeneous. Do not create two attempt records or invent run/module/attempt IDs
+to display QA and retrieval from the same native execution. The native result
+assembly path should retain primary reference-QA category metrics in the single
+atomic record and expose the separate retrieval category summaries through its
+bound native replay artifact and supplementary view. All raw summaries remain
+in `category_metrics`; none are discarded or blended into QA.
+
+Full record assembly still requires actual identity, artifact and resource
+metadata from the registered run. Offline replay cannot invent these fields.
+Its implementation must bind the single record to the source/configuration,
+raw traces and replay report through the existing bundle verifier, and preserve
+missing/failed attempts without manufacturing a completed run.
+
+The trace renderer previously displayed only generic QA/retrieval fields,
+leaving native request/response records mostly blank. It now shows native
+projection status, the public request and its byte digest, option transformation,
+scorer prediction, retrieved source IDs, claim checks, reader-policy match,
+runtime-custody flag, configuration digest and original response. Every trace
+also offers an escaped complete stored-JSON view for fields outside the named
+layout. These are displayed records, not new execution attestations.
+
+All 75 focused rendering/native-summary checks passed, including native false-
+custody visibility, HTML escaping and unchanged raw downloads. The local site
+was regenerated from the existing signed retrieval result; the served complete-
+trace view and byte-identical raw download were checked. No synthetic native
+result or additional competitor result was added to that preview.

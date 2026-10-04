@@ -952,3 +952,38 @@ def test_legacy_artifact_downloads_require_exact_bound_bytes(tmp_path: Path, tam
     index = json.loads((output / "data/comparison-index.json").read_text())
     assert index["groups"] == []
     assert index["exclusions"][0]["reason"] == "legacy-comparison-metadata-unavailable"
+
+
+def test_native_trace_pages_expose_request_response_and_replay_limits(tmp_path: Path) -> None:
+    from leaderboard.native_metrics import category_metric
+    record = _v2_development_record()
+    record["metrics"] = [category_metric({"source_count": 1, "scored_count": 0,
+        "missing_count": 1, "native_recall_count": 0, "rounded_qa_sum": 0, "native_recall_sum": 0},
+        4, family="reference_qa", scorer_digest="sha256:" + "c" * 64)]
+    paths = _bind_v2_artifacts(tmp_path, record)
+    trace = {"question_id": "native-synthetic", "projection_policy": "native-explicit-abstention-v1",
+        "status": "incomplete-reader-execution", "request": {"question": "<script>unsafe</script>"},
+        "request_sha256": "a" * 64, "question_transformation": {"category": 4},
+        "decoded_prediction": None, "retrieved_dialog_ids": ["D1:1"], "claim_text_custody": [],
+        "reader_policy_matched": False, "runtime_custody_verified": False,
+        "run_config_sha256": "b" * 64, "raw_response": {"answer": None, "reader": {}},
+        "additional_audit_field": "retained-visible"}
+    raw = (json.dumps(trace, sort_keys=True) + "\n").encode()
+    paths["traces.jsonl"].write_bytes(raw)
+    record["trace_index_digest"] = "sha256:" + hashlib.sha256(raw).hexdigest()
+    results = _write_json(tmp_path / "results.json", record)
+    output = tmp_path / "site"
+    render_site(results, {record["record_id"]: paths["traces.jsonl"]}, output,
+        artifacts={record["record_id"]: {"build": paths["build.json"], "config": paths["config.json"],
+                                         "bundle": paths["bundle-manifest.json"]}})
+    page = (output / "traces" / _digest(record["record_id"]) / f"{_digest(trace['question_id'])}.html").read_text()
+    for label in ("Native projection status", "Question and public request", "Request byte digest",
+                  "Question transformation and option mapping", "Prediction passed to the category scorer",
+                  "Retrieved source dialog IDs", "Claim replay checks", "Original public response",
+                  "Complete stored trace (JSON)", "retained-visible"):
+        assert label in page
+    assert "Runtime custody verified</h2><pre>false</pre>" in page
+    assert "incomplete-reader-execution" in page
+    assert "<script>unsafe</script>" not in page
+    assert "&lt;script&gt;unsafe&lt;/script&gt;" in page
+    assert (output / "data" / _digest(record["record_id"]) / "traces.jsonl").read_bytes() == raw
