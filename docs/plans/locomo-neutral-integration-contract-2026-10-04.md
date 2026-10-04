@@ -262,3 +262,10 @@ before a later failure, no automatic retries, choice-map isolation and cleanup.
 Invalid choice maps and overlong questions failed before capture. Ruff passed.
 Real model execution, signed persistence and neutral registry integration remain
 open.
+
+Early-stop verification: callers that do not exhaust the sequence must use
+`contextlib.closing(iter_native_answers(...))` or explicitly call `close()`.
+The native regression now pauses after the first yielded record, confirms the
+store is live, closes the sequence and verifies immediate cleanup with no
+additional answer invocation. All 24 native tests and Ruff passed after this
+addition. A plain loop `break` alone is not documented as immediate cleanup.
