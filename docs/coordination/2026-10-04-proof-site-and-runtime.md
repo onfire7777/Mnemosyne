@@ -453,3 +453,20 @@ binds the input, source files, samples and retained local log hashes. Avoid
 repeating model-load attempts without a meaningful resource/runtime change.
 Continue scorer, adapter, source and lightweight regression work; the required
 model/resource and 24-case scale gates remain open without lowering settings.
+
+## Candidate-bound reader disclosure policy
+
+Native LoCoMo answers can now bind an explicit policy containing the candidate
+commit, canonical candidate-manifest digest and exact reader/decomposer model,
+prompt, serializer and decoding disclosures. The isolated replay request and
+report retain that policy; omitted or changed policies reject bound records.
+Missing reader execution remains incomplete, and matching metadata never sets
+runtime custody true. The existing QA verifier shares disclosure construction.
+Registered runtime authentication and native bundle integration remain open.
+
+Validation: 135 isolated scorer/ingestion/tokenizer/replay/derivation tests;
+95 production native/replay/reader-policy/reproducibility tests; and 26 QA/reader
+policy tests passed, with one skip in that last group. Ruff passed. The live
+benchmark page was also checked for the coverage-versus-compatibility explanation.
+Current remote CI at 046f08a8 remains in progress; these local changes have not
+been represented as remotely verified or merged.
