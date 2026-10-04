@@ -1,5 +1,8 @@
 # WMB M07 — Retention, Rehearsal, and Decay Implementation Contract
 
+Status: `PROPOSED` — full module protocol remains unfrozen and not approved.
+Current development evidence below does not confer full module readiness.
+
 ## Current prerequisite reconciliation — 2026-10-04
 
 This update supersedes stale dependency/liveness statements in the historical

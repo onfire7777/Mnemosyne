@@ -1,5 +1,8 @@
 # WMB M08 — Reversible Forgetting Implementation Contract
 
+Status: `PROPOSED` — full module protocol remains unfrozen and not approved.
+Current development evidence below does not confer full module readiness.
+
 ## Current source reconciliation — 2026-10-04
 
 [Candidate development protocol and remaining freeze decisions](wmb-m08-development-protocol-2026-10-04.md) now specifies selector/receipt semantics, case ordering and metric denominators. It is not an admitted or frozen protocol.
