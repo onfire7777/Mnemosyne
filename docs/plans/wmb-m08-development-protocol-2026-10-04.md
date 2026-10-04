@@ -102,7 +102,7 @@ satisfied. A numerical rate alone cannot discharge those gates.
 
 ## Decisions still required for freeze
 
-1. Final closed request/receipt/trace JSON schemas and bounded field sizes.
+1. Close the trace/observation schema. Operation request/receipt schemas and field bounds are now implemented below; the complete protocol is not yet frozen.
 2. Exact seed list, deterministic generation algorithm, per-family population,
    canonical canary-digest algorithm and byte-identical fixture artifact.
 3. Semantic-grader definition, source/model pins if applicable, calibration and
@@ -116,3 +116,26 @@ satisfied. A numerical rate alone cannot discharge those gates.
 These are finite implementation tasks, not grounds to remove M08 from scope.
 The full fixture, scorer, public execution, resource receipt and acceptance
 measurements remain required by the parent plan.
+
+## Implemented operation contract v0.1
+
+`eval/public/schema/wmbs-m08-operation-v0.1.schema.json` now defines closed
+module-local delete/restore requests and receipts. Identity strings are bounded
+to 256 characters without control characters, source sets to 1–128 unique
+handles, and failure explanations to 1–2,000 characters. Successful receipts
+require a null reason; failed, aborted and unsupported receipts require an
+explanation. Only mode `reversible` is accepted. Unknown fields are rejected.
+
+`eval/public/m08_contract.py` validates messages and cross-message bindings.
+Tenant, branch, ordered source handles, adapter/version and operation IDs must
+match. Restoration requires a completed embedded delete receipt, the same
+scope/adapter, a new operation ID and the matching delete-operation reference
+in its response. These checks establish shape and reference consistency, not
+signatures, authorization, truthful execution or a passing benchmark.
+
+Seventeen contract checks pass, covering a valid full exchange and mismatched
+identity/scope, duplicate/empty selectors, mode substitution, extra approval
+claims, incomplete failure disclosures and invalid restoration predecessors.
+Ruff passes. The shared ABI and current product deletion semantics are untouched.
+The trace schema, generator, semantic grader, product capability, resource
+admission and complete measured acceptance remain open.
