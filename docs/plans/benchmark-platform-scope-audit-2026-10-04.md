@@ -231,3 +231,16 @@ and external validity also remain research gaps declared by the standard.
 No result, target, acceptance threshold or frozen scorer is changed by this
 audit. The next website specification and implementation must remain traceable
 to this full retained scope.
+
+## Integrated validation checkpoint — 2026-10-04
+
+At source `396a1bcb`, all 480 combined leaderboard, BurnOS HTTP compatibility,
+native package/result and public development-bundle lifecycle tests passed in
+207.69 seconds. This includes actual M06 public-CLI execution and its bundle
+round trip. All 160 isolated LoCoMo scorer/ingestion/tokenizer/replay/assembly/
+derivation tests passed in 17.72 seconds. Repository-wide Ruff passed.
+
+The accumulated development batch is ready for synchronization. The previous
+GitHub head `046f08a8` already has a known Windows fixture-newline failure; this
+batch contains its fix. Pushing supersedes that old run so required checks can
+validate the actual new head. No merge or whole-project completion is implied.
