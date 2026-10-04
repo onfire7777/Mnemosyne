@@ -78,6 +78,31 @@ def _digest(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
+def test_empty_site_explains_missing_results_and_links_methods(tmp_path: Path) -> None:
+    results = _write_json(tmp_path / "results.json", [])
+    output = tmp_path / "site"
+    assert main([str(results), str(output)]) == 0
+    index = (output / "index.html").read_text()
+    assert "No verified results published yet." in index
+    assert "Development tests are not benchmark rankings." in index
+    assert 'href="methods.html"' in index
+    methods = (output / "methods.html").read_text()
+    assert "Retrieval is not answer quality" in methods
+    assert "operator entry" in methods
+    assert 'name="viewport"' in index
+
+
+def test_result_pages_preserve_supplied_uncertainty_without_inventing_confidence(tmp_path: Path) -> None:
+    results = _write_json(tmp_path / "results.json", _result())
+    traces = _write_traces(tmp_path / "traces.jsonl", [_trace()])
+    output = tmp_path / "site"
+    render_site(results, {"result-001": traces}, output)
+    for page in [output / "index.html", output / "results" / f"{_digest('result-001')}.html"]:
+        rendered = page.read_text()
+        assert "Interval: 0.6 to 0.85" in rendered
+        assert "95%" not in rendered  # v1 does not supply a confidence level.
+
+
 def test_renders_one_validated_result_and_its_public_bundle_trace(
     tmp_path: Path,
 ) -> None:
@@ -115,6 +140,7 @@ def test_renders_one_validated_result_and_its_public_bundle_trace(
         f"sha256:{'4' * 64}",
     ):
         assert immutable in result_page
+        assert immutable in index
     assert (
         f"../traces/{_digest('result-001')}/{_digest('question-001')}.html"
         in result_page

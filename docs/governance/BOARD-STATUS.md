@@ -1,6 +1,6 @@
 # Board Status and Activation Register
 
-Version: 0.2.0
+Version: 0.2.1
 Status: inactive board; source-owned gates in progress; External activation required only for the optional board upgrade
 
 Two registers. Register A gates publication and is entirely within the
@@ -13,14 +13,18 @@ Per [CHARTER](CHARTER.md) and [CREDIBILITY-MODEL](CREDIBILITY-MODEL.md).
 
 | Gate | Current evidence | State |
 |---|---|---|
-| Pre-registration in force | Not implemented | Open |
-| Append-only signed run ledger | Ed25519 signing and audit hash chain exist from v1.0 Tier-B; not yet applied to eval runs | Open |
-| Reproducible by construction | Reproduction bundles specified in METHODOLOGY; one-command path not published | Open |
-| Open stack published | Harness and adapters exist under Apache-2.0 in `eval/public/`; memory-native generators and graders not written | Partial |
+| Pre-registration in force | `eval/public/runner.py` checks candidate protocol, budgets, model and prompt custody against registration. A complete public launch registration and admitted run evidence remain unverified. | Open |
+| Append-only signed run ledger | `leaderboard/ledger.py` implements signed eval entries, hash-chain verification and signed roster heads. A real launch ledger with its complete run evidence remains missing. | Open |
+| Reproducible by construction | `eval/public/bundle.py` implements bundle verification and replay; development lifecycle checks exist. Public headline-eligible results and their reproduced bundles remain unverified. | Open |
+| Open stack published | Harness, adapters, memory-native generators and graders exist in `eval/public/`; `leaderboard/` contains rendering, publication and readiness tools. A deployed site, versioned public run data and mirrored evidence are not established by source availability. | Partial |
 | Adversarial self-report populated | None | Open |
-| Public dispute channel | Repository issues available; no logged resolution protocol wired | Open |
+| Public dispute channel | Repository issues and `APPEALS-AND-DISPUTES.md` exist. An operational public log and a Register A process consistent with optional board activation remain unverified. | Open |
 | Public methods write-up | Outline only; preprint and open review channel not published | Open |
-| Roster-to-ledger completeness | Not implemented; no check binds the pre-registered entrant roster to ledger outcomes | Open |
+| Roster-to-ledger completeness | `leaderboard/ledger.py` rejects changed rosters, unknown entrants and omitted outcomes during complete verification. No complete real launch roster/ledger is supplied. | Open |
+
+Evidence reconciled on 2026-10-04. These are status corrections, not changes to
+the original gates. Implemented validators and passing fixture tests do not
+prove that real launch evidence exists or satisfies those validators.
 
 No gate above requires another organisation, funding, or a legal entity. Each is
 a software and disclosure task.

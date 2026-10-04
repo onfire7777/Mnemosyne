@@ -2,6 +2,14 @@
 
 ## Owner priority and present evidence
 
+This document organizes execution only. It does not replace, narrow or amend
+the original Plans A and B, accepted specifications, roadmap deliverables or
+acceptance criteria. The owner reaffirmed on 2026-10-04 that all original plans
+must still be followed as written. Every original requirement remains in scope;
+website preparation and a subset of passing benchmarks cannot close the whole
+program. Reconcile stale factual status against evidence without lowering gates
+or silently dropping work.
+
 On 2026-10-04 the owner reaffirmed the unfinished Plan B deliverables: a
 website showing auditable benchmark evidence and real measurements against
 other memory systems. This is the next priority after the current integration
@@ -20,8 +28,11 @@ runs, including LongMemEval Recall@5 0.2806 on 500 records. These are explicitly
 non-publishable historical results, not current-version measurements or proof
 of superiority. On this machine the referenced
 `/Users/admin/mnemosyne-public-artifacts` directory and the external candidate
-directory are absent. Ollama, its local model manifests, and its reader service
-are also absent. Do not reconstruct missing evidence from report numbers.
+directory are absent. The initially absent Ollama runtime and pinned Qwen3 8B
+model were restored locally on 2026-10-04; a generic generation smoke check
+passed. This is runtime availability, not benchmark evidence. See the
+[delivery receipt](../coordination/2026-10-04-proof-site-and-runtime.md).
+Do not reconstruct missing evidence from report numbers.
 
 ## 1. Finish the current verified integration
 
