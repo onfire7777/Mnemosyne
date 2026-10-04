@@ -7,6 +7,7 @@ returns semantic firings, not fabricated timing measurements or sink receipts.
 from copy import deepcopy
 from datetime import datetime, timedelta
 import json
+import hashlib
 
 
 def _time(value):
@@ -39,6 +40,7 @@ class ExplicitActionReference:
     def __init__(self):
         self.tasks = {}
         self.keys = {}
+        self.mutations = {}
         self.now = None
         self.events = []
         self.conditions = {}
@@ -48,11 +50,17 @@ class ExplicitActionReference:
         if command == 'task.create':
             return self._create(payload)
         if command == 'task.update':
-            _closed(payload, ('type', 'task_id'))
-            if payload['type'] != 'cancel' or payload['task_id'] not in self.tasks:
-                raise ValueError('only known-task cancellation is supported')
-            self.tasks[payload['task_id']]['cancelled'] = True
-            return {}
+            return self._update(payload)
+        if command == 'task.inspect':
+            _closed(payload, ('task_id',))
+            task_id = _text(payload['task_id'])
+            if task_id not in self.tasks:
+                raise ValueError('unknown task')
+            task = self.tasks[task_id]
+            return {'task_id': task_id, 'intention_id': 'reference:' + task_id,
+                    'revision': self._revision(task), 'action_id': task['action_id'],
+                    'status': 'cancelled' if task['cancelled'] else
+                    'fired' if task['occurrence'] >= task['maximum'] else 'scheduled'}
         if command == 'clock.inject':
             _closed(payload, ('now',))
             now = _time(payload['now'])
@@ -67,11 +75,66 @@ class ExplicitActionReference:
             return self._observe()
         raise ValueError('unsupported reference command')
 
+    @staticmethod
+    def _revision(task):
+        return hashlib.sha256(_json({**task, 'due': task['due'].isoformat()}).encode()).hexdigest()
+
+    def _update(self, payload):
+        _closed(payload, ('type', 'task_id'), ('action_id', 'due_at', 'expected_revision', 'idempotency_key'))
+        task_id = _text(payload['task_id'])
+        if task_id not in self.tasks:
+            raise ValueError('unknown task')
+        kind = payload['type']
+        if kind not in ('cancel', 'override', 'reschedule'):
+            raise ValueError('unsupported mutation')
+        if (kind == 'cancel' and ('action_id' in payload or 'due_at' in payload)
+                or kind == 'override' and 'due_at' in payload):
+            raise ValueError('fields do not match mutation')
+        encoded = _json(payload)
+        key = payload.get('idempotency_key')
+        if 'idempotency_key' in payload:
+            _text(key)
+        if ('expected_revision' in payload) != ('idempotency_key' in payload):
+            raise ValueError('revision and idempotency key must be supplied together')
+        if key is not None:
+            _text(key)
+            revision = _text(payload['expected_revision'])
+            if len(revision) != 64 or any(c not in '0123456789abcdef' for c in revision):
+                raise ValueError('invalid revision')
+            if key in self.mutations:
+                if self.mutations[key] != encoded:
+                    raise ValueError('mutation key conflict')
+                return {}
+        task = self.tasks[task_id]
+        if key is not None and payload['expected_revision'] != self._revision(task):
+            raise ValueError('stale revision')
+        changed = deepcopy(task)
+        if kind == 'cancel':
+            if task['occurrence'] >= task['maximum']:
+                raise ValueError('fired task cannot be cancelled')
+            changed['cancelled'] = True
+        else:
+            if task['cancelled'] or task['occurrence'] >= task['maximum']:
+                raise ValueError('terminal task cannot be updated')
+            changed['action_id'] = _text(payload.get('action_id'))
+            if kind == 'reschedule':
+                if task['trigger']['type'] != 'exact_time':
+                    raise ValueError('draft rescheduling supports exact-time only')
+                changed['due'] = _time(payload.get('due_at'))
+                if changed['interval'] is not None:
+                    changed['due'] + timedelta(seconds=changed['interval'] * (changed['maximum'] - changed['occurrence'] - 1))
+        self.tasks[task_id] = changed
+        if key is not None:
+            self.mutations[key] = encoded
+        return {}
+
     def _create(self, task):
         _closed(task, ('task_id', 'action_id', 'trigger'), ('idempotency_key', 'dependency_ids', 'recurrence_policy'))
         task_id, action_id = _text(task['task_id']), _text(task['action_id'])
         encoded = _json(task)
         key = task.get('idempotency_key')
+        if 'idempotency_key' in task:
+            _text(key)
         if key is not None:
             _text(key)
             if key in self.keys:
