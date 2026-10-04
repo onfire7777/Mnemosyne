@@ -1,6 +1,6 @@
 # LoCoMo adapter intake — pinned source review
 
-Status: protocol review completed; adapter, dataset admission and measurement remain open.
+Status: initial source review and ingestion boundary implemented; full protocol parity, runnable adapter, dataset admission and measurement remain open.
 Parent: [W4 neutral benchmark suite](../superpowers/plans/2026-07-15-W4-neutral-adapter-suite-plan.md).
 
 ## Source custody
@@ -77,3 +77,47 @@ images. A text-only adapter cannot claim evaluation of the image content.
 This intake does not close W4 Phase 1, its adapter acceptance criterion, or any
 quality target. It prevents a generic F1 shortcut from being mislabeled as an
 upstream-faithful LoCoMo implementation.
+
+## Ingestion boundary and extended source review
+
+`eval/public/adapters/locomo.py::split_samples` now separates source conversation
+objects, query-only records and full scoring annotations. IDs bind sample ID and
+original QA position without ambiguous delimiter concatenation. It preserves
+category/evidence annotations exactly, including empty or parenthesized evidence,
+and does not substitute generated observations or summaries for conversations.
+It deep-copies inputs and rejects invalid categories, duplicate samples, absent
+labels and non-finite JSON. This is an ingestion component, not a registered
+runnable suite or a claim of upstream-equivalent scoring.
+
+Further pinned files inspected (same upstream commit):
+
+| File | Bytes | SHA-256 |
+|---|---:|---|
+| `task_eval/evaluation_stats.py` | 8398 | `d36bf596de05ea6f1c355e433167a8cd704bea3a3745277c650ac0c464bba139` |
+| `task_eval/gpt_utils.py` | 15800 | `5fc977375878199735acd28fba5ae6f4d657fa0e000c0d2918a90c07b6035793` |
+| `task_eval/rag_utils.py` | 8635 | `136a30a444a1b3a2533e71a5aa94f8b4f30f06f784b66528a8efcb6dbe50f6c7` |
+| `requirements.txt` | 7941 | `c09ca9b9a54a4c78b316b546719712394855202b9e3c5d37c52aebb6d17c9936` |
+
+The statistics path accumulates rounded per-case scores by category and divides
+by total category counts, including rows without a metric. Its retrieval
+accumulation requires nonempty evidence but retains total category counts as
+the denominator. Preserve this as upstream reporting, while separately exposing
+missingness; do not quietly recompute a more favorable denominator.
+
+The GPT prompt path adds a date instruction for category 2. Category 5 explicitly
+constructs two answer choices using the source answer as a distractor and random
+choice ordering, then converts the selected option back to text. This is an
+intentional protocol transformation, not permission to send all scorer labels
+to the memory store. A replayable implementation must retain its choice order,
+random state, prompt and raw/decoded output. Plain query-only ingestion does not
+yet reproduce that prompt path.
+
+The upstream retrieval encoders call CUDA directly and do not pin model content
+revisions in these calls. The supplied environment export includes NLTK 3.8.1,
+NumPy 1.26.0 and regex 2022.10.31 alongside Linux/CUDA packages. None were installed
+or executed during this review. The unchanged CUDA path is unavailable on this
+Mac; a disclosed CPU/MPS adaptation needs parity and resource evidence. Resolve
+model content pins and transitive prompt/call helpers before run registration.
+
+Validation: all 17 synthetic ingestion tests passed. No held-out input, model
+execution, benchmark score or upstream parity result is represented by them.

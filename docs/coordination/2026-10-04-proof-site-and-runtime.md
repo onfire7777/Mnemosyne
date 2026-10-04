@@ -404,3 +404,7 @@ All 111 rendering/publication/history/grouping tests passed, including byte tamp
 ## LoCoMo upstream intake and plan reconciliation
 
 Reviewed the official upstream scorer, runner, RAG script and license at commit `3eb6f2c585f5e1699204e3c3bdf7adc5c28cb376`, retaining byte sizes and SHA-256 in the linked LoCoMo intake plan. Identified category-specific scoring, per-case rounding and the missing-context recall fallback that prevent substituting generic QA scoring. No held-out data was inspected or measured; no upstream code was executed. W4 now links the next-step contract without closing its adapter checkbox. Reconciled the comparison-context plan to reflect already implemented selection/URL state, local signed history and verified downloads while retaining operational admission and competitor-run gaps.
+
+## LoCoMo ingestion component
+
+Implemented separate conversation, query and annotation lanes with stable per-sample/question IDs, preserved source values and fail-closed structural validation. All 17 synthetic tests passed; no production dependencies or runtime contracts changed. Extended upstream review records prompt choice randomization, category denominator semantics, source hashes and the unchanged CUDA path incompatibility on this Mac. Full scorer parity, dataset admission, runnable adapter and real measurement remain open.
