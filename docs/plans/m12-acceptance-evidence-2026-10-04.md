@@ -95,3 +95,9 @@ captures in `m12-paired-development-2026-10-04/recovery.json`. Both inputs repla
 before comparison; case-specific response-loss/reset counts are retained and
 observed metric differences are zero. The reference remains unadmitted and this
 is not the preregistered non-inferiority decision required for ranking.
+
+Reference freeze also has a verified nested-condition semantics gap: the public
+CLI and draft differ on nested boolean/number equality and membership. See
+`eval/reports/m12-condition-reference-boundary-2026-10-04.md` and its public-seam
+regression. Full semantic equivalence is not established by existing matched
+workloads; the intended policy must be explicit before extending admission.
