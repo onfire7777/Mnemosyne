@@ -32,25 +32,13 @@ def _closed(row, fields):
         raise ValueError("timing record has missing or unknown fields")
 
 
-def score_exact_time(expected, ticks):
-    """Score captured ticks against explicit exact-time occurrence expectations.
-
-    Lateness is max(0, first firing's virtual evaluation time - expected due).
-    Missing/future occurrences have no lateness value. Early firing, duplicate
-    observations, cancellation violations and reported due-date drift remain
-    separate findings. Command duration is wall time, never virtual lateness.
-    """
-    if any(not isinstance(rows, list) or len(rows) > 10000 for rows in (expected, ticks)):
-        raise ValueError("expected occurrences and ticks must be bounded lists")
-    schedule = {}
-    for row in expected:
-        _closed(row, "action_id occurrence due_at cancelled")
-        key = _key(row)
-        if key in schedule or type(row["cancelled"]) is not bool:
-            raise ValueError("duplicate occurrence or invalid cancellation flag")
-        schedule[key] = {**row, "due": _time(row["due_at"])}
+def collect_action_ticks(ticks, *, allowed_trigger_types):
+    """Validate complete public timing observations without inferring eligibility."""
+    if not isinstance(ticks, list) or len(ticks) > 10000:
+        raise ValueError("ticks must be a bounded list")
     observed = defaultdict(list)
     horizon = None
+    tick_times = []
     wall_ms = 0.0
     observation_count = 0
     for tick in ticks:
@@ -59,6 +47,7 @@ def score_exact_time(expected, ticks):
         if horizon is not None and now < horizon:
             raise ValueError("tick clock must not move backwards")
         horizon = now
+        tick_times.append(now)
         duration = tick["evaluation_wall_ms"]
         if type(duration) not in (int, float) or not math.isfinite(duration) or not 0 <= duration <= 86400000:
             raise ValueError("invalid command wall duration")
@@ -76,8 +65,8 @@ def score_exact_time(expected, ticks):
         for firing in firings:
             _closed(firing, "action_id intention_id occurrence trigger_type due_at evaluated_at provider_evaluated_at")
             key = _key(firing)
-            if firing["trigger_type"] != "exact_time":
-                raise ValueError("this diagnostic supports only exact-time triggers")
+            if not isinstance(firing["trigger_type"], str) or firing["trigger_type"] not in allowed_trigger_types:
+                raise ValueError("this diagnostic does not support the observed trigger type")
             if not isinstance(firing["intention_id"], str) or not firing["intention_id"].strip():
                 raise ValueError("missing intention identity")
             if _time(firing["evaluated_at"]) != now:
@@ -89,6 +78,27 @@ def score_exact_time(expected, ticks):
             action_ids.append(firing["action_id"])
         if Counter(action_ids) != Counter(tick["action_ids"]):
             raise ValueError("firing observations do not match returned action IDs")
+    return observed, horizon, wall_ms, tick_times
+
+
+def score_exact_time(expected, ticks):
+    """Score captured ticks against explicit exact-time occurrence expectations.
+
+    Lateness is max(0, first firing's virtual evaluation time - expected due).
+    Missing/future occurrences have no lateness value. Early firing, duplicate
+    observations, cancellation violations and reported due-date drift remain
+    separate findings. Command duration is wall time, never virtual lateness.
+    """
+    if any(not isinstance(rows, list) or len(rows) > 10000 for rows in (expected, ticks)):
+        raise ValueError("expected occurrences and ticks must be bounded lists")
+    schedule = {}
+    for row in expected:
+        _closed(row, "action_id occurrence due_at cancelled")
+        key = _key(row)
+        if key in schedule or type(row["cancelled"]) is not bool:
+            raise ValueError("duplicate occurrence or invalid cancellation flag")
+        schedule[key] = {**row, "due": _time(row["due_at"])}
+    observed, horizon, wall_ms, _ = collect_action_ticks(ticks, allowed_trigger_types={"exact_time"})
     rows = []
     lateness = []
     due_drift = 0

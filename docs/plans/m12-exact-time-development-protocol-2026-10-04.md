@@ -49,6 +49,11 @@ This projection contains no action payload, secret or private engine field.
 
 ## Descriptive scorer
 
+A separate [explicit-trigger window scorer](m12-trigger-window-development-2026-10-04.md)
+now defines event/condition/dependency eligibility and transient windows. It
+does not change the exact-time report format below or establish a complete
+multiweek workload.
+
 ### Optional inert delivery sink
 
 The runner's `--sink` variant sends every firing observation to a

@@ -1,0 +1,69 @@
+# M12 explicit-trigger eligibility windows
+
+Status: development scorer and public-CLI regression, not a registered corpus,
+calibration result or admission decision. This extends the timing definitions
+needed by the original M12 plan without changing the existing exact-time or
+PM-Bench/TriggerBench scoring contracts.
+
+`eval.public.action_trigger_timing.score_trigger_windows(expected, ticks)` accepts
+one isolated case. Each expected occurrence has exactly `action_id`,
+`occurrence`, `trigger_type`, `due_at`, `windows`, and `cancelled_at`. Types are
+the five explicit public triggers: exact time, time window, event, condition,
+and dependency completion. The workload must derive eligibility independently
+from its declared inputs, never from the candidate's output.
+
+Each window has `start`, `end`, and Boolean `end_inclusive`. Starts are inclusive;
+a null end is unbounded. Windows are ordered and disjoint; an empty list means
+no eligibility. Starts cannot precede `due_at`. Time-window triggers require
+finite exclusive ends, matching the public `[start, end)` contract. Other
+triggers can use inclusive point windows for a signal available at one tick.
+Event/condition observations can use point windows or multiple disjoint windows
+to model transient signals. A signal's first appearance does not authorize
+firing indefinitely after it disappears. `cancelled_at` truncates all windows
+exclusively: a firing at the cancellation timestamp is invalid. The workload
+must schedule the cancellation before the tick when using that boundary.
+
+The caller supplies complete public `intention.observe` responses. Shared
+validation checks clocks, firing identity/occurrence fields, supported trigger
+types, action-ID multiplicity, and finite command duration. Limits are 10,000
+expected occurrences, ticks, total firings and total windows, with at most 100
+windows per occurrence. A sorted-tick lookup checks whether each window was
+visited without a full tick-by-window cross product.
+
+For each expected occurrence:
+
+- One firing inside an active window with the expected trigger type contributes
+  one true positive. Additional observations are false positives, including
+  duplicate otherwise-valid firings.
+- Early, inactive-gap, expired, post-cancellation, never-eligible and wrong-type
+  firings are retained as invalid observations. Unknown actions are retained
+  separately. Each observation contributes at most one false positive; the
+  duplicate diagnostic does not add a second metric penalty.
+- A false negative requires at least one observed tick in an active window and
+  no valid firing. A window with no observed tick is disclosed as having no
+  observed opportunity, not silently scored as successful or missed.
+- Lateness is the first valid firing time minus the first declared eligibility
+  window's start. It includes delays imposed by the workload's polling schedule
+  and missed earlier windows. Missing/invalid-only occurrences have null latency.
+  This is not a measurement of a continuously running production scheduler.
+
+Reports retain global and per-trigger TP/FP/FN and precision/recall/F1; undefined
+denominators are null. They also retain every observation, invalid reason,
+duplicate count, provider due-date discrepancies, opportunity counts, latency
+denominator, and evaluation-command wall time. No confidence interval, calibrated
+floor, admission verdict, total dollar cost or comparative rank is invented.
+
+`workload_completeness_verified` is always false here. A scorer receiving only
+observed ticks cannot prove that required ticks or input events were supplied.
+The planned multiweek runner must separately bind the complete ordered plan,
+input events, cancellations and observations before using these metrics.
+Therefore an empty/truncated trace cannot establish a passing benchmark.
+
+The regression case sends five real structured intentions through the public
+CLI, supplies event and condition observations, and checks the resulting five
+firings. Synthetic edge cases cover disjoint windows, cancellation boundaries,
+early/expired observations, missing opportunities, duplicates, unknown actions
+and malformed intervals. This is not implicit natural-language intention
+formation, an overloaded multiweek corpus or calibrated baseline evidence.
+Those requirements and registered recovery, resource/cost and admission remain
+open. The existing exact-time saved captures remain replayable unchanged.

@@ -110,6 +110,13 @@ unexpected outcomes. It is a separate development diagnostic, not a change to
 the two registered suites. See the [exact-time diagnostic contract](../../docs/plans/m12-exact-time-development-protocol-2026-10-04.md)
 for denominators, clock semantics and the remaining M12 requirements.
 
+A separate [five-trigger window scorer](../../docs/plans/m12-trigger-window-development-2026-10-04.md)
+accepts independently declared eligibility intervals, including transient
+event/condition signals and exclusive time-window endpoints. Its development
+reports separate invalid firings, missed observed opportunities, duplicates
+and lateness from actual eligibility. It does not prove workload completeness
+or supply the planned registered multiweek corpus or calibration.
+
 Run and retain the five-seed exact-time diagnostic in a new directory:
 
 ```sh
