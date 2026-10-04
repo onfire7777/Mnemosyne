@@ -14,6 +14,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from leaderboard.explainers import systems_body
 from leaderboard.validate import (
     SCHEMA_VERSION,
     SCHEMA_VERSION_V2,
@@ -375,8 +376,10 @@ def _render_pages(
         '<h2>Who operates this site</h2><p>Mnemosyne is the operator entry. The project '
         'must run supported competitors under the same disclosed protocol, retain failed '
         'attempts, and explain missing systems. Operator-run does not mean independent '
-        'or neutral evaluation.</p></article>',
+        'or neutral evaluation.</p>'
+        '<p><a href="systems.html">Explore memory system architectures</a></p></article>',
     )
+    pages[Path("systems.html")] = _page("Memory systems", systems_body())
     return pages
 
 
