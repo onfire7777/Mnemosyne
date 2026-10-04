@@ -1,5 +1,6 @@
 """Native LoCoMo public capture boundary; not an admitted benchmark runner."""
 from contextlib import contextmanager
+from copy import deepcopy
 from dataclasses import replace
 from hashlib import sha256
 import json
@@ -8,7 +9,50 @@ from tempfile import TemporaryDirectory
 
 from eval.harness.cli_driver import MnemoCLI
 from eval.public.custody import capture_cid
-from .locomo import LoCoMoError, normalize_dialogs
+from .locomo import LoCoMoError, decode_upstream_category5, normalize_dialogs, prepare_upstream_question
+
+
+def project_native_response(response: dict, annotation: dict, evidence: dict, *,
+                            choice_draw: float | None = None) -> dict:
+    """Project a public response without treating execution failure as abstention.
+
+    Reader disclosure presence is a prerequisite, not proof of runtime custody;
+    the eventual registered runner must validate the actual provider manifest.
+    """
+    prepared = prepare_upstream_question(annotation, choice_draw=choice_draw)
+    if not isinstance(response, dict) or type(response.get("abstained")) is not bool:
+        raise LoCoMoError("native response requires explicit boolean abstained")
+    reader, hops = response.get("reader"), response.get("hops")
+    if not isinstance(reader, dict) or not isinstance(hops, list):
+        raise LoCoMoError("native response requires reader and hop records")
+    retrieved = []
+    for hop in hops:
+        if not isinstance(hop, dict) or not isinstance(hop.get("retrieved_cids"), list):
+            raise LoCoMoError("native retrieval hop is malformed")
+        for cid in hop["retrieved_cids"]:
+            if not isinstance(cid, str) or cid not in evidence:
+                raise LoCoMoError("native response references unregistered evidence")
+            dialog = evidence[cid]["dialog_id"]
+            if dialog not in retrieved:
+                retrieved.append(dialog)
+    result = {"raw_response": deepcopy(response), "question_transformation": prepared,
+              "retrieved_dialog_ids": retrieved, "decoded_prediction": None,
+              "projection_policy": "native-explicit-abstention-v1",
+              "status": "incomplete-reader-execution", "runtime_custody_verified": False}
+    if not isinstance(reader.get("grounded_reader"), dict) or not reader["grounded_reader"]:
+        return result
+    answer = response.get("answer")
+    if response["abstained"]:
+        if answer not in (None, ""):
+            raise LoCoMoError("native abstention contradicts nonempty answer")
+        decoded = "No information available"
+    else:
+        if not isinstance(answer, str) or not answer.strip():
+            raise LoCoMoError("native non-abstention requires an answer")
+        decoded = (decode_upstream_category5(answer, prepared["answer_key"])["decoded_prediction"]
+                   if prepared["category"] == 5 else answer.strip())
+    result.update(status="projected", decoded_prediction=decoded)
+    return result
 
 
 @contextmanager

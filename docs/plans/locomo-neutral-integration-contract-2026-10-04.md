@@ -108,3 +108,31 @@ corrected before the passing rerun. Ruff passed.
 
 This advances step 2 only. It does not complete response conversion, measured
 capability testing, registry integration, real-dataset admission or W4 acceptance.
+
+## Native response projection checkpoint
+
+`project_native_response` now retains a deep copy of the original public response,
+the registered question transformation and its explicit category-5 choice draw,
+and mapped retrieved dialog IDs. Unknown retrieval evidence fails closed rather
+than being filtered out. Duplicate retrieval references retain their first order.
+
+The public API can return `abstained: true` with empty reader disclosure after a
+provider timeout (`tests/test_public_eval_cli.py` demonstrates this). Accordingly,
+responses without a nonempty grounded-reader disclosure produce
+`incomplete-reader-execution` and a null decoded prediction. They must remain
+missing/incomplete outcomes in the eventual replay report, not earn an
+abstention score or be dropped from denominators.
+
+For responses with grounded-reader disclosure, the explicitly versioned native
+projection maps a boolean abstention with null/empty answer to `No information
+available`. Non-abstaining answers are stripped and category 5 uses the pinned
+option decoder. Contradictory abstention plus nonempty answer is rejected.
+This mapping is native-adapter behavior, not an unchanged upstream response.
+Presence of reader disclosure does not verify its truth or runtime custody:
+the returned record explicitly leaves `runtime_custody_verified` false pending
+registered provider-manifest validation.
+
+All ten native tests passed, covering public capture plus response projection,
+timeout separation, raw-response retention, option mapping, malformed answers
+and foreign retrieval evidence. Ruff passed. Answer invocation, admission,
+full replay binding and official measurements remain open.
