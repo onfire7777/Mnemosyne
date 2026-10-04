@@ -1,0 +1,256 @@
+{
+  "cases": [
+    {
+      "case_id": "synthetic-0",
+      "evidence": [
+        {
+          "id": "cid-0",
+          "text": "word café café"
+        }
+      ],
+      "output": {
+        "operation": "read",
+        "prediction": {
+          "answer_type": "span",
+          "end": 10,
+          "evidence_id": "cid-0",
+          "start": 5,
+          "supporting_ids": [
+            "cid-0"
+          ]
+        }
+      },
+      "query": "ask",
+      "window_counts": [
+        1
+      ]
+    },
+    {
+      "case_id": "synthetic-1",
+      "evidence": [
+        {
+          "id": "cid-0",
+          "text": "word café"
+        }
+      ],
+      "output": {
+        "operation": "read",
+        "prediction": {
+          "answer_type": "span",
+          "end": 11,
+          "evidence_id": "cid-0",
+          "start": 5,
+          "supporting_ids": [
+            "cid-0"
+          ]
+        }
+      },
+      "query": "ask",
+      "window_counts": [
+        1
+      ]
+    },
+    {
+      "case_id": "synthetic-2",
+      "evidence": [
+        {
+          "id": "cid-0",
+          "text": "word café 東京"
+        }
+      ],
+      "output": {
+        "operation": "read",
+        "prediction": {
+          "answer_type": "span",
+          "end": 17,
+          "evidence_id": "cid-0",
+          "start": 11,
+          "supporting_ids": [
+            "cid-0"
+          ]
+        }
+      },
+      "query": "ask",
+      "window_counts": [
+        1
+      ]
+    },
+    {
+      "case_id": "synthetic-3",
+      "evidence": [
+        {
+          "id": "cid-0",
+          "text": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word 東京"
+        }
+      ],
+      "output": {
+        "operation": "read",
+        "prediction": {
+          "answer_type": "span",
+          "end": 4506,
+          "evidence_id": "cid-0",
+          "start": 4500,
+          "supporting_ids": [
+            "cid-0"
+          ]
+        }
+      },
+      "query": "ask",
+      "window_counts": [
+        5
+      ]
+    },
+    {
+      "case_id": "synthetic-4",
+      "evidence": [
+        {
+          "id": "cid-0",
+          "text": "café"
+        },
+        {
+          "id": "cid-1",
+          "text": "東京"
+        }
+      ],
+      "output": {
+        "operation": "read",
+        "prediction": {
+          "answer_type": "span",
+          "end": 6,
+          "evidence_id": "cid-1",
+          "start": 0,
+          "supporting_ids": [
+            "cid-1"
+          ]
+        }
+      },
+      "query": "ask",
+      "window_counts": [
+        1,
+        1
+      ]
+    },
+    {
+      "case_id": "synthetic-5",
+      "evidence": [
+        {
+          "id": "cid-0",
+          "text": "unknown"
+        }
+      ],
+      "output": {
+        "operation": "read",
+        "prediction": {
+          "answer_type": "null",
+          "supporting_ids": []
+        }
+      },
+      "query": "ask",
+      "window_counts": [
+        1
+      ]
+    },
+    {
+      "case_id": "synthetic-6",
+      "evidence": [],
+      "output": {
+        "operation": "read",
+        "prediction": {
+          "answer_type": "null",
+          "supporting_ids": []
+        }
+      },
+      "query": "ask",
+      "window_counts": []
+    },
+    {
+      "case_id": "synthetic-7",
+      "evidence": [
+        {
+          "id": "cid-0",
+          "text": "café"
+        },
+        {
+          "id": "cid-1",
+          "text": "café"
+        }
+      ],
+      "output": {
+        "operation": "read",
+        "prediction": {
+          "answer_type": "span",
+          "end": 5,
+          "evidence_id": "cid-0",
+          "start": 0,
+          "supporting_ids": [
+            "cid-0"
+          ]
+        }
+      },
+      "query": "ask",
+      "window_counts": [
+        1,
+        1
+      ]
+    },
+    {
+      "case_id": "synthetic-8",
+      "evidence": [
+        {
+          "id": "cid-0",
+          "text": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word café word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word "
+        }
+      ],
+      "output": {
+        "operation": "read",
+        "prediction": {
+          "answer_type": "span",
+          "end": 2540,
+          "evidence_id": "cid-0",
+          "start": 2535,
+          "supporting_ids": [
+            "cid-0"
+          ]
+        }
+      },
+      "query": "ask",
+      "window_counts": [
+        3
+      ]
+    },
+    {
+      "case_id": "synthetic-9",
+      "evidence": [
+        {
+          "id": "cid-0",
+          "text": "[CLS] unknown"
+        }
+      ],
+      "output": {
+        "operation": "read",
+        "prediction": {
+          "answer_type": "null",
+          "supporting_ids": []
+        }
+      },
+      "query": "ask",
+      "window_counts": [
+        1
+      ]
+    }
+  ],
+  "learned_quality_verified": false,
+  "max_answer_tokens": 1,
+  "model_sha256": "c2cc54fb369b5b29b3dbf8df0251c24a1c4fc31892d797ca7305fee19983c065",
+  "null_threshold": 0.0,
+  "null_token_id": 1,
+  "onnxruntime_version": "1.28.0",
+  "policy": "window-null-margin-v1",
+  "resource_admission_verified": false,
+  "schema": "compact-onnx-decoded-parity/v1",
+  "synthetic": true,
+  "tokenizer_sha256": "71c88a3c45127a777dc0e2e4cedc3567ad2093ff074b8876803d97e3b2d85ba9",
+  "tokenizers_version": "0.22.1",
+  "window_length": 512,
+  "window_step": 128
+}

@@ -27,6 +27,8 @@ bounded Linux CI job exercises native parity; its remote outcome is pending.
 
 A subsequent experimental span-only `InferenceSession` now connects the native
 tensor adapter to a digest-checked tokenizer and exact source-byte offsets.
+Clean-source decoded-reader evidence: `eval/reports/compact-decoded-reader-development-2026-10-04`
+(`fe753290`; raw logs, fixture bytes and hash manifest).
 Ten generated cases match a separate Python reference's decoded spans/nulls,
 including Unicode, later windows and multi-document ties. The original tensor
 result alone did not prove these properties. The named window/null policy is
