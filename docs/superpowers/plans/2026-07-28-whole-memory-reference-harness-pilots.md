@@ -67,7 +67,7 @@ Ed25519/ledger infrastructure.
 | M01 | `PILOT-READY-DEV` for Local only | `INTERNALLY_MEASURED` | SQLite/P32 and seeded process-kill durability |
 | M03 | `PROPOSED` for full M03 | `INTERNALLY_MEASURED` for the valid-time slice | full bitemporal transaction-time query semantics |
 | M10 | `PILOT-READY-DEV` for deterministic reader | `INTERNALLY_MEASURED` | model-backed/judged QA and absent numeric confidence |
-| M12 | `PROPOSED` | `INTERNALLY_MEASURED` development smoke | recurrence plumbing, official pins, calibrated baseline, certification scale |
+| M12 | `PROPOSED` | `INTERNALLY_MEASURED` development smoke | integrated full corpus and sink/recovery evidence, official pins, calibrated baseline, certification scale |
 | M13 | `PROPOSED` | `INTERNALLY_MEASURED` development smoke | multi-capacity/promotion experiment and certification scale |
 | M15 | `PILOT-READY-DEV` for admitted pilot payloads | `INTERNALLY_MEASURED` | any missing manifest/seed/canonical projection |
 | M20 | `CONTRACT-READY` for result-v2/local ledger | `IMPLEMENTED` | identity-bound signing, public rendering/publication, PBPP, independent custody |
@@ -108,6 +108,17 @@ checks; implementation remains outstanding. PR #83 later delivered that bounded 
 PR #84 delivered the dependent M15 development slice, as recorded below.
 
 ## M12/M13 delivery checkpoint
+
+2026-10-04 later continuation: source now includes exact-time and five-trigger
+window scoring, a versioned four-week five-trigger workload, a separate durable
+inert sink capture and a separate versioned response-loss recovery workload.
+The [recovery capture](../../../eval/reports/m12-operation-recovery-development-2026-10-04/README.md)
+retains 360 operations, 50 lost successful responses and 50 adapter resets.
+The [five-trigger capture](../../../eval/reports/m12-explicit-trigger-development-2026-10-04/README.md)
+retains 525 operations. These are development diagnostics, not the integrated
+admitted M12 corpus. Every-firing sink integration, overload, implicit formation,
+calibrated absolute floors/reference margins and full resource/cost admission
+remain open. The original acceptance conditions below remain unchanged.
 
 2026-10-04 continuation: [action observation integrity regressions](../../../eval/reports/m12-action-observation-integrity-2026-10-04.md)
 repair duplicate suppression in `ActionCLI` and exercise real public-CLI

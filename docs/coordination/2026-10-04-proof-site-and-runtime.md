@@ -818,3 +818,19 @@ This tightens evidence validation without changing input generation or the
 production API. The clean-source recovery run was already executing source
 `1fddb7d7`; its receipt must retain that actual source, while replay additionally
 applies these stricter checks.
+
+
+The clean-source recovery execution completed from `1fddb7d7`. All 360
+operations were retained; 50 response losses and 50 adapter resets preserved
+original request revisions and task identity. Ten uncancelled actions fired
+once, and ten cancelled controls remained unfired. Its recorded harness hashes
+were checked against the exact source commit, and the subsequent stricter
+replay reproduced all reports. The final recovery/trigger/type-binding tests
+passed 34 checks. The raw capture is retained under
+`eval/reports/m12-operation-recovery-development-2026-10-04/`.
+
+The next M12 integration must combine the workload with the inert sink so every
+firing has a durable delivery record, then extend overload/implicit cases and
+calibrated exact-reference comparisons. A response-loss trace is not a
+power-loss test or cross-module M11/M12/M17 admission. Original acceptance and
+resource/cost gates remain unchanged.
