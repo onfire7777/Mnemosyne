@@ -109,3 +109,48 @@ def test_condition_false_and_future_inputs_do_not_trigger_until_valid_current_si
         fired = observe(ref, tick)
         assert bool(fired) == (value is True and observed == tick)
     assert observe(ref, 13) == []
+
+
+def test_final_recurrence_does_not_advance_beyond_representable_time():
+    ref = ExplicitActionReference()
+    last = '9999-12-31T23:59:59+00:00'
+    ref.run('task.create', task(spec={'at': last}, recurrence_policy={
+        'type': 'interval', 'interval_seconds': 1, 'max_occurrences': 1}))
+    ref.run('clock.inject', {'now': last})
+    assert len(ref.run('intention.observe', {})['firing_observations']) == 1
+    assert ref.run('intention.observe', {})['firing_observations'] == []
+
+
+@pytest.mark.parametrize('generator', [make_plan, make_fanout_plan])
+def test_every_reference_occurrence_matches_independently_declared_eligibility(generator):
+    def parse(value):
+        return datetime.fromisoformat(value.replace('Z', '+00:00'))
+
+    for case in generator()['cases']:
+        ref = ExplicitActionReference()
+        observations, ticks = [], []
+        for operation in case['operations']:
+            response = ref.run(operation['command'], operation['payload'])
+            if operation['command'] == 'intention.observe':
+                ticks.append(parse(response['evaluated_at']))
+                observations.extend(response['firing_observations'])
+        actual = {(row['action_id'], row['occurrence']): row for row in observations}
+        assert len(actual) == len(observations), 'duplicate occurrence'
+        expected_keys = set()
+        for expected in case['expected']:
+            cancelled = parse(expected['cancelled_at']) if expected['cancelled_at'] else None
+            eligible = [now for now in ticks if (cancelled is None or now < cancelled)
+                        and any(now >= parse(window['start']) and
+                                (window['end'] is None or now < parse(window['end']) or
+                                 (window['end_inclusive'] and now == parse(window['end'])))
+                                for window in expected['windows'])]
+            key = (expected['action_id'], expected['occurrence'])
+            if not eligible:
+                assert key not in actual
+                continue
+            expected_keys.add(key)
+            assert key in actual
+            assert parse(actual[key]['evaluated_at']) == min(eligible)
+            assert parse(actual[key]['due_at']) == parse(expected['due_at'])
+            assert actual[key]['trigger_type'] == expected['trigger_type']
+        assert set(actual) == expected_keys

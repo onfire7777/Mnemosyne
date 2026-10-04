@@ -52,3 +52,16 @@ benchmark design or successful execution by a real memory system.
 
 Existing official protocols, registered fixture bytes, production APIs and
 BurnOS behavior are unchanged.
+
+## Per-occurrence validation
+
+The reference tests now compare every emitted action/occurrence key, trigger
+type, original due time and first eligible observation against the separately
+declared windows in both full development workloads. They reject unexpected,
+missing and duplicate keys; aggregate totals alone no longer support this check.
+Gold remains solely in the test assertion path, never an interpreter input.
+
+A hand-written maximum-timestamp case exposed an unnecessary date advance after
+the final recurrent occurrence. The interpreter now advances only if another
+occurrence remains, so a completed schedule cannot overflow while constructing
+an unused next due time. This correction changes no product engine code.

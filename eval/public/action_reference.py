@@ -176,7 +176,7 @@ class ExplicitActionReference:
                             'due_at': task['due'].isoformat(), 'evaluated_at': self.now.isoformat(),
                             'provider_evaluated_at': None})
             task['occurrence'] += 1
-            if task['interval'] is not None:
+            if task['interval'] is not None and task['occurrence'] < task['maximum']:
                 task['due'] += timedelta(seconds=task['interval'])
         self.events.clear()
         self.conditions.clear()
