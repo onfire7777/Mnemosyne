@@ -169,3 +169,19 @@ def test_resource_probe_failure_is_recorded_and_does_not_run_child(tmp_path, mon
     assert result['error_type'] == 'PermissionError'
     assert result['returncode'] is None
     assert 'private path' not in json.dumps(result)
+
+
+def test_relative_usage_roots_resolve_against_child_cwd(tmp_path):
+    child_cwd = tmp_path / 'child'
+    child_cwd.mkdir()
+    (child_cwd / 'measured').mkdir()
+    (child_cwd / 'measured' / 'data').write_bytes(b'1234567')
+    attempt = tmp_path / 'attempt'
+    result = run_monitored([sys.executable, '-c', 'pass'], cwd=child_cwd,
+                           output_dir=attempt, wall_seconds=5, pressure_probe=lambda: 1,
+                           poll_seconds=0.01, usage_roots=[Path('measured')])
+    assert result['status'] == 'succeeded'
+    assert result['resource_diagnostics']['max_sampled_logical_file_bytes'] == 7
+    assert result['resource_diagnostics']['disk_roots'] == [str(child_cwd / 'measured')]
+    initial = json.loads((attempt / 'start.json').read_text())
+    assert initial['resource_diagnostics']['disk_roots'] == [str(child_cwd / 'measured')]
