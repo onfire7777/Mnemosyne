@@ -91,6 +91,8 @@ def run_monitored(
         if isinstance(value, bool) or not math.isfinite(value) or value <= 0:
             raise ValueError("time limits must be positive and finite")
     cwd = cwd.resolve(strict=True)
+    if usage_roots is not None:
+        usage_roots = [cwd / Path(root) for root in usage_roots]
     output_dir.mkdir(mode=0o700, parents=False, exist_ok=False)
     start = time.monotonic()
     receipt: dict[str, object] = {
@@ -100,11 +102,9 @@ def run_monitored(
         "status": "no_run", "reason": None, "returncode": None,
         "benchmark_verified": False,
     }
-    _write_json(output_dir / "start.json", receipt)
     process = None
     usage_path = output_dir / "usage.jsonl"
     if usage_roots is not None:
-        usage_roots = [Path(root).absolute() for root in usage_roots]
         receipt["resource_diagnostics"] = {
             "measurement": "sampled-process-group-rss-and-logical-regular-file-bytes",
             "peak_rss_verified": False, "admission_verified": False,
@@ -112,8 +112,10 @@ def run_monitored(
             "samples": 0, "max_sampled_rss_bytes": 0,
             "max_sampled_logical_file_bytes": 0,
         }
-        usage_path.touch(exist_ok=False)
+    _write_json(output_dir / "start.json", receipt)
     try:
+        if usage_roots is not None:
+            usage_path.touch(exist_ok=False)
         with (output_dir / "pressure.jsonl").open("x") as samples, \
              (output_dir / "stdout.log").open("xb") as stdout, \
              (output_dir / "stderr.log").open("xb") as stderr:
