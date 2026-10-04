@@ -24,8 +24,8 @@ python -m http.server 8791 --bind 127.0.0.1 --directory /tmp/mnemosyne-proof-pre
 Validation: 352 tests passed across render, output smoke, publish, readiness,
 result contract and signed ledger modules. Ten governance/publication-policy
 tests passed; Ruff passed for changed Python files. The broader repository
-suite remains in progress with four certificate-rotation failures; these
-focused passes are not an all-suite or release-readiness claim.
+suite subsequently finished with five failures, detailed below; these focused
+passes are not an all-suite or release-readiness claim.
 
 Browser checks used the actual generated pages: Results → Methods → Results;
 an explicitly labeled synthetic UI fixture → run disclosures → result →
@@ -198,4 +198,29 @@ configure a host. All source rights and publication gates still apply.
 Validation: 85 focused render/publication/policy checks and Ruff passed. The
 tests cover exported digest equality and the verified trace snapshot even when
 the original file changes after its first read. The full older-source suite
-remains running; this is not an all-suite pass claim.
+has now finished, as recorded below; this is not an all-suite pass claim.
+
+## Completed local suite
+
+The sequential local suite completed in 1,689.03 seconds (28 minutes, 9 seconds):
+5,447 passed, 267 skipped, 191 deselected and five failed. It started before the
+later website and monitor changes; their focused test results above are separate.
+
+Four failures are the parameterized certificate-renewal integration cases in
+`tests/test_production_mcp_client_cert_rotator.py`. The hardened production
+subprocess selects this host's older system Python and fails on the `int | None`
+annotation before completing transaction recovery. The separately investigated
+system LibreSSL capability gap also remains unresolved. Required Python/OpenSSL
+capabilities are documented in `infra/README.md`; no safe-PATH, certificate or
+test gate was relaxed to turn these failures green.
+
+The fifth failure was the obsolete M12 README assertion, corrected in commit
+`19dc2c6c`. Its focused follow-up passed while preserving the outstanding
+multiweek, calibrated-baseline and lateness evidence requirements. The local
+skips include unavailable PostgreSQL, platform-specific and optional-extension
+coverage; they are not successes. GitHub PostgreSQL and platform jobs provide
+separate evidence, and the final development revision still needs its own CI.
+
+The complete local log is retained in the ignored completion evidence directory
+as `final-suite.log`. This establishes that the ordinary test workload can finish
+on this Mac. It does not establish that the full model benchmark fits in memory.
