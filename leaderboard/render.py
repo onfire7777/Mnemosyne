@@ -16,6 +16,8 @@ from typing import Any
 
 from leaderboard.grouping import build_comparison_index
 from leaderboard.workspace import comparison_body
+from leaderboard.history import history_body
+from leaderboard.ledger import LedgerError, verified_ledger_snapshot
 from leaderboard.explainers import systems_body
 from leaderboard.comparisons import comparisons_body
 from leaderboard.catalog import benchmarks_body, coverage_body, load_catalog
@@ -194,7 +196,7 @@ def _page(title: str, body: str, root: str = "") -> str:
         f'<nav aria-label="Main"><a href="{root}index.html">Results</a>'
         f'<a href="{root}benchmarks.html">Benchmarks</a><a href="{root}coverage.html">Coverage</a>'
         f'<a href="{root}compare.html">Compare</a><a href="{root}systems.html">Systems</a>'
-        f'<a href="{root}methods.html">Methods</a></nav></header>'
+        f'<a href="{root}attempts.html">Attempts</a><a href="{root}methods.html">Methods</a></nav></header>'
         f"<main>{body}</main>\n"
         "<footer>Open, operator-run. Mnemosyne is the operator entry.</footer>"
         "</body></html>\n"
@@ -562,9 +564,22 @@ def render_site(
     traces: dict[str, str | Path],
     destination: str | Path,
     artifacts: dict[str, dict[str, str | Path]] | None = None,
+    *,
+    ledger_source: tuple[str | Path, str | Path] | None = None,
 ) -> None:
     """Render a complete site, replacing the destination only after validation."""
     records = _load_results(Path(results))
+    snapshot = None
+    if ledger_source is not None:
+        try:
+            ledger_path, public_key_path = ledger_source
+            snapshot = verified_ledger_snapshot(Path(ledger_path), Path(public_key_path))
+        except (LedgerError, TypeError, ValueError) as exc:
+            raise RenderError(f"invalid attempt history: {exc}") from exc
+        signed_results = [entry["result"] for entry in snapshot["entries"]
+                          if entry["status"] == "succeeded"]
+        if any(record not in signed_results for record in records):
+            raise RenderError("visible result is not present in signed attempt history")
     record_ids = {record["record_id"] for record in records}
     trace_ids = set(traces)
     missing = sorted(record_ids - trace_ids)
@@ -587,6 +602,9 @@ def render_site(
     pages[Path("data/comparison-index.json")] = _export_json(comparison_index)
     pages[Path("compare.html")] = _page("Compare", comparison_body(comparison_index))
     pages[Path("comparison.js")] = Path(__file__).with_name("comparison.js").read_bytes()
+    pages[Path("attempts.html")] = _page("Attempt history", history_body(snapshot, records))
+    if snapshot is not None:
+        pages[Path("data/attempt-history.json")] = _export_json(snapshot)
     for record_id, payloads in verified_artifacts.items():
         for name, content in payloads.items():
             pages[Path("data") / _digest(record_id) / name] = content
