@@ -18,6 +18,8 @@ import signal
 import subprocess
 import time
 
+from eval.public.resource_usage import process_group_rss_bytes, regular_file_bytes
+
 
 def macos_memory_pressure() -> int:
     result = subprocess.run(
@@ -73,6 +75,7 @@ def run_monitored(
     argv: Sequence[str], *, cwd: Path, output_dir: Path, wall_seconds: float,
     pressure_probe: Callable[[], int] = macos_memory_pressure,
     poll_seconds: float = 1.0,
+    usage_roots: Sequence[Path] | None = None,
 ) -> dict[str, object]:
     """Run once, abort on non-normal pressure, and retain a terminal receipt.
 
@@ -99,11 +102,33 @@ def run_monitored(
     }
     _write_json(output_dir / "start.json", receipt)
     process = None
+    usage_path = output_dir / "usage.jsonl"
+    if usage_roots is not None:
+        usage_roots = [Path(root).absolute() for root in usage_roots]
+        receipt["resource_diagnostics"] = {
+            "measurement": "sampled-process-group-rss-and-logical-regular-file-bytes",
+            "peak_rss_verified": False, "admission_verified": False,
+            "disk_roots": [str(root) for root in usage_roots],
+            "samples": 0, "max_sampled_rss_bytes": 0,
+            "max_sampled_logical_file_bytes": 0,
+        }
+        usage_path.touch(exist_ok=False)
     try:
         with (output_dir / "pressure.jsonl").open("x") as samples, \
              (output_dir / "stdout.log").open("xb") as stdout, \
              (output_dir / "stderr.log").open("xb") as stderr:
             while True:
+                if usage_roots is not None:
+                    rss = process_group_rss_bytes(process.pid) if process is not None else 0
+                    disk = regular_file_bytes(list(usage_roots))
+                    sample = {"elapsed_seconds": time.monotonic() - start,
+                              "process_group_rss_bytes": rss, "logical_file_bytes": disk}
+                    with usage_path.open("a") as usage:
+                        usage.write(json.dumps(sample) + "\n")
+                    diagnostics = receipt["resource_diagnostics"]
+                    diagnostics["samples"] += 1
+                    diagnostics["max_sampled_rss_bytes"] = max(diagnostics["max_sampled_rss_bytes"], rss)
+                    diagnostics["max_sampled_logical_file_bytes"] = max(diagnostics["max_sampled_logical_file_bytes"], disk)
                 if process is not None and process.poll() is not None:
                     receipt.update(status="succeeded" if process.returncode == 0 else "failed",
                                    reason="process-exited", returncode=process.returncode)
@@ -155,6 +180,7 @@ def main() -> int:
     parser.add_argument("--cwd", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--wall-seconds", type=float, required=True)
+    parser.add_argument("--usage-root", type=Path, action="append", help="opt-in logical disk and process-group RSS sampling; not admission")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
@@ -165,7 +191,7 @@ def main() -> int:
     previous = signal.signal(signal.SIGTERM, interrupt)
     try:
         result = run_monitored(command, cwd=args.cwd, output_dir=args.output_dir,
-                               wall_seconds=args.wall_seconds)
+                               wall_seconds=args.wall_seconds, usage_roots=args.usage_root)
     finally:
         signal.signal(signal.SIGTERM, previous)
     print(json.dumps(result, sort_keys=True))
