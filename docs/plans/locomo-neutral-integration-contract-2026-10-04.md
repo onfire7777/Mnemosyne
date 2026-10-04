@@ -220,3 +220,12 @@ duplicate/tampered records and option-order custody. Ruff passed. The report
 keeps runtime custody and publication authorization false. It is offline
 structural/score replay, not signed execution evidence, registry admission,
 model-quality proof or a completed native adapter run.
+
+Completeness refinement: native reports now distinguish
+`source_population_complete` (every supplied question has a projected response)
+from `complete` (that condition plus nonempty coverage of all five categories).
+`absent_categories` and per-category completeness remain explicit. A synthetic
+single-category population with every question answered is therefore not marked
+as a complete LoCoMo report. All 26 scorer tests, including this regression,
+passed; Ruff passed. Even the stricter complete flag does not establish admitted
+dataset coverage, runtime authenticity or publication eligibility.

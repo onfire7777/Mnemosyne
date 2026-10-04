@@ -232,12 +232,16 @@ def replay_native_population(samples: list[dict], records: list[dict], *,
                       "native_evidence_recall": recall})
     for group in groups.values():
         count, observed = group["source_count"], group["native_recall_count"]
+        group["complete"] = count > 0 and group["missing_count"] == 0
         group["qa_source_denominator_mean"] = group["rounded_qa_sum"] / count if count else None
         group["native_observed_recall_mean"] = group["native_recall_sum"] / observed if observed else None
     def digest(value):
         return sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+    absent_categories = [category for category, group in groups.items() if group["source_count"] == 0]
     return {"schema_version": "mnemosyne.locomo-native-replay/v1", "categories": groups,
-            "cases": cases, "complete": all(row["missing_count"] == 0 for row in groups.values()),
+            "cases": cases, "complete": all(row["complete"] for row in groups.values()),
+            "source_population_complete": all(row["missing_count"] == 0 for row in groups.values()),
+            "absent_categories": absent_categories,
             "source_sha256": digest(samples), "records_sha256": digest(sorted(records, key=lambda r: r["question_id"])),
             "caption_policy": caption_policy, "choice_draws": dict(choice_draws),
             "publication_authorized": False, "runtime_custody_verified": False,

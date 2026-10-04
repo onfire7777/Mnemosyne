@@ -193,3 +193,12 @@ def test_native_population_replays_missingness_empty_retrieval_and_tampering(tmp
     assert failed_report["categories"]["5"]["missing_count"] == 1
     assert failed_report["categories"]["5"]["scored_count"] == 0
     assert failed_report["cases"][4]["status"] == "incomplete-reader-execution"
+    narrowed = deepcopy(sample)
+    narrowed["qa"] = narrowed["qa"][:1]
+    narrowed_report = replay_native_population([narrowed], [record],
+                                               caption_policy="exclude-caption", choice_draws={})
+    assert narrowed_report["source_population_complete"]
+    assert not narrowed_report["complete"]
+    assert narrowed_report["absent_categories"] == ["2", "3", "4", "5"]
+    assert narrowed_report["categories"]["1"]["complete"]
+    assert not narrowed_report["categories"]["2"]["complete"]
