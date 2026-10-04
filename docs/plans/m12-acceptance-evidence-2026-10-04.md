@@ -11,7 +11,7 @@ replace the original specification or promote development evidence to admission.
 | Typed scheduling, revision, authorization, idempotency and virtual tick | Public action adapter; revision-keyed recovery workload; public authorization and retry regression tests | Bind exact adapter/runtime identity into registered multi-system runs; do not infer authorization coverage from happy-path scheduling |
 | Exact-time, window, event, condition and dependency cases | Retained five-trigger, five-seed four-week capture; 525 operations | Incorporate in registered full corpus with pinned reference behavior |
 | Recurrence, cancellation and negative controls | Five-trigger capture includes recurring schedules, cancellation and unmatched/expired controls | Preserve these controls in the full corpus, including failures under load |
-| Implicit cases | Current workload explicitly creates structured intentions | Add public-input implicit formation cases with positive, ambiguous and negative examples; report unsupported adapters explicitly; never insert gold schedules on their behalf |
+| Implicit cases | Versioned 220-conversation development corpus with separate public inputs/evaluator labels, positive commitments, ambiguity, negatives and multi-turn cancellation/rescheduling | Implement actual public formation adapter, sequential execution and downstream firing evaluation; broaden language/dependency coverage; never insert gold schedules on a candidate’s behalf |
 | Overloaded-trigger cases | Versioned bounded fan-out generator: 2/4/8/16 actions per explicit type; full run from c7a9d05a completed/replayed with 750 expected firings | Define actual overload behavior and resource envelope; bounded fan-out is not saturation evidence |
 | Every firing targets harness-owned idempotent sink | Retained full trigger-sink and recovery-sink captures; exact annex replay | Integrate sink into the admitted full corpus and every candidate adapter; no external payload execution |
 | Recovery and retry correctness | 360-operation capture: 50 response losses, 50 adapter resets, 10 eligible firings, 10 cancelled controls; 10 sink receipts and 10 deliberate duplicate deliveries | Local response loss is not arbitrary crash recovery or external-service exactly-once behavior |
@@ -107,3 +107,15 @@ CLI and draft differ on nested boolean/number equality and membership. See
 `eval/reports/m12-condition-reference-boundary-2026-10-04.md` and its public-seam
 regression. Full semantic equivalence is not established by existing matched
 workloads; the intended policy must be explicit before extending admission.
+
+
+## Natural-language formation corpus
+
+The [implicit-formation development protocol](m12-implicit-formation-development-2026-10-04.md)
+now defines 220 conversations across five seeds and four weekly dates. Public
+inputs and evaluator labels are separately materialized with byte hashes;
+turn-prefix projection prevents revealing later cancellations prematurely.
+This is corpus availability, not execution evidence. The current structured
+action adapter does not implement formation from these conversations. Agent
+integration, measured execution, downstream firing, broader language coverage
+and held-out/calibration splits remain required.

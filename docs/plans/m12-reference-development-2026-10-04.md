@@ -47,8 +47,9 @@ benchmark design or successful execution by a real memory system.
   retained response-loss/reset workload where the full contract requires it.
   Recurrence-policy mutation, non-exact rescheduling and arbitrary crash recovery
   are not established by that development capture.
-- Define implicit-intent and actual overload fixtures without replacing inputs
-  with expected schedules or tailoring the benchmark to this implementation.
+- Integrate and broaden the separately defined natural-language formation corpus
+  and define actual overload fixtures. Never replace public inputs with expected
+  schedules or tailor the benchmark to this implementation.
 - Preserve the implemented shared sink and raw-operation replay across the full
   corpus; measure comparable execution boundaries and resources before latency
   or resource comparisons. Existing explicit, fan-out and recovery captures are

@@ -18,6 +18,14 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+The [natural-language formation corpus](../docs/plans/m12-implicit-formation-development-2026-10-04.md)
+now contains 220 conversations with separate input/label files and incremental
+turn projection. Positive commitments, timing ambiguity, negatives, quoted
+instructions and multi-turn cancellation/rescheduling are represented. The
+current structured action adapter does not execute this corpus; no candidate
+score or implicit-formation capability is claimed. Public formation integration,
+firing evaluation and broader/held-out coverage remain open.
+
 A [separate full fan-out resource observation](../eval/reports/m12-fanout-resource-development-2026-10-04/README.md)
 from 421a1fcd completed and replayed all 1,220 operations in 304.701 monotonic
 seconds. Its 292 samples recorded at most 88 MiB process-group RSS and 3,913,523
