@@ -83,6 +83,24 @@ These are implementation regressions, not expanded registered fixtures or an
 admitted M12 result. Injected poll delays do not measure real scheduler latency,
 and no external action payload or production scheduler runs in these tests.
 
+The development adapter also forwards an explicit `idempotency_key` on
+`task.create`, and a paired `idempotency_key` / `expected_revision` on override
+or reschedule updates. `task.inspect` reads the public provider-issued content
+revision and scoped intention/action/status identifiers. The adapter never
+refreshes an update's precondition automatically: retries must retain their
+original key and revision. Recreating the adapter's in-memory map is possible
+by replaying the original keyed creation request before retrying an update.
+Within a live adapter, a keyed task cannot be rebound to another creation key
+or share that key with another task. Keyed revision preconditions on cancel
+are rejected explicitly; they are not silently discarded.
+
+Public-subprocess regressions drop the first successful create and update
+responses, rebuild the adapter state, and resend the original requests on five
+calendar dates. They check conflicts, unchanged intention identity, one firing
+and no second firing on a repeated tick. This models response loss **after a
+successful subprocess exit**, not power loss or arbitrary crash points. It
+does not expand the registered fixtures or establish full M12 recovery admission.
+
 An opt-in `intention.observe` command now captures public firing identities,
 occurrences, due dates, virtual evaluation clocks and command wall duration.
 `action_timing.score_exact_time` scores these against an independently supplied

@@ -671,3 +671,32 @@ Updated the engine contract, current state, M12 protocol, scope audit and site
 catalog. Registered retry/recovery workloads and full M12 admission still
 require completion. The older CI run 37225669534 remained active at inspection;
 its earlier head does not certify this increment.
+
+## Public action adapter response-loss recovery
+
+The development action adapter now forwards explicit creation keys and paired
+update keys/content revisions, and exposes `task.inspect` through the public
+revision-bearing intention list. It validates the returned principal/session,
+identity, revision and status; it never manufactures a new retry revision.
+A live adapter rejects rebinding a keyed task or assigning its key to another
+task. Cancellation key/revision fields remain explicitly unsupported, rather
+than being silently ignored.
+
+Twelve focused checks passed in 13.35s. Five of them run real CLI subprocesses
+on separate calendar dates, discard the first successful creation/update
+responses, reconstruct the adapter's in-memory mapping by replaying the
+original keyed creation, and repeat the original update. They verify stable
+intention identity, conflicts/stale revisions, exactly one observed firing,
+no repeated-tick firing, and successful retry after the terminal transition.
+Other checks reject misbound inspection output and invalid key binding before
+an intention write. No engine internals or fabricated write responses are used
+by the five recovery cases. This models lost responses after successful
+subprocess exit, not power loss or arbitrary crash points. The original
+registered fixture/scorer bytes are unchanged.
+
+The combined response-loss, recurrence, PM-Bench/TriggerBench and persisted
+timing-runner regressions passed 63 tests in 42.69s. Repository-wide Ruff and
+whitespace checks passed. The served coverage page now names the response-loss
+evidence and still-open keyed-cancellation/recovery gates. Remote branch reads
+confirmed main at 8c103f0f and development at 762f12c8; newer local work is not
+represented as remote-verified or merged.

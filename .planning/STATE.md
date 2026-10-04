@@ -23,8 +23,10 @@ idempotency keys through CLI/MCP and all three engine implementations. New
 updates also require a current-state content revision; recognized retries never
 reapply the mutation. Creation returns its original acknowledgement, while
 update returns current state. Local/SQLite regressions passed; live PostgreSQL
-verification is pending in the expanded CI job. Registered retry/recovery
-workload integration and full M12 admission remain open. See
+verification is pending in the expanded CI job. The public adapter now forwards
+keys/revisions and passes response-loss regressions after rebuilding its task
+map. Keyed cancellation preconditions, registered retry/recovery workload
+integration and full M12 admission remain open. See
 [the contract](../docs/ENGINE-CONTRACT.md#prospective-memory-contract).
 
 M12 now also has a [sink-enabled development capture](../eval/reports/m12-inert-sink-development-2026-10-04/README.md)

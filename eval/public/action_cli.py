@@ -8,7 +8,7 @@ canonical claim payload; it never imports a memory engine and reproduces
 CLI verifies the token without any private coupling.
 
 ``ActionCLI`` translates the deterministic-action probe's symbolic seam
-(``task.create``/``task.update``/``clock.inject``/``event.inject``/
+(``task.create``/``task.update``/``task.inspect``/``clock.inject``/``event.inject``/
 ``intention.query``/``intention.observe``/``action.select``) into authenticated production intention
 subprocess commands (``intention-schedule``/``intention-update``/
 ``intention-cancel``/``intention-evaluate``). The default query returns opaque
@@ -113,6 +113,7 @@ class _ScopeState:
     events: list[dict[str, Any]] = field(default_factory=list)
     conditions: dict[str, dict[str, Any]] = field(default_factory=dict)
     intention_by_task: dict[str, str] = field(default_factory=dict)
+    creation_key_by_task: dict[str, str] = field(default_factory=dict)
 
 
 class ActionCLI:
@@ -136,6 +137,7 @@ class ActionCLI:
         handler = {
             "task.create": self._task_create,
             "task.update": self._task_update,
+            "task.inspect": self._task_inspect,
             "clock.inject": self._clock_inject,
             "event.inject": self._event_inject,
             "intention.query": self._intention_query,
@@ -207,6 +209,14 @@ class ActionCLI:
     def _task_create(self, state: _ScopeState, task: Mapping[str, Any]) -> dict[str, Any]:
         task_id = _require_str(task.get("task_id"), "task_id")
         action_id = _require_str(task.get("action_id"), "action_id")
+        creation_key = task.get("idempotency_key")
+        if task_id in state.creation_key_by_task and state.creation_key_by_task[task_id] != creation_key:
+            raise ActionCLIError("a keyed task cannot be rebound to a different creation key")
+        if creation_key is not None and any(
+            key == creation_key and known_task != task_id
+            for known_task, key in state.creation_key_by_task.items()
+        ):
+            raise ActionCLIError("a creation key cannot identify two tasks")
         trigger = task.get("trigger")
         if not isinstance(trigger, Mapping):
             raise ActionCLIError("task trigger is required")
@@ -221,6 +231,8 @@ class ActionCLI:
             ["--recurrence-policy", _json(task["recurrence_policy"])]
             if "recurrence_policy" in task else []
         )
+        retry_args = (["--idempotency-key", _require_str(task["idempotency_key"], "idempotency_key")]
+                      if "idempotency_key" in task else [])
         result = state.cli.run(
             "intention-schedule",
             "--tenant", state.tenant_id,
@@ -233,11 +245,14 @@ class ActionCLI:
             "--evidence-cid", state.evidence_cid,
             *dependency_args,
             *recurrence_args,
+            *retry_args,
         ).json
         intention_id = result.get("intention_id") if isinstance(result, Mapping) else None
         if not isinstance(intention_id, str) or not intention_id:
             raise ActionCLIError("intention-schedule omitted an intention id")
         state.intention_by_task[task_id] = intention_id
+        if creation_key is not None:
+            state.creation_key_by_task[task_id] = creation_key
         return {}
 
     def _task_update(self, state: _ScopeState, update: Mapping[str, Any]) -> dict[str, Any]:
@@ -247,6 +262,8 @@ class ActionCLI:
         if intention_id is None:
             raise ActionCLIError(f"update references unscheduled task {task_id!r}")
         if update_type == "cancel":
+            if "idempotency_key" in update or "expected_revision" in update:
+                raise ActionCLIError("cancel does not yet support keyed revision preconditions")
             state.cli.run(
                 "intention-cancel",
                 "--tenant", state.tenant_id,
@@ -267,8 +284,41 @@ class ActionCLI:
             args += ["--due-at", _require_str(update.get("due_at"), "reschedule due_at")]
         if "recurrence_policy" in update:
             args += ["--recurrence-policy", _json(update["recurrence_policy"])]
+        if "idempotency_key" in update or "expected_revision" in update:
+            args += [
+                "--idempotency-key", _require_str(update.get("idempotency_key"), "idempotency_key"),
+                "--expected-revision", _require_str(update.get("expected_revision"), "expected_revision"),
+            ]
         state.cli.run(*args)
         return {}
+
+    def _task_inspect(self, state: _ScopeState, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """Read a provider-issued revision; never refresh a retry's precondition."""
+        task_id = _require_str(payload.get("task_id"), "task_id")
+        intention_id = state.intention_by_task.get(task_id)
+        if intention_id is None:
+            raise ActionCLIError(f"inspection references unscheduled task {task_id!r}")
+        result = state.cli.run("intention-list", "--tenant", state.tenant_id, "--include-revision").json
+        rows = result.get("intentions") if isinstance(result, Mapping) else None
+        if not isinstance(rows, list):
+            raise ActionCLIError("intention-list omitted intentions")
+        matches = [row for row in rows if isinstance(row, Mapping) and row.get("intention_id") == intention_id]
+        if len(matches) != 1:
+            raise ActionCLIError("inspection requires exactly one matching intention")
+        row = matches[0]
+        if (row.get("tenant_id") != state.tenant_id or row.get("session_id") != state.session_id
+                or row.get("user_id") != _EVAL_USER_ID or row.get("agent_id") != _EVAL_AGENT_ID):
+            raise ActionCLIError("inspection returned an intention outside the authenticated scope")
+        revision = row.get("revision")
+        if (not isinstance(revision, str) or len(revision) != 64
+                or any(char not in "0123456789abcdef" for char in revision)):
+            raise ActionCLIError("inspection omitted a valid content revision")
+        if not isinstance(row.get("status"), str) or row["status"] not in {"scheduled", "cancelled", "fired"}:
+            raise ActionCLIError("inspection returned an invalid intention status")
+        action = row.get("action")
+        action_id = _require_str(action.get("ref") if isinstance(action, Mapping) else None, "action ref")
+        return {"task_id": task_id, "intention_id": intention_id, "revision": revision,
+                "status": row["status"], "action_id": action_id}
 
     def _clock_inject(self, state: _ScopeState, payload: Mapping[str, Any]) -> dict[str, Any]:
         state.now = _require_str(payload.get("now"), "clock now")
