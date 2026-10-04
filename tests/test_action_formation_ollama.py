@@ -25,7 +25,7 @@ class Transport:
                      'prompt_eval_count': 20, 'eval_count': 8}
 
     def __call__(self, base, route, payload, timeout):
-        self.calls.append((base, route, deepcopy(payload), timeout))
+        self.calls.append((base, route, None if payload is None else json.loads(payload), timeout))
         return json.dumps(self.tags if route == '/api/tags' else self.chat).encode()
 
 
@@ -147,3 +147,27 @@ def test_http_failure_retains_bounded_body_and_status_without_retry(tmp_path):
     assert base64.b64decode(error['raw_base64']) == b'{"error":"server unavailable"}'
     assert error['body_truncated'] is False
     assert records[-1]['stage'] == 'failed'
+
+
+@pytest.mark.parametrize('order,first', [('canonical', 'clarification'), ('declared', 'operations')])
+def test_exact_wire_bytes_preserve_selected_schema_order(tmp_path, order, first):
+    import hashlib
+
+    transport = Transport()
+    sent = []
+
+    def capture(base, route, payload, timeout):
+        if route == '/api/chat':
+            sent.append(payload)
+        return transport(base, route, payload, timeout)
+
+    complete(request(), model=MODEL, digest=DIGEST, evidence_dir=tmp_path,
+             output_mode='schema', wire_order=order, transport=capture)
+    assert len(sent) == 1 and isinstance(sent[0], bytes)
+    body = json.loads(sent[0])
+    assert next(iter(body['format']['oneOf'][0]['properties'])) == first
+    record = next(row for row in logs(tmp_path) if row['stage'] == 'chat_request')
+    assert base64.b64decode(record['request_body_base64']) == sent[0]
+    assert record['request_body_sha256'] == hashlib.sha256(sent[0]).hexdigest()
+    assert body == record['body']
+    assert logs(tmp_path)[0]['wire_order'] == order

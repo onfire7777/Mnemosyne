@@ -374,3 +374,18 @@ error body, explicitly marking truncation, without retrying or inventing model
 output. This diagnostic change does not retroactively fill the earlier gap.
 Full completion, reliable formation quality, independent custody and the
 original acceptance/calibration gates remain open.
+
+## Explicit wire-order variants
+
+The provider now exposes `--wire-order canonical|declared`. Canonical remains
+the default and preserves the earlier alphabetically sorted HTTP JSON encoding.
+Declared order preserves schema property insertion order, placing `operations`
+before `clarification`. JSON objects are logically unordered, but the
+[upstream grammar tests](https://github.com/ggml-org/llama.cpp/blob/master/tests/test-json-schema-to-grammar.cpp)
+show that property order can affect constrained output order. Whether this
+explains the observed over-clarification must be measured, not assumed.
+
+Each HTTP request record now retains its exact body bytes as base64 plus a
+SHA-256 digest, alongside the parsed body. This prevents canonical log encoding
+from concealing a wire-order difference. Both modes send the same public input
+and schema meaning. No labels, expected decisions or answer repair are added.

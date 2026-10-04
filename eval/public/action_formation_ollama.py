@@ -6,8 +6,8 @@ identity is checked against server-reported digests, not independently attested.
 
 import argparse
 import base64
-from copy import deepcopy
 import hashlib
+import json
 import math
 import os
 from pathlib import Path
@@ -71,8 +71,7 @@ def _base_url(value):
 
 
 def _http(base, route, body, timeout):
-    raw = None if body is None else _canonical(body)
-    request = Request(base + route, data=raw, headers={'Content-Type': 'application/json'})
+    request = Request(base + route, data=body, headers={'Content-Type': 'application/json'})
     # Never inherit proxy settings or redirect a public conversation elsewhere.
     with build_opener(ProxyHandler({}), _NoRedirect()).open(request, timeout=timeout) as response:
         value = response.read(2 * 1024 * 1024 + 1)
@@ -96,14 +95,14 @@ def _check_model(tags, model, digest):
 
 
 def complete(request, *, model, digest, evidence_dir, base_url='http://127.0.0.1:11434',
-             timeout=120, num_ctx=8192, num_predict=2048, output_mode='json', transport=_http):
+             timeout=120, num_ctx=8192, num_predict=2048, output_mode='json', wire_order='canonical', transport=_http):
     base = _base_url(base_url)
     if (not isinstance(model, str) or re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}', model) is None
             or not isinstance(digest, str) or re.fullmatch('[0-9a-f]{64}', digest) is None
             or type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 300
             or type(num_ctx) is not int or not 2048 <= num_ctx <= 32768
             or type(num_predict) is not int or not 128 <= num_predict <= 4096
-            or output_mode not in ('json', 'schema')):
+            or output_mode not in ('json', 'schema') or wire_order not in ('canonical', 'declared')):
         raise ValueError('invalid local formation configuration')
     if (not isinstance(request, dict) or set(request) != {
             'schema', 'conversation', 'current_tasks', 'prior_responses', 'response_contract'}
@@ -134,7 +133,7 @@ def complete(request, *, model, digest, evidence_dir, base_url='http://127.0.0.1
 
         record({'stage': 'configuration', 'schema': 'm12-ollama-formation-attempt/v1',
                 'model': model, 'expected_server_digest': digest, 'base_url': base,
-                'output_mode': output_mode,
+                'output_mode': output_mode, 'wire_order': wire_order,
                 'format_sha256': hashlib.sha256(_canonical(output_format)).hexdigest(),
                 'source_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                 'prompt_sha256': hashlib.sha256(SYSTEM_PROMPT.encode()).hexdigest(),
@@ -142,10 +141,15 @@ def complete(request, *, model, digest, evidence_dir, base_url='http://127.0.0.1
                 'publishable': False})
 
         def call(stage, route, payload):
-            record({'stage': stage + '_request', 'route': route, 'body': payload})
+            encoded = None if payload is None else (
+                _canonical(payload) if wire_order == 'canonical' else
+                (json.dumps(payload, separators=(',', ':'), ensure_ascii=False, allow_nan=False) + '\n').encode())
+            record({'stage': stage + '_request', 'route': route, 'body': payload,
+                    'request_body_base64': None if encoded is None else base64.b64encode(encoded).decode(),
+                    'request_body_sha256': None if encoded is None else hashlib.sha256(encoded).hexdigest()})
             started = time.perf_counter()
             try:
-                response = transport(base, route, deepcopy(payload), timeout)
+                response = transport(base, route, encoded, timeout)
             except HTTPError as error:
                 # Preserve bounded server diagnostics without retrying or turning
                 # a transport failure into a model response.
@@ -194,6 +198,7 @@ def main():
     parser.add_argument('--num-ctx', type=int, default=8192)
     parser.add_argument('--num-predict', type=int, default=2048)
     parser.add_argument('--output-mode', choices=('json', 'schema'), default='json')
+    parser.add_argument('--wire-order', choices=('canonical', 'declared'), default='canonical')
     args = parser.parse_args()
     try:
         raw = sys.stdin.buffer.read(MAX_INPUT_BYTES + 1)
@@ -202,7 +207,7 @@ def main():
         request = _parsed(raw)
         content = complete(request, model=args.model, digest=args.digest, evidence_dir=args.evidence_dir,
                            base_url=args.base_url, timeout=args.timeout,
-                           num_ctx=args.num_ctx, num_predict=args.num_predict, output_mode=args.output_mode)
+                           num_ctx=args.num_ctx, num_predict=args.num_predict, output_mode=args.output_mode, wire_order=args.wire_order)
         sys.stdout.buffer.write(content)
     except Exception as error:
         print(type(error).__name__, file=sys.stderr)
