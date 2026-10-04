@@ -18,6 +18,12 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+Dependency cases now have public-only timed observation, durable inert receipts
+and evaluator-only timing diagnostics. All five scenario integration tests use
+explicit golden setup, not model formation. Twenty-three dependency checks pass,
+including false-positive scoring for blocked/cancelled dependents and duplicate
+probe controls. Full provider runner and saved-trace verification remain open.
+
 The dependency extension now has a separate state scorer that resolves public
 intention IDs to unambiguous prerequisite actions. Wrong, missing, self-linked
 and ambiguous dependencies do not receive credit; absent inspection references
