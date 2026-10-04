@@ -76,18 +76,9 @@ def coverage_body(catalog: dict) -> str:
     )
 
 
-def benchmarks_body(catalog: dict) -> str:
-    rows = "".join(
-        f'<tr><th scope="row">{escape(row["name"])}</th><td>{escape(row["status"])}</td>'
-        f'<td>{escape(row["policy"])}</td></tr>' for row in catalog["benchmarks"]
-    )
+def _protocol_notes(catalog: dict) -> str:
     return (
-        '<h1>A broader view of memory</h1><p class="intro">Established benchmarks '
-        'and a whole-memory program, with their evidence kept distinct.</p>'
-        '<div class="prose"><p>This catalog tracks the original planned benchmark '
-        'families. A catalog entry is not a result, proof of admission or confirmation '
-        'that its full workload runs on this computer.</p>'
-        '<section id="protocol-fit"><h2>What these tests see—and what they miss</h2>'
+        '<details class="protocol-panel" id="protocol-fit"><summary>What these tests see—and what they miss</summary><div class="prose">'
         '<p><strong>Existing benchmarks can evaluate Mnemosyne, but a score does not '
         'describe its whole memory system.</strong> Coverage means which behaviors a '
         'protocol measures. Adapter compatibility means which system interfaces a runner '
@@ -134,7 +125,7 @@ def benchmarks_body(catalog: dict) -> str:
         'features do not cancel it or prove superiority. We must preserve upstream '
         'protocols for comparable results and disclose adapter limitations. Additional '
         'whole-memory tests belong in a separately identified track, with the same '
-        'rules available to every participating system.</p></section>'
+        'rules available to every participating system.</p>'
         '<h2>Three tracks, separate conclusions</h2><p><strong>Official upstream:</strong> '
         'the original protocol, inputs and scoring, unchanged. '
         '<strong>Enhanced successor:</strong> separately versioned tests with disclosed '
@@ -142,15 +133,62 @@ def benchmarks_body(catalog: dict) -> str:
         'conformance tests, never substituted for official results.</p>'
         '<p>LongMemEval-QA is internal-only under the current publication policy. '
         'Retrieval and answer quality remain separate. No combined overall rank is implied.</p>'
-        + _source(catalog, "status_source", "Read the full slate and source audit") + '</div>'
-        '<h2 class="section-heading">Planned benchmark families</h2>'
-        '<div class="table-scroll" role="region" aria-label="Benchmark catalog" tabindex="0">'
-        '<table><thead><tr><th scope="col">Family</th><th scope="col">Implementation and evidence</th>'
-        f'<th scope="col">Reporting policy</th></tr></thead><tbody>{rows}</tbody></table></div>'
-        '<section class="prose"><h2 class="section-heading">Beyond individual benchmark scores</h2>'
-        '<p><a href="coverage.html">Explore all 24 capabilities and 20 modules</a>, '
-        'including correction, forgetting, provenance, future actions, security and recovery.</p>'
-        '<p><a href="comparisons.html#coverage">Read the current landscape and coverage gaps</a> · '
-        '<a href="systems.html">Explore memory systems</a> · '
-        '<a href="data/catalog.json" download>Download scope catalog (JSON)</a></p></section>'
+        + _source(catalog, "status_source", "Read the full slate and source audit") + '</div></details>'
+    )
+
+
+def benchmarks_body(catalog: dict) -> str:
+    cards = []
+    for number, row in enumerate(catalog["benchmarks"], 1):
+        planned = row["status"].startswith("Planned family;")
+        stage = "planned" if planned else "development"
+        label = "Planned family" if planned else "Development components"
+        cards.append(
+            f'<article class="benchmark-card" data-benchmark data-stage="{stage}">'
+            f'<div class="card-meta"><span class="card-number">{number:02d}</span>'
+            f'<span class="badge {stage}">{label}</span></div>'
+            f'<h3>{escape(row["name"])}</h3><p>{escape(row["status"])}</p>'
+            '<details><summary>Reporting rules</summary>'
+            f'<p>{escape(row["policy"])}</p></details></article>'
+        )
+    count = len(cards)
+    return (
+        '<div class="hero"><div><p class="eyebrow">BENCHMARK LIBRARY</p>'
+        '<h1>A broader view<br>of AI memory.</h1>'
+        '<p class="intro">Explore established benchmarks and the behaviors that a '
+        'complete memory system needs to prove.</p></div>'
+        '<a class="button secondary hero-aside" href="coverage.html">Explore whole-memory coverage ↗</a></div>'
+        '<div class="stats-strip" aria-label="Planned evaluation scope">'
+        f'<div class="stat"><strong>{count:02d}</strong><span>Benchmark families</span></div>'
+        f'<div class="stat"><strong>{len(catalog["capabilities"]):02d}</strong><span>Memory capabilities</span></div>'
+        f'<div class="stat"><strong>{len(catalog["modules"]):02d}</strong><span>Whole-memory modules</span></div>'
+        '<div class="stat"><strong>Open</strong><span>Methods &amp; evidence</span></div></div>'
+        '<div class="callout"><strong>Coverage is not compatibility.</strong> '
+        'Existing benchmarks can evaluate Mnemosyne. Our current runs measure only part '
+        'of its memory lifecycle. <a href="#protocol-fit">Understand the limits →</a></div>'
+        '<section aria-labelledby="library-title"><div class="library-heading">'
+        '<div><p class="eyebrow">THE EVALUATION LANDSCAPE</p><h2 id="library-title">Find a benchmark</h2></div>'
+        '<a class="subtle-link" href="data/catalog.json" download>Download catalog ↓</a></div>'
+        '<p>These are scope and implementation labels, not admission badges or performance '
+        'results. A catalog entry is not a result or proof that its full workload runs on this computer.</p>'
+        '<div class="library-controls" id="library-controls" hidden>'
+        '<label class="search-field"><span class="sr-only">Search benchmarks</span>'
+        '<input type="search" id="benchmark-search" placeholder="Search benchmarks, behaviors, or evidence…"></label>'
+        '<fieldset class="filter-group"><legend class="sr-only">Implementation stage</legend>'
+        '<label><input type="radio" name="stage" value="all" checked><span>All families</span></label>'
+        '<label><input type="radio" name="stage" value="development"><span>Development</span></label>'
+        '<label><input type="radio" name="stage" value="planned"><span>Planned</span></label></fieldset></div>'
+        f'<p id="benchmark-count" class="muted" role="status" aria-live="polite">{count} benchmark families</p>'
+        '<div class="benchmark-grid">' + ''.join(cards) + '</div>'
+        '<div id="search-empty" class="search-empty" hidden><h3>No matching benchmarks</h3>'
+        '<p>Try a broader term or another implementation stage.</p>'
+        '<button type="button" id="benchmark-reset">Clear filters</button></div></section>'
+        '<section class="feature-band"><div><p class="eyebrow">BEYOND A SINGLE SCORE</p>'
+        '<h2>Memory is more than recall.</h2><p>Correction. Forgetting. Provenance. '
+        'Future actions. Security. Recovery. Explore the complete planned scope and '
+        'the evidence still needed.</p></div>'
+        '<a class="button" href="coverage.html">Explore 20 modules →</a></section>'
+        + _protocol_notes(catalog)
+        + '<p class="section-links"><a href="comparisons.html#coverage">Coverage gaps</a> · '
+        '<a href="systems.html">Memory systems</a> · <a href="methods.html">Methodology</a></p>'
     )

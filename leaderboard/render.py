@@ -14,6 +14,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from leaderboard.ui import page_shell
 from leaderboard.grouping import build_comparison_index
 from leaderboard.workspace import comparison_body
 from leaderboard.history import history_body
@@ -145,62 +146,7 @@ def _escape(value: object) -> str:
 
 
 def _page(title: str, body: str, root: str = "") -> str:
-    return (
-        "<!doctype html>\n"
-        '<html lang="en"><head><meta charset="utf-8">'
-        '<meta name="viewport" content="width=device-width, initial-scale=1">'
-        f"<title>{_escape(title)} · Mnemetric</title>"
-        "<style>"
-        ":root{color-scheme:light;--ink:#0c1938;--muted:#59667c;--line:#cbd3df}"
-        "*{box-sizing:border-box}body{margin:0;background:#fff;color:var(--ink);"
-        "font:20px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}"
-        "body>header,main,body>footer{max-width:1440px;margin:auto;padding:0 64px}"
-        "body>header{display:flex;align-items:center;justify-content:space-between;"
-        "gap:24px;padding-top:16px;padding-bottom:18px;border-bottom:1px solid var(--line)}"
-        "a{color:#005bd3;text-underline-offset:4px}a:focus-visible{outline:3px solid #005bd3;"
-        "outline-offset:5px}.brand{font:32px Georgia,serif;color:var(--ink);text-decoration:none}"
-        "nav{display:flex;flex-wrap:wrap;gap:16px 28px}nav a{text-decoration:none}main{padding-top:48px;"
-        "padding-bottom:40px}h1,h2{font-family:Georgia,serif;letter-spacing:-.025em;line-height:1.15}"
-        "h1{font-size:56px;font-weight:500;margin:4px 0 14px}h2{font-size:36px;font-weight:500;margin:0 0 24px}"
-        "p{margin:0 0 24px}.intro{font-size:28px;color:var(--muted);margin-bottom:48px}"
-        ".table-scroll{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:18px}"
-        "th,td{text-align:left;border:1px solid var(--line);padding:18px;vertical-align:top}"
-        "th{font-weight:500;background:#f7f9fc}th:first-child{width:21%}"
-        ".empty{text-align:center;padding:66px 24px}.empty p:last-child{margin:0;"
-        "color:var(--muted);font-size:17px}.overview{display:grid;grid-template-columns:1fr 1fr;"
-        "gap:72px;border-top:1px solid var(--line);margin-top:40px;padding-top:38px}"
-        ".overview h2{font-size:32px}.overview p,small{color:var(--muted)}small{display:block;"
-        "font-size:15px;overflow-wrap:anywhere}body>footer{border-top:1px solid var(--line);padding-top:16px;"
-        "padding-bottom:24px;font-size:16px;color:var(--muted)}pre{white-space:pre-wrap;"
-        "overflow-wrap:anywhere;padding:20px;background:#f7f9fc;font-size:15px}"
-        "li{overflow-wrap:anywhere}.prose{max-width:880px}.prose h2{margin-top:36px}"
-        ".section-heading{margin-top:48px}.scope-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}"
-        ".scope-card{border:1px solid var(--line);padding:24px}.scope-card h3{margin:0 0 12px;font-size:22px}"
-        ".scope-card p{margin:0}.scope-card:target{outline:3px solid #005bd3;outline-offset:3px}"
-        ".capability-map th:first-child{width:65%}"
-        "[hidden]{display:none!important}.comparison-group{margin:40px 0}.comparison-group small{overflow-wrap:anywhere}"
-        "#comparison-controls{padding:24px;background:#f7f9fc;margin-bottom:24px}"
-        "#comparison-controls select{display:block;width:100%;margin:12px 0;font:inherit}"
-        "#comparison-controls fieldset{min-width:0;margin:16px 0;border:1px solid var(--line)}"
-        "#comparison-controls fieldset label{display:inline-block;margin:8px 20px 8px 0}"
-        "button{font:inherit;padding:8px 16px}input:focus-visible,select:focus-visible,button:focus-visible{outline:3px solid #005bd3;outline-offset:3px}"
-        "@media(max-width:700px){body{font-size:17px}body>header,main,body>footer{padding-left:20px;"
-        "padding-right:20px}.brand{font-size:25px}nav{gap:18px;font-size:16px}"
-        "body>header{align-items:flex-start;flex-direction:column;gap:12px}.scope-grid{grid-template-columns:1fr}"
-        "main{padding-top:32px}h1{font-size:39px}.intro{font-size:21px;margin-bottom:34px}"
-        "h2{font-size:29px}.overview{grid-template-columns:1fr;gap:24px}.overview h2{font-size:28px}"
-        "th,td{padding:12px}table{min-width:540px}.empty{padding:40px 18px}"
-        ".empty-results{min-width:0}.empty-results thead{display:none}}"
-        "</style></head><body>\n"
-        f'<header><a class="brand" href="{root}index.html">Mnemetric</a>'
-        f'<nav aria-label="Main"><a href="{root}index.html">Results</a>'
-        f'<a href="{root}benchmarks.html">Benchmarks</a><a href="{root}coverage.html">Coverage</a>'
-        f'<a href="{root}compare.html">Compare</a><a href="{root}systems.html">Systems</a>'
-        f'<a href="{root}attempts.html">Attempts</a><a href="{root}methods.html">Methods</a></nav></header>'
-        f"<main>{body}</main>\n"
-        "<footer>Open, operator-run. Mnemosyne is the operator entry.</footer>"
-        "</body></html>\n"
-    )
+    return page_shell(title, body, root)
 
 
 def _interval(metric: dict[str, Any]) -> str:
@@ -625,6 +571,8 @@ def render_site(
     pages[Path("data/comparison-index.json")] = _export_json(comparison_index)
     pages[Path("compare.html")] = _page("Compare", comparison_body(comparison_index))
     pages[Path("comparison.js")] = Path(__file__).with_name("comparison.js").read_bytes()
+    for asset in ("site.css", "site.js"):
+        pages[Path(asset)] = Path(__file__).with_name(asset).read_bytes()
     pages[Path("attempts.html")] = _page("Attempt history", history_body(snapshot, records))
     if snapshot is not None:
         pages[Path("data/attempt-history.json")] = _export_json(snapshot)
