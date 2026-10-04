@@ -420,3 +420,7 @@ Implemented the category-specific scorer in an isolated optional evaluation envi
 ## LoCoMo category replay reporting
 
 Added replay reports bound to source and decoded-prediction digests, preserving all five category rows and every source question. Missing outputs remain null-scored cases with explicit counts; upstream-style denominators and observed/fallback retrieval counts stay distinct. Duplicate/unknown IDs, extra fields and explicit null contexts are rejected. No overall rank or publication authorization is emitted. All 59 isolated ingestion/scoring tests and Ruff passed. This closes the category-reporting component, not full adapter execution or benchmark admission.
+
+## LoCoMo asset admission evidence
+
+Verified the pinned 2,805,274-byte raw dataset against its Git blob SHA and recorded SHA-256 `79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4`. Streamed only for hashes, with no retained or parsed payload. The current asset validator rejected its actual `CC-BY-NC-4.0` license; retained exact rejection in the tracked intake receipt. No license relabeling, allowlist expansion, runtime registry entry or scored run occurred. LoCoMo real-data admission is a specific remaining gate; other implementation work remains possible.
