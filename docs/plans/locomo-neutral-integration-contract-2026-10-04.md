@@ -156,3 +156,18 @@ capture/isolation test still exercises the real public CLI. No real model
 answering is claimed by these tests. Ruff passed. Dataset/runtime admission,
 complete population orchestration, signed replay bundles and measured quality
 remain required before a real native LoCoMo result.
+
+## Claim and quotation custody
+
+Native response projection now also requires the public claim list. Claim
+citations must identify registered evidence and appear in the response's
+retrieval trace. Every quoted span must belong to its claim's cited evidence;
+its integer character offsets must fall within the captured content, and the
+SHA-256 of that UTF-8 encoded substring must match the supplied slice hash.
+This follows the product's character-indexed span convention. Foreign citations,
+malformed claims and altered quotations fail before score projection.
+
+All 20 native tests passed, including valid span projection, changed span hashes,
+foreign/malformed citations and registered-but-unretrieved evidence. Ruff passed.
+These checks establish structural evidence custody, not semantic entailment or
+truth of a claim. Full replay and provider custody remain separate requirements.

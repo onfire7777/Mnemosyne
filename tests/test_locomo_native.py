@@ -50,6 +50,7 @@ def test_native_capture_rejects_invalid_receipts_before_yield(monkeypatch, resul
 
 def response(answer="violet", abstained=False, reader=None):
     return {"answer": answer, "abstained": abstained,
+            "claims": [],
             "reader": {"grounded_reader": {"provider": "synthetic"}} if reader is None else reader,
             "hops": [{"retrieved_cids": ["cid", "cid"]}]}
 
@@ -141,3 +142,35 @@ def test_native_question_does_not_swallow_execution_errors(tmp_path, monkeypatch
     foreign = split_samples([sample("two")])["questions"][0]
     with pytest.raises(LoCoMoError, match="conversation"):
         answer_captured_question(conversation, foreign, source["qa"][0])
+
+
+def test_native_claim_span_is_checked_against_captured_bytes():
+    from hashlib import sha256
+    raw = response()
+    raw["claims"] = [{"text": "violet", "evidence_cids": ["cid"], "spans": [
+        {"cid": "cid", "start": 0, "end": 6, "slice_sha256": sha256(b"violet").hexdigest()}]}]
+    evidence = {"cid": {"dialog_id": "D1:1", "capture": {"content": "violet kite"}}}
+    assert project_native_response(raw, sample("one")["qa"][0], evidence)["status"] == "projected"
+    raw["claims"][0]["spans"][0]["slice_sha256"] = "0" * 64
+    with pytest.raises(LoCoMoError, match="captured content"):
+        project_native_response(raw, sample("one")["qa"][0], evidence)
+
+
+@pytest.mark.parametrize("claim", [
+    {"text": "x", "evidence_cids": ["foreign"], "spans": []},
+    {"text": "x", "evidence_cids": ["cid"], "spans": [{"cid": "foreign"}]},
+    {"text": "x", "evidence_cids": "cid", "spans": []},
+])
+def test_native_claim_cannot_introduce_foreign_or_malformed_evidence(claim):
+    raw = response()
+    raw["claims"] = [claim]
+    with pytest.raises(LoCoMoError):
+        project_native_response(raw, sample("one")["qa"][0], {"cid": {"dialog_id": "D1:1"}})
+
+
+def test_native_claim_must_cite_an_observed_retrieval():
+    raw = response()
+    raw["hops"] = []
+    raw["claims"] = [{"text": "violet", "evidence_cids": ["cid"], "spans": []}]
+    with pytest.raises(LoCoMoError, match="retrieval trace"):
+        project_native_response(raw, sample("one")["qa"][0], {"cid": {"dialog_id": "D1:1"}})
