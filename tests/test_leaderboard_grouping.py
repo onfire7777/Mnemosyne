@@ -159,3 +159,27 @@ def test_renderer_exports_empty_index_without_inventing_comparison(tmp_path):
     index = json.loads((tmp_path / 'site/data/comparison-index.json').read_text())
     assert index['groups'] == index['exclusions'] == index['source_record_ids'] == []
     assert index['ranking'] is None
+
+
+def test_duplicate_metric_cannot_inflate_group_rows():
+    record, payloads = _input()
+    record['metrics'].append(copy.deepcopy(record['metrics'][0]))
+    result = build_comparison_index([record], {'one':payloads})
+    assert result['groups'] == []
+    assert result['exclusions'][0]['reason'] == 'ambiguous-duplicate-metric'
+
+
+@pytest.mark.parametrize('field', ['seed', 'module_id'])
+def test_distinct_atomic_cells_are_not_duplicate_attempts(field):
+    a, ap = _input()
+    b = copy.deepcopy(a)
+    b['record_id'] = 'distinct-cell'
+    b['identity'][field] = 2 if field == 'seed' else 'M02'
+    if field == 'module_id':
+        b['module_id'] = 'M02'
+    else:
+        b['run_profile']['seeds'] = [2]
+    result = build_comparison_index([a, b], {'one':ap, 'distinct-cell':ap})
+    assert result['exclusions'] == []
+    assert sum(len(group['rows']) for group in result['groups']) == 2
+    assert all(not group['multi_system'] for group in result['groups'])

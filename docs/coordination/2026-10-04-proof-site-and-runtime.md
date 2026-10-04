@@ -316,3 +316,20 @@ removed by regenerating the real empty preview; no fixture score remains in the
 served dataset. `comparison-workspace-preview.png` captures the resulting real
 empty-state page. Keyboard-native form controls and a live status region are
 present; broader assistive-technology testing remains outstanding.
+
+## Comparison population review
+
+Review against WMBS section 9.5 found two population edge cases: repeated metric
+identities could duplicate rows, while the initial system/run/attempt shortcut
+incorrectly excluded distinct module or seed cells. Grouping now rejects repeated
+metric identities and identifies duplicates using the complete original atomic
+identity. Three regressions failed before the fix; all 307 related checks now
+pass. Ruff and diff checks pass. These are comparison semantics only; frozen
+benchmark source and signed registration remain untouched.
+
+CI run 37222196669 for pushed revision df99593b has eight successful platform,
+lint, provider and PostgreSQL jobs; Unit + drift checks remains in progress.
+This does not validate the later local grouping/workspace commits. Those remain
+queued locally to avoid cancelling the active run before it yields evidence.
+The real retrieval process 50773/session 66073 was verified live at 285 seconds
+with normal pressure. A score and terminal status are not yet available.

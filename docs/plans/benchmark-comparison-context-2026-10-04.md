@@ -39,8 +39,8 @@ not manufacture competitor coverage.
 
 Only measured records with passed safety gates and verified resource treatment
 enter candidates. Non-measured states, missing context, invalid/broken artifact
-bindings, lineage disagreements and duplicate system/run/attempt identities
-remain in exclusions. No failed gate is averaged away. Exclusions retain record
+bindings, lineage disagreements and duplicate full atomic identities (including system version, module and seed)
+remain in exclusions. Duplicate metric identities within one atomic record are also excluded rather than counted twice. No failed gate is averaged away. Exclusions retain record
 IDs so the original detail page and evidence remain reachable.
 
 ## Reproducibility and delivery

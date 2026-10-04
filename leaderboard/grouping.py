@@ -83,7 +83,7 @@ def build_comparison_index(records: list[dict], artifacts: dict[str, dict[str, b
     ordered = sorted(records, key=lambda record: record["record_id"])
     valid = {record["record_id"]: not validate_record(record) for record in ordered}
     attempts = Counter(
-        (r["identity"]["system_id"], r["identity"]["run_id"], r["identity"]["attempt_id"])
+        _canonical(r["identity"])
         for r in ordered if valid[r["record_id"]] and r["schema_version"] == SCHEMA_VERSION_V2
     )
     groups = {}
@@ -98,8 +98,11 @@ def build_comparison_index(records: list[dict], artifacts: dict[str, dict[str, b
             reason = "legacy-comparison-metadata-unavailable"
         else:
             identity = record["identity"]
-            if attempts[(identity["system_id"], identity["run_id"], identity["attempt_id"])] != 1:
+            if attempts[_canonical(identity)] != 1:
                 reason = "ambiguous-duplicate-attempt"
+            elif len({_canonical({key: metric.get(key) for key in ("name", "family", "unit", "judge")})
+                      for metric in record["metrics"]}) != len(record["metrics"]):
+                reason = "ambiguous-duplicate-metric"
             elif record["attempt_outcome"] != "measured":
                 reason = "attempt-" + record["attempt_outcome"]
             elif any(gate["status"] != "passed" for gate in record["safety_gates"]):
