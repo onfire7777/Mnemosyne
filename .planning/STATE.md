@@ -18,6 +18,12 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+The dependency extension now has a separate state scorer that resolves public
+intention IDs to unambiguous prerequisite actions. Wrong, missing, self-linked
+and ambiguous dependencies do not receive credit; absent inspection references
+reject incomplete evidence. Public-CLI storage/inspection and corpus checks
+passed 18 tests. Timing execution, receipts and replay remain unfinished.
+
 A separately versioned 100-conversation dependency formation extension is now
 materialized with public inputs and evaluator labels. It spans five seeds and
 four weekly dates; ten corpus tests pass, including unchanged original fixture
