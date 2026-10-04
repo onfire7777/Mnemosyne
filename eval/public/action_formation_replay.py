@@ -32,7 +32,7 @@ HARNESS_FILES = ('action_timing_run.py', 'action_cli.py', 'action_timing.py', 'a
                  'action_formation.py', 'action_formation_run.py', 'action_implicit_plan.py',
                  'action_formation_scoring.py', 'action_formation_observe.py',
                  'action_formation_timing.py', 'action_trigger_timing.py', 'action_formation_replay.py',
-                 'action_formation_ollama.py')
+                 'action_formation_ollama.py', 'action_formation_schema.py')
 
 
 def _read(path):

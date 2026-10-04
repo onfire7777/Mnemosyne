@@ -110,3 +110,16 @@ def test_context_rejection_does_not_drop_history_or_call_model(tmp_path):
     with pytest.raises(ValueError, match='context budget'):
         complete(supplied, model=MODEL, digest=DIGEST, evidence_dir=tmp_path, transport=transport)
     assert not transport.calls
+
+
+def test_schema_mode_records_grammar_and_preserves_model_content(tmp_path):
+    from eval.public.action_formation_schema import response_schema
+
+    transport = Transport()
+    supplied = request()
+    content = complete(supplied, model=MODEL, digest=DIGEST, evidence_dir=tmp_path,
+                       output_mode='schema', transport=transport)
+    assert content == transport.chat['message']['content'].encode()
+    assert transport.calls[1][2]['format'] == response_schema(supplied['conversation']['actions'])
+    assert logs(tmp_path)[0]['output_mode'] == 'schema'
+    assert len(logs(tmp_path)[0]['format_sha256']) == 64
