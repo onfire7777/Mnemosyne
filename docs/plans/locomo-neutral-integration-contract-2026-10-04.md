@@ -765,3 +765,23 @@ nonzero exit with a JSON verification error. A real separate-process regression
 checks both an intact package and trace tampering. All 13 package tests and
 Ruff passed. The command does not turn saved-response replay into model
 re-execution, registration, resource proof or publication authorization.
+
+### Retained runner context observation
+
+The [historical runner receipt](../research/benchmark-intake/local-reader-observed-context-2026-10-04.json)
+advances the earlier metadata-only audit. The retained server log for the
+2026-10-04 18:26:50 UTC synthetic probe records `-c 4096`, context shifting
+enabled, an initialized 4,096-token context and 4,035 prompt tokens at the runner.
+The request then failed/was aborted during the memory-pressure probe. Only 61
+context tokens remained before output, below the configured 512-token maximum.
+Thus full prompt plus maximum output did not fit in that observed window
+without context shifting. This is evidence about that historical invocation,
+not proof of the current server default or a successful generation.
+
+The runner token count is not proof of the untruncated raw input's token count:
+pre-runner truncation remains unverified. The receipt retains exact selected
+log lines and the observed log snapshot's byte size/hash, and binds the existing
+synthetic input hash. No model was loaded to obtain it. Future preflight must
+explicitly bind effective context and full-input tokenization before claiming
+complete coverage; merely observing the model's 40,960-token capacity is
+insufficient. The original protected-input and resource gates remain intact.
