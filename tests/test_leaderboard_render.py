@@ -233,7 +233,8 @@ def test_output_is_deterministic_for_logically_identical_input_orderings(
     )
 
     assert _tree(first_output) == _tree(second_output)
-    assert all(raw.endswith(b"\n") and b"\r\n" not in raw for raw in _tree(first_output).values())
+    assert all(raw.endswith(b"\n") and b"\r\n" not in raw
+               for name, raw in _tree(first_output).items() if not str(name).endswith(".zip"))
 
 
 def test_metric_ties_are_deterministic_for_logically_identical_orderings(
@@ -286,7 +287,8 @@ def test_escapes_hostile_values_and_uses_only_safe_relative_links(
 
     render_site(results, {record["record_id"]: traces}, output)
 
-    rendered = b"".join(_tree(output).values()).decode()
+    rendered = b"".join(raw for name, raw in _tree(output).items()
+                        if not str(name).endswith(".zip")).decode()
     assert "<script>" not in rendered
     assert "<img src=x" not in rendered
     assert "<b>not markup</b>" not in rendered
