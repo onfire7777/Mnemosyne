@@ -15,6 +15,15 @@ from .locomo_config import bind_native_run_config, validate_native_run_config
 from .locomo import LoCoMoError, decode_upstream_category5, native_choice_policy, normalize_dialogs, prepare_upstream_question, split_samples
 
 
+def _require_isolated_cli(cli):
+    if not isinstance(cli, MnemoCLI) or cli.backend != "local":
+        raise LoCoMoError("native capture requires an isolated local MnemoCLI")
+    # The CLI disables argparse abbreviations. Exact/equal-form duplicates can
+    # otherwise override the harness-owned backend and temporary store.
+    if any(flag.split("=", 1)[0] in {"--store", "--backend"} for flag in cli.global_flags):
+        raise LoCoMoError("native CLI flags cannot override isolated storage")
+
+
 def _evidence_digest(evidence):
     return sha256(json.dumps(evidence, sort_keys=True, separators=(",", ":"),
                              allow_nan=False).encode()).hexdigest()
@@ -78,7 +87,8 @@ def answer_captured_question(conversation: dict, question: dict, annotation: dic
         raise LoCoMoError("native question does not match its conversation and annotation")
     prepared = prepare_upstream_question(annotation, choice_draw=choice_draw)
     cli = conversation["cli"]
-    if not isinstance(cli, MnemoCLI) or not Path(cli.store).is_file():
+    _require_isolated_cli(cli)
+    if not Path(cli.store).is_file():
         raise LoCoMoError("native question requires a live captured store")
     request = {"question_id": question["question_id"], "question": prepared["query"],
                "context": {"tenant_id": conversation["tenant_id"], "user_id": "locomo", "role": "reader"}}
@@ -300,8 +310,7 @@ def captured_conversations(samples: object, cli: MnemoCLI, *, caption_policy: st
     source date/speaker/text/caption as JSON; this is not an upstream prompt.
     No explicit consolidation, answer call, clock advance or scoring occurs.
     """
-    if not isinstance(cli, MnemoCLI) or cli.backend != "local":
-        raise LoCoMoError("native capture requires an isolated local MnemoCLI")
+    _require_isolated_cli(cli)
     normalized = normalize_dialogs(samples, caption_policy=caption_policy)
     by_sample = {}
     for record in normalized["records"]:

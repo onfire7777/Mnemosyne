@@ -382,3 +382,25 @@ def test_seeded_native_execution_preserves_option_policy(tmp_path, monkeypatch):
     assert "(a) Not mentioned in the conversation" in seen[0]
     assert "(b) Not mentioned in the conversation" in seen[1]
     assert all(r["status"] == "incomplete-reader-execution" for r in records)
+
+
+@pytest.mark.parametrize("flags", [["--store", "another-store.json"], ["--store=another-store.json"],
+                                    ["--backend", "postgres"], ["--backend=sqlite"]])
+def test_native_cli_rejects_storage_override_before_invocation(tmp_path, monkeypatch, flags):
+    store = tmp_path / "original-store.json"
+    store.write_bytes(b"untouched synthetic store")
+    cli = MnemoCLI(store=str(store), global_flags=flags)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("a storage override must fail before invoking the CLI")
+
+    monkeypatch.setattr(MnemoCLI, "capture_batch", forbidden)
+    monkeypatch.setattr(MnemoCLI, "eval_answer_batch", forbidden)
+    source = sample("override")
+    with pytest.raises(LoCoMoError, match="override isolated storage"):
+        with captured_conversations([source], cli, caption_policy="exclude-caption"):
+            pytest.fail("unsafe CLI reached capture context")
+    conversation = {"sample_id": "override", "tenant_id": "synthetic", "cli": cli, "evidence": {}}
+    with pytest.raises(LoCoMoError, match="override isolated storage"):
+        answer_captured_question(conversation, split_samples([source])["questions"][0], source["qa"][0])
+    assert store.read_bytes() == b"untouched synthetic store"

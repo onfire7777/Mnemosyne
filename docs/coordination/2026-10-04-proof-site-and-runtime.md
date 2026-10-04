@@ -493,3 +493,23 @@ At 18:30 UTC, remote CI run 37224190672 still had Unit + drift checks running.
 Its Windows file-lock failure is fixed locally by the earlier LF fixture change;
 all other completed gating jobs passed. Accumulated local commits remain held
 until that run finishes, avoiding cancellation of its long-running unit job.
+
+## Native run configuration and store isolation
+
+Added the optional source-bound native run configuration, with full/normalized
+source and replay-policy digests, reader/choice policies, CLI settings and
+runtime/resource artifact references. Sequential execution validates it before
+capture; each record retains its digest and isolated full-population replay
+recomputes the bindings. CLI flag values are hashed instead of copied, avoiding
+credential disclosure. References still require independent artifact admission,
+authentication and enforcement; matching declarations do not establish runtime
+custody or publication eligibility. The neutral integration contract records the
+remaining work and exact test evidence.
+
+Review also identified that extra global `--store`/`--backend` flags could override
+the isolated store/backend selected by the native harness. Both capture and answer
+paths now reject separated and equals-form overrides before any CLI invocation.
+The public parser already disables option abbreviations. Four regression cases
+verify no command runs and the original store remains byte-identical.
+All 37 native tests and Ruff passed after the isolation fix. No product API or
+BurnOS integration code changed in this increment.
