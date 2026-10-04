@@ -185,3 +185,29 @@ def decode_upstream_category5(raw_prediction: str, answer_key: dict) -> dict:
         decoded = normalized
     return {"raw_prediction": raw_prediction, "decoded_prediction": decoded,
             "upstream_revision": UPSTREAM_REVISION}
+
+
+def prepare_single_question_prompt(context: str, annotation: dict, *,
+                                   choice_draw: float | None = None) -> dict:
+    """Reproduce pinned GPT batch-size-one prompt assembly on supplied context.
+
+    Context construction, retrieval and token budgeting are separate contracts.
+    This does not claim that arbitrary supplied context is upstream-equivalent.
+    Retain the returned record alongside raw model output for later replay.
+    """
+    if not isinstance(context, str):
+        raise LoCoMoError("context must be a string")
+    prepared = prepare_upstream_question(annotation, choice_draw=choice_draw)
+    if prepared["category"] == 5:
+        instruction = "Based on the above context, answer the following question."
+    else:
+        instruction = ("Based on the above context, write an answer in the form of a short phrase "
+                       "for the following question. Answer with exact words from the context whenever possible.")
+    prompt = context + "\n\n\n" + instruction + "\n\nQuestion: " + prepared["query"] + " Short answer:\n"
+    return {"schema_version": "mnemosyne.locomo-single-question-prompt/v1",
+            "upstream_revision": UPSTREAM_REVISION, "batch_size": 1,
+            "question": prepared, "prompt": prompt,
+            "prompt_sha256": sha256(prompt.encode("utf-8")).hexdigest(),
+            "context_sha256": sha256(context.encode("utf-8")).hexdigest(),
+            "generation": {"num_gen": 1, "num_tokens_request": 32, "temperature": 0},
+            "context_conformance_verified": False}
