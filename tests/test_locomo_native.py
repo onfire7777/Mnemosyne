@@ -209,3 +209,62 @@ def test_native_replay_rebuilds_capture_request_and_projection(tmp_path, monkeyp
     unobserved_source["conversation"]["session_1"][1]["text"] = "changed unreturned evidence"
     with pytest.raises(LoCoMoError, match="mismatch"):
         verify_native_answer_record(unobserved_source, 0, record, caption_policy="exclude-caption")
+
+
+def test_native_sequence_preserves_full_population_and_stops_without_retry(tmp_path, monkeypatch):
+    from eval.public.adapters.locomo_native import iter_native_answers
+    source = [sample("one"), sample("two")]
+    source[0]["qa"].append({"question": "Synthetic?", "category": 5, "answer": "distractor", "evidence": []})
+    questions = split_samples(source)["questions"]
+    draws = {questions[1]["question_id"]: 0.1}
+    calls = []
+    stores = []
+    should_fail = True
+
+    def answer(cli, path):
+        request = json.loads(Path(path).read_text())
+        calls.append(request["question_id"])
+        stores.append(Path(cli.store))
+        if should_fail and len(calls) == 2:
+            assert "(a) Not mentioned in the conversation" in request["question"]
+            raise RuntimeError("synthetic failure after one retained record")
+        return {"results": [{"question_id": request["question_id"], "answer": None,
+                             "abstained": True, "claims": [], "hops": [], "reader": {}}]}
+
+    monkeypatch.setattr(MnemoCLI, "eval_answer_batch", answer)
+    iterator = iter_native_answers(source, MnemoCLI(store=str(tmp_path / "untouched")),
+                                   caption_policy="exclude-caption", choice_draws=draws)
+    first = next(iterator)
+    assert first["question_id"] == questions[0]["question_id"]
+    assert first["status"] == "incomplete-reader-execution"
+    draws[questions[1]["question_id"]] = 0.9  # Cannot mutate an already-started sequence's choices.
+    with pytest.raises(RuntimeError, match="retained record"):
+        next(iterator)
+    assert calls == [row["question_id"] for row in questions[:2]]
+    assert all(not store.exists() for store in stores)
+    should_fail = False
+    calls.clear()
+    stores.clear()
+    records = list(iter_native_answers(source, MnemoCLI(store=str(tmp_path / "untouched")),
+                                       caption_policy="exclude-caption", choice_draws=draws))
+    assert [row["question_id"] for row in records] == [row["question_id"] for row in questions]
+    assert calls == [row["question_id"] for row in questions]
+    assert all(not store.exists() for store in stores)
+
+
+@pytest.mark.parametrize("fault", ["missing-draw", "long-query"])
+def test_native_sequence_prevalidates_before_any_capture(tmp_path, monkeypatch, fault):
+    from eval.public.adapters.locomo_native import iter_native_answers
+    source = [sample("one")]
+    if fault == "missing-draw":
+        source[0]["qa"][0]["category"] = 5
+    else:
+        source[0]["qa"][0]["question"] = "x" * 2001
+
+    def forbidden(*args):
+        raise AssertionError("invalid population must fail before capture")
+
+    monkeypatch.setattr(MnemoCLI, "capture_batch", forbidden)
+    with pytest.raises(LoCoMoError):
+        list(iter_native_answers(source, MnemoCLI(store=str(tmp_path / "unused")),
+                                 caption_policy="exclude-caption", choice_draws={}))

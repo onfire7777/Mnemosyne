@@ -17,6 +17,33 @@ def _evidence_digest(evidence):
                              allow_nan=False).encode()).hexdigest()
 
 
+def iter_native_answers(samples: object, cli: MnemoCLI, *, caption_policy: str,
+                        choice_draws: dict[str, float]):
+    """Yield the full source population in order; never filter failed questions.
+
+    The caller must admit the data/runtime and persist each yielded record in
+    its attempt ledger. An exception stops the attempt without retries or an
+    invented completion result. No source question is silently truncated.
+    """
+    source = split_samples(samples)
+    normalize_dialogs(samples, caption_policy=caption_policy)
+    annotations = {row["question_id"]: row["annotation"] for row in source["annotations"]}
+    required = {qid for qid, row in annotations.items() if row["category"] == 5}
+    if not isinstance(choice_draws, dict) or set(choice_draws) != required:
+        raise LoCoMoError("native execution requires exactly the category-5 choice draws")
+    choice_draws = dict(choice_draws)
+    for qid, annotation in annotations.items():
+        prepared = prepare_upstream_question(annotation, choice_draw=choice_draws.get(qid))
+        if not prepared["query"].strip() or len(prepared["query"]) > 2000:
+            raise LoCoMoError("native transformed question exceeds the public query contract")
+    with captured_conversations(samples, cli, caption_policy=caption_policy) as captured:
+        by_sample = {row["sample_id"]: row for row in captured}
+        for question in source["questions"]:
+            qid = question["question_id"]
+            yield answer_captured_question(by_sample[question["sample_id"]], question,
+                                           annotations[qid], choice_draw=choice_draws.get(qid))
+
+
 def answer_captured_question(conversation: dict, question: dict, annotation: dict, *,
                              choice_draw: float | None = None) -> dict:
     """Invoke the public ephemeral answer path and retain exact request custody.

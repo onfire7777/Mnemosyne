@@ -239,3 +239,26 @@ The public single-record verifier continues to prepare its own independent
 context. Existing tamper, complete-population and order-invariance tests still
 exercise the same verification rules. This reduces repeated preprocessing by
 construction, not a measured wall-time or RAM performance claim.
+
+## Native execution sequence
+
+`iter_native_answers` now validates the complete supplied population, caption
+policy and exact category-5 choice map before any capture. Transformed queries
+must fit the existing 2,000-character public query contract; overlong inputs
+fail explicitly rather than being truncated. The sequence copies its option
+choices at startup, captures isolated conversations, then yields one retained
+record per question in original source order. Caller mutation of the choice
+map after the first yield does not change subsequent prompts.
+
+The caller must admit the data/runtime before use and persist each yielded
+record in its attempt ledger. Exceptions stop execution without retries or
+invented completion. Previously yielded records remain available to the caller;
+temporary stores are cleaned when the context unwinds. This sequence does not
+itself provide signed attempt persistence or replace the public runner's gates.
+
+All 24 native tests passed. Sequence tests used real public captures with a
+synthetic answer transport to verify full population order, retained progress
+before a later failure, no automatic retries, choice-map isolation and cleanup.
+Invalid choice maps and overlong questions failed before capture. Ruff passed.
+Real model execution, signed persistence and neutral registry integration remain
+open.
