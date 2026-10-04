@@ -66,3 +66,35 @@ ledger outcome. A run that cannot start needs a reasoned `no_run` record. A
 successful run still requires bundle verification and exact reproduction;
 neither result permits a QA, superiority, independent-reproduction or public
 launch claim. Later comparative work needs its own complete registration.
+
+## Outer resource guard
+
+`eval/public/monitor.py` is an outer process guard, separate from the registered
+scoring source. Invoke its reviewed copy with the registered checkout as the
+working directory and that checkout's Python as the target executable:
+
+```sh
+python /path/to/reviewed/eval/public/monitor.py \
+  --cwd "$PINNED_SOURCE_CHECKOUT" \
+  --output-dir "$NEW_MONITOR_ATTEMPT_DIRECTORY" \
+  --wall-seconds 3600 -- \
+  "$PINNED_SOURCE_CHECKOUT/.venv/bin/python" -m mnemosyne.cli eval-public \
+  --suite longmemeval-retrieval \
+  --dataset-dir "$PINNED_LONGMEMEVAL_DIRECTORY" \
+  --out-dir "$NEW_EXTERNAL_BUNDLE_DIRECTORY"
+```
+
+Record the guard's source commit and file hash in the signed execution receipt.
+The monitor must not be copied into the registered checkout or change its
+source. It samples macOS pressure once per second, refuses non-normal or
+unreadable pressure, and terminates the target's process group on resource
+abort. It preserves stdout, stderr, pressure samples and a terminal receipt in
+an exclusively created directory; an existing directory cannot be reused.
+It is intended for this trusted harness, not workloads that escape process
+groups. Monitor receipts are unsigned until separately signed by the operator.
+
+A monitor status of `succeeded` means only that the command exited zero and
+cleanup succeeded. It does not validate a bundle, authorize scoring before the
+execution gates, supply the signed start receipt, or replace the signed outcome
+ledger. Perform those steps explicitly. A hard host shutdown may leave only a
+start receipt; reconcile that interrupted attempt without rerunning it.

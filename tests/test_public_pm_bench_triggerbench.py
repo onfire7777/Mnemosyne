@@ -581,9 +581,8 @@ def _load_committed_fixture(name: str) -> dict[str, object]:
 def test_public_readme_m12_gap_disclosure_matches_committed_fixtures() -> None:
     """Pin the M12 development-gap disclosure to the fixtures it describes.
 
-    The README paragraph is the only place the M12 evidence limits are stated
-    for a reader, so it must neither be deleted nor drift away from the
-    committed fixtures it summarizes.
+    The README's M12 evidence limits must not drift away from the committed
+    fixtures, even when the CLI gains capabilities those fixtures do not use.
     """
     readme = (
         Path(__file__).resolve().parents[1] / "eval" / "public" / "README.md"
@@ -619,15 +618,18 @@ def test_public_readme_m12_gap_disclosure_matches_committed_fixtures() -> None:
         "and seven steps; `triggerbench-development` has one seed (`7`), "
         "twenty one-step cases, and no calibrated baseline." in unwrapped
     )
-    # "Recurrence is represented in fixture metadata but is not forwarded":
-    # the metadata half is pinned here, the non-forwarding half by
-    # `test_action_cli_..._without_forwarding_regularity`.
+    # Regularity metadata is not an explicit recurrence policy. The CLI now
+    # forwards a supplied policy, but these frozen fixtures do not supply one.
     assert "recurring" in {
         task["regularity"] for case in pm_cases for task in case["tasks"]
     }
+    assert "recurrence_policy" not in set(_keys(pm_bench))
+    assert "recurrence_policy" not in set(_keys(triggerbench))
+    assert "CLI now forwards an explicit `recurrence_policy`" in unwrapped
     assert (
-        "Recurrence is represented in fixture metadata but is not forwarded "
-        "as production recurrence plumbing." in unwrapped
+        "The committed fixtures still carry only regularity metadata, so these suites "
+        "do not yet exercise recurrence or establish calibrated recurrence performance."
+        in unwrapped
     )
     assert (
         "Lateness is scored only as a binary `late` safety counter" in unwrapped
