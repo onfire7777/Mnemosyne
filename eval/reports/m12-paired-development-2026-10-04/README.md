@@ -30,3 +30,20 @@ The matching stdout bytes are retained in the corresponding JSON files. Input
 capture READMEs document their exact source identities and limitations. Hashes
 and replay support integrity checking; they are not signatures or independent
 execution authentication. All original M12 acceptance requirements remain binding.
+
+## Recovery pair
+
+`recovery.json` adds the five-seed 360-operation recovery pair. Both runs contain
+50 deliberately lost successful responses and 50 adapter resets, ten eligible
+firings and ten cancelled controls. The report retains each case's fault/reset
+counts alongside metrics, binds both input captures, and reproduces byte-for-byte.
+Observed metric differences are zero in this workload. That does not establish
+non-inferiority on other workloads or certify the draft reference.
+
+```sh
+python -m eval.public.action_comparison eval/reports/m12-recovery-sink-development-2026-10-04 eval/reports/m12-reference-recovery-development-2026-10-04
+```
+
+The candidate source receipt is explicitly dirty, with its recorded harness
+hashes separately verified against the source commit; the reference receipt is
+clean. See both capture READMEs. The comparison does not erase either limitation.

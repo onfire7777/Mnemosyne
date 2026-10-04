@@ -67,3 +67,31 @@ def test_retained_paired_reports_reproduce_exact_bytes(name, candidate):
     result = action_comparison.compare(REPORTS / candidate,
                                        REPORTS / f'm12-reference-{name}-development-2026-10-04')
     assert _canonical(result) == (REPORTS / 'm12-paired-development-2026-10-04' / f'{name}.json').read_bytes()
+
+
+def test_recovery_comparison_retains_loss_and_reset_counts():
+    result = action_comparison.compare(REPORTS / 'm12-recovery-sink-development-2026-10-04',
+                                       REPORTS / 'm12-reference-recovery-development-2026-10-04')
+    assert result['ranking_eligible'] is result['non_inferiority_evaluated'] is False
+    assert result['reference_id'] == 'draft-durable-action-reference/v1'
+    assert len(result['cases']) == 5
+    for case in result['cases']:
+        assert case['recovery_operations'] == {
+            'injected_response_losses': {'candidate': 10, 'draft_reference': 10},
+            'adapter_resets': {'candidate': 10, 'draft_reference': 10}}
+        assert all(row['difference'] == 0 for row in case['metrics'].values())
+        assert 'by_load' not in case
+
+
+def test_recovery_cannot_pair_with_explicit_reference():
+    with pytest.raises(ValueError):
+        action_comparison.compare(REPORTS / 'm12-recovery-sink-development-2026-10-04',
+                                  REPORTS / 'm12-reference-explicit-development-2026-10-04')
+
+
+def test_retained_recovery_pair_reproduces_exact_bytes():
+    from eval.public.bundle import _canonical
+
+    result = action_comparison.compare(REPORTS / 'm12-recovery-sink-development-2026-10-04',
+                                       REPORTS / 'm12-reference-recovery-development-2026-10-04')
+    assert _canonical(result) == (REPORTS / 'm12-paired-development-2026-10-04/recovery.json').read_bytes()
