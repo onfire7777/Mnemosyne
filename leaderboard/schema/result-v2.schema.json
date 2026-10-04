@@ -76,18 +76,45 @@
       "type": "array",
       "minItems": 1,
       "items": {
-        "allOf": [
-          { "$ref": "#/$defs/metric" },
+        "anyOf": [
           {
-            "if": {
-              "properties": { "family": { "const": "judged_qa" } },
-              "required": ["family"]
-            },
-            "then": {
-              "required": ["judge"],
-              "properties": { "judge": { "$ref": "#/$defs/judge" } }
-            },
-            "else": { "not": { "required": ["judge"] } }
+            "allOf": [
+              {
+                "$ref": "#/$defs/metric"
+              },
+              {
+                "if": {
+                  "properties": {
+                    "family": {
+                      "const": "judged_qa"
+                    }
+                  },
+                  "required": [
+                    "family"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "judge"
+                  ],
+                  "properties": {
+                    "judge": {
+                      "$ref": "#/$defs/judge"
+                    }
+                  }
+                },
+                "else": {
+                  "not": {
+                    "required": [
+                      "judge"
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "$ref": "#/$defs/nativeCategoryMetric"
           }
         ]
       }
@@ -156,6 +183,42 @@
     }
   },
   "allOf": [
+    {
+      "if": {
+        "properties": {
+          "metrics": {
+            "contains": {
+              "type": "object",
+              "properties": {
+                "summary_kind": {
+                  "const": "locomo-native-category/v1"
+                }
+              },
+              "required": [
+                "summary_kind"
+              ]
+            }
+          }
+        },
+        "required": [
+          "metrics"
+        ]
+      },
+      "then": {
+        "properties": {
+          "track_kind": {
+            "const": "DEVELOPMENT"
+          },
+          "publication": {
+            "properties": {
+              "publishable": {
+                "const": false
+              }
+            }
+          }
+        }
+      }
+    },
     {
       "if": {
         "properties": {
@@ -239,6 +302,7 @@
           "anyOf": [
             { "items": { "properties": { "family": { "const": "retrieval" } } } },
             { "items": { "properties": { "family": { "const": "judged_qa" } } } },
+            { "items": { "properties": { "family": { "const": "reference_qa" } } } },
             { "items": { "properties": { "family": { "const": "security" } } } },
             { "items": { "properties": { "family": { "const": "calibration" } } } },
             { "items": { "properties": { "family": { "const": "performance" } } } },
@@ -7678,6 +7742,101 @@
         "config_digest": { "$ref": "#/$defs/sha256Digest" }
       }
     },
+    "nativeCategoryMetric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "summary_kind",
+        "name",
+        "family",
+        "category",
+        "value",
+        "unit",
+        "confidence_interval",
+        "uncertainty_method",
+        "numerator",
+        "denominator",
+        "source_count",
+        "observed_count",
+        "missing_count",
+        "not_applicable_count",
+        "status",
+        "scorer_digest"
+      ],
+      "properties": {
+        "summary_kind": {
+          "const": "locomo-native-category/v1"
+        },
+        "name": {
+          "type": "string",
+          "pattern": "^(qa|evidence_recall)_category_[1-5]$"
+        },
+        "family": {
+          "enum": [
+            "reference_qa",
+            "retrieval"
+          ]
+        },
+        "category": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5
+        },
+        "value": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "unit": {
+          "const": "ratio"
+        },
+        "confidence_interval": {
+          "type": "null"
+        },
+        "uncertainty_method": {
+          "const": "not-estimated"
+        },
+        "numerator": {
+          "type": "number",
+          "minimum": 0
+        },
+        "denominator": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "observed_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "missing_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "not_applicable_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "status": {
+          "enum": [
+            "absent-category",
+            "incomplete",
+            "not-applicable",
+            "measured"
+          ]
+        },
+        "scorer_digest": {
+          "$ref": "#/$defs/sha256Digest"
+        }
+      },
+      "$comment": "Runtime validation enforces category/name, count arithmetic, source versus observed denominator, exact ratio and status. No uncertainty estimate is implied."
+    },
     "metric": {
       "type": "object",
       "additionalProperties": false,
@@ -7800,6 +7959,7 @@
               "enum": [
                 "retrieval",
                 "judged_qa",
+                "reference_qa",
                 "security",
                 "calibration",
                 "performance",

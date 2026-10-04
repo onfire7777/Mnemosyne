@@ -683,10 +683,18 @@ def _validate_record_v2(record: dict[str, object]) -> list[str]:
     else:
         families: set[object] = set()
         for index, metric in enumerate(metrics):
-            errors.extend(_validate_metric(metric, index))
+            if isinstance(metric, dict) and "summary_kind" in metric:
+                from leaderboard.native_metrics import validate_category_metric
+                errors.extend(validate_category_metric(metric, f"/metrics/{index}"))
+                if record.get("track_kind") != "DEVELOPMENT":
+                    errors.append("/track_kind")
+                if not isinstance(record.get("publication"), dict) or record["publication"].get("publishable") is not False:
+                    errors.append("/publication/publishable")
+            else:
+                errors.extend(_validate_metric(metric, index))
             if isinstance(metric, dict):
                 family = metric.get("family")
-                if family in _METRIC_FAMILIES:
+                if family in (*_METRIC_FAMILIES, "reference_qa"):
                     families.add(family)
         if len(families) > 1:
             errors.append("/metrics")
@@ -836,7 +844,7 @@ def _validate_projection_compatibility(value: object) -> list[str]:
         for field in ("name", "unit"):
             if not _nonempty_string(metric.get(field)):
                 errors.append(f"{prefix}/metric/{field}")
-        if metric.get("family") not in _METRIC_FAMILIES:
+        if metric.get("family") not in (*_METRIC_FAMILIES, "reference_qa"):
             errors.append(f"{prefix}/metric/family")
     return errors
 

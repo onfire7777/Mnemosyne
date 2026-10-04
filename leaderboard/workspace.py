@@ -22,7 +22,7 @@ def comparison_body(index: dict) -> str:
         for row in sorted(group['rows'], key=lambda row: (row['identity']['system_id'], row['record_id'])):
             identity, metric = row['identity'], row['metric']
             interval = metric.get('confidence_interval')
-            interval_text = 'Not supplied' if interval is None else f"{interval['low']} to {interval['high']}"
+            interval_text = ('Not estimated (descriptive)' if 'summary_kind' in metric else 'Not supplied') if interval is None else f"{interval['low']} to {interval['high']}"
             path = sha256(row['record_id'].encode()).hexdigest()
             rows.append(f'<tr data-system="{_text(identity["system_id"])}">'
                         f'<th scope="row">{_text(identity["system_id"])}<small>{_text(identity["system_version"])}</small></th>'
@@ -43,7 +43,7 @@ def comparison_body(index: dict) -> str:
                         f'<pre>{_text(json.dumps(key, sort_keys=True, indent=2))}</pre></details></section>')
     checks = ''.join(f'<label><input type="checkbox" name="system" value="{_text(system)}" checked> {_text(system)}</label>' for system in systems)
     exclusions = ''.join(f'<li><a href="results/{sha256(row["record_id"].encode()).hexdigest()}.html">{_text(row["record_id"])}</a>: '
-                         f'{_text(row["reason"].replace("-", " "))}</li>' for row in index['exclusions'])
+                         f'{_text(row.get("metric", ""))} {_text(row["reason"].replace("-", " "))}</li>' for row in index['exclusions'])
     controls = (f'<form id="comparison-controls" data-source="{_text(index["source_digest"])}" hidden><label for="comparison-group">Comparison group</label>'
                 f'<select id="comparison-group">{options}</select>'
                 f'<fieldset><legend>Systems</legend>{checks or "<p>No eligible systems yet.</p>"}</fieldset>'

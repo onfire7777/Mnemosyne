@@ -115,11 +115,22 @@ def build_comparison_index(records: list[dict], artifacts: dict[str, dict[str, b
             exclusions.append({"record_id": record_id, "reason": reason})
             continue
         for metric in record["metrics"]:
+            if "summary_kind" in metric and metric["scorer_digest"] != context["scorer_digest"]:
+                exclusions.append({"record_id": record_id, "metric": metric["name"],
+                                   "reason": "metric-scorer-mismatch"})
+                continue
+            if "summary_kind" in metric and metric["status"] != "measured":
+                exclusions.append({"record_id": record_id, "metric": metric["name"],
+                                   "reason": "metric-" + metric["status"]})
+                continue
             key = {field: identity[field] for field in _IDENTITY_FIELDS}
             key.update({field: context[field] for field in _CONTEXT_FIELDS})
             key["metric"] = {field: metric[field] for field in ("name", "family", "unit")}
             key["resource_treatment"] = record["resources"]["treatment"]
             key["judge"] = metric.get("judge")
+            if "summary_kind" in metric:
+                key["summary"] = {field: metric[field] for field in
+                                  ("summary_kind", "category", "scorer_digest", "uncertainty_method")}
             # Efficiency depends directly on hardware/backend. Quality groups
             # disclose those differences in rows instead of hiding other systems.
             if metric["family"] == "performance":

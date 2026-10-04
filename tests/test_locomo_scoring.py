@@ -170,6 +170,16 @@ def test_native_population_replays_missingness_empty_retrieval_and_tampering(tmp
     assert report["categories"]["2"]["missing_count"] == 1
     assert not report["complete"] and not report["publication_authorized"]
     assert len(report["cases"]) == 5
+    from leaderboard.native_metrics import validate_category_metric
+    projected = report["category_metrics"]
+    assert set(projected) == {"reference_qa", "retrieval"}
+    assert projected["reference_qa"][0]["value"] == 1
+    assert projected["reference_qa"][1]["value"] == 0
+    assert projected["reference_qa"][1]["status"] == "incomplete"
+    assert projected["retrieval"][1]["value"] is None
+    for metrics in projected.values():
+        assert len(metrics) == 5
+        assert all(not validate_category_metric(metric, "/metric") for metric in metrics)
     corrupted = deepcopy(record)
     corrupted["decoded_prediction"] = "changed"
     for records in [[corrupted], [record, record]]:
