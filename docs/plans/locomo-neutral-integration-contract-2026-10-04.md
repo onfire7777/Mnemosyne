@@ -715,3 +715,25 @@ link/inventory checks before returning success. Access-time changes from normal
 reads are excluded. All 12 disk-package checks now pass; Ruff and diff whitespace
 checks pass. This is a local consistency check, not a lock against mutations
 made after verification returns or an immutable external-custody guarantee.
+
+## Effective context prerequisite audit
+
+The [static context receipt](../research/benchmark-intake/local-reader-static-context-audit-2026-10-04.json)
+reconstructs the exact rendered prompts for the retained synthetic feasibility
+input without loading a model. Its 24,000 evidence characters become 24,839 user
+prompt characters plus 130 system characters. The current generation policy
+requests at most 512 output tokens but does not explicitly set `num_ctx`.
+Thus candidate prompt/decoding hashes alone do not fix the effective context
+window: provider/model defaults remain a separate runtime dependency.
+
+Do not infer token fit from character counts or substitute the LoCoMo reference
+cl100k tokenizer for Qwen's tokenizer. Before the next full-settings probe,
+record a model-revision-matched token count including the actual chat template,
+the effective context window and output reservation, and check them together.
+Also retain evidence that the provider did not truncate the submitted input.
+No exact token count or effective window has been verified in this audit; no
+claim that the full prompt fits or necessarily overflows is warranted. Changing
+`num_ctx` changes the frozen generation policy and requires a newly identified
+candidate and fresh resource preflight, not mutation of historical receipts.
+The original 24,000-character requirement and stopped memory-pressure probes
+remain unchanged. This audit does not authorize another model load.
