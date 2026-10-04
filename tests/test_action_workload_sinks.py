@@ -58,3 +58,17 @@ def test_public_workloads_deliver_to_sink_and_keep_failures_incomplete(tmp_path,
         (output / 'sink.json').write_text(json.dumps(changed))
         with pytest.raises(ValueError):
             module.recompute(output)
+
+
+def test_retained_full_trigger_sink_capture_replays():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / 'eval/reports/m12-trigger-sink-development-2026-10-04'
+    result = action_trigger_run.recompute(root)
+    annex = json.loads((root / 'sink.json').read_text())
+    assert sum(c['report']['metrics']['true_positives'] for c in result['cases']) == 130
+    assert sum(len(c['snapshot']['receipts']) for c in annex['cases']) == 130
+    attempts = [row for c in annex['cases'] for row in c['snapshot']['attempts']]
+    assert len(attempts) == 260
+    assert sum(row['outcome'] == 'accepted' for row in attempts) == 130
+    assert sum(row['outcome'] == 'duplicate' for row in attempts) == 130
