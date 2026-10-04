@@ -70,3 +70,12 @@ retain 525/1,220 operations and 130/750 inert receipts respectively. Both replay
 semantically and through the sink, with clean recorded harness hashes matching
 44d578fa. These are draft reference outputs, not additional candidate runs.
 The reference remains unadmitted; no calibration or superiority claim is made.
+
+## Paired diagnostic evidence
+
+[Retained paired reports](../../eval/reports/m12-paired-development-2026-10-04/README.md)
+replay both roles on identical explicit/fan-out requests and bind their source
+artifacts. All observed count and precision/recall/F1 differences are zero in
+these fixtures. This is neither superiority evidence nor an approved
+non-inferiority result. Full reference semantics, durable revision recovery,
+implicit/overloaded cases, disjoint calibration and admission remain open.
