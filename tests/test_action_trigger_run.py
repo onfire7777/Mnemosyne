@@ -103,3 +103,11 @@ def test_retained_real_public_cli_capture_replays():
     assert sum(c['report']['metrics']['true_positives'] for c in result['cases']) == 130
     assert all(c['report']['metrics']['false_positives'] == 0 for c in result['cases'])
     assert all(c['report']['metrics']['false_negatives'] == 0 for c in result['cases'])
+
+
+def test_replay_rejects_boolean_signal_rewritten_as_integer():
+    plan, records = empty_trace()
+    condition = next(r for r in records if r['command'] == 'event.inject' and r['payload'].get('value') is True)
+    condition['payload']['value'] = 1
+    with pytest.raises(ValueError):
+        reports(plan, records)

@@ -78,7 +78,7 @@ def _reports(plan, records):
                 raise ValueError("invalid operation record")
             if (record["case_id"] != case["case_id"] or type(record["step"]) is not int
                     or record["step"] != step or record["command"] != operation["command"]
-                    or record["payload"] != operation["payload"]):
+                    or _canonical(record["payload"]) != _canonical(operation["payload"])):
                 raise ValueError("operation record does not match the plan")
             if operation["command"] == "clock.inject":
                 now = operation["payload"]["now"]
