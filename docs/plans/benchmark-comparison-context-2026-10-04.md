@@ -52,7 +52,13 @@ hash their exact compatibility object. Input ordering cannot change selection.
 Rows preserve original values and reported confidence intervals; the index
 invents no confidence level, sample count or weights.
 
-Remaining: interactive selection and URL state, side-by-side presentation,
-registered policy-artifact admission, complete attempt-ledger integration and
-eligible real competitor runs. Exporting an index does not complete those
-requirements or the broader benchmark platform.
+Implemented: interactive system/group selection, reset, dataset-bound URL state,
+back/forward restoration and side-by-side presentation. The local preview also
+supports a verified signed attempt-history snapshot and raw artifact downloads
+for digest-bound v1 and v2 results. These are preview capabilities, not release
+admission.
+
+Remaining: registered policy-artifact admission, publication-safe complete
+attempt-ledger integration and eligible real competitor runs. The retained
+v1 retrieval baseline has no comparison context and remains explicitly excluded.
+Neither that run nor the comparison workspace completes the broader platform.
