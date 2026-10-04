@@ -259,7 +259,7 @@
     {
       "id": "M12",
       "name": "Prospective action",
-      "status": "Development probes, four-week recurrence/timing diagnostics, a five-trigger eligibility-window scorer with a versioned four-week workload and an inert delivery sink exist; creation/update/cancel retries, content revisions and public response-loss regressions are locally tested with PostgreSQL CI pending; registered recovery/full-trigger corpus, calibrated baseline, full timing/cost and admission remain."
+      "status": "Development probes, four-week recurrence/timing diagnostics, a five-trigger eligibility-window scorer with a versioned four-week workload and an inert delivery sink exist; creation/update/cancel retries, content revisions and public response-loss regressions are locally tested with PostgreSQL CI pending; a separate four-week recovery capture retains 50 injected response losses and exact replay; registered recovery/full-trigger corpus, calibrated baseline, full timing/cost and admission remain."
     },
     {
       "id": "M13",

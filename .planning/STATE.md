@@ -18,6 +18,13 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+A [clean-source four-week recovery capture](../eval/reports/m12-operation-recovery-development-2026-10-04/README.md)
+completed 360 public operations, 50 injected response losses and 50 adapter
+resets. Ten uncancelled actions fired once and ten cancelled actions stayed
+unfired. Original revisions, recovered identities and terminal states replay
+exactly. This is client response-loss recovery, not process/power-loss or
+external side-effect recovery. Integrated sink/full-corpus admission remains open.
+
 M12 now includes a [five-trigger eligibility-window scorer](../docs/plans/m12-trigger-window-development-2026-10-04.md)
 with explicit transient-signal and endpoint rules, plus a versioned four-week
 five-seed public-CLI workload with complete ordered operation logs and replay.

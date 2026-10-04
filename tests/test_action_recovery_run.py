@@ -143,3 +143,16 @@ def test_replay_requires_original_revision_reference_json_type():
     update['payload']['expected_revision_from'] = float(update['payload']['expected_revision_from'])
     with pytest.raises(ValueError):
         reports(plan, records)
+
+
+def test_retained_clean_source_recovery_capture_replays():
+    from pathlib import Path
+    from eval.public.action_recovery_run import recompute
+
+    root = Path(__file__).resolve().parents[1]
+    result = recompute(root / 'eval/reports/m12-operation-recovery-development-2026-10-04')
+    assert sum(c['injected_response_losses'] for c in result['cases']) == 50
+    assert sum(c['adapter_resets'] for c in result['cases']) == 50
+    assert sum(c['report']['metrics']['true_positives'] for c in result['cases']) == 10
+    assert all(c['report']['metrics']['false_positives'] == 0 for c in result['cases'])
+    assert all(c['report']['metrics']['false_negatives'] == 0 for c in result['cases'])
