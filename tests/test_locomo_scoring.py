@@ -150,11 +150,12 @@ def test_native_population_replays_missingness_empty_retrieval_and_tampering(tmp
     conversation = {"sample_id": "synthetic", "tenant_id": tenant,
                     "cli": MnemoCLI(store=str(store)), "evidence": evidence}
 
-    def answer(cli, path):
+    def answer(cli, path, *, include_derivation=False):
         request = json.loads(Path(path).read_text())
         cid = next(iter(evidence))
         start = evidence[cid]["capture"]["content"].index("violet")
-        claim = {"text": "violet", "evidence_cids": [cid], "spans": [{"cid": cid,
+        claim = {"text": "violet", "evidence_cids": [cid],
+                 "derivation": {"schema_version": "mnemosyne.claim-derivation/v1", "kind": "quotation", "operation": None}, "spans": [{"cid": cid,
                  "start": start, "end": start + 6, "slice_sha256": sha256(b"violet").hexdigest()}]}
         return {"results": [{"question_id": request["question_id"], "answer": "violet",
                              "abstained": False, "claims": [claim], "hops": [{"retrieved_cids": [cid]}],
@@ -189,7 +190,7 @@ def test_native_population_replays_missingness_empty_retrieval_and_tampering(tmp
                                                 caption_policy="exclude-caption", choice_draws=draws)
     assert complete["categories"]["5"]["native_observed_recall_mean"] is None
 
-    def incomplete(cli, path):
+    def incomplete(cli, path, *, include_derivation=False):
         request = json.loads(Path(path).read_text())
         return {"results": [{"question_id": request["question_id"], "answer": None,
                              "abstained": True, "claims": [], "hops": [], "reader": {}}]}

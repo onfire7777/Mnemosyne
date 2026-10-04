@@ -28,11 +28,12 @@ def test_cross_environment_native_replay(tmp_path, monkeypatch):
     conversation = {"sample_id": "synthetic", "tenant_id": context["tenant"],
                     "cli": MnemoCLI(store=str(store)), "evidence": context["evidence"]}
 
-    def answer(cli, path):
+    def answer(cli, path, *, include_derivation=False):
         request = json.loads(Path(path).read_text())
         cid = next(iter(context["evidence"]))
         start = context["evidence"][cid]["capture"]["content"].index("violet")
-        claim = {"text": "violet", "evidence_cids": [cid], "spans": [{"cid": cid,
+        claim = {"text": "violet", "evidence_cids": [cid],
+                 "derivation": {"schema_version": "mnemosyne.claim-derivation/v1", "kind": "quotation", "operation": None}, "spans": [{"cid": cid,
                  "start": start, "end": start + 6, "slice_sha256": sha256(b"violet").hexdigest()}]}
         return {"results": [{"question_id": request["question_id"], "answer": "violet",
                              "abstained": False, "claims": [claim], "hops": [{"retrieved_cids": [cid]}],
@@ -49,7 +50,7 @@ def test_cross_environment_native_replay(tmp_path, monkeypatch):
     saved.write_text(json.dumps(report))
     assert verify_report_in_environment(json.loads(saved.read_text()), [sample], [record], **kwargs) == report
     assert report["protocol"]["id"] == "mnemosyne.locomo-native-scoring/v1"
-    assert len(report["protocol"]["replay_source_sha256"]) == 7
+    assert len(report["protocol"]["replay_source_sha256"]) == 8
     for field, changed in (
         ("categories", {}), ("caption_policy", "include-source-caption"),
         ("protocol", {**report["protocol"], "scorer_dependencies": {}}),

@@ -52,6 +52,7 @@ def test_native_capture_rejects_invalid_receipts_before_yield(monkeypatch, resul
 def response(answer="violet", abstained=False, reader=None):
     return {"answer": answer, "abstained": abstained,
             "claims": [] if abstained or not answer else [{"text": answer, "evidence_cids": ["cid"],
+                "derivation": {"schema_version": "mnemosyne.claim-derivation/v1", "kind": "quotation", "operation": None},
                 "spans": [{"cid": "cid", "start": 0, "end": len(answer),
                            "slice_sha256": sha256(answer.encode()).hexdigest()}]}],
             "reader": {"grounded_reader": {"provider": "synthetic"}} if reader is None else reader,
@@ -98,7 +99,8 @@ def test_native_question_uses_read_only_public_boundary_and_retains_request(tmp_
     question = split_samples([source])["questions"][0]
     observed = []
 
-    def answer(cli, path):
+    def answer(cli, path, *, include_derivation=False):
+        assert include_derivation is True
         assert "--evaluation-read-only" in cli.global_flags
         request = json.loads(Path(path).read_text())
         assert request["question"] == "what?"
@@ -117,6 +119,13 @@ def test_native_question_uses_read_only_public_boundary_and_retains_request(tmp_
     assert result["raw_batch_response"]["results"][0]["answer"] == "violet"
     assert json.loads(result["request_jsonl"]) == result["request"]
     assert not observed[0].exists()
+    def omit_derivation(cli, path, *, include_derivation=False):
+        payload = answer(cli, path, include_derivation=include_derivation)
+        payload["results"][0]["claims"][0].pop("derivation")
+        return payload
+    monkeypatch.setattr(MnemoCLI, "eval_answer_batch", omit_derivation)
+    with pytest.raises(LoCoMoError, match="omitted requested"):
+        answer_captured_question(conversation, question, source["qa"][0])
 
 
 @pytest.mark.parametrize("payload", [{}, {"results": []}, {"results": [{"question_id": "foreign"}]}])
@@ -125,7 +134,7 @@ def test_native_question_rejects_wrong_response_identity(tmp_path, monkeypatch, 
     store = tmp_path / "store"
     store.write_text("synthetic transport test only")
     conversation = {"sample_id": "one", "tenant_id": "tenant", "cli": MnemoCLI(store=str(store)), "evidence": {}}
-    monkeypatch.setattr(MnemoCLI, "eval_answer_batch", lambda *args: payload)
+    monkeypatch.setattr(MnemoCLI, "eval_answer_batch", lambda *args, **kwargs: payload)
     with pytest.raises(LoCoMoError, match="result"):
         answer_captured_question(conversation, split_samples([source])["questions"][0], source["qa"][0])
 
@@ -136,7 +145,7 @@ def test_native_question_does_not_swallow_execution_errors(tmp_path, monkeypatch
     store.write_text("synthetic transport test only")
     conversation = {"sample_id": "one", "tenant_id": "tenant", "cli": MnemoCLI(store=str(store)), "evidence": {}}
 
-    def fail(*args):
+    def fail(*args, **kwargs):
         raise RuntimeError("synthetic provider failure")
 
     monkeypatch.setattr(MnemoCLI, "eval_answer_batch", fail)
@@ -187,7 +196,7 @@ def test_native_replay_rebuilds_capture_request_and_projection(tmp_path, monkeyp
         conversation = conversations[0]
         cid = next(iter(conversation["evidence"]))
 
-        def answer(cli, path):
+        def answer(cli, path, *, include_derivation=False):
             request = json.loads(Path(path).read_text())
             raw = response()
             raw["hops"] = [{"retrieved_cids": [cid]}]
@@ -227,7 +236,7 @@ def test_native_sequence_preserves_full_population_and_stops_without_retry(tmp_p
     stores = []
     should_fail = True
 
-    def answer(cli, path):
+    def answer(cli, path, *, include_derivation=False):
         request = json.loads(Path(path).read_text())
         assert all(not store.exists() for store in stores if store != Path(cli.store))
         calls.append(request["question_id"])
@@ -324,6 +333,7 @@ def test_native_synthesis_text_is_preserved_without_claiming_derivation_replay()
     evidence = {"cid": {"dialog_id": "D1:1", "capture": {"content": "violet"}}}
     quoted = project_native_response(raw, sample("one")["qa"][0], evidence)
     assert quoted["claim_text_custody"] == ["exact-quoted-spans"]
+    raw["claims"][0].pop("derivation")
     raw["claims"][0]["text"] = raw["answer"] = "A derived synthetic answer"
     derived = project_native_response(raw, sample("one")["qa"][0], evidence)
     assert derived["status"] == "projected"

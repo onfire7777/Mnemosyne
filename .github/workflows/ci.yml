@@ -114,7 +114,7 @@ jobs:
       - name: Run synthetic scorer and ingestion conformance
         env:
           MNEMOSYNE_TEST_TOKENIZER_VOCAB: ${{ runner.temp }}/cl100k_base.tiktoken
-        run: MNEMOSYNE_TEST_LOCOMO_PYTHON="$(command -v python)" python -m pytest tests/test_locomo_scoring.py tests/test_locomo_ingestion.py tests/test_locomo_tokenizer.py tests/test_locomo_replay.py -q
+        run: MNEMOSYNE_TEST_LOCOMO_PYTHON="$(command -v python)" python -m pytest tests/test_locomo_scoring.py tests/test_locomo_ingestion.py tests/test_locomo_tokenizer.py tests/test_locomo_replay.py tests/test_derivation_replay.py -q
 
   windows-file-lock:
     name: Windows file lock

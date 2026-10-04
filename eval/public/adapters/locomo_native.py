@@ -9,6 +9,7 @@ from tempfile import TemporaryDirectory
 
 from eval.harness.cli_driver import MnemoCLI
 from eval.public.custody import capture_cid
+from eval.public.derivation import DerivationError, verify_claim_derivation
 from .locomo import LoCoMoError, decode_upstream_category5, normalize_dialogs, prepare_upstream_question, split_samples
 
 
@@ -73,14 +74,17 @@ def answer_captured_question(conversation: dict, question: dict, annotation: dic
     with TemporaryDirectory(prefix="mneme-locomo-question-") as directory:
         path = Path(directory) / "request.jsonl"
         path.write_text(raw_request, encoding="utf-8")
-        payload = read_only.eval_answer_batch(path)
+        payload = read_only.eval_answer_batch(path, include_derivation=True)
     results = payload.get("results") if isinstance(payload, dict) else None
     if (not isinstance(results, list) or len(results) != 1 or not isinstance(results[0], dict)
             or results[0].get("question_id") != question["question_id"]):
         raise LoCoMoError("native answer result does not match requested question")
     projection = project_native_response(results[0], annotation, conversation["evidence"],
                                          choice_draw=choice_draw)
+    if any("derivation" not in claim for claim in results[0]["claims"]):
+        raise LoCoMoError("native answer omitted requested derivation receipts")
     return {**projection, "question_id": question["question_id"],
+            "command_options": {"include_derivation": True},
             "capture_digest": _evidence_digest(conversation["evidence"]),
             "request": request, "request_jsonl": raw_request,
             "request_sha256": sha256(raw_request.encode()).hexdigest(),
@@ -104,7 +108,8 @@ def project_native_response(response: dict, annotation: dict, evidence: dict, *,
         raise LoCoMoError("native response exceeds the public claim limit")
     claim_text_custody = []
     for claim in claims:
-        if (not isinstance(claim, dict) or set(claim) != {"text", "evidence_cids", "spans"}
+        if (not isinstance(claim, dict) or set(claim) not in (
+                {"text", "evidence_cids", "spans"}, {"text", "evidence_cids", "spans", "derivation"})
                 or not isinstance(claim.get("text"), str) or not claim["text"].strip()
                 or len(claim["text"]) > 2000
                 or not isinstance(claim.get("evidence_cids"), list)
@@ -131,14 +136,17 @@ def project_native_response(response: dict, annotation: dict, evidence: dict, *,
                 raise LoCoMoError("native claim spans overlap")
             ranges.append((start, end))
             quoted.append(content[start:end])
+            if isinstance(claim.get("derivation"), dict) and claim["derivation"].get("kind") == "synthesis":
+                if content.find(content[start:end]) != start or content.find(content[start:end], start + 1) >= 0:
+                    raise LoCoMoError("native synthesis operand is ambiguous in captured content")
             if span["cid"] not in span_cids:
                 span_cids.append(span["cid"])
         if cited != span_cids:
             raise LoCoMoError("native citations do not match ordered spans")
-        # Public AnswerClaim omits the synthesis operation: retain the result,
-        # but never describe its derivation as replay-verified from spans alone.
-        claim_text_custody.append("exact-quoted-spans" if claim["text"] == " ".join(quoted)
-                                  else "derived-text-unverified")
+        try:
+            claim_text_custody.append(verify_claim_derivation(claim, quoted))
+        except DerivationError as exc:
+            raise LoCoMoError("native claim derivation does not replay") from exc
     retrieved = []
     retrieved_cids = set()
     for hop in hops:
@@ -237,10 +245,13 @@ def _verify_prepared_native_record(context: dict, question_index: int, record: d
             or results[0].get("question_id") != question["question_id"]):
         raise LoCoMoError("native replay response identity mismatch")
     expected = {**project_native_response(results[0], annotation, evidence, choice_draw=choice_draw),
+                "command_options": {"include_derivation": True},
                 "capture_digest": context["capture_digest"],
                 "question_id": question["question_id"], "request": request,
                 "request_jsonl": raw_request, "request_sha256": sha256(raw_request.encode()).hexdigest(),
                 "raw_batch_response": deepcopy(payload)}
+    if any("derivation" not in claim for claim in results[0]["claims"]):
+        raise LoCoMoError("native replay omitted requested derivation receipts")
     try:
         actual_json = json.dumps(record, sort_keys=True, allow_nan=False)
         expected_json = json.dumps(expected, sort_keys=True, allow_nan=False)
