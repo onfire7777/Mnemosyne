@@ -585,3 +585,26 @@ bundle, operator/custody approval, and human approval. Independent third-party
 reproduction is an optional separately signed receipt; its absence does not
 block an otherwise operator-run claim, and its presence does not relabel the
 operator or imply certification.
+
+### Native LoCoMo development evidence verification
+
+For a package created by `write_native_development_bundle`, run the verifier
+from the corresponding source checkout with an explicitly trusted, separately
+installed Python 3.11 scorer environment using the pinned LoCoMo dependencies:
+
+```sh
+uv run --locked python -m eval.public.native_bundle /path/to/package \
+  --scorer-python /path/to/locomo-scorer/bin/python
+```
+
+Success writes one JSON receipt to stdout and exits zero. The receipt includes
+the reconstructed atomic result and explicitly reports `registered: false`,
+`model_execution_verified: false` and `publication_authorized: false`. Invalid
+packages write a JSON error to stderr and exit nonzero. Invalid command-line
+arguments also exit nonzero through the argument parser.
+
+This checks exact file custody and replays saved responses through the pinned
+scorer; it does not call a memory model, install dependencies, admit a dataset,
+register a run, or provide an independent execution reproduction. Use the same
+source/protocol version as the package. Common registered bundle verification
+remains a separate contract; these development packages do not satisfy it.

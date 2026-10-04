@@ -106,3 +106,24 @@ def test_native_package_rejects_changes_during_scorer_replay(native_inputs, tmp_
     monkeypatch.setattr(native_bundle, "assemble_development_result", mutate_after_replay)
     with pytest.raises(BundleError, match="changed during verification"):
         verify_native_development_bundle(destination, scorer_python=python)
+
+
+def test_saved_native_package_can_be_verified_in_separate_process(native_inputs, tmp_path):
+    import subprocess
+    import sys
+
+    metadata, payloads, python = native_inputs
+    destination = tmp_path / "native"
+    result = write_native_development_bundle(destination, metadata, payloads, scorer_python=python)
+    command = [sys.executable, "-m", "eval.public.native_bundle", str(destination), "--scorer-python", python]
+    verified = subprocess.run(command, capture_output=True, text=True, timeout=30)
+    assert verified.returncode == 0, verified.stderr
+    receipt = json.loads(verified.stdout)
+    assert receipt["valid"] and receipt["result"] == result
+    assert not receipt["registered"] and not receipt["model_execution_verified"]
+    assert not receipt["publication_authorized"]
+    (destination / "traces.jsonl").write_bytes(b'{}\n')
+    rejected = subprocess.run(command, capture_output=True, text=True, timeout=30)
+    assert rejected.returncode == 1 and rejected.stdout == ""
+    assert json.loads(rejected.stderr)["valid"] is False
+    assert "digest mismatch" in json.loads(rejected.stderr)["error"]

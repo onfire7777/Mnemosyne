@@ -755,3 +755,13 @@ tokenized/template input to this model/template identity, then establish that
 the original full-input request is not truncated. Model architecture capacity
 alone does not resolve the earlier memory-pressure failures or justify a new
 full-settings probe on the unchanged computer.
+
+### Command-line package verification
+
+The native development verifier is now callable as
+`python -m eval.public.native_bundle PACKAGE --scorer-python EXECUTABLE` from the
+matching checkout. It emits the explicit development receipt as JSON, or a
+nonzero exit with a JSON verification error. A real separate-process regression
+checks both an intact package and trace tampering. All 13 package tests and
+Ruff passed. The command does not turn saved-response replay into model
+re-execution, registration, resource proof or publication authorization.

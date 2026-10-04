@@ -122,3 +122,27 @@ def write_native_development_bundle(destination, metadata, payloads, *, scorer_p
         shutil.rmtree(destination)
         raise
     return result
+
+
+def main(argv=None):
+    """Verify a saved development package without executing a memory model."""
+    import argparse
+    import json
+    import sys
+
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
+    parser.add_argument("package", type=Path, help="saved native development evidence directory")
+    parser.add_argument("--scorer-python", type=Path, required=True,
+                        help="explicit trusted Python executable with pinned scorer dependencies")
+    args = parser.parse_args(argv)
+    try:
+        receipt = verify_native_development_bundle(args.package, scorer_python=args.scorer_python)
+    except (BundleError, LoCoMoError, OSError, ValueError) as exc:
+        print(json.dumps({"valid": False, "error": str(exc)}), file=sys.stderr)
+        return 1
+    print(json.dumps(receipt, sort_keys=True, allow_nan=False))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
