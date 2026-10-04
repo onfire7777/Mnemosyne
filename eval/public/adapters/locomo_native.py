@@ -9,6 +9,7 @@ from tempfile import TemporaryDirectory
 
 from eval.harness.cli_driver import MnemoCLI
 from eval.public.custody import capture_cid
+from eval.public.reader_policy import match_reader_policy, validate_reader_policy
 from eval.public.derivation import DerivationError, verify_claim_derivation
 from .locomo import LoCoMoError, decode_upstream_category5, normalize_dialogs, prepare_upstream_question, split_samples
 
@@ -19,7 +20,7 @@ def _evidence_digest(evidence):
 
 
 def iter_native_answers(samples: object, cli: MnemoCLI, *, caption_policy: str,
-                        choice_draws: dict[str, float]):
+                        choice_draws: dict[str, float], reader_policy: dict | None = None):
     """Yield the full source population in order; never filter failed questions.
 
     The caller must admit the data/runtime and persist each yielded record in
@@ -28,6 +29,9 @@ def iter_native_answers(samples: object, cli: MnemoCLI, *, caption_policy: str,
     Consumers that may stop early must use contextlib.closing on this iterator
     or call close() explicitly to release the capture stores immediately.
     """
+    reader_policy = deepcopy(reader_policy)
+    if reader_policy is not None:
+        validate_reader_policy(reader_policy)
     samples = deepcopy(samples)
     source = split_samples(samples)
     normalize_dialogs(samples, caption_policy=caption_policy)
@@ -48,17 +52,20 @@ def iter_native_answers(samples: object, cli: MnemoCLI, *, caption_policy: str,
             for question in questions_by_sample[sample["sample_id"]]:
                 qid = question["question_id"]
                 yield answer_captured_question(captured[0], question,
-                                               annotations[qid], choice_draw=choice_draws.get(qid))
+                                               annotations[qid], choice_draw=choice_draws.get(qid), reader_policy=reader_policy)
 
 
 def answer_captured_question(conversation: dict, question: dict, annotation: dict, *,
-                             choice_draw: float | None = None) -> dict:
+                             choice_draw: float | None = None, reader_policy: dict | None = None) -> dict:
     """Invoke the public ephemeral answer path and retain exact request custody.
 
     The caller owns dataset/run admission and provider/resource configuration.
     CLI exceptions propagate to that caller's attempt ledger; they are never
     converted to successful abstention. This function does not admit a run.
     """
+    reader_policy = deepcopy(reader_policy)
+    if reader_policy is not None:
+        validate_reader_policy(reader_policy)
     if (question.get("sample_id") != conversation["sample_id"]
             or not isinstance(question.get("question_id"), str) or not question["question_id"]
             or question.get("query") != annotation.get("question")):
@@ -80,7 +87,7 @@ def answer_captured_question(conversation: dict, question: dict, annotation: dic
             or results[0].get("question_id") != question["question_id"]):
         raise LoCoMoError("native answer result does not match requested question")
     projection = project_native_response(results[0], annotation, conversation["evidence"],
-                                         choice_draw=choice_draw)
+                                         choice_draw=choice_draw, reader_policy=reader_policy)
     if any("derivation" not in claim for claim in results[0]["claims"]):
         raise LoCoMoError("native answer omitted requested derivation receipts")
     return {**projection, "question_id": question["question_id"],
@@ -92,7 +99,7 @@ def answer_captured_question(conversation: dict, question: dict, annotation: dic
 
 
 def project_native_response(response: dict, annotation: dict, evidence: dict, *,
-                            choice_draw: float | None = None) -> dict:
+                            choice_draw: float | None = None, reader_policy: dict | None = None) -> dict:
     """Project a public response without treating execution failure as abstention.
 
     Reader disclosure presence is a prerequisite, not proof of runtime custody;
@@ -106,6 +113,14 @@ def project_native_response(response: dict, annotation: dict, evidence: dict, *,
         raise LoCoMoError("native response requires reader, hop and claim records")
     if len(claims) > 20:
         raise LoCoMoError("native response exceeds the public claim limit")
+    policy_digest = None
+    policy_matched = False
+    if reader_policy is not None:
+        try:
+            policy_digest = validate_reader_policy(reader_policy)
+            policy_matched = match_reader_policy(reader, reader_policy)
+        except (ValueError, TypeError) as exc:
+            raise LoCoMoError("native reader disclosure does not match its policy") from exc
     claim_text_custody = []
     for claim in claims:
         if (not isinstance(claim, dict) or set(claim) not in (
@@ -163,6 +178,7 @@ def project_native_response(response: dict, annotation: dict, evidence: dict, *,
         raise LoCoMoError("native claim cites evidence absent from retrieval trace")
     result = {"raw_response": deepcopy(response), "question_transformation": prepared,
               "claim_text_custody": claim_text_custody,
+              "reader_policy_sha256": policy_digest, "reader_policy_matched": policy_matched,
               "retrieved_dialog_ids": retrieved, "decoded_prediction": None,
               "projection_policy": "native-explicit-abstention-v1",
               "status": "incomplete-reader-execution", "runtime_custody_verified": False}
@@ -206,14 +222,14 @@ def _capture_plan(records, tenant):
 
 
 def verify_native_answer_record(sample: dict, question_index: int, record: dict, *,
-                                caption_policy: str, choice_draw: float | None = None) -> dict:
+                                caption_policy: str, choice_draw: float | None = None, reader_policy: dict | None = None) -> dict:
     """Recompute request and projection from source; never trust saved derived fields.
 
     This checks internal replay consistency, not that a model really produced
     the response. Signed run and provider custody remain external prerequisites.
     """
     context = _prepare_native_replay(sample, caption_policy=caption_policy)
-    return _verify_prepared_native_record(context, question_index, record, choice_draw=choice_draw)
+    return _verify_prepared_native_record(context, question_index, record, choice_draw=choice_draw, reader_policy=reader_policy)
 
 
 def _prepare_native_replay(sample: dict, *, caption_policy: str) -> dict:
@@ -227,7 +243,7 @@ def _prepare_native_replay(sample: dict, *, caption_policy: str) -> dict:
 
 
 def _verify_prepared_native_record(context: dict, question_index: int, record: dict, *,
-                                    choice_draw: float | None = None) -> dict:
+                                    choice_draw: float | None = None, reader_policy: dict | None = None) -> dict:
     if type(question_index) is not int or not 0 <= question_index < len(context["questions"]):
         raise LoCoMoError("native replay question index is invalid")
     if not isinstance(record, dict):
@@ -244,7 +260,7 @@ def _verify_prepared_native_record(context: dict, question_index: int, record: d
     if (not isinstance(results, list) or len(results) != 1 or not isinstance(results[0], dict)
             or results[0].get("question_id") != question["question_id"]):
         raise LoCoMoError("native replay response identity mismatch")
-    expected = {**project_native_response(results[0], annotation, evidence, choice_draw=choice_draw),
+    expected = {**project_native_response(results[0], annotation, evidence, choice_draw=choice_draw, reader_policy=reader_policy),
                 "command_options": {"include_derivation": True},
                 "capture_digest": context["capture_digest"],
                 "question_id": question["question_id"], "request": request,

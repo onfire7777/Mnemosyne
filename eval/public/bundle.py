@@ -1645,9 +1645,7 @@ def _verify_qa_custody(
     build: dict[str, Any],
 ) -> None:
     from eval.public.runner import load_qa_protocol, qa_protocol_digests, require_clean_candidate_checkout, validate_candidate_manifest
-    from mnemosyne.providers.extractive_decomposer import (
-        disclosure as decomposer_disclosure,
-    )
+    from eval.public.reader_policy import grounded_reader_disclosure
     from mnemosyne.providers.grounded_protocol import PROMPT_BUNDLES, role_digests
 
     protocol = load_qa_protocol()
@@ -1710,16 +1708,7 @@ def _verify_qa_custody(
         raise BundleError("embedded candidate manifest digest mismatch")
     if candidate.get("model_content_sha256") != reader["model_content_sha256"]:
         raise BundleError("candidate manifest model digest mismatch")
-    expected_trace_reader = {
-        "query_decomposer": decomposer_disclosure(),
-        "grounded_reader": {
-            "role": "grounded_reader",
-            "model": protocol["model"]["selector"],
-            "model_content_digest": reader["model_content_sha256"],
-            **role_digests("grounded_reader"),
-            "decoding_options": protocol["decoding"],
-        },
-    }
+    expected_trace_reader = grounded_reader_disclosure(reader["model_content_sha256"])
     if metadata.get("interval_methods") != protocol["interval_methods"]:
         raise BundleError("QA mixed interval declaration mismatch")
     intervals = measured.get("intervals", {})

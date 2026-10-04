@@ -27,6 +27,7 @@ def test_cross_environment_native_replay(tmp_path, monkeypatch):
     store.write_text("synthetic transport only")
     conversation = {"sample_id": "synthetic", "tenant_id": context["tenant"],
                     "cli": MnemoCLI(store=str(store)), "evidence": context["evidence"]}
+    reader = {"grounded_reader": {"provider": "synthetic"}}
 
     def answer(cli, path, *, include_derivation=False):
         request = json.loads(Path(path).read_text())
@@ -37,7 +38,7 @@ def test_cross_environment_native_replay(tmp_path, monkeypatch):
                  "start": start, "end": start + 6, "slice_sha256": sha256(b"violet").hexdigest()}]}
         return {"results": [{"question_id": request["question_id"], "answer": "violet",
                              "abstained": False, "claims": [claim], "hops": [{"retrieved_cids": [cid]}],
-                             "reader": {"grounded_reader": {"provider": "synthetic"}}}]}
+                             "reader": reader}]}
 
     monkeypatch.setattr(MnemoCLI, "eval_answer_batch", answer)
     record = answer_captured_question(conversation, split_samples([sample])["questions"][0], sample["qa"][0])
@@ -50,7 +51,7 @@ def test_cross_environment_native_replay(tmp_path, monkeypatch):
     saved.write_text(json.dumps(report))
     assert verify_report_in_environment(json.loads(saved.read_text()), [sample], [record], **kwargs) == report
     assert report["protocol"]["id"] == "mnemosyne.locomo-native-scoring/v1"
-    assert len(report["protocol"]["replay_source_sha256"]) == 8
+    assert len(report["protocol"]["replay_source_sha256"]) == 9
     for field, changed in (
         ("categories", {}), ("caption_policy", "include-source-caption"),
         ("protocol", {**report["protocol"], "scorer_dependencies": {}}),
@@ -60,6 +61,25 @@ def test_cross_environment_native_replay(tmp_path, monkeypatch):
             verify_report_in_environment({**report, field: changed}, [sample], [record], **kwargs)
     missing = replay_in_environment([sample], [], **kwargs)
     assert missing["categories"]["4"]["missing_count"] == 1
+    options = {"synthetic": True}
+    policy = {"schema_version": "mnemosyne.reader-policy/v1", "candidate_git_sha": "a" * 40,
+              "candidate_manifest_sha256": "b" * 64, "reader": {role: {
+                  "role": role, "model": "synthetic", "model_content_digest": "c" * 64,
+                  "prompt_sha256": "d" * 64, "serializer_sha256": "e" * 64,
+                  "decoding_options": options,
+                  "decoding_sha256": sha256(b'{"synthetic":true}').hexdigest(),
+              } for role in ("query_decomposer", "grounded_reader")}}
+    reader = policy["reader"]
+    bound_record = answer_captured_question(conversation, split_samples([sample])["questions"][0],
+                                            sample["qa"][0], reader_policy=policy)
+    assert bound_record["reader_policy_matched"] and not bound_record["runtime_custody_verified"]
+    bound_report = replay_in_environment([sample], [bound_record], reader_policy=policy, **kwargs)
+    assert bound_report["reader_policy"] == policy
+    with pytest.raises(LoCoMoError, match="rejected replay"):
+        replay_in_environment([sample], [bound_record], **kwargs)
+    changed = {**policy, "candidate_manifest_sha256": "f" * 64}
+    with pytest.raises(LoCoMoError, match="rejected replay"):
+        replay_in_environment([sample], [bound_record], reader_policy=changed, **kwargs)
     record["decoded_prediction"] = "tampered"
     with pytest.raises(LoCoMoError, match="rejected replay"):
         replay_in_environment([sample], [record], **kwargs)
