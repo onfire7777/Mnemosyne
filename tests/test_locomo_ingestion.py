@@ -176,6 +176,25 @@ def test_nonrag_request_rejects_invalid_question_selection(index):
         prepare_nonrag_request(sample(), index, speaker_order=["A", "B"], token_count=len, max_length=1000)
 
 
+@pytest.mark.parametrize("size", [0, 20, 1681126, 1681127])
+def test_tokenizer_rejects_unverified_bytes_before_loading_runtime(tmp_path, monkeypatch, size):
+    from eval.public.adapters import locomo_tokenizer
+    path = tmp_path / "vocabulary"
+    path.write_bytes(b"x" * size)
+
+    def forbidden(_):
+        raise AssertionError("runtime must not be consulted for invalid vocabulary")
+    monkeypatch.setattr(locomo_tokenizer, "version", forbidden)
+    with pytest.raises(LoCoMoError, match="SHA-256 mismatch"):
+        locomo_tokenizer.load_verified_encoding(path)
+
+
+def test_tokenizer_missing_file_has_no_download_fallback(tmp_path):
+    from eval.public.adapters.locomo_tokenizer import load_verified_encoding
+    with pytest.raises(FileNotFoundError):
+        load_verified_encoding(tmp_path / "absent")
+
+
 def test_separates_inputs_without_rewriting_or_dropping_source_annotations():
     source = [sample()]
     before = deepcopy(source)

@@ -391,4 +391,28 @@ provider chat-wrapper token accounting or real runtime/resource acceptance.
 The public helper still accepts arbitrary token counters, so it correctly leaves
 its tokenizer-conformance flag false until a verified tokenizer integration
 contract exists. A hash-locked tokenizer environment and vocabulary loader are
-remaining implementation work.
+implemented in the next stage below; automatic runner integration remains open.
+
+## Offline verified tokenizer loader
+
+`eval/public/adapters/locomo_tokenizer.py::load_verified_encoding` reads only the
+explicit local vocabulary path, bounds the read to the expected byte count plus
+one, and verifies the exact size and SHA-256 before consulting the runtime. It
+requires tiktoken 0.5.2 and constructs the cl100k_base encoding directly from those
+verified bytes using the pinned pattern and special-token IDs. It never calls a
+network or cache loader. Missing files remain errors, with no download fallback.
+
+The optional `requirements-locomo-tokenizer.in` and generated hash-locked
+`requirements-locomo-tokenizer.lock` reproduce the isolated tokenizer/scorer test
+environment. They do not change the production package or the scorer-only CI
+job. Install with `uv pip install --python /path/to/scorer/bin/python
+--require-hashes -r eval/public/requirements-locomo-tokenizer.lock`.
+
+Validation: 99 ingestion/scoring tests passed, including missing, truncated,
+same-size-corrupted and oversized vocabulary rejection before runtime loading.
+After verifying the hash-locked environment, a local positive check disabled
+HTTP requests during verified loading and compared 505 synthetic strings against
+the pinned upstream encoding. All token sequences matched. All five special
+tokens retained the upstream default rejection behavior.
+[Offline-loader receipt](../research/benchmark-intake/locomo-offline-tokenizer-2026-10-04.json).
+Ruff passed. No model, held-out dataset or measured benchmark result was involved.
