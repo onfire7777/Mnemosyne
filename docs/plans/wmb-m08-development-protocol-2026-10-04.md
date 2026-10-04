@@ -139,3 +139,19 @@ claims, incomplete failure disclosures and invalid restoration predecessors.
 Ruff passes. The shared ABI and current product deletion semantics are untouched.
 The trace schema, generator, semantic grader, product capability, resource
 admission and complete measured acceptance remain open.
+
+### Ordered operation custody
+
+The module-local validator now also checks an ordered list of request/receipt
+exchanges, bounded to 10,000 operations. Every exchange must contain its request
+and terminal receipt, operation IDs may not repeat, and a restore must embed
+the exact completed delete receipt already present in the preceding sequence.
+Matching fields within a forged restore request are insufficient. Failed and
+aborted operations remain valid terminal observations rather than disappearing.
+
+All 25 contract checks pass, including future/missing deletion references,
+reused IDs, altered embedded scope, a failed deletion misrepresented as completed,
+missing terminal receipts and undeclared exchange fields. Ruff passes. These
+checks do not establish authenticity, authorization, actual effects or full
+fixture population coverage: detecting an entirely omitted planned exchange
+still requires comparison against the frozen fixture, which remains open.
