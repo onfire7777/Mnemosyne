@@ -92,3 +92,19 @@ Evaluation time is measured with `perf_counter` around the in-process interprete
 call. It excludes durable sink writes and differs from the candidate's CLI process
 boundary. These measurements must not be used for direct latency rankings.
 Cost, peak RSS and full resource admission are not supplied by this runner.
+
+## Paired development diagnostics
+
+`python -m eval.public.action_comparison CANDIDATE_DIRECTORY REFERENCE_DIRECTORY`
+replays both retained runs, requires identical versioned plans and sink-enabled
+candidate evidence, and rejects artifacts changed during replay. It binds all
+six input artifacts per role by SHA-256 and reports candidate-minus-reference
+metric differences by case and, for fan-out, by load phase. Undefined rates stay
+undefined; there is no pooled winner or hidden substitution of missing values.
+
+This is an unadmitted-reference diagnostic, not the calibrated non-inferiority
+comparison required by the original M12 contract. It has explicit false flags
+for ranking, admission, publication and non-inferiority evaluation. In-process
+reference timing and candidate subprocess timing are excluded. Artifact hashes
+and replay establish reproducibility of the diagnostic, not independent custody
+or authenticity of the original execution.
