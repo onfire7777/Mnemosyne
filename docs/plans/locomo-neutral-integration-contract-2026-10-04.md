@@ -33,14 +33,14 @@ Category 5's source-answer distractor belongs only in the registered question
 transformation, never in ingested memory. Category-specific scoring remains
 the pinned scorer, with missing predictions and recall applicability explicit.
 
-## Current integration audit — reader and option-order policy update
+## Current integration audit — native configuration binding update
 
 This table supersedes the original sequence's prospective descriptions below;
 it does not close W4 or any measured acceptance requirement.
 
 | Original step | Current implementation evidence | Remaining acceptance work |
 |---|---|---|
-| 1. Freeze track/configuration | Native replay identifies its separate scoring policy, upstream revision, dependency pins, nine replay-source hashes, caption policy and explicit or seeded category-5 choices. | Bind a registered SUT candidate, actual model/provider/runtime manifests, declared resource/context budget and preregistered option-order policy. The replay policy alone is not this run configuration. |
+| 1. Freeze track/configuration | Optional native configuration binds full and normalized source hashes, replay policy, reader/choice policies, CLI settings and runtime/resource artifact references. Its digest is retained in each answer and the replay report. | Authenticate and admit the referenced candidate/runtime/resource artifacts, effective model/provider/tokenizer/context settings and preregistered choice policy; a matching declaration is not runtime or resource proof. |
 | 2. Native public adapter | `iter_native_answers` validates the population first, captures one isolated conversation at a time, invokes public read-only answers, retains command options and cleans stores. Public capture tests exercise actual subprocesses. | Full admitted population under the registered runtime and resource envelope; signed attempt persistence. |
 | 3. Response conversion | Raw outputs, missing reader execution, explicit abstention, category-5 decoding, citations, spans, answer rendering and opt-in synthesis derivations are retained/validated. The independent derivation checker does not call the product synthesizer. | Optional candidate-bound reader policy now checks exact model, prompt, serializer and decoding disclosures and is retained in offline replay. Authenticate that candidate and actual runtime through the registered bundle path; a matching disclosure is not proof of provider execution. |
 | 4. Neutral bundle/replay | Full-population offline scoring and exact saved-report replay work across the production and pinned scorer interpreters; missing questions and absent categories remain visible. | Connect these components to the existing bundle inventory, configuration anchors, result schema and verifier without changing generic QA semantics. |
@@ -71,8 +71,8 @@ The current `eval/public/bundle.py` has two separate verification contracts:
   candidate/runtime verification code where its invariants apply, while keeping
   native preprocessing and per-category scoring distinct.
 
-Next implementation order: complete the dedicated native run configuration around
-the optional reader-policy binding; add coordinated bundle/result metric projection and
+Next implementation order: authenticate the native configuration’s referenced runtime/resource
+artifacts through existing custody checks; add coordinated bundle/result metric projection and
 verification using the existing isolated replay worker; then add gated runner
 and registry dispatch. The production interpreter must validate registry,
 candidate, runtime and artifact custody before invoking the minimal scorer
@@ -496,3 +496,38 @@ Validation: 144 isolated conformance tests passed, 48 production native/reader/
 replay tests passed, and an additional Python 3.14-to-3.11 seeded replay test
 passed. Both option orders, invalid/ambiguous seeds, unchanged ambient RNG state,
 changed policy, missing outputs and retained full denominators are exercised.
+
+
+## Native configuration binding checkpoint
+
+`locomo_config.py` defines a closed `mnemosyne.locomo-native-config/v1`
+declaration. `build_native_run_config` binds the full source and normalized input,
+current replay source/protocol, caption/reader/choice policies, runtime and
+resource manifest SHA-256 references, and local CLI backend/flags/timeout.
+Flag values are represented by a canonical digest rather than copied into the
+artifact, since a flag may contain a credential. Store paths are intentionally
+excluded: execution uses fresh per-conversation stores. Environment, interpreter,
+provider and effective context identity still require the runtime/resource
+artifacts and their authentication; this declaration does not infer them.
+
+Pass `run_config` to `iter_native_answers` together with the same caption,
+reader and explicit/seeded choice policy. It validates the source/configuration
+before capture and the CLI again before each question. Each returned record
+retains `run_config_sha256`. Full-population replay and the isolated worker
+accept the same configuration, recompute its input bindings, check every
+record’s digest and retain the declaration in the report. Configured records
+require full-population replay; the single-record helper remains for unconfigured
+structural checks. Missing configuration, changed source, policy, CLI settings or
+artifact references reject the configured record/report path.
+
+The configuration is optional for existing development calls and never sets
+runtime custody or publication authorization true. A caller-supplied artifact
+hash is a reference, not verification of that artifact. Registered execution
+still needs pre-access registration, candidate/runtime checks, resource admission,
+retained attempts and neutral bundle integration. No real LoCoMo data was used.
+
+Validation: 145 isolated tests passed, 49 production native/reader/replay tests
+passed, and the expanded 15-test reader/configuration suite passed. Coverage
+includes a real public capture path with a synthetic empty-reader response,
+cross-interpreter configured replay, changed artifact/input bindings, pre-capture
+CLI drift rejection and malformed declarations. Ruff passed.

@@ -364,8 +364,19 @@ def test_seeded_native_execution_preserves_option_policy(tmp_path, monkeypatch):
             "abstained": True, "claims": [], "hops": [], "reader": {}}]}
 
     monkeypatch.setattr(MnemoCLI, "eval_answer_batch", answer)
-    records = list(iter_native_answers([source], MnemoCLI(store=str(tmp_path / "unused")),
-                    caption_policy="exclude-caption", choice_seed=1))
+    from eval.public.adapters.locomo_config import build_native_run_config, validate_native_run_config
+    from eval.public.reader_policy import candidate_reader_policy
+    from eval.public.runner import build_candidate_manifest
+    from mnemosyne.providers.grounded_protocol import MODEL_CONTENT_SHA256
+    cli = MnemoCLI(store=str(tmp_path / "unused"))
+    policy = candidate_reader_policy(build_candidate_manifest(
+        model_content_sha256=MODEL_CONTENT_SHA256, git_sha="a" * 40,
+        created_at_utc="2026-10-04T00:00:00Z"))
+    config = build_native_run_config([source], cli, caption_policy="exclude-caption", choice_seed=1,
+                    reader_policy=policy, runtime_manifest_sha256="1" * 64, resource_manifest_sha256="2" * 64)
+    records = list(iter_native_answers([source], cli, caption_policy="exclude-caption", choice_seed=1,
+                                       reader_policy=policy, run_config=config))
+    assert all(r["run_config_sha256"] == validate_native_run_config(config) for r in records)
     draws = native_choice_policy([source], choice_seed=1)["draws"]
     assert [r["question_transformation"]["choice_draw"] for r in records] == list(draws.values())
     assert "(a) Not mentioned in the conversation" in seen[0]
