@@ -81,3 +81,30 @@ the pinned scorer, with missing predictions and recall applicability explicit.
 This contract preserves original W4 scope. It does not close its LoCoMo checkbox,
 authorize a license-policy bypass, establish superiority or claim that other
 memory-system adapters have been implemented.
+
+## Native capture implementation checkpoint
+
+`eval/public/adapters/locomo_native.py::captured_conversations` now exposes a
+bounded-lifetime local capture context. It uses only public `MnemoCLI`
+capture-batch calls, creates a separate temporary store and hashed tenant for
+each source conversation, and verifies the returned CID sequence against
+the public evidence-identity formula before yielding any handles.
+
+The disclosed native preprocessing serializes source timestamp, speaker, text
+and selected caption as canonical JSON. Unique source types bind each dialog's
+stable identity, so identical text in two turns retains distinct provenance.
+This is not the upstream baseline's prompt formatting. Question/answer/evidence
+annotations are not passed to capture. Temporary stores are removed on context
+exit and the caller's original store is untouched. No explicit consolidation,
+clock advancement, answer generation or scoring is performed by this boundary.
+
+Three focused tests passed using the installed Python 3.14 project environment:
+one real public-CLI test captured and searched two independent conversations,
+verified distinct evidence identities for duplicate text, excluded source labels,
+checked cross-conversation lookup isolation and cleanup; two synthetic receipt
+tests rejected wrong result counts and invalid CIDs before yielding. The initial
+negative tests omitted the required CLI store argument; that test setup was
+corrected before the passing rerun. Ruff passed.
+
+This advances step 2 only. It does not complete response conversion, measured
+capability testing, registry integration, real-dataset admission or W4 acceptance.
