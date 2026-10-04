@@ -18,6 +18,14 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+Failed-attempt analysis now accounts for all 220 planned cases. The initial
+capture has 0 completed / 1 incomplete / 219 not attempted; the schema capture
+has 21 / 1 / 198. Completed-prefix diagnostics retain 17 misses without a
+full-corpus score. Formation checks: 108 passed; no acceptance gate closed.
+The website refinement is committed at `ea3832d0` with 57 rendering checks.
+CI run 37238287825 on `30184aeb` remains in progress at this checkpoint; later
+local commits have not been pushed or validated by that run.
+
 At `a927ee4e`, a four-cell diagnostic holds one public input fixed while varying
 compact model and schema wire order. Both models changed from clarification to
 an incorrect exact-time proposal when keys followed declaration order. Exact
