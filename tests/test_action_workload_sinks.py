@@ -72,3 +72,19 @@ def test_retained_full_trigger_sink_capture_replays():
     assert len(attempts) == 260
     assert sum(row['outcome'] == 'accepted' for row in attempts) == 130
     assert sum(row['outcome'] == 'duplicate' for row in attempts) == 130
+
+
+def test_retained_full_recovery_sink_capture_replays():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / 'eval/reports/m12-recovery-sink-development-2026-10-04'
+    result = action_recovery_run.recompute(root)
+    assert sum(c['injected_response_losses'] for c in result['cases']) == 50
+    assert sum(c['adapter_resets'] for c in result['cases']) == 50
+    assert sum(c['report']['metrics']['true_positives'] for c in result['cases']) == 10
+    annex = json.loads((root / 'sink.json').read_text())
+    assert sum(len(c['snapshot']['receipts']) for c in annex['cases']) == 10
+    attempts = [row for c in annex['cases'] for row in c['snapshot']['attempts']]
+    assert len(attempts) == 20
+    assert sum(row['outcome'] == 'accepted' for row in attempts) == 10
+    assert sum(row['outcome'] == 'duplicate' for row in attempts) == 10
