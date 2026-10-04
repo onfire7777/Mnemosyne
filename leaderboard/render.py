@@ -16,6 +16,7 @@ from typing import Any
 
 from leaderboard.explainers import systems_body
 from leaderboard.comparisons import comparisons_body
+from leaderboard.catalog import benchmarks_body, coverage_body, load_catalog
 from leaderboard.validate import (
     SCHEMA_VERSION,
     SCHEMA_VERSION_V2,
@@ -154,7 +155,7 @@ def _page(title: str, body: str, root: str = "") -> str:
         "gap:24px;padding-top:16px;padding-bottom:18px;border-bottom:1px solid var(--line)}"
         "a{color:#005bd3;text-underline-offset:4px}a:focus-visible{outline:3px solid #005bd3;"
         "outline-offset:5px}.brand{font:32px Georgia,serif;color:var(--ink);text-decoration:none}"
-        "nav{display:flex;gap:48px}nav a{text-decoration:none}main{padding-top:48px;"
+        "nav{display:flex;flex-wrap:wrap;gap:16px 28px}nav a{text-decoration:none}main{padding-top:48px;"
         "padding-bottom:40px}h1,h2{font-family:Georgia,serif;letter-spacing:-.025em;line-height:1.15}"
         "h1{font-size:56px;font-weight:500;margin:4px 0 14px}h2{font-size:36px;font-weight:500;margin:0 0 24px}"
         "p{margin:0 0 24px}.intro{font-size:28px;color:var(--muted);margin-bottom:48px}"
@@ -169,8 +170,13 @@ def _page(title: str, body: str, root: str = "") -> str:
         "padding-bottom:24px;font-size:16px;color:var(--muted)}pre{white-space:pre-wrap;"
         "overflow-wrap:anywhere;padding:20px;background:#f7f9fc;font-size:15px}"
         "li{overflow-wrap:anywhere}.prose{max-width:880px}.prose h2{margin-top:36px}"
+        ".section-heading{margin-top:48px}.scope-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}"
+        ".scope-card{border:1px solid var(--line);padding:24px}.scope-card h3{margin:0 0 12px;font-size:22px}"
+        ".scope-card p{margin:0}.scope-card:target{outline:3px solid #005bd3;outline-offset:3px}"
+        ".capability-map th:first-child{width:65%}"
         "@media(max-width:700px){body{font-size:17px}body>header,main,body>footer{padding-left:20px;"
         "padding-right:20px}.brand{font-size:25px}nav{gap:18px;font-size:16px}"
+        "body>header{align-items:flex-start;flex-direction:column;gap:12px}.scope-grid{grid-template-columns:1fr}"
         "main{padding-top:32px}h1{font-size:39px}.intro{font-size:21px;margin-bottom:34px}"
         "h2{font-size:29px}.overview{grid-template-columns:1fr;gap:24px}.overview h2{font-size:28px}"
         "th,td{padding:12px}table{min-width:540px}.empty{padding:40px 18px}"
@@ -178,6 +184,8 @@ def _page(title: str, body: str, root: str = "") -> str:
         "</style></head><body>\n"
         f'<header><a class="brand" href="{root}index.html">OpenMemBench</a>'
         f'<nav aria-label="Main"><a href="{root}index.html">Results</a>'
+        f'<a href="{root}benchmarks.html">Benchmarks</a><a href="{root}coverage.html">Coverage</a>'
+        f'<a href="{root}systems.html">Systems</a>'
         f'<a href="{root}methods.html">Methods</a></nav></header>'
         f"<main>{body}</main>\n"
         "<footer>Open, operator-run. Mnemosyne is the operator entry.</footer>"
@@ -378,7 +386,8 @@ def _render_pages(
         "Leaderboard",
         '<h1>Memory benchmarks, with evidence.</h1>'
         '<p class="intro">Compare measured results. Inspect the traces behind every number.</p>'
-        '<p><a href="comparisons.html">Compare memory capabilities and benchmark coverage</a></p>'
+        '<p><a href="benchmarks.html">Explore benchmark families</a> · '
+        '<a href="coverage.html">See the whole-memory coverage map</a></p>'
         '<section aria-labelledby="results-heading"><h2 id="results-heading">Results</h2>'
         '<div class="table-scroll" role="region" aria-label="Benchmark results" tabindex="0">'
         f'<table class="{"" if index_items else "empty-results"}"><thead><tr>'
@@ -417,6 +426,10 @@ def _render_pages(
     )
     pages[Path("systems.html")] = _page("Memory systems", systems_body())
     pages[Path("comparisons.html")] = _page("Capabilities and benchmark coverage", comparisons_body())
+    catalog = load_catalog()
+    pages[Path("benchmarks.html")] = _page("Benchmark catalog", benchmarks_body(catalog))
+    pages[Path("coverage.html")] = _page("Whole-memory coverage", coverage_body(catalog))
+    pages[Path("data/catalog.json")] = _export_json(catalog)
     return pages
 
 

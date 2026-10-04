@@ -866,3 +866,50 @@ def test_rejects_remote_artifact_uri_without_network(tmp_path: Path) -> None:
             },
         )
     assert not (tmp_path / "site").exists()
+
+
+def test_empty_platform_exposes_full_scope_without_inventing_results(tmp_path: Path) -> None:
+    results = _write_json(tmp_path / 'results.json', [])
+    output = tmp_path / 'site'
+    render_site(results, {}, output)
+    coverage = (output / 'coverage.html').read_text()
+    catalog = json.loads((output / 'data' / 'catalog.json').read_text())
+    assert {c['id'] for c in catalog['capabilities']} == {f'C{i:02}' for i in range(1, 25)}
+    assert {m['id'] for m in catalog['modules']} == {f'M{i:02}' for i in range(1, 21)}
+    for capability in catalog['capabilities']:
+        assert f'id="{capability["id"]}"' in coverage
+        for module in capability['modules']:
+            assert f'href="#{module}"' in coverage
+    for module in catalog['modules']:
+        assert f'id="{module["id"]}"' in coverage
+    assert 'not a measured system score' in coverage
+    assert json.loads((output / 'data' / 'results.json').read_text()) == []
+    index = (output / 'index.html').read_text()
+    assert 'href="benchmarks.html"' in index
+    assert 'href="coverage.html"' in index
+    benchmarks = (output / 'benchmarks.html').read_text()
+    assert 'LongMemEval-V2' in benchmarks
+    assert 'BEAM-10M' in benchmarks
+    assert 'STATE-Bench' in benchmarks
+    assert 'Official upstream' in benchmarks
+    assert 'not a result' in benchmarks
+
+
+def test_catalog_preserves_original_capability_to_module_contract() -> None:
+    import re
+    from leaderboard.catalog import load_catalog
+
+    catalog = load_catalog()
+    root = Path(__file__).resolve().parents[1]
+    source = (root / catalog['scope_source']).read_text()
+    expected = {}
+    for line in source.splitlines():
+        if re.match(r'^\| C\d\d \|', line):
+            cells = [cell.strip() for cell in line.strip('|').split('|')]
+            expected[cells[0]] = (
+                [f'M{i:02}' for i in range(1, 20)]
+                if cells[0] == 'C24' else re.findall(r'M\d\d', cells[3])
+            )
+    assert {row['id']: row['modules'] for row in catalog['capabilities']} == expected
+    assert len(catalog['joint_scenarios']) == 6
+    assert all(len(row['modules']) >= 3 for row in catalog['joint_scenarios'])
