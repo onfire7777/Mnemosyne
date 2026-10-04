@@ -718,6 +718,13 @@ made after verification returns or an immutable external-custody guarantee.
 
 ## Effective context prerequisite audit
 
+Latest prerequisite evidence: the [offline reference-tokenizer audit](../research/benchmark-intake/local-reader-reference-tokens-2026-10-04.md)
+matches the installed Qwen vocabulary and merges to a pinned reference. The
+unchanged synthetic prompt has 3,989 user and 25 system tokens counted
+separately. This does not include chat formatting or prove runtime tokenizer
+equivalence. It strengthens the 4,096-context insufficiency finding without
+loading a model; full-input coverage and resource admission remain open.
+
 The [static context receipt](../research/benchmark-intake/local-reader-static-context-audit-2026-10-04.json)
 reconstructs the exact rendered prompts for the retained synthetic feasibility
 input without loading a model. Its 24,000 evidence characters become 24,839 user

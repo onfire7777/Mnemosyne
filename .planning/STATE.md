@@ -18,6 +18,17 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+Latest prerequisite work: [offline Qwen token measurement](../docs/research/benchmark-intake/local-reader-reference-tokens-2026-10-04.md)
+verified the installed vocabulary / added-token IDs / merges against a pinned
+reference and counted the unchanged synthetic probe's message contents. Six
+real-artifact diagnostic tests passed; no model loaded. The 4,096-token
+historical context cannot accommodate the observed 4,035-token runner prompt
+plus 512 output tokens without shifting. Full-input/runtime equivalence,
+effective context for the next candidate and resource admission remain open.
+CI `37225669534` at `762f12c8` has passed all gating jobs except unit/drift,
+which was still running at inspection. Later local commits are not covered
+by that head's results; no merge or phase completion is recorded.
+
 At `4a0e4c4c`, the Mnemetric comparison/coverage/attempt surfaces and real local
 retrieval preview are implemented; the single retrieval run has an exact
 nine-file clean-checkout reproduction. It is nonpublishable and not an official
