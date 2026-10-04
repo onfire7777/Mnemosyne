@@ -229,3 +229,13 @@ single-category population with every question answered is therefore not marked
 as a complete LoCoMo report. All 26 scorer tests, including this regression,
 passed; Ruff passed. Even the stricter complete flag does not establish admitted
 dataset coverage, runtime authenticity or publication eligibility.
+
+Replay resource refinement: population replay now prepares each conversation's
+normalized inputs, evidence map and capture digest once, then reuses that local
+context across its questions. Previously those full-conversation operations were
+repeated for every answer record. Contexts own copied question/annotation data
+and remain local to the invocation; there is no global cache or cross-run state.
+The public single-record verifier continues to prepare its own independent
+context. Existing tamper, complete-population and order-invariance tests still
+exercise the same verification rules. This reduces repeated preprocessing by
+construction, not a measured wall-time or RAM performance claim.
