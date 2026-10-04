@@ -114,3 +114,5 @@ Each slice is independently testable but none closes Plan B by itself.
 Continue missing benchmark modules, real external adapters and Plan A product
 quality work alongside platform implementation. Resource limits determine
 where a run happens, not whether its original acceptance requirement survives.
+
+Implementation update: declared-context grouping and the static/progressive comparison workspace are implemented in `leaderboard/grouping.py`, `leaderboard/workspace.py` and `leaderboard/comparison.js`. URL filters pin source identity; missing context remains excluded. Operational admission, full ledger integration and real competitor evidence remain open.

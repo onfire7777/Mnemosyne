@@ -295,3 +295,24 @@ remain open. Validation: 301 grouping, contract, render, publish and policy
 checks passed; Ruff and diff checks passed. The registered retrieval run was
 still live with normal pressure during implementation; no second benchmark
 workload was launched.
+
+## Comparison workspace
+
+`compare.html` now exposes compatible groups, per-system checkboxes, atomic
+result tables, reported uncertainty, original run links, execution differences,
+exact conditions and excluded-record reasons. JavaScript only filters existing
+server-rendered rows; it fetches no mutable scores. Without JavaScript all
+compatible groups remain visible. Filter URLs preserve group/system selection
+and the source-dataset digest. Stale dataset links fail visibly rather than
+silently substituting current results. No cross-group sorting or averaging is
+introduced.
+
+Validation: 111 workspace/grouping/render/publication checks passed, plus Ruff
+and diff checks. Real-browser synthetic testing confirmed all-system default,
+system filtering (3 to 2 rows), empty selection, reset, back navigation, selected
+group restoration after reload and stale-dataset warning. At 390px, document
+width is 390px after repairing long-fingerprint overflow. Synthetic pages were
+removed by regenerating the real empty preview; no fixture score remains in the
+served dataset. `comparison-workspace-preview.png` captures the resulting real
+empty-state page. Keyboard-native form controls and a live status region are
+present; broader assistive-technology testing remains outstanding.
