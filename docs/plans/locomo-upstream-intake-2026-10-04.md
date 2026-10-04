@@ -186,3 +186,32 @@ uv pip install --python /path/to/scorer/bin/python -r eval/public/requirements-l
 Remaining: source-complete prompt/retrieval contract, aggregate reporting,
 pinned dataset admission, adapter/runner/bundle integration, permitted runtime
 and resource preflight, then registered actual evaluation and reproduction.
+
+## Category replay report
+
+`score_prediction_set` binds decoded outputs to the full explicitly supplied
+source population using ingestion IDs. It rejects unknown/duplicate IDs, extra
+prediction fields and explicit null context. Absent outputs remain explicit
+`missing-prediction` cases with null scores. All five categories remain present,
+including categories with no source examples.
+
+Per-category fields retain source/scored/missing counts, the sum of rounded
+per-case scores, the upstream-style source-denominator mean, recall numerator
+and mean, and observed/fallback recall counts. The upstream-style mean can be
+zero for an unscored category with source examples, but its missing count and
+`complete: false` are explicit; it is not a measured zero-score claim. Categories
+without examples have null means. No overall average, ranking or publication
+authorization is emitted. Original source order controls accumulation; order of
+prediction submission does not alter the output or its canonical digest.
+
+The report retains source/prediction SHA-256 digests for replay binding. These
+are not substitutes for dataset admission, signed registration or model-execution
+evidence. The input field is deliberately named `decoded_prediction`; this
+scoring boundary does not claim to retain an unprovided raw model response.
+
+Validation: all 59 ingestion and scoring tests passed in the isolated scorer
+environment. New tests cover missing category outputs, full denominators,
+three-decimal per-case accumulation, submission-order invariance, separate
+fallback counts and malformed/ambiguous prediction populations. Ruff passed.
+Adapter execution, asset admission, surrounding prompts and immutable neutral
+bundles are still required before any real benchmark result.
