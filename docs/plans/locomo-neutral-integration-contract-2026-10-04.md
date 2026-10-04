@@ -612,7 +612,7 @@ atomic record and expose the separate retrieval category summaries through its
 bound native replay artifact and supplementary view. All raw summaries remain
 in `category_metrics`; none are discarded or blended into QA.
 
-Full record assembly still requires actual identity, artifact and resource
+Registered record assembly still requires actual identity, artifact and resource
 metadata from the registered run. Offline replay cannot invent these fields.
 Its implementation must bind the single record to the source/configuration,
 raw traces and replay report through the existing bundle verifier, and preserve
@@ -631,3 +631,29 @@ custody visibility, HTML escaping and unchanged raw downloads. The local site
 was regenerated from the existing signed retrieval result; the served complete-
 trace view and byte-identical raw download were checked. No synthetic native
 result or additional competitor result was added to that preview.
+
+## Development atomic-result projection
+
+`eval/public/adapters/locomo_results.py` now assembles one development-only
+reference-QA result from explicit metadata and immutable artifact bytes. It
+checks the complete manifest inventory and raw digests, candidate/public-seam
+binding, source identity, seed, adapter protocol and full scorer replay before
+returning a schema-valid record. All five retrieval summaries remain in the
+same bound replay artifact; no second attempt identity is invented.
+
+Replay alone cannot establish execution, resource or safety admission. This
+projection therefore requires not-measured, resource-unverified, operator-run
+development metadata and rejects promoted safety or publication claims. Even a
+complete synthetic answer population remains unverified execution. This helper
+does not write a registered bundle, enter the common bundle verifier or grant
+runner admission. Those integration steps and real measured execution remain
+open; the earlier full-record-construction checkpoint is advanced only for this
+explicit development projection.
+
+Validation: 13 assembly tests passed both through production Python 3.14 to the
+isolated scorer and within Python 3.11. The broader isolated suite passed 157
+tests before the final answered-population test was added; that added test is
+included in both 13-test passes. Rejections cover mutated/rehashed source and
+reports, identities, seeds, manifest bytes and promoted evidence claims. Ruff,
+diff whitespace and workflow YAML parsing passed. CI now includes the assembly
+suite; this local validation does not claim a completed GitHub run.
