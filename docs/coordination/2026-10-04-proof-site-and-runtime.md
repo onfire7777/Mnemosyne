@@ -525,3 +525,15 @@ runtime files are rejected. Resource-file hash verification remains separate
 from resource preflight, and no model execution/publication claim is promoted.
 The 29 runtime-installation, cross-interpreter replay and reader/configuration
 checks passed; Ruff passed. No model or protected-data execution occurred.
+
+
+## Native trace inspector and local preview refresh
+
+Reconciled native result assembly with the accepted one-record-per-atomic-attempt
+rule: primary QA belongs in one result, with retrieval summaries retained in its
+bound replay artifact rather than fabricated extra attempts. Full record/bundle
+assembly remains open. Added named native request/response, projection, claim,
+policy and custody fields to trace pages, plus escaped complete JSON on all trace
+pages. The 75 focused checks passed. Refreshed the local preview from its existing
+signed retrieval result, verified the served trace inspector and byte-identical
+raw download, and added no new measured results.

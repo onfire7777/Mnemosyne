@@ -355,6 +355,19 @@ def _render_pages(
                 answer_label = "Final answer"
             else:
                 answer_label = "Recorded output"
+            native_fields = (
+                ("status", "Native projection status"),
+                ("request", "Question and public request"),
+                ("request_sha256", "Request byte digest"),
+                ("question_transformation", "Question transformation and option mapping"),
+                ("decoded_prediction", "Prediction passed to the category scorer"),
+                ("retrieved_dialog_ids", "Retrieved source dialog IDs"),
+                ("claim_text_custody", "Claim replay checks"),
+                ("reader_policy_matched", "Reader disclosure matches policy"),
+                ("runtime_custody_verified", "Runtime custody verified"),
+                ("run_config_sha256", "Run configuration digest"),
+                ("raw_response", "Original public response"),
+            ) if trace.get("projection_policy") == "native-explicit-abstention-v1" else ()
             evidence = "".join(
                 f"<h2>{label}</h2><pre>{_escape(trace[field])}</pre>"
                 for field, label in (
@@ -365,7 +378,7 @@ def _render_pages(
                         "Retrieved context/evidence: authorized_retrieval_hops",
                     ),
                     ("answer", answer_label),
-                )
+                ) + native_fields
                 if field in trace
             )
             pages[
@@ -375,7 +388,9 @@ def _render_pages(
                 f"<h1>Trace {_escape(question_id)}</h1>"
                 f'<p><a href="../../results/{record_digest}.html">'
                 "Back to result</a></p>"
-                f"{evidence}",
+                f"{evidence}"
+                '<details><summary>Complete stored trace (JSON)</summary>'
+                f'<pre>{_escape(json.dumps(trace, sort_keys=True, indent=2, ensure_ascii=False))}</pre></details>',
                 root="../../",
             )
         pages[Path("results") / f"{record_digest}.html"] = _page(
