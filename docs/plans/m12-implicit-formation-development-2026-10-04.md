@@ -429,3 +429,12 @@ fixed timestamps, offered-action IDs or expected answers. `contract-v1` remains
 the default. Logs retain the selected profile and exact prompt hash/body.
 A named variant is not evidence of improved quality: controlled real-provider
 measurements are required and remain separate from benchmark admission.
+
+
+The [paired prompt capture](../../eval/reports/m12-formation-semantic-diagnostic-2026-10-04/README.md)
+retains all 22 first-turn responses for the first 11 frozen cases. Added semantic
+instructions corrected one recurrence proposal but did not repair event or
+condition gates and introduced an unrelated task in another case. These mixed
+observations do not justify a default change or a quality claim. No tasks were
+executed. The next investigation should distinguish constrained-decoding bias
+from semantic model limitations while keeping public inputs and failures visible.

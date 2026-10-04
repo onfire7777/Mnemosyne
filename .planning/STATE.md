@@ -18,6 +18,15 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+A paired Qwen3 1.7B diagnostic at clean `cccb4b24` completed all 22 first-turn
+calls across the first 11 frozen cases. Semantic instructions fixed one
+recurrence proposal but left event/condition timer substitutions and introduced
+an unrelated task. Both profiles remain development-only; `contract-v1` stays
+the default. Raw evidence is in `m12-formation-semantic-diagnostic-2026-10-04`.
+111 formation checks and the separate retained-capture verification passed.
+The run completed in 80.544 seconds; cleanup observed no models loaded. No tasks
+were executed and no full-conversation quality or scheduling result is claimed.
+
 Failed-attempt analysis now accounts for all 220 planned cases. The initial
 capture has 0 completed / 1 incomplete / 219 not attempted; the schema capture
 has 21 / 1 / 198. Completed-prefix diagnostics retain 17 misses without a

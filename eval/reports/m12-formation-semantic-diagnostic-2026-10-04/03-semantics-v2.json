@@ -1,0 +1,26 @@
+{
+  "case_id": "6a02bb8c9e712f2fa69ae689",
+  "profile": "semantics-v2",
+  "task_execution": false,
+  "publishable": false,
+  "status": "valid-envelope",
+  "response": {
+    "operations": [
+      {
+        "command": "task.create",
+        "payload": {
+          "task_id": "6a02bb8c9e712f2fa69ae689",
+          "action_id": "73fb2b5f07f78b62",
+          "trigger": {
+            "type": "exact_time",
+            "payload": {
+              "at": "2030-11-28T00:00:00Z"
+            }
+          },
+          "idempotency_key": "release_packet_review"
+        }
+      }
+    ],
+    "clarification": null
+  }
+}

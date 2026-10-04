@@ -1,0 +1,19 @@
+{
+  "operations": [
+    {
+      "command": "task.create",
+      "payload": {
+        "task_id": "563c75b6a6b2f389e4461455",
+        "action_id": "442fc5162f3d03ac",
+        "trigger": {
+          "type": "exact_time",
+          "payload": {
+            "at": "2030-11-28T01:00:00Z"
+          }
+        },
+        "idempotency_key": "release_packet_reminder"
+      }
+    }
+  ],
+  "clarification": null
+}
