@@ -1,0 +1,49 @@
+{
+  "packages_queried": 424,
+  "findings": [
+    {
+      "ecosystem": "crates.io",
+      "name": "crossbeam-epoch",
+      "version": "0.9.18",
+      "vulns": [
+        {
+          "id": "RUSTSEC-2026-0204",
+          "modified": "2026-07-06T22:30:04.159269Z"
+        }
+      ]
+    },
+    {
+      "ecosystem": "crates.io",
+      "name": "h2",
+      "version": "0.4.15",
+      "vulns": [
+        {
+          "id": "RUSTSEC-2026-0258",
+          "modified": "2026-08-18T08:30:03.308019Z"
+        }
+      ]
+    },
+    {
+      "ecosystem": "crates.io",
+      "name": "paste",
+      "version": "1.0.15",
+      "vulns": [
+        {
+          "id": "RUSTSEC-2024-0436",
+          "modified": "2026-01-27T22:03:15.694766Z"
+        }
+      ]
+    },
+    {
+      "ecosystem": "crates.io",
+      "name": "rustls",
+      "version": "0.23.41",
+      "vulns": [
+        {
+          "id": "RUSTSEC-2026-0285",
+          "modified": "2026-09-14T16:15:03.240735Z"
+        }
+      ]
+    }
+  ]
+}

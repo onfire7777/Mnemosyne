@@ -1,0 +1,21 @@
+{
+  "base_commit": "c3d440f26e028e51b173d240e5c11d3eb77617ff",
+  "locks": {
+    "uv.lock": {
+      "before_sha256": "f019a7b0d71f11d51926f41d5fe6b316fc6b9ac25646c314552256b2f4dd6cda",
+      "after_sha256": "f019a7b0d71f11d51926f41d5fe6b316fc6b9ac25646c314552256b2f4dd6cda"
+    },
+    "rust/mneme-providers/Cargo.lock": {
+      "before_sha256": "11094d7582e8fcc12f43cb57c86096a9f9900850fc95340fbdf341f881bb5ba7",
+      "after_sha256": "997deb5c640fffcd6ff7bd13ed2f6757007419fce0ce41aaae6b881c89531aa6"
+    },
+    "rust/mnemosyne-native/Cargo.lock": {
+      "before_sha256": "fb3f115b164c782b5146c1cce9726131f49e8ad1509a1f3a7d0b9dde33d424e2",
+      "after_sha256": "2fe70d869f102b36ef270092d140e1141065e0fe78d0873ec8f20df52ebc8a13"
+    },
+    "services/answering-ort/Cargo.lock": {
+      "before_sha256": "7795e3717c7d4f77979cfc50ab800a57f18a3b09f13959de2bde58f11178bfc6",
+      "after_sha256": "7795e3717c7d4f77979cfc50ab800a57f18a3b09f13959de2bde58f11178bfc6"
+    }
+  }
+}
