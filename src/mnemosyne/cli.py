@@ -5147,8 +5147,8 @@ def _mcp_serve_preflight(transport: str) -> None:
         raise SystemExit(
             "mcp-serve --transport streamable-http requires "
             + " and ".join(missing)
-            + ": install the MCP extra with `pip install 'mnemosyne-memory[mcp]'` "
-            "(or `uv sync --extra mcp` in a checkout)."
+            + ": from this repository root, install the MCP extra with "
+            "`python -m pip install '.[mcp]'` or `uv sync --extra mcp`."
         )
 
 

@@ -18,6 +18,9 @@ remain unchanged. Source delivery is distinct from measured acceptance.
   and does not establish whole-memory capability or public admission.
 - Phase 12 protected QA, official dataset/provider evidence, REPRO-002,
   physical 8 GiB acceptance, and publication/launch gates remain open.
+- PyPI release also requires resolving the distribution-name collision recorded
+  in `docs/coordination/2026-10-04-distribution-name-collision.md`; repository-local
+  installs remain the supported path for this source.
 
 Evidence sources: `eval/public/bundle.py`, `leaderboard/validate.py`,
 `eval/public/security_calibration.py`, `eval/public/wmbs_m06.py`,
