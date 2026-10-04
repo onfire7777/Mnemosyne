@@ -234,12 +234,12 @@
     {
       "id": "M07",
       "name": "Retention/rehearsal/decay",
-      "status": "Public CLI clock/rehearsal prerequisite characterized and regression-tested; the full multi-seed fixture, scorer, integration and resource admission remain open."
+      "status": "Public CLI rehearsal scheduling tested across five calendar starts spanning over a virtual year; full seeded retention, retrieval, interference, storage/cost and resource admission remain open."
     },
     {
       "id": "M08",
       "name": "Reversible forgetting",
-      "status": "Plan exists; dedicated benchmark fixture/scorer/integration missing."
+      "status": "Public tombstoning exists; its reversible-delete adapter contract is unresolved. Dedicated fixture, scorer and integration remain missing; restore correctness is not claimed."
     },
     {
       "id": "M09",

@@ -1,5 +1,32 @@
 # WMB M08 — Reversible Forgetting Implementation Contract
 
+## Current source reconciliation — 2026-10-04
+
+The current owner authorizes solo implementation on the existing development
+branch; historical lane/write-slot restrictions below do not require creating
+new branches or resurrecting old PRs. Technical capability and benchmark gates
+remain binding.
+
+The public CLI and `MnemoCLI.forget` expose `tombstone_recompute` and
+`hard_delete_legal`. The source inventory did not find a public `restore` or
+`undelete` command for a delete receipt, nor an explicit `reversible` mode.
+This does not establish that tombstoning cannot support a reversible-delete
+adapter: it establishes that the mapping and its observable guarantees have
+not been frozen or demonstrated. Do not rename hard deletion to reversible
+deletion or count backup recovery as a tested restore operation. Restore is
+optional in the M08 contract; absence of restore alone does not disqualify an
+otherwise valid reversible-delete adapter.
+
+The next source-readiness step is a precise public adapter contract covering
+selector scope, receipt identity, tombstone behavior, re-ingestion transitions
+and whether restore is supported. The descriptive fixture/scorer also need
+the existing closed-schema and metric-formula freeze. Resource receipts gate
+measured/admitted claims, not the pure Stage A source work, as specified below.
+Until these prerequisites are resolved, the website describes M08 as
+unfinished rather than as a measured capability or a zero score.
+
+## Historical implementation contract
+
 Status: `PROPOSED` / **PLANNING ARTIFACT ONLY — NOT CODE-READY.**
 This file authorizes no source, fixture, registry, scorer, measurement,
 admission-state, publication change, or GitHub PR.
