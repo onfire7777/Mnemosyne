@@ -18,6 +18,13 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+TRAIN document connectivity at `51bb3975` now groups all 220,744 staged rows
+into 919 components. The largest has 152,706 rows (89,667 Hotpot and 63,039
+SQuAD); only 758 Hotpot rows remain outside it. See
+`eval/reports/compact-train-groups-2026-10-04`. Random row splits would violate
+source-document isolation. No partitions are assigned; semantic entity and
+protected-overlap screening remain open before training admission.
+
 Exact-source TRAIN staging at `19b9e0b9` processed 220,766 upstream rows:
 220,744 retained, 22 rejected for invalid Hotpot support indices. The independent
 raw-source audit checked every retained row and 194,069 exact spans. Evidence:

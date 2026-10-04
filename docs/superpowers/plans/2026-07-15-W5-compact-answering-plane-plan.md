@@ -50,6 +50,12 @@ are neither benchmark results nor training admission. Entity/document grouping,
 pre/post protected-overlap checks, whole-cluster exclusion, frozen partitions
 and complete attribution custody remain open before any model work.
 
+Source-document grouping now finds 919 connected components; one holds
+152,706 of 220,744 staged rows, including 89,667 Hotpot rows. This constrains
+independent Hotpot selection/calibration coverage (758 rows outside that
+component). `eval/reports/compact-train-groups-2026-10-04` retains the policy,
+histogram and full-edge audit. No partition or training admission is claimed.
+
 ## Goal
 
 Build the compact grounded-answering plane — embedder + cross-encoder reranker +

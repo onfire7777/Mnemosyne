@@ -1,0 +1,18 @@
+{
+  "schema": "compact-train-group-edge-audit/v1",
+  "rows_checked": 220744,
+  "document_keys_checked": 982911,
+  "groups": 919,
+  "shared_document_edges_crossing_groups": 0,
+  "largest_group_rows": 152706,
+  "largest_group_by_source": {
+    "hotpotqa/hotpot_qa": 89667,
+    "rajpurkar/squad_v2": 63039
+  },
+  "outside_largest_by_source": {
+    "rajpurkar/squad_v2": 67280,
+    "hotpotqa/hotpot_qa": 758
+  },
+  "partition_status": "unassigned",
+  "training_admitted": false
+}
