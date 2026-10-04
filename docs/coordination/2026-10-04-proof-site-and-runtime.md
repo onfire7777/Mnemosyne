@@ -120,3 +120,28 @@ validation remains unchanged. Ruff and 89 relevant render/publication/policy
 tests passed. The actual browser path from Methods to the eight-entry guide
 was inspected. This prepares L3 content but does not establish its public
 publication or close the methods-paper requirement.
+
+## Trace semantics and registered retrieval preparation
+
+A trace review found that the `answer` field in deterministic retrieval runs
+contains a retrieved identifier, while the site previously called it a final
+answer. The renderer now labels it “Retrieval output (not a generated answer)”.
+QA traces retain “Final answer”; unrecognized families use “Recorded output”.
+Eighty-five focused rendering, publication and policy checks passed, as did
+Ruff. Browser navigation through a synthetic result to its trace confirmed
+the corrected label; the temporary synthetic site was then removed and the
+empty real-results preview restored.
+
+The signed registration in
+`eval/registrations/2026-10-04-longmemeval-retrieval-b0cdbd89/` fixes a
+500-question, retrieval-only characterization at source commit
+`b0cdbd8986b94c91a3bf20833ed33f405612025a`. Its signature, seven source-file
+hashes, clean detached checkout and both raw dataset digests were verified.
+The detached checkout creates no additional named branch. Public registration
+verification, completion of the existing local test workload, and an exclusive
+start receipt remain execution gates. No scoring attempt has started.
+
+`docs/research/OpenMemBench-Methods-Draft.md` records the methods and remaining
+publication requirements. Neither this draft nor the single-system retrieval
+registration replaces the original comparative roster, QA evaluation,
+adversarial report, independent review or public website requirements.

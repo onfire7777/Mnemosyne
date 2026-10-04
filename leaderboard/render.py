@@ -296,6 +296,13 @@ def _render_pages(
                 f"{_escape(question_id)}</a>"
                 "</li>"
             )
+            family = trace.get("scoring_family")
+            if family == "deterministic-retrieval":
+                answer_label = "Retrieval output (not a generated answer)"
+            elif family == "qa":
+                answer_label = "Final answer"
+            else:
+                answer_label = "Recorded output"
             evidence = "".join(
                 f"<h2>{label}</h2><pre>{_escape(trace[field])}</pre>"
                 for field, label in (
@@ -305,7 +312,7 @@ def _render_pages(
                         "authorized_retrieval_hops",
                         "Retrieved context/evidence: authorized_retrieval_hops",
                     ),
-                    ("answer", "Final answer"),
+                    ("answer", answer_label),
                 )
                 if field in trace
             )

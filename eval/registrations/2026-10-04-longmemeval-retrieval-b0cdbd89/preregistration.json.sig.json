@@ -1,0 +1,8 @@
+{
+  "algorithm": "ed25519",
+  "manifest": "preregistration.json",
+  "manifest_sha256": "sha256:1c1f8ce65dbc4380bbaf1d0fb9dd44609a78bf03e9cc221c4f73d06aeccfdbc7",
+  "public_key_sha256": "sha256:c0d59227b22d86162fee73780613d668de37c2b7a32801cc011090aaaef48d5d",
+  "schema": "mnemosyne.evidence_signature.v1",
+  "signature_b64": "7vQOXLaUDLk+iiy1BvFuERm1qIOOOopZLyMWH5jgzySe4Py6lgRah//lLF8G/quDZ4b05WTB3h9O4VYUtMIDDQ=="
+}
