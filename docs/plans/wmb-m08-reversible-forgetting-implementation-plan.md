@@ -311,3 +311,23 @@ zero exact-canary leakage; semantic leakage ≤1%; unrelated utility loss
 No registry row exists, so this cell is not runnable. A missing hook is
 `unsupported`, never a zero.
 ```
+
+## Public tombstone/re-ingestion characterization — 2026-10-04
+
+A temporary local-store probe through public CLI subprocesses establishes a
+specific existing behavior: after `forget --erasure-mode tombstone_recompute`,
+re-ingesting the identical source produces the same CID but does not restore
+that evidence to search. This holds through two delete/re-ingest cycles. The
+target is demonstrably retrievable before deletion; unrelated same-tenant
+content and identical content in a second tenant remain retrievable after both
+cycles. The repeatable regression is
+`tests/test_public_tombstone_reingestion.py`; it passed on the local production
+environment, with Ruff also passing.
+
+This narrows the adapter contract: identical re-ingestion must not be presented
+as restoration of the tombstoned item. It demonstrates no-resurrection and
+control preservation for this bounded exact-query case, not general semantic
+leakage, multi-hop contamination, full erase coverage, five seeded corpora or
+restore correctness. No public restore operation is exercised or implied. The
+C10 mapping and the full M08 fixture/scorer remain unresolved. No persistent
+user store, model, external service or protected dataset was used.
