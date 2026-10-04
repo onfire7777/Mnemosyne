@@ -107,3 +107,24 @@ def test_replay_transport_rejects_wrong_response_and_timeout(monkeypatch):
     monkeypatch.setattr(subprocess, "run", timeout)
     with pytest.raises(LoCoMoError, match="timed out"):
         replay_in_environment([], [], caption_policy="exclude-caption", choice_draws={}, python=sys.executable)
+
+
+def test_choice_seed_reproduces_across_interpreters():
+    from eval.public.adapters.locomo import native_choice_policy
+    executable = os.environ.get("MNEMOSYNE_TEST_LOCOMO_PYTHON")
+    if not executable:
+        pytest.skip("requires explicit pinned scorer Python")
+    source = [{"sample_id": "synthetic-seed", "conversation": {
+        "session_1_date_time": "Synthetic date", "session_1": [
+            {"speaker": "A", "text": "violet kite", "dia_id": "D1:1"}]},
+        "qa": [{"question": f"Synthetic {i}?", "answer": "distractor", "category": 5,
+                "evidence": []} for i in range(2)]}]
+    policy = native_choice_policy(source, choice_seed=1)
+    report = replay_in_environment(source, [], caption_policy="exclude-caption",
+                                    choice_seed=1, python=executable)
+    assert report["choice_policy"] == policy
+    assert report["categories"]["5"]["missing_count"] == 2
+    assert not report["complete"] and not report["runtime_custody_verified"]
+    with pytest.raises(LoCoMoError, match="rejected replay"):
+        replay_in_environment(source, [], caption_policy="exclude-caption",
+                              choice_seed=1, choice_draws=policy["draws"], python=executable)

@@ -190,6 +190,26 @@ def test_native_population_replays_missingness_empty_retrieval_and_tampering(tmp
                                                 caption_policy="exclude-caption", choice_draws=draws)
     assert complete["categories"]["5"]["native_observed_recall_mean"] is None
 
+    from eval.public.adapters.locomo import native_choice_policy
+    from eval.public.adapters.locomo_replay import verify_report_in_environment
+    for seed in (1, 2):  # Exercises both option orders through the isolated worker.
+        seeded_draws = native_choice_policy(source, choice_seed=seed)["draws"]
+        seeded_records = [answer_captured_question(conversation, question, annotation,
+                          choice_draw=seeded_draws.get(question["question_id"]))
+                          for question, annotation in zip(questions, sample["qa"], strict=True)]
+        seeded = replay_native_population(source, seeded_records,
+                                           caption_policy="exclude-caption", choice_seed=seed)
+        assert seeded["choice_policy"]["seed"] == seed
+        assert seeded["choice_draws"] == seeded_draws
+        assert seeded == verify_report_in_environment(seeded, source, seeded_records,
+                    caption_policy="exclude-caption", choice_seed=seed, python=sys.executable)
+        with pytest.raises(LoCoMoError, match="rejected replay"):
+            replay_in_environment(source, seeded_records, caption_policy="exclude-caption",
+                                  choice_seed=3, python=sys.executable)
+        with pytest.raises(LoCoMoError, match="saved native report"):
+            verify_report_in_environment(seeded, source, seeded_records,
+                    caption_policy="exclude-caption", choice_draws=seeded_draws, python=sys.executable)
+
     def incomplete(cli, path, *, include_derivation=False):
         request = json.loads(Path(path).read_text())
         return {"results": [{"question_id": request["question_id"], "answer": None,

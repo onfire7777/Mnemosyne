@@ -165,6 +165,36 @@ def prepare_upstream_question(annotation: dict, *, choice_draw: float | None = N
             "query": query, "choice_draw": choice_draw, "answer_key": answer_key}
 
 
+def native_choice_policy(samples: object, *, choice_draws: dict | None = None,
+                         choice_seed: int | None = None) -> dict:
+    """Resolve explicit native option ordering without ambient RNG state.
+
+    Seeded draws use Python Random.random in source order, once per category-5
+    question. This is a native run policy, not the upstream script's RNG state.
+    Registration and pre-execution choice of the seed remain caller duties.
+    """
+    from random import Random
+
+    if (choice_draws is None) == (choice_seed is None):
+        raise LoCoMoError("supply exactly one of choice_draws or choice_seed")
+    annotations = split_samples(samples)["annotations"]
+    required = [row["question_id"] for row in annotations if row["annotation"]["category"] == 5]
+    if choice_seed is not None:
+        if type(choice_seed) is not int or not 0 <= choice_seed < 2 ** 64:
+            raise LoCoMoError("choice seed must be an unsigned 64-bit integer")
+        random = Random(choice_seed)
+        draws = {qid: random.random() for qid in required}
+        policy = "python-random-source-order/v1"
+    else:
+        if not isinstance(choice_draws, dict) or set(choice_draws) != set(required):
+            raise LoCoMoError("native choice policy requires exactly the category-5 choice draws")
+        draws = dict(choice_draws)
+        policy = "explicit-draws/v1"
+    for row in annotations:
+        prepare_upstream_question(row["annotation"], choice_draw=draws.get(row["question_id"]))
+    return {"id": policy, "seed": choice_seed, "draws": draws}
+
+
 def decode_upstream_category5(raw_prediction: str, answer_key: dict) -> dict:
     """Retain raw text and the upstream decoder's unusual short-output behavior.
 

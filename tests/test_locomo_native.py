@@ -340,3 +340,27 @@ def test_native_synthesis_text_is_preserved_without_claiming_derivation_replay()
     assert derived["decoded_prediction"] == "A derived synthetic answer"
     assert derived["claim_text_custody"] == ["derived-text-unverified"]
     assert not derived["runtime_custody_verified"]
+
+
+def test_seeded_native_execution_preserves_option_policy(tmp_path, monkeypatch):
+    from eval.public.adapters.locomo_native import iter_native_answers
+    from eval.public.adapters.locomo import native_choice_policy
+    source = sample("seeded")
+    source["qa"] = [{"question": f"Synthetic {i}?", "answer": "distractor", "category": 5,
+                     "evidence": []} for i in range(2)]
+    seen = []
+
+    def answer(cli, path, *, include_derivation=False):
+        request = json.loads(Path(path).read_text())
+        seen.append(request["question"])
+        return {"results": [{"question_id": request["question_id"], "answer": None,
+            "abstained": True, "claims": [], "hops": [], "reader": {}}]}
+
+    monkeypatch.setattr(MnemoCLI, "eval_answer_batch", answer)
+    records = list(iter_native_answers([source], MnemoCLI(store=str(tmp_path / "unused")),
+                    caption_policy="exclude-caption", choice_seed=1))
+    draws = native_choice_policy([source], choice_seed=1)["draws"]
+    assert [r["question_transformation"]["choice_draw"] for r in records] == list(draws.values())
+    assert "(a) Not mentioned in the conversation" in seen[0]
+    assert "(b) Not mentioned in the conversation" in seen[1]
+    assert all(r["status"] == "incomplete-reader-execution" for r in records)

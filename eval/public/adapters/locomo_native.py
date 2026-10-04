@@ -11,7 +11,7 @@ from eval.harness.cli_driver import MnemoCLI
 from eval.public.custody import capture_cid
 from eval.public.reader_policy import match_reader_policy, validate_reader_policy
 from eval.public.derivation import DerivationError, verify_claim_derivation
-from .locomo import LoCoMoError, decode_upstream_category5, normalize_dialogs, prepare_upstream_question, split_samples
+from .locomo import LoCoMoError, decode_upstream_category5, native_choice_policy, normalize_dialogs, prepare_upstream_question, split_samples
 
 
 def _evidence_digest(evidence):
@@ -20,7 +20,8 @@ def _evidence_digest(evidence):
 
 
 def iter_native_answers(samples: object, cli: MnemoCLI, *, caption_policy: str,
-                        choice_draws: dict[str, float], reader_policy: dict | None = None):
+                        choice_draws: dict[str, float] | None = None, reader_policy: dict | None = None,
+                        choice_seed: int | None = None):
     """Yield the full source population in order; never filter failed questions.
 
     The caller must admit the data/runtime and persist each yielded record in
@@ -36,10 +37,8 @@ def iter_native_answers(samples: object, cli: MnemoCLI, *, caption_policy: str,
     source = split_samples(samples)
     normalize_dialogs(samples, caption_policy=caption_policy)
     annotations = {row["question_id"]: row["annotation"] for row in source["annotations"]}
-    required = {qid for qid, row in annotations.items() if row["category"] == 5}
-    if not isinstance(choice_draws, dict) or set(choice_draws) != required:
-        raise LoCoMoError("native execution requires exactly the category-5 choice draws")
-    choice_draws = dict(choice_draws)
+    choice_draws = native_choice_policy(samples, choice_draws=choice_draws,
+                                        choice_seed=choice_seed)["draws"]
     for qid, annotation in annotations.items():
         prepared = prepare_upstream_question(annotation, choice_draw=choice_draws.get(qid))
         if not prepared["query"].strip() or len(prepared["query"]) > 2000:

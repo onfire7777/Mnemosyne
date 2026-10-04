@@ -14,7 +14,7 @@ from tempfile import TemporaryFile
 from .locomo import LoCoMoError
 
 MAX_BYTES = 64 * 1024 * 1024
-_FIELDS = {"samples", "records", "caption_policy", "choice_draws", "reader_policy"}
+_FIELDS = {"samples", "records", "caption_policy", "choice_draws", "reader_policy", "choice_seed"}
 
 
 def _pairs(pairs):
@@ -51,8 +51,8 @@ def _encode(value):
     return raw
 
 
-def replay_in_environment(samples, records, *, caption_policy, choice_draws,
-                          python: str | Path, timeout_s: float = 120, reader_policy: dict | None = None) -> dict:
+def replay_in_environment(samples, records, *, caption_policy, choice_draws=None,
+                          python: str | Path, timeout_s: float = 120, reader_policy: dict | None = None, choice_seed: int | None = None) -> dict:
     """Return verified scoring output using an explicitly selected interpreter."""
     if type(timeout_s) not in (int, float) or not math.isfinite(timeout_s) or timeout_s <= 0:
         raise LoCoMoError("replay timeout must be finite and positive")
@@ -60,7 +60,7 @@ def replay_in_environment(samples, records, *, caption_policy, choice_draws,
     if not executable.is_file():
         raise LoCoMoError("scorer Python executable is missing")
     request = _encode(dict(samples=samples, records=records, caption_policy=caption_policy,
-                           choice_draws=choice_draws, reader_policy=reader_policy))
+                           choice_draws=choice_draws, reader_policy=reader_policy, choice_seed=choice_seed))
     root = Path(__file__).resolve().parents[3]
     # -I ignores ambient PYTHONPATH/user packages; keep the selected venv intact.
     bootstrap = (f"import sys,runpy;sys.path[:0]={[str(root), str(root / 'src')]!r};"
@@ -98,8 +98,8 @@ def _main():
     sys.stdout.buffer.write(_encode({"request_sha256": sha256(raw).hexdigest(), "report": report}))
 
 
-def verify_report_in_environment(report, samples, records, *, caption_policy, choice_draws,
-                                 python: str | Path, timeout_s: float = 120, reader_policy: dict | None = None) -> dict:
+def verify_report_in_environment(report, samples, records, *, caption_policy, choice_draws=None,
+                                 python: str | Path, timeout_s: float = 120, reader_policy: dict | None = None, choice_seed: int | None = None) -> dict:
     """Verify every saved report field against source, records and current policy.
 
     Changed replay source must be verified in its original checkout rather
@@ -107,7 +107,7 @@ def verify_report_in_environment(report, samples, records, *, caption_policy, ch
     not proof of model execution or authorization to publish.
     """
     expected = replay_in_environment(samples, records, caption_policy=caption_policy,
-                                     choice_draws=choice_draws, python=python, timeout_s=timeout_s, reader_policy=reader_policy)
+                                     choice_draws=choice_draws, python=python, timeout_s=timeout_s, reader_policy=reader_policy, choice_seed=choice_seed)
     if _encode(report) != _encode(expected):
         raise LoCoMoError("saved native report does not match source-bound replay")
     return expected

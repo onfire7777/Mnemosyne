@@ -286,3 +286,38 @@ def test_upstream_decoder_retains_raw_and_short_output_semantics(raw, expected):
     result = decode_upstream_category5(raw, {"a": "first", "b": "second"})
     assert result["raw_prediction"] == raw
     assert result["decoded_prediction"] == expected
+
+
+def test_native_choice_seed_is_stable_local_and_source_ordered():
+    import random
+    from eval.public.adapters.locomo import native_choice_policy, prepare_upstream_question
+    source = [sample("first"), sample("second")]
+    state = random.getstate()
+    policy = native_choice_policy(source, choice_seed=1)
+    assert random.getstate() == state
+    assert policy["id"] == "python-random-source-order/v1"
+    assert policy["seed"] == 1
+    assert list(policy["draws"].values()) == [0.13436424411240122, 0.8474337369372327]
+    expected_ids = [row["question_id"] for row in split_samples(source)["annotations"]
+                    if row["annotation"]["category"] == 5]
+    assert list(policy["draws"]) == expected_ids
+    annotations = [row["annotation"] for row in split_samples(source)["annotations"]
+                   if row["annotation"]["category"] == 5]
+    assert [prepare_upstream_question(row, choice_draw=draw)["answer_key"]["a"]
+            for row, draw in zip(annotations, policy["draws"].values(), strict=True)] == [
+                "Not mentioned in the conversation", "SCORER_SECRET"]
+    assert native_choice_policy(source, choice_seed=1) == policy
+    explicit = native_choice_policy(source, choice_draws=policy["draws"])
+    assert explicit["draws"] == policy["draws"] and explicit["seed"] is None
+    assert explicit["id"] != policy["id"]
+    policy["draws"].clear()
+    assert explicit["draws"]  # Caller mutation cannot change the saved policy.
+
+
+@pytest.mark.parametrize("kwargs", [{}, {"choice_seed": True}, {"choice_seed": -1},
+    {"choice_seed": 2**64}, {"choice_seed": 1.0}, {"choice_seed": "1"},
+    {"choice_seed": 1, "choice_draws": {}}, {"choice_draws": {}}])
+def test_native_choice_policy_rejects_missing_ambiguous_or_invalid_choices(kwargs):
+    from eval.public.adapters.locomo import native_choice_policy
+    with pytest.raises(LoCoMoError):
+        native_choice_policy([sample()], **kwargs)

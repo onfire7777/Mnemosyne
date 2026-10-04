@@ -33,14 +33,14 @@ Category 5's source-answer distractor belongs only in the registered question
 transformation, never in ingested memory. Category-specific scoring remains
 the pinned scorer, with missing predictions and recall applicability explicit.
 
-## Current integration audit — reader-policy binding update
+## Current integration audit — reader and option-order policy update
 
 This table supersedes the original sequence's prospective descriptions below;
 it does not close W4 or any measured acceptance requirement.
 
 | Original step | Current implementation evidence | Remaining acceptance work |
 |---|---|---|
-| 1. Freeze track/configuration | Native replay identifies its separate scoring policy, upstream revision, dependency pins, nine replay-source hashes, caption policy and explicit category-5 choices. | Bind a registered SUT candidate, actual model/provider/runtime manifests, declared resource/context budget and option-order generation policy. The replay policy alone is not this run configuration. |
+| 1. Freeze track/configuration | Native replay identifies its separate scoring policy, upstream revision, dependency pins, nine replay-source hashes, caption policy and explicit or seeded category-5 choices. | Bind a registered SUT candidate, actual model/provider/runtime manifests, declared resource/context budget and preregistered option-order policy. The replay policy alone is not this run configuration. |
 | 2. Native public adapter | `iter_native_answers` validates the population first, captures one isolated conversation at a time, invokes public read-only answers, retains command options and cleans stores. Public capture tests exercise actual subprocesses. | Full admitted population under the registered runtime and resource envelope; signed attempt persistence. |
 | 3. Response conversion | Raw outputs, missing reader execution, explicit abstention, category-5 decoding, citations, spans, answer rendering and opt-in synthesis derivations are retained/validated. The independent derivation checker does not call the product synthesizer. | Optional candidate-bound reader policy now checks exact model, prompt, serializer and decoding disclosures and is retained in offline replay. Authenticate that candidate and actual runtime through the registered bundle path; a matching disclosure is not proof of provider execution. |
 | 4. Neutral bundle/replay | Full-population offline scoring and exact saved-report replay work across the production and pinned scorer interpreters; missing questions and absent categories remain visible. | Connect these components to the existing bundle inventory, configuration anchors, result schema and verifier without changing generic QA semantics. |
@@ -478,3 +478,21 @@ real public captures and a synthetic provider for quotation and arithmetic,
 then verify the emitted derivation through the independent native projection.
 Ruff, diff checks and CI YAML parsing passed. Remote CI remains in progress on
 `046f08a8`; these subsequent commits remain local to avoid cancelling it.
+
+
+## Reproducible native option ordering
+
+`native_choice_policy` now resolves either a complete explicit draw map or an
+unsigned 64-bit seed, never an ambient/default seed. Seeded mode draws from a
+local Python `Random.random()` instance once per category-5 question in original
+source order. Both the sequential public adapter and isolated scoring worker use
+this same policy. The report retains its versioned identity, seed and exact draws;
+changing the seed or relabeling seeded draws as explicit inputs fails saved-report
+verification. Original upstream question/decoder semantics remain unchanged.
+This native generation policy does not claim the upstream script's RNG state,
+pre-execution registration, provider execution or dataset admission.
+
+Validation: 144 isolated conformance tests passed, 48 production native/reader/
+replay tests passed, and an additional Python 3.14-to-3.11 seeded replay test
+passed. Both option orders, invalid/ambiguous seeds, unchanged ambient RNG state,
+changed policy, missing outputs and retained full denominators are exercised.
