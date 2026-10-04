@@ -121,6 +121,11 @@ retain the separate package-identity prerequisite for any future public release.
 
 ## Remaining program after this slice
 
+- Owner priority, reaffirmed on 2026-10-04: execute
+  `docs/plans/benchmark-proof-delivery-2026-10-04.md` for the visible evidence
+  website, real reproducible runs and fair comparisons before expanding more
+  development-only benchmark modules. The historical results do not prove
+  current performance or superiority.
 - M12 multi-week seeded recurrence experiment, lateness magnitude, calibrated
   baseline; M13 multi-capacity and explicit promotion-control experiment.
 - Resolve and freeze missing module contracts before implementing them; extend
