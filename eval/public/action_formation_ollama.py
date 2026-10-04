@@ -54,6 +54,27 @@ Return at most 16 operations. Do not include explanations or markdown fences.
 '''
 
 
+SEMANTIC_GUIDANCE = '''
+Interpret trigger meaning before writing an operation. A timestamp can be an
+eligibility boundary rather than the event that should cause the reminder.
+For event-gated requests, preserve both the named event and its field matches;
+due_at is the earliest eligible time, not permission to fire without the event.
+For state-gated requests, preserve the named condition, comparison and value.
+Use exact_time only for an unconditional point-in-time reminder. Use time_window
+for an allowed interval. Preserve dependency requirements and recurrence only
+when requested. Never replace an event, condition or dependency with a timer.
+A fully supplied future event condition does not require its arrival time to be
+known now. Ask for clarification only when required intent information is absent
+or contradictory, not because a future signal has not occurred yet.
+For cancellation and rescheduling, mutate the matching stored task rather than
+creating a second copy. Leave unrelated stored tasks unchanged. A negative or
+quoted statement alone does not create a task. Use only the current conversation
+prefix; do not predict later turns or assume hidden facts.
+'''
+PROMPT_PROFILES = {'contract-v1': SYSTEM_PROMPT,
+                   'semantics-v2': SYSTEM_PROMPT + SEMANTIC_GUIDANCE}
+
+
 class _NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         raise ValueError('local formation provider does not follow redirects')
@@ -95,29 +116,31 @@ def _check_model(tags, model, digest):
 
 
 def complete(request, *, model, digest, evidence_dir, base_url='http://127.0.0.1:11434',
-             timeout=120, num_ctx=8192, num_predict=2048, output_mode='json', wire_order='canonical', transport=_http):
+             timeout=120, num_ctx=8192, num_predict=2048, output_mode='json', wire_order='canonical', prompt_profile='contract-v1', transport=_http):
     base = _base_url(base_url)
     if (not isinstance(model, str) or re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}', model) is None
             or not isinstance(digest, str) or re.fullmatch('[0-9a-f]{64}', digest) is None
             or type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 300
             or type(num_ctx) is not int or not 2048 <= num_ctx <= 32768
             or type(num_predict) is not int or not 128 <= num_predict <= 4096
-            or output_mode not in ('json', 'schema') or wire_order not in ('canonical', 'declared')):
+            or output_mode not in ('json', 'schema') or wire_order not in ('canonical', 'declared')
+            or prompt_profile not in PROMPT_PROFILES):
         raise ValueError('invalid local formation configuration')
     if (not isinstance(request, dict) or set(request) != {
             'schema', 'conversation', 'current_tasks', 'prior_responses', 'response_contract'}
             or request['schema'] != 'm12-formation-request/v1'):
         raise ValueError('unsupported formation request')
+    prompt = PROMPT_PROFILES[prompt_profile]
     raw = _canonical(request)
     if len(raw) > MAX_INPUT_BYTES:
         raise ValueError('formation request exceeds limit')
     # Conservative byte-based guard, not a claim of exact tokenizer/template
     # custody. Fail rather than silently shorten public history for the model.
-    if len(raw) + len(SYSTEM_PROMPT.encode()) + num_predict + 512 > num_ctx:
+    if len(raw) + len(prompt.encode()) + num_predict + 512 > num_ctx:
         raise ValueError('formation request exceeds conservative context budget')
     output_format = 'json' if output_mode == 'json' else response_schema(request['conversation']['actions'])
     body = {'model': model, 'messages': [
-        {'role': 'system', 'content': SYSTEM_PROMPT},
+        {'role': 'system', 'content': prompt},
         {'role': 'user', 'content': raw.decode('utf-8')}],
         'stream': False, 'format': output_format, 'think': False, 'keep_alive': 0,
         'options': {'temperature': 0, 'seed': 7, 'num_ctx': num_ctx,
@@ -133,10 +156,10 @@ def complete(request, *, model, digest, evidence_dir, base_url='http://127.0.0.1
 
         record({'stage': 'configuration', 'schema': 'm12-ollama-formation-attempt/v1',
                 'model': model, 'expected_server_digest': digest, 'base_url': base,
-                'output_mode': output_mode, 'wire_order': wire_order,
+                'output_mode': output_mode, 'wire_order': wire_order, 'prompt_profile': prompt_profile,
                 'format_sha256': hashlib.sha256(_canonical(output_format)).hexdigest(),
                 'source_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-                'prompt_sha256': hashlib.sha256(SYSTEM_PROMPT.encode()).hexdigest(),
+                'prompt_sha256': hashlib.sha256(prompt.encode()).hexdigest(),
                 'timeout_seconds': timeout, 'provider_identity_attested': False,
                 'publishable': False})
 
@@ -199,6 +222,7 @@ def main():
     parser.add_argument('--num-predict', type=int, default=2048)
     parser.add_argument('--output-mode', choices=('json', 'schema'), default='json')
     parser.add_argument('--wire-order', choices=('canonical', 'declared'), default='canonical')
+    parser.add_argument('--prompt-profile', choices=tuple(PROMPT_PROFILES), default='contract-v1')
     args = parser.parse_args()
     try:
         raw = sys.stdin.buffer.read(MAX_INPUT_BYTES + 1)
@@ -207,7 +231,8 @@ def main():
         request = _parsed(raw)
         content = complete(request, model=args.model, digest=args.digest, evidence_dir=args.evidence_dir,
                            base_url=args.base_url, timeout=args.timeout,
-                           num_ctx=args.num_ctx, num_predict=args.num_predict, output_mode=args.output_mode, wire_order=args.wire_order)
+                           num_ctx=args.num_ctx, num_predict=args.num_predict, output_mode=args.output_mode, wire_order=args.wire_order,
+                           prompt_profile=args.prompt_profile)
         sys.stdout.buffer.write(content)
     except Exception as error:
         print(type(error).__name__, file=sys.stderr)

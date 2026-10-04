@@ -417,3 +417,15 @@ and 198 not attempted, retaining the 17 missed eligible occurrences in the
 completed prefix. Neither report supplies a full-corpus score or permits ranking.
 This makes missing evidence explicit without treating unattempted cases as
 observed model failures or hiding failures behind a completed-case denominator.
+
+
+## Explicit semantic-instruction variant
+
+`--prompt-profile semantics-v2` supplements the existing public field contract
+with general trigger semantics: earliest eligibility differs from firing;
+event/condition/dependency gates must be preserved; recurrence requires user
+intent; mutations must not duplicate existing tasks. It contains no corpus IDs,
+fixed timestamps, offered-action IDs or expected answers. `contract-v1` remains
+the default. Logs retain the selected profile and exact prompt hash/body.
+A named variant is not evidence of improved quality: controlled real-provider
+measurements are required and remain separate from benchmark admission.
