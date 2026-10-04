@@ -18,6 +18,11 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+Development evidence export now bounds manifest/member reads and rejects
+duplicate manifest keys, final-component symlinks and ambiguous archive paths.
+61 rendering/export checks passed. All six existing preview downloads remain
+byte-identical. This is integrity hardening, not a new benchmark result.
+
 The proof site now links to development evidence with the dependency failure
 and paired prompt/decoding experiments. Deterministic ZIP downloads include
 manifest-checked raw files. The page explicitly separates these captures from

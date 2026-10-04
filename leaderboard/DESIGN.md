@@ -35,3 +35,8 @@ benchmark library. It keeps incomplete attempts and completed diagnostic
 experiments distinct from admitted result records and the signed attempt ledger.
 Each curated capture offers deterministic ZIP and manifest downloads. Every
 file is hash-checked before export; failed validation aborts the build.
+
+Evidence manifests are bounded to 1 MiB, members to 4 MiB and the export to
+20 MiB. Reads reject nonregular files and final-component symlinks. Duplicate
+manifest keys and noncanonical archive paths are rejected before packaging.
+These checks assume a caller-owned directory tree, not a hostile filesystem.
