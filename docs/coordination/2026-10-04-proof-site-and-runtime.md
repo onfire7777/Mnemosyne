@@ -352,3 +352,19 @@ custody input and retains artifacts on mismatch, unlike the convenience wrapper
 that deletes a mismatching destination. No score or protocol is changed. The
 terminal and artifact-comparison receipts still require verification and signing;
 local reproduction is not independent external reproduction.
+
+## Consistent signed attempt-history snapshot
+
+`verified_ledger_snapshot` now returns verified entries, their signed head and
+complete roster, plus the verification public key, while holding one ledger
+lock. Existing `verify_ledger` behavior is preserved through this shared path.
+A snapshot remains independently reconstructable after the live ledger grows;
+tampering with the signed roster is rejected. The snapshot wrapper itself is
+not signed and never grants publication authorization. This prepares the
+attempt-history view without silently publishing inactive/nonpublishable results.
+
+Validation: all 116 ledger/publication checks passed, including detached snapshot
+reconstruction after an append and signed-head tampering. Ruff and diff checks
+passed. Rendering the history and deciding which historical contents satisfy
+release gates remain separate unfinished work. Retrieval reproduction session
+24553 remains active with normal pressure; its result is not inferred here.

@@ -1102,3 +1102,39 @@ def test_refuses_in_place_rewrite_of_a_sealed_v1_row(
     with pytest.raises(LedgerError):
         _append(ledger_path, private_key, entry_id="entry-after-rewrite")
     assert not ledger_path.with_name("runs-v2.jsonl").exists()
+
+
+def test_verified_snapshot_is_self_contained_after_ledger_grows(
+    ledger_path: Path, key_paths: tuple[Path, Path], tmp_path: Path,
+) -> None:
+    from leaderboard.ledger import verified_ledger_snapshot
+    private, public = key_paths
+    first = _append(ledger_path, private, entry_id='first')
+    snapshot = verified_ledger_snapshot(ledger_path, public)
+    _append(ledger_path, private, entry_id='later', status='failed', reason='retained failed attempt')
+    assert snapshot['entries'] == [first]
+    assert snapshot['head']['entry_digest'] == first['entry_digest']
+    assert snapshot['roster'] == ['synthetic-entrant']
+    assert snapshot['publication_authorized'] is False
+    copied = tmp_path / 'snapshot.jsonl'
+    copied.write_text(''.join(json.dumps(entry, sort_keys=True, separators=(',', ':'), ensure_ascii=False) + '\n'
+                              for entry in snapshot['entries']))
+    copied.with_suffix('.jsonl.head.json').write_text(json.dumps(snapshot['head'], sort_keys=True, separators=(',', ':'), ensure_ascii=False) + '\n')
+    copied_key = tmp_path / 'snapshot-public.pem'
+    copied_key.write_text(snapshot['public_key_pem'])
+    assert verify_ledger(copied, copied_key) == [first]
+    assert len(verify_ledger(ledger_path, public)) == 2
+
+
+def test_verified_snapshot_rejects_tampered_signed_head(
+    ledger_path: Path, key_paths: tuple[Path, Path],
+) -> None:
+    from leaderboard.ledger import verified_ledger_snapshot
+    private, public = key_paths
+    _append(ledger_path, private, entry_id='first')
+    head_path = ledger_path.with_suffix('.jsonl.head.json')
+    head = json.loads(head_path.read_text())
+    head['roster'].append('omitted-competitor')
+    head_path.write_text(json.dumps(head, sort_keys=True, separators=(',', ':'), ensure_ascii=False) + '\n')
+    with pytest.raises(LedgerError, match='head signature'):
+        verified_ledger_snapshot(ledger_path, public)
