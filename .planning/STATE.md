@@ -16,6 +16,17 @@ progress:
 
 # Project State
 
+## Benchmark-platform scope reaffirmed — 2026-10-04
+
+The owner's primary website objective is the full multi-system benchmark
+platform in Plan B and WMBS, including the original external slate, all 24
+capabilities / 20 modules and reproducible comparisons. A proof viewer or one
+retrieval run is not a substitute. The
+[scope audit](../docs/plans/benchmark-platform-scope-audit-2026-10-04.md)
+records the retained requirements, current source/evidence gaps and next
+website-contract work. Plan A, BurnOS compatibility and all original acceptance
+criteria remain in force. No completion counter is advanced by this review.
+
 ## Status reconciliation — 2026-10-04
 
 Source inspected at `3c21be5d`. This dated reconciliation supersedes older

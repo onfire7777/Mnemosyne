@@ -1,5 +1,16 @@
 # Roadmap: v2.0 Public Benchmark and Memory Leadership
 
+## Benchmark-platform scope reaffirmed — 2026-10-04
+
+The website is the public **multi-system benchmark platform** described by
+Plan B L0–L4 and the whole-memory standard, with Mnemosyne as one disclosed
+entrant. Its retained scope includes the full upstream slate, 24 capabilities,
+20 modules, joint scenarios, fair comparisons and reproducible evidence.
+The current static proof viewer and a single retrieval characterization are
+intermediate work. The [scope audit](../docs/plans/benchmark-platform-scope-audit-2026-10-04.md)
+maps original requirements to missing platform surfaces and module work.
+No phase, acceptance target or progress counter changes from this clarification.
+
 ## Status reconciliation — 2026-10-04
 
 Source inspected at `3c21be5d`. This dated reconciliation supersedes older
