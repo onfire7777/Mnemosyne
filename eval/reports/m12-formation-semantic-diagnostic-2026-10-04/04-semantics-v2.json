@@ -1,0 +1,40 @@
+{
+  "case_id": "585fae27b378ebae2281d9fe",
+  "profile": "semantics-v2",
+  "task_execution": false,
+  "publishable": false,
+  "status": "valid-envelope",
+  "response": {
+    "operations": [
+      {
+        "command": "task.create",
+        "payload": {
+          "task_id": "release_packet_reminder",
+          "action_id": "73fb2b5f07f78b62",
+          "trigger": {
+            "type": "exact_time",
+            "payload": {
+              "at": "2030-11-28T01:00:00Z"
+            }
+          },
+          "idempotency_key": "release_packet_reminder"
+        }
+      },
+      {
+        "command": "task.create",
+        "payload": {
+          "task_id": "review_budget_reminder",
+          "action_id": "442fc5162f3d03ac",
+          "trigger": {
+            "type": "exact_time",
+            "payload": {
+              "at": "2030-11-28T00:00:00Z"
+            }
+          },
+          "idempotency_key": "review_budget_reminder"
+        }
+      }
+    ],
+    "clarification": null
+  }
+}

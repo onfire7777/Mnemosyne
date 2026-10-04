@@ -1,0 +1,26 @@
+{
+  "case_id": "dd3feb06b69964589070b212",
+  "profile": "contract-v1",
+  "task_execution": false,
+  "publishable": false,
+  "status": "valid-envelope",
+  "response": {
+    "operations": [
+      {
+        "command": "task.create",
+        "payload": {
+          "task_id": "dd3feb06b69964589070b212",
+          "action_id": "73fb2b5f07f78b62",
+          "trigger": {
+            "type": "exact_time",
+            "payload": {
+              "at": "2030-11-28T01:00:00Z"
+            }
+          },
+          "idempotency_key": "release_packet_review"
+        }
+      }
+    ],
+    "clarification": null
+  }
+}
