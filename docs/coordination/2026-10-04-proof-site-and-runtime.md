@@ -537,3 +537,18 @@ policy and custody fields to trace pages, plus escaped complete JSON on all trac
 pages. The 75 focused checks passed. Refreshed the local preview from its existing
 signed retrieval result, verified the served trace inspector and byte-identical
 raw download, and added no new measured results.
+
+## Benchmark interpretation clarification
+
+The benchmark page now explicitly distinguishes partial lifecycle coverage from
+inherent incompatibility. A QA protocol can observe benefits of an enabled
+internal memory mechanism; it does not establish behavior of operations never
+invoked by the run. Missing integration is an adapter limitation, not proof that
+the source benchmark cannot evaluate Mnemosyne. The original LongMemEval and
+LoCoMo upstream documentation was checked again; LongMemEval now links a V2,
+so the page explicitly confines its coverage discussion to the original
+protocol used by the current run. No V2 coverage assessment is claimed.
+
+The existing signed retrieval preview was regenerated and its served benchmark
+page checked for both clarifications. Ruff passed. No measurements, source
+protocols or BurnOS contracts changed.
