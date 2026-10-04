@@ -108,3 +108,20 @@ for ranking, admission, publication and non-inferiority evaluation. In-process
 reference timing and candidate subprocess timing are excluded. Artifact hashes
 and replay establish reproducibility of the diagnostic, not independent custody
 or authenticity of the original execution.
+
+## Revision-guarded draft mutations
+
+The reference exposes `task.inspect` with a deterministic SHA-256 content
+revision, stable intention identity and current action/status. It accepts
+`task.update` override, cancellation and exact-time rescheduling. An optional
+idempotency key must be paired with the original expected revision. A known
+identical retry returns its original empty acknowledgement before checking the
+current revision or terminal state; conflicting reuse and stale fresh requests
+fail. Updates are constructed separately and committed only after validation.
+
+Firing and cancellation change content revisions. A fired task cannot be
+cancelled or newly updated; a recognized previous mutation retry cannot undo
+its final state. Creation and mutation idempotency namespaces are separate.
+These in-memory receipts are a prerequisite for reference recovery, not durable
+recovery evidence. Recurrence-policy mutations and non-exact rescheduling remain
+explicitly unsupported by this draft. Existing reference captures still replay.

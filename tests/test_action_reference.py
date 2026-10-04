@@ -154,3 +154,72 @@ def test_every_reference_occurrence_matches_independently_declared_eligibility(g
             assert parse(actual[key]['due_at']) == parse(expected['due_at'])
             assert actual[key]['trigger_type'] == expected['trigger_type']
         assert set(actual) == expected_keys
+
+
+def test_revision_guarded_update_retry_preserves_terminal_state():
+    ref = ExplicitActionReference()
+    ref.run('task.create', task())
+    before = ref.run('task.inspect', {'task_id': 'a'})
+    update = {'type': 'override', 'task_id': 'a', 'action_id': 'revised',
+              'idempotency_key': 'update', 'expected_revision': before['revision']}
+    ref.run('task.update', update)
+    after = ref.run('task.inspect', {'task_id': 'a'})
+    assert after['revision'] != before['revision']
+    with pytest.raises(ValueError, match='stale'):
+        ref.run('task.update', {**update, 'idempotency_key': 'stale'})
+    with pytest.raises(ValueError, match='conflict'):
+        ref.run('task.update', {**update, 'action_id': 'conflicting'})
+    assert observe(ref, 10)[0]['action_id'] == 'revised'
+    final = ref.run('task.inspect', {'task_id': 'a'})
+    assert final['status'] == 'fired' and final['revision'] != after['revision']
+    ref.run('task.update', update)
+    assert ref.run('task.inspect', {'task_id': 'a'}) == final
+
+
+def test_cancel_retry_and_original_update_do_not_resurrect_cancelled_task():
+    ref = ExplicitActionReference()
+    ref.run('task.create', task())
+    revision = ref.run('task.inspect', {'task_id': 'a'})['revision']
+    cancel = {'type': 'cancel', 'task_id': 'a', 'idempotency_key': 'cancel', 'expected_revision': revision}
+    ref.run('task.update', cancel)
+    ref.run('task.update', cancel)
+    assert ref.run('task.inspect', {'task_id': 'a'})['status'] == 'cancelled'
+    assert observe(ref, 10) == []
+
+
+def test_reschedule_and_invalid_update_are_atomic():
+    ref = ExplicitActionReference()
+    ref.run('task.create', task())
+    before = ref.run('task.inspect', {'task_id': 'a'})
+    invalid = {'type': 'reschedule', 'task_id': 'a', 'action_id': 'changed', 'due_at': 'invalid'}
+    with pytest.raises(ValueError):
+        ref.run('task.update', invalid)
+    assert ref.run('task.inspect', {'task_id': 'a'}) == before
+    ref.run('task.update', {**invalid, 'due_at': stamp(20), 'idempotency_key': 'reschedule',
+                            'expected_revision': before['revision']})
+    assert observe(ref, 10) == []
+    row = observe(ref, 20)[0]
+    assert row['action_id'] == 'changed' and row['due_at'] == stamp(20)
+
+
+def test_cancellation_cannot_relabel_a_fired_task():
+    ref = ExplicitActionReference()
+    ref.run('task.create', task())
+    observe(ref, 10)
+    before = ref.run('task.inspect', {'task_id': 'a'})
+    with pytest.raises(ValueError, match='fired'):
+        ref.run('task.update', {'type': 'cancel', 'task_id': 'a'})
+    assert ref.run('task.inspect', {'task_id': 'a'}) == before
+
+
+def test_explicit_null_keys_cannot_bypass_revision_or_creation_validation():
+    ref = ExplicitActionReference()
+    with pytest.raises(ValueError):
+        ref.run('task.create', {**task(), 'idempotency_key': None})
+    assert not ref.tasks
+    ref.run('task.create', task())
+    before = ref.run('task.inspect', {'task_id': 'a'})
+    with pytest.raises(ValueError):
+        ref.run('task.update', {'type': 'cancel', 'task_id': 'a',
+                                'idempotency_key': None, 'expected_revision': None})
+    assert ref.run('task.inspect', {'task_id': 'a'}) == before
