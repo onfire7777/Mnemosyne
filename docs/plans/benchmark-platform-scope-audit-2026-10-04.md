@@ -159,7 +159,7 @@ not a promotion to a run-ready or publicly measured state.
 | M09 | Declared-surface erasure | Plan exists; full benchmark and explicit surface/restore evidence missing. |
 | M10 | Calibration/abstention | Deterministic pilot exists; model-backed calibration and public-label evidence remain. |
 | M11 | Security/isolation | Plan and separate security-development infrastructure exist; full M11 benchmark missing. |
-| M12 | Prospective action | Development probes, five seeded four-week timing runs, a five-trigger eligibility-window scorer with a versioned four-week workload and an inert delivery sink with replayed retry evidence exist; creation/update/cancel retries, content revisions and public response-loss regressions are locally tested with PostgreSQL CI pending; a separate four-week recovery capture retains 50 injected response losses and exact replay; registered recovery/full-trigger corpus, calibrated baseline, full timing/cost and admission remain. |
+| M12 | Prospective action | Development evidence includes a four-week five-trigger run with 130 inert delivery receipts and a separate recovery run with 50 injected response losses. Bounded 2/4/8/16 trigger fan-out is implemented; its full execution remains pending. Public retry/revision paths are locally tested; PostgreSQL CI, full overload/implicit-intent coverage, reference calibration, resource/cost and admission remain open. |
 | M13 | Working memory | Development probe exists; capacity and promotion-control experiment remains. |
 | M14 | Procedural task utility | Plan exists; closed-agent environment, policy/baseline/inference contract and implementation remain. |
 | M15 | Determinism/replay | Pilot composition exists; all admitted payloads and real clean-checkout reproduction remain. |

@@ -18,6 +18,20 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+The [recovery run with its durable inert sink](../eval/reports/m12-recovery-sink-development-2026-10-04/README.md)
+completed 360 operations and 50 injected response losses. Ten eligible firings
+produced ten receipts; ten deliberate delivery retries were duplicates. Exact
+replay passed. The source receipt remains explicitly dirty; recorded harness
+hashes match the source commit. These are local development diagnostics.
+
+The [full five-trigger sink capture](../eval/reports/m12-trigger-sink-development-2026-10-04/README.md)
+completed 525 operations with 130 durable inert receipts and 260 delivery
+attempts, all deliberately repeated deliveries identified as duplicates.
+Its clean-source hashes, timing reports and sink annex were verified. A bounded
+mixed-trigger fan-out generator now covers 2/4/8/16 actions per type and reports
+each load separately; its full execution is pending. These development results
+do not establish full M12 acceptance or an external exactly-once guarantee.
+
 A [clean-source four-week recovery capture](../eval/reports/m12-operation-recovery-development-2026-10-04/README.md)
 completed 360 public operations, 50 injected response losses and 50 adapter
 resets. Ten uncancelled actions fired once and ten cancelled actions stayed

@@ -259,7 +259,7 @@
     {
       "id": "M12",
       "name": "Prospective action",
-      "status": "Development probes, four-week recurrence/timing diagnostics, a five-trigger eligibility-window scorer with a versioned four-week workload and an inert delivery sink exist; creation/update/cancel retries, content revisions and public response-loss regressions are locally tested with PostgreSQL CI pending; a separate four-week recovery capture retains 50 injected response losses and exact replay; registered recovery/full-trigger corpus, calibrated baseline, full timing/cost and admission remain."
+      "status": "Development evidence includes a four-week five-trigger run with 130 inert delivery receipts and a separate recovery run with 50 injected response losses. Bounded 2/4/8/16 trigger fan-out is implemented; its full execution remains pending. Public retry/revision paths are locally tested; PostgreSQL CI, full overload/implicit-intent coverage, reference calibration, resource/cost and admission remain open."
     },
     {
       "id": "M13",
