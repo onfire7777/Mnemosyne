@@ -261,8 +261,13 @@ def test_metric_ties_are_deterministic_for_logically_identical_orderings(
     first_tree, second_tree = _tree(tmp_path / "first-site"), _tree(tmp_path / "second-site")
     # Display order is canonical; exported records retain their input array
     # order so that consumers can reproduce the signed record identity.
-    assert {k: v for k, v in first_tree.items() if k.endswith(".html")} == {
-        k: v for k, v in second_tree.items() if k.endswith(".html")
+    # Comparison URLs are pinned to exact source identity, including array
+    # order. Normalize only that disclosed fingerprint, not displayed metrics.
+    first_digest = json.loads(first_tree["data/comparison-index.json"])["source_digest"].encode()
+    second_digest = json.loads(second_tree["data/comparison-index.json"])["source_digest"].encode()
+    assert first_digest != second_digest
+    assert {k: v.replace(first_digest, b"SOURCE") for k, v in first_tree.items() if k.endswith(".html")} == {
+        k: v.replace(second_digest, b"SOURCE") for k, v in second_tree.items() if k.endswith(".html")
     }
     assert json.loads(first_tree["data/results.json"]) == [first_record]
     assert json.loads(second_tree["data/results.json"]) == [second_record]

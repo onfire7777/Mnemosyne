@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from leaderboard.grouping import build_comparison_index
+from leaderboard.workspace import comparison_body
 from leaderboard.explainers import systems_body
 from leaderboard.comparisons import comparisons_body
 from leaderboard.catalog import benchmarks_body, coverage_body, load_catalog
@@ -167,7 +168,7 @@ def _page(title: str, body: str, root: str = "") -> str:
         "color:var(--muted);font-size:17px}.overview{display:grid;grid-template-columns:1fr 1fr;"
         "gap:72px;border-top:1px solid var(--line);margin-top:40px;padding-top:38px}"
         ".overview h2{font-size:32px}.overview p,small{color:var(--muted)}small{display:block;"
-        "font-size:15px}body>footer{border-top:1px solid var(--line);padding-top:16px;"
+        "font-size:15px;overflow-wrap:anywhere}body>footer{border-top:1px solid var(--line);padding-top:16px;"
         "padding-bottom:24px;font-size:16px;color:var(--muted)}pre{white-space:pre-wrap;"
         "overflow-wrap:anywhere;padding:20px;background:#f7f9fc;font-size:15px}"
         "li{overflow-wrap:anywhere}.prose{max-width:880px}.prose h2{margin-top:36px}"
@@ -175,6 +176,12 @@ def _page(title: str, body: str, root: str = "") -> str:
         ".scope-card{border:1px solid var(--line);padding:24px}.scope-card h3{margin:0 0 12px;font-size:22px}"
         ".scope-card p{margin:0}.scope-card:target{outline:3px solid #005bd3;outline-offset:3px}"
         ".capability-map th:first-child{width:65%}"
+        "[hidden]{display:none!important}.comparison-group{margin:40px 0}.comparison-group small{overflow-wrap:anywhere}"
+        "#comparison-controls{padding:24px;background:#f7f9fc;margin-bottom:24px}"
+        "#comparison-controls select{display:block;width:100%;margin:12px 0;font:inherit}"
+        "#comparison-controls fieldset{min-width:0;margin:16px 0;border:1px solid var(--line)}"
+        "#comparison-controls fieldset label{display:inline-block;margin:8px 20px 8px 0}"
+        "button{font:inherit;padding:8px 16px}input:focus-visible,select:focus-visible,button:focus-visible{outline:3px solid #005bd3;outline-offset:3px}"
         "@media(max-width:700px){body{font-size:17px}body>header,main,body>footer{padding-left:20px;"
         "padding-right:20px}.brand{font-size:25px}nav{gap:18px;font-size:16px}"
         "body>header{align-items:flex-start;flex-direction:column;gap:12px}.scope-grid{grid-template-columns:1fr}"
@@ -186,7 +193,7 @@ def _page(title: str, body: str, root: str = "") -> str:
         f'<header><a class="brand" href="{root}index.html">Mnemetric</a>'
         f'<nav aria-label="Main"><a href="{root}index.html">Results</a>'
         f'<a href="{root}benchmarks.html">Benchmarks</a><a href="{root}coverage.html">Coverage</a>'
-        f'<a href="{root}systems.html">Systems</a>'
+        f'<a href="{root}compare.html">Compare</a><a href="{root}systems.html">Systems</a>'
         f'<a href="{root}methods.html">Methods</a></nav></header>'
         f"<main>{body}</main>\n"
         "<footer>Open, operator-run. Mnemosyne is the operator entry.</footer>"
@@ -576,9 +583,10 @@ def render_site(
         for record_id in sorted(record_ids)
     }
     pages: dict[Path, str | bytes] = dict(_render_pages(records, loaded_traces))
-    pages[Path("data/comparison-index.json")] = _export_json(
-        build_comparison_index(records, verified_artifacts)
-    )
+    comparison_index = build_comparison_index(records, verified_artifacts)
+    pages[Path("data/comparison-index.json")] = _export_json(comparison_index)
+    pages[Path("compare.html")] = _page("Compare", comparison_body(comparison_index))
+    pages[Path("comparison.js")] = Path(__file__).with_name("comparison.js").read_bytes()
     for record_id, payloads in verified_artifacts.items():
         for name, content in payloads.items():
             pages[Path("data") / _digest(record_id) / name] = content
