@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 
 from eval.harness.cli_driver import MnemoCLI
-from eval.public.adapters.locomo import LoCoMoError
-from eval.public.adapters.locomo_native import captured_conversations, project_native_response
+from eval.public.adapters.locomo import LoCoMoError, split_samples
+from eval.public.adapters.locomo_native import answer_captured_question, captured_conversations, project_native_response
 
 
 def sample(identity):
@@ -87,3 +87,57 @@ def test_native_category5_uses_recorded_option_mapping():
 def test_native_projection_rejects_ambiguous_answers_and_foreign_evidence(raw):
     with pytest.raises(LoCoMoError):
         project_native_response(raw, sample("one")["qa"][0], {"cid": {"dialog_id": "D1:1"}})
+
+
+def test_native_question_uses_read_only_public_boundary_and_retains_request(tmp_path, monkeypatch):
+    source = sample("one")
+    question = split_samples([source])["questions"][0]
+    observed = []
+
+    def answer(cli, path):
+        assert "--evaluation-read-only" in cli.global_flags
+        request = json.loads(Path(path).read_text())
+        assert request["question"] == "what?"
+        assert "SECRET_LABEL" not in Path(path).read_text()
+        observed.append(Path(path))
+        return {"results": [{**response(), "question_id": request["question_id"]}]}
+
+    monkeypatch.setattr(MnemoCLI, "eval_answer_batch", answer)
+    store = tmp_path / "synthetic-store"
+    store.write_text("synthetic transport test only")
+    conversation = {"sample_id": "one", "tenant_id": "tenant-one", "cli": MnemoCLI(store=str(store)),
+                    "evidence": {"cid": {"dialog_id": "D1:1"}}}
+    result = answer_captured_question(conversation, question, source["qa"][0])
+    assert result["decoded_prediction"] == "violet"
+    assert result["request"]["context"]["tenant_id"] == "tenant-one"
+    assert result["raw_batch_response"]["results"][0]["answer"] == "violet"
+    assert json.loads(result["request_jsonl"]) == result["request"]
+    assert not observed[0].exists()
+
+
+@pytest.mark.parametrize("payload", [{}, {"results": []}, {"results": [{"question_id": "foreign"}]}])
+def test_native_question_rejects_wrong_response_identity(tmp_path, monkeypatch, payload):
+    source = sample("one")
+    store = tmp_path / "store"
+    store.write_text("synthetic transport test only")
+    conversation = {"sample_id": "one", "tenant_id": "tenant", "cli": MnemoCLI(store=str(store)), "evidence": {}}
+    monkeypatch.setattr(MnemoCLI, "eval_answer_batch", lambda *args: payload)
+    with pytest.raises(LoCoMoError, match="result"):
+        answer_captured_question(conversation, split_samples([source])["questions"][0], source["qa"][0])
+
+
+def test_native_question_does_not_swallow_execution_errors(tmp_path, monkeypatch):
+    source = sample("one")
+    store = tmp_path / "store"
+    store.write_text("synthetic transport test only")
+    conversation = {"sample_id": "one", "tenant_id": "tenant", "cli": MnemoCLI(store=str(store)), "evidence": {}}
+
+    def fail(*args):
+        raise RuntimeError("synthetic provider failure")
+
+    monkeypatch.setattr(MnemoCLI, "eval_answer_batch", fail)
+    with pytest.raises(RuntimeError, match="provider failure"):
+        answer_captured_question(conversation, split_samples([source])["questions"][0], source["qa"][0])
+    foreign = split_samples([sample("two")])["questions"][0]
+    with pytest.raises(LoCoMoError, match="conversation"):
+        answer_captured_question(conversation, foreign, source["qa"][0])

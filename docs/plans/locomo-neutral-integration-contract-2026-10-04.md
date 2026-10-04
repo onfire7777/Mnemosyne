@@ -136,3 +136,23 @@ All ten native tests passed, covering public capture plus response projection,
 timeout separation, raw-response retention, option mapping, malformed answers
 and foreign retrieval evidence. Ruff passed. Answer invocation, admission,
 full replay binding and official measurements remain open.
+
+## Public answer invocation checkpoint
+
+`answer_captured_question` now checks the question's conversation and source
+query, applies the declared category transformation, and invokes
+`eval-answer-batch` through a cloned public CLI with `--evaluation-read-only`.
+It requires a live captured store, binds the returned single result to the
+requested question ID, and passes it through the explicit native projection.
+The exact request JSONL and SHA-256, structured request and original batch
+response are retained. Temporary request files are cleaned on exit. Exceptions
+propagate to the future registered runner's attempt handling; they are never
+converted into successful answers or silently removed from the population.
+
+All 15 native tests passed. New invocation tests use an explicitly synthetic
+transport to verify read-only flags, request-label exclusion, conversation and
+response identity, request cleanup and exception propagation. The existing
+capture/isolation test still exercises the real public CLI. No real model
+answering is claimed by these tests. Ruff passed. Dataset/runtime admission,
+complete population orchestration, signed replay bundles and measured quality
+remain required before a real native LoCoMo result.
