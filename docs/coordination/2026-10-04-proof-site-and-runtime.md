@@ -333,3 +333,22 @@ This does not validate the later local grouping/workspace commits. Those remain
 queued locally to avoid cancelling the active run before it yields evidence.
 The real retrieval process 50773/session 66073 was verified live at 285 seconds
 with normal pressure. A score and terminal status are not yet available.
+
+## Registered retrieval source run completed
+
+The frozen b0cdbd89 source run completed once in 312.304 seconds, with all sampled
+memory-pressure levels normal. The bundle verifier passed and the trace contains
+500 distinct question IDs, matching the registered population. The original
+bundle, exact metrics, signed start/terminal/outcome/result and verified signed
+ledger are retained outside the repository under the registered run root.
+Publication and comparative-superiority flags remain false. This result proves
+that the full retrieval-only workload can finish on this Mac; it does not resolve
+the separate model-reader hardware gate or demonstrate leadership.
+
+Local exact reproduction is now active under the same resource guard (session
+24553). Its signed start identifies the frozen source and source-manifest digest.
+The external reproduction wrapper calls the same frozen runner with the stored
+custody input and retains artifacts on mismatch, unlike the convenience wrapper
+that deletes a mismatching destination. No score or protocol is changed. The
+terminal and artifact-comparison receipts still require verification and signing;
+local reproduction is not independent external reproduction.
