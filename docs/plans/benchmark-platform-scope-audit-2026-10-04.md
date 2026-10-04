@@ -3,9 +3,14 @@
 Date: 2026-10-04. Source baseline: `bad975f7` on `codex/development`.
 Status: execution reconciliation, not benchmark admission or a result.
 
+Current reconciliation at `a458bcea` supersedes the baseline-only missing-work
+statements below where explicitly updated. The original scope and acceptance
+criteria remain unchanged. The product name is now Mnemetric; OpenMemBench
+technical identifiers and signed historical artifacts retain their original names.
+
 ## Owner's intended product
 
-The primary website product is **OpenMemBench, a public memory-system benchmark
+The primary website product is **Mnemetric, a public memory-system benchmark
 platform**. It compares existing memory systems, explains the evidence, and
 hosts a comprehensive whole-memory evaluation program. Mnemosyne is one
 entrant, with its operator conflict disclosed. A Mnemosyne feature page or a
@@ -55,18 +60,19 @@ Plan B L2 specifies public versioned data, permanent run URLs and per-question
 traces. WMBS §9.5 additionally specifies comparison projections, filters,
 compatible-record selection, declared exclusions and resource views. It
 explicitly leaves detailed website interaction design to a later specification.
-That missing specification must be completed; the static renderer is the
-evidence foundation, not the entire product definition.
+The subsequent website plan and comparison-context contract now cover the
+implemented directories, coverage map, comparison workspace and attempt history.
+Operational admission, comparable system runs and public launch remain open.
 
 | Product surface | Required behavior | Current evidence / gap |
 |---|---|---|
-| Main benchmark workspace | Start with systems, benchmarks and measured results; select comparable systems and tracks. | Static result table exists; no full comparison workspace. |
+| Main benchmark workspace | Start with systems, benchmarks and measured results; select comparable systems and tracks. | Result table and shareable comparison workspace exist, including filters and explicit exclusions. Real matched multi-system evidence remains absent. |
 | System directory | Initial roster: Mnemosyne, Mem0, Graphiti/Zep, Letta, Cognee, MemOS, Supermemory, HippoRAG. Pin actual product/OSS variants and versions; permit further systems through fair adapters. | Eight sourced architecture profiles exist. Profiles are not tested competitor adapters or results. |
-| Benchmark directory | Explain each construct, protocol/version, datasets, grading, coverage and limitations. Distinguish official upstream, enhanced successor and development tracks. | Six-project editorial coverage page exists; the full planned slate and runnable status need a structured directory. |
-| Comparison view | Side-by-side compatible results with CIs, ties, sample counts, dates, cost/latency/RAM and environment disclosures. Publish filters, exclusions and source record IDs. | Per-run disclosures exist; cross-system comparison projections and interactions remain missing. |
-| Whole-memory coverage | Show all 24 capabilities / 20 modules, their evidence state, missing work and per-system support. Capability presence is separate from measured quality. | Internal inventory exists; complete public coverage matrix is missing. |
-| Run and trace browser | System → track → benchmark version → immutable run → per-question stored/retrieved/answer evidence → downloaded artifacts and reproduction command. | Static run/trace pages and digest-bound downloads exist; a real fully browsable eligible run is still missing. |
-| Methodology and trust | Registration, all attempts including failures/no-runs, conflicts, changes, judge diagnostics, losses, appeals and reproduction. | Validators/ledger and draft methods exist; populated public operational evidence remains missing. |
+| Benchmark directory | Explain each construct, protocol/version, datasets, grading, coverage and limitations. Distinguish official upstream, enhanced successor and development tracks. | Structured 14-family directory and six-project editorial review exist. Protocol-fit explanation distinguishes coverage from adapter compatibility. Most full adapters and measured evidence remain open. |
+| Comparison view | Side-by-side compatible results with CIs, ties, sample counts, dates, cost/latency/RAM and environment disclosures. Publish filters, exclusions and source record IDs. | Digest-bound comparison candidates, side-by-side rendering, filters and URL state exist. Candidate eligibility is not publication authorization; the v1 real run lacks comparable v2 metadata and remains explicitly excluded. |
+| Whole-memory coverage | Show all 24 capabilities / 20 modules, their evidence state, missing work and per-system support. Capability presence is separate from measured quality. | Public program-scope map covers all 24 capabilities, 20 modules and six joint scenarios. Per-system measured coverage still needs real adapters and evidence. |
+| Run and trace browser | System → track → benchmark version → immutable run → per-question stored/retrieved/answer evidence → downloaded artifacts and reproduction command. | Local preview now contains one real 500-question retrieval run, trace pages and verified raw downloads. Its clean-checkout reproduction matched all nine bundle hashes. The operator run is nonpublishable and does not prove QA or multi-system leadership. |
+| Methodology and trust | Registration, all attempts including failures/no-runs, conflicts, changes, judge diagnostics, losses, appeals and reproduction. | Verified ledger snapshots and local attempt-history pages exist and show the retained operator run without invented extra attempts. Public operating history, dispute handling and launch approval remain open. |
 | Durable publication | Versioned public data, permanent URLs, site hosting, licensed dump, DOI snapshot/archive mirror and working submission/dispute channels. | No deployed final platform or completed archival launch evidence. |
 
 Missing, unsupported, failed, aborted and not measured must remain distinct.
@@ -104,7 +110,16 @@ same explicit admission process and does not remove the original slate.
 The current LongMemEval retrieval registration is useful baseline preparation,
 but covers one system and one metric family. It cannot close W4, M5, L2, L4 or
 the comprehensive whole-memory program. Its exact source and stopping rules
-remain frozen; it was not executed during this scope review.
+remain frozen. It was unexecuted at the initial scope review; it subsequently
+completed with Recall@5 0.2806 and nDCG@5 0.2967188496001503. These measurements
+describe the registered retrieval configuration, not full upstream QA results.
+
+LoCoMo now has synthetic-tested ingestion, dialog normalization, question/prompt
+construction, context truncation, category scoring/replay and a verified offline
+tokenizer. The upstream asset's exact hash is known but its CC-BY-NC-4.0 license
+is outside the current admission allowlist. Full neutral-harness integration,
+runtime/preflight, admitted data and actual measurements remain open. See the
+[current intake and evidence](locomo-upstream-intake-2026-10-04.md).
 
 ## Whole-memory implementation and evidence inventory
 
@@ -120,7 +135,7 @@ not a promotion to a run-ready or publicly measured state.
 | M04 | Conflict/correction | Development matrix and replay exist; full public acceptance remains. |
 | M05 | Provenance/explanation | Development cell exists; quarantines and complete outcome/lineage evidence remain. |
 | M06 | Consolidation/learning | Stage A/B development cell exists; sustained learning and non-degradation acceptance remains. |
-| M07 | Retention/rehearsal/decay | Plan exists; dedicated benchmark fixture/scorer/integration missing. |
+| M07 | Retention/rehearsal/decay | Public CLI clock/rehearsal prerequisite characterized and regression-tested; dedicated multi-seed benchmark fixture/scorer/integration and resource admission remain missing. |
 | M08 | Reversible forgetting | Plan exists; dedicated benchmark fixture/scorer/integration missing. |
 | M09 | Declared-surface erasure | Plan exists; full benchmark and explicit surface/restore evidence missing. |
 | M10 | Calibration/abstention | Deterministic pilot exists; model-backed calibration and public-label evidence remain. |

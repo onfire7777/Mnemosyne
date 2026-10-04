@@ -433,6 +433,7 @@ special-token rejection cases against the original pinned constructor, using
 verified local bytes and blocking its file/cache loaders during our loader call.
 It also exercises composed requests and wrong-runtime rejection. All 102 focused
 tests passed locally with the vocabulary environment variable set; no tests
-skipped. Local YAML parsing was not verified because the available project
-environments do not contain PyYAML. Remote CI still requires a run
+skipped. A subsequent isolated PyYAML 6.0.3 check parsed the workflow and
+verified its timeout, required vocabulary environment and positive-test command;
+no parser dependency was added to the project runtime. Remote CI still requires a run
 on the pushed commit; local success is not remote validation.
