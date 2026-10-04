@@ -1,0 +1,81 @@
+"""Retain development formation execution; no scores or model-quality claims."""
+
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import tempfile
+
+from eval.harness.cli_driver import MnemoCLI
+from eval.public.action_cli import ActionCLI
+from eval.public.action_formation import CommandFormationProvider, run_case
+from eval.public.action_implicit_plan import make_corpus, public_case
+from eval.public.action_timing_run import _source_receipt, _write
+from eval.public.bundle import _canonical
+
+
+def run_development(output, provider):
+    output = Path(output)
+    output.mkdir(parents=True, exist_ok=False)
+    corpus = make_corpus()
+    public = [public_case(case) for case in corpus['cases']]
+    _write(output / 'inputs.json', {'schema': corpus['schema'], 'cases': public})
+    _write(output / 'provider.json', {
+        'identity': provider.identity, 'identity_verified': False,
+        'argv': list(provider.argv), 'timeout_seconds': provider.timeout_seconds,
+        'filesystem_isolation_verified': False, 'publishable': False,
+    })
+    source = _source_receipt(False)
+    for name in ('action_formation.py', 'action_formation_run.py', 'action_implicit_plan.py'):
+        source['harness_files']['eval/public/' + name] = hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
+    _write(output / 'source.json', source)
+    completed, records = [], 0
+    try:
+        with (output / 'operations.jsonl').open('xb') as log, \
+                tempfile.TemporaryDirectory(prefix='m12-formation-') as temp:
+            def emit(record):
+                nonlocal records
+                log.write(_canonical(record))
+                log.flush()
+                os.fsync(log.fileno())
+                records += 1
+
+            for case in corpus['cases']:
+                identity = case['public']['case_id']
+                # Isolate harness task maps and stores per case. This does not
+                # attest isolation inside the separately configured provider.
+                actions = ActionCLI(MnemoCLI(store='unused', timeout_s=30))
+                completed.append(run_case(
+                    case, provider=provider, actions=actions,
+                    scope={'store': str(Path(temp) / (identity + '.json')),
+                           'tenant_id': identity, 'session_id': 'formation'}, emit=emit,
+                ))
+    except BaseException as error:
+        _write(output / 'status.json', {
+            'status': 'failed', 'exception_type': type(error).__name__,
+            'completed_cases': len(completed), 'retained_records': records,
+            'publishable': False, 'scored': False,
+        })
+        raise
+    result = {'schema': 'm12-formation-execution/v1', 'track': 'DEVELOPMENT',
+              'publishable': False, 'scored': False, 'cases': completed,
+              'firing_evaluation': 'not-run', 'model_quality': 'not-evaluated',
+              'filesystem_isolation_verified': False}
+    _write(output / 'execution.json', result)
+    _write(output / 'status.json', {'status': 'completed', 'completed_cases': len(completed),
+                                  'retained_records': records, 'publishable': False, 'scored': False})
+    return result
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--provider-identity', required=True)
+    parser.add_argument('--timeout-seconds', type=float, default=30)
+    parser.add_argument('command', nargs=argparse.REMAINDER)
+    args = parser.parse_args()
+    command = args.command[1:] if args.command[:1] == ['--'] else args.command
+    provider = CommandFormationProvider(tuple(command), args.provider_identity, args.timeout_seconds)
+    result = run_development(args.output, provider)
+    print(json.dumps({'status': 'completed', 'cases': len(result['cases']), 'scored': False}))

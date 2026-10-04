@@ -56,14 +56,15 @@ Do not read these labels and call `task.create` on behalf of a candidate. A
 future formation adapter must obtain its schedules from the actual system or
 explicitly identified agent-plus-memory stack through public operations, retain
 its raw responses and count that processing's time, resources and model cost.
-The current structured adapter has no supported mapping for this corpus.
-That is an unimplemented adapter path, not a measured zero or proof that the
+The current structured adapter alone has no supported mapping for this corpus;
+the development bridge below requires a separately configured formation provider.
+That is an unvalidated provider path, not a measured zero or proof that the
 underlying memory system cannot participate in a larger agent stack.
 
 ## Remaining acceptance work
 
-- Implement and validate the public formation-response/inspection mapping and
-  incremental runner, including isolated contexts and all responses retained.
+- Validate the development response bridge and incremental runner below with
+  an actual pinned formation provider, isolated contexts and retained responses.
 - Evaluate firing behavior, cancellation and recurrence after formation through
   virtual observations and the same inert sink; formation labels alone cannot
   establish successful prospective action.
@@ -88,3 +89,76 @@ Generation refuses an existing output directory. Tests verify deterministic
 coverage, hand-checked boundary labels, evaluator-label separation, mutation
 isolation, future-turn exclusion and byte-identical materialization. No model,
 candidate system or external action is invoked by generation.
+
+## Development response bridge and execution runner
+
+`eval/public/action_formation.py` now provides a separate, opt-in command
+transport and bridge. It does not reuse or change the preregistered grounded
+reader protocol. `action_formation_run.py` drives the generated cases with
+fresh public action adapters and local stores. Its provider is explicitly
+configured; there is no default model, parser, gold lookup or synthetic fallback.
+
+The provider command receives UTF-8 JSON on stdin. Requests have schema
+`m12-formation-request/v1`, a `conversation` prefix, `current_tasks` obtained
+from public inspection, `prior_responses` from earlier successful turns, and a
+`response_contract`. No evaluator label, later user turn, store path or session
+credential is included. The same executable may be called again for each turn;
+the request contains the permitted history. Its model wrapper must implement
+the following response protocol rather than assuming a generic chat response.
+
+Responses are JSON objects with exactly `operations` and `clarification`.
+`clarification` is null or a nonempty question; asking a question requires an
+empty operation list. `operations` contains at most sixteen objects with
+`command` and `payload`. Only `task.create` and `task.update` are allowed.
+Creation accepts the existing public symbolic task fields: task/action IDs,
+trigger, optional dependencies, recurrence and idempotency key. Updates accept
+cancel, override or reschedule; keyed updates require the original public
+revision. Action IDs must come from the offered inert actions. Dependencies
+and update targets must identify tasks already known in the current case or
+created earlier in the same batch. The bridge caps known tasks at 128.
+
+The complete batch's command/field envelopes are checked before writes. The
+public CLI remains responsible for trigger and mutation semantics. This is
+not an atomic multi-command transaction: if a later command is rejected,
+earlier successful mutations remain in that case and the log records both.
+The bridge does not retry a failed model response or silently repair it.
+
+Input and output limits are 256 KiB and 128 KiB. Commands execute as an argv
+list without a shell, with a configured per-call timeout and the existing
+bounded subprocess transport. Identity is caller-declared, not attested.
+The program records raw stdout as base64 before parsing, including nonzero
+exits and malformed UTF-8/JSON. Timeouts and transport-limit errors may have
+no complete stdout available; they retain an error and failed attempt instead
+of a fabricated response. Stderr is not copied into public artifacts.
+
+The runner retains public inputs, provider configuration, source hashes and
+flushed/fsynced operation records. Requests are logged before actions. Public
+responses, elapsed call durations, model stdout, clarification and per-turn
+task inspections are retained. Logging failure stops subsequent actions.
+Runtime failures produce `status: failed` with completed-case and record counts;
+a completed execution still has `scored: false` and `publishable: false`.
+
+Example invocation, using an already configured provider program:
+
+```sh
+python -m eval.public.action_formation_run \
+  --output /new/absolute/formation-attempt \
+  --provider-identity pinned-provider-description \
+  --timeout-seconds 30 -- /absolute/path/to/formation-provider
+```
+
+Provider argv is recorded, so configuration secrets belong outside command-line
+arguments. Separate harness stores do not prove provider-side isolation. Local
+commands are not filesystem-sandboxed, and repository fixtures are accessible
+to same-user code: `filesystem_isolation_verified` remains false. Admission
+requires a separately verified provider boundary and model/runtime custody.
+No unchanged failed eight-billion-parameter reader probe is repeated here.
+
+Validation currently uses explicitly identified scripted test doubles and real
+public CLI calls, including revision-keyed cancellation. That proves plumbing,
+not natural-language understanding. No real formation-provider run has been
+retained. Full state-equivalence scoring, downstream firing/sink evaluation,
+resource/cost capture, provider pinning and calibrated comparisons remain open.
+The reused action adapter still captures generic probe scheduling evidence;
+binding natural-language source turns to intention evidence CIDs also remains
+required before claiming complete formation provenance.

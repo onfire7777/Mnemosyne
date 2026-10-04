@@ -18,6 +18,13 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+The formation development runner now accepts an explicitly configured bounded
+command provider and applies only allowed operations through the public action
+adapter. It retains incremental requests, raw responses, public outcomes and
+partial-failure status. Scripted command/public-CLI tests pass; no actual model
+quality or downstream firing result is claimed. Provider pinning/isolation,
+natural-input evidence-CID binding and complete scoring remain open.
+
 The [natural-language formation corpus](../docs/plans/m12-implicit-formation-development-2026-10-04.md)
 now contains 220 conversations with separate input/label files and incremental
 turn projection. Positive commitments, timing ambiguity, negatives, quoted
