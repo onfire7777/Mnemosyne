@@ -354,3 +354,23 @@ the bridge. Grammar-valid incorrect timing, unnecessary reminders or bad
 clarification remain model errors; schema conformance is not memory quality.
 Any run with this flag is a distinct development variant, not a repair of the
 retained initial failure or a replacement for the frozen reader configuration.
+
+
+## Retained schema-variant attempt and HTTP diagnostics
+
+The [schema-variant capture](../../eval/reports/m12-formation-schema-attempt-2026-10-04/README.md)
+from clean `dec91100` completed 21 of 220 cases before an HTTP error on the next
+chat request. All 25 successful model responses asked for clarification and
+scheduled no task. The completed prefix therefore missed 17 eligible
+occurrences. This is not a full-corpus score or a measurement of the engine's
+scheduling accuracy. Every completed prefix case is retained in partial state
+and timing diagnostics; the completed-run verifier does not certify this failed
+capture as a complete run. The original plain-JSON failure remains separate.
+
+All 161 pressure samples were normal, and cleanup found no loaded model.
+The old wrapper retained only the HTTP error class; its status/body and cause
+are unknown. Subsequent source now records the HTTP status and up to 2 MiB of
+error body, explicitly marking truncation, without retrying or inventing model
+output. This diagnostic change does not retroactively fill the earlier gap.
+Full completion, reliable formation quality, independent custody and the
+original acceptance/calibration gates remain open.

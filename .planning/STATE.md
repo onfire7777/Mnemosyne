@@ -18,6 +18,14 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+The schema-constrained Qwen3 0.6B attempt at clean `dec91100` has ended: 21
+cases completed, then an HTTP error stopped the next request. Its 25 successful
+responses only requested clarification; no task writes occurred and 17 eligible
+occurrences were missed in the completed prefix. All 161 pressure samples were
+normal. Raw evidence and partial diagnostics are retained; this is not a
+completed benchmark. The wrapper now records bounded HTTP error details.
+CI at pushed `55ae2ef9` passed; newer local commits require their own CI.
+
 The formation runner now retains twelve fixed public-input virtual probes per
 conversation and scoped inert receipts for every observed firing. A real local
 Qwen3 0.6B attempt at clean 88a56f24 stopped on its first invalid response,

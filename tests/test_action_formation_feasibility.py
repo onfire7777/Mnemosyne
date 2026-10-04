@@ -48,3 +48,37 @@ def test_retained_small_model_failure_is_not_a_completed_benchmark():
     pressure = [json.loads(line) for line in (root / 'monitor/pressure.jsonl').read_text().splitlines()]
     assert len(pressure) == manifest['normal_pressure_samples'] == 3
     assert all(row['pressure'] == 1 for row in pressure)
+
+
+def test_schema_attempt_preserves_all_completed_prefix_cases_and_quality_failures():
+    from eval.public.action_formation_scoring import score_case
+    from eval.public.action_formation_timing import score_observations
+
+    root = Path(__file__).resolve().parents[1] / 'eval/reports/m12-formation-schema-attempt-2026-10-04'
+    manifest = json.loads((root / 'manifest.json').read_text())
+    for name, expected in manifest['files'].items():
+        raw = (root / name).read_bytes()
+        assert expected == {'sha256': hashlib.sha256(raw).hexdigest(), 'bytes': len(raw)}
+    rows = [json.loads(line) for line in (root / 'workload/operations.jsonl').read_text().splitlines()]
+    report = json.loads((root / 'partial-diagnostics.json').read_text())
+    assert manifest['complete_benchmark'] is report['complete_benchmark'] is False
+    assert manifest['completed_cases'] == len(report['cases']) == 21
+    corpus = make_corpus()['cases']
+    assert [r['case_id'] for r in report['cases']] == [c['public']['case_id'] for c in corpus[:21]]
+    for case, retained in zip(corpus[:21], report['cases'], strict=True):
+        records = [r for r in rows if r['case_id'] == case['public']['case_id']]
+        assert retained['state'] == score_case(case, [r for r in records if r['stage'] == 'turn_completed'])
+        ticks = [r['response'] for r in records if r['stage'] == 'observation_response' and r['command'] == 'intention.observe']
+        assert retained['timing'] == score_observations(case, {'case_id': case['public']['case_id'], 'ticks': ticks})
+    assert sum(r['timing']['metrics']['false_negatives'] for r in report['cases']) == 17
+    assert sum(r['timing']['metrics']['true_positives'] for r in report['cases']) == 0
+    assert not any(r.get('command') in ('task.create', 'task.update') for r in rows)
+    outputs = [r for r in rows if r['stage'] == 'formation_response' and r['returncode'] == 0]
+    assert len(outputs) == manifest['model_responses'] == 25
+    for row in outputs:
+        value = json.loads(base64.b64decode(row['stdout_base64']))
+        assert value['operations'] == [] and value['clarification']
+    status = json.loads((root / 'workload/status.json').read_text())
+    assert status['status'] == 'failed' and status['completed_cases'] == 21
+    assert rows[-1]['stage'] == 'formation_error'
+    assert rows[-1]['case_id'] == corpus[21]['public']['case_id']

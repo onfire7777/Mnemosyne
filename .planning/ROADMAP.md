@@ -20,7 +20,9 @@ and a natural-language formation pipeline with stored-state/timing diagnostics
 and saved-trace consistency verification. The first local small-model invocation
 is [retained as a failed attempt](../eval/reports/m12-formation-feasibility-2026-10-04/README.md),
 not a completed benchmark or admitted result. A schema-constrained provider
-variant is available; its existence is not a measurement.
+variant completed 21 cases before an HTTP error, with no task writes and 17
+missed eligible occurrences in that prefix. This incomplete attempt does not
+establish full-corpus performance or engine scheduling accuracy.
 
 The [scope audit](../docs/plans/benchmark-platform-scope-audit-2026-10-04.md)
 records the current local-versus-pushed source and CI boundary. These additions

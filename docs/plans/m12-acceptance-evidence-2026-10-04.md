@@ -153,3 +153,11 @@ now provides one actual local model response. The intended 220-case run stopped
 on the first invalid response, before any task write. All three pressure samples
 were normal and the model was unloaded afterward. This is a failed development
 attempt, not a zero accuracy estimate or a successful M12 measurement.
+
+
+The [schema-constrained model attempt](../../eval/reports/m12-formation-schema-attempt-2026-10-04/README.md)
+completed 21 cases before an HTTP error. It issued no task writes and missed
+17 eligible occurrences in that prefix. Partial per-case diagnostics preserve
+this loss; no full-corpus, engine-quality or resource-admission claim follows.
+The HTTP error cause is unknown because the old wrapper omitted status/body.
+New source records bounded HTTP error detail for future attempts.

@@ -123,3 +123,27 @@ def test_schema_mode_records_grammar_and_preserves_model_content(tmp_path):
     assert transport.calls[1][2]['format'] == response_schema(supplied['conversation']['actions'])
     assert logs(tmp_path)[0]['output_mode'] == 'schema'
     assert len(logs(tmp_path)[0]['format_sha256']) == 64
+
+
+def test_http_failure_retains_bounded_body_and_status_without_retry(tmp_path):
+    from io import BytesIO
+    from urllib.error import HTTPError
+
+    transport = Transport()
+    calls = []
+
+    def fail_chat(base, route, payload, timeout):
+        calls.append(route)
+        if route == '/api/chat':
+            raise HTTPError(base + route, 503, 'unavailable', {}, BytesIO(b'{"error":"server unavailable"}'))
+        return transport(base, route, payload, timeout)
+
+    with pytest.raises(HTTPError):
+        complete(request(), model=MODEL, digest=DIGEST, evidence_dir=tmp_path, transport=fail_chat)
+    assert calls == ['/api/tags', '/api/chat']
+    records = logs(tmp_path)
+    error = next(row for row in records if row['stage'] == 'chat_http_error')
+    assert error['status'] == 503
+    assert base64.b64decode(error['raw_base64']) == b'{"error":"server unavailable"}'
+    assert error['body_truncated'] is False
+    assert records[-1]['stage'] == 'failed'
