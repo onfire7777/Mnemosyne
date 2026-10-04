@@ -264,7 +264,7 @@ def native_replay_protocol() -> dict:
     paths = (
         "eval/public/adapters/locomo.py", "eval/public/adapters/locomo_native.py",
         "eval/public/adapters/locomo_scoring.py", "eval/public/adapters/locomo_replay.py",
-        "eval/public/custody.py", "eval/harness/cli_driver.py", "src/mnemosyne/ids.py",
+        "eval/public/custody.py", "eval/public/derivation.py", "eval/harness/cli_driver.py", "src/mnemosyne/ids.py",
     )
     return {
         "id": "mnemosyne.locomo-native-scoring/v1",
@@ -274,6 +274,7 @@ def native_replay_protocol() -> dict:
         "source_time": "verbatim-data; no virtual-clock advancement",
         "question_transformation": "upstream-category-instructions-and-explicit-choice-draw",
         "projection": "native-explicit-abstention-v1",
+        "claim_derivation": "mnemosyne.claim-derivation/v1; quotation or independently replayed arithmetic/date",
         "qa_scoring": "pinned-category-scorer; round-each-case-to-3-decimals",
         "qa_denominator": "all-source-questions-in-category; missing-contributes-zero",
         "native_evidence_recall": "exact-dialog-membership; empty-retrieval-zero; empty-gold-null",

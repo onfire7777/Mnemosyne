@@ -396,3 +396,37 @@ synthesis, and both cases passed: the latter derived 4 from source operands 1.20
 and 2.80. In each case, removing the opted-in provenance gave the exact default
 response; input stores remained byte-for-byte unchanged. Unit checks also
 retained arithmetic/date operations through the public serializer. Ruff passed.
+
+## Native derivation replay connected
+
+Native answer execution now requests the public derivation trace and retains
+`command_options.include_derivation: true`. Both execution and saved-record
+verification reject nonempty claim lists missing the requested receipts. The
+native projection accepts the versioned optional claim field and reconstructs
+operands from the already verified CID/span pairs. Synthesis operands must also
+be unambiguous within their captured source content.
+
+`eval/public/derivation.py` independently verifies quotations, exact rational
+arithmetic and calendar composition using the standard library; it does not
+call the product synthesizer. It preserves operation ordering, decimal bounds,
+canonical output and the declared five-operation allowlist. No arbitrary code
+or numeric-expression evaluation is permitted. Verified synthesis is labeled
+`replayed-deterministic-synthesis`; legacy receipt-free projection still exposes
+`derived-text-unverified`, but new retained native records require receipts.
+Older developmental records must use their original verifying checkout.
+
+The replay protocol now fingerprints eight listed source files including this
+verifier. Runtime/provider authenticity, dataset admission and signed neutral
+bundle integration are still outstanding; replaying a calculation does not
+prove those conditions or establish benchmark superiority.
+
+Validation: 135 isolated checks passed, including 25 derivation checks and 200
+seeded arithmetic comparisons with the product contract. The initial isolated
+run exposed a test-only package import that pulled in production dependencies;
+the parity test now loads only the standalone standard-library provider file,
+without expanding the scorer environment. All 41 production-environment native,
+cross-interpreter and public-CLI roundtrip checks passed. The latter exercise
+real public captures and a synthetic provider for quotation and arithmetic,
+then verify the emitted derivation through the independent native projection.
+Ruff, diff checks and CI YAML parsing passed. Remote CI remains in progress on
+`046f08a8`; these subsequent commits remain local to avoid cancelling it.

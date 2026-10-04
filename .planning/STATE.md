@@ -22,8 +22,8 @@ At `4a0e4c4c`, the Mnemetric comparison/coverage/attempt surfaces and real local
 retrieval preview are implemented; the single retrieval run has an exact
 nine-file clean-checkout reproduction. It is nonpublishable and not an official
 QA or multi-system comparison. Local combined platform/BurnOS/bundle regression
-checks passed 452 tests. The latest isolated LoCoMo checks passed 110 tests;
-24 native public-boundary tests and seven cross-environment replay tests passed.
+checks passed 452 tests. The latest isolated LoCoMo checks passed 135 tests;
+32 native public-boundary tests and seven cross-environment replay tests passed.
 
 LoCoMo now includes ingestion, scoring, non-RAG prompt construction, a verified
 tokenizer, sequential native capture/answer execution and isolated scorer replay.

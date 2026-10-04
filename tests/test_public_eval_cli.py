@@ -745,8 +745,8 @@ def test_public_answer_and_batch_are_ordered_grounded_and_store_immutable(
 ) -> None:
     store = tmp_path / "store.json"
     ordinary = MnemoCLI(store=str(store))
-    ordinary.capture("answer-tenant", "user-a", "Ada has amounts 1.20 and 2.80." if synthesis
-                     else "Ada owns project Zephyr.")
+    source_text = "Ada has amounts 1.20 and 2.80." if synthesis else "Ada owns project Zephyr."
+    captured = ordinary.capture("answer-tenant", "user-a", source_text)
     provider = tmp_path / "grounded-provider.py"
     provider.write_text(
         """#!/usr/bin/env python3
@@ -819,6 +819,13 @@ json.dump(response, sys.stdout)
     assert [row["question_id"] for row in batch["results"]] == ["q2", "q1"]
     detailed = read_only.eval_answer_batch(rows, include_derivation=True)
     for result in detailed["results"]:
+        from eval.public.adapters.locomo_native import project_native_response
+        projected = project_native_response(
+            result, {"question": "Ada", "category": 4, "answer": result["answer"]},
+            {captured["cid"]: {"dialog_id": "synthetic", "capture": {"content": source_text}}},
+        )
+        assert projected["claim_text_custody"] == [
+            "replayed-deterministic-synthesis" if synthesis else "exact-quoted-spans"]
         for claim in result["claims"]:
             assert claim.pop("derivation") == {
                 "schema_version": "mnemosyne.claim-derivation/v1",
