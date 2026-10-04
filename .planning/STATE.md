@@ -18,6 +18,12 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+A separately versioned 100-conversation dependency formation extension is now
+materialized with public inputs and evaluator labels. It spans five seeds and
+four weekly dates; ten corpus tests pass, including unchanged original fixture
+bytes. This is corpus availability only. Dependency identity normalization,
+scoring/execution/replay support and actual model measurements remain open.
+
 The `c4a9d32a` paired decoding diagnostic completed 22 first-turn calls: all
 11 plain-JSON outputs failed envelope validation; all 11 schema outputs passed.
 Plain JSON still substituted a timer for the first event request. No task was
