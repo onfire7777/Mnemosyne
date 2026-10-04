@@ -311,3 +311,9 @@ missingness, tamper rejection, malformed JSON and timeout propagation. Ruff and
 CI YAML parsing passed. CI includes this boundary in the isolated scorer job.
 The prior remote CI head `df99593b` passed all nine gating jobs; a new-head CI run
 is still required for the accumulated local changes.
+
+CI correction: GitHub rejected workflow head `3d132c74` before dispatch because
+`runner.temp` was used in job-level `env`, where the runner context is unavailable.
+The earlier YAML parse only proved syntax, not GitHub's context rules. Moved the
+same vocabulary path into the download/test step environments, where runner
+context is supported. No test, runtime pin or acceptance gate was removed.
