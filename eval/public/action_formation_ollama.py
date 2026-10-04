@@ -19,6 +19,7 @@ from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_ope
 import uuid
 
 from eval.public.action_formation import MAX_INPUT_BYTES, MAX_OUTPUT_BYTES
+from eval.public.action_formation_schema import response_schema
 from eval.public.bundle import _canonical, _json_depth, _parse_json
 
 SYSTEM_PROMPT = '''You are the formation role in a development memory evaluation.
@@ -94,13 +95,14 @@ def _check_model(tags, model, digest):
 
 
 def complete(request, *, model, digest, evidence_dir, base_url='http://127.0.0.1:11434',
-             timeout=120, num_ctx=8192, num_predict=2048, transport=_http):
+             timeout=120, num_ctx=8192, num_predict=2048, output_mode='json', transport=_http):
     base = _base_url(base_url)
     if (not isinstance(model, str) or re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}', model) is None
             or not isinstance(digest, str) or re.fullmatch('[0-9a-f]{64}', digest) is None
             or type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 300
             or type(num_ctx) is not int or not 2048 <= num_ctx <= 32768
-            or type(num_predict) is not int or not 128 <= num_predict <= 4096):
+            or type(num_predict) is not int or not 128 <= num_predict <= 4096
+            or output_mode not in ('json', 'schema')):
         raise ValueError('invalid local formation configuration')
     if (not isinstance(request, dict) or set(request) != {
             'schema', 'conversation', 'current_tasks', 'prior_responses', 'response_contract'}
@@ -113,10 +115,11 @@ def complete(request, *, model, digest, evidence_dir, base_url='http://127.0.0.1
     # custody. Fail rather than silently shorten public history for the model.
     if len(raw) + len(SYSTEM_PROMPT.encode()) + num_predict + 512 > num_ctx:
         raise ValueError('formation request exceeds conservative context budget')
+    output_format = 'json' if output_mode == 'json' else response_schema(request['conversation']['actions'])
     body = {'model': model, 'messages': [
         {'role': 'system', 'content': SYSTEM_PROMPT},
         {'role': 'user', 'content': raw.decode('utf-8')}],
-        'stream': False, 'format': 'json', 'think': False, 'keep_alive': 0,
+        'stream': False, 'format': output_format, 'think': False, 'keep_alive': 0,
         'options': {'temperature': 0, 'seed': 7, 'num_ctx': num_ctx,
                     'num_predict': num_predict, 'num_thread': 2, 'num_batch': 128}}
     root = Path(evidence_dir)
@@ -130,6 +133,8 @@ def complete(request, *, model, digest, evidence_dir, base_url='http://127.0.0.1
 
         record({'stage': 'configuration', 'schema': 'm12-ollama-formation-attempt/v1',
                 'model': model, 'expected_server_digest': digest, 'base_url': base,
+                'output_mode': output_mode,
+                'format_sha256': hashlib.sha256(_canonical(output_format)).hexdigest(),
                 'source_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                 'prompt_sha256': hashlib.sha256(SYSTEM_PROMPT.encode()).hexdigest(),
                 'timeout_seconds': timeout, 'provider_identity_attested': False,
@@ -174,6 +179,7 @@ def main():
     parser.add_argument('--timeout', type=float, default=120)
     parser.add_argument('--num-ctx', type=int, default=8192)
     parser.add_argument('--num-predict', type=int, default=2048)
+    parser.add_argument('--output-mode', choices=('json', 'schema'), default='json')
     args = parser.parse_args()
     try:
         raw = sys.stdin.buffer.read(MAX_INPUT_BYTES + 1)
@@ -182,7 +188,7 @@ def main():
         request = _parsed(raw)
         content = complete(request, model=args.model, digest=args.digest, evidence_dir=args.evidence_dir,
                            base_url=args.base_url, timeout=args.timeout,
-                           num_ctx=args.num_ctx, num_predict=args.num_predict)
+                           num_ctx=args.num_ctx, num_predict=args.num_predict, output_mode=args.output_mode)
         sys.stdout.buffer.write(content)
     except Exception as error:
         print(type(error).__name__, file=sys.stderr)

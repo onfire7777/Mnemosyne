@@ -336,3 +336,21 @@ operation envelope, without inserting labels or repairing model answers.
 Any changed provider variant must retain this initial failure and identify its
 new settings. A full valid run, semantic accuracy, independent custody and all
 original M12 admission/calibration requirements remain open.
+
+
+## Schema-constrained development variant
+
+The optional `--output-mode schema` provider flag now supplies a JSON Schema to
+Ollama. Plain `json` remains available and is still the default, preserving the
+first attempt's settings. The schema uses only public action IDs and the public
+operation contract. It covers all five trigger shapes, interval recurrence,
+cancel/override/reschedule and paired revision/idempotency fields. It separates
+clarification-only responses from operations, preventing that structural error
+without choosing a decision, timestamp or expected action on the model's behalf.
+
+HTTP evidence records the chosen mode, exact schema in the request body and its
+SHA-256 digest. Generated content is still returned unchanged and validated by
+the bridge. Grammar-valid incorrect timing, unnecessary reminders or bad
+clarification remain model errors; schema conformance is not memory quality.
+Any run with this flag is a distinct development variant, not a repair of the
+retained initial failure or a replacement for the frozen reader configuration.
