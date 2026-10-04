@@ -174,3 +174,38 @@ def test_native_claim_must_cite_an_observed_retrieval():
     raw["claims"] = [{"text": "violet", "evidence_cids": ["cid"], "spans": []}]
     with pytest.raises(LoCoMoError, match="retrieval trace"):
         project_native_response(raw, sample("one")["qa"][0], {"cid": {"dialog_id": "D1:1"}})
+
+
+def test_native_replay_rebuilds_capture_request_and_projection(tmp_path, monkeypatch):
+    from copy import deepcopy
+    from eval.public.adapters.locomo_native import verify_native_answer_record
+    source = sample("one")
+    with captured_conversations([source], MnemoCLI(store=str(tmp_path / "unused")),
+                                caption_policy="exclude-caption") as conversations:
+        conversation = conversations[0]
+        cid = next(iter(conversation["evidence"]))
+
+        def answer(cli, path):
+            request = json.loads(Path(path).read_text())
+            raw = response()
+            raw["hops"] = [{"retrieved_cids": [cid]}]
+            return {"results": [{**raw, "question_id": request["question_id"]}]}
+
+        monkeypatch.setattr(MnemoCLI, "eval_answer_batch", answer)
+        record = answer_captured_question(conversation, split_samples([source])["questions"][0], source["qa"][0])
+    # Replay still works after the original temporary store has been removed.
+    assert verify_native_answer_record(source, 0, record, caption_policy="exclude-caption") == record
+    for field, value in [("decoded_prediction", "changed"), ("request_sha256", "0" * 64),
+                         ("runtime_custody_verified", True), ("extra_field", "unrecognized")]:
+        damaged = deepcopy(record)
+        damaged[field] = value
+        with pytest.raises(LoCoMoError, match="mismatch"):
+            verify_native_answer_record(source, 0, damaged, caption_policy="exclude-caption")
+    damaged_source = deepcopy(source)
+    damaged_source["conversation"]["session_1"][0]["text"] = "changed source"
+    with pytest.raises(LoCoMoError, match="evidence"):
+        verify_native_answer_record(damaged_source, 0, record, caption_policy="exclude-caption")
+    unobserved_source = deepcopy(source)
+    unobserved_source["conversation"]["session_1"][1]["text"] = "changed unreturned evidence"
+    with pytest.raises(LoCoMoError, match="mismatch"):
+        verify_native_answer_record(unobserved_source, 0, record, caption_policy="exclude-caption")
