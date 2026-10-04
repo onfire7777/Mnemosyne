@@ -23,7 +23,8 @@ including clean process exit. See `services/answering-ort/README.md` for the
 exact reproduction command and limitations.
 [Raw validation evidence](../../../eval/reports/compact-onnx-native-development-2026-10-04/README.md)
 retains successful clean-source checks plus the failed SDK invocation. A
-bounded Linux CI job exercises native parity; its remote outcome is pending.
+bounded Linux CI job now passed at `e1ad2d0c` (51 native tests, formatting,
+Clippy); see `eval/reports/compact-onnx-linux-ci-2026-10-04`.
 
 A subsequent experimental span-only `InferenceSession` now connects the native
 tensor adapter to a digest-checked tokenizer and exact source-byte offsets.
@@ -54,7 +55,10 @@ Source-document grouping now finds 919 connected components; one holds
 152,706 of 220,744 staged rows, including 89,667 Hotpot rows. This constrains
 independent Hotpot selection/calibration coverage (758 rows outside that
 component). `eval/reports/compact-train-groups-2026-10-04` retains the policy,
-histogram and full-edge audit. No partition or training admission is claimed.
+histogram and full-edge audit. The first partition plan is subsequently frozen at `db54506a`: 176,595 train,
+22,075 selection and 22,074 calibration rows. Evidence and coverage limits are
+in `eval/reports/compact-train-partitions-2026-10-04`. This is quarantined;
+protected/entity screening and attribution remain required before admission.
 
 ## Goal
 
