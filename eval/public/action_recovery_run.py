@@ -9,10 +9,13 @@ from pathlib import Path
 import random
 import sys
 import tempfile
+import uuid
 
 from eval.harness.cli_driver import MnemoCLI
 from eval.public.action_cli import ActionCLI
-from eval.public.action_timing_run import SEEDS, _source_receipt, _write
+from eval.public.action_timing_run import (
+    SEEDS, _deliver, _sink_for, _source_receipt, _validate_sink_annex, _write,
+)
 from eval.public.action_trigger_timing import score_trigger_windows
 from eval.public.bundle import _canonical, _parse_json
 
@@ -187,16 +190,18 @@ def reports(plan, records):
             'ordered_workload_verified': True, 'cases': results}
 
 
-def run_development(output):
+def run_development(output, *, with_sink=False):
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
     plan, records = make_plan(), []
     _write(output / 'plan.json', plan)
-    source = _source_receipt()
+    source = _source_receipt(with_sink)
     for name in ('action_recovery_run.py', 'action_trigger_timing.py'):
         path = Path(__file__).with_name(name)
         source['harness_files']['eval/public/' + name] = hashlib.sha256(path.read_bytes()).hexdigest()
     _write(output / 'source.json', source)
+    sink_cases = []
+    run_id = str(uuid.uuid4()) if with_sink else None
     try:
         with (output / 'operations.jsonl').open('xb') as log, tempfile.TemporaryDirectory(prefix='m12-recovery-') as temp:
             for case in plan['cases']:
@@ -204,6 +209,7 @@ def run_development(output):
                 adapter, past = ActionCLI(driver), []
                 scope = {'store': str(Path(temp) / (case['case_id'] + '.json')),
                          'tenant_id': case['case_id'], 'session_id': 'operation-recovery'}
+                sink = _sink_for(output / 'sink.sqlite3', run_id, case['case_id'], 'operation-recovery') if with_sink else None
                 for step, operation in enumerate(case['operations']):
                     payload = resolve_payload(operation, past)
                     command = operation['command']
@@ -230,8 +236,14 @@ def run_development(output):
                     log.flush()
                     records.append(record)
                     past.append(record)
+                    if sink is not None and operation['command'] == 'intention.observe':
+                        _deliver(sink, response)
+                if sink is not None:
+                    sink_cases.append({'case_id': case['case_id'], 'snapshot': sink.snapshot()})
         result = reports(plan, records)
         _write(output / 'reports.json', result)
+        if with_sink:
+            _write(output / 'sink.json', {'schema': 'm12-inert-sink-annex/v1', 'run_id': run_id, 'cases': sink_cases})
     except BaseException as error:
         _write(output / 'status.json', {'status': 'failed', 'exception_type': type(error).__name__,
                                        'completed_operations': len(records), 'publishable': False})
@@ -259,16 +271,19 @@ def recompute(output):
         raise ValueError('recovery execution did not complete')
     if _canonical(_parse_json(read('reports.json'), 'reports')) != _canonical(result):
         raise ValueError('saved recovery report does not recompute')
+    _validate_sink_annex(output, read, plan, records, 'operation-recovery')
     return result
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('output', type=Path)
-    parser.add_argument('--recompute', action='store_true')
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--recompute', action='store_true')
+    mode.add_argument('--sink', action='store_true', help='retain inert delivery receipts and deliberate retries')
     args = parser.parse_args()
     try:
-        result = recompute(args.output) if args.recompute else run_development(args.output)
+        result = recompute(args.output) if args.recompute else run_development(args.output, with_sink=args.sink)
     except Exception as error:
         print(f'Recovery diagnostic failed: {type(error).__name__}', file=sys.stderr)
         raise SystemExit(1) from None

@@ -141,3 +141,25 @@ state are disclosed. Registered recovery admission, overload, implicit
 formation, calibrated reference systems and full resource/cost gates remain
 open; the five-trigger workload and existing registered fixture bytes remain
 unchanged.
+
+## Sink-connected execution
+
+Both `action_trigger_run` and `action_recovery_run` accept `--sink`. Each raw
+firing is sent to the existing durable, harness-owned SQLite sink, followed by
+one explicitly labelled harness retry. The sink binds run, case, tenant,
+session, intention and occurrence. It stores one inert receipt per logical
+delivery and retains every attempt, including duplicates/conflicts.
+
+The mode preserves existing plan and timing-report bytes. `source.json`
+explicitly declares whether the sink was enabled; `sink.json` contains its
+per-case snapshots, and `sink.sqlite3` retains the local durable records.
+Recompute checks the complete operation sequence first and reconstructs the
+annex with the correct workload session. A missing, modified or unadvertised
+annex is rejected. Existing captures without a sink remain replayable.
+
+Delivery failure retains completed raw operations and a failed status rather
+than writing a successful report. The sink does not execute external payloads.
+A deliberately repeated sink attempt tests idempotent recording, not an
+independent external service's exactly-once guarantee. Current separate
+workloads still need overload/implicit cases, integrated cross-module recovery,
+calibration and resource/cost admission before full M12 acceptance.

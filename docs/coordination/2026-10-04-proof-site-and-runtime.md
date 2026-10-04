@@ -834,3 +834,19 @@ firing has a durable delivery record, then extend overload/implicit cases and
 calibrated exact-reference comparisons. A response-loss trace is not a
 power-loss test or cross-module M11/M12/M17 admission. Original acceptance and
 resource/cost gates remain unchanged.
+
+## Sink-connected action workloads
+
+The previous `2ef09be5` turn made progress by retaining clean-source response-loss
+recovery evidence. Both five-trigger and recovery runners now support `--sink`,
+reusing the exact-time runner's durable sink and replay implementation. Each
+observed firing produces a candidate delivery followed by a labelled harness
+retry; each workload uses its own session scope. Reports are written only after
+all deliveries succeed. Replay binds the annex to the complete operations and
+rejects missing, modified or unadvertised delivery evidence.
+
+Forty-nine focused tests passed, including real public-CLI sink delivery in both
+runners, failed-delivery retention, tampered receipt/scope/retry rejection and
+sink concurrency/rollback cases. All four historical captures replay unchanged.
+Ruff and whitespace checks passed. Full clean-source workload captures follow
+separately; this implementation alone is not a measured admission result.

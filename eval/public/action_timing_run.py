@@ -120,20 +120,37 @@ def _deliver(sink, response):
             raise ValueError("inconsistent sink delivery; durable attempts retained")
 
 
-def _sink_for(path, run_id, case_id):
-    return ActionSink(path, run_id=run_id, case_id=case_id, tenant_id=case_id, session_id="timing")
+def _sink_for(path, run_id, case_id, session_id="timing"):
+    return ActionSink(path, run_id=run_id, case_id=case_id, tenant_id=case_id, session_id=session_id)
 
 
-def _replay_sink(plan, records, run_id):
+def _replay_sink(plan, records, run_id, session_id="timing"):
     cases = []
     with tempfile.TemporaryDirectory(prefix="m12-sink-replay-") as temp:
         for case in plan["cases"]:
-            sink = _sink_for(Path(temp) / "sink.sqlite3", run_id, case["case_id"])
+            sink = _sink_for(Path(temp) / "sink.sqlite3", run_id, case["case_id"], session_id)
             for record in records:
                 if record["case_id"] == case["case_id"] and record["command"] == "intention.observe":
                     _deliver(sink, record["response"])
             cases.append({"case_id": case["case_id"], "snapshot": sink.snapshot()})
     return {"schema": "m12-inert-sink-annex/v1", "run_id": run_id, "cases": cases}
+
+
+def _validate_sink_annex(output, read, plan, records, session_id="timing"):
+    source = _parse_json(read("source.json"), "source")
+    if not isinstance(source, dict):
+        raise ValueError("invalid source receipt")
+    enabled = source.get("sink_enabled", False)
+    if type(enabled) is not bool:
+        raise ValueError("invalid sink declaration")
+    if enabled:
+        annex = _parse_json(read("sink.json"), "sink")
+        if not isinstance(annex, dict) or not isinstance(annex.get("run_id"), str):
+            raise ValueError("invalid sink annex")
+        if _canonical(annex) != _canonical(_replay_sink(plan, records, annex["run_id"], session_id)):
+            raise ValueError("sink annex does not recompute")
+    elif (output / "sink.json").exists():
+        raise ValueError("unadvertised sink annex")
 
 
 def run_development(output, *, with_sink=False):
@@ -197,18 +214,7 @@ def recompute(output):
         raise ValueError("operation count differs from completion record")
     if _canonical(_parse_json(read("reports.json"), "reports")) != _canonical(reports):
         raise ValueError("saved reports do not recompute")
-    source = _parse_json(read("source.json"), "source")
-    enabled = source.get("sink_enabled", False)
-    if type(enabled) is not bool:
-        raise ValueError("invalid sink declaration")
-    if enabled:
-        annex = _parse_json(read("sink.json"), "sink")
-        if not isinstance(annex, dict) or not isinstance(annex.get("run_id"), str):
-            raise ValueError("invalid sink annex")
-        if _canonical(annex) != _canonical(_replay_sink(plan, records, annex["run_id"])):
-            raise ValueError("sink annex does not recompute")
-    elif (output / "sink.json").exists():
-        raise ValueError("unadvertised sink annex")
+    _validate_sink_annex(output, read, plan, records)
     return reports
 
 

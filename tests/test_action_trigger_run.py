@@ -76,6 +76,7 @@ def test_saved_replay_checks_reports_completion_and_size(tmp_path, damage):
 
     plan, records = empty_trace()
     result = reports(plan, records)
+    (tmp_path / 'source.json').write_bytes(_canonical({'sink_enabled': False}))
     (tmp_path / 'plan.json').write_bytes(_canonical(plan))
     (tmp_path / 'operations.jsonl').write_bytes(b''.join(_canonical(row) for row in records))
     (tmp_path / 'status.json').write_bytes(_canonical({
