@@ -30,7 +30,7 @@ def test_cross_environment_native_replay(tmp_path, monkeypatch):
     reader = {"grounded_reader": {"provider": "synthetic"}}
 
     def answer(cli, path, *, include_derivation=False):
-        request = json.loads(Path(path).read_text())
+        request = json.loads(Path(path).read_text(encoding="utf-8"))
         cid = next(iter(context["evidence"]))
         start = context["evidence"][cid]["capture"]["content"].index("violet")
         claim = {"text": "violet", "evidence_cids": [cid],
@@ -49,7 +49,7 @@ def test_cross_environment_native_replay(tmp_path, monkeypatch):
     assert not report["publication_authorized"] and not report["runtime_custody_verified"]
     saved = tmp_path / "report.json"
     saved.write_text(json.dumps(report))
-    assert verify_report_in_environment(json.loads(saved.read_text()), [sample], [record], **kwargs) == report
+    assert verify_report_in_environment(json.loads(saved.read_text(encoding="utf-8")), [sample], [record], **kwargs) == report
     assert report["protocol"]["id"] == "mnemosyne.locomo-native-scoring/v1"
     assert len(report["protocol"]["replay_source_sha256"]) == 11
     for field, changed in (

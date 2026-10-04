@@ -95,6 +95,13 @@ def test_native_projection_rejects_ambiguous_answers_and_foreign_evidence(raw):
 
 
 def test_native_question_uses_read_only_public_boundary_and_retains_request(tmp_path, monkeypatch):
+    original_read_text = Path.read_text
+
+    def legacy_locale_read(path, encoding=None, *args, **kwargs):
+        # Exercise the Windows legacy text default even on UTF-8 hosts.
+        return original_read_text(path, encoding or "cp1252", *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", legacy_locale_read)
     source = sample("one")
     source["qa"][0]["question"] = "café what?"
     question = split_samples([source])["questions"][0]
@@ -104,12 +111,12 @@ def test_native_question_uses_read_only_public_boundary_and_retains_request(tmp_
     def answer(cli, path, *, include_derivation=False):
         assert include_derivation is True
         assert "--evaluation-read-only" in cli.global_flags
-        request = json.loads(Path(path).read_text())
+        request = json.loads(Path(path).read_text(encoding="utf-8"))
         assert request["question"] == "café what?"
         actual = Path(path).read_bytes()
         assert actual == (json.dumps(request, sort_keys=True, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
         wire_bytes.append(actual)
-        assert "SECRET_LABEL" not in Path(path).read_text()
+        assert "SECRET_LABEL" not in Path(path).read_text(encoding="utf-8")
         observed.append(Path(path))
         return {"results": [{**response(), "question_id": request["question_id"]}]}
 
@@ -204,7 +211,7 @@ def test_native_replay_rebuilds_capture_request_and_projection(tmp_path, monkeyp
         cid = next(iter(conversation["evidence"]))
 
         def answer(cli, path, *, include_derivation=False):
-            request = json.loads(Path(path).read_text())
+            request = json.loads(Path(path).read_text(encoding="utf-8"))
             raw = response()
             raw["hops"] = [{"retrieved_cids": [cid]}]
             claim = raw["claims"][0]
@@ -244,7 +251,7 @@ def test_native_sequence_preserves_full_population_and_stops_without_retry(tmp_p
     should_fail = True
 
     def answer(cli, path, *, include_derivation=False):
-        request = json.loads(Path(path).read_text())
+        request = json.loads(Path(path).read_text(encoding="utf-8"))
         assert all(not store.exists() for store in stores if store != Path(cli.store))
         calls.append(request["question_id"])
         stores.append(Path(cli.store))
@@ -358,7 +365,7 @@ def test_seeded_native_execution_preserves_option_policy(tmp_path, monkeypatch):
     seen = []
 
     def answer(cli, path, *, include_derivation=False):
-        request = json.loads(Path(path).read_text())
+        request = json.loads(Path(path).read_text(encoding="utf-8"))
         seen.append(request["question"])
         return {"results": [{"question_id": request["question_id"], "answer": None,
             "abstained": True, "claims": [], "hops": [], "reader": {}}]}

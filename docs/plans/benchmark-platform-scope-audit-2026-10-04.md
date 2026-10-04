@@ -244,3 +244,16 @@ The accumulated development batch is ready for synchronization. The previous
 GitHub head `046f08a8` already has a known Windows fixture-newline failure; this
 batch contains its fix. Pushing supersedes that old run so required checks can
 validate the actual new head. No merge or whole-project completion is implied.
+
+### Windows Unicode test correction
+
+New-head CI `37225548568` passed the formerly failing Windows file-lock job,
+LoCoMo scorer/production-package conformance, provider, Postgres, native wheels
+and lint. Windows portability identified a separate test-only defect: native
+request stubs decoded UTF-8 JSON with the platform default `Path.read_text()`.
+The real CLI already uses `path.open(encoding="utf-8")`. Test stubs now explicitly
+read UTF-8, and the Unicode request regression emulates a CP1252 default on any
+host while retaining exact wire-byte/hash checks. All 37 native tests and 34
+isolated replay/scoring checks pass; Ruff passes. A fresh native Windows CI run
+must verify the correction. Unit/drift on the earlier head remained running at
+inspection; it was not counted as passing.

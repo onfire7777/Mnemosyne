@@ -151,7 +151,7 @@ def test_native_population_replays_missingness_empty_retrieval_and_tampering(tmp
                     "cli": MnemoCLI(store=str(store)), "evidence": evidence}
 
     def answer(cli, path, *, include_derivation=False):
-        request = json.loads(Path(path).read_text())
+        request = json.loads(Path(path).read_text(encoding="utf-8"))
         cid = next(iter(evidence))
         start = evidence[cid]["capture"]["content"].index("violet")
         claim = {"text": "violet", "evidence_cids": [cid],
@@ -221,7 +221,7 @@ def test_native_population_replays_missingness_empty_retrieval_and_tampering(tmp
                     caption_policy="exclude-caption", choice_draws=seeded_draws, python=sys.executable)
 
     def incomplete(cli, path, *, include_derivation=False):
-        request = json.loads(Path(path).read_text())
+        request = json.loads(Path(path).read_text(encoding="utf-8"))
         return {"results": [{"question_id": request["question_id"], "answer": None,
                              "abstained": True, "claims": [], "hops": [], "reader": {}}]}
 
