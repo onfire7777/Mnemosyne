@@ -470,3 +470,26 @@ policy tests passed, with one skip in that last group. Ruff passed. The live
 benchmark page was also checked for the coverage-versus-compatibility explanation.
 Current remote CI at 046f08a8 remains in progress; these local changes have not
 been represented as remotely verified or merged.
+
+## Native option-order and wire-byte custody
+
+Added an explicit seeded native option policy alongside caller-supplied draws.
+Execution and replay share source-order category-5 draw generation, preserve
+policy identity/seed/draws, and reject ambiguous configuration. Both option
+orders, full missing-answer denominators, changed policies and cross-interpreter
+replay are tested. This does not establish pre-execution registration or reuse
+the upstream script's ambient RNG state.
+
+Fixed native capture/question JSONL writes to use exact UTF-8 bytes. The prior
+question writer allowed platform newline translation after the recorded SHA-256
+was calculated, which could make Windows wire bytes differ from retained
+request evidence. The public-boundary test now includes Unicode and compares
+actual file bytes and their hash with the retained request; Windows portability
+CI explicitly selects that check. All 33 native tests and Ruff passed locally;
+workflow YAML parsed successfully. Actual Windows validation awaits the next
+pushed head; syntax parsing is not a claim that GitHub accepted or ran the job.
+
+At 18:30 UTC, remote CI run 37224190672 still had Unit + drift checks running.
+Its Windows file-lock failure is fixed locally by the earlier LF fixture change;
+all other completed gating jobs passed. Accumulated local commits remain held
+until that run finishes, avoiding cancellation of its long-running unit job.

@@ -79,7 +79,7 @@ def answer_captured_question(conversation: dict, question: dict, annotation: dic
     read_only = replace(cli, global_flags=[*cli.global_flags, "--evaluation-read-only"])
     with TemporaryDirectory(prefix="mneme-locomo-question-") as directory:
         path = Path(directory) / "request.jsonl"
-        path.write_text(raw_request, encoding="utf-8")
+        path.write_bytes(raw_request.encode("utf-8"))
         payload = read_only.eval_answer_batch(path, include_derivation=True)
     results = payload.get("results") if isinstance(payload, dict) else None
     if (not isinstance(results, list) or len(results) != 1 or not isinstance(results[0], dict)
@@ -298,7 +298,7 @@ def captured_conversations(samples: object, cli: MnemoCLI, *, caption_policy: st
             child = replace(cli, store=str(Path(directory) / f"{index}.store.json"))
             rows, expected = _capture_plan(records, tenant)
             path = Path(directory) / f"{index}.capture.jsonl"
-            path.write_text("".join(json.dumps(row, sort_keys=True) + "\n" for row in rows))
+            path.write_bytes("".join(json.dumps(row, sort_keys=True) + "\n" for row in rows).encode("utf-8"))
             results = child.capture_batch(path).get("results")
             if not isinstance(results, list) or len(results) != len(expected):
                 raise LoCoMoError("native capture result count mismatch")

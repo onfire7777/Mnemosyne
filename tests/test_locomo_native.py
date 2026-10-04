@@ -96,14 +96,19 @@ def test_native_projection_rejects_ambiguous_answers_and_foreign_evidence(raw):
 
 def test_native_question_uses_read_only_public_boundary_and_retains_request(tmp_path, monkeypatch):
     source = sample("one")
+    source["qa"][0]["question"] = "café what?"
     question = split_samples([source])["questions"][0]
     observed = []
+    wire_bytes = []
 
     def answer(cli, path, *, include_derivation=False):
         assert include_derivation is True
         assert "--evaluation-read-only" in cli.global_flags
         request = json.loads(Path(path).read_text())
-        assert request["question"] == "what?"
+        assert request["question"] == "café what?"
+        actual = Path(path).read_bytes()
+        assert actual == (json.dumps(request, sort_keys=True, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
+        wire_bytes.append(actual)
         assert "SECRET_LABEL" not in Path(path).read_text()
         observed.append(Path(path))
         return {"results": [{**response(), "question_id": request["question_id"]}]}
@@ -118,6 +123,8 @@ def test_native_question_uses_read_only_public_boundary_and_retains_request(tmp_
     assert result["request"]["context"]["tenant_id"] == "tenant-one"
     assert result["raw_batch_response"]["results"][0]["answer"] == "violet"
     assert json.loads(result["request_jsonl"]) == result["request"]
+    assert result["request_jsonl"].encode("utf-8") == wire_bytes[0]
+    assert result["request_sha256"] == sha256(wire_bytes[0]).hexdigest()
     assert not observed[0].exists()
     def omit_derivation(cli, path, *, include_derivation=False):
         payload = answer(cli, path, include_derivation=include_derivation)
