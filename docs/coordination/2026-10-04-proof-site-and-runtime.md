@@ -70,3 +70,35 @@ is Infra Technologies, Inc. The service binds to `127.0.0.1:11434`.
 `BOARD-STATUS.md` now distinguishes implemented tools from missing launch
 evidence. No gate was removed or marked satisfied by this receipt. BurnOS
 production APIs and transport behavior are unchanged by the renderer work.
+
+## Hardware feasibility follow-up
+
+After the owner asked whether this computer could actually run the planned
+workload, live inspection identified an Apple M1 Pro with 10 CPU cores and
+16 GiB unified memory. The short generation above took approximately 5.01
+seconds including 4.56 seconds loading; it used a 2,048-token context and is
+not evidence that the full reader workload fits.
+
+A separate synthetic resource preflight invoked the real grounded-reader
+provider with 24,000 evidence characters and the unchanged registered decoding
+options. A monitor sampled macOS `kern.memorystatus_vm_pressure_level` every
+two seconds and terminated the preflight if warning/critical pressure appeared.
+Pressure changed from 1 (normal) to 2 (warning) during model loading; the monitor
+terminated the caller after 2.04 seconds. Ollama logged client cancellation and
+aborted loading. A subsequent check showed normal pressure and no loaded model.
+Swap usage remained 722.56 MiB across the sampled interval.
+
+The Ollama log reported a 4,096-token context for the actual reader request,
+roughly 5,311 MiB projected Metal allocation and 373 MiB host allocation. These
+are runtime estimates, not measured peak resident usage; the canceled load did
+not establish sustainable throughput, full-context coverage or completion.
+The difference between the default context and maximum evidence budget also
+needs verification before a valid full benchmark.
+
+Therefore full local model-benchmark feasibility is **not established under
+current application load**. The 24-case scale run has not started, no protected
+attempt was consumed, and no model/context/acceptance criterion was weakened.
+Continue ordinary code tests locally and existing CI checks. Before model
+benchmarks, obtain a successful monitored preflight at the required settings
+with sufficient headroom, or use a suitable separately authorized compute host.
+Do not close the user's other applications or launch paid compute implicitly.
