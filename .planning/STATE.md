@@ -18,6 +18,14 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+Dependency security repair: OSV matched three fixable vulnerabilities in the
+native/provider lockfiles. Crossbeam-epoch is now 0.9.21, h2 0.4.16 and rustls
+0.23.45 (webpki 0.103.15). Six native, sixteen provider and twenty-three Python
+compatibility tests passed; the models-enabled provider path compiled. The
+rescan retains only the paste maintenance advisory. Evidence and limitations:
+`eval/reports/dependency-audit-2026-10-04`. GitHub's private critical alert remains
+unverified; this does not assert default-branch or full security clearance.
+
 The first whole-component partition plan at `db54506a` is frozen in
 `eval/reports/compact-train-partitions-2026-10-04`: 176,595 train / 22,075
 selection / 22,074 calibration rows. Hotpot selection/calibration coverage is
