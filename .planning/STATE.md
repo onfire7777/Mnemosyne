@@ -20,8 +20,10 @@ progress:
 
 The [M12 acceptance evidence ledger](../docs/plans/m12-acceptance-evidence-2026-10-04.md)
 preserves every original requirement, including implicit/overloaded cases,
-reference calibration and measured resource admission. Bounded fan-out is now
-running with a pressure guard; it is not yet a completed result.
+reference calibration and measured resource admission. The [full bounded fan-out capture](../eval/reports/m12-fanout-sink-development-2026-10-04/README.md)
+completed 1,220 operations and replayed exactly: 750 expected firings, 750 inert
+receipts and 750 deliberately duplicated deliveries. No observed misses, false
+positives or duplicate firings occurred. Normal pressure is not resource admission.
 
 The [recovery run with its durable inert sink](../eval/reports/m12-recovery-sink-development-2026-10-04/README.md)
 completed 360 operations and 50 injected response losses. Ten eligible firings
@@ -34,7 +36,7 @@ completed 525 operations with 130 durable inert receipts and 260 delivery
 attempts, all deliberately repeated deliveries identified as duplicates.
 Its clean-source hashes, timing reports and sink annex were verified. A bounded
 mixed-trigger fan-out generator now covers 2/4/8/16 actions per type and reports
-each load separately; its full execution is pending. These development results
+each load separately; its full execution and replay are now retained. These development results
 do not establish full M12 acceptance or an external exactly-once guarantee.
 
 A [clean-source four-week recovery capture](../eval/reports/m12-operation-recovery-development-2026-10-04/README.md)
