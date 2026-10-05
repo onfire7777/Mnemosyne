@@ -1889,6 +1889,16 @@ def cmd_eval_query_batch(args: argparse.Namespace) -> None:
 
     if not args.evaluation_read_only:
         raise ValueError("eval-query-batch requires --evaluation-read-only")
+    overrides = {}
+    for option, field, maximum in (
+        ("retrieval_token_budget", "token_budget", 262_144),
+        ("retrieval_top_k", "top_k", 100),
+    ):
+        value = getattr(args, option, None)
+        if value is not None:
+            if type(value) is not int or not 1 <= value <= maximum:
+                raise ValueError(f"--{option.replace('_', '-')} must be between 1 and {maximum}")
+            overrides[field] = value
     path = Path(args.input_jsonl)
     if args.max_records < 1:
         raise ValueError("--max-records must be positive")
@@ -1938,6 +1948,11 @@ def cmd_eval_query_batch(args: argparse.Namespace) -> None:
     if len({row["question_id"] for row in rows}) != len(rows):
         raise ValueError("evaluation query batch has duplicate question IDs")
     tools = load_tools(args)
+    if overrides:
+        from dataclasses import replace
+
+        # Evaluation-only overlay: read-only engine never persists this policy.
+        tools.engine.policy = replace(tools.engine.policy, **overrides)
     results = []
     for row in rows:
         search = tools.search(tenant_id=row["tenant"], query=row["query"])
@@ -1951,7 +1966,13 @@ def cmd_eval_query_batch(args: argparse.Namespace) -> None:
                 "explanation": explanation,
             }
         )
-    emit({"count": len(results), "ok": True, "results": results})
+    payload = {"count": len(results), "ok": True, "results": results}
+    if overrides:
+        payload["evaluation_policy"] = {
+            "token_budget": tools.engine.policy.token_budget,
+            "top_k": tools.engine.policy.top_k,
+        }
+    emit(payload)
 
 
 def _answer_context(value: object) -> Any:
@@ -19331,6 +19352,10 @@ def build_parser() -> argparse.ArgumentParser:
     eval_query_batch = sub.add_parser("eval-query-batch")
     eval_query_batch.add_argument("--input-jsonl", type=Path, required=True)
     eval_query_batch.add_argument("--max-records", type=int, default=10_000)
+    eval_query_batch.add_argument("--retrieval-token-budget", type=int,
+                                  help="read-only evaluation token budget (1..262144)")
+    eval_query_batch.add_argument("--retrieval-top-k", type=int,
+                                  help="read-only evaluation result limit (1..100)")
     eval_query_batch.set_defaults(func=cmd_eval_query_batch)
 
     answer = sub.add_parser("answer")

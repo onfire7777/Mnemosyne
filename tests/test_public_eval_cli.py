@@ -1051,3 +1051,35 @@ def test_cli_qa_run_verify_reproduce_and_report_round_trip(tmp_path: Path, monke
     assert (source / "candidate-manifest.json").read_bytes() == (reproduced / "candidate-manifest.json").read_bytes()
     assert main(["eval-public", "--write-report", str(source), "--reproduced-bundle", str(reproduced), "--report-output", str(report), "--report-note", str(note)]) == 0
     assert main(["eval-public", "--verify-report", str(report), "--report-note", str(note)]) == 0
+
+
+def test_eval_batch_explicit_retrieval_policy_does_not_mutate_store(tmp_path: Path) -> None:
+    store = tmp_path / 'store.json'
+    cli = MnemoCLI(store=str(store))
+    for suffix in ('first', 'second'):
+        cli.capture('t', 'u', 'alpha evidence ' * 1200 + suffix, source_identity=suffix)
+    batch = tmp_path / 'queries.jsonl'
+    batch.write_text(json.dumps({'question_id': 'q', 'tenant': 't', 'query': 'alpha evidence'}) + '\n')
+    readonly = replace(cli, global_flags=['--evaluation-read-only'])
+    before = {p.name: p.read_bytes() for p in tmp_path.iterdir() if p.is_file()}
+    baseline = readonly.run('eval-query-batch', '--input-jsonl', str(batch)).json
+    expanded = readonly.run('eval-query-batch', '--input-jsonl', str(batch),
+                            '--retrieval-token-budget', '12000', '--retrieval-top-k', '2').json
+    assert not baseline['results'][0]['search']['hits']
+    assert len(expanded['results'][0]['search']['hits']) == 2
+    assert expanded['evaluation_policy'] == {'token_budget': 12000, 'top_k': 2}
+    assert {p.name: p.read_bytes() for p in tmp_path.iterdir() if p.is_file()} == before
+    assert readonly.run('eval-query-batch', '--input-jsonl', str(batch)).json == baseline
+
+
+@pytest.mark.parametrize('field,value', [
+    ('retrieval_token_budget', 0), ('retrieval_token_budget', 262145),
+    ('retrieval_token_budget', True), ('retrieval_top_k', 0),
+    ('retrieval_top_k', 101), ('retrieval_top_k', True),
+])
+def test_eval_retrieval_policy_rejects_invalid_bounds_before_loading(field, value):
+    from mnemosyne.cli import cmd_eval_query_batch
+    args = Namespace(evaluation_read_only=True, retrieval_token_budget=None, retrieval_top_k=None)
+    setattr(args, field, value)
+    with pytest.raises(ValueError, match='must be between'):
+        cmd_eval_query_batch(args)
