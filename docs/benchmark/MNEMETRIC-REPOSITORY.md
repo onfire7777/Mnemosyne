@@ -21,3 +21,19 @@ must retain its original hashes and source identities.
 See Mnemetric's SCOPE.md, .planning/ROADMAP.md, EXTRACTION.json and VALIDATION.md
 for ownership, preserved plans, source provenance and current verification limits.
 This extraction is not completion of either project's remaining acceptance gates.
+
+## Current delivery locations
+
+The benchmark platform is hosted at https://mnemetric.burnos.app and the distinct
+Mnemosyne product presentation at https://mnemosyne.burnos.app. Both use separate
+Cloudflare Pages projects and shared BurnOS styling; https://burnos.app and its
+existing deployment are unchanged. Source for both presentation sites belongs
+to Mnemetric; memory-runtime deployment and public API compatibility remain here.
+
+Mnemetric now retains official MemoryAgentBench source/configuration pins,
+complete four-split dataset inventory, SH-6k retrieval diagnostics, prepared
+answer requests and strict scoring-input joins. These do not establish full
+benchmark execution, answer quality or superiority. Follow its current roadmap
+and verification receipts rather than interpreting legacy copies here as current
+implementation state. Hosted generation awaits an API key and spending limit;
+the owner's current direction is to continue all feasible work without one.
