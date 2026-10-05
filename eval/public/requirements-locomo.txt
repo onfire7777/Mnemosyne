@@ -1,5 +1,5 @@
 # Isolated upstream-scorer parity environment; Python 3.11, not Mnemosyne runtime.
 # No NLTK datasets, model weights or upstream generation dependencies are needed.
-nltk==3.8.1
+nltk==3.10.3
 numpy==1.26.0
 regex==2022.10.31
