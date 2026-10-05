@@ -11,6 +11,11 @@ runtime readiness, grounded-reader QA, and protected evidence remain open. This
 document is the durable acceptance contract; the loop generates tactical plans
 under `docs/plans/goalex-r*.md`.
 
+
+## Status reconciliation — 2026-10-04
+
+Source inspection at `3c21be5d`; historical instructions below describe the original execution contract, not a request to repeat landed work. Local graph development fixes remain delivered (PRs #23/#26/#28). The Phase 12 source lease sweep is also delivered (#46–#61), but production graph parity, grounded QA targets and protected evidence remain open under 12-04. No measured acceptance is inferred from source.
+
 ## Goal
 
 Make the `graph_ppr` retrieval channel actually participate, lifting multi-hop

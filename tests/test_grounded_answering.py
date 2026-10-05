@@ -517,6 +517,7 @@ def test_synthesis_claims_resolve_authorized_spans_and_render_canonical_output(
     )
     claim = claims[0]
     assert claim.text == expected
+    assert claim.synthesis_operation == operation
     assert claim.evidence_cids == tuple(evidence)
     assert tuple((span.cid, span.start, span.end) for span in claim.spans) == tuple(
         (cid, 7, 7 + len(quote))
@@ -525,6 +526,16 @@ def test_synthesis_claims_resolve_authorized_spans_and_render_canonical_output(
     assert tuple(span.slice_sha256 for span in claim.spans) == tuple(
         hashlib.sha256(quote.encode("utf-8")).hexdigest() for quote in quotes
     )
+    from types import SimpleNamespace
+    from mnemosyne.cli import _public_answer
+    result = SimpleNamespace(answer=expected, claims=claims, abstained=False,
+                             trace=SimpleNamespace(hops=()))
+    legacy = _public_answer(result, {})
+    detailed = _public_answer(result, {}, include_derivation=True)
+    assert detailed["claims"][0].pop("derivation") == {
+        "schema_version": "mnemosyne.claim-derivation/v1", "kind": "synthesis", "operation": operation,
+    }
+    assert detailed == legacy
 
 
 @pytest.mark.parametrize(

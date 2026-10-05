@@ -8,13 +8,19 @@ canonical claim payload; it never imports a memory engine and reproduces
 CLI verifies the token without any private coupling.
 
 ``ActionCLI`` translates the deterministic-action probe's symbolic seam
-(``task.create``/``task.update``/``clock.inject``/``event.inject``/
-``intention.query``/``action.select``) into authenticated production intention
+(``task.create``/``task.update``/``task.inspect``/``clock.inject``/``event.inject``/
+``intention.query``/``intention.observe``/``action.select``) into authenticated production intention
 subprocess commands (``intention-schedule``/``intention-update``/
-``intention-cancel``/``intention-evaluate``).  It only ever returns the opaque
-data-only action IDs the production evaluator fires; it never sees or forwards
+``intention-cancel``/``intention-evaluate``). The default query returns opaque
+data-only action IDs; the opt-in observation also returns public firing timing
+and identity fields. It never sees or forwards
 fixture gold, and it never executes an observation payload — the narrative and
 channel observations are treated as inert data.
+
+The opt-in ``evidence.capture`` command captures caller-supplied source text via
+the public CLI and binds subsequent creations to its CID. Existing callers keep
+the generic probe evidence. Known keyed creations retain their original CID on
+retry even when later evidence has been captured in the same adapter session.
 """
 
 from __future__ import annotations
@@ -23,7 +29,9 @@ import base64
 import hashlib
 import hmac
 import json
+import math
 from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
 from typing import Any, Mapping, Sequence
 
 from eval.harness.cli_driver import MnemoCLI
@@ -110,6 +118,8 @@ class _ScopeState:
     events: list[dict[str, Any]] = field(default_factory=list)
     conditions: dict[str, dict[str, Any]] = field(default_factory=dict)
     intention_by_task: dict[str, str] = field(default_factory=dict)
+    creation_key_by_task: dict[str, str] = field(default_factory=dict)
+    creation_evidence_by_task: dict[str, str] = field(default_factory=dict)
 
 
 class ActionCLI:
@@ -133,9 +143,12 @@ class ActionCLI:
         handler = {
             "task.create": self._task_create,
             "task.update": self._task_update,
+            "task.inspect": self._task_inspect,
+            "evidence.capture": self._evidence_capture,
             "clock.inject": self._clock_inject,
             "event.inject": self._event_inject,
             "intention.query": self._intention_query,
+            "intention.observe": self._intention_observe,
             "action.select": self._action_select,
         }.get(command)
         if handler is None:
@@ -183,7 +196,8 @@ class ActionCLI:
         self._scopes[store] = state
         return state
 
-    def _capture_evidence(self, cli: MnemoCLI, tenant_id: str) -> str:
+    def _capture_evidence(self, cli: MnemoCLI, tenant_id: str,
+                          content: str = "inert prospective-memory scheduling evidence") -> str:
         captured = cli.run(
             "capture",
             "--tenant", tenant_id,
@@ -191,7 +205,7 @@ class ActionCLI:
             "--actor", "user",
             "--source-type", "public-action-probe",
             "--source-identity", "public-action-probe",
-            "--content", "inert prospective-memory scheduling evidence",
+            "--content", content,
         ).json
         cid = captured.get("cid") if isinstance(captured, Mapping) else None
         if not isinstance(cid, str) or not cid:
@@ -200,9 +214,29 @@ class ActionCLI:
 
     # ---- symbolic command handlers -------------------------------------
 
+    def _evidence_capture(self, state: _ScopeState, payload: Mapping[str, Any]) -> dict[str, Any]:
+        if set(payload) != {"content"}:
+            raise ActionCLIError("evidence capture requires only content")
+        content = _require_str(payload.get("content"), "evidence content")
+        if len(content.encode("utf-8")) > 256 * 1024:
+            raise ActionCLIError("evidence content exceeds 256 KiB")
+        cid = self._capture_evidence(state.cli, state.tenant_id, content)
+        state.evidence_cid = cid
+        return {"evidence_cid": cid, "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest()}
+
     def _task_create(self, state: _ScopeState, task: Mapping[str, Any]) -> dict[str, Any]:
         task_id = _require_str(task.get("task_id"), "task_id")
         action_id = _require_str(task.get("action_id"), "action_id")
+        creation_key = task.get("idempotency_key")
+        if task_id in state.intention_by_task and task_id not in state.creation_key_by_task:
+            raise ActionCLIError("an unkeyed task cannot be recreated; update it or use a new task_id")
+        if task_id in state.creation_key_by_task and state.creation_key_by_task[task_id] != creation_key:
+            raise ActionCLIError("a keyed task cannot be rebound to a different creation key")
+        if creation_key is not None and any(
+            key == creation_key and known_task != task_id
+            for known_task, key in state.creation_key_by_task.items()
+        ):
+            raise ActionCLIError("a creation key cannot identify two tasks")
         trigger = task.get("trigger")
         if not isinstance(trigger, Mapping):
             raise ActionCLIError("task trigger is required")
@@ -213,6 +247,14 @@ class ActionCLI:
             if intention_id is None:
                 raise ActionCLIError(f"dependency {dependency!r} scheduled out of order")
             dependency_args += ["--dependency", intention_id]
+        recurrence_args = (
+            ["--recurrence-policy", _json(task["recurrence_policy"])]
+            if "recurrence_policy" in task else []
+        )
+        retry_args = (["--idempotency-key", _require_str(task["idempotency_key"], "idempotency_key")]
+                      if "idempotency_key" in task else [])
+        evidence_cid = (state.creation_evidence_by_task.get(task_id, state.evidence_cid)
+                        if creation_key is not None else state.evidence_cid)
         result = state.cli.run(
             "intention-schedule",
             "--tenant", state.tenant_id,
@@ -222,13 +264,18 @@ class ActionCLI:
             "--trigger-expression", _json(expression),
             "--action", _json({"ref": action_id}),
             "--due-at", due_at,
-            "--evidence-cid", state.evidence_cid,
+            "--evidence-cid", evidence_cid,
             *dependency_args,
+            *recurrence_args,
+            *retry_args,
         ).json
         intention_id = result.get("intention_id") if isinstance(result, Mapping) else None
         if not isinstance(intention_id, str) or not intention_id:
             raise ActionCLIError("intention-schedule omitted an intention id")
         state.intention_by_task[task_id] = intention_id
+        if creation_key is not None:
+            state.creation_key_by_task[task_id] = creation_key
+            state.creation_evidence_by_task[task_id] = evidence_cid
         return {}
 
     def _task_update(self, state: _ScopeState, update: Mapping[str, Any]) -> dict[str, Any]:
@@ -237,11 +284,18 @@ class ActionCLI:
         intention_id = state.intention_by_task.get(task_id)
         if intention_id is None:
             raise ActionCLIError(f"update references unscheduled task {task_id!r}")
+        retry_args = []
+        if "idempotency_key" in update or "expected_revision" in update:
+            retry_args = [
+                "--idempotency-key", _require_str(update.get("idempotency_key"), "idempotency_key"),
+                "--expected-revision", _require_str(update.get("expected_revision"), "expected_revision"),
+            ]
         if update_type == "cancel":
             state.cli.run(
                 "intention-cancel",
                 "--tenant", state.tenant_id,
                 "--intention-id", intention_id,
+                *retry_args,
             )
             return {}
         if update_type not in {"override", "reschedule"}:
@@ -256,8 +310,56 @@ class ActionCLI:
         ]
         if update_type == "reschedule":
             args += ["--due-at", _require_str(update.get("due_at"), "reschedule due_at")]
-        state.cli.run(*args)
+        if "recurrence_policy" in update:
+            args += ["--recurrence-policy", _json(update["recurrence_policy"])]
+        state.cli.run(*args, *retry_args)
         return {}
+
+    def _task_inspect(self, state: _ScopeState, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """Read a provider-issued revision; never refresh a retry's precondition."""
+        include_schedule = payload.get("include_schedule", False)
+        if type(include_schedule) is not bool:
+            raise ActionCLIError("include_schedule must be boolean")
+        task_id = _require_str(payload.get("task_id"), "task_id")
+        intention_id = state.intention_by_task.get(task_id)
+        if intention_id is None:
+            raise ActionCLIError(f"inspection references unscheduled task {task_id!r}")
+        result = state.cli.run("intention-list", "--tenant", state.tenant_id, "--include-revision").json
+        rows = result.get("intentions") if isinstance(result, Mapping) else None
+        if not isinstance(rows, list):
+            raise ActionCLIError("intention-list omitted intentions")
+        matches = [row for row in rows if isinstance(row, Mapping) and row.get("intention_id") == intention_id]
+        if len(matches) != 1:
+            raise ActionCLIError("inspection requires exactly one matching intention")
+        row = matches[0]
+        if (row.get("tenant_id") != state.tenant_id or row.get("session_id") != state.session_id
+                or row.get("user_id") != _EVAL_USER_ID or row.get("agent_id") != _EVAL_AGENT_ID):
+            raise ActionCLIError("inspection returned an intention outside the authenticated scope")
+        revision = row.get("revision")
+        if (not isinstance(revision, str) or len(revision) != 64
+                or any(char not in "0123456789abcdef" for char in revision)):
+            raise ActionCLIError("inspection omitted a valid content revision")
+        if not isinstance(row.get("status"), str) or row["status"] not in {"scheduled", "cancelled", "fired"}:
+            raise ActionCLIError("inspection returned an invalid intention status")
+        action = row.get("action")
+        action_id = _require_str(action.get("ref") if isinstance(action, Mapping) else None, "action ref")
+        result = {"task_id": task_id, "intention_id": intention_id, "revision": revision,
+                  "status": row["status"], "action_id": action_id}
+        if include_schedule:
+            _observation_time(row.get("due_at"))
+            _require_str(row.get("trigger_type"), "trigger type")
+            for key in ("trigger_expression", "recurrence_policy", "recurrence_state"):
+                if not isinstance(row.get(key), dict):
+                    raise ActionCLIError(f"inspection omitted {key}")
+            for key in ("dependencies", "evidence_ids"):
+                if (not isinstance(row.get(key), list)
+                        or any(not isinstance(value, str) or not value for value in row[key])):
+                    raise ActionCLIError(f"inspection omitted valid {key}")
+            result["schedule"] = json.loads(json.dumps({key: row[key] for key in (
+                "trigger_type", "trigger_expression", "due_at", "dependencies",
+                "recurrence_policy", "recurrence_state", "evidence_ids",
+            )}, allow_nan=False))
+        return result
 
     def _clock_inject(self, state: _ScopeState, payload: Mapping[str, Any]) -> dict[str, Any]:
         state.now = _require_str(payload.get("now"), "clock now")
@@ -287,7 +389,7 @@ class ActionCLI:
         return {}
 
     def _intention_query(
-        self, state: _ScopeState, observations: Mapping[str, Any]
+        self, state: _ScopeState, observations: Mapping[str, Any], *, include_observations: bool = False,
     ) -> dict[str, Any]:
         if not state.now:
             raise ActionCLIError("intention.query requires an injected clock")
@@ -304,24 +406,40 @@ class ActionCLI:
             "measured_recall": 1.0,
             "measurement_cid": state.evidence_cid,
         }
-        result = state.cli.run(
+        invocation = state.cli.run(
             "intention-evaluate",
             "--tenant", state.tenant_id,
             "--evaluated-at", state.now,
             "--trigger-context", _json(trigger_context),
             "--operating-point", _json(operating_point),
-        ).json
+        )
+        result = invocation.json
         fired = result.get("intentions") if isinstance(result, Mapping) else None
         if not isinstance(fired, list):
             raise ActionCLIError("intention-evaluate omitted fired intentions")
-        action_ids = sorted({_fired_action_id(intention) for intention in fired})
-        # Each intention fires once; per-step signals are consumed with it.
+        # Preserve multiplicity so the benchmark can reject duplicate firings.
+        action_ids = sorted(_fired_action_id(intention) for intention in fired)
+        # Each occurrence fires once; per-step signals are consumed with it.
         state.events = []
         state.conditions = {}
-        return {
+        response = {
             "action_ids": action_ids,
             "queried_channels": _channels(observations.get("channel_observations", [])),
         }
+        if include_observations:
+            wall_ms = invocation.wall_ms
+            if type(wall_ms) not in (int, float) or not math.isfinite(wall_ms) or wall_ms < 0:
+                raise ActionCLIError("invalid evaluation command duration")
+            response.update({
+                "evaluated_at": state.now,
+                "evaluation_wall_ms": wall_ms,
+                "firing_observations": [_firing_observation(item, state) for item in fired],
+            })
+        return response
+
+    def _intention_observe(self, state: _ScopeState, observations: Mapping[str, Any]) -> dict[str, Any]:
+        """Opt-in development timing evidence from the same public evaluation."""
+        return self._intention_query(state, observations, include_observations=True)
 
     def _action_select(self, state: _ScopeState, payload: Mapping[str, Any]) -> dict[str, Any]:
         del state
@@ -333,7 +451,7 @@ class ActionCLI:
         candidates = payload.get("candidate_action_ids", [])
         if not isinstance(candidates, list):
             raise ActionCLIError("action.select candidate_action_ids must be a list")
-        selected = sorted(set(candidates) & available)
+        selected = sorted(candidate for candidate in candidates if candidate in available)
         return {"action_ids": selected}
 
 
@@ -377,6 +495,45 @@ def _fired_action_id(intention: Any) -> str:
     if not isinstance(ref, str) or not ref:
         raise ActionCLIError("fired intention omitted its opaque action reference")
     return ref
+
+
+def _firing_observation(item: Mapping[str, Any], state: _ScopeState) -> dict[str, Any]:
+    if item.get("tenant_id") != state.tenant_id or item.get("session_id") != state.session_id:
+        raise ActionCLIError("firing observation crossed its tenant/session scope")
+    if item.get("user_id") != _EVAL_USER_ID or item.get("agent_id") != _EVAL_AGENT_ID:
+        raise ActionCLIError("firing observation crossed its principal scope")
+    if item.get("status") != "fired" or item.get("intention_id") not in state.intention_by_task.values():
+        raise ActionCLIError("firing observation is not a known fired intention")
+    recurrence = item.get("recurrence_state")
+    if not isinstance(recurrence, Mapping):
+        raise ActionCLIError("firing observation omitted recurrence state")
+    occurrence = recurrence.get("occurrence")
+    if type(occurrence) is not int or occurrence < 0:
+        raise ActionCLIError("invalid firing occurrence")
+    due = _observation_time(item.get("due_at"))
+    evaluated = _observation_time(state.now)
+    reported = recurrence.get("last_evaluated_at")
+    if reported is not None and _observation_time(reported) != evaluated:
+        raise ActionCLIError("provider evaluation time differs from requested clock")
+    return {
+        "action_id": _fired_action_id(item),
+        "intention_id": item["intention_id"],
+        "occurrence": occurrence,
+        "trigger_type": _require_str(item.get("trigger_type"), "trigger_type"),
+        "due_at": due.isoformat(),
+        "evaluated_at": evaluated.isoformat(),
+        "provider_evaluated_at": _observation_time(reported).isoformat() if reported is not None else None,
+    }
+
+
+def _observation_time(value: Any) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None:
+            raise ValueError("missing timezone")
+        return parsed.astimezone(UTC)
+    except (TypeError, ValueError) as error:
+        raise ActionCLIError("observation time must be timezone-aware ISO-8601") from error
 
 
 def _channels(observations: Any) -> list[str]:

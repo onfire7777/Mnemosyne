@@ -1,0 +1,27 @@
+{
+  "schema": "whole-component-partition-audit/v1",
+  "membership_rows": 220744,
+  "groups": 919,
+  "all_memberships_assigned_once": true,
+  "all_group_ids_covered": true,
+  "rows": {
+    "train": 176595,
+    "calibration": 22074,
+    "selection": 22075
+  },
+  "source_rows": {
+    "train": {
+      "hotpotqa/hotpot_qa": 89930,
+      "rajpurkar/squad_v2": 86665
+    },
+    "calibration": {
+      "rajpurkar/squad_v2": 21825,
+      "hotpotqa/hotpot_qa": 249
+    },
+    "selection": {
+      "rajpurkar/squad_v2": 21829,
+      "hotpotqa/hotpot_qa": 246
+    }
+  },
+  "training_admitted": false
+}

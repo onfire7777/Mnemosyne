@@ -1,0 +1,48 @@
+{
+  "argv": [
+    "/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne/.superpowers/sdd/completion-2026-10-04/verified-venv/bin/python",
+    "-m",
+    "eval.public.action_formation_run",
+    "--output",
+    "/Users/admin/.local/state/mnemosyne/formation-runs/2026-10-04-dec91100-schema/workload",
+    "--provider-identity",
+    "ollama/qwen3:0.6b@7df6b6e09427a769808717c0a93cadc4ae99ed4eb8bf5ca557c90846becea435; schema-constrained development formation role",
+    "--timeout-seconds",
+    "150",
+    "--",
+    "/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne/.superpowers/sdd/completion-2026-10-04/verified-venv/bin/python",
+    "-m",
+    "eval.public.action_formation_ollama",
+    "--model",
+    "qwen3:0.6b",
+    "--digest",
+    "7df6b6e09427a769808717c0a93cadc4ae99ed4eb8bf5ca557c90846becea435",
+    "--evidence-dir",
+    "/Users/admin/.local/state/mnemosyne/formation-runs/2026-10-04-dec91100-schema/workload/provider-http",
+    "--output-mode",
+    "schema"
+  ],
+  "benchmark_verified": false,
+  "cwd": "/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne",
+  "elapsed_seconds": 195.7150321660156,
+  "finished_at": "2026-10-04T20:28:53.869529+00:00",
+  "pid": 82553,
+  "poll_seconds": 1.0,
+  "reason": "process-exited",
+  "resource_diagnostics": {
+    "admission_verified": false,
+    "disk_roots": [
+      "/Users/admin/.local/state/mnemosyne/formation-runs/2026-10-04-dec91100-schema"
+    ],
+    "max_sampled_logical_file_bytes": 1306927,
+    "max_sampled_rss_bytes": 99696640,
+    "measurement": "sampled-process-group-rss-and-logical-regular-file-bytes",
+    "peak_rss_verified": false,
+    "samples": 162
+  },
+  "returncode": 1,
+  "schema": "mnemosyne.monitored-command.v1",
+  "started_at": "2026-10-04T20:08:15.589593+00:00",
+  "status": "failed",
+  "wall_seconds": 1800
+}

@@ -89,6 +89,10 @@ flowchart TD
 
 ## Quick Start
 
+Install this project from its cloned repository. The public PyPI name
+`mnemosyne-memory` currently identifies a different project; see the
+[distribution identity note](docs/coordination/2026-10-04-distribution-name-collision.md).
+
 ```bash
 # Get the source
 git clone https://github.com/onfire7777/Mnemosyne.git

@@ -1889,6 +1889,16 @@ def cmd_eval_query_batch(args: argparse.Namespace) -> None:
 
     if not args.evaluation_read_only:
         raise ValueError("eval-query-batch requires --evaluation-read-only")
+    overrides = {}
+    for option, field, maximum in (
+        ("retrieval_token_budget", "token_budget", 262_144),
+        ("retrieval_top_k", "top_k", 100),
+    ):
+        value = getattr(args, option, None)
+        if value is not None:
+            if type(value) is not int or not 1 <= value <= maximum:
+                raise ValueError(f"--{option.replace('_', '-')} must be between 1 and {maximum}")
+            overrides[field] = value
     path = Path(args.input_jsonl)
     if args.max_records < 1:
         raise ValueError("--max-records must be positive")
@@ -1938,6 +1948,11 @@ def cmd_eval_query_batch(args: argparse.Namespace) -> None:
     if len({row["question_id"] for row in rows}) != len(rows):
         raise ValueError("evaluation query batch has duplicate question IDs")
     tools = load_tools(args)
+    if overrides:
+        from dataclasses import replace
+
+        # Evaluation-only overlay: read-only engine never persists this policy.
+        tools.engine.policy = replace(tools.engine.policy, **overrides)
     results = []
     for row in rows:
         search = tools.search(tenant_id=row["tenant"], query=row["query"])
@@ -1951,7 +1966,13 @@ def cmd_eval_query_batch(args: argparse.Namespace) -> None:
                 "explanation": explanation,
             }
         )
-    emit({"count": len(results), "ok": True, "results": results})
+    payload = {"count": len(results), "ok": True, "results": results}
+    if overrides:
+        payload["evaluation_policy"] = {
+            "token_budget": tools.engine.policy.token_budget,
+            "top_k": tools.engine.policy.top_k,
+        }
+    emit(payload)
 
 
 def _answer_context(value: object) -> Any:
@@ -1984,12 +2005,17 @@ def _parse_answer_context_json(raw: str) -> Any:
         raise ValueError("answer context is invalid JSON") from exc
 
 
-def _public_answer(result: Any, disclosure: dict[str, object]) -> dict[str, object]:
+def _public_answer(result: Any, disclosure: dict[str, object], *, include_derivation: bool = False) -> dict[str, object]:
     return {
         "answer": result.answer,
         "claims": [
             {
                 "text": claim.text,
+                **({"derivation": {
+                    "schema_version": "mnemosyne.claim-derivation/v1",
+                    "kind": "synthesis" if claim.synthesis_operation is not None else "quotation",
+                    "operation": claim.synthesis_operation,
+                }} if include_derivation else {}),
                 "evidence_cids": list(claim.evidence_cids),
                 "spans": [
                     {
@@ -2017,13 +2043,13 @@ def _public_answer(result: Any, disclosure: dict[str, object]) -> dict[str, obje
     }
 
 
-def _answer_one(tools: Any, question: str, context: Any, provider: Any) -> dict[str, object]:
+def _answer_one(tools: Any, question: str, context: Any, provider: Any, *, include_derivation: bool = False) -> dict[str, object]:
     from mnemosyne.answering import AnswerRequest, GroundedAnswerOrchestrator
 
     result = GroundedAnswerOrchestrator(tools.engine, provider).answer(
         AnswerRequest(question=question, context=context), provider
     )
-    return _public_answer(result, provider.disclosure)
+    return _public_answer(result, provider.disclosure, include_derivation=include_derivation)
 
 
 def cmd_answer(args: argparse.Namespace) -> None:
@@ -2110,7 +2136,7 @@ def cmd_eval_answer_batch(args: argparse.Namespace) -> None:
     results = []
     for question_id, question, context in rows:
         provider = CommandGroundedProvider.from_environment()
-        value = _answer_one(tools, question, context, provider)
+        value = _answer_one(tools, question, context, provider, include_derivation=args.include_derivation)
         if set(provider.disclosure) not in (
             {"query_decomposer"},
             {"query_decomposer", "grounded_reader"},
@@ -5147,8 +5173,8 @@ def _mcp_serve_preflight(transport: str) -> None:
         raise SystemExit(
             "mcp-serve --transport streamable-http requires "
             + " and ".join(missing)
-            + ": install the MCP extra with `pip install 'mnemosyne-memory[mcp]'` "
-            "(or `uv sync --extra mcp` in a checkout)."
+            + ": from this repository root, install the MCP extra with "
+            "`python -m pip install '.[mcp]'` or `uv sync --extra mcp`."
         )
 
 
@@ -8723,6 +8749,7 @@ def cmd_intention_schedule(args: argparse.Namespace) -> None:
             evidence_ids=args.evidence_cid,
             priority=args.priority,
             dependencies=args.dependency,
+            idempotency_key=args.idempotency_key,
             recurrence_policy=(
                 parse_json_arg(args.recurrence_policy, None)
                 if args.recurrence_policy is not None
@@ -8740,6 +8767,7 @@ def cmd_intention_cancel(args: argparse.Namespace) -> None:
             tenant_id=args.tenant,
             intention_id=args.intention_id,
             cancelled_by=args.cancelled_by,
+            expected_revision=args.expected_revision, idempotency_key=args.idempotency_key,
             **_intention_auth_kwargs(args),
         )
     )
@@ -8753,6 +8781,7 @@ def cmd_intention_update(args: argparse.Namespace) -> None:
         action=parse_json_arg(args.action, None) if args.action is not None else None,
         recurrence_policy=(parse_json_arg(args.recurrence_policy, None)
                            if args.recurrence_policy is not None else None),
+        expected_revision=args.expected_revision, idempotency_key=args.idempotency_key,
         **_intention_auth_kwargs(args),
     ))
 
@@ -8772,7 +8801,8 @@ def cmd_intention_evaluate(args: argparse.Namespace) -> None:
 
 def cmd_intention_list(args: argparse.Namespace) -> None:
     tools = load_tools(args)
-    emit(tools.list_intentions(tenant_id=args.tenant, **_intention_auth_kwargs(args)))
+    emit(tools.list_intentions(tenant_id=args.tenant, include_revision=args.include_revision,
+                              **_intention_auth_kwargs(args)))
 
 
 def cmd_outcome_evaluate(args: argparse.Namespace) -> None:
@@ -19322,6 +19352,10 @@ def build_parser() -> argparse.ArgumentParser:
     eval_query_batch = sub.add_parser("eval-query-batch")
     eval_query_batch.add_argument("--input-jsonl", type=Path, required=True)
     eval_query_batch.add_argument("--max-records", type=int, default=10_000)
+    eval_query_batch.add_argument("--retrieval-token-budget", type=int,
+                                  help="read-only evaluation token budget (1..262144)")
+    eval_query_batch.add_argument("--retrieval-top-k", type=int,
+                                  help="read-only evaluation result limit (1..100)")
     eval_query_batch.set_defaults(func=cmd_eval_query_batch)
 
     answer = sub.add_parser("answer")
@@ -19332,6 +19366,8 @@ def build_parser() -> argparse.ArgumentParser:
     eval_answer_batch = sub.add_parser("eval-answer-batch")
     eval_answer_batch.add_argument("--input-jsonl", type=Path, required=True)
     eval_answer_batch.add_argument("--max-records", type=int, default=10_000)
+    eval_answer_batch.add_argument("--include-derivation", action="store_true",
+                                   help="include versioned quotation/synthesis provenance in each claim")
     eval_answer_batch.set_defaults(func=cmd_eval_answer_batch)
 
     ingest = sub.add_parser("ingest")
@@ -20043,11 +20079,14 @@ def build_parser() -> argparse.ArgumentParser:
     intention_schedule.add_argument("--priority", default="normal")
     intention_schedule.add_argument("--dependency", action="append", default=[])
     intention_schedule.add_argument("--recurrence-policy")
+    intention_schedule.add_argument("--idempotency-key")
     intention_schedule.set_defaults(func=cmd_intention_schedule)
 
     intention_cancel = sub.add_parser("intention-cancel")
     intention_cancel.add_argument("--tenant", required=True)
     intention_cancel.add_argument("--intention-id", required=True)
+    intention_cancel.add_argument("--expected-revision")
+    intention_cancel.add_argument("--idempotency-key")
     intention_cancel.add_argument("--cancelled-by")
     intention_cancel.set_defaults(func=cmd_intention_cancel)
 
@@ -20059,6 +20098,8 @@ def build_parser() -> argparse.ArgumentParser:
     intention_update.add_argument("--due-at")
     intention_update.add_argument("--action")
     intention_update.add_argument("--recurrence-policy")
+    intention_update.add_argument("--expected-revision")
+    intention_update.add_argument("--idempotency-key")
     intention_update.set_defaults(func=cmd_intention_update)
 
     intention_evaluate = sub.add_parser("intention-evaluate")
@@ -20070,6 +20111,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     intention_list = sub.add_parser("intention-list")
     intention_list.add_argument("--tenant", required=True)
+    intention_list.add_argument("--include-revision", action="store_true")
     intention_list.set_defaults(func=cmd_intention_list)
 
     outcome_evaluate = sub.add_parser("outcome-evaluate")

@@ -739,12 +739,14 @@ def test_evaluation_query_batch_matches_public_search_explain_and_is_read_only(
     assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before
 
 
+@pytest.mark.parametrize("synthesis", [False, True])
 def test_public_answer_and_batch_are_ordered_grounded_and_store_immutable(
-    tmp_path: Path,
+    tmp_path: Path, synthesis: bool,
 ) -> None:
     store = tmp_path / "store.json"
     ordinary = MnemoCLI(store=str(store))
-    ordinary.capture("answer-tenant", "user-a", "Ada owns project Zephyr.")
+    source_text = "Ada has amounts 1.20 and 2.80." if synthesis else "Ada owns project Zephyr."
+    captured = ordinary.capture("answer-tenant", "user-a", source_text)
     provider = tmp_path / "grounded-provider.py"
     provider.write_text(
         """#!/usr/bin/env python3
@@ -761,8 +763,11 @@ if role == "query_decomposer":
     response = {"queries": ([] if evidence else [request["question"]]), "metadata": metadata}
 else:
     evidence = request.get("evidence") or []
-    response = ({"claims": [{"spans": [{"cid": evidence[0]["cid"],
-                "quote": evidence[0]["content"]}]}],
+    claims = ([{"synthesis": {"operation": "add", "spans": [
+                {"cid": evidence[0]["cid"], "quote": quote} for quote in ("1.20", "2.80")]}}]
+              if evidence and "1.20" in evidence[0]["content"] else
+              [{"spans": [{"cid": evidence[0]["cid"], "quote": evidence[0]["content"]}]}] if evidence else [])
+    response = ({"claims": claims,
                 "unresolved": False, "metadata": metadata} if evidence else
                 {"claims": [], "unresolved": True, "metadata": metadata})
 json.dump(response, sys.stdout)
@@ -788,9 +793,14 @@ json.dump(response, sys.stdout)
     assert answer["claims"] and answer["claims"][0]["evidence_cids"]
     assert set(answer["claims"][0]) == {"text", "evidence_cids", "spans"}
     assert set(answer["claims"][0]["spans"][0]) == {"cid", "start", "end", "slice_sha256"}
-    assert answer["claims"][0]["spans"][0]["slice_sha256"] == hashlib.sha256(
-        answer["answer"].encode("utf-8")
-    ).hexdigest()
+    if synthesis:
+        assert answer["answer"] == "4"
+        assert [span["slice_sha256"] for span in answer["claims"][0]["spans"]] == [
+            hashlib.sha256(quote.encode()).hexdigest() for quote in ("1.20", "2.80")]
+    else:
+        assert answer["claims"][0]["spans"][0]["slice_sha256"] == hashlib.sha256(
+            answer["answer"].encode("utf-8")
+        ).hexdigest()
     assert "Ada owns project Zephyr." not in json.dumps(answer["claims"][0]["spans"])
     assert set(answer) == {"answer", "claims", "abstained", "hops", "reader"}
     assert set(answer["reader"]) == {"query_decomposer", "grounded_reader"}
@@ -807,6 +817,21 @@ json.dump(response, sys.stdout)
     before[rows.name] = rows.read_bytes()
     batch = read_only.eval_answer_batch(rows)
     assert [row["question_id"] for row in batch["results"]] == ["q2", "q1"]
+    detailed = read_only.eval_answer_batch(rows, include_derivation=True)
+    for result in detailed["results"]:
+        from eval.public.adapters.locomo_native import project_native_response
+        projected = project_native_response(
+            result, {"question": "Ada", "category": 4, "answer": result["answer"]},
+            {captured["cid"]: {"dialog_id": "synthetic", "capture": {"content": source_text}}},
+        )
+        assert projected["claim_text_custody"] == [
+            "replayed-deterministic-synthesis" if synthesis else "exact-quoted-spans"]
+        for claim in result["claims"]:
+            assert claim.pop("derivation") == {
+                "schema_version": "mnemosyne.claim-derivation/v1",
+                "kind": "synthesis" if synthesis else "quotation", "operation": "add" if synthesis else None,
+            }
+    assert detailed == batch
     assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before
 
 
@@ -1026,3 +1051,35 @@ def test_cli_qa_run_verify_reproduce_and_report_round_trip(tmp_path: Path, monke
     assert (source / "candidate-manifest.json").read_bytes() == (reproduced / "candidate-manifest.json").read_bytes()
     assert main(["eval-public", "--write-report", str(source), "--reproduced-bundle", str(reproduced), "--report-output", str(report), "--report-note", str(note)]) == 0
     assert main(["eval-public", "--verify-report", str(report), "--report-note", str(note)]) == 0
+
+
+def test_eval_batch_explicit_retrieval_policy_does_not_mutate_store(tmp_path: Path) -> None:
+    store = tmp_path / 'store.json'
+    cli = MnemoCLI(store=str(store))
+    for suffix in ('first', 'second'):
+        cli.capture('t', 'u', 'alpha evidence ' * 1200 + suffix, source_identity=suffix)
+    batch = tmp_path / 'queries.jsonl'
+    batch.write_text(json.dumps({'question_id': 'q', 'tenant': 't', 'query': 'alpha evidence'}) + '\n')
+    readonly = replace(cli, global_flags=['--evaluation-read-only'])
+    before = {p.name: p.read_bytes() for p in tmp_path.iterdir() if p.is_file()}
+    baseline = readonly.run('eval-query-batch', '--input-jsonl', str(batch)).json
+    expanded = readonly.run('eval-query-batch', '--input-jsonl', str(batch),
+                            '--retrieval-token-budget', '12000', '--retrieval-top-k', '2').json
+    assert not baseline['results'][0]['search']['hits']
+    assert len(expanded['results'][0]['search']['hits']) == 2
+    assert expanded['evaluation_policy'] == {'token_budget': 12000, 'top_k': 2}
+    assert {p.name: p.read_bytes() for p in tmp_path.iterdir() if p.is_file()} == before
+    assert readonly.run('eval-query-batch', '--input-jsonl', str(batch)).json == baseline
+
+
+@pytest.mark.parametrize('field,value', [
+    ('retrieval_token_budget', 0), ('retrieval_token_budget', 262145),
+    ('retrieval_token_budget', True), ('retrieval_top_k', 0),
+    ('retrieval_top_k', 101), ('retrieval_top_k', True),
+])
+def test_eval_retrieval_policy_rejects_invalid_bounds_before_loading(field, value):
+    from mnemosyne.cli import cmd_eval_query_batch
+    args = Namespace(evaluation_read_only=True, retrieval_token_budget=None, retrieval_top_k=None)
+    setattr(args, field, value)
+    with pytest.raises(ValueError, match='must be between'):
+        cmd_eval_query_batch(args)

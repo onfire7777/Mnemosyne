@@ -51,12 +51,13 @@ from mnemosyne.engine import (
     _privacy_backfill_controls,
     _privacy_backfill_metadata,
     _advance_intention_after_fire,
-    _cancelled_intention,
+    prepare_intention_cancel,
     _is_replayed_evaluation,
-    _updated_intention,
+    prepare_intention_update,
     canonicalize_intention,
     intention_audit_context,
     intention_audit_diff,
+    validate_intention_retry,
     intention_fire_receipt_id,
     validate_intention_evaluation_inputs,
     validate_intention_provenance_claim,
@@ -6052,12 +6053,30 @@ class PostgresEngine:
             }
         )
 
-    def schedule_intention(self, intention: Intention) -> str:
+    def _retry_scheduled_intention(self, cur: Any, db_tenant_id: Any, intention: Intention) -> bool:
+        # One snapshot binds row existence to creation history. The row lock
+        # protects it while provenance is checked; non-UUID legacy IDs live in diff.
+        cur.execute(
+            "SELECT a.diff FROM intentions i LEFT JOIN audit_log a "
+            "ON a.tenant_id = i.tenant_id AND a.op = 'schedule_intention' "
+            "AND (a.target_id = %s OR a.diff->>'target_id' = %s) "
+            "WHERE i.tenant_id = %s AND i.intention_id = %s FOR UPDATE OF i",
+            (_uuid_or_none(intention.intention_id), intention.intention_id,
+             db_tenant_id, intention.intention_id),
+        )
+        rows = cur.fetchall()
+        if rows:
+            self._intention_provenance_rows(cur, db_tenant_id=db_tenant_id, intention=intention)
+            validate_intention_retry(intention, [row["diff"] for row in rows if row["diff"] is not None])
+            return True
+        return False
+
+    def schedule_intention(self, intention: Intention, *, idempotent: bool = False) -> str:
         """Store an intention after tenant, provenance, trust, and taint checks.
 
         Validates all five trigger types, rejects cycles at schedule time for
         dependency_completion, and atomically persists + audits. Duplicates
-        raise ValueError and never mutate/audit.
+        raise ValueError unless an explicit idempotent retry matches creation.
         """
 
         intention = canonicalize_intention(intention, require_scheduled=True)
@@ -6067,6 +6086,8 @@ class PostgresEngine:
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
+                if idempotent and self._retry_scheduled_intention(cur, db_tenant_id, intention):
+                    return intention.intention_id
                 cur.execute(
                     """
                     SELECT 1 FROM (
@@ -6146,7 +6167,18 @@ class PostgresEngine:
                     ),
                 )
                 if cur.fetchone() is None:
+                    if idempotent and self._retry_scheduled_intention(cur, db_tenant_id, intention):
+                        return intention.intention_id
                     raise ValueError(f"intention {intention.intention_id!r} already exists")
+                if idempotent:
+                    cur.execute(
+                        "SELECT 1 FROM audit_log WHERE tenant_id = %s "
+                        "AND op = 'schedule_intention' "
+                        "AND (target_id = %s OR diff->>'target_id' = %s)",
+                        (db_tenant_id, _uuid_or_none(intention.intention_id), intention.intention_id),
+                    )
+                    if cur.fetchone() is not None:
+                        raise ValueError("cannot retry a removed intention")
                 # Recheck after the conflict-aware insert. Under READ COMMITTED,
                 # this closes a fire -> forget race where the first receipt read
                 # preceded the firing commit but the insert waited for deletion.
@@ -6184,7 +6216,8 @@ class PostgresEngine:
         return intention.intention_id
 
     def cancel_intention(
-        self, tenant_id: str, intention_id: str, *, cancelled_by: str, session_id: str
+        self, tenant_id: str, intention_id: str, *, cancelled_by: str, session_id: str,
+        expected_revision: str | None = None, idempotency_key: str | None = None,
     ) -> None:
         """Cancel an intention. Missing/cross-tenant -> KeyError; non-owner or
         wrong bound session -> PermissionError; fired -> ValueError; repeating
@@ -6222,10 +6255,23 @@ class PostgresEngine:
                     # external user id; keep accepting the owner's real
                     # external principal by mapping it through the stable UUID.
                     principal = current.user_id
-                intention = _cancelled_intention(
-                    current, cancelled_by=principal, session_id=session_id
+                previous_diffs = []
+                if idempotency_key is not None:
+                    cur.execute(
+                        "SELECT diff FROM audit_log WHERE tenant_id = %s AND op = 'cancel_intention' "
+                        "AND (target_id = %s OR diff->>'target_id' = %s)",
+                        (db_tenant_id, _uuid_or_none(intention_id), intention_id),
+                    )
+                    previous_diffs = [item["diff"] for item in cur.fetchall()]
+                intention, receipt, replay = prepare_intention_cancel(
+                    current, cancelled_by=principal, session_id=session_id,
+                    expected_revision=expected_revision, idempotency_key=idempotency_key,
+                    previous_diffs=previous_diffs,
                 )
-                if intention == current:
+                if replay:
+                    self._intention_provenance_rows(cur, db_tenant_id=db_tenant_id, intention=current)
+                    return
+                if intention == current and receipt is None:
                     return
                 was_scheduled = current.status == "scheduled"
                 provenance = self._intention_provenance_rows(
@@ -6250,14 +6296,15 @@ class PostgresEngine:
                 )
                 if cur.fetchone() is None:
                     raise RuntimeError("intention cancellation lost its state transition")
-                if was_scheduled:
+                if was_scheduled or receipt is not None:
                     self._audit(
                         cur,
                         db_tenant_id,
                         cancelled_by,
                         "cancel_intention",
                         intention_id,
-                        intention_audit_diff(intention, status="cancelled"),
+                        {**intention_audit_diff(intention, status="cancelled"),
+                         **({"cancel_request": receipt} if receipt is not None else {})},
                         source="prospective_memory",
                         trust_tier=trust_tier,
                         capability_tags=capability_tags,
@@ -6288,6 +6335,7 @@ class PostgresEngine:
         self, tenant_id: str, intention_id: str, *, user_id: str, agent_id: str,
         session_id: str, due_at: datetime | None = None, action: dict[str, Any] | None = None,
         recurrence_policy: dict[str, Any] | None = None,
+        expected_revision: str | None = None, idempotency_key: str | None = None,
     ) -> Intention:
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self.connect() as conn:
@@ -6312,15 +6360,25 @@ class PostgresEngine:
                     # external user id; keep accepting the owner's real
                     # external principal by mapping it through the stable UUID.
                     principal_user_id = current.user_id
-                updated = _updated_intention(
+                previous_diffs = []
+                if idempotency_key is not None:
+                    cur.execute(
+                        "SELECT diff FROM audit_log WHERE tenant_id = %s AND op = 'update_intention' "
+                        "AND (target_id = %s OR diff->>'target_id' = %s)",
+                        (db_tenant_id, _uuid_or_none(intention_id), intention_id),
+                    )
+                    previous_diffs = [item["diff"] for item in cur.fetchall()]
+                updated, receipt, replay = prepare_intention_update(
                     current, user_id=principal_user_id, agent_id=agent_id,
                     session_id=session_id, due_at=due_at, action=action,
                     recurrence_policy=recurrence_policy,
+                    expected_revision=expected_revision, idempotency_key=idempotency_key,
+                    previous_diffs=previous_diffs,
                 )
                 provenance = self._intention_provenance_rows(
                     cur, db_tenant_id=db_tenant_id, intention=updated
                 )
-                if updated == current:
+                if replay or (updated == current and receipt is None):
                     return copy.deepcopy(current)
                 trust_tier, capability_tags = intention_audit_context(provenance)
                 cur.execute(
@@ -6342,7 +6400,8 @@ class PostgresEngine:
                     raise RuntimeError("intention update lost its scheduled transition")
                 self._audit(
                     cur, db_tenant_id, user_id, "update_intention", intention_id,
-                    intention_audit_diff(updated, status="scheduled"),
+                    {**intention_audit_diff(updated, status="scheduled"),
+                     **({"update_request": receipt} if receipt is not None else {})},
                     source="prospective_memory", trust_tier=trust_tier,
                     capability_tags=capability_tags,
                 )

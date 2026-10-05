@@ -48,9 +48,9 @@ oracle.
 `LocalMemoryEngine`, `PostgresEngine`, and `SqliteEngine` provide the same
 five-method surface with byte-identical signatures:
 
-- `schedule_intention(self, intention: Intention) -> str`
-- `update_intention(self, tenant_id, intention_id, *, user_id, agent_id, session_id, due_at=None, action=None, recurrence_policy=None) -> Intention`
-- `cancel_intention(self, tenant_id, intention_id, *, cancelled_by, session_id) -> None`
+- `schedule_intention(self, intention: Intention, *, idempotent: bool = False) -> str`
+- `update_intention(self, tenant_id, intention_id, *, user_id, agent_id, session_id, due_at=None, action=None, recurrence_policy=None, expected_revision=None, idempotency_key=None) -> Intention`
+- `cancel_intention(self, tenant_id, intention_id, *, cancelled_by, session_id, expected_revision=None, idempotency_key=None) -> None`
 - `evaluate_due_intentions(self, tenant_id, *, evaluated_at, trigger_context, operating_point) -> list[Intention]`
 - `list_intentions(self, tenant_id) -> list[Intention]`
 
@@ -68,6 +68,74 @@ main-branch evidence for the same tenant and user. The provenance trust ceiling
 (`is_write_tainted`) fail closed **before any mutation** — an over-ceiling or
 write-tainted origin raises `PermissionError`; missing / erased / cross-tenant /
 cross-user evidence raises `ValueError`.
+
+**Creation retries.** CLI `intention-schedule --idempotency-key KEY` and MCP
+`schedule_intention(idempotency_key=KEY)` opt into durable creation retries.
+The key must be 1–128 printable, non-space ASCII characters. Its identity is
+scoped by authenticated tenant, owner, agent and session; token renewal within
+the same session preserves that identity. A different session has a different
+key scope. The raw key is not stored. Reuse exactly the same request fields;
+changed content with the same scoped key raises `ValueError`.
+
+The facade derives a stable intention UUID and calls the engine with
+`idempotent=True`. An existing intention must have exactly one matching original
+creation digest in the atomically committed audit history. Every retry still
+requires current authorization and valid originating evidence. Missing or
+ambiguous history fails closed. A removed intention is not recreated from its
+retained creation receipt. Local locking / SQLite transactions and PostgreSQL
+row locks plus conflict-aware insertion protect concurrent retries.
+
+The response is the original **creation acknowledgement**, including its initial
+`scheduled` state, not a current-state query. An update, cancellation, firing or
+recurrence advance is never undone by a creation retry. Call `list_intentions`
+to observe current state. Erasure/revocation can make retries fail; this is not
+a guarantee of replay after deletion of the underlying records. Calls without
+a key keep creating distinct intentions. Low-level engine duplicates still
+raise unless the caller explicitly requests idempotence.
+
+**Update retries and content revisions.** Request `include_revision=true` on
+MCP `list_intentions`, or use CLI `intention-list --include-revision`. Each
+returned intention then includes a `revision` token for its complete current
+canonical state. This is a content ETag, not a monotonic edit counter: returning
+to byte-identical state returns the same token. It does not prove that no
+intervening edit occurred. Default list responses remain unchanged.
+
+Pass both `expected_revision` and `idempotency_key` to `update_intention` (CLI:
+`--expected-revision TOKEN --idempotency-key KEY`). A new request must match
+current state under the engine's lock/transaction. A stale token fails before
+mutation. The same key rules apply as for creation, scoped additionally to the
+intention and update operation. Reuse the original revision and patch when
+retrying; do not replace the revision with a freshly read one under the same
+key. A changed patch or revision under that key is a conflict.
+
+The update and receipt commit together, including a receipt for an accepted
+no-op. The audit stores key/request digests and the resulting revision, without
+another copy of the action payload. An identical retry checks current authority
+and provenance, performs no mutation and returns **current state**, including
+its `revision`. It may therefore differ from the first response after a later
+edit, cancellation or firing. This differs deliberately from the creation
+acknowledgement: update returns a state snapshot, not a replayed response body.
+Erased intentions cannot be recreated by update retries. Calls without the new
+arguments retain their existing behavior and response fields.
+
+**Cancellation retries.** `cancel_intention` / `intention-cancel` accept the
+same paired revision/key arguments. Their receipt namespace is separate from
+updates and binds the intention, tenant, authenticated cancellation principal
+and session. A new request must match current state; a repeated key must retain
+its original revision. The cancellation and digest-only receipt commit
+atomically. A recognized retry rechecks current provenance and requires the
+intention still to be cancelled. A new key targeting already-cancelled current
+state records a no-op receipt; retrying that key adds no second receipt.
+
+A concurrent update or firing can win before cancellation. In that case a stale
+revision or fired state rejects cancellation; no successful cancellation is
+reported. When cancellation wins, evaluation cannot fire that intention. Keyed
+CLI/MCP replies include the current `revision`; unkeyed replies remain unchanged.
+The public action adapter forwards these fields without refreshing them.
+
+These are opt-in public operation contracts. Their use in a registered M12
+workload, live backend validation, recovery and full benchmark admission remain
+separate evidence requirements.
 
 **Session-auth contract.** Scheduling does not itself require a session token: the
 optional `Intention.session_id`, when present, must be a non-empty string and

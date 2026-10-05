@@ -1,0 +1,162 @@
+{
+  "completed_cases": 1,
+  "incomplete_cases": 1,
+  "not_attempted_cases": 98,
+  "state": [
+    {
+      "schema": "m12-dependency-formation-state-diagnostic/v1",
+      "case_id": "53dc6f2c3f59df7a86790a50",
+      "track": "DEVELOPMENT",
+      "publishable": false,
+      "ranking_eligible": false,
+      "firing_evaluated": false,
+      "provenance_verified": false,
+      "turns": [
+        {
+          "turn": 0,
+          "true_positives": 1,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "state_exact_match": true,
+          "premature_fired_tasks": 0,
+          "observed_occurrence_advances": 0,
+          "clarification_expected": false,
+          "clarification_present": false,
+          "clarification_semantics": "not-evaluated"
+        },
+        {
+          "turn": 1,
+          "true_positives": 0,
+          "false_positives": 1,
+          "false_negatives": 2,
+          "state_exact_match": false,
+          "premature_fired_tasks": 0,
+          "observed_occurrence_advances": 0,
+          "clarification_expected": false,
+          "clarification_present": false,
+          "clarification_semantics": "not-evaluated"
+        }
+      ],
+      "dependency_identity": "public intention identifiers resolved to unambiguous action identities"
+    }
+  ],
+  "timing": [
+    {
+      "schema": "m12-trigger-window-diagnostic/v1",
+      "track": "DEVELOPMENT",
+      "publishable": false,
+      "metrics": {
+        "true_positives": 1,
+        "false_positives": 0,
+        "false_negatives": 1,
+        "precision": 1.0,
+        "recall": 0.5,
+        "f1": 0.6666666666666666
+      },
+      "by_trigger": {
+        "condition": {
+          "true_positives": 0,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": null,
+          "recall": null,
+          "f1": null
+        },
+        "dependency_completion": {
+          "true_positives": 0,
+          "false_positives": 0,
+          "false_negatives": 1,
+          "precision": null,
+          "recall": 0.0,
+          "f1": 0.0
+        },
+        "event": {
+          "true_positives": 0,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": null,
+          "recall": null,
+          "f1": null
+        },
+        "exact_time": {
+          "true_positives": 1,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "time_window": {
+          "true_positives": 0,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": null,
+          "recall": null,
+          "f1": null
+        }
+      },
+      "rows": [
+        {
+          "action_id": "5180fa571a7e2fa0",
+          "occurrence": 0,
+          "trigger_type": "dependency_completion",
+          "observed_opportunity": true,
+          "true_positives": 0,
+          "false_positives": 0,
+          "false_negatives": 1,
+          "precision": null,
+          "recall": 0.0,
+          "f1": 0.0,
+          "lateness_seconds": null,
+          "observations": []
+        },
+        {
+          "action_id": "abea80854e293fd4",
+          "occurrence": 0,
+          "trigger_type": "exact_time",
+          "observed_opportunity": true,
+          "true_positives": 1,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "lateness_seconds": 1.0,
+          "observations": [
+            {
+              "action_id": "abea80854e293fd4",
+              "due_at": "2031-06-15T01:00:01+00:00",
+              "evaluated_at": "2031-06-15T01:00:01+00:00",
+              "intention_id": "0d3c9c2d-3071-56c1-be08-f36e177ece0b",
+              "occurrence": 0,
+              "provider_evaluated_at": null,
+              "trigger_type": "exact_time"
+            }
+          ]
+        }
+      ],
+      "invalid_observations": [],
+      "unexpected_observations": [],
+      "duplicate_observations": 0,
+      "reported_due_drift_observations": 1,
+      "eligible_opportunities": 2,
+      "no_observed_opportunity": 0,
+      "lateness_observed_denominator": 1,
+      "mean_lateness_seconds": 1.0,
+      "max_lateness_seconds": 1.0,
+      "evaluation_command_wall_ms": 905.2159150014631,
+      "horizon": "2031-06-15T02:00:00+00:00",
+      "cost_usd": null,
+      "cost_status": "not-measured",
+      "workload_completeness_verified": false,
+      "uncertainty": "not-estimated; descriptive finite observations only",
+      "case_id": "53dc6f2c3f59df7a86790a50",
+      "ranking_eligible": false,
+      "clarification_quality_evaluated": false,
+      "trace_replay_verified": false
+    }
+  ],
+  "full_corpus_score": null,
+  "publishable": false,
+  "trace_replay_verified": false
+}

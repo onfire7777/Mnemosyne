@@ -1,0 +1,8 @@
+{
+  "vocabulary_sha256": "223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7",
+  "tiktoken": "0.5.2",
+  "matching_encoding_cases": 505,
+  "special_token_rejection_cases": 5,
+  "network_disabled_for_verified_loader": true,
+  "scope": "Offline loader parity on synthetic text; not benchmark score"
+}

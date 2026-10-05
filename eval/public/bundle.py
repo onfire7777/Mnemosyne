@@ -48,6 +48,8 @@ _CANONICAL_REPLAY_SEEDS = {
     "wmbs-m01-development": (20260728,),
     "wmbs-m02-retrieval-development": (20260801,),
     "wmbs-m03-valid-time-development": (11, 23, 37, 53, 71),
+    "wmbs-m04-development": (11, 23, 37, 53, 71),
+    "wmbs-m06-development": (17, 31, 43, 61, 79),
     "wmbs-m05-provenance-development": (13, 29, 41, 59, 73),
     "wmbs-m10-development": (0, 1, 2, 3, 4),
 }
@@ -154,6 +156,9 @@ _REGISTERED_SCORING_PROFILES = {
     "working-memory-action-v1": ("deterministic-action", "bootstrap"),
     "wmbs-m01-v1": ("whole-memory-development", "descriptive"),
     "wmbs-m03-valid-time-v1": ("whole-memory-development", "descriptive"),
+    "wmbs-m02-retrieval-v1": ("whole-memory-development", "descriptive"),
+    "wmbs-m04-v1": ("whole-memory-development", "descriptive"),
+    "wmbs-m06-v1": ("whole-memory-development", "descriptive"),
     "wmbs-m05-v1": ("whole-memory-development", "descriptive"),
     "wmbs-m10-v1": ("whole-memory-development", "descriptive"),
     "security-calibration-development-v1": (
@@ -1089,7 +1094,10 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
         _parse_json(line, "traces.jsonl")
         for line in (root / "traces.jsonl").read_text().splitlines()
     ]
-    trace_ids = [_trace_id(trace, family=config.get("family")) for trace in traces]
+    trace_ids = [
+        _trace_id(trace, family=config.get("family"), profile=config.get("scoring_profile"))
+        for trace in traces
+    ]
     if len(trace_ids) != len(set(trace_ids)):
         raise BundleError("duplicate trace IDs")
     family, method, profile = (
@@ -1097,15 +1105,19 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
         config.get("interval_method"),
         config.get("scoring_profile"),
     )
-    if measured.get("trace_count") != len(traces):
+    # M04/M06 have closed, fixture-bound scorers instead of generic counters.
+    fixture_counted = profile in {"wmbs-m04-v1", "wmbs-m06-v1"}
+    if not fixture_counted and measured.get("trace_count") != len(traces):
         raise BundleError("trace/metric count drift")
     # M03's scored population is its as-of history queries, not its traces, so
     # `total` carries its own denominator and is pinned separately below, once
     # the benchmark it is derived from has been digest-anchored to the registry.
-    if profile != "wmbs-m03-valid-time-v1" and measured.get("total") != len(traces):
+    if not fixture_counted and profile != "wmbs-m03-valid-time-v1" and measured.get("total") != len(traces):
         raise BundleError("trace/metric count drift")
     allowed_profile = _REGISTERED_SCORING_PROFILES.get(profile)
-    if any(trace.get("scoring_family") != family for trace in traces):
+    # M02/M04 oracles require closed traces with no scoring_family field.
+    closed_trace = profile in {"wmbs-m02-retrieval-v1", "wmbs-m04-v1"}
+    if any(trace.get("scoring_family", family if closed_trace else None) != family for trace in traces):
         raise BundleError("metric families may not be blended")
     if family in {
         "deterministic-retrieval",
@@ -1508,6 +1520,11 @@ def _render_report_note(report: dict[str, Any], report_digest: str) -> bytes:
 def _scoring_labels(benchmark: Any) -> list[dict[str, Any]]:
     if not isinstance(benchmark, dict):
         raise BundleError("scoring profile benchmark is missing")
+    if benchmark.get("schema_id") in {
+        "wmbs-m02-retrieval-development/fixture/0.1",
+        "wmbs-m04-development/fixture/0.1",
+    } or benchmark.get("fixture_id") == "wmbs-m06-consolidation-development":
+        return [{"fixture": benchmark}]
     if isinstance(benchmark.get("cases"), list):
         if benchmark.get("schema_id") == "wmbs-m10-development/fixture/0.1":
             artifact = benchmark.get("calibration_artifact")
@@ -1594,7 +1611,12 @@ def _scoring_labels(benchmark: Any) -> list[dict[str, Any]]:
     return labels
 
 
-def _trace_id(trace: dict[str, Any], *, family: Any) -> tuple[Any, ...]:
+def _trace_id(trace: dict[str, Any], *, family: Any, profile: Any = None) -> tuple[Any, ...]:
+    if profile == "wmbs-m04-v1":
+        identity = (trace.get("case_id"), trace.get("permutation"), trace.get("source_id", ""))
+        if not all(isinstance(value, str) for value in identity) or not all(identity[:2]):
+            raise BundleError("invalid conflict trace ID")
+        return identity
     if family == "security-calibration-development":
         case_id = trace.get("case_id")
         if not isinstance(case_id, str) or not case_id:
@@ -1623,9 +1645,7 @@ def _verify_qa_custody(
     build: dict[str, Any],
 ) -> None:
     from eval.public.runner import load_qa_protocol, qa_protocol_digests, require_clean_candidate_checkout, validate_candidate_manifest
-    from mnemosyne.providers.extractive_decomposer import (
-        disclosure as decomposer_disclosure,
-    )
+    from eval.public.reader_policy import grounded_reader_disclosure
     from mnemosyne.providers.grounded_protocol import PROMPT_BUNDLES, role_digests
 
     protocol = load_qa_protocol()
@@ -1688,16 +1708,7 @@ def _verify_qa_custody(
         raise BundleError("embedded candidate manifest digest mismatch")
     if candidate.get("model_content_sha256") != reader["model_content_sha256"]:
         raise BundleError("candidate manifest model digest mismatch")
-    expected_trace_reader = {
-        "query_decomposer": decomposer_disclosure(),
-        "grounded_reader": {
-            "role": "grounded_reader",
-            "model": protocol["model"]["selector"],
-            "model_content_digest": reader["model_content_sha256"],
-            **role_digests("grounded_reader"),
-            "decoding_options": protocol["decoding"],
-        },
-    }
+    expected_trace_reader = grounded_reader_disclosure(reader["model_content_sha256"])
     if metadata.get("interval_methods") != protocol["interval_methods"]:
         raise BundleError("QA mixed interval declaration mismatch")
     intervals = measured.get("intervals", {})

@@ -1,0 +1,12 @@
+{
+  "platform": "macos-arm64",
+  "cargo_build_jobs": 2,
+  "native_tests_passed": 6,
+  "provider_tests_passed": 16,
+  "models_feature_cargo_check": "passed",
+  "python_compatibility_tests_passed": 23,
+  "ruff": "passed",
+  "remote_ci_for_patch": "pending",
+  "github_private_alert_resolution": "unverified",
+  "raw_test_output_retained": false
+}

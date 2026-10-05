@@ -1,0 +1,26 @@
+{
+  "argv": [
+    ".superpowers/sdd/completion-2026-10-04/verified-venv/bin/python",
+    "/Users/admin/.local/state/mnemosyne/formation-semantic-diagnostic/2026-10-04-cccb4b24/run.py"
+  ],
+  "benchmark_verified": false,
+  "cwd": "/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne",
+  "poll_seconds": 1.0,
+  "reason": null,
+  "resource_diagnostics": {
+    "admission_verified": false,
+    "disk_roots": [
+      "/Users/admin/.local/state/mnemosyne/formation-semantic-diagnostic/2026-10-04-cccb4b24"
+    ],
+    "max_sampled_logical_file_bytes": 0,
+    "max_sampled_rss_bytes": 0,
+    "measurement": "sampled-process-group-rss-and-logical-regular-file-bytes",
+    "peak_rss_verified": false,
+    "samples": 0
+  },
+  "returncode": null,
+  "schema": "mnemosyne.monitored-command.v1",
+  "started_at": "2026-10-04T22:05:32.472092+00:00",
+  "status": "no_run",
+  "wall_seconds": 240.0
+}

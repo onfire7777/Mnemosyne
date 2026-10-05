@@ -1,0 +1,12 @@
+{
+  "source_sha256": "5fc977375878199735acd28fba5ae6f4d657fa0e000c0d2918a90c07b6035793",
+  "vocabulary_url": "https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken",
+  "vocabulary_bytes": 1681126,
+  "vocabulary_sha256": "223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7",
+  "tiktoken": "0.5.2",
+  "encoding": "cl100k_base",
+  "cases": 60,
+  "matched": 60,
+  "truncated_cases": 24,
+  "scope": "Synthetic full non-RAG request assembly with actual pinned tokenizer; no model or dataset execution"
+}

@@ -1,0 +1,3 @@
+# Optional isolated tokenizer verification environment; never production runtime.
+-r requirements-locomo-test.in
+tiktoken==0.5.2

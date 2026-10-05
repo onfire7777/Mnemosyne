@@ -1,0 +1,25 @@
+{
+  "schema": "m12-clocked-pressure-capture/v1",
+  "files": {
+    "README.md": "fc8ef406e921a57327942a3be1738c985d79c634a26f8a007ef04b48e4511138",
+    "monitor/pressure.jsonl": "07ad6da6ce7dacb6a72bb1db47890e0fd4730ca65b9bad7ef158a85f2bc0a293",
+    "monitor/start.json": "43adb3765c0b87ad7a8b2f69834561d977956b8e377fcf7cb30983240283c6a3",
+    "monitor/stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "monitor/stdout.log": "40288cc2a4ef3e7cf96f90a2ab26d3c27d7d416218c78b1c01526e68696f7b73",
+    "monitor/terminal.json": "178d1ecfca404b31aaeb197287ff9161fdefb5bf9cc8848866b1a82632e929e3",
+    "monitor/usage.jsonl": "9c3acb5d77f1e3e5a7ae2ce7476f259a5491dae287756fedb9c4b20aa045a711",
+    "replay-validation.json": "9c3302ddd5296110a8b4bbd45341ef5fb49a5207b7b37c36824ba76177f09223",
+    "source/action_pressure.py.txt": "823f052c4e8465bbecb8737ff8a0bcb995338adaa644562db8e3745e97e8270c",
+    "summary.json": "a8d5049108dd00af574e1491547f7036daec9f57bd8489575f5f2070d9aeaed4",
+    "workload/operations.jsonl": "6c6722abad1f55e9c9a118cbd60a72513c0cc710f3ef55a9e768c62c92ecd7db",
+    "workload/plan.json": "76c4c60ed19b54d0aee149943eb0ece0cf6227c7dd15e55a7715fdfc1ceb6135",
+    "workload/reports.json": "40288cc2a4ef3e7cf96f90a2ab26d3c27d7d416218c78b1c01526e68696f7b73",
+    "workload/sink.json": "9568458b01d6ff4a1d886a1a21db291e257e50e7ed9c514e4bc762957f2cecbf",
+    "workload/sink.sqlite3": "5dba99b9c5503cbc5a60dfdc94185a0fd0a4f4c8fc420096c35dfe36d7c8f956",
+    "workload/source.json": "4e1c384bf5860f6f58e56a5d4d62d27d28b0cee61f51b47669f1fe5545d4c19d",
+    "workload/status.json": "71075235b4c655ddbfa4e1f6f40dba3d3979bd7e14e7d8fe4ebf80822793d79e",
+    "workload/timings.jsonl": "65f0da22ac7976b9dfd71dbf5770a330179040dcd5d7c0cbd9dbea35c8afa490"
+  },
+  "publishable": false,
+  "ranking_eligible": false
+}

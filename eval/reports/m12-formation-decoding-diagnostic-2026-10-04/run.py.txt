@@ -1,0 +1,41 @@
+import hashlib
+import json
+from pathlib import Path
+import subprocess
+from eval.public.action_formation import validate_response
+from eval.public.action_formation_ollama import complete
+from eval.public.action_implicit_plan import make_corpus, public_turn
+
+root = Path(__file__).resolve().parent
+profiles = ['json', 'schema']
+requests = [{'schema': 'm12-formation-request/v1', 'conversation': public_turn(c, 0),
+             'current_tasks': [], 'prior_responses': [],
+             'response_contract': {'commands': ['task.create', 'task.update'],
+                                   'fields': ['operations', 'clarification'], 'maximum_operations': 16}}
+            for c in make_corpus()['cases'][:11]]
+def save(name, value):
+    (root / name).write_text(json.dumps(value, indent=2) + '\n')
+save('inputs.json', requests)
+save('plan.json', {'source_commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+                  'output_modes': profiles, 'prompt_profile': 'semantics-v2', 'selection': 'first 11 frozen corpus cases, first turn only; no task execution',
+                  'model': 'qwen3:1.7b', 'digest': '8f68893c685c3ddff2aa3fffce2aa60a30bb2da65ca488b61fff134a4d1730e7',
+                  'wire_order': 'declared', 'num_ctx': 12288,
+                  'inputs_sha256': hashlib.sha256((root / 'inputs.json').read_bytes()).hexdigest(),
+                  'publishable': False})
+for index, request in enumerate(requests):
+    for profile in profiles:
+        cell = f'{index:02d}-{profile}'
+        result = {'case_id': request['conversation']['case_id'], 'output_mode': profile, 'prompt_profile': 'semantics-v2',
+                  'task_execution': False, 'publishable': False}
+        try:
+            output = complete(request, model='qwen3:1.7b',
+                              digest='8f68893c685c3ddff2aa3fffce2aa60a30bb2da65ca488b61fff134a4d1730e7',
+                              evidence_dir=root / cell, prompt_profile='semantics-v2',
+                              output_mode=profile, wire_order='declared', num_ctx=12288)
+            (root / (cell + '.txt')).write_bytes(output)
+            response = validate_response(output, allowed_actions={a['action_id'] for a in request['conversation']['actions']}, existing_tasks=set())
+            result.update(status='valid-envelope', response=response)
+        except Exception as error:
+            result.update(status='failed', error_type=type(error).__name__)
+        save(cell + '.json', result)
+        print(json.dumps({'cell': cell, 'status': result['status']}), flush=True)

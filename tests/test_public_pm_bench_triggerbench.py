@@ -581,9 +581,8 @@ def _load_committed_fixture(name: str) -> dict[str, object]:
 def test_public_readme_m12_gap_disclosure_matches_committed_fixtures() -> None:
     """Pin the M12 development-gap disclosure to the fixtures it describes.
 
-    The README paragraph is the only place the M12 evidence limits are stated
-    for a reader, so it must neither be deleted nor drift away from the
-    committed fixtures it summarizes.
+    The README's M12 evidence limits must not drift away from the committed
+    fixtures, even when the CLI gains capabilities those fixtures do not use.
     """
     readme = (
         Path(__file__).resolve().parents[1] / "eval" / "public" / "README.md"
@@ -619,15 +618,18 @@ def test_public_readme_m12_gap_disclosure_matches_committed_fixtures() -> None:
         "and seven steps; `triggerbench-development` has one seed (`7`), "
         "twenty one-step cases, and no calibrated baseline." in unwrapped
     )
-    # "Recurrence is represented in fixture metadata but is not forwarded":
-    # the metadata half is pinned here, the non-forwarding half by
-    # `test_action_cli_..._without_forwarding_regularity`.
+    # Regularity metadata is not an explicit recurrence policy. The CLI now
+    # forwards a supplied policy, but these frozen fixtures do not supply one.
     assert "recurring" in {
         task["regularity"] for case in pm_cases for task in case["tasks"]
     }
+    assert "recurrence_policy" not in set(_keys(pm_bench))
+    assert "recurrence_policy" not in set(_keys(triggerbench))
+    assert "CLI now forwards an explicit `recurrence_policy`" in unwrapped
     assert (
-        "Recurrence is represented in fixture metadata but is not forwarded "
-        "as production recurrence plumbing." in unwrapped
+        "The committed fixtures still carry only regularity metadata, so these suites "
+        "do not yet exercise recurrence or establish calibrated recurrence performance."
+        in unwrapped
     )
     assert (
         "Lateness is scored only as a binary `late` safety counter" in unwrapped
@@ -800,3 +802,37 @@ def test_action_cli_represents_pm_bench_lifecycle_and_ticks_without_forwarding_r
         "stale_preupdate_action": 0,
         "dependency_violation": 0,
     }
+
+
+def test_action_cli_preserves_duplicate_firings_for_benchmark_rejection(tmp_path, monkeypatch):
+    """The translator must not hide a provider's duplicate execution evidence."""
+    def fake_run(self, command, *args, **kwargs):
+        if command == "capture":
+            return SimpleNamespace(json={"cid": "origin"})
+        if command == "intention-schedule":
+            return SimpleNamespace(json={"intention_id": "scheduled"})
+        if command in {"intention-cancel", "intention-update"}:
+            return SimpleNamespace(json={})
+        if command == "intention-evaluate":
+            return SimpleNamespace(json={"intentions": [
+                {"action": {"ref": "action-0"}},
+                {"action": {"ref": "action-0"}},
+            ]})
+        raise AssertionError(command)
+
+    monkeypatch.setattr(MnemoCLI, "run", fake_run)
+    adapter = ActionCLI(MnemoCLI(store=str(tmp_path / "unused.json")))
+    with pytest.raises(ActionProbeError, match="duplicated action IDs"):
+        run(_load_committed_fixture("pm-bench-development.json"), adapter)
+
+
+def test_action_selection_does_not_deduplicate_candidate_evidence(tmp_path, monkeypatch):
+    monkeypatch.setattr(MnemoCLI, "run", lambda *a, **k: SimpleNamespace(json={"cid": "origin"}))
+    adapter = ActionCLI(MnemoCLI(store=str(tmp_path / "unused.json")))
+    result = adapter.run("action.select", {
+        "store": str(tmp_path / "case.json"), "tenant_id": "t", "session_id": "s",
+    }, {
+        "candidate_action_ids": ["allowed", "excluded", "allowed"],
+        "available_actions": [{"action_id": "allowed"}],
+    })
+    assert result["action_ids"] == ["allowed", "allowed"]

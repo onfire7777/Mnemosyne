@@ -1,5 +1,11 @@
 # Mnemosyne — Roadmap to 100% Blueprint Parity
 
+> **Scope clarified 2026-10-04:** This is the historical v1.0/blueprint
+> roadmap, not the current v2.0 completion claim. Historical receipts and
+> percentages apply only to their named scope. See `.planning/ROADMAP.md` for
+> current source delivery and the still-open measured/publication gates.
+
+
 **Authored:** 2026-06-24 · **Last updated:** 2026-07-07 · **Current baseline:** `main` after Tier A source reconciliation, G1/G4 cognitive-runtime gating, production manifest/custody hardening, full T-SEC protected-registry reconciliation, §24 support-strategy runtime durability, protected gate-case ratchet enforcement, shared network-safety provider/probe fetching, provider-manifest command/executable custody validation, skeletal-capture rejection, symlinked input rejection, required external verifier report output, strict external render/capture env-file loading, refreshable Tier-B custody packets, row-scoped production readiness routing, generated render-env action plans, generated runtime-env examples, capture-blocker summaries, canonical `RUNTIME_ENV_FILE` operator handoff docs, `RUNTIME_ENV_FILE`-parameterized executable packet `next-commands.sh` capture-to-verify handoff, out-of-band reviewer handoff records, ADR-002 CPU-parametric B9 closure, and the `capture-bc10` production-evidence attestation. The exact moving baseline must be refreshed with `git log -1 --oneline`, `git status --short --branch`, and GitHub Actions for current `HEAD` before writing new status.
 **Controlling status doc:** `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` (10 gap rows — all **Done** as of 2026-07-07: Tier-B production evidence captured + offline-verified, bundle fingerprint `sha256:6dc117d6bb95e7a683915d432b2d2b21997133e9bfbd53624427a7317eeb2271`)
 **Verdict source:** blended completion reached **100% for the strict Tier-B parity rows** on 2026-07-07 after retained production evidence passed the full wrapper/audit/verifier path. Earlier percentage math below is retained only to explain the historical plateau.

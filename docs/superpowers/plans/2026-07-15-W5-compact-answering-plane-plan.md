@@ -6,6 +6,60 @@
 **Depends on:** W1 (headline QA numbers depend on the retrieval fix). The sidecar and bakeoff may be built in parallel with W1.
 **Governed by:** `.planning/runbooks/COMPACT-MODEL-8GB-ACCEPTANCE.md` and the compact-reader design doc — unchanged; this plan implements, it does not relax them.
 
+
+## Status reconciliation — 2026-10-04
+
+Source inspection at `3c21be5d`; historical instructions below describe the original execution contract, not a request to repeat landed work. The compact acceptance harness exists in `eval/compact_answering/acceptance.py` and Phase 15 S4 records explicit missing physical evidence. Model selection, sidecar promotion, production parity and physical 8 GiB Windows/Linux acceptance remain open. Receipt files are not proof of a successful physical acceptance run.
+
+### Native execution checkpoint — 2026-10-04
+
+The default sidecar is still a fail-closed skeleton, not a working learned
+reader. An opt-in Rust ONNX span-tensor adapter now loads digest-checked local
+graph bytes and executes a bounded batch-one transformer tensor ABI. A real
+314-byte synthetic graph matched Python ONNX Runtime at five input lengths;
+malformed-output and non-finite rejection checks also passed. The first native
+runtime configuration failed at process teardown; the replacement pin passed
+including clean process exit. See `services/answering-ort/README.md` for the
+exact reproduction command and limitations.
+[Raw validation evidence](../../../eval/reports/compact-onnx-native-development-2026-10-04/README.md)
+retains successful clean-source checks plus the failed SDK invocation. A
+bounded Linux CI job now passed at `e1ad2d0c` (51 native tests, formatting,
+Clippy); see `eval/reports/compact-onnx-linux-ci-2026-10-04`.
+
+A subsequent experimental span-only `InferenceSession` now connects the native
+tensor adapter to a digest-checked tokenizer and exact source-byte offsets.
+Clean-source decoded-reader evidence: `eval/reports/compact-decoded-reader-development-2026-10-04`
+(`fe753290`; raw logs, fixture bytes and hash manifest).
+Ten generated cases match a separate Python reference's decoded spans/nulls,
+including Unicode, later windows and multi-document ties. The original tensor
+result alone did not prove these properties. The named window/null policy is
+explicitly uncalibrated; no learned quality score is reported.
+
+Phase 1 and the broader plane remain incomplete: full multi-task heads, actual
+encoder serving, admitted artifact/configuration custody and learned-model
+end-to-end parity remain open. Corpus decontamination, model bakeoffs,
+quantization and physical acceptance remain open. No protected data or learned
+weights were used, and candidate v19 / BurnOS behavior is unchanged.
+
+### TRAIN preparation checkpoint — 2026-10-04
+
+The fixed-pinned raw intake and exact-source row staging now run locally without
+loading a model. 220,744 retained rows and 194,069 spans passed an independent
+raw-parquet audit; 22 malformed Hotpot support references are rejected with
+source hashes. See `eval/reports/compact-train-staging-2026-10-04`. These counts
+are neither benchmark results nor training admission. Entity/document grouping,
+pre/post protected-overlap checks, whole-cluster exclusion, frozen partitions
+and complete attribution custody remain open before any model work.
+
+Source-document grouping now finds 919 connected components; one holds
+152,706 of 220,744 staged rows, including 89,667 Hotpot rows. This constrains
+independent Hotpot selection/calibration coverage (758 rows outside that
+component). `eval/reports/compact-train-groups-2026-10-04` retains the policy,
+histogram and full-edge audit. The first partition plan is subsequently frozen at `db54506a`: 176,595 train,
+22,075 selection and 22,074 calibration rows. Evidence and coverage limits are
+in `eval/reports/compact-train-partitions-2026-10-04`. This is quarantined;
+protected/entity screening and attribution remain required before admission.
+
 ## Goal
 
 Build the compact grounded-answering plane — embedder + cross-encoder reranker +

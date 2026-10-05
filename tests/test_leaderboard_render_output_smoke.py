@@ -4,6 +4,7 @@ Consumes `leaderboard.render.render_site` only. Does not re-test Backend
 unit cases (validation matrix, publication restore, mixed-schema, etc.).
 """
 
+import html
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
@@ -71,8 +72,9 @@ def _assert_leaderboard_site(output: Path, record_id: str) -> Path:
     index = index_path.read_text(encoding="utf-8")
     assert index.startswith("<!doctype html>")
     assert "<html" in index
-    assert "<title>Leaderboard</title>" in index
-    assert "<h1>Leaderboard</h1>" in index
+    assert "<title>Leaderboard · Mnemetric</title>" in index
+    assert "<h1>Memory benchmarks, with evidence.</h1>" in index
+    assert html.escape(record_id) in index
 
     digest = _digest(record_id)
     relative = f"results/{digest}.html"

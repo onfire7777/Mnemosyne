@@ -1,5 +1,14 @@
 # Requirements: v2.0 Public Benchmark and Memory Leadership
 
+## Implementation versus acceptance — 2026-10-04
+
+REPRO-001 source delivery is complete via PR #144 after N12 #139.
+CAP-004..011 remain unchecked: S2–S5 implementation and development/research
+artifacts have landed, but their full capability or measured acceptance
+claims are not established. S5 explicitly selects research-only. M06 Stage A/B
+are development-only and PROPOSED. REPRO-002 and public launch stay open.
+
+
 ## Publication and Harness
 
 | ID | Requirement | Authority | Status |
@@ -11,7 +20,7 @@
 | [ ] BENCH-005 | HippoRAG multi-hop datasets produce deterministic Recall@2/@5 and EM/F1 with graph/PPR channel traces and published-baseline context. | Plan B M1.3 | Partial — local dev graph participation is positive and deterministic; production-Postgres parity and reader EM/F1 remain open |
 | [ ] BENCH-006 | MemoryAgentBench has a conforming Mnemosyne adapter and upstream submission path; BEAM runs with a fully disclosed reader/config. | Plan B M1.4/M1.5 | Partial — source contracts are merged; official/upstream execution, rights, provider/model/judge disclosure, and operator evidence remain gated |
 | [x] BENCH-007 | Deterministic public suites run on a scheduled regression-only CI cadence without tuning on held-out/test data. | Plan B M1.6 | Complete — PR #86 delivered the fixed workflow and manual operability; real `schedule` run `30807305055` succeeded on `b8673031a80158c49d552a4b3647829d213243bd` on 2026-08-03, with job `91665545558` verified and retained in the lease map |
-| [ ] REPRO-001 | A neutral reproducibility bundle standard covers manifests, raw traces, configs, environment/build fingerprints, metrics, intervals, and integrity hashes. | Plan B M2 | Planned |
+| [x] REPRO-001 | A neutral reproducibility bundle standard covers manifests, raw traces, configs, environment/build fingerprints, metrics, intervals, and integrity hashes. | Plan B M2 | Complete (source standard; REPRO-002 evidence separate) |
 | [ ] REPRO-002 | At least one headline-eligible result is reproducible by construction from the published bundle — one documented command from a clean checkout — before any external claim. Independent third-party reproduction is recorded as strengthening evidence when offered and does not gate the claim. | Plan B M3/PBPP | Planned |
 
 ## Capability Leadership

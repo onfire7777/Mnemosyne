@@ -1,0 +1,22 @@
+import hashlib,json,subprocess
+from pathlib import Path
+from eval.public.action_formation import validate_response
+from eval.public.action_formation_ollama import complete
+root=Path(__file__).resolve().parent
+request=json.loads((root/'input.json').read_text())
+profiles=[{'model':model,'digest':digest,'wire_order':order} for model,digest in (
+ ('qwen3:0.6b','7df6b6e09427a769808717c0a93cadc4ae99ed4eb8bf5ca557c90846becea435'),
+ ('qwen3:1.7b','8f68893c685c3ddff2aa3fffce2aa60a30bb2da65ca488b61fff134a4d1730e7')) for order in ('canonical','declared')]
+head=subprocess.run(['git','rev-parse','HEAD'],check=True,capture_output=True,text=True).stdout.strip()
+(root/'plan.json').write_text(json.dumps({'source_commit':head,'profiles':profiles,'input_sha256':hashlib.sha256((root/'input.json').read_bytes()).hexdigest(),'purpose':'four prespecified single-input diagnostic cells; not benchmark results','publishable':False},indent=2)+'\n')
+for index,profile in enumerate(profiles):
+ result={**profile,'publishable':False,'task_execution':False}
+ try:
+  content=complete(request,**profile,evidence_dir=root/str(index),output_mode='schema')
+  (root/f'output-{index}.txt').write_bytes(content)
+  response=validate_response(content,allowed_actions={a['action_id'] for a in request['conversation']['actions']},existing_tasks=set())
+  result.update(status='valid-envelope',operations=len(response['operations']),clarification=response['clarification'])
+ except Exception as error:
+  result.update(status='failed',error_type=type(error).__name__)
+ (root/f'result-{index}.json').write_text(json.dumps(result,indent=2)+'\n')
+ print(json.dumps(result),flush=True)

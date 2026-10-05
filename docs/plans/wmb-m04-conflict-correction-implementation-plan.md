@@ -22,6 +22,11 @@ and quarantine finding in §3 was re-checked and still holds verbatim at
 
 ---
 
+
+## Status reconciliation — 2026-10-04
+
+Source inspection at `3c21be5d`; historical instructions below describe the original execution contract, not a request to repeat landed work. M04 now has its fixture, scorer, tests and registry-reachable development adapter. See `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md` for exact paths. Original missing-source and pre-Stage-B statements are historical. Full module admission remains PROPOSED, publication flags remain false, and remaining official/custody/measurement requirements are not discharged by development reachability.
+
 ## 1. Authority
 
 | Source | Role here |

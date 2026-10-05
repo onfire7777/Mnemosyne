@@ -1,0 +1,20 @@
+Traceback (most recent call last):
+  File "<frozen runpy>", line 203, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne/eval/public/action_dependency_run.py", line 118, in <module>
+    result = run_development(args.output, provider)
+  File "/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne/eval/public/action_dependency_run.py", line 70, in run_development
+    formation = run_case(
+        case, provider=provider, actions=actions,
+        scope=scope, emit=emit,
+    )
+  File "/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne/eval/public/action_formation.py", line 187, in run_case
+    call(operation['command'], operation['payload'], index)
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne/eval/public/action_formation.py", line 147, in call
+    response = actions.run(command, scope, deepcopy(payload))
+  File "/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne/eval/public/action_cli.py", line 156, in run
+    return handler(state, payload)
+  File "/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne/eval/public/action_cli.py", line 232, in _task_create
+    raise ActionCLIError("a keyed task cannot be rebound to a different creation key")
+eval.public.action_cli.ActionCLIError: a keyed task cannot be rebound to a different creation key

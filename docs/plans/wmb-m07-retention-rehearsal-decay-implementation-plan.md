@@ -1,5 +1,39 @@
 # WMB M07 — Retention, Rehearsal, and Decay Implementation Contract
 
+Status: `PROPOSED` — full module protocol remains unfrozen and not approved.
+Current development evidence below does not confer full module readiness.
+
+## Current prerequisite reconciliation — 2026-10-04
+
+This update supersedes stale dependency/liveness statements in the historical
+August contract below; it does not waive the M07 acceptance or resource gates.
+N12 and P14-B source have landed (#139/#144), and P15-S2 source/development
+closure landed through #160. These are no longer absent predecessor code.
+Their measured-acceptance requirements remain distinct from source delivery.
+
+A narrow public-boundary characterization at `b29543bf` confirms that
+`ingest --metadata`, `queue-enqueue --kind consolidate_evidence --payload ...`
+and `consolidate-once` can apply an explicit `now` to the real lifecycle
+forgetter. In an isolated local store, one synthetic protected item was not
+rehearsed before its due date, rehearsed exactly at the due date, and retained
+its updated schedule in the next process. No model ran. The repeatable
+`tests/test_public_lifecycle_clock.py` regression passed; its source uses only
+the public CLI driver and does not import the engine or lifecycle oracle.
+[Characterization receipt](../research/benchmark-intake/m07-clock-characterization-2026-10-04.json).
+
+This supports an adapter-specific clock mechanism, not a global simulated-time
+contract. Queue timestamps still use wall time, and this probe did not assess
+retrieval, answering, months-long timelines, storage/cost, five seeds or
+interference. A complete M07 fixture/scorer, precise public clock adapter
+contract, resource admission and threshold calibration remain open. The
+historical “NOT CODE-READY” status is not flipped by this one-item probe.
+
+Historical lane reservations below record their original scope; the current
+owner's solo-development instruction governs active work, while technical
+prerequisites and claim boundaries continue to apply.
+
+## Historical August implementation contract
+
 Status: `PROPOSED` / **PLANNING ARTIFACT ONLY — NOT CODE-READY.**
 This file authorizes no source, fixture, registry, scorer, measurement,
 admission-state, publication change, or GitHub PR.
@@ -240,3 +274,23 @@ survival 1.0. Measured admission receipt required; no asserted L16 budget.
 Corpus scale and official-track coverage stay disclosed deferrals. No
 registry row exists, so this cell is not runnable.
 ```
+
+## Extended public-calendar prerequisite — 2026-10-04
+
+`tests/test_public_lifecycle_clock.py` now checks five fixed calendar starts,
+including month-end, year-end and leap-day boundaries. Each isolated store
+advances one protected item through eight successful rehearsals using the
+literal documented next-interval sequence 3, 7, 14, 30, 60, 120, 240, 240 days.
+At each due date the public queue/forgetter path is invoked first one second
+early and then exactly on time. The early call must not rehearse; the due call
+must increment the count and persist the expected next date. All operations
+run through fresh public CLI subprocesses without importing the lifecycle
+oracle, and each result must report no model-backed role, no failed item and
+no demotion. Each calendar spans over one virtual year without sleeps.
+
+All six clock tests (the original three-day case plus these five calendars)
+passed in 25.51 seconds; Ruff passed. These fixed calendar regressions are not
+the five seeded M07 corpora. They establish broader scheduling persistence,
+not the global clock contract, successful retrieval/answering, interference,
+resource admission, survival over the complete corpus or storage/cost Pareto
+acceptance. Those original obligations remain open.

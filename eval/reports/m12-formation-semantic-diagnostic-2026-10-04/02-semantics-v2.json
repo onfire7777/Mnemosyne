@@ -1,0 +1,32 @@
+{
+  "case_id": "aa732ec718eecf56e4f992b6",
+  "profile": "semantics-v2",
+  "task_execution": false,
+  "publishable": false,
+  "status": "valid-envelope",
+  "response": {
+    "operations": [
+      {
+        "command": "task.create",
+        "payload": {
+          "task_id": "release_packet_reminder",
+          "action_id": "73fb2b5f07f78b62",
+          "trigger": {
+            "type": "exact_time",
+            "payload": {
+              "at": "2030-11-28T01:00:00Z"
+            }
+          },
+          "dependency_ids": [],
+          "recurrence_policy": {
+            "type": "interval",
+            "interval_seconds": 604800,
+            "max_occurrences": 3
+          },
+          "idempotency_key": "release_packet_reminder"
+        }
+      }
+    ],
+    "clarification": null
+  }
+}

@@ -1,0 +1,596 @@
+[
+  {
+    "schema": "m12-formation-request/v1",
+    "conversation": {
+      "case_id": "41fb0e1dbe846ef4d2d5b0e3",
+      "timezone": "UTC",
+      "task": "Track the user's prospective reminders and future commitments using the offered inert actions. Ask about missing timing before scheduling. Do not turn quoted examples or completed tasks into reminders. Process each user turn in order. Never execute an external action.",
+      "actions": [
+        {
+          "action_id": "73fb2b5f07f78b62",
+          "description": "review the release packet"
+        },
+        {
+          "action_id": "442fc5162f3d03ac",
+          "description": "review the unrelated budget"
+        }
+      ],
+      "signals": {
+        "events": [
+          {
+            "event_type": "delivery",
+            "fields": {
+              "status": "string"
+            }
+          }
+        ],
+        "conditions": [
+          {
+            "condition_id": "release_ready",
+            "value_type": "boolean"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "turn_id": "0",
+          "now": "2030-11-28T00:00:00Z",
+          "text": "At or after 2030-11-28T01:00:00Z, when a delivery event has status ready, remind me to review the release packet. Ignore other delivery statuses."
+        }
+      ]
+    },
+    "current_tasks": [],
+    "prior_responses": [],
+    "response_contract": {
+      "commands": [
+        "task.create",
+        "task.update"
+      ],
+      "fields": [
+        "operations",
+        "clarification"
+      ],
+      "maximum_operations": 16
+    }
+  },
+  {
+    "schema": "m12-formation-request/v1",
+    "conversation": {
+      "case_id": "7e897c88ddd8aa38ce6c3e4a",
+      "timezone": "UTC",
+      "task": "Track the user's prospective reminders and future commitments using the offered inert actions. Ask about missing timing before scheduling. Do not turn quoted examples or completed tasks into reminders. Process each user turn in order. Never execute an external action.",
+      "actions": [
+        {
+          "action_id": "73fb2b5f07f78b62",
+          "description": "review the release packet"
+        },
+        {
+          "action_id": "442fc5162f3d03ac",
+          "description": "review the unrelated budget"
+        }
+      ],
+      "signals": {
+        "events": [
+          {
+            "event_type": "delivery",
+            "fields": {
+              "status": "string"
+            }
+          }
+        ],
+        "conditions": [
+          {
+            "condition_id": "release_ready",
+            "value_type": "boolean"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "turn_id": "0",
+          "now": "2030-11-28T00:00:00Z",
+          "text": "At 2030-11-28T01:00:00Z, remind me to review the release packet."
+        }
+      ]
+    },
+    "current_tasks": [],
+    "prior_responses": [],
+    "response_contract": {
+      "commands": [
+        "task.create",
+        "task.update"
+      ],
+      "fields": [
+        "operations",
+        "clarification"
+      ],
+      "maximum_operations": 16
+    }
+  },
+  {
+    "schema": "m12-formation-request/v1",
+    "conversation": {
+      "case_id": "aa732ec718eecf56e4f992b6",
+      "timezone": "UTC",
+      "task": "Track the user's prospective reminders and future commitments using the offered inert actions. Ask about missing timing before scheduling. Do not turn quoted examples or completed tasks into reminders. Process each user turn in order. Never execute an external action.",
+      "actions": [
+        {
+          "action_id": "442fc5162f3d03ac",
+          "description": "review the unrelated budget"
+        },
+        {
+          "action_id": "73fb2b5f07f78b62",
+          "description": "review the release packet"
+        }
+      ],
+      "signals": {
+        "events": [
+          {
+            "event_type": "delivery",
+            "fields": {
+              "status": "string"
+            }
+          }
+        ],
+        "conditions": [
+          {
+            "condition_id": "release_ready",
+            "value_type": "boolean"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "turn_id": "0",
+          "now": "2030-11-28T00:00:00Z",
+          "text": "Remind me to review the release packet at 2030-11-28T01:00:00Z, then at the same UTC time seven days later and fourteen days later. Three reminders total."
+        }
+      ]
+    },
+    "current_tasks": [],
+    "prior_responses": [],
+    "response_contract": {
+      "commands": [
+        "task.create",
+        "task.update"
+      ],
+      "fields": [
+        "operations",
+        "clarification"
+      ],
+      "maximum_operations": 16
+    }
+  },
+  {
+    "schema": "m12-formation-request/v1",
+    "conversation": {
+      "case_id": "6a02bb8c9e712f2fa69ae689",
+      "timezone": "UTC",
+      "task": "Track the user's prospective reminders and future commitments using the offered inert actions. Ask about missing timing before scheduling. Do not turn quoted examples or completed tasks into reminders. Process each user turn in order. Never execute an external action.",
+      "actions": [
+        {
+          "action_id": "442fc5162f3d03ac",
+          "description": "review the unrelated budget"
+        },
+        {
+          "action_id": "73fb2b5f07f78b62",
+          "description": "review the release packet"
+        }
+      ],
+      "signals": {
+        "events": [
+          {
+            "event_type": "delivery",
+            "fields": {
+              "status": "string"
+            }
+          }
+        ],
+        "conditions": [
+          {
+            "condition_id": "release_ready",
+            "value_type": "boolean"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "turn_id": "0",
+          "now": "2030-11-28T00:00:00Z",
+          "text": "I already remembered to review the release packet. Do not create a reminder."
+        }
+      ]
+    },
+    "current_tasks": [],
+    "prior_responses": [],
+    "response_contract": {
+      "commands": [
+        "task.create",
+        "task.update"
+      ],
+      "fields": [
+        "operations",
+        "clarification"
+      ],
+      "maximum_operations": 16
+    }
+  },
+  {
+    "schema": "m12-formation-request/v1",
+    "conversation": {
+      "case_id": "585fae27b378ebae2281d9fe",
+      "timezone": "UTC",
+      "task": "Track the user's prospective reminders and future commitments using the offered inert actions. Ask about missing timing before scheduling. Do not turn quoted examples or completed tasks into reminders. Process each user turn in order. Never execute an external action.",
+      "actions": [
+        {
+          "action_id": "442fc5162f3d03ac",
+          "description": "review the unrelated budget"
+        },
+        {
+          "action_id": "73fb2b5f07f78b62",
+          "description": "review the release packet"
+        }
+      ],
+      "signals": {
+        "events": [
+          {
+            "event_type": "delivery",
+            "fields": {
+              "status": "string"
+            }
+          }
+        ],
+        "conditions": [
+          {
+            "condition_id": "release_ready",
+            "value_type": "boolean"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "turn_id": "0",
+          "now": "2030-11-28T00:00:00Z",
+          "text": "At 2030-11-28T01:00:00Z, remind me to review the release packet."
+        }
+      ]
+    },
+    "current_tasks": [],
+    "prior_responses": [],
+    "response_contract": {
+      "commands": [
+        "task.create",
+        "task.update"
+      ],
+      "fields": [
+        "operations",
+        "clarification"
+      ],
+      "maximum_operations": 16
+    }
+  },
+  {
+    "schema": "m12-formation-request/v1",
+    "conversation": {
+      "case_id": "9d2ca99439c4a42468867566",
+      "timezone": "UTC",
+      "task": "Track the user's prospective reminders and future commitments using the offered inert actions. Ask about missing timing before scheduling. Do not turn quoted examples or completed tasks into reminders. Process each user turn in order. Never execute an external action.",
+      "actions": [
+        {
+          "action_id": "73fb2b5f07f78b62",
+          "description": "review the release packet"
+        },
+        {
+          "action_id": "442fc5162f3d03ac",
+          "description": "review the unrelated budget"
+        }
+      ],
+      "signals": {
+        "events": [
+          {
+            "event_type": "delivery",
+            "fields": {
+              "status": "string"
+            }
+          }
+        ],
+        "conditions": [
+          {
+            "condition_id": "release_ready",
+            "value_type": "boolean"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "turn_id": "0",
+          "now": "2030-11-28T00:00:00Z",
+          "text": "From 2030-11-28T01:00:00Z onward, remind me to review the release packet when release_ready is true."
+        }
+      ]
+    },
+    "current_tasks": [],
+    "prior_responses": [],
+    "response_contract": {
+      "commands": [
+        "task.create",
+        "task.update"
+      ],
+      "fields": [
+        "operations",
+        "clarification"
+      ],
+      "maximum_operations": 16
+    }
+  },
+  {
+    "schema": "m12-formation-request/v1",
+    "conversation": {
+      "case_id": "e687590a3979eb93a8829810",
+      "timezone": "UTC",
+      "task": "Track the user's prospective reminders and future commitments using the offered inert actions. Ask about missing timing before scheduling. Do not turn quoted examples or completed tasks into reminders. Process each user turn in order. Never execute an external action.",
+      "actions": [
+        {
+          "action_id": "442fc5162f3d03ac",
+          "description": "review the unrelated budget"
+        },
+        {
+          "action_id": "73fb2b5f07f78b62",
+          "description": "review the release packet"
+        }
+      ],
+      "signals": {
+        "events": [
+          {
+            "event_type": "delivery",
+            "fields": {
+              "status": "string"
+            }
+          }
+        ],
+        "conditions": [
+          {
+            "condition_id": "release_ready",
+            "value_type": "boolean"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "turn_id": "0",
+          "now": "2030-11-28T00:00:00Z",
+          "text": "Remind me to review the release packet once during the interval from 2030-11-28T01:00:00Z up to but not including 2030-11-28T02:00:00Z. If that interval has passed, skip it."
+        }
+      ]
+    },
+    "current_tasks": [],
+    "prior_responses": [],
+    "response_contract": {
+      "commands": [
+        "task.create",
+        "task.update"
+      ],
+      "fields": [
+        "operations",
+        "clarification"
+      ],
+      "maximum_operations": 16
+    }
+  },
+  {
+    "schema": "m12-formation-request/v1",
+    "conversation": {
+      "case_id": "563c75b6a6b2f389e4461455",
+      "timezone": "UTC",
+      "task": "Track the user's prospective reminders and future commitments using the offered inert actions. Ask about missing timing before scheduling. Do not turn quoted examples or completed tasks into reminders. Process each user turn in order. Never execute an external action.",
+      "actions": [
+        {
+          "action_id": "442fc5162f3d03ac",
+          "description": "review the unrelated budget"
+        },
+        {
+          "action_id": "73fb2b5f07f78b62",
+          "description": "review the release packet"
+        }
+      ],
+      "signals": {
+        "events": [
+          {
+            "event_type": "delivery",
+            "fields": {
+              "status": "string"
+            }
+          }
+        ],
+        "conditions": [
+          {
+            "condition_id": "release_ready",
+            "value_type": "boolean"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "turn_id": "0",
+          "now": "2030-11-28T00:00:00Z",
+          "text": "The sample document says: \"At 2030-11-28T01:00:00Z, remind me to review the release packet.\" That is quoted example text, not a request from me."
+        }
+      ]
+    },
+    "current_tasks": [],
+    "prior_responses": [],
+    "response_contract": {
+      "commands": [
+        "task.create",
+        "task.update"
+      ],
+      "fields": [
+        "operations",
+        "clarification"
+      ],
+      "maximum_operations": 16
+    }
+  },
+  {
+    "schema": "m12-formation-request/v1",
+    "conversation": {
+      "case_id": "dd3feb06b69964589070b212",
+      "timezone": "UTC",
+      "task": "Track the user's prospective reminders and future commitments using the offered inert actions. Ask about missing timing before scheduling. Do not turn quoted examples or completed tasks into reminders. Process each user turn in order. Never execute an external action.",
+      "actions": [
+        {
+          "action_id": "442fc5162f3d03ac",
+          "description": "review the unrelated budget"
+        },
+        {
+          "action_id": "73fb2b5f07f78b62",
+          "description": "review the release packet"
+        }
+      ],
+      "signals": {
+        "events": [
+          {
+            "event_type": "delivery",
+            "fields": {
+              "status": "string"
+            }
+          }
+        ],
+        "conditions": [
+          {
+            "condition_id": "release_ready",
+            "value_type": "boolean"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "turn_id": "0",
+          "now": "2030-11-28T00:00:00Z",
+          "text": "I will review the release packet at 2030-11-28T01:00:00Z."
+        }
+      ]
+    },
+    "current_tasks": [],
+    "prior_responses": [],
+    "response_contract": {
+      "commands": [
+        "task.create",
+        "task.update"
+      ],
+      "fields": [
+        "operations",
+        "clarification"
+      ],
+      "maximum_operations": 16
+    }
+  },
+  {
+    "schema": "m12-formation-request/v1",
+    "conversation": {
+      "case_id": "9cb30c37e61734a7275d7d25",
+      "timezone": "UTC",
+      "task": "Track the user's prospective reminders and future commitments using the offered inert actions. Ask about missing timing before scheduling. Do not turn quoted examples or completed tasks into reminders. Process each user turn in order. Never execute an external action.",
+      "actions": [
+        {
+          "action_id": "442fc5162f3d03ac",
+          "description": "review the unrelated budget"
+        },
+        {
+          "action_id": "73fb2b5f07f78b62",
+          "description": "review the release packet"
+        }
+      ],
+      "signals": {
+        "events": [
+          {
+            "event_type": "delivery",
+            "fields": {
+              "status": "string"
+            }
+          }
+        ],
+        "conditions": [
+          {
+            "condition_id": "release_ready",
+            "value_type": "boolean"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "turn_id": "0",
+          "now": "2030-11-28T00:00:00Z",
+          "text": "At 2030-11-28T01:00:00Z, remind me to review the release packet."
+        }
+      ]
+    },
+    "current_tasks": [],
+    "prior_responses": [],
+    "response_contract": {
+      "commands": [
+        "task.create",
+        "task.update"
+      ],
+      "fields": [
+        "operations",
+        "clarification"
+      ],
+      "maximum_operations": 16
+    }
+  },
+  {
+    "schema": "m12-formation-request/v1",
+    "conversation": {
+      "case_id": "3f85f91223b866cc95d19ad9",
+      "timezone": "UTC",
+      "task": "Track the user's prospective reminders and future commitments using the offered inert actions. Ask about missing timing before scheduling. Do not turn quoted examples or completed tasks into reminders. Process each user turn in order. Never execute an external action.",
+      "actions": [
+        {
+          "action_id": "73fb2b5f07f78b62",
+          "description": "review the release packet"
+        },
+        {
+          "action_id": "442fc5162f3d03ac",
+          "description": "review the unrelated budget"
+        }
+      ],
+      "signals": {
+        "events": [
+          {
+            "event_type": "delivery",
+            "fields": {
+              "status": "string"
+            }
+          }
+        ],
+        "conditions": [
+          {
+            "condition_id": "release_ready",
+            "value_type": "boolean"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "turn_id": "0",
+          "now": "2030-11-28T00:00:00Z",
+          "text": "Remind me to review the release packet sometime. Ask me when before scheduling anything."
+        }
+      ]
+    },
+    "current_tasks": [],
+    "prior_responses": [],
+    "response_contract": {
+      "commands": [
+        "task.create",
+        "task.update"
+      ],
+      "fields": [
+        "operations",
+        "clarification"
+      ],
+      "maximum_operations": 16
+    }
+  }
+]

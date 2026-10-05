@@ -78,6 +78,31 @@ def _digest(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
+def test_empty_site_explains_missing_results_and_links_methods(tmp_path: Path) -> None:
+    results = _write_json(tmp_path / "results.json", [])
+    output = tmp_path / "site"
+    assert main([str(results), str(output)]) == 0
+    index = (output / "index.html").read_text()
+    assert "No verified results published yet." in index
+    assert "Development tests are not benchmark rankings." in index
+    assert 'href="methods.html"' in index
+    methods = (output / "methods.html").read_text()
+    assert "Retrieval is not answer quality" in methods
+    assert "operator entry" in methods
+    assert 'name="viewport"' in index
+
+
+def test_result_pages_preserve_supplied_uncertainty_without_inventing_confidence(tmp_path: Path) -> None:
+    results = _write_json(tmp_path / "results.json", _result())
+    traces = _write_traces(tmp_path / "traces.jsonl", [_trace()])
+    output = tmp_path / "site"
+    render_site(results, {"result-001": traces}, output)
+    for page in [output / "index.html", output / "results" / f"{_digest('result-001')}.html"]:
+        rendered = page.read_text()
+        assert "Interval: 0.6 to 0.85" in rendered
+        assert "95%" not in rendered  # v1 does not supply a confidence level.
+
+
 def test_renders_one_validated_result_and_its_public_bundle_trace(
     tmp_path: Path,
 ) -> None:
@@ -115,6 +140,7 @@ def test_renders_one_validated_result_and_its_public_bundle_trace(
         f"sha256:{'4' * 64}",
     ):
         assert immutable in result_page
+        assert immutable in index
     assert (
         f"../traces/{_digest('result-001')}/{_digest('question-001')}.html"
         in result_page
@@ -122,7 +148,9 @@ def test_renders_one_validated_result_and_its_public_bundle_trace(
     assert "Stored context/evidence" in trace_page
     assert "doc-1" in trace_page
     assert "Retrieved context/evidence" in trace_page
-    assert "Final answer" in trace_page
+    assert "Retrieval output" in trace_page
+    assert "not a generated answer" in trace_page
+    assert "Final answer" not in trace_page
     assert "../../results/" in trace_page
 
 
@@ -131,6 +159,7 @@ def test_renders_qa_evidence_fields_that_exist_in_the_source_trace(
 ) -> None:
     results = _write_json(tmp_path / "results.json", _result())
     trace = _trace()
+    trace["scoring_family"] = "qa"
     trace.pop("ranked_retrieved_hits")
     trace.pop("stored_records")
     trace["authorized_retrieval_hops"] = [
@@ -151,6 +180,24 @@ def test_renders_qa_evidence_fields_that_exist_in_the_source_trace(
     assert "authorized_retrieval_hops" in page
     assert "fact &lt;one&gt;" in page
     assert "final &lt;answer&gt;" in page
+    assert "Final answer" in page
+    assert "Retrieval output" not in page
+
+
+@pytest.mark.parametrize("family", [None, "unknown", [], {}])
+def test_unrecognized_trace_family_does_not_claim_generated_answer(
+    tmp_path: Path, family: object,
+) -> None:
+    results = _write_json(tmp_path / "results.json", _result())
+    trace = _trace()
+    trace["scoring_family"] = family
+    traces = _write_traces(tmp_path / "traces.jsonl", [trace])
+    output = tmp_path / "site"
+    render_site(results, {"result-001": traces}, output)
+    page = next((output / "traces").rglob("*.html")).read_text()
+    assert "Recorded output" in page
+    assert "Final answer" not in page
+    assert "Retrieval output" not in page
 
 
 def test_output_is_deterministic_for_logically_identical_input_orderings(
@@ -186,7 +233,8 @@ def test_output_is_deterministic_for_logically_identical_input_orderings(
     )
 
     assert _tree(first_output) == _tree(second_output)
-    assert all(raw.endswith(b"\n") and b"\r\n" not in raw for raw in _tree(first_output).values())
+    assert all(raw.endswith(b"\n") and b"\r\n" not in raw
+               for name, raw in _tree(first_output).items() if not str(name).endswith(".zip"))
 
 
 def test_metric_ties_are_deterministic_for_logically_identical_orderings(
@@ -211,7 +259,19 @@ def test_metric_ties_are_deterministic_for_logically_identical_orderings(
         tmp_path / "second-site",
     )
 
-    assert _tree(tmp_path / "first-site") == _tree(tmp_path / "second-site")
+    first_tree, second_tree = _tree(tmp_path / "first-site"), _tree(tmp_path / "second-site")
+    # Display order is canonical; exported records retain their input array
+    # order so that consumers can reproduce the signed record identity.
+    # Comparison URLs are pinned to exact source identity, including array
+    # order. Normalize only that disclosed fingerprint, not displayed metrics.
+    first_digest = json.loads(first_tree["data/comparison-index.json"])["source_digest"].encode()
+    second_digest = json.loads(second_tree["data/comparison-index.json"])["source_digest"].encode()
+    assert first_digest != second_digest
+    assert {k: v.replace(first_digest, b"SOURCE") for k, v in first_tree.items() if k.endswith(".html")} == {
+        k: v.replace(second_digest, b"SOURCE") for k, v in second_tree.items() if k.endswith(".html")
+    }
+    assert json.loads(first_tree["data/results.json"]) == [first_record]
+    assert json.loads(second_tree["data/results.json"]) == [second_record]
 
 
 def test_escapes_hostile_values_and_uses_only_safe_relative_links(
@@ -227,7 +287,8 @@ def test_escapes_hostile_values_and_uses_only_safe_relative_links(
 
     render_site(results, {record["record_id"]: traces}, output)
 
-    rendered = b"".join(_tree(output).values()).decode()
+    rendered = b"".join(raw for name, raw in _tree(output).items()
+                        if not str(name).endswith(".zip")).decode()
     assert "<script>" not in rendered
     assert "<img src=x" not in rendered
     assert "<b>not markup</b>" not in rendered
@@ -651,6 +712,14 @@ def test_renders_v2_record_fields_and_safety_gates(tmp_path: Path) -> None:
     assert "failed" in page
     assert "operator" in page
     assert "trace-001" in page
+    data_root = output / "data" / _digest(str(record["record_id"]))
+    assert json.loads((data_root / "result.json").read_text()) == record
+    assert json.loads((output / "data" / "results.json").read_text()) == [record]
+    for field, filename in DIGEST_PAYLOAD_NAMES.items():
+        exported = (data_root / filename).read_bytes()
+        assert exported == artifacts[filename].read_bytes()
+        assert "sha256:" + hashlib.sha256(exported).hexdigest() == record[field]
+        assert f'/{filename}" download' in page
 
 
 def test_rejects_mixed_v1_and_v2_rendering(tmp_path: Path) -> None:
@@ -781,6 +850,8 @@ def test_v2_render_uses_verified_trace_snapshot(
     )
     assert "question-001" in pages
     assert "MUTATED" not in pages
+    exported = output / "data" / _digest(str(record["record_id"])) / "traces.jsonl"
+    assert "sha256:" + hashlib.sha256(original_read_bytes(exported)).hexdigest() == record["trace_index_digest"]
 
 
 def test_rejects_remote_artifact_uri_without_network(tmp_path: Path) -> None:
@@ -802,3 +873,119 @@ def test_rejects_remote_artifact_uri_without_network(tmp_path: Path) -> None:
             },
         )
     assert not (tmp_path / "site").exists()
+
+
+def test_empty_platform_exposes_full_scope_without_inventing_results(tmp_path: Path) -> None:
+    results = _write_json(tmp_path / 'results.json', [])
+    output = tmp_path / 'site'
+    render_site(results, {}, output)
+    coverage = (output / 'coverage.html').read_text()
+    catalog = json.loads((output / 'data' / 'catalog.json').read_text())
+    assert {c['id'] for c in catalog['capabilities']} == {f'C{i:02}' for i in range(1, 25)}
+    assert {m['id'] for m in catalog['modules']} == {f'M{i:02}' for i in range(1, 21)}
+    for capability in catalog['capabilities']:
+        assert f'id="{capability["id"]}"' in coverage
+        for module in capability['modules']:
+            assert f'href="#{module}"' in coverage
+    for module in catalog['modules']:
+        assert f'id="{module["id"]}"' in coverage
+    assert 'not a measured system score' in coverage
+    assert json.loads((output / 'data' / 'results.json').read_text()) == []
+    index = (output / 'index.html').read_text()
+    assert 'href="benchmarks.html"' in index
+    assert 'href="coverage.html"' in index
+    benchmarks = (output / 'benchmarks.html').read_text()
+    assert 'LongMemEval-V2' in benchmarks
+    assert 'BEAM-10M' in benchmarks
+    assert 'STATE-Bench' in benchmarks
+    assert 'Official upstream' in benchmarks
+    assert 'not a result' in benchmarks
+
+
+def test_catalog_preserves_original_capability_to_module_contract() -> None:
+    import re
+    from leaderboard.catalog import load_catalog
+
+    catalog = load_catalog()
+    root = Path(__file__).resolve().parents[1]
+    source = (root / catalog['scope_source']).read_text()
+    expected = {}
+    for line in source.splitlines():
+        if re.match(r'^\| C\d\d \|', line):
+            cells = [cell.strip() for cell in line.strip('|').split('|')]
+            expected[cells[0]] = (
+                [f'M{i:02}' for i in range(1, 20)]
+                if cells[0] == 'C24' else re.findall(r'M\d\d', cells[3])
+            )
+    assert {row['id']: row['modules'] for row in catalog['capabilities']} == expected
+    assert len(catalog['joint_scenarios']) == 6
+    assert all(len(row['modules']) >= 3 for row in catalog['joint_scenarios'])
+
+
+@pytest.mark.parametrize("tampered", [None, *DIGEST_PAYLOAD_NAMES.values()])
+def test_legacy_artifact_downloads_require_exact_bound_bytes(tmp_path: Path, tampered) -> None:
+    record = _result()
+    paths = _bind_v2_artifacts(tmp_path, record)
+    results = _write_json(tmp_path / "results.json", record)
+    output = tmp_path / "site"
+    output.mkdir()
+    (output / "existing.txt").write_text("preserve on failure")
+    if tampered:
+        paths[tampered].write_bytes(paths[tampered].read_bytes() + b" ")
+    kwargs = dict(
+        results=results, traces={record["record_id"]: paths["traces.jsonl"]},
+        destination=output, artifacts={record["record_id"]: {
+            "build": paths["build.json"], "config": paths["config.json"],
+            "bundle": paths["bundle-manifest.json"],
+        }},
+    )
+    if tampered:
+        with pytest.raises(RenderError, match="digest mismatch"):
+            render_site(**kwargs)
+        assert (output / "existing.txt").read_text() == "preserve on failure"
+        return
+    render_site(**kwargs)
+    data = output / "data" / _digest(record["record_id"])
+    page = (output / "results" / f"{_digest(record['record_id'])}.html").read_text()
+    assert json.loads((data / "result.json").read_text()) == record
+    for name in DIGEST_PAYLOAD_NAMES.values():
+        assert (data / name).read_bytes() == paths[name].read_bytes()
+        assert f'/{name}" download' in page
+    index = json.loads((output / "data/comparison-index.json").read_text())
+    assert index["groups"] == []
+    assert index["exclusions"][0]["reason"] == "legacy-comparison-metadata-unavailable"
+
+
+def test_native_trace_pages_expose_request_response_and_replay_limits(tmp_path: Path) -> None:
+    from leaderboard.native_metrics import category_metric
+    record = _v2_development_record()
+    record["metrics"] = [category_metric({"source_count": 1, "scored_count": 0,
+        "missing_count": 1, "native_recall_count": 0, "rounded_qa_sum": 0, "native_recall_sum": 0},
+        4, family="reference_qa", scorer_digest="sha256:" + "c" * 64)]
+    paths = _bind_v2_artifacts(tmp_path, record)
+    trace = {"question_id": "native-synthetic", "projection_policy": "native-explicit-abstention-v1",
+        "status": "incomplete-reader-execution", "request": {"question": "<script>unsafe</script>"},
+        "request_sha256": "a" * 64, "question_transformation": {"category": 4},
+        "decoded_prediction": None, "retrieved_dialog_ids": ["D1:1"], "claim_text_custody": [],
+        "reader_policy_matched": False, "runtime_custody_verified": False,
+        "run_config_sha256": "b" * 64, "raw_response": {"answer": None, "reader": {}},
+        "additional_audit_field": "retained-visible"}
+    raw = (json.dumps(trace, sort_keys=True) + "\n").encode()
+    paths["traces.jsonl"].write_bytes(raw)
+    record["trace_index_digest"] = "sha256:" + hashlib.sha256(raw).hexdigest()
+    results = _write_json(tmp_path / "results.json", record)
+    output = tmp_path / "site"
+    render_site(results, {record["record_id"]: paths["traces.jsonl"]}, output,
+        artifacts={record["record_id"]: {"build": paths["build.json"], "config": paths["config.json"],
+                                         "bundle": paths["bundle-manifest.json"]}})
+    page = (output / "traces" / _digest(record["record_id"]) / f"{_digest(trace['question_id'])}.html").read_text()
+    for label in ("Native projection status", "Question and public request", "Request byte digest",
+                  "Question transformation and option mapping", "Prediction passed to the category scorer",
+                  "Retrieved source dialog IDs", "Claim replay checks", "Original public response",
+                  "Complete stored trace (JSON)", "retained-visible"):
+        assert label in page
+    assert "Runtime custody verified</h2><pre>false</pre>" in page
+    assert "incomplete-reader-execution" in page
+    assert "<script>unsafe</script>" not in page
+    assert "&lt;script&gt;unsafe&lt;/script&gt;" in page
+    assert (output / "data" / _digest(record["record_id"]) / "traces.jsonl").read_bytes() == raw

@@ -1,0 +1,30 @@
+{
+  "argv": [
+    ".superpowers/sdd/completion-2026-10-04/verified-venv/bin/python",
+    "-m",
+    "eval.public.action_pressure",
+    "/Users/admin/.local/state/mnemosyne/pressure-runs/2026-10-04-d59949ed/mcp-stdio/workload",
+    "--transport",
+    "mcp-stdio"
+  ],
+  "benchmark_verified": false,
+  "cwd": "/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne",
+  "poll_seconds": 1.0,
+  "reason": null,
+  "resource_diagnostics": {
+    "admission_verified": false,
+    "disk_roots": [
+      "/Users/admin/.local/state/mnemosyne/pressure-runs/2026-10-04-d59949ed/mcp-stdio"
+    ],
+    "max_sampled_logical_file_bytes": 0,
+    "max_sampled_rss_bytes": 0,
+    "measurement": "sampled-process-group-rss-and-logical-regular-file-bytes",
+    "peak_rss_verified": false,
+    "samples": 0
+  },
+  "returncode": null,
+  "schema": "mnemosyne.monitored-command.v1",
+  "started_at": "2026-10-04T22:25:15.941966+00:00",
+  "status": "no_run",
+  "wall_seconds": 1800.0
+}

@@ -1,0 +1,13 @@
+{
+  "schema": "compact-train-staging-evidence/v1",
+  "files": {
+    "README.md": "8be5aaa653b63d74f834169d7c2fdf0fe69baa5a11a6d3df644a3f508466fb5a",
+    "audit_source.py": "5dc842b6fea5d816f957407aadb8df58765c5dd4c49cb5e78667783376aa0bfd",
+    "rejected.jsonl": "33eaa02cc19ab8dfe9b92ccdd4a90086bb687f732237e5dd2fadab89463c7142",
+    "source-audit.json": "096889f2cbcb96a1f881689182abcdb1d48d09931b707bd71be4e23d5690d35d",
+    "staging.json": "469f5b4ff25807767d83d240bbb1e2bea6e7debba74bb582ea8d914950ed2399"
+  },
+  "training_admitted": false,
+  "publishable": false,
+  "ranking_eligible": false
+}

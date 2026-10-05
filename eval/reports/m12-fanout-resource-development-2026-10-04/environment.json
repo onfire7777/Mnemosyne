@@ -1,0 +1,19 @@
+{
+  "schema": "m12-local-resource-environment/v1",
+  "observed_at": "2026-10-04T19:46:55.056925+00:00",
+  "physical_memory_bytes": 17179869184,
+  "logical_cpus": 10,
+  "architecture": "arm64",
+  "macos_version": "26.6.2",
+  "tmpdir": "/Users/admin/.local/state/mnemosyne/action-resource-runs/2026-10-04-421a1fcd-attempt2/scratch",
+  "temporary_store_paths_observed": [
+    "scratch/m12-triggers-_hvo0fuy/seed-41.json",
+    "scratch/m12-triggers-_hvo0fuy/seed-7.json",
+    "scratch/m12-triggers-_hvo0fuy/seed-19.json"
+  ],
+  "notes": [
+    "Environment observation recorded during the run, not an admission receipt.",
+    "TMPDIR was supplied to the workload by the launching wrapper.",
+    "Disk samples include files under the attempt root only."
+  ]
+}

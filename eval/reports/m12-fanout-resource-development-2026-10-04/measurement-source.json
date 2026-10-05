@@ -1,0 +1,10 @@
+{
+  "admission_verified": false,
+  "files": {
+    "eval/public/monitor.py": "2065aabb9aabfde2656edfd458e1ebe7501b685d53f71a5b89de85c7a7f6caad",
+    "eval/public/resource_usage.py": "64c9fd8993122dc341178d79e92314aa0506e1d4ab98f14ddbd11dc89dcbca0b"
+  },
+  "schema": "m12-measurement-source/v1",
+  "source_commit": "421a1fcd1473b4669300910483f97c155e30f310",
+  "verification": "working files matched named commit during the run; no independent attestation"
+}

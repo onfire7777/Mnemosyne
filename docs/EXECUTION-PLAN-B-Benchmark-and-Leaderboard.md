@@ -1,4 +1,15 @@
 # Mnemosyne — Execution Plan B: Benchmarking & the Leaderboard
+
+## Status reconciliation — 2026-10-04
+
+Current delivery and acceptance are tracked in `.planning/ROADMAP.md`.
+N12 and REPRO-001 are delivered (#139/#144); Phase 15 S2–S5 source and
+research artifacts are delivered (through #160/#164/#177/#199). M06 Stage A/B
+are delivered (#202/#205), development-only and PROPOSED. Earlier status
+paragraphs below are historical snapshots. Protected QA, official benchmarks,
+provider evidence, physical 8 GiB acceptance, REPRO-002 and publication remain
+open; development fixtures do not close those gates.
+
 ## Goal: prove Mnemosyne's results credibly, and build the field's neutral memory-benchmark leaderboard
 
 **Version:** 1.2 · **Date:** 2026-07-13 · **Status:** In Progress (approved)
@@ -222,7 +233,7 @@ Seed by running **all major systems** (mem0, Zep/Graphiti, Letta, Cognee, MemOS,
 ### Definition-of-Done checklist (Plan B)
 - [x] Charter updated to PBPP; provider-bakeoff README references it (M4).
 - [ ] `eval/public/` harness live; LongMemEval-recall, HippoRAG multi-hop, MemoryAgentBench adapter, BEAM runnable with bundles (M1).
-- [ ] Reproducibility bundle standard implemented; agent-reproduces from bundle (M2).
+- [ ] Reproducibility bundle standard implemented; agent-reproduces from bundle (M2). Standard implementation and development contract landed in PR #144; full reproduction acceptance remains evidence-gated.
 - [ ] Headline numbers reproducible by construction from their bundles, one documented command each (M3); any third-party reproduction note recorded as strengthening evidence.
 - [ ] Register A gates satisfied — pre-registration, append-only signed run ledger, reproducibility by construction, open stack, populated adversarial self-report, public dispute channel, public methods write-up; COI + firewall policy public (L0). Board seating is the optional Register B upgrade and gates nothing here.
 - [ ] Methodology + anti-gaming + contamination controls implemented (L1).

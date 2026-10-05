@@ -94,12 +94,13 @@ from mnemosyne.engine import (
     _privacy_backfill_controls,
     _privacy_backfill_metadata,
     _advance_intention_after_fire,
-    _cancelled_intention,
+    prepare_intention_cancel,
     _is_replayed_evaluation,
-    _updated_intention,
+    prepare_intention_update,
     canonicalize_intention,
     intention_audit_context,
     intention_audit_diff,
+    validate_intention_retry,
     intention_fire_receipt_id,
     validate_intention_dependencies,
     validate_intention_evaluation_inputs,
@@ -4336,13 +4337,35 @@ class SqliteEngine:
             for intention in [Intention.from_dict(json.loads(row["record"]))]
         }
 
-    def schedule_intention(self, intention: Intention) -> str:
+    def schedule_intention(self, intention: Intention, *, idempotent: bool = False) -> str:
         """Store an intention after tenant, provenance, trust, and taint checks."""
         intention = canonicalize_intention(intention, require_scheduled=True)
         with self._lock:
             conn = self._connect(intention.tenant_id)
             conn.execute("BEGIN IMMEDIATE")
             try:
+                if idempotent:
+                    # ponytail: audit JSON scan; index operation/target if retry volume warrants it.
+                    rows = conn.execute(
+                        "SELECT record FROM audit_log WHERE tenant_id = ?",
+                        (intention.tenant_id,),
+                    )
+                    creation_diffs = [
+                        record["diff"] for row in rows
+                        for record in [json.loads(row["record"])]
+                        if record.get("op") == "schedule_intention"
+                        and record.get("target_id") == intention.intention_id
+                    ]
+                    if conn.execute(
+                        "SELECT 1 FROM intentions WHERE tenant_id = ? AND intention_id = ?",
+                        (intention.tenant_id, intention.intention_id),
+                    ).fetchone() is not None:
+                        self._intention_provenance_rows(conn, intention)
+                        validate_intention_retry(intention, creation_diffs)
+                        conn.commit()
+                        return intention.intention_id
+                    if creation_diffs:
+                        raise ValueError("cannot retry a removed intention")
                 receipt = conn.execute(
                     "SELECT 1 FROM intention_fire_receipts "
                     "WHERE tenant_id = ? AND intention_id = ?",
@@ -4393,7 +4416,8 @@ class SqliteEngine:
             return intention.intention_id
 
     def cancel_intention(
-        self, tenant_id: str, intention_id: str, *, cancelled_by: str, session_id: str
+        self, tenant_id: str, intention_id: str, *, cancelled_by: str, session_id: str,
+        expected_revision: str | None = None, idempotency_key: str | None = None,
     ) -> None:
         with self._lock:
             conn = self._connect(tenant_id)
@@ -4406,10 +4430,22 @@ class SqliteEngine:
                 if row is None:
                     raise KeyError(intention_id)
                 current = Intention.from_dict(json.loads(row["record"]))
-                intention = _cancelled_intention(
-                    current, cancelled_by=cancelled_by, session_id=session_id
+                previous_diffs = []
+                if idempotency_key is not None:
+                    previous_diffs = [record["diff"] for item in conn.execute(
+                        "SELECT record FROM audit_log WHERE tenant_id = ?", (tenant_id,))
+                        for record in [json.loads(item["record"])]
+                        if record.get("op") == "cancel_intention" and record.get("target_id") == intention_id]
+                intention, receipt, replay = prepare_intention_cancel(
+                    current, cancelled_by=cancelled_by, session_id=session_id,
+                    expected_revision=expected_revision, idempotency_key=idempotency_key,
+                    previous_diffs=previous_diffs,
                 )
-                if intention == current:
+                if replay:
+                    self._intention_provenance_rows(conn, current)
+                    conn.commit()
+                    return
+                if intention == current and receipt is None:
                     conn.commit()
                     return
                 was_scheduled = current.status == "scheduled"
@@ -4428,14 +4464,15 @@ class SqliteEngine:
                 )
                 if cursor.rowcount != 1:
                     raise RuntimeError("intention cancellation lost its state transition")
-                if was_scheduled:
+                if was_scheduled or receipt is not None:
                     self._audit_row(
                         conn,
                         tenant_id,
                         cancelled_by,
                         "cancel_intention",
                         intention_id,
-                        intention_audit_diff(intention, status="cancelled"),
+                        {**intention_audit_diff(intention, status="cancelled"),
+                         **({"cancel_request": receipt} if receipt is not None else {})},
                         source="prospective_memory",
                         trust_tier=trust_tier,
                         capability_tags=capability_tags,
@@ -4449,6 +4486,7 @@ class SqliteEngine:
         self, tenant_id: str, intention_id: str, *, user_id: str, agent_id: str,
         session_id: str, due_at: datetime | None = None, action: dict[str, Any] | None = None,
         recurrence_policy: dict[str, Any] | None = None,
+        expected_revision: str | None = None, idempotency_key: str | None = None,
     ) -> Intention:
         with self._lock:
             conn = self._connect(tenant_id)
@@ -4461,13 +4499,21 @@ class SqliteEngine:
                 if row is None:
                     raise KeyError(intention_id)
                 current = Intention.from_dict(json.loads(row["record"]))
-                updated = _updated_intention(
+                previous_diffs = []
+                if idempotency_key is not None:
+                    previous_diffs = [record["diff"] for item in conn.execute(
+                        "SELECT record FROM audit_log WHERE tenant_id = ?", (tenant_id,))
+                        for record in [json.loads(item["record"])]
+                        if record.get("op") == "update_intention" and record.get("target_id") == intention_id]
+                updated, receipt, replay = prepare_intention_update(
                     current, user_id=user_id,
                     agent_id=agent_id, session_id=session_id, due_at=due_at, action=action,
                     recurrence_policy=recurrence_policy,
+                    expected_revision=expected_revision, idempotency_key=idempotency_key,
+                    previous_diffs=previous_diffs,
                 )
                 provenance = self._intention_provenance_rows(conn, updated)
-                if updated == current:
+                if replay or (updated == current and receipt is None):
                     conn.commit()
                     return copy.deepcopy(current)
                 trust_tier, capability_tags = intention_audit_context(provenance)
@@ -4480,7 +4526,8 @@ class SqliteEngine:
                     raise RuntimeError("intention update lost its scheduled transition")
                 self._audit_row(
                     conn, tenant_id, user_id, "update_intention", intention_id,
-                    intention_audit_diff(updated, status="scheduled"),
+                    {**intention_audit_diff(updated, status="scheduled"),
+                     **({"update_request": receipt} if receipt is not None else {})},
                     source="prospective_memory", trust_tier=trust_tier,
                     capability_tags=capability_tags,
                 )
