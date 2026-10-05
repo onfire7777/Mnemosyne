@@ -37,3 +37,26 @@ benchmark execution, answer quality or superiority. Follow its current roadmap
 and verification receipts rather than interpreting legacy copies here as current
 implementation state. Hosted generation awaits an API key and spending limit;
 the owner's current direction is to continue all feasible work without one.
+
+## Explicit read-only evaluation retrieval policy
+
+Mnemetric's four-task MemoryAgentBench diagnostic exposed a budget mismatch:
+Mnemosyne's default 4096 estimated-token budget cannot fit two of the official
+chunks in any of the 17 tested contexts. Preserve that diagnostic as default
+behavior; it is not a ten-chunk comparison.
+
+The public `eval-query-batch` command now accepts `--retrieval-token-budget`
+(1..262144) and `--retrieval-top-k` (1..100). They require the existing local
+`--evaluation-read-only` mode. When supplied, the command applies a temporary
+policy copy and reports the effective `evaluation_policy` in its output.
+It does not persist the policy, alter ordinary search defaults, or expose
+additional policy controls through BurnOS's MCP interface. Existing commands
+without either option retain their output shape.
+
+The real CLI regression exercises two chunks individually larger than the
+default budget, verifies both can be returned under the explicit evaluation
+budget, checks all store files remain byte-identical, and repeats the default
+query to prove its result is unchanged. Bounds are validated before loading
+input files or the store. A fair benchmark still needs a declared profile,
+matched budget semantics, pinned runtime, and a fresh retained run; the new
+options alone establish neither equivalence nor answer quality.
