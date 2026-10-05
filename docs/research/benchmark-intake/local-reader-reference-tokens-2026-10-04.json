@@ -1,0 +1,27 @@
+{
+  "full_context_coverage_verified": false,
+  "matched_added_token_ids": 26,
+  "matched_merge_rules": 151387,
+  "matched_vocabulary_entries": 151643,
+  "model_execution_performed": false,
+  "model_metadata_sha256": "0d34b63c3fd2c7c854624ae21f0ced5f7e75395ded8916e5253bf79699e49f02",
+  "prompts": {
+    "system": {
+      "characters": 130,
+      "reference_tokens": 25,
+      "sha256": "c5f876a45ae505908f7e4f2990584194d1842c905d6e1fbb7160abe6097a2f6c"
+    },
+    "user": {
+      "characters": 24839,
+      "reference_tokens": 3989,
+      "sha256": "8c24e62a84b7fd5c4ad4588b3c1726a31c8a244ed656008d821457c22ea540bb"
+    }
+  },
+  "resource_admission_verified": false,
+  "runtime_tokenizer_equivalence_verified": false,
+  "schema": "mnemosyne.qwen-reference-context-audit/v1",
+  "scope": "Separate message contents only; excludes chat template and output tokens.",
+  "tokenizer_revision": "b968826d9c46dd6066d109eabc6255188de91218",
+  "tokenizer_sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+  "tokenizers_version": "0.22.1"
+}

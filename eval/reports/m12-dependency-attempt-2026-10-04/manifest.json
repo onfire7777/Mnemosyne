@@ -1,0 +1,28 @@
+{
+  "schema": "m12-dependency-failed-attempt/v1",
+  "files": {
+    "README.md": "3464801a954b53b6ae70e634dc53440d14676cff57162c0ad0455e77d214157a",
+    "cleanup.json": "a6fe9ec6e26a38d99fca418b69826e0238b7a2bb319ff05eb153a6fcfd1fa28d",
+    "monitor/pressure.jsonl": "22c3318e7a6d923ba5d686d4f8f42bffea4f8ef83b7c3b98abba26471c62b6f0",
+    "monitor/start.json": "c67eb5f80f31940112bf792c915b56d3fa75e6f2e654aced223be8a88e93ebed",
+    "monitor/stderr.log": "95ce2d57ec5e9e61e283d7f6cf65767819a08665c7caee3a74b39015c898bdcb",
+    "monitor/stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "monitor/terminal.json": "59c23d241c59703cb02fbb885a5f18601c6e6f05e039c92de3523f8bfa1e0618",
+    "monitor/usage.jsonl": "043f63483ca7da9c8b70f104334c97153fc0a1be70d39fdfa5640da0a047293f",
+    "partial-diagnostics.json": "bd80386759019f0b950f03f7325fb8d4cf4f4eee12eeabdf6830e4df9a2b4988",
+    "provider/0b7027721eb0418683a963fe27828d51.jsonl": "cc6ca4e8db49bbd26045ca423e843ef7e1a4e31ca368b942fe00dd9bd076db6c",
+    "provider/69af5d64b8e04d0e868332b9d2cb8113.jsonl": "6986829243a7a4fb0f114c64ff11a8bc9ccd625f2444628cfa82c4d9715cd0d9",
+    "provider/7aff640a03824d06a7200ac47a2807d4.jsonl": "1ae0749c812a98ef08c63b7e94ef79bb1c0bbc2698b68ba414f2bdcd07f1b809",
+    "provider/ca6a8396d86847d1b4c2b9bf01bb35ae.jsonl": "04782fe4c33a9be916fd54d5091555c941202588428695c568396b54bde62993",
+    "usage.json": "20b149f0df7a6e2e846aa39a83a35278840debe1e124ea2c793bc9775e6a47da",
+    "workload/inputs.json": "d64bbd6ad598895ebf8998a7daa16e797b2ad2108e0300c89bd70821c8d0ee47",
+    "workload/observation-plan.json": "e167d6c7ed6a083e1210bc4ab448f24604b2deca156ca8f90aa898735094ef20",
+    "workload/operations.jsonl": "908b5399703217df5bbb8a32f037edbd29c50cb27c8e59e13ac3881e785edac7",
+    "workload/provider.json": "0848a8d4d3cd17392ae9a3bd39294b704929da9bc84bc7736a3a4b996e7723c9",
+    "workload/sink.sqlite3": "9eddce6b1bda526e0bf1ba5e869b4aa2258b038a54a7b0d64f9c2c6028ae8beb",
+    "workload/source.json": "596449e6d0aab815b66d399c9ef387811ef2e122a40ffaa6399c5b278a3e1428",
+    "workload/status.json": "ba492b860e7c95a6f28c11b44f432d8890297f3216c246d233d86642e3a55e08"
+  },
+  "publishable": false,
+  "full_corpus_score": null
+}

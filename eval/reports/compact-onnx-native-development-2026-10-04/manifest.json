@@ -1,0 +1,21 @@
+{
+  "schema": "compact-native-development-capture/v1",
+  "files": {
+    "README.md": "bcf33e65222a3679cf90359f8f651d7cade0c03af73eb3410729f9a0cd9317e2",
+    "failed-sdk-invocation/native.log": "4c5b23a27a17bb2dfaa34100279f3aa1ac4267d1cd2e1e0d0d3cb457cd96f7d5",
+    "failed-sdk-invocation/validation.json": "fdd3ffe9df77e6ab62adf2f3c11ae6a8073365d161d115e00671aa5d189e6b19",
+    "fixture/extra-output.onnx": "0054845aae1e3180ae118ec6bba3dfb9c4f593b742de334db01cd60e941b13f3",
+    "fixture/fixture.json": "fb3824f998c245125c7e855707a721a748227a2eeeeae44a59be4eb7dddd68f7",
+    "fixture/nonfinite.onnx": "73ee043b40a61ceebc7623d353b212f639844a606b299a32d7a2ab638877150e",
+    "fixture/short-output.onnx": "07b1dadbdbbf040a2bec67687ab4a88a667a814c491e529247621e693e1940e8",
+    "fixture/span.onnx": "c2cc54fb369b5b29b3dbf8df0251c24a1c4fc31892d797ca7305fee19983c065",
+    "fixture/token-types.onnx": "897d06b6c809799816eb221edc8b248d490162e84740364c1bc50ad666cdb95f",
+    "verified/clippy.log": "d2c6415eeb78bcf768cc8afd3d7cff8362b2df638d6bf055858ea6d3b0dc9407",
+    "verified/compatibility.log": "74df7ee03c2a2e5003c74f1b6e77a5af104fe33794e55ef1eeb7a30b35ec476c",
+    "verified/format.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "verified/native.log": "22c4112e454f9a735410393bd7f1ec38e3d1e2411cb66b1d28ca1457d4ee37f8",
+    "verified/validation.json": "016499ac6f0e781ef13f2153732130f3468b981f0c8ada7eab944341ebcd51da"
+  },
+  "publishable": false,
+  "ranking_eligible": false
+}

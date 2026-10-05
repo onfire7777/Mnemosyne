@@ -629,10 +629,8 @@ def test_action_readme_states_evidence_boundary_and_selection_contract() -> None
         Path(__file__).resolve().parents[1] / "eval/public/README.md"
     ).read_text()
     assert "deterministic synthetic/development eval only" in readme
-    assert (
-        "evaluator-side intersection of the production evaluator's fired data-only"
-        in readme
-    )
+    assert "filters the production evaluator's fired data-only action IDs" in readme
+    assert "while preserving duplicates for rejection" in readme
     assert "never executes or exposes" in readme
     assert "TriggerBench, or Working Memory reproduction." in readme
     assert "publication or headline claim" in readme

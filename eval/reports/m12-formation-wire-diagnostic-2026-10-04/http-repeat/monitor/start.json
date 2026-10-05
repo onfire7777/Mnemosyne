@@ -1,0 +1,15 @@
+{
+  "argv": [
+    ".superpowers/sdd/completion-2026-10-04/verified-venv/bin/python",
+    "/Users/admin/.local/state/mnemosyne/formation-http-diagnostics/2026-10-04-30184aeb/replay.py"
+  ],
+  "benchmark_verified": false,
+  "cwd": "/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne",
+  "poll_seconds": 1.0,
+  "reason": null,
+  "returncode": null,
+  "schema": "mnemosyne.monitored-command.v1",
+  "started_at": "2026-10-04T22:00:14.394995+00:00",
+  "status": "no_run",
+  "wall_seconds": 180.0
+}

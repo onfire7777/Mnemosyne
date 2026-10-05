@@ -1,8 +1,12 @@
 # Whole-Memory Benchmark Standard — M01–M20 completeness inventory
 
-**Baseline:** recomputed from the tree at `main@b8673031` plus the
+**Historical Round-0 baseline:** recomputed from the tree at `main@b8673031` plus the
 `codex/goalex-whole-memory-pilot` controller branch, on 2026-08-03, as Round 0
 of the operator's benchmark directive in `GOAL.md`.
+
+**Current reconciliation: 2026-10-04**, source `3c21be5d` plus the dedicated
+development branch. M07/M08 proposal files are present after #118/#119; M16
+now has a development-source plan. Source existence never implies admission.
 
 **October 1, 2026 scoped reconciliation:** PR #120 consolidates the repaired
 M09/M11/M17/M18/M19/M20 proposed plan documents from PRs #122–#127 against
@@ -36,15 +40,10 @@ mapping is its C01–C24 table (same file, lines 502–525).
   M02/M04/M05/M14 plans and the consolidated M09/M11/M17/M18/M19/M20
   documents are `PROPOSED` planning artifacts, not implementation approvals.
   PRs #122–#127 are historical source PRs consolidated into #120, not missing
-  plan paths. M06 is also on-tree as its row records. Separate proposed plan
-  PRs M07 (#118) and M08 (#119) remain **not approved** and absent here;
-  those two cells cite the PR and the
-  intended path in plain text. The inventory pin test can resolve only
-  on-tree paths (`tests/test_wmbs_module_inventory.py`); it cannot fetch a
-  GitHub PR head. Those rows therefore also backtick the on-main M14 plan as
-  an on-tree NOT CODE-READY witness, not as that module's own plan. A cell marked *not approved* authorizes no
-  implementation: the ladder's step 2 (freeze/approve) is still outstanding
-  for it.
+  plan paths. M06 is also on-tree as its row records. M07 (#118) and M08 (#119) are now on-tree as PROPOSED / NOT CODE-READY
+  plans, not missing files. M16 has an exact development-source plan added on
+  2026-10-04; it is not an executed result. Plan existence does not establish
+  measured admission or publication eligibility.
 - **Fixture** — a committed file under `eval/public/fixtures/`.
 - **Scorer** — *any* of: a dedicated `eval/public/wmbs_mNN.py`, an inline
   `_score_wmbs_*` / profile branch in `eval/public/scoring.py`, or module logic
@@ -62,21 +61,21 @@ mapping is its C01–C24 table (same file, lines 502–525).
 | Module | Capability / short name | Exact plan (approved?) | Fixture | Scorer | Test suite | Registry entry | Admission state | Cheapest next step (GOAL.md ladder) |
 |---|---|---|---|---|---|---|---|---|
 | M01 | C01/C02 — Capture and durability | yes — pilot plan `…harness-pilots.md:67` | yes — `eval/public/fixtures/wmbs-m01-development.json` | yes — `eval/public/wmbs_m01.py`; profile `wmbs-m01-v1` at `eval/public/scoring.py:35`, `_score_wmbs_m01` at `scoring.py:94`; adapter at `adapters/whole_memory_reference.py:95` | yes — `tests/test_public_wmbs_m01.py` | yes — `wmbs-m01-development` at `eval/public/registry.json:215` | `PROPOSED`; `PILOT-READY-DEV` for Local only; `publishable:false`, `pbpp_headline_eligible:false` | Landed end to end. Step 4 residue only: widen beyond Local/SQLite when an approved plan admits it |
-| M02 | C01/C03/C07 — Retrieval and organization | exists, **not approved** — `docs/plans/wmb-m02-retrieval-organization-implementation-plan.md`, `Status: PROPOSED` at its line 3; freeze gate outstanding | yes — `eval/public/fixtures/wmbs-m02-retrieval-development.json` | yes — `eval/public/wmbs_m02.py`; profile `wmbs-m02-retrieval-v1` at `eval/public/scoring.py:39`, `_score_wmbs_m02_retrieval` at `scoring.py:159`; adapter `run_m02_retrieval_development` at `adapters/whole_memory_reference.py:173` | yes — `tests/test_public_wmbs_m02.py`; Stage B RED-B in `tests/test_public_whole_memory_reference.py:3452` | yes — `wmbs-m02-retrieval-development` at `eval/public/registry.json:234` | `PROPOSED`; development cell; `publishable:false`, `pbpp_headline_eligible:false`, `headline_eligible:false`, `upstream_comparable:false`, `independent_external_reproduction:false` | Registry-reachable from `run_public_suite`; admission unchanged (`PROPOSED`); publication unchanged (all flags false). Not landed end to end. Residue: official LoCoMo/LongMemEval/HippoRAG adapters, 2,000-event corpus, baselines/CIs, unmeasured cost metrics, deferred `bundle.py` `allowed_profile` / `_CANONICAL_REPLAY_SEEDS`. Plan freeze gate still outstanding. README cell at `eval/public/README.md:235` |
+| M02 | C01/C03/C07 — Retrieval and organization | exists, **not approved** — `docs/plans/wmb-m02-retrieval-organization-implementation-plan.md`, `Status: PROPOSED` at its line 3; freeze gate outstanding | yes — `eval/public/fixtures/wmbs-m02-retrieval-development.json` | yes — `eval/public/wmbs_m02.py`; profile `wmbs-m02-retrieval-v1` at `eval/public/scoring.py:39`, `_score_wmbs_m02_retrieval` at `scoring.py:159`; adapter `run_m02_retrieval_development` at `adapters/whole_memory_reference.py:173` | yes — `tests/test_public_wmbs_m02.py`; Stage B RED-B in `tests/test_public_whole_memory_reference.py:3452` | yes — `wmbs-m02-retrieval-development` at `eval/public/registry.json:234` | `PROPOSED`; development cell; `publishable:false`, `pbpp_headline_eligible:false`, `headline_eligible:false`, `upstream_comparable:false`, `independent_external_reproduction:false` | Registry-reachable from `run_public_suite`; admission unchanged (`PROPOSED`); publication unchanged (all flags false). Not landed end to end. Residue: official LoCoMo/LongMemEval/HippoRAG adapters, 2,000-event corpus, baselines/CIs, unmeasured cost metrics. Development bundle verification/replay is now implemented; it does not close those broader gaps. Plan freeze gate still outstanding. README cell at `eval/public/README.md:235` |
 | M03 | C04 — Temporal evolution | yes — pilot plan `…harness-pilots.md:68` | yes — `eval/public/fixtures/wmbs-m03-valid-time-development.json` | yes, **inline, with no `wmbs_m03.py` file** — profile `wmbs-m03-valid-time-v1` at `eval/public/scoring.py:37`, `_score_wmbs_m03_valid_time` at `scoring.py:156`; adapter `run_m03_valid_time_development` at `adapters/whole_memory_reference.py:138`; seeds at `eval/public/bundle.py:44` | yes — `tests/test_public_whole_memory_reference.py:3119`, `:3176`, `:3213`, `:3232`; admission conformance in `tests/test_public_wmbs_m03_registry_admission.py` | yes — `wmbs-m03-valid-time-development` at `eval/public/registry.json:234` | `PROPOSED` for full M03; valid-time slice `INTERNALLY_MEASURED` | Registry-reachable from `run_public_suite`; admission unchanged (`PROPOSED` for full M03; valid-time slice `INTERNALLY_MEASURED`); publication unchanged (`publishable:false`, `pbpp_headline_eligible:false`, `headline_eligible:false`, `upstream_comparable:false`, `independent_external_reproduction:false`). Residue: full transaction-time bitemporality, out of scope for the valid-time slice |
-| M04 | C05 — Conflict and correction | exists, **not approved** — `docs/plans/wmb-m04-conflict-correction-implementation-plan.md`, `Status: PROPOSED` at its line 3; freeze gate outstanding | yes — `eval/public/fixtures/wmbs-m04-development.json` | yes — `eval/public/wmbs_m04.py`; profile `wmbs-m04-v1` at `eval/public/scoring.py:41`, `_score_wmbs_m04` at `scoring.py:174`; adapter `run_m04_conflict_development` at `adapters/whole_memory_reference.py:411` | yes — `tests/test_public_wmbs_m04.py`; Stage B RED-B in `tests/test_public_whole_memory_reference.py:3805`; ABI conformance in `tests/test_public_wmbs_portable_event_abi.py` | yes — `wmbs-m04-development` at `eval/public/registry.json:272` | `PROPOSED`; development cell; `publishable:false`, `pbpp_headline_eligible:false`, `headline_eligible:false`, `upstream_comparable:false`, `independent_external_reproduction:false` | Registry-reachable from `run_public_suite`; admission unchanged (`PROPOSED`); publication unchanged (all flags false). Not landed end to end. Residue: deferred `bundle.py` `allowed_profile` / `_CANONICAL_REPLAY_SEEDS`. Plan freeze gate still outstanding. README cell at `eval/public/README.md:272` |
+| M04 | C05 — Conflict and correction | exists, **not approved** — `docs/plans/wmb-m04-conflict-correction-implementation-plan.md`, `Status: PROPOSED` at its line 3; freeze gate outstanding | yes — `eval/public/fixtures/wmbs-m04-development.json` | yes — `eval/public/wmbs_m04.py`; profile `wmbs-m04-v1` at `eval/public/scoring.py:41`, `_score_wmbs_m04` at `scoring.py:174`; adapter `run_m04_conflict_development` at `adapters/whole_memory_reference.py:411` | yes — `tests/test_public_wmbs_m04.py`; Stage B RED-B in `tests/test_public_whole_memory_reference.py:3805`; ABI conformance in `tests/test_public_wmbs_portable_event_abi.py` | yes — `wmbs-m04-development` at `eval/public/registry.json:272` | `PROPOSED`; development cell; `publishable:false`, `pbpp_headline_eligible:false`, `headline_eligible:false`, `upstream_comparable:false`, `independent_external_reproduction:false` | Registry-reachable from `run_public_suite`; admission unchanged (`PROPOSED`); publication unchanged (all flags false). Not landed end to end. Development bundle verification/replay is now implemented. Full comparator, resource and public acceptance evidence remains outstanding. Plan freeze gate still outstanding. README cell at `eval/public/README.md:272` |
 | M05 | C06 — Provenance and explanation | exists, **not approved** — `docs/plans/wmb-m05-provenance-explanation-implementation-plan.md`, `Status: PROPOSED` at its line 5; freeze gate outstanding | yes — `eval/public/fixtures/wmbs-m05-provenance-development.json` | yes — `eval/public/wmbs_m05.py`; profile `wmbs-m05-v1` at `eval/public/scoring.py:43`, `_score_wmbs_m05` at `scoring.py:194`; adapter `run_m05_provenance_development` at `adapters/whole_memory_reference.py:719` | yes — `tests/test_public_wmbs_m05.py`; Stage B RED-B in `tests/test_public_whole_memory_reference.py:4146`; ABI conformance in `tests/test_public_wmbs_portable_event_abi.py` | yes — `wmbs-m05-development` at `eval/public/registry.json:289` | `PROPOSED`; development cell; `publishable:false`, `pbpp_headline_eligible:false`, `headline_eligible:false`, `upstream_comparable:false`, `independent_external_reproduction:false`; `system_seam: public-cli-subprocess` | Registry-reachable from `run_public_suite`; admission unchanged (`PROPOSED`); publication unchanged (all flags false). Not landed end to end. Stage B is a reachability fix only. Residue: plan freeze gate outstanding; open quarantines Q1/Q2/Q3/Q4/Q7/Q9/Q10/Q12. README cell at `eval/public/README.md:315` (`### M05 provenance development`) |
-| M06 | C08 — Consolidation and learning | exists, **not approved** — `docs/plans/wmb-m06-consolidation-learning-implementation-plan.md`, `Status: PROPOSED` at its line 3; open PR #116; freeze gate outstanding | yes — `eval/public/fixtures/wmbs-m06-consolidation-development.json` | yes — `eval/public/wmbs_m06.py`; profile `wmbs-m06-v1` at `eval/public/scoring.py:47`, `_score_wmbs_m06` at `eval/public/scoring.py:324`; adapter `run_m06_consolidation_development` at `adapters/whole_memory_reference.py:808` | yes — `tests/test_public_wmbs_m06.py` | yes — `wmbs-m06-development` at `eval/public/registry.json:326` | `PROPOSED`; development cell; `publishable:false`, `pbpp_headline_eligible:false`, `headline_eligible:false`, `upstream_comparable:false`, `independent_external_reproduction:false`; `system_seam: public-cli-subprocess`; not in the first pilot (`…standard-design.md:771`) | Registry-reachable from `run_public_suite`; admission unchanged (`PROPOSED`); publication unchanged (all flags false). Not landed end to end. Stage B is a reachability fix only. Source plan (#116) stays PROPOSED / not approved. Do not claim CAP-007/008 closed. README cell at `eval/public/README.md:428` (`### M06 consolidation and learning`) |
-| M07 | C09 — Retention, rehearsal, and decay | exists via open PR #118, **not approved** — Status PROPOSED / NOT CODE-READY at docs/plans/wmb-m07-retention-rehearsal-decay-implementation-plan.md (not on this tree); on-tree pin-test witness only, not this module's plan: `docs/plans/wmb-m14-procedural-task-utility-implementation-plan.md` | **no** | **no** | **no** | **no** | `PROPOSED`; not in the first pilot (`…standard-design.md:798`) | Plan exists as PROPOSED / NOT CODE-READY via #118. Freeze/approval gate outstanding. Authorizes no implementation; do not start Stage A |
-| M08 | C10 — Reversible forgetting | exists via open PR #119, **not approved** — Status PROPOSED / NOT CODE-READY at docs/plans/wmb-m08-reversible-forgetting-implementation-plan.md (not on this tree); on-tree pin-test witness only, not this module's plan: `docs/plans/wmb-m14-procedural-task-utility-implementation-plan.md` | **no** | **no** | **no** | **no** | `PROPOSED` for adapters exposing the hook, else `UNSUPPORTED-BY-SYSTEM` (`…standard-design.md:818`) | Plan exists as PROPOSED / NOT CODE-READY via #119. Freeze/approval gate outstanding. Authorizes no implementation; do not start Stage A |
+| M06 | C08 — Consolidation and learning | exists, **not approved** — `docs/plans/wmb-m06-consolidation-learning-implementation-plan.md`, `Status: PROPOSED` at its line 3; historical proposal #116; freeze gate outstanding | yes — `eval/public/fixtures/wmbs-m06-consolidation-development.json` | yes — `eval/public/wmbs_m06.py`; profile `wmbs-m06-v1` at `eval/public/scoring.py:47`, `_score_wmbs_m06` at `eval/public/scoring.py:324`; adapter `run_m06_consolidation_development` at `adapters/whole_memory_reference.py:808` | yes — `tests/test_public_wmbs_m06.py` | yes — `wmbs-m06-development` at `eval/public/registry.json:326` | `PROPOSED`; development cell; `publishable:false`, `pbpp_headline_eligible:false`, `headline_eligible:false`, `upstream_comparable:false`, `independent_external_reproduction:false`; `system_seam: public-cli-subprocess`; not in the first pilot (`…standard-design.md:771`) | Registry-reachable from `run_public_suite`; admission unchanged (`PROPOSED`); publication unchanged (all flags false). Not landed end to end. Stage B is a reachability fix only. Source plan (#116) stays PROPOSED / not approved. Do not claim CAP-007/008 closed. README cell at `eval/public/README.md:428` (`### M06 consolidation and learning`) |
+| M07 | C09 — Retention, rehearsal, and decay | exists on-tree, **not approved** — `docs/plans/wmb-m07-retention-rehearsal-decay-implementation-plan.md`; PROPOSED / NOT CODE-READY; merged plan #118 | **no** | **no** | **no** | **no** | `PROPOSED`; not in the first pilot (`…standard-design.md:798`) | Plan exists on-tree. Freeze/approval and exact implementation gates remain outstanding; no module source is claimed. |
+| M08 | C10 — Reversible forgetting | exists on-tree, **not approved** — `docs/plans/wmb-m08-reversible-forgetting-implementation-plan.md`; PROPOSED / NOT CODE-READY; merged plan #119 | **no** | **no** | **no** | **no** | `PROPOSED` for adapters exposing the hook, else `UNSUPPORTED-BY-SYSTEM` (`…standard-design.md:818`) | Plan exists on-tree. Freeze/approval and exact implementation gates remain outstanding; no module source is claimed. |
 | M09 | C11 — Declared-surface erasure conformance | exists on-tree, **not approved** — `docs/plans/wmb-m09-declared-surface-erasure-implementation-plan.md`; PROPOSED / NOT CODE-READY, consolidated from #122 in #120 | **no** | **no** | **no** | **no** | `PROPOSED` for Local/SQLite declared surfaces (`…standard-design.md:846`) | Freeze/approval and exact implementation lease remain outstanding. Document placement authorizes no implementation; do not start Stage A |
 | M10 | C12 — Calibration and abstention | yes — pilot plan `…harness-pilots.md:69` | yes — `eval/public/fixtures/wmbs-m10-development.json` | yes — `eval/public/wmbs_m10.py`; profile `wmbs-m10-v1` at `eval/public/scoring.py:39`, `_score_wmbs_m10` at `scoring.py:281`; adapter at `adapters/whole_memory_reference.py:119` | yes — `tests/test_public_wmbs_m10.py` | yes — `wmbs-m10-development` at `eval/public/registry.json:252` | `PROPOSED`; `PILOT-READY-DEV` for the deterministic reader; `publishable:false`, `pbpp_headline_eligible:false` | Landed end to end. Step 4 residue only: model-backed/judged QA and numeric confidence remain out of scope |
 | M11 | C15/C16 — Security and isolation | exists on-tree, **not approved** — `docs/plans/wmb-m11-security-isolation-implementation-plan.md`; PROPOSED / NOT CODE-READY, consolidated from #123 in #120 | **no** | **no** | **no** | **no** | `PROPOSED` for internal local-principal scope (`…standard-design.md:899`) | Freeze/approval and exact implementation lease remain outstanding. Authorizes no implementation; do not start Stage A. CAP-004 and RAIL-001/004 still depend on it |
-| M12 | C13 — Prospective action | yes — pilot plan `…harness-pilots.md:70` | yes — `eval/public/fixtures/pm-bench-development.json` and `eval/public/fixtures/triggerbench-development.json` | yes, **inline** — profiles `pm-bench-action-v1` / `triggerbench-action-v1` dispatched at `eval/public/scoring.py:40`, `_score_pm_action` at `scoring.py:336`; no `wmbs_m12.py` | yes — `tests/test_public_pm_bench_triggerbench.py` | yes — `pm-bench-development` at `eval/public/registry.json:134` and `triggerbench-development` at `:150` | `PROPOSED`; `INTERNALLY_MEASURED` development smoke; both suites `publishable:false`, `pbpp_headline_eligible:false` | Landed end to end at development scale. Step 1 for the disclosed gaps: recurrence plumbing, lateness magnitude, calibrated baseline (`eval/public/README.md:48`) |
+| M12 | C13 — Prospective action | yes — pilot plan `…harness-pilots.md:70` | yes — `eval/public/fixtures/pm-bench-development.json` and `eval/public/fixtures/triggerbench-development.json` | yes, **inline** — profiles `pm-bench-action-v1` / `triggerbench-action-v1` dispatched at `eval/public/scoring.py:40`, `_score_pm_action` at `scoring.py:336`; no `wmbs_m12.py` | yes — `tests/test_public_pm_bench_triggerbench.py` | yes — `pm-bench-development` at `eval/public/registry.json:134` and `triggerbench-development` at `:150` | `PROPOSED`; `INTERNALLY_MEASURED` development smoke; both suites `publishable:false`, `pbpp_headline_eligible:false` | Landed end to end at development scale. Step 1 for the disclosed gaps: multiweek recurrence experiment, lateness magnitude, calibrated baseline; explicit recurrence forwarding is implemented (`eval/public/README.md:48`) |
 | M13 | C14 — Working memory | yes — pilot plan `…harness-pilots.md:71` | yes — `eval/public/fixtures/working-memory-action-development.json` | yes, **inline** — profile `working-memory-action-v1` dispatched at `eval/public/scoring.py:42`, `_score_working_action` in the same module; no `wmbs_m13.py` | yes — `tests/test_public_working_memory_action_probe.py` | yes — `working-memory-action-development` at `eval/public/registry.json:166` | `PROPOSED`; `INTERNALLY_MEASURED` development smoke; `publishable:false`, `pbpp_headline_eligible:false` | Landed end to end at development scale. Step 1 for the disclosed gaps: capacity parameter and promotion control (`eval/public/README.md:57`) |
 | M14 | C07/C08/C23 — Procedural task utility | exists, **not approved** — `docs/plans/wmb-m14-procedural-task-utility-implementation-plan.md`, whose own line 3 reads `PLANNING ARTIFACT ONLY — NOT CODE-READY`; freeze gate outstanding | **no** | **no** | **no** | **no** | `PROPOSED`; deferred until the portable-event ABI plus one pilot exist (`…standard-design.md:449`) | Step 2/3: the plan exists, so freeze it and implement fixture + scorer test-first. Cheapest module with a plan but no artifact |
 | M15 | C02/C17 — Determinism and replay | yes — pilot plan `…harness-pilots.md:72` | **no dedicated fixture — by design**: composes the M01/M03/M10 fixtures (`eval/public/bundle.py:43`–`45`) | yes, **inline** — `run_m15_composed_development` at `adapters/whole_memory_reference.py:254`; M15 projection and digest at `eval/public/bundle.py:94` and `:158`; no `wmbs_m15.py` | yes — `tests/test_public_whole_memory_reference.py:2208`, `:2228` | **no — by design**: M15 is a cross-run property, not a suite | `PROPOSED`; `PILOT-READY-DEV` for admitted pilot payloads | Landed as a run property. No registry step exists to take; step 4 residue is coverage of any future payload |
-| M16 | C18/C20 — Backend and transport parity | **no** | **no** | **no** | **no** | **no** | `PROPOSED` for Local/SQLite/local MCP (`…standard-design.md:1026`) | Step 1: author the exact implementation plan. CAP-011 and RAIL-001 depend on it |
+| M16 | C18/C20 — Backend and transport parity | exact development-source plan — `docs/plans/wmb-m16-backend-transport-parity-implementation-plan.md`; no admitted measurement result | **no** standalone fixture; inline literal oracle in the development cassette | yes — `eval/public/wmbs_m16.py` comparison logic and `eval/public/adapters/backend_transport_parity.py`; local development validation only; no scoring-profile registration | yes — `tests/test_public_wmbs_m16.py`; four local pairs and five repeats per pair | **no** | `PROPOSED` for Local/SQLite/local MCP (`…standard-design.md:1026`) | Bounded local backend/transport development cassette implemented and tested. No executed acceptance result; measured admission remains PROPOSED; resource/migration/external-pair evidence remains separate. |
 | M17 | C19 — Custody and recovery | exists on-tree, **not approved** — `docs/plans/wmb-m17-custody-recovery-implementation-plan.md`; PROPOSED / NOT CODE-READY, consolidated from #124 in #120 | **no** | **no** | **no** | **no** | `PROPOSED` for local fault injection (`…standard-design.md:1049`) | Freeze/approval, exact implementation lease, R6 and R1 remain outstanding. Authorizes no implementation; do not start Stage A |
 | M18 | C20 — Interoperability | exists on-tree, **not approved** — `docs/plans/wmb-m18-interoperability-implementation-plan.md`; PROPOSED / NOT CODE-READY, consolidated from #125 in #120 | **no** | **no** | **no** | **no** | `PROPOSED` for internal single-system scope (`…standard-design.md:1071`) | Freeze/approval and exact implementation lease remain outstanding. Authorizes no implementation; do not start Stage A |
 | M19 | C21 — Multimodal memory | exists on-tree, **not approved** / **DEFERRED** — `docs/plans/wmb-m19-multimodal-memory-implementation-plan.md`; PROPOSED / NOT CODE-READY, consolidated from #126 in #120; module disposition DEFERRED per C21 | **no** | **no** | **no** | **no** | `PROPOSED`; C21 is *currently deferred* (`…standard-design.md:523`) | None. Deferred by the standard; document placement does not undefer C21 |
@@ -102,7 +101,8 @@ them").
    `eval/public/scoring.py:324`) and adapter
    `run_m06_consolidation_development`
    (`adapters/whole_memory_reference.py:808`).
-   **Scorer-bearing modules are M01, M02, M03, M04, M05, M06, M10, M12, M13, M15 — 10 of 20.**
+   **Scorer-bearing modules are M01, M02, M03, M04, M05, M06, M10, M12, M13, M15, M16 — 11 of 20.**
+   M16 has a tested local development cassette, not an executed acceptance result.
 
 2. **"registry-admitted: M01, M10 — 2 of 20" undercounts by two.** The count
    evidently grepped the `wmbs-` prefix. `eval/public/registry.json` also
@@ -124,10 +124,10 @@ them").
    M06 (#116), M07 (#118), M08 (#119), M09 (#122), M11 (#123), M17 (#124),
    M18 (#125), M19 (#126, DEFERRED), and the M20 v2 delta (#127).
    PR #120 now places the six repaired M09/M11/M17/M18/M19/M20 documents
-   on this tree; M06 is also on-tree. Source PR references record provenance,
+   on this tree; M06, M07 and M08 are also on-tree. Source PR references record provenance,
    not a current claim that those files are absent or PRs remain open.
    **Modules with an exact plan of any kind (on-tree or retained proposal) are
-   M01–M15, M17–M20 — 19 of 20.** That figure counts *existence*, not
+   M01–M20 — 20 of 20.** That figure counts *existence*, not
    approval, and must not be read as authorization.    Only the seven pilot-plan
    modules (M01, M03, M10, M12, M13, M15, M20) carry an **approved** plan.
    The M02, M04, M05, and M14 on-main plans are `PROPOSED` planning artifacts
@@ -135,17 +135,14 @@ them").
    at its §2 plan-status table and line 191 (those four only; that table does
    not list #116–#127). The source plan proposals (#116, #118, #119, #122,
    #123, #124, #125, #126, #127) are separately `PROPOSED` / NOT CODE-READY
-   per each PR's own Status header, not per that derivation table. M16
-   remains the only module with neither an on-main plan nor an open plan PR.
+   per each plan's Status header, not per that derivation table. M16 now has an exact local development-source plan and tested cassette source; measured admission remains open.
 
 4. **"no plan and no module: M06, M07, M08, M09, M11, M16, M17, M18, M19,
    M20 — 10" wrongly includes M20 and now also wrongly includes every module
-   that has an open ACCEPT plan PR.** M20 has an approved plan (pilot plan
+   that has an on-tree proposal plan.** M20 has an approved plan (pilot plan
    line 73, disposition `CONTRACT-READY`) and a landed v1 substrate under
-   `leaderboard/` with six committed test files. Its open work is the
-   result-v2 delta (also planned as PROPOSED / NOT CODE-READY via #127),
-   which is lease-blocked behind node `N12`, not greenfield module authoring.
-   M07, M08, M09, M11, M17, and M18 have open ACCEPT plans (#118,
+   `leaderboard/` with six committed test files. The result-v2 delta landed in #139; full publication acceptance remains open. It is not greenfield module authoring.
+   M07, M08, M09, M11, M17, and M18 have on-tree proposal plans (#118,
    #119, #122, #123, #124, #125) that are PROPOSED / NOT CODE-READY — they
    are plan-without-artifact, not no-plan. M06 is registry-reachable from
    `run_public_suite` (`wmbs-m06-development`); Stage B is a reachability fix
@@ -153,8 +150,8 @@ them").
    plan (#116 / `docs/plans/wmb-m06-consolidation-learning-implementation-plan.md`)
    stays PROPOSED / NOT CODE-READY and **not approved**.
    M19 is deferred-with-plan via
-   #126, not no-plan. **True no-plan-and-no-artifact modules are M16 —
-   1 of 20.**
+   #126, not no-plan. **True no-plan-and-no-artifact modules are none —
+   0 of 20.**
 
 5. **"M03, M12, M13, M15 are candidates [for fixture-without-scorer-or-plan]
    — verify in the inventory": verified false for all four.** M03, M12, and
@@ -172,7 +169,7 @@ them").
    `PROPOSED`; publication flags false; do not call M02 landed. M03 stays
    registry-reachable only (`PROPOSED`; publication flags false; residue =
    transaction-time deferral). M04 stays `PROPOSED`; publication flags false;
-   do not call M04 landed. Residue is the deferred `bundle.py` `allowed_profile`.
+   do not call M04 fully accepted. Development bundle verification/replay is implemented; full comparator and public acceptance remain open.
    M05 is now column-complete as a development cell like M02/M04 — still
    `PROPOSED`, publication flags false; do not call M05 landed end to end.
    M06 is now column-complete as a development cell like M05 — still
@@ -200,8 +197,8 @@ second.
    freeze gate is still outstanding; Q1/Q3/Q4 (and disclosed
    Q2/Q7/Q9/Q10/Q12) remain open. M14 stays the next highest
    non-lease-blocked gap.
-2. **M14 — plan exists, no artifact.** The only on-main per-module plan
-   with nothing built (open ACCEPT plan PRs for M07–M09/M11/M17–M19 are also
+2. **M14 — plan exists, no artifact.** One of the on-tree per-module plans
+   with nothing built (proposals for M07–M09/M11/M17–M19 are also
    plan-without-artifact but remain `PROPOSED` / NOT CODE-READY). That plan
    is `PROPOSED` — its own line 3 reads
    `PLANNING ARTIFACT ONLY — NOT CODE-READY` and its freeze gate is
@@ -211,29 +208,29 @@ second.
    ordinary ungated source work needing no operator authorization. This is the
    highest-value item that is *not* lease-blocked.
 3. **M12 and M13 — landed, with disclosed development gaps.** Not new-module
-   work: their remaining items are recurrence plumbing, lateness magnitude, a
+   work: their remaining items are a recurrence experiment, lateness magnitude, a
    calibrated baseline (M12), and a capacity parameter plus promotion control
    (M13), each already disclosed in `eval/public/README.md`. Each needs step 1
-   for its specific gap, not a whole module plan.
-4. **M16 — only remaining greenfield.** Pure step 1 (author the exact plan),
-   always permitted. CAP-011, RAIL-001, and C18/C20 parity depend on it.
-   M11 is no longer greenfield: its ACCEPT plan exists via #123 as
-   `PROPOSED` / NOT CODE-READY; freeze/approval gate outstanding; do not
-   start Stage A. CAP-004 and RAIL-001/004 still depend on M11.
+   for its specific gap, not a whole module plan. Explicit recurrence policy
+   forwarding through ActionCLI is now covered by real CLI regression tests.
+4. **M16 — bounded local development cassette implemented.** The four Local/SQLite
+   CLI/MCP-stdio cells and five repeats per cell are covered by the tests in
+   `docs/plans/wmb-m16-backend-transport-parity-implementation-plan.md`.
+   External backend/transport and migration/resource evidence remains separate.
+   The M11 proposal is also on-tree but remains PROPOSED / not approved.
 5. **M06 — Stage B registered; reachability only.**
    `wmbs-m06-development` is registry-reachable from `run_public_suite`
    as a development cell. Stage B is a reachability fix only: admission
    stays `PROPOSED`; publication flags stay false; this is not a
-   publication upgrade and is not landed end to end. The source plan
+   publication upgrade and does not establish calibrated end-to-end acceptance. The source plan
    (#116) stays PROPOSED / not approved. Do not claim CAP-007 or CAP-008
    closed.
    M07, M08, M09, M17, and M18 each have a `PROPOSED` / NOT CODE-READY plan
-   PR (#118, #119, #122, #124, #125). Freeze/approval gate outstanding. Do
+   on-tree (source PRs #118, #119, #122, #124, #125). Freeze/approval gate outstanding. Do
    not start Stage A for those modules.
-6. **M20 — lease-blocked, not greenfield.** The v2 delta now has an open
-   `PROPOSED` / NOT CODE-READY plan (#127) and still waits on node `N12`
-   and the protected signed-publication paths; do not open it as module
-   work or treat it as a greenfield implement.
+6. **M20 — result-v2 source delivered, publication acceptance open.**
+   N12 landed in #139; do not repeat the delivered dispatcher work.
+   Real entrant evidence, reproduction and publication approval remain required.
 7. **M19 — do not start.** C21 is deferred by the standard
    (`…standard-design.md:523`). A DEFERRED ACCEPT plan exists via #126;
    that is not undeferral and authorizes no implementation.

@@ -1,0 +1,665 @@
+﻿2026-10-04T22:38:52.6072173Z Current runner version: '2.337.0'
+2026-10-04T22:38:52.6094256Z ##[group]Runner Image Provisioner
+2026-10-04T22:38:52.6095097Z Hosted Compute Agent
+2026-10-04T22:38:52.6095656Z Version: 20260901.588
+2026-10-04T22:38:52.6096251Z Commit: f88ec8081b781fac6c440065ac7ff9e710ce3d0b
+2026-10-04T22:38:52.6096988Z Build Date: 2026-09-01T19:56:44Z
+2026-10-04T22:38:52.6097619Z Worker ID: {4d17f81d-3bfb-443b-aab5-4b56336e83eb}
+2026-10-04T22:38:52.6098260Z Azure Region: westus3
+2026-10-04T22:38:52.6098898Z ##[endgroup]
+2026-10-04T22:38:52.6100501Z ##[group]Operating System
+2026-10-04T22:38:52.6101300Z Ubuntu
+2026-10-04T22:38:52.6101798Z 24.04.5
+2026-10-04T22:38:52.6102262Z LTS
+2026-10-04T22:38:52.6102811Z ##[endgroup]
+2026-10-04T22:38:52.6103366Z ##[group]Runner Image
+2026-10-04T22:38:52.6103951Z Image: ubuntu-24.04
+2026-10-04T22:38:52.6104495Z Version: 20260927.320.1
+2026-10-04T22:38:52.6105669Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260927.320/images/ubuntu/Ubuntu2404-Readme.md
+2026-10-04T22:38:52.6107041Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260927.320
+2026-10-04T22:38:52.6107936Z ##[endgroup]
+2026-10-04T22:38:52.6108984Z ##[group]GITHUB_TOKEN Permissions
+2026-10-04T22:38:52.6111106Z Contents: read
+2026-10-04T22:38:52.6111767Z Metadata: read
+2026-10-04T22:38:52.6112274Z ##[endgroup]
+2026-10-04T22:38:52.6114182Z Secret source: Actions
+2026-10-04T22:38:52.6115019Z Cache mode: write
+2026-10-04T22:38:52.6115736Z Prepare workflow directory
+2026-10-04T22:38:52.6449259Z Prepare all required actions
+2026-10-04T22:38:52.6489844Z Getting action download info
+2026-10-04T22:38:52.9442691Z Download action repository 'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0' (SHA:9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0)
+2026-10-04T22:38:53.0354789Z Download action repository 'actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1' (SHA:ece7cb06caefa5fff74198d8649806c4678c61a1)
+2026-10-04T22:38:53.2517857Z Complete job name: Compact ONNX tensor parity
+2026-10-04T22:38:53.3143051Z ##[group]Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+2026-10-04T22:38:53.3143883Z with:
+2026-10-04T22:38:53.3144251Z   repository: onfire7777/Mnemosyne
+2026-10-04T22:38:53.3147372Z   token: ***
+2026-10-04T22:38:53.3147745Z   ssh-strict: true
+2026-10-04T22:38:53.3148113Z   ssh-user: git
+2026-10-04T22:38:53.3148476Z   persist-credentials: true
+2026-10-04T22:38:53.3148880Z   clean: true
+2026-10-04T22:38:53.3149249Z   sparse-checkout-cone-mode: true
+2026-10-04T22:38:53.3149683Z   fetch-depth: 1
+2026-10-04T22:38:53.3150048Z   fetch-tags: false
+2026-10-04T22:38:53.3150418Z   show-progress: true
+2026-10-04T22:38:53.3150785Z   lfs: false
+2026-10-04T22:38:53.3151271Z   submodules: false
+2026-10-04T22:38:53.3151646Z   set-safe-directory: true
+2026-10-04T22:38:53.3152071Z   allow-unsafe-pr-checkout: false
+2026-10-04T22:38:53.3152642Z env:
+2026-10-04T22:38:53.3152979Z   CARGO_BUILD_JOBS: 2
+2026-10-04T22:38:53.3153354Z ##[endgroup]
+2026-10-04T22:38:53.3988946Z Syncing repository: onfire7777/Mnemosyne
+2026-10-04T22:38:53.3991193Z ##[group]Getting Git version info
+2026-10-04T22:38:53.3992109Z Working directory is '/home/runner/work/Mnemosyne/Mnemosyne'
+2026-10-04T22:38:53.3993464Z [command]/usr/bin/git version
+2026-10-04T22:38:53.4062431Z git version 2.55.0
+2026-10-04T22:38:53.4078189Z ##[endgroup]
+2026-10-04T22:38:53.4086704Z Temporarily overriding HOME='/home/runner/work/_temp/dcc8612d-af1c-4b5b-92fd-28af7815f86d' before making global git config changes
+2026-10-04T22:38:53.4088627Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-04T22:38:53.4091786Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Mnemosyne/Mnemosyne
+2026-10-04T22:38:53.4134476Z Deleting the contents of '/home/runner/work/Mnemosyne/Mnemosyne'
+2026-10-04T22:38:53.4137354Z ##[group]Determining repository object format
+2026-10-04T22:38:53.4138668Z ##[endgroup]
+2026-10-04T22:38:53.4139627Z ##[group]Initializing the repository
+2026-10-04T22:38:53.4142295Z [command]/usr/bin/git init /home/runner/work/Mnemosyne/Mnemosyne
+2026-10-04T22:38:53.4247986Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-10-04T22:38:53.4249429Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-10-04T22:38:53.4250855Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-10-04T22:38:53.4252140Z hint: call:
+2026-10-04T22:38:53.4252828Z hint:
+2026-10-04T22:38:53.4253622Z hint: 	git config --global init.defaultBranch <name>
+2026-10-04T22:38:53.4254575Z hint:
+2026-10-04T22:38:53.4255554Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-10-04T22:38:53.4256916Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-10-04T22:38:53.4258010Z hint:
+2026-10-04T22:38:53.4258820Z hint: 	git branch -m <name>
+2026-10-04T22:38:53.4259277Z hint:
+2026-10-04T22:38:53.4259854Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-10-04T22:38:53.4260689Z Initialized empty Git repository in /home/runner/work/Mnemosyne/Mnemosyne/.git/
+2026-10-04T22:38:53.4269013Z [command]/usr/bin/git remote add origin https://github.com/onfire7777/Mnemosyne
+2026-10-04T22:38:53.4310489Z ##[endgroup]
+2026-10-04T22:38:53.4311347Z ##[group]Disabling automatic garbage collection
+2026-10-04T22:38:53.4314566Z [command]/usr/bin/git config --local gc.auto 0
+2026-10-04T22:38:53.4352975Z ##[endgroup]
+2026-10-04T22:38:53.4354284Z ##[group]Setting up auth
+2026-10-04T22:38:53.4354937Z Removing SSH command configuration
+2026-10-04T22:38:53.4355901Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-04T22:38:53.4383386Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-04T22:38:53.4710053Z Removing HTTP extra header
+2026-10-04T22:38:53.4717205Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-04T22:38:53.4750925Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-04T22:38:53.4945569Z Removing includeIf entries pointing to credentials config files
+2026-10-04T22:38:53.4949597Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-04T22:38:53.4980544Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-04T22:38:53.5184725Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-7a2e6f2e-f36f-42cf-a782-c18674f54f5a.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-10-04T22:38:53.5222219Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/Mnemosyne/Mnemosyne/.git.path /home/runner/work/_temp/git-credentials-7a2e6f2e-f36f-42cf-a782-c18674f54f5a.config
+2026-10-04T22:38:53.5255367Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/Mnemosyne/Mnemosyne/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-7a2e6f2e-f36f-42cf-a782-c18674f54f5a.config
+2026-10-04T22:38:53.5291999Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-7a2e6f2e-f36f-42cf-a782-c18674f54f5a.config
+2026-10-04T22:38:53.5334766Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-7a2e6f2e-f36f-42cf-a782-c18674f54f5a.config
+2026-10-04T22:38:53.5424759Z ##[endgroup]
+2026-10-04T22:38:53.5425745Z ##[group]Fetching the repository
+2026-10-04T22:38:53.5431500Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +19f5dd463ffbfec05397fc71b5932541f76b0891:refs/remotes/pull/214/merge
+2026-10-04T22:38:55.6912666Z From https://github.com/onfire7777/Mnemosyne
+2026-10-04T22:38:55.6914225Z  * [new ref]         19f5dd463ffbfec05397fc71b5932541f76b0891 -> pull/214/merge
+2026-10-04T22:38:55.6917061Z ##[endgroup]
+2026-10-04T22:38:55.6918184Z ##[group]Determining the checkout info
+2026-10-04T22:38:55.6919461Z ##[endgroup]
+2026-10-04T22:38:55.6922732Z [command]/usr/bin/git sparse-checkout disable
+2026-10-04T22:38:55.6976001Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-10-04T22:38:55.7007144Z ##[group]Checking out the ref
+2026-10-04T22:38:55.7009928Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/214/merge
+2026-10-04T22:38:55.8635389Z Note: switching to 'refs/remotes/pull/214/merge'.
+2026-10-04T22:38:55.8636491Z 
+2026-10-04T22:38:55.8637187Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-10-04T22:38:55.8638805Z changes and commit them, and you can discard any commits you make in this
+2026-10-04T22:38:55.8640533Z state without impacting any branches by switching back to a branch.
+2026-10-04T22:38:55.8641739Z 
+2026-10-04T22:38:55.8642442Z If you want to create a new branch to retain commits you create, you may
+2026-10-04T22:38:55.8643977Z do so (now or later) by using -c with the switch command. Example:
+2026-10-04T22:38:55.8644901Z 
+2026-10-04T22:38:55.8645336Z   git switch -c <new-branch-name>
+2026-10-04T22:38:55.8646025Z 
+2026-10-04T22:38:55.8646457Z Or undo this operation with:
+2026-10-04T22:38:55.8647102Z 
+2026-10-04T22:38:55.8647477Z   git switch -
+2026-10-04T22:38:55.8647999Z 
+2026-10-04T22:38:55.8649201Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-10-04T22:38:55.8650348Z 
+2026-10-04T22:38:55.8651860Z HEAD is now at 19f5dd4 Merge e1ad2d0cf5ac19298547740363795c2ad25da356 into 8c103f0f383994cbc5753601fef804278ff5e6d2
+2026-10-04T22:38:55.8655756Z ##[endgroup]
+2026-10-04T22:38:55.8702233Z [command]/usr/bin/git log -1 --format=%H
+2026-10-04T22:38:55.8729706Z 19f5dd463ffbfec05397fc71b5932541f76b0891
+2026-10-04T22:38:55.9117777Z ##[group]Run actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+2026-10-04T22:38:55.9119197Z with:
+2026-10-04T22:38:55.9119954Z   python-version: 3.11
+2026-10-04T22:38:55.9120804Z   check-latest: false
+2026-10-04T22:38:55.9128525Z   token: ***
+2026-10-04T22:38:55.9129340Z   update-environment: true
+2026-10-04T22:38:55.9130270Z   allow-prereleases: false
+2026-10-04T22:38:55.9131439Z   freethreaded: false
+2026-10-04T22:38:55.9132260Z env:
+2026-10-04T22:38:55.9132989Z   CARGO_BUILD_JOBS: 2
+2026-10-04T22:38:55.9133807Z ##[endgroup]
+2026-10-04T22:38:56.0219436Z ##[group]Installed versions
+2026-10-04T22:38:56.0303206Z Successfully set up CPython (3.11.16)
+2026-10-04T22:38:56.0305535Z ##[endgroup]
+2026-10-04T22:38:56.0539599Z ##[group]Run python -m pip install onnx==1.18.0 onnxruntime==1.28.0 tokenizers==0.22.1
+2026-10-04T22:38:56.0542717Z [36;1mpython -m pip install onnx==1.18.0 onnxruntime==1.28.0 tokenizers==0.22.1[0m
+2026-10-04T22:38:56.1080841Z shell: /usr/bin/bash -e {0}
+2026-10-04T22:38:56.1082117Z env:
+2026-10-04T22:38:56.1082876Z   CARGO_BUILD_JOBS: 2
+2026-10-04T22:38:56.1083956Z   pythonLocation: /opt/hostedtoolcache/Python/3.11.16/x64
+2026-10-04T22:38:56.1085539Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.11.16/x64/lib/pkgconfig
+2026-10-04T22:38:56.1087049Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.16/x64
+2026-10-04T22:38:56.1088429Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.16/x64
+2026-10-04T22:38:56.1089810Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.16/x64
+2026-10-04T22:38:56.1091310Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.11.16/x64/lib
+2026-10-04T22:38:56.1092523Z ##[endgroup]
+2026-10-04T22:38:57.9881719Z Collecting onnx==1.18.0
+2026-10-04T22:38:58.0301418Z   Downloading onnx-1.18.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (6.9 kB)
+2026-10-04T22:38:58.1081512Z Collecting onnxruntime==1.28.0
+2026-10-04T22:38:58.1134092Z   Downloading onnxruntime-1.28.0-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (5.5 kB)
+2026-10-04T22:38:58.2433234Z Collecting tokenizers==0.22.1
+2026-10-04T22:38:58.2484770Z   Downloading tokenizers-0.22.1-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (6.8 kB)
+2026-10-04T22:38:58.4256535Z Collecting numpy>=1.22 (from onnx==1.18.0)
+2026-10-04T22:38:58.4303653Z   Downloading numpy-2.4.6-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (6.6 kB)
+2026-10-04T22:38:58.5626950Z Collecting protobuf>=4.25.1 (from onnx==1.18.0)
+2026-10-04T22:38:58.5669521Z   Downloading protobuf-7.36.2-cp310-abi3-manylinux2014_x86_64.whl.metadata (595 bytes)
+2026-10-04T22:38:58.5859617Z Collecting typing_extensions>=4.7.1 (from onnx==1.18.0)
+2026-10-04T22:38:58.5896135Z   Downloading typing_extensions-4.16.0-py3-none-any.whl.metadata (3.3 kB)
+2026-10-04T22:38:58.6088489Z Collecting flatbuffers (from onnxruntime==1.28.0)
+2026-10-04T22:38:58.6125354Z   Downloading flatbuffers-25.12.19-py2.py3-none-any.whl.metadata (1.0 kB)
+2026-10-04T22:38:58.6344018Z Collecting packaging (from onnxruntime==1.28.0)
+2026-10-04T22:38:58.6380516Z   Downloading packaging-26.3-py3-none-any.whl.metadata (3.5 kB)
+2026-10-04T22:38:58.7027117Z Collecting huggingface-hub<2.0,>=0.16.4 (from tokenizers==0.22.1)
+2026-10-04T22:38:58.7063313Z   Downloading huggingface_hub-1.33.0-py3-none-any.whl.metadata (16 kB)
+2026-10-04T22:38:58.7343491Z Collecting click<9.0.0,>=8.4.2 (from huggingface-hub<2.0,>=0.16.4->tokenizers==0.22.1)
+2026-10-04T22:38:58.7377122Z   Downloading click-8.5.0-py3-none-any.whl.metadata (2.6 kB)
+2026-10-04T22:38:58.7615307Z Collecting filelock>=3.10.0 (from huggingface-hub<2.0,>=0.16.4->tokenizers==0.22.1)
+2026-10-04T22:38:58.7651853Z   Downloading filelock-4.0.10-py3-none-any.whl.metadata (2.0 kB)
+2026-10-04T22:38:58.7861189Z Collecting fsspec>=2023.5.0 (from huggingface-hub<2.0,>=0.16.4->tokenizers==0.22.1)
+2026-10-04T22:38:58.7895645Z   Downloading fsspec-2026.9.0-py3-none-any.whl.metadata (10 kB)
+2026-10-04T22:38:58.8369548Z Collecting hf-xet<2.0.0,>=1.6.0 (from huggingface-hub<2.0,>=0.16.4->tokenizers==0.22.1)
+2026-10-04T22:38:58.8405939Z   Downloading hf_xet-1.6.0-cp38-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (4.9 kB)
+2026-10-04T22:38:58.8643190Z Collecting httpx<1,>=0.23.0 (from huggingface-hub<2.0,>=0.16.4->tokenizers==0.22.1)
+2026-10-04T22:38:58.8679840Z   Downloading httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+2026-10-04T22:38:58.9039348Z Collecting pyyaml>=5.1 (from huggingface-hub<2.0,>=0.16.4->tokenizers==0.22.1)
+2026-10-04T22:38:58.9076890Z   Downloading pyyaml-6.0.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.4 kB)
+2026-10-04T22:38:58.9385180Z Collecting tqdm>=4.42.1 (from huggingface-hub<2.0,>=0.16.4->tokenizers==0.22.1)
+2026-10-04T22:38:58.9420755Z   Downloading tqdm-4.70.1-py3-none-any.whl.metadata (57 kB)
+2026-10-04T22:38:58.9691321Z Collecting anyio (from httpx<1,>=0.23.0->huggingface-hub<2.0,>=0.16.4->tokenizers==0.22.1)
+2026-10-04T22:38:58.9725431Z   Downloading anyio-4.15.1-py3-none-any.whl.metadata (4.7 kB)
+2026-10-04T22:38:58.9966876Z Collecting certifi (from httpx<1,>=0.23.0->huggingface-hub<2.0,>=0.16.4->tokenizers==0.22.1)
+2026-10-04T22:38:59.0010786Z   Downloading certifi-2026.7.22-py3-none-any.whl.metadata (2.5 kB)
+2026-10-04T22:38:59.0243416Z Collecting httpcore==1.* (from httpx<1,>=0.23.0->huggingface-hub<2.0,>=0.16.4->tokenizers==0.22.1)
+2026-10-04T22:38:59.0287222Z   Downloading httpcore-1.0.9-py3-none-any.whl.metadata (21 kB)
+2026-10-04T22:38:59.0643168Z Collecting idna (from httpx<1,>=0.23.0->huggingface-hub<2.0,>=0.16.4->tokenizers==0.22.1)
+2026-10-04T22:38:59.0680533Z   Downloading idna-3.20-py3-none-any.whl.metadata (7.2 kB)
+2026-10-04T22:38:59.0846886Z Collecting h11>=0.16 (from httpcore==1.*->httpx<1,>=0.23.0->huggingface-hub<2.0,>=0.16.4->tokenizers==0.22.1)
+2026-10-04T22:38:59.0880335Z   Downloading h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+2026-10-04T22:38:59.1000382Z Downloading onnx-1.18.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (17.6 MB)
+2026-10-04T22:38:59.3601257Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 17.6/17.6 MB 69.0 MB/s  0:00:00
+2026-10-04T22:38:59.3655350Z Downloading onnxruntime-1.28.0-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (19.2 MB)
+2026-10-04T22:38:59.5491798Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 19.2/19.2 MB 104.4 MB/s  0:00:00
+2026-10-04T22:38:59.5528832Z Downloading tokenizers-0.22.1-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (3.3 MB)
+2026-10-04T22:38:59.5755409Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.3/3.3 MB 158.7 MB/s  0:00:00
+2026-10-04T22:38:59.5795991Z Downloading huggingface_hub-1.33.0-py3-none-any.whl (846 kB)
+2026-10-04T22:38:59.5851233Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 846.4/846.4 kB 170.7 MB/s  0:00:00
+2026-10-04T22:38:59.5889933Z Downloading click-8.5.0-py3-none-any.whl (125 kB)
+2026-10-04T22:38:59.5946282Z Downloading hf_xet-1.6.0-cp38-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (4.5 MB)
+2026-10-04T22:38:59.6156973Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.5/4.5 MB 220.1 MB/s  0:00:00
+2026-10-04T22:38:59.6194274Z Downloading httpx-0.28.1-py3-none-any.whl (73 kB)
+2026-10-04T22:38:59.6270176Z Downloading httpcore-1.0.9-py3-none-any.whl (78 kB)
+2026-10-04T22:38:59.6323190Z Downloading filelock-4.0.10-py3-none-any.whl (111 kB)
+2026-10-04T22:38:59.6377047Z Downloading fsspec-2026.9.0-py3-none-any.whl (221 kB)
+2026-10-04T22:38:59.6431268Z Downloading h11-0.16.0-py3-none-any.whl (37 kB)
+2026-10-04T22:38:59.6484767Z Downloading numpy-2.4.6-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (16.9 MB)
+2026-10-04T22:38:59.7980053Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 16.9/16.9 MB 113.0 MB/s  0:00:00
+2026-10-04T22:38:59.8021480Z Downloading packaging-26.3-py3-none-any.whl (129 kB)
+2026-10-04T22:38:59.8076536Z Downloading protobuf-7.36.2-cp310-abi3-manylinux2014_x86_64.whl (343 kB)
+2026-10-04T22:38:59.8135425Z Downloading pyyaml-6.0.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (806 kB)
+2026-10-04T22:38:59.8241841Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 806.6/806.6 kB 62.2 MB/s  0:00:00
+2026-10-04T22:38:59.8281161Z Downloading tqdm-4.70.1-py3-none-any.whl (80 kB)
+2026-10-04T22:38:59.8337067Z Downloading typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+2026-10-04T22:38:59.8388059Z Downloading anyio-4.15.1-py3-none-any.whl (132 kB)
+2026-10-04T22:38:59.8438442Z Downloading idna-3.20-py3-none-any.whl (69 kB)
+2026-10-04T22:38:59.8490018Z Downloading certifi-2026.7.22-py3-none-any.whl (136 kB)
+2026-10-04T22:38:59.8543727Z Downloading flatbuffers-25.12.19-py2.py3-none-any.whl (26 kB)
+2026-10-04T22:39:00.1904068Z Installing collected packages: flatbuffers, typing_extensions, tqdm, pyyaml, protobuf, packaging, numpy, idna, hf-xet, h11, fsspec, filelock, click, certifi, onnxruntime, onnx, httpcore, anyio, httpx, huggingface-hub, tokenizers
+2026-10-04T22:39:05.2385888Z 
+2026-10-04T22:39:05.2398951Z Successfully installed anyio-4.15.1 certifi-2026.7.22 click-8.5.0 filelock-4.0.10 flatbuffers-25.12.19 fsspec-2026.9.0 h11-0.16.0 hf-xet-1.6.0 httpcore-1.0.9 httpx-0.28.1 huggingface-hub-1.33.0 idna-3.20 numpy-2.4.6 onnx-1.18.0 onnxruntime-1.28.0 packaging-26.3 protobuf-7.36.2 pyyaml-6.0.3 tokenizers-0.22.1 tqdm-4.70.1 typing_extensions-4.16.0
+2026-10-04T22:39:05.3200736Z ##[group]Run rustup toolchain install 1.98.1 --profile minimal --component clippy,rustfmt
+2026-10-04T22:39:05.3201433Z [36;1mrustup toolchain install 1.98.1 --profile minimal --component clippy,rustfmt[0m
+2026-10-04T22:39:05.3265317Z shell: /usr/bin/bash -e {0}
+2026-10-04T22:39:05.3265542Z env:
+2026-10-04T22:39:05.3265726Z   CARGO_BUILD_JOBS: 2
+2026-10-04T22:39:05.3265978Z   pythonLocation: /opt/hostedtoolcache/Python/3.11.16/x64
+2026-10-04T22:39:05.3266347Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.11.16/x64/lib/pkgconfig
+2026-10-04T22:39:05.3266700Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.16/x64
+2026-10-04T22:39:05.3267018Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.16/x64
+2026-10-04T22:39:05.3267498Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.16/x64
+2026-10-04T22:39:05.3267818Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.11.16/x64/lib
+2026-10-04T22:39:05.3268088Z ##[endgroup]
+2026-10-04T22:39:05.3435579Z info: syncing channel updates for 1.98.1-x86_64-unknown-linux-gnu
+2026-10-04T22:39:05.5266046Z info: latest update on 2026-09-03 for version 1.98.1 (48a229cea 2026-09-01)
+2026-10-04T22:39:05.5266565Z info: downloading 5 components
+2026-10-04T22:39:12.9301232Z 
+2026-10-04T22:39:12.9369782Z   1.98.1-x86_64-unknown-linux-gnu installed - rustc 1.98.1 (48a229cea 2026-09-01)
+2026-10-04T22:39:12.9370286Z 
+2026-10-04T22:39:12.9452005Z ##[group]Run python eval/compact_answering/onnx_span_parity.py "$RUNNER_TEMP/onnx-span-parity"
+2026-10-04T22:39:12.9452613Z [36;1mpython eval/compact_answering/onnx_span_parity.py "$RUNNER_TEMP/onnx-span-parity"[0m
+2026-10-04T22:39:12.9453138Z [36;1mpython eval/compact_answering/onnx_reader_parity.py "$RUNNER_TEMP/onnx-span-parity"[0m
+2026-10-04T22:39:12.9453538Z [36;1mpython - <<'PYTHON'[0m
+2026-10-04T22:39:12.9453755Z [36;1mimport os[0m
+2026-10-04T22:39:12.9453968Z [36;1mfrom pathlib import Path[0m
+2026-10-04T22:39:12.9454199Z [36;1mimport onnxruntime[0m
+2026-10-04T22:39:12.9454533Z [36;1mlibrary = Path(onnxruntime.__file__).parent / "capi/libonnxruntime.so.1.28.0"[0m
+2026-10-04T22:39:12.9455002Z [36;1massert library.is_file(), "pinned native runtime library is missing"[0m
+2026-10-04T22:39:12.9455381Z [36;1mwith open(os.environ["GITHUB_ENV"], "a") as output:[0m
+2026-10-04T22:39:12.9455700Z [36;1m    output.write(f"ORT_DYLIB_PATH={library}\n")[0m
+2026-10-04T22:39:12.9456175Z [36;1m    output.write(f"MNEMOSYNE_ONNX_PARITY_FIXTURE={os.environ['RUNNER_TEMP']}/onnx-span-parity\n")[0m
+2026-10-04T22:39:12.9456578Z [36;1mPYTHON[0m
+2026-10-04T22:39:12.9518361Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-10-04T22:39:12.9518656Z env:
+2026-10-04T22:39:12.9518835Z   CARGO_BUILD_JOBS: 2
+2026-10-04T22:39:12.9519092Z   pythonLocation: /opt/hostedtoolcache/Python/3.11.16/x64
+2026-10-04T22:39:12.9519468Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.11.16/x64/lib/pkgconfig
+2026-10-04T22:39:12.9519832Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.16/x64
+2026-10-04T22:39:12.9520148Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.16/x64
+2026-10-04T22:39:12.9520468Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.16/x64
+2026-10-04T22:39:12.9520782Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.11.16/x64/lib
+2026-10-04T22:39:12.9521293Z ##[endgroup]
+2026-10-04T22:39:13.1282054Z [0;93m2026-10-04 22:39:13.127902600 [W:onnxruntime:Default, device_discovery.cc:134 GetPciBusId] Skipping pci_bus_id for PCI path at "/sys/devices/LNXSYSTM:00/LNXSYBUS:00/ACPI0004:00/MSFT1000:00/5620e0c7-8062-4dce-aeb7-520c7ef76171" because filename "5620e0c7-8062-4dce-aeb7-520c7ef76171" did not match expected pattern of [0-9a-f]+:[0-9a-f]+:[0-9a-f]+[.][0-9a-f]+[m
+2026-10-04T22:39:13.1460125Z {"directory": "/home/runner/work/_temp/onnx-span-parity", "model_bytes": 314, "cases": 5, "model_sha256": "c2cc54fb369b5b29b3dbf8df0251c24a1c4fc31892d797ca7305fee19983c065"}
+2026-10-04T22:39:13.2714094Z [0;93m2026-10-04 22:39:13.269754843 [W:onnxruntime:Default, device_discovery.cc:134 GetPciBusId] Skipping pci_bus_id for PCI path at "/sys/devices/LNXSYSTM:00/LNXSYBUS:00/ACPI0004:00/MSFT1000:00/5620e0c7-8062-4dce-aeb7-520c7ef76171" because filename "5620e0c7-8062-4dce-aeb7-520c7ef76171" did not match expected pattern of [0-9a-f]+:[0-9a-f]+:[0-9a-f]+[.][0-9a-f]+[m
+2026-10-04T22:39:13.4203988Z {"cases": 10, "tokenizer_sha256": "71c88a3c45127a777dc0e2e4cedc3567ad2093ff074b8876803d97e3b2d85ba9"}
+2026-10-04T22:39:13.5293756Z [0;93m2026-10-04 22:39:13.528146799 [W:onnxruntime:Default, device_discovery.cc:134 GetPciBusId] Skipping pci_bus_id for PCI path at "/sys/devices/LNXSYSTM:00/LNXSYBUS:00/ACPI0004:00/MSFT1000:00/5620e0c7-8062-4dce-aeb7-520c7ef76171" because filename "5620e0c7-8062-4dce-aeb7-520c7ef76171" did not match expected pattern of [0-9a-f]+:[0-9a-f]+:[0-9a-f]+[.][0-9a-f]+[m
+2026-10-04T22:39:13.5523193Z ##[group]Run cargo +1.98.1 test --locked --manifest-path services/answering-ort/Cargo.toml --features onnx -- --include-ignored
+2026-10-04T22:39:13.5523948Z [36;1mcargo +1.98.1 test --locked --manifest-path services/answering-ort/Cargo.toml --features onnx -- --include-ignored[0m
+2026-10-04T22:39:13.5585304Z shell: /usr/bin/bash -e {0}
+2026-10-04T22:39:13.5585537Z env:
+2026-10-04T22:39:13.5585710Z   CARGO_BUILD_JOBS: 2
+2026-10-04T22:39:13.5585970Z   pythonLocation: /opt/hostedtoolcache/Python/3.11.16/x64
+2026-10-04T22:39:13.5586357Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.11.16/x64/lib/pkgconfig
+2026-10-04T22:39:13.5586721Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.16/x64
+2026-10-04T22:39:13.5587058Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.16/x64
+2026-10-04T22:39:13.5587376Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.16/x64
+2026-10-04T22:39:13.5587702Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.11.16/x64/lib
+2026-10-04T22:39:13.5588276Z   ORT_DYLIB_PATH: /opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/site-packages/onnxruntime/capi/libonnxruntime.so.1.28.0
+2026-10-04T22:39:13.5588871Z   MNEMOSYNE_ONNX_PARITY_FIXTURE: /home/runner/work/_temp/onnx-span-parity
+2026-10-04T22:39:13.5589190Z ##[endgroup]
+2026-10-04T22:39:13.5958554Z     Updating crates.io index
+2026-10-04T22:39:13.8589437Z  Downloading crates ...
+2026-10-04T22:39:13.9265840Z   Downloaded bit-set v0.8.0
+2026-10-04T22:39:13.9311503Z   Downloaded ahash v0.8.12
+2026-10-04T22:39:13.9351140Z   Downloaded base64 v0.13.1
+2026-10-04T22:39:13.9393274Z   Downloaded cfg-if v1.0.5
+2026-10-04T22:39:13.9411379Z   Downloaded digest v0.10.7
+2026-10-04T22:39:13.9428889Z   Downloaded autocfg v1.5.1
+2026-10-04T22:39:13.9445048Z   Downloaded num-integer v0.1.47
+2026-10-04T22:39:13.9472299Z   Downloaded libloading v0.9.0
+2026-10-04T22:39:13.9556568Z   Downloaded minimal-lexical v0.2.1
+2026-10-04T22:39:13.9596832Z   Downloaded serde_derive v1.0.228
+2026-10-04T22:39:13.9623442Z   Downloaded darling_macro v0.20.11
+2026-10-04T22:39:13.9631415Z   Downloaded paste v1.0.15
+2026-10-04T22:39:13.9663014Z   Downloaded strsim v0.11.1
+2026-10-04T22:39:13.9674529Z   Downloaded thiserror v2.0.21
+2026-10-04T22:39:13.9734943Z   Downloaded darling v0.20.11
+2026-10-04T22:39:13.9778575Z   Downloaded unicode-segmentation v1.13.3
+2026-10-04T22:39:13.9804044Z   Downloaded generic-array v0.14.7
+2026-10-04T22:39:13.9815461Z   Downloaded monostate v0.1.18
+2026-10-04T22:39:13.9832285Z   Downloaded derive_builder_macro v0.20.2
+2026-10-04T22:39:13.9838711Z   Downloaded thiserror-impl v2.0.21
+2026-10-04T22:39:13.9852010Z   Downloaded bit-vec v0.8.0
+2026-10-04T22:39:13.9865352Z   Downloaded block-buffer v0.10.4
+2026-10-04T22:39:13.9874256Z   Downloaded cpufeatures v0.2.17
+2026-10-04T22:39:13.9885401Z   Downloaded pastey v0.2.3
+2026-10-04T22:39:13.9896446Z   Downloaded ident_case v1.0.1
+2026-10-04T22:39:13.9903640Z   Downloaded macro_rules_attribute v0.2.3
+2026-10-04T22:39:13.9916195Z   Downloaded num_cpus v1.17.0
+2026-10-04T22:39:13.9945958Z   Downloaded rand_chacha v0.9.0
+2026-10-04T22:39:13.9956912Z   Downloaded zmij v1.0.23
+2026-10-04T22:39:13.9972552Z   Downloaded ryu v1.0.23
+2026-10-04T22:39:14.0005006Z   Downloaded derive_builder v0.20.2
+2026-10-04T22:39:14.0051565Z   Downloaded either v1.18.0
+2026-10-04T22:39:14.0067410Z   Downloaded itoa v1.0.18
+2026-10-04T22:39:14.0081126Z   Downloaded fnv v1.0.7
+2026-10-04T22:39:14.0089361Z   Downloaded macro_rules_attribute-proc_macro v0.2.3
+2026-10-04T22:39:14.0097883Z   Downloaded crypto-common v0.1.7
+2026-10-04T22:39:14.0106037Z   Downloaded pin-project-lite v0.2.17
+2026-10-04T22:39:14.0174031Z   Downloaded darling_core v0.20.11
+2026-10-04T22:39:14.0221518Z   Downloaded quote v1.0.46
+2026-10-04T22:39:14.0243552Z   Downloaded rawpointer v0.2.1
+2026-10-04T22:39:14.0250441Z   Downloaded dary_heap v0.3.9
+2026-10-04T22:39:14.0259388Z   Downloaded rayon-cond v0.4.0
+2026-10-04T22:39:14.0268308Z   Downloaded rustversion v1.0.23
+2026-10-04T22:39:14.0291500Z   Downloaded serde_core v1.0.228
+2026-10-04T22:39:14.0313899Z   Downloaded castaway v0.2.4
+2026-10-04T22:39:14.0325333Z   Downloaded ort-sys v2.0.0-rc.13
+2026-10-04T22:39:14.0347067Z   Downloaded version_check v0.9.5
+2026-10-04T22:39:14.0357440Z   Downloaded aho-corasick v1.1.5
+2026-10-04T22:39:14.0401766Z   Downloaded derive_builder_core v0.20.2
+2026-10-04T22:39:14.0418509Z   Downloaded num-complex v0.4.6
+2026-10-04T22:39:14.0430687Z   Downloaded monostate-impl v0.1.18
+2026-10-04T22:39:14.0437589Z   Downloaded rand_core v0.9.5
+2026-10-04T22:39:14.0448921Z   Downloaded static_assertions v1.1.0
+2026-10-04T22:39:14.0461420Z   Downloaded ppv-lite86 v0.2.21
+2026-10-04T22:39:14.0472382Z   Downloaded crossbeam-deque v0.8.8
+2026-10-04T22:39:14.0485100Z   Downloaded crossbeam-epoch v0.9.21
+2026-10-04T22:39:14.0506604Z   Downloaded once_cell v1.21.4
+2026-10-04T22:39:14.0529190Z   Downloaded sha2 v0.10.9
+2026-10-04T22:39:14.0552133Z   Downloaded crossbeam-utils v0.8.23
+2026-10-04T22:39:14.0576539Z   Downloaded log v0.4.34
+2026-10-04T22:39:14.0598667Z   Downloaded proc-macro2 v1.0.106
+2026-10-04T22:39:14.0624961Z   Downloaded matrixmultiply v0.3.11
+2026-10-04T22:39:14.0652538Z   Downloaded smallvec v1.16.2
+2026-10-04T22:39:14.0676228Z   Downloaded getrandom v0.3.4
+2026-10-04T22:39:14.0700553Z   Downloaded num-traits v0.2.19
+2026-10-04T22:39:14.0723977Z   Downloaded serde v1.0.228
+2026-10-04T22:39:14.0754344Z   Downloaded unicode-ident v1.0.24
+2026-10-04T22:39:14.0778756Z   Downloaded memchr v2.8.3
+2026-10-04T22:39:14.0828435Z   Downloaded rayon-core v1.13.0
+2026-10-04T22:39:14.0861457Z   Downloaded tracing-core v0.1.36
+2026-10-04T22:39:14.0885632Z   Downloaded unicode-normalization-alignments v0.1.12
+2026-10-04T22:39:14.0910242Z   Downloaded compact_str v0.9.1
+2026-10-04T22:39:14.0941223Z   Downloaded fancy-regex v0.14.0
+2026-10-04T22:39:14.0972402Z   Downloaded unicode_categories v0.1.1
+2026-10-04T22:39:14.0987682Z   Downloaded nom v7.1.3
+2026-10-04T22:39:14.1033246Z   Downloaded typenum v1.20.1
+2026-10-04T22:39:14.1066705Z   Downloaded tokenizers v0.22.1
+2026-10-04T22:39:14.1142898Z   Downloaded ndarray v0.17.2
+2026-10-04T22:39:14.1221130Z   Downloaded rand v0.9.5
+2026-10-04T22:39:14.1252595Z   Downloaded serde_json v1.0.150
+2026-10-04T22:39:14.1313629Z   Downloaded ort v2.0.0-rc.13
+2026-10-04T22:39:14.1376879Z   Downloaded itertools v0.14.0
+2026-10-04T22:39:14.1437400Z   Downloaded rayon v1.12.0
+2026-10-04T22:39:14.1518660Z   Downloaded regex v1.13.1
+2026-10-04T22:39:14.1563339Z   Downloaded esaxx-rs v0.1.10
+2026-10-04T22:39:14.1592379Z   Downloaded syn v2.0.119
+2026-10-04T22:39:14.1681174Z   Downloaded zerocopy v0.8.59
+2026-10-04T22:39:14.1862667Z   Downloaded syn v3.0.6
+2026-10-04T22:39:14.1954508Z   Downloaded regex-syntax v0.8.11
+2026-10-04T22:39:14.2017734Z   Downloaded tracing v0.1.44
+2026-10-04T22:39:14.2158385Z   Downloaded regex-automata v0.4.18
+2026-10-04T22:39:14.2281148Z   Downloaded spm_precompiled v0.1.4
+2026-10-04T22:39:14.2344291Z   Downloaded libc v0.2.186
+2026-10-04T22:39:14.3007226Z    Compiling proc-macro2 v1.0.106
+2026-10-04T22:39:14.3007772Z    Compiling unicode-ident v1.0.24
+2026-10-04T22:39:14.3336128Z    Compiling quote v1.0.46
+2026-10-04T22:39:14.4252595Z    Compiling version_check v0.9.5
+2026-10-04T22:39:14.5442209Z    Compiling serde_core v1.0.228
+2026-10-04T22:39:14.6328332Z    Compiling cfg-if v1.0.5
+2026-10-04T22:39:14.6576087Z    Compiling libc v0.2.186
+2026-10-04T22:39:14.8825908Z    Compiling syn v2.0.119
+2026-10-04T22:39:16.0000891Z    Compiling memchr v2.8.3
+2026-10-04T22:39:16.4073319Z    Compiling crossbeam-utils v0.8.23
+2026-10-04T22:39:16.9789098Z    Compiling fnv v1.0.7
+2026-10-04T22:39:17.0005605Z    Compiling crossbeam-epoch v0.9.21
+2026-10-04T22:39:17.0685730Z    Compiling strsim v0.11.1
+2026-10-04T22:39:17.2083427Z    Compiling zerocopy v0.8.59
+2026-10-04T22:39:17.3370783Z    Compiling ident_case v1.0.1
+2026-10-04T22:39:17.3371328Z    Compiling getrandom v0.3.4
+2026-10-04T22:39:17.3684390Z    Compiling serde v1.0.228
+2026-10-04T22:39:17.4434705Z    Compiling darling_core v0.20.11
+2026-10-04T22:39:17.4741341Z    Compiling serde_derive v1.0.228
+2026-10-04T22:39:19.0576524Z    Compiling generic-array v0.14.7
+2026-10-04T22:39:19.1164518Z    Compiling crossbeam-deque v0.8.8
+2026-10-04T22:39:19.4296616Z    Compiling darling_macro v0.20.11
+2026-10-04T22:39:19.6250157Z    Compiling rayon-core v1.13.0
+2026-10-04T22:39:19.6741827Z    Compiling rustversion v1.0.23
+2026-10-04T22:39:19.7827310Z    Compiling typenum v1.20.1
+2026-10-04T22:39:20.4539375Z    Compiling darling v0.20.11
+2026-10-04T22:39:20.5495444Z    Compiling aho-corasick v1.1.5
+2026-10-04T22:39:21.3892175Z    Compiling either v1.18.0
+2026-10-04T22:39:21.4817082Z    Compiling regex-syntax v0.8.11
+2026-10-04T22:39:21.8969696Z    Compiling zmij v1.0.23
+2026-10-04T22:39:21.9851793Z    Compiling ppv-lite86 v0.2.21
+2026-10-04T22:39:22.5754884Z    Compiling regex-automata v0.4.18
+2026-10-04T22:39:23.1759970Z    Compiling derive_builder_core v0.20.2
+2026-10-04T22:39:23.8523149Z    Compiling rand_core v0.9.5
+2026-10-04T22:39:23.9334103Z    Compiling syn v3.0.6
+2026-10-04T22:39:25.2112309Z    Compiling ahash v0.8.12
+2026-10-04T22:39:25.2699456Z    Compiling bit-vec v0.8.0
+2026-10-04T22:39:25.3677974Z    Compiling smallvec v1.16.2
+2026-10-04T22:39:25.4510508Z    Compiling thiserror v2.0.21
+2026-10-04T22:39:25.5572126Z    Compiling itoa v1.0.18
+2026-10-04T22:39:25.6234486Z    Compiling minimal-lexical v0.2.1
+2026-10-04T22:39:25.7340539Z    Compiling serde_json v1.0.150
+2026-10-04T22:39:25.7847347Z    Compiling esaxx-rs v0.1.10
+2026-10-04T22:39:25.8332448Z    Compiling ort-sys v2.0.0-rc.13
+2026-10-04T22:39:25.9531979Z    Compiling paste v1.0.15
+2026-10-04T22:39:26.0299088Z    Compiling nom v7.1.3
+2026-10-04T22:39:26.0648418Z    Compiling bit-set v0.8.0
+2026-10-04T22:39:26.1326121Z    Compiling thiserror-impl v2.0.21
+2026-10-04T22:39:26.7344693Z    Compiling rand_chacha v0.9.0
+2026-10-04T22:39:26.9439106Z    Compiling castaway v0.2.4
+2026-10-04T22:39:26.9714549Z    Compiling derive_builder_macro v0.20.2
+2026-10-04T22:39:26.9740844Z    Compiling rayon v1.12.0
+2026-10-04T22:39:27.2399910Z    Compiling itertools v0.14.0
+2026-10-04T22:39:28.0229253Z    Compiling block-buffer v0.10.4
+2026-10-04T22:39:28.0612898Z    Compiling crypto-common v0.1.7
+2026-10-04T22:39:28.0928488Z    Compiling monostate-impl v0.1.18
+2026-10-04T22:39:28.1246054Z    Compiling static_assertions v1.1.0
+2026-10-04T22:39:28.1413337Z    Compiling macro_rules_attribute-proc_macro v0.2.3
+2026-10-04T22:39:28.2081979Z    Compiling base64 v0.13.1
+2026-10-04T22:39:28.2937828Z    Compiling once_cell v1.21.4
+2026-10-04T22:39:28.3308162Z    Compiling pastey v0.2.3
+2026-10-04T22:39:28.3452001Z    Compiling ryu v1.0.23
+2026-10-04T22:39:28.4130057Z    Compiling unicode-segmentation v1.13.3
+2026-10-04T22:39:28.5363012Z    Compiling macro_rules_attribute v0.2.3
+2026-10-04T22:39:28.5528317Z    Compiling compact_str v0.9.1
+2026-10-04T22:39:28.6299080Z    Compiling spm_precompiled v0.1.4
+2026-10-04T22:39:28.8179686Z    Compiling monostate v0.1.18
+2026-10-04T22:39:28.8864072Z    Compiling digest v0.10.7
+2026-10-04T22:39:28.9146238Z    Compiling rayon-cond v0.4.0
+2026-10-04T22:39:28.9738498Z    Compiling derive_builder v0.20.2
+2026-10-04T22:39:29.0030905Z    Compiling rand v0.9.5
+2026-10-04T22:39:29.3437111Z    Compiling fancy-regex v0.14.0
+2026-10-04T22:39:29.9438998Z    Compiling unicode-normalization-alignments v0.1.12
+2026-10-04T22:39:30.2196062Z    Compiling regex v1.13.1
+2026-10-04T22:39:30.2236480Z    Compiling dary_heap v0.3.9
+2026-10-04T22:39:30.2833937Z    Compiling libloading v0.9.0
+2026-10-04T22:39:30.3620136Z    Compiling cpufeatures v0.2.17
+2026-10-04T22:39:30.3786091Z    Compiling unicode_categories v0.1.1
+2026-10-04T22:39:30.4431144Z    Compiling log v0.4.34
+2026-10-04T22:39:30.4598154Z    Compiling sha2 v0.10.9
+2026-10-04T22:39:30.5122389Z    Compiling tokenizers v0.22.1
+2026-10-04T22:39:30.6541540Z    Compiling ort v2.0.0-rc.13
+2026-10-04T22:39:32.2908170Z    Compiling num_cpus v1.17.0
+2026-10-04T22:39:32.9732475Z    Compiling answering-ort v0.1.0 (/home/runner/work/Mnemosyne/Mnemosyne/services/answering-ort)
+2026-10-04T22:39:39.8065786Z     Finished `test` profile [unoptimized + debuginfo] target(s) in 26.23s
+2026-10-04T22:39:39.8222829Z      Running unittests src/lib.rs (services/answering-ort/target/debug/deps/answering_ort-8a22172cd378abb7)
+2026-10-04T22:39:39.8240124Z 
+2026-10-04T22:39:39.8240304Z running 48 tests
+2026-10-04T22:39:39.8245496Z test embed::tests::ranking_empty_candidates_returns_empty ... ok
+2026-10-04T22:39:39.8246454Z test embed::tests::vectors_must_be_finite_nonzero_and_exactly_padded ... ok
+2026-10-04T22:39:39.8247306Z test embed::tests::native_and_zero_padded_cosine_have_the_same_result ... ok
+2026-10-04T22:39:39.8249243Z test embed::tests::ranking_ties_are_broken_by_candidate_id ... ok
+2026-10-04T22:39:39.8249897Z test embed::tests::request_and_response_require_version_and_all_identities ... ok
+2026-10-04T22:39:39.8250635Z test onnx_reader::tests::span_selection_masks_question_and_gaps_and_abstains_at_threshold ... ok
+2026-10-04T22:39:39.8251595Z test protocol::tests::responses_have_exact_common_schema_and_one_payload ... ok
+2026-10-04T22:39:39.8260460Z test protocol::tests::exact_versioned_request_schema_accepts_all_operations ... ok
+2026-10-04T22:39:39.8264554Z test reader::tests::expired_deadline_is_fail_closed_by_caller ... ok
+2026-10-04T22:39:39.8268367Z test reader::tests::logits_are_validated_before_return ... ok
+2026-10-04T22:39:39.8277712Z test reader::tests::null_yes_no_and_unsupported_types_are_bounded ... ok
+2026-10-04T22:39:39.8278682Z test protocol::tests::preserves_recursive_duplicate_and_existing_limit_rejection ... ok
+2026-10-04T22:39:39.8279660Z test reader::tests::rejects_drifted_identity_nonfinite_and_bad_utf8_offsets ... ok
+2026-10-04T22:39:39.8281740Z test reader::tests::span_reconstructs_exact_source_bytes ... ok
+2026-10-04T22:39:39.8282596Z test reader::tests::spans_must_be_grounded_in_supporting_facts ... ok
+2026-10-04T22:39:39.8283454Z test protocol::tests::wrong_version_and_malformed_identity_are_rejected ... ok
+2026-10-04T22:39:39.8284308Z test reader::tests::windows_must_cover_the_full_source_context ... ok
+2026-10-04T22:39:39.8285485Z test rerank::tests::orders_scores_descending_then_by_evidence_id_and_caps_width ... ok
+2026-10-04T22:39:39.8286063Z test rerank::tests::rejects_duplicate_and_unknown_json_fields ... ok
+2026-10-04T22:39:39.8286603Z test rerank::tests::rejects_expired_deadline_before_admitting_scores ... ok
+2026-10-04T22:39:39.8287132Z test rerank::tests::parses_exact_versioned_request_and_response ... ok
+2026-10-04T22:39:39.8287850Z test rerank::tests::rejects_limits_identity_drift_and_nonfinite_scores ... ok
+2026-10-04T22:39:39.8288611Z test rerank::tests::rejects_unknown_duplicate_and_incomplete_scores ... ok
+2026-10-04T22:39:39.8289150Z test runtime::tests::configuration_enforces_the_resource_contract ... ok
+2026-10-04T22:39:39.8289692Z test runtime::tests::component_identity_drift_is_typed_and_fail_closed ... ok
+2026-10-04T22:39:39.8290461Z test runtime::tests::expired_deadline_fails_before_session_access ... ok
+2026-10-04T22:39:39.8291497Z test runtime::tests::custody_identity_is_configured_not_adopted_from_requests ... ok
+2026-10-04T22:39:39.8304526Z test runtime::tests::late_session_result_fails_closed ... ok
+2026-10-04T22:39:39.8306003Z test runtime::tests::invalid_session_outputs_fail_closed ... ok
+2026-10-04T22:39:39.8307701Z test runtime::tests::malformed_custody_environment_fails_closed ... ok
+2026-10-04T22:39:39.8317680Z test runtime::tests::partial_custody_environment_fails_closed ... ok
+2026-10-04T22:39:39.8336262Z test runtime::tests::process_runtime_is_shared_and_unavailable_fails_closed ... ok
+2026-10-04T22:39:39.8337226Z test runtime::tests::runtime_config_loads_trusted_custody_identity_from_environment ... ok
+2026-10-04T22:39:39.8338029Z test runtime::tests::one_in_flight_is_enforced_and_permit_is_released ... ok
+2026-10-04T22:39:39.8338697Z test runtime::tests::session_success_and_error_are_propagated ... ok
+2026-10-04T22:39:39.8341369Z test runtime::tests::unset_custody_environment_keeps_development_identity ... ok
+2026-10-04T22:39:39.8342715Z test runtime::tests::synthetic_components_share_protocol_runtime_and_preserve_identity ... ok
+2026-10-04T22:39:39.8348077Z test tests::admission_is_bounded_to_one_active_and_one_queued_connection ... ok
+2026-10-04T22:39:39.8364750Z test tests::loopback_transport_returns_deterministic_fail_closed_response ... ok
+2026-10-04T22:39:39.8365922Z test tests::rejects_non_loopback_before_binding ... ok
+2026-10-04T22:39:39.8448454Z test tests::framing_accepts_crlf_and_rejects_oversized_bodies ... ok
+2026-10-04T22:39:39.8450369Z test tests::unix_bind_does_not_remove_non_socket_paths ... ok
+2026-10-04T22:39:39.8453748Z test tests::unix_bind_preserves_live_socket ... ok
+2026-10-04T22:39:39.8456327Z test tests::unix_bind_replaces_stale_socket_and_sets_owner_only_permissions ... ok
+2026-10-04T22:39:39.8484578Z test runtime::tests::hard_deadline_returns_while_blocked_session_remains_busy ... ok
+2026-10-04T22:39:39.8507672Z test tests::unix_probe_timeout_is_bounded_and_treated_as_live ... ok
+2026-10-04T22:39:39.8575982Z test tests::request_deadline_covers_incomplete_frames ... ok
+2026-10-04T22:39:39.9160789Z test onnx_reader::tests::tokenizer_rejects_stochastic_or_ambiguous_inputs_and_keeps_all_windows ... ok
+2026-10-04T22:39:39.9161434Z 
+2026-10-04T22:39:39.9161658Z test result: ok. 48 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+2026-10-04T22:39:39.9161944Z 
+2026-10-04T22:39:39.9165362Z      Running unittests src/main.rs (services/answering-ort/target/debug/deps/answering_ort-4e2f6e0284c1ce76)
+2026-10-04T22:39:39.9177147Z 
+2026-10-04T22:39:39.9177281Z running 0 tests
+2026-10-04T22:39:39.9177458Z 
+2026-10-04T22:39:39.9177785Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-10-04T22:39:39.9178226Z 
+2026-10-04T22:39:39.9179359Z      Running tests/onnx_reader.rs (services/answering-ort/target/debug/deps/onnx_reader-3231af677ba4994a)
+2026-10-04T22:39:39.9192254Z 
+2026-10-04T22:39:39.9192393Z running 1 test
+2026-10-04T22:39:39.9667445Z test actual_reader_preserves_unicode_windows_nulls_and_runtime_boundaries ... ok
+2026-10-04T22:39:39.9667843Z 
+2026-10-04T22:39:39.9668064Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+2026-10-04T22:39:39.9668353Z 
+2026-10-04T22:39:39.9712664Z      Running tests/onnx_span.rs (services/answering-ort/target/debug/deps/onnx_span-6d901815c1dce90b)
+2026-10-04T22:39:39.9724275Z 
+2026-10-04T22:39:39.9724419Z running 2 tests
+2026-10-04T22:39:39.9727553Z test invalid_tokens_fail_before_runtime_loading ... ok
+2026-10-04T22:39:39.9975797Z test real_onnx_execution_matches_python_reference ... ok
+2026-10-04T22:39:39.9976052Z 
+2026-10-04T22:39:39.9976271Z test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+2026-10-04T22:39:39.9976567Z 
+2026-10-04T22:39:40.0011088Z    Doc-tests answering_ort
+2026-10-04T22:39:40.0835782Z 
+2026-10-04T22:39:40.0836198Z running 0 tests
+2026-10-04T22:39:40.0836384Z 
+2026-10-04T22:39:40.0836683Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-10-04T22:39:40.0837006Z 
+2026-10-04T22:39:40.0947189Z ##[group]Run cargo +1.98.1 fmt --check --manifest-path services/answering-ort/Cargo.toml
+2026-10-04T22:39:40.0947727Z [36;1mcargo +1.98.1 fmt --check --manifest-path services/answering-ort/Cargo.toml[0m
+2026-10-04T22:39:40.0948336Z [36;1mcargo +1.98.1 clippy --locked --manifest-path services/answering-ort/Cargo.toml --all-targets --features onnx -- -D warnings[0m
+2026-10-04T22:39:40.1007441Z shell: /usr/bin/bash -e {0}
+2026-10-04T22:39:40.1007659Z env:
+2026-10-04T22:39:40.1007865Z   CARGO_BUILD_JOBS: 2
+2026-10-04T22:39:40.1008126Z   pythonLocation: /opt/hostedtoolcache/Python/3.11.16/x64
+2026-10-04T22:39:40.1008494Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.11.16/x64/lib/pkgconfig
+2026-10-04T22:39:40.1008850Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.16/x64
+2026-10-04T22:39:40.1009172Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.16/x64
+2026-10-04T22:39:40.1009664Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.16/x64
+2026-10-04T22:39:40.1010016Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.11.16/x64/lib
+2026-10-04T22:39:40.1010539Z   ORT_DYLIB_PATH: /opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/site-packages/onnxruntime/capi/libonnxruntime.so.1.28.0
+2026-10-04T22:39:40.1011302Z   MNEMOSYNE_ONNX_PARITY_FIXTURE: /home/runner/work/_temp/onnx-span-parity
+2026-10-04T22:39:40.1011622Z ##[endgroup]
+2026-10-04T22:39:40.2850577Z     Checking cfg-if v1.0.5
+2026-10-04T22:39:40.2852263Z     Checking serde_core v1.0.228
+2026-10-04T22:39:40.2994619Z     Checking memchr v2.8.3
+2026-10-04T22:39:40.5059629Z     Checking libc v0.2.186
+2026-10-04T22:39:40.9496605Z     Checking crossbeam-utils v0.8.23
+2026-10-04T22:39:41.1153551Z     Checking crossbeam-epoch v0.9.21
+2026-10-04T22:39:41.2081557Z     Checking getrandom v0.3.4
+2026-10-04T22:39:41.2594642Z     Checking zerocopy v0.8.59
+2026-10-04T22:39:41.3338668Z     Checking serde v1.0.228
+2026-10-04T22:39:41.5570102Z     Checking typenum v1.20.1
+2026-10-04T22:39:41.8991127Z     Checking generic-array v0.14.7
+2026-10-04T22:39:42.1426576Z     Checking crossbeam-deque v0.8.8
+2026-10-04T22:39:42.2064515Z     Checking aho-corasick v1.1.5
+2026-10-04T22:39:42.5974434Z     Checking regex-syntax v0.8.11
+2026-10-04T22:39:43.1547075Z     Checking either v1.18.0
+2026-10-04T22:39:43.2350471Z     Checking ppv-lite86 v0.2.21
+2026-10-04T22:39:43.3720085Z     Checking regex-automata v0.4.18
+2026-10-04T22:39:43.3867473Z     Checking rayon-core v1.13.0
+2026-10-04T22:39:43.5515842Z     Checking rand_core v0.9.5
+2026-10-04T22:39:43.6118007Z     Checking smallvec v1.16.2
+2026-10-04T22:39:43.6812385Z     Checking itoa v1.0.18
+2026-10-04T22:39:43.7264384Z     Checking minimal-lexical v0.2.1
+2026-10-04T22:39:43.8067793Z     Checking bit-vec v0.8.0
+2026-10-04T22:39:43.8815172Z     Checking bit-set v0.8.0
+2026-10-04T22:39:43.9285145Z     Checking nom v7.1.3
+2026-10-04T22:39:44.6018148Z     Checking rand_chacha v0.9.0
+2026-10-04T22:39:44.6139861Z     Checking castaway v0.2.4
+2026-10-04T22:39:44.6404084Z     Checking rayon v1.12.0
+2026-10-04T22:39:44.6756876Z     Checking zmij v1.0.23
+2026-10-04T22:39:44.8083319Z     Checking itertools v0.14.0
+2026-10-04T22:39:45.4609707Z     Checking block-buffer v0.10.4
+2026-10-04T22:39:45.4966724Z     Checking crypto-common v0.1.7
+2026-10-04T22:39:45.5260013Z     Checking unicode-segmentation v1.13.3
+2026-10-04T22:39:45.6159007Z     Checking static_assertions v1.1.0
+2026-10-04T22:39:45.6309286Z     Checking once_cell v1.21.4
+2026-10-04T22:39:45.6718369Z     Checking ryu v1.0.23
+2026-10-04T22:39:45.6942877Z     Checking base64 v0.13.1
+2026-10-04T22:39:45.7159084Z     Checking compact_str v0.9.1
+2026-10-04T22:39:45.7822132Z     Checking spm_precompiled v0.1.4
+2026-10-04T22:39:45.8382762Z     Checking macro_rules_attribute v0.2.3
+2026-10-04T22:39:45.8532402Z     Checking ahash v0.8.12
+2026-10-04T22:39:45.9023709Z     Checking rayon-cond v0.4.0
+2026-10-04T22:39:45.9353936Z     Checking monostate v0.1.18
+2026-10-04T22:39:45.9542142Z     Checking digest v0.10.7
+2026-10-04T22:39:46.0183805Z     Checking serde_json v1.0.150
+2026-10-04T22:39:46.0199603Z     Checking rand v0.9.5
+2026-10-04T22:39:46.2587804Z     Checking derive_builder v0.20.2
+2026-10-04T22:39:46.2819146Z     Checking regex v1.13.1
+2026-10-04T22:39:46.3739652Z     Checking fancy-regex v0.14.0
+2026-10-04T22:39:46.4156935Z     Checking thiserror v2.0.21
+2026-10-04T22:39:46.4351541Z     Checking ort-sys v2.0.0-rc.13
+2026-10-04T22:39:46.5567286Z     Checking esaxx-rs v0.1.10
+2026-10-04T22:39:46.6032749Z     Checking unicode-normalization-alignments v0.1.12
+2026-10-04T22:39:46.6042433Z     Checking dary_heap v0.3.9
+2026-10-04T22:39:46.6665434Z     Checking libloading v0.9.0
+2026-10-04T22:39:46.7192776Z     Checking unicode_categories v0.1.1
+2026-10-04T22:39:46.7756976Z     Checking cpufeatures v0.2.17
+2026-10-04T22:39:46.7894453Z     Checking log v0.4.34
+2026-10-04T22:39:46.8373707Z     Checking sha2 v0.10.9
+2026-10-04T22:39:46.8656300Z     Checking tokenizers v0.22.1
+2026-10-04T22:39:46.9534778Z     Checking ort v2.0.0-rc.13
+2026-10-04T22:39:47.5254867Z     Checking num_cpus v1.17.0
+2026-10-04T22:39:48.5305433Z     Checking answering-ort v0.1.0 (/home/runner/work/Mnemosyne/Mnemosyne/services/answering-ort)
+2026-10-04T22:39:49.3326116Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 9.12s
+2026-10-04T22:39:49.3512865Z Post job cleanup.
+2026-10-04T22:39:49.4800724Z Post job cleanup.
+2026-10-04T22:39:49.5534514Z [command]/usr/bin/git version
+2026-10-04T22:39:49.5572894Z git version 2.55.0
+2026-10-04T22:39:49.5600391Z Temporarily overriding HOME='/home/runner/work/_temp/85c9051c-2058-433c-9936-e9243d540ec6' before making global git config changes
+2026-10-04T22:39:49.5601575Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-04T22:39:49.5606599Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Mnemosyne/Mnemosyne
+2026-10-04T22:39:49.5636865Z Removing SSH command configuration
+2026-10-04T22:39:49.5642692Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-04T22:39:49.5674515Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-04T22:39:49.5904220Z Removing HTTP extra header
+2026-10-04T22:39:49.5909513Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-04T22:39:49.5946152Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-04T22:39:49.6174754Z Removing includeIf entries pointing to credentials config files
+2026-10-04T22:39:49.6181712Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-04T22:39:49.6213288Z includeif.gitdir:/home/runner/work/Mnemosyne/Mnemosyne/.git.path
+2026-10-04T22:39:49.6214199Z includeif.gitdir:/home/runner/work/Mnemosyne/Mnemosyne/.git/worktrees/*.path
+2026-10-04T22:39:49.6215012Z includeif.gitdir:/github/workspace/.git.path
+2026-10-04T22:39:49.6215753Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-10-04T22:39:49.6222266Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/Mnemosyne/Mnemosyne/.git.path
+2026-10-04T22:39:49.6246811Z /home/runner/work/_temp/git-credentials-7a2e6f2e-f36f-42cf-a782-c18674f54f5a.config
+2026-10-04T22:39:49.6256583Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/Mnemosyne/Mnemosyne/.git.path /home/runner/work/_temp/git-credentials-7a2e6f2e-f36f-42cf-a782-c18674f54f5a.config
+2026-10-04T22:39:49.6294506Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/Mnemosyne/Mnemosyne/.git/worktrees/*.path
+2026-10-04T22:39:49.6332587Z /home/runner/work/_temp/git-credentials-7a2e6f2e-f36f-42cf-a782-c18674f54f5a.config
+2026-10-04T22:39:49.6341326Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/Mnemosyne/Mnemosyne/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-7a2e6f2e-f36f-42cf-a782-c18674f54f5a.config
+2026-10-04T22:39:49.6378239Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-10-04T22:39:49.6403726Z /github/runner_temp/git-credentials-7a2e6f2e-f36f-42cf-a782-c18674f54f5a.config
+2026-10-04T22:39:49.6410834Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-7a2e6f2e-f36f-42cf-a782-c18674f54f5a.config
+2026-10-04T22:39:49.6448413Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-10-04T22:39:49.6471627Z /github/runner_temp/git-credentials-7a2e6f2e-f36f-42cf-a782-c18674f54f5a.config
+2026-10-04T22:39:49.6479425Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-7a2e6f2e-f36f-42cf-a782-c18674f54f5a.config
+2026-10-04T22:39:49.6514406Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-04T22:39:49.6724006Z Removing credentials config '/home/runner/work/_temp/git-credentials-7a2e6f2e-f36f-42cf-a782-c18674f54f5a.config'
+2026-10-04T22:39:49.6873835Z Cleaning up orphan processes

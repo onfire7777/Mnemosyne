@@ -1,0 +1,19 @@
+{
+  "operations": [
+    {
+      "command": "task.create",
+      "payload": {
+        "task_id": "release_packet_reminder",
+        "trigger": {
+          "type": "time_window",
+          "payload": {
+            "start": "2030-11-28T01:00:00Z",
+            "end": "2030-11-28T02:00:00Z"
+          }
+        },
+        "idempotency_key": "release_packet_reminder"
+      }
+    }
+  ],
+  "clarification": "What is the exact time you would like to remind the user about reviewing the release packet?"
+}

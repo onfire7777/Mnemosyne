@@ -1,0 +1,115 @@
+{
+  "schema": "m12-provider-usage-diagnostic/v1",
+  "invocations": 4,
+  "calls": [
+    {
+      "file": "eval/reports/m12-dependency-attempt-2026-10-04/provider/0b7027721eb0418683a963fe27828d51.jsonl",
+      "sha256": "cc6ca4e8db49bbd26045ca423e843ef7e1a4e31ca368b942fe00dd9bd076db6c",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 914,
+        "eval_count": 146,
+        "total_duration": 3390666875,
+        "load_duration": 783829916,
+        "prompt_eval_duration": 891007000,
+        "eval_duration": 1701336000
+      }
+    },
+    {
+      "file": "eval/reports/m12-dependency-attempt-2026-10-04/provider/69af5d64b8e04d0e868332b9d2cb8113.jsonl",
+      "sha256": "6986829243a7a4fb0f114c64ff11a8bc9ccd625f2444628cfa82c4d9715cd0d9",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 919,
+        "eval_count": 166,
+        "total_duration": 3620532792,
+        "load_duration": 780870208,
+        "prompt_eval_duration": 895881000,
+        "eval_duration": 1930333000
+      }
+    },
+    {
+      "file": "eval/reports/m12-dependency-attempt-2026-10-04/provider/7aff640a03824d06a7200ac47a2807d4.jsonl",
+      "sha256": "1ae0749c812a98ef08c63b7e94ef79bb1c0bbc2698b68ba414f2bdcd07f1b809",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 1401,
+        "eval_count": 120,
+        "total_duration": 3607296834,
+        "load_duration": 782210042,
+        "prompt_eval_duration": 1363516000,
+        "eval_duration": 1449033000
+      }
+    },
+    {
+      "file": "eval/reports/m12-dependency-attempt-2026-10-04/provider/ca6a8396d86847d1b4c2b9bf01bb35ae.jsonl",
+      "sha256": "04782fe4c33a9be916fd54d5091555c941202588428695c568396b54bde62993",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 1425,
+        "eval_count": 135,
+        "total_duration": 3827603959,
+        "load_duration": 784693625,
+        "prompt_eval_duration": 1411347000,
+        "eval_duration": 1616695000
+      }
+    }
+  ],
+  "totals": {
+    "prompt_eval_count": {
+      "known_sum": 4659,
+      "known_calls": 4,
+      "missing_calls": 0,
+      "complete_total": 4659
+    },
+    "eval_count": {
+      "known_sum": 567,
+      "known_calls": 4,
+      "missing_calls": 0,
+      "complete_total": 567
+    },
+    "total_duration": {
+      "known_sum": 14446100460,
+      "known_calls": 4,
+      "missing_calls": 0,
+      "complete_total": 14446100460
+    },
+    "load_duration": {
+      "known_sum": 3131603791,
+      "known_calls": 4,
+      "missing_calls": 0,
+      "complete_total": 3131603791
+    },
+    "prompt_eval_duration": {
+      "known_sum": 4561751000,
+      "known_calls": 4,
+      "missing_calls": 0,
+      "complete_total": 4561751000
+    },
+    "eval_duration": {
+      "known_sum": 6697397000,
+      "known_calls": 4,
+      "missing_calls": 0,
+      "complete_total": 6697397000
+    }
+  },
+  "duration_unit": "nanoseconds",
+  "wall_elapsed_seconds": null,
+  "monetary_cost": null,
+  "provider_reported_not_attested": true,
+  "publishable": false,
+  "resource_admission_verified": false,
+  "ranking_eligible": false
+}

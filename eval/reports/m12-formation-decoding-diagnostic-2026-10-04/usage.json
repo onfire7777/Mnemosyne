@@ -1,0 +1,403 @@
+{
+  "schema": "m12-provider-usage-diagnostic/v1",
+  "invocations": 22,
+  "calls": [
+    {
+      "file": "eval/reports/m12-formation-decoding-diagnostic-2026-10-04/00-json/ffb5bc175744436aaca65368da62180d.jsonl",
+      "sha256": "7946e3c03845c1b90b08bc6f8f34e40ad6194d932da2c6fd8b176decd3fcec8b",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 942,
+        "eval_count": 133,
+        "total_duration": 3248498750,
+        "load_duration": 781023167,
+        "prompt_eval_duration": 912946000,
+        "eval_duration": 1546460000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-decoding-diagnostic-2026-10-04/00-schema/fbbcaa7c84f54ef393c1c5c4265452c4.jsonl",
+      "sha256": "631c5b09d015ecb65499f02c168f09d5139ced85c56aa8babfcb71b8be50ad83",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 942,
+        "eval_count": 131,
+        "total_duration": 3250373709,
+        "load_duration": 781948334,
+        "prompt_eval_duration": 922765000,
+        "eval_duration": 1534177000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-decoding-diagnostic-2026-10-04/01-json/c1195d440cc94a099e5f704f7aaf64c2.jsonl",
+      "sha256": "dc9f64be03b169d199fe161f640e8937dd41474b970ad5b6d796ef14b04be2f7",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 927,
+        "eval_count": 130,
+        "total_duration": 3252604542,
+        "load_duration": 786509500,
+        "prompt_eval_duration": 904950000,
+        "eval_duration": 1556087000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-decoding-diagnostic-2026-10-04/01-schema/f4e5f85c7967487d8fd3ce85888db388.jsonl",
+      "sha256": "4516965e0c9dd5a5c4e8ce021a2c64badecb5b7bf96ec1a06fbf6d27837b2376",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 927,
+        "eval_count": 131,
+        "total_duration": 3229125167,
+        "load_duration": 788145917,
+        "prompt_eval_duration": 891708000,
+        "eval_duration": 1537176000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-decoding-diagnostic-2026-10-04/02-json/6c9ec3eae7504e44935a00862e8f8ffe.jsonl",
+      "sha256": "d742792d0172c5f6d1ee3f499f172c1875444a27c0ec140f003e2588ce911389",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 945,
+        "eval_count": 311,
+        "total_duration": 5329944625,
+        "load_duration": 785832708,
+        "prompt_eval_duration": 916537000,
+        "eval_duration": 3618873000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-decoding-diagnostic-2026-10-04/02-schema/59ffb4d34eb343fcb851a6e92c037c75.jsonl",
+      "sha256": "9d78f4243ba447655c97580b32c2c974877df3929f7b4c0b9c8ad23bbd323a39",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 945,
+        "eval_count": 175,
+        "total_duration": 3780678750,
+        "load_duration": 788651208,
+        "prompt_eval_duration": 918206000,
+        "eval_duration": 2058393999
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-decoding-diagnostic-2026-10-04/03-json/b7d5e8d03f674b1bb4782d52c0783945.jsonl",
+      "sha256": "e00016f60a313555c1f565d56ac815723a8622624540a3c8093e81dd23f31eb7",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 912,
+        "eval_count": 127,
+        "total_duration": 3143850750,
+        "load_duration": 785194042,
+        "prompt_eval_duration": 885123000,
+        "eval_duration": 1465904000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-decoding-diagnostic-2026-10-04/03-schema/9adc7524e59344fc853a5509b2ad8b7c.jsonl",
+      "sha256": "60a31f1abe6c18fb1fa19da5203e7efaad61bf93ec9a1b4a800e53a818a2cd88",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 912,
+        "eval_count": 147,
+        "total_duration": 3416756459,
+        "load_duration": 785079917,
+        "prompt_eval_duration": 898340000,
+        "eval_duration": 1724276000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-decoding-diagnostic-2026-10-04/04-json/5c0e2d93b7604beea07ba80f1f99a691.jsonl",
+      "sha256": "7e5c9f5b58becf492d7d3f64cd1f4d38d3cb8bb4fa48b1a73f1ca1a77df0c06d",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 927,
+        "eval_count": 107,
+        "total_duration": 2922103625,
+        "load_duration": 783632083,
+        "prompt_eval_duration": 888281000,
+        "eval_duration": 1243441000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-decoding-diagnostic-2026-10-04/04-schema/5e25726c152c4641886642f679a57cdd.jsonl",
+      "sha256": "a7754ad2344b66fb8c591fc31ba8396830dd0431046a767f9be35ddd1e377135",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 927,
+        "eval_count": 244,
+        "total_duration": 4553962791,
+        "load_duration": 786275916,
+        "prompt_eval_duration": 883792000,
+        "eval_duration": 2869578000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-decoding-diagnostic-2026-10-04/05-json/a5aa8dc7fc2a40649baf4366dc5f31f1.jsonl",
+      "sha256": "03b2401ff336c7054d64e08fb283564451d2c8a2f333cca2ff0f7a4225a9b1a6",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 936,
+        "eval_count": 130,
+        "total_duration": 3215130833,
+        "load_duration": 788435292,
+        "prompt_eval_duration": 912116000,
+        "eval_duration": 1505385000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-decoding-diagnostic-2026-10-04/05-schema/725b9d52912e4fa9a182c0bd1335bb67.jsonl",
+      "sha256": "6d5cb5742af8c2f455d20c63848d6b72a2fe6512a81f16cf1b41e8dcf661ac52",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 936,
+        "eval_count": 129,
+        "total_duration": 3227572916,
+        "load_duration": 782148500,
+        "prompt_eval_duration": 913828000,
+        "eval_duration": 1517255000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-decoding-diagnostic-2026-10-04/06-json/a12b7cf9ba324a3097cdfdd90430cf55.jsonl",
+      "sha256": "4d6001149627dc6a514e40a973ed127f77f1097a6f3043fb320401f59275b2dd",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 969,
+        "eval_count": 152,
+        "total_duration": 3504320583,
+        "load_duration": 784133708,
+        "prompt_eval_duration": 945905000,
+        "eval_duration": 1764464000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-decoding-diagnostic-2026-10-04/06-schema/20fef3fad2a54ad99d0e9b9f7d0d2d91.jsonl",
+      "sha256": "53f13c2e4a376e01b864c87dbf58adecda51d4a09dc292957e1f7ac54cc85ac7",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 969,
+        "eval_count": 161,
+        "total_duration": 3624728458,
+        "load_duration": 783218208,
+        "prompt_eval_duration": 946349000,
+        "eval_duration": 1881352000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-decoding-diagnostic-2026-10-04/07-json/5aad4c78f2e94ac29df8ec5b5246a7b8.jsonl",
+      "sha256": "9b0c02294eb6869c5d202ce83a0f4171ddfb161a9cbe0d17103f44819b6c11fa",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 949,
+        "eval_count": 129,
+        "total_duration": 3203578125,
+        "load_duration": 783085542,
+        "prompt_eval_duration": 912479000,
+        "eval_duration": 1499924000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-decoding-diagnostic-2026-10-04/07-schema/2738967a05cd44cbb7bd01a9746c237f.jsonl",
+      "sha256": "117da3a2c52bd1698c36c1c33d4b37ee9595c2b48dd03e0618f6a13406dd79f0",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 949,
+        "eval_count": 131,
+        "total_duration": 3269931792,
+        "load_duration": 788043209,
+        "prompt_eval_duration": 919559000,
+        "eval_duration": 1547371000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-decoding-diagnostic-2026-10-04/08-json/2361d83c79b644a28c8b13e44b69b8d2.jsonl",
+      "sha256": "10a999727144524461267144a37979083635793fe60d2f415430042d0573da8c",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 926,
+        "eval_count": 150,
+        "total_duration": 3419355458,
+        "load_duration": 783744167,
+        "prompt_eval_duration": 883052000,
+        "eval_duration": 1744326000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-decoding-diagnostic-2026-10-04/08-schema/b836c29e95e34329b534f1b33da5e98e.jsonl",
+      "sha256": "69c982224fcc7ebc1b1134c17619593a459abc5d332d2698516e712cde4c1dec",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 926,
+        "eval_count": 147,
+        "total_duration": 3424615666,
+        "load_duration": 788195875,
+        "prompt_eval_duration": 896068000,
+        "eval_duration": 1729686000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-decoding-diagnostic-2026-10-04/09-json/014d8b7fac1643fb8c6e2259cb8c3e09.jsonl",
+      "sha256": "13c26d8385fa229d899f0cfac29349517965ffb8cf20c51a97186958d39c3c0f",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 930,
+        "eval_count": 107,
+        "total_duration": 2936245250,
+        "load_duration": 783117292,
+        "prompt_eval_duration": 910588000,
+        "eval_duration": 1235954000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-decoding-diagnostic-2026-10-04/09-schema/b21c30303d414f9297b7655def457596.jsonl",
+      "sha256": "67ca947eae0be70f3a03c36bcc828e14e0a1ae6b08318e7e073f988f31ea55f5",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 930,
+        "eval_count": 264,
+        "total_duration": 4925566042,
+        "load_duration": 786933375,
+        "prompt_eval_duration": 932139000,
+        "eval_duration": 3192851000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-decoding-diagnostic-2026-10-04/10-json/28930e9f59af48b0ba38769999760634.jsonl",
+      "sha256": "ff7808e0c1cb8b96f1413992bf6e5c330e3ccfd7f927155e34b8d09ce58cd74f",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 915,
+        "eval_count": 128,
+        "total_duration": 3183815166,
+        "load_duration": 784147416,
+        "prompt_eval_duration": 914822000,
+        "eval_duration": 1477343000
+      }
+    },
+    {
+      "file": "eval/reports/m12-formation-decoding-diagnostic-2026-10-04/10-schema/20c0e8e7bbac4663b55549c3f602dadd.jsonl",
+      "sha256": "8dae8bf3e9f8eab45988488e9119068909ba3ef30008509863898e2fd34c07ba",
+      "model": "qwen3:1.7b",
+      "prompt_profile": "semantics-v2",
+      "response_retained": true,
+      "terminal_stage": "completed",
+      "provider_reported": {
+        "prompt_eval_count": 915,
+        "eval_count": 149,
+        "total_duration": 3448518375,
+        "load_duration": 786998583,
+        "prompt_eval_duration": 891532000,
+        "eval_duration": 1757789000
+      }
+    }
+  ],
+  "totals": {
+    "prompt_eval_count": {
+      "known_sum": 20556,
+      "known_calls": 22,
+      "missing_calls": 0,
+      "complete_total": 20556
+    },
+    "eval_count": {
+      "known_sum": 3413,
+      "known_calls": 22,
+      "missing_calls": 0,
+      "complete_total": 3413
+    },
+    "total_duration": {
+      "known_sum": 77511277832,
+      "known_calls": 22,
+      "missing_calls": 0,
+      "complete_total": 77511277832
+    },
+    "load_duration": {
+      "known_sum": 17274493959,
+      "known_calls": 22,
+      "missing_calls": 0,
+      "complete_total": 17274493959
+    },
+    "prompt_eval_duration": {
+      "known_sum": 20001085000,
+      "known_calls": 22,
+      "missing_calls": 0,
+      "complete_total": 20001085000
+    },
+    "eval_duration": {
+      "known_sum": 40008065999,
+      "known_calls": 22,
+      "missing_calls": 0,
+      "complete_total": 40008065999
+    }
+  },
+  "duration_unit": "nanoseconds",
+  "wall_elapsed_seconds": null,
+  "monetary_cost": null,
+  "provider_reported_not_attested": true,
+  "publishable": false,
+  "resource_admission_verified": false,
+  "ranking_eligible": false
+}

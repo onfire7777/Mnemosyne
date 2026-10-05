@@ -1,0 +1,25 @@
+{
+  "source_commit": "5cce12c6fae7a9eb0d9aa5c85aa3673747800a91",
+  "source_dirty": false,
+  "runtime_version": "1.28.0",
+  "runtime_library_sha256": "99909e99214e31fe2296c9f7fae5abc2eaf0145342efe8b0a6ed82e9ddb0a0a0",
+  "commands": {
+    "native": {
+      "argv": [
+        "cargo",
+        "test",
+        "--manifest-path",
+        "services/answering-ort/Cargo.toml",
+        "--features",
+        "onnx",
+        "--",
+        "--include-ignored"
+      ],
+      "returncode": 101,
+      "elapsed_seconds": 2.00483875,
+      "log_sha256": "4c5b23a27a17bb2dfaa34100279f3aa1ac4267d1cd2e1e0d0d3cb457cd96f7d5"
+    }
+  },
+  "learned_quality_verified": false,
+  "physical_acceptance_verified": false
+}

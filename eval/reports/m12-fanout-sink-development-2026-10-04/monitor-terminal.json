@@ -1,0 +1,22 @@
+{
+  "argv": [
+    "/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne/.superpowers/sdd/completion-2026-10-04/verified-venv/bin/python",
+    "-m",
+    "eval.public.action_trigger_run",
+    "/Users/admin/.local/state/mnemosyne/action-fanout-runs/2026-10-04-c7a9d05a/workload",
+    "--sink",
+    "--fanout"
+  ],
+  "benchmark_verified": false,
+  "cwd": "/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne",
+  "elapsed_seconds": 226.6787699579727,
+  "finished_at": "2026-10-04T19:34:14.713804+00:00",
+  "pid": 73887,
+  "poll_seconds": 1.0,
+  "reason": "process-exited",
+  "returncode": 0,
+  "schema": "mnemosyne.monitored-command.v1",
+  "started_at": "2026-10-04T19:16:49.888119+00:00",
+  "status": "succeeded",
+  "wall_seconds": 1800
+}

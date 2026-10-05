@@ -1,0 +1,61 @@
+{
+  "schema": "compact-train-intake-verification/v1",
+  "assets": [
+    {
+      "repository": "rajpurkar/squad_v2",
+      "revision": "3ffb306f725f7d2ce8394bc1873b24868140c412",
+      "upstream_path": "README.md",
+      "local_path": "rajpurkar/squad_v2/3ffb306f725f7d2ce8394bc1873b24868140c412/README.md",
+      "bytes": 8916,
+      "sha256": "7a6726352072e8517318959fe0438d4f45880affc041ced6da3bf2e4dec94c68",
+      "source_url": "https://huggingface.co/datasets/rajpurkar/squad_v2/resolve/3ffb306f725f7d2ce8394bc1873b24868140c412/README.md",
+      "role": "license-card"
+    },
+    {
+      "repository": "rajpurkar/squad_v2",
+      "revision": "3ffb306f725f7d2ce8394bc1873b24868140c412",
+      "upstream_path": "squad_v2/train-00000-of-00001.parquet",
+      "local_path": "rajpurkar/squad_v2/3ffb306f725f7d2ce8394bc1873b24868140c412/squad_v2/train-00000-of-00001.parquet",
+      "bytes": 16369982,
+      "sha256": "f6da32ffb482ff463ad056477740d1bb284b96a45db3a08bee6a225ca6abf291",
+      "source_url": "https://huggingface.co/datasets/rajpurkar/squad_v2/resolve/3ffb306f725f7d2ce8394bc1873b24868140c412/squad_v2/train-00000-of-00001.parquet",
+      "role": "train"
+    },
+    {
+      "repository": "hotpotqa/hotpot_qa",
+      "revision": "1908d6afbbead072334abe2965f91bd2709910ab",
+      "upstream_path": "README.md",
+      "local_path": "hotpotqa/hotpot_qa/1908d6afbbead072334abe2965f91bd2709910ab/README.md",
+      "bytes": 9522,
+      "sha256": "3cfab003a856275d3198b031c6b2ac46c63178fb462a4123705f652b71b22813",
+      "source_url": "https://huggingface.co/datasets/hotpotqa/hotpot_qa/resolve/1908d6afbbead072334abe2965f91bd2709910ab/README.md",
+      "role": "license-card"
+    },
+    {
+      "repository": "hotpotqa/hotpot_qa",
+      "revision": "1908d6afbbead072334abe2965f91bd2709910ab",
+      "upstream_path": "distractor/train-00000-of-00002.parquet",
+      "local_path": "hotpotqa/hotpot_qa/1908d6afbbead072334abe2965f91bd2709910ab/distractor/train-00000-of-00002.parquet",
+      "bytes": 165624177,
+      "sha256": "76d3bb3048a7cc73c1958107c0c5872a00d7e7d00c105b81e92f6769e7822e68",
+      "source_url": "https://huggingface.co/datasets/hotpotqa/hotpot_qa/resolve/1908d6afbbead072334abe2965f91bd2709910ab/distractor/train-00000-of-00002.parquet",
+      "role": "train"
+    },
+    {
+      "repository": "hotpotqa/hotpot_qa",
+      "revision": "1908d6afbbead072334abe2965f91bd2709910ab",
+      "upstream_path": "distractor/train-00001-of-00002.parquet",
+      "local_path": "hotpotqa/hotpot_qa/1908d6afbbead072334abe2965f91bd2709910ab/distractor/train-00001-of-00002.parquet",
+      "bytes": 166162479,
+      "sha256": "713661628434fbb19fff7392e2e321e4ed107e3c7c7784d0690946e5f722763f",
+      "source_url": "https://huggingface.co/datasets/hotpotqa/hotpot_qa/resolve/1908d6afbbead072334abe2965f91bd2709910ab/distractor/train-00001-of-00002.parquet",
+      "role": "train"
+    }
+  ],
+  "all_asset_bytes_independently_rehashed": true,
+  "download_implementation_commit": "b9c3dbd7",
+  "download_implementation_sha256": "923463739a56aea945ff215bb49e02da8b82ef23853d372d63c74f227019560b",
+  "original_receipt_source_hash_valid": false,
+  "source_hash_limitation": "Original downloader read source at completion; the source file was edited during transfer. Its original transform_sha256 is not execution identity. The known launch revision is recorded separately; fixed in e90d4622.",
+  "training_admitted": false
+}

@@ -1,0 +1,6 @@
+import json,sys
+from pathlib import Path
+from eval.public.action_formation_ollama import complete
+root=Path(__file__).resolve().parent
+result=complete(json.loads((root/'input.json').read_text()),model='qwen3:0.6b',digest='7df6b6e09427a769808717c0a93cadc4ae99ed4eb8bf5ca557c90846becea435',evidence_dir=root/'http',output_mode='schema')
+sys.stdout.buffer.write(result)

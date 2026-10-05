@@ -1,0 +1,24 @@
+{
+  "schema": "compact-decoded-reader-development-capture/v1",
+  "files": {
+    "README.md": "c842a33dc5b54334f312cb88a2eab4642c2a91e71314e0bd6f82fc96608c8f33",
+    "clippy.log": "4cf86278c1e6d659943a46a3d7e3da429ac15be90f0f17742e24ef85228e7d3e",
+    "compatibility.log": "57c368fbf8b1e826a5f71165fee062631201cc2a6823f2af0dc1f73992012096",
+    "default.log": "832e43a1ff34530b5e621623ba94498d1ed570ce47bf76bb3fdc74d291c55ce5",
+    "fixture/extra-output.onnx": "0054845aae1e3180ae118ec6bba3dfb9c4f593b742de334db01cd60e941b13f3",
+    "fixture/fixture.json": "fb3824f998c245125c7e855707a721a748227a2eeeeae44a59be4eb7dddd68f7",
+    "fixture/nonfinite.onnx": "73ee043b40a61ceebc7623d353b212f639844a606b299a32d7a2ab638877150e",
+    "fixture/reader-cases.json": "a66caed9546323e09d72621637f97888127eb3385e9dc4f48e3b821a943d971a",
+    "fixture/short-output.onnx": "07b1dadbdbbf040a2bec67687ab4a88a667a814c491e529247621e693e1940e8",
+    "fixture/span.onnx": "c2cc54fb369b5b29b3dbf8df0251c24a1c4fc31892d797ca7305fee19983c065",
+    "fixture/token-types.onnx": "897d06b6c809799816eb221edc8b248d490162e84740364c1bc50ad666cdb95f",
+    "fixture/tokenizer.json": "71c88a3c45127a777dc0e2e4cedc3567ad2093ff074b8876803d97e3b2d85ba9",
+    "format.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native.log": "23656d266b26dfde378d38f41db23934a65023266c5d7afdbf66221c0aba88be",
+    "reader-fixture.log": "1ea9ffde75cb68a5e678b0588136adb903ff6bad562047bde5e47ab2146a73c3",
+    "tensor-fixture.log": "d01720234590e19d59789be6f3d59e22fd09634d01849f8e8bfae3d0b3ee2f3e",
+    "validation.json": "b7a8029fc05a49745705fb81093c5cebe24824ec40e27a8c5273beac2a69cc65"
+  },
+  "publishable": false,
+  "ranking_eligible": false
+}

@@ -1,0 +1,11 @@
+{
+  "schema": "compact-train-source-audit/v1",
+  "counts": {
+    "source_rows": 220766,
+    "retained_rows": 220744,
+    "rejected_rows": 22,
+    "verified_spans": 194069
+  },
+  "all_retained_rows_checked_against_raw_source": true,
+  "training_admitted": false
+}

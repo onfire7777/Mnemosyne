@@ -1,5 +1,37 @@
 # WMB M08 — Reversible Forgetting Implementation Contract
 
+Status: `PROPOSED` — full module protocol remains unfrozen and not approved.
+Current development evidence below does not confer full module readiness.
+
+## Current source reconciliation — 2026-10-04
+
+[Candidate development protocol and remaining freeze decisions](wmb-m08-development-protocol-2026-10-04.md) now specifies selector/receipt semantics, case ordering and metric denominators. It is not an admitted or frozen protocol.
+
+The current owner authorizes solo implementation on the existing development
+branch; historical lane/write-slot restrictions below do not require creating
+new branches or resurrecting old PRs. Technical capability and benchmark gates
+remain binding.
+
+The public CLI and `MnemoCLI.forget` expose `tombstone_recompute` and
+`hard_delete_legal`. The source inventory did not find a public `restore` or
+`undelete` command for a delete receipt, nor an explicit `reversible` mode.
+This does not establish that tombstoning cannot support a reversible-delete
+adapter: it establishes that the mapping and its observable guarantees have
+not been frozen or demonstrated. Do not rename hard deletion to reversible
+deletion or count backup recovery as a tested restore operation. Restore is
+optional in the M08 contract; absence of restore alone does not disqualify an
+otherwise valid reversible-delete adapter.
+
+The next source-readiness step is a precise public adapter contract covering
+selector scope, receipt identity, tombstone behavior, re-ingestion transitions
+and whether restore is supported. The descriptive fixture/scorer also need
+the existing closed-schema and metric-formula freeze. Resource receipts gate
+measured/admitted claims, not the pure Stage A source work, as specified below.
+Until these prerequisites are resolved, the website describes M08 as
+unfinished rather than as a measured capability or a zero score.
+
+## Historical implementation contract
+
 Status: `PROPOSED` / **PLANNING ARTIFACT ONLY — NOT CODE-READY.**
 This file authorizes no source, fixture, registry, scorer, measurement,
 admission-state, publication change, or GitHub PR.
@@ -284,3 +316,46 @@ zero exact-canary leakage; semantic leakage ≤1%; unrelated utility loss
 No registry row exists, so this cell is not runnable. A missing hook is
 `unsupported`, never a zero.
 ```
+
+## Public tombstone/re-ingestion characterization — 2026-10-04
+
+A temporary local-store probe through public CLI subprocesses establishes a
+specific existing behavior: after `forget --erasure-mode tombstone_recompute`,
+re-ingesting the identical source produces the same CID but does not restore
+that evidence to search. This holds through two delete/re-ingest cycles. The
+target is demonstrably retrievable before deletion; unrelated same-tenant
+content and identical content in a second tenant remain retrievable after both
+cycles. The repeatable regression is
+`tests/test_public_tombstone_reingestion.py`; it passed on the local production
+environment, with Ruff also passing.
+
+This narrows the adapter contract: identical re-ingestion must not be presented
+as restoration of the tombstoned item. It demonstrates no-resurrection and
+control preservation for this bounded exact-query case, not general semantic
+leakage, multi-hop contamination, full erase coverage, five seeded corpora or
+restore correctness. No public restore operation is exercised or implied. The
+C10 mapping and the full M08 fixture/scorer remain unresolved. No persistent
+user store, model, external service or protected dataset was used.
+
+## Reversible-delete implementation boundary — 2026-10-04
+
+Further source review of `MnemosyneEngine.forget` confirms that the
+`tombstone_recompute` branch blanks `ev.content`, marks the evidence erased,
+and applies the same treatment to erased derived evidence. The tombstone
+retains identity as a replay blocklist; it is not merely a reversible visibility
+flag. The public two-cycle test confirms that identical ingestion does not
+restore it. The existing `hard_delete_legal` mode remains a separate destructive
+operation. No adapter may relabel either operation as proven reversible
+forgetting without a new, explicit capability contract and evidence.
+
+The implementation sequence must therefore resolve the product boundary before
+claiming C10: define the authorized reversible operation and retained-data
+policy; keep it distinct from hard deletion; specify tenant/branch scope and
+receipt identity; define how later hard deletion removes any recovery material;
+and define whether authorized restoration is offered. If restoration is
+offered, it must preserve relevant provenance and avoid resurrecting subsequent
+corrections, legal erasures or another tenant's data. Freeze these semantics
+with the module-local or shared ABI before Stage B. This is retained work, not
+an exemption from the original M08 requirement. Until implemented, report the
+current adapter as lacking a demonstrated reversible-delete operation rather
+than assign it a zero-quality score or a passing tombstone proxy.

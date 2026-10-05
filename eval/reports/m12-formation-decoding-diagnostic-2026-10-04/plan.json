@@ -1,0 +1,15 @@
+{
+  "source_commit": "c4a9d32a93de92d863f3368736eb067518e83526",
+  "output_modes": [
+    "json",
+    "schema"
+  ],
+  "prompt_profile": "semantics-v2",
+  "selection": "first 11 frozen corpus cases, first turn only; no task execution",
+  "model": "qwen3:1.7b",
+  "digest": "8f68893c685c3ddff2aa3fffce2aa60a30bb2da65ca488b61fff134a4d1730e7",
+  "wire_order": "declared",
+  "num_ctx": 12288,
+  "inputs_sha256": "858fa956f50d5eaabac70594479a755f0854092730bad9568e8c176f71afdd94",
+  "publishable": false
+}

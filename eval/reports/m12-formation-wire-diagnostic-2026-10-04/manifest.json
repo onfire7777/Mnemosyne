@@ -1,0 +1,141 @@
+{
+  "cells": 4,
+  "files": {
+    "http-repeat/http/92ec56f1e4584cdf94ff9f0a6d05f5e2.jsonl": {
+      "bytes": 14573,
+      "sha256": "ddfc9089ec3cba1be3db37102cd079f300b20f96f183baf132ea078442eb8c38"
+    },
+    "http-repeat/input.json": {
+      "bytes": 1077,
+      "sha256": "10b662fa809f90f74cd12623f5eeb6c0914c38d04f2c50337e421fc6dc62fce0"
+    },
+    "http-repeat/monitor/pressure.jsonl": {
+      "bytes": 113,
+      "sha256": "8245e0d3936c4052a071c4f315d88a89f3d06f710a24af24f729896cb118841d"
+    },
+    "http-repeat/monitor/start.json": {
+      "bytes": 517,
+      "sha256": "9fe92f43dc9663aadb3b0e0c0f07881e7cc1b215bef3d61c3a0fb54e44ae9971"
+    },
+    "http-repeat/monitor/stderr.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "http-repeat/monitor/stdout.log": {
+      "bytes": 218,
+      "sha256": "8141e943aafb03c2f924667d6a242ce5ca95469a937a97d6fdbf84a309c6183a"
+    },
+    "http-repeat/monitor/terminal.json": {
+      "bytes": 639,
+      "sha256": "d315ae52e9a3df79c08a7e320e088b0a2de4c4a1db2d5099e8d60c38dd1ce032"
+    },
+    "http-repeat/plan.json": {
+      "bytes": 279,
+      "sha256": "a046f8e82ac03dc26c57cf4ba2b9bfab055a36385b535510cfe8c3a51c8f02f8"
+    },
+    "http-repeat/replay.py.txt": {
+      "bytes": 367,
+      "sha256": "bd1385d2c5b86a33ea1895887a4e5a79c063ce71f846d218afc2f3df5bf83762"
+    },
+    "matrix/0/28979c7fcc104446b87c7b2f9577f07b.jsonl": {
+      "bytes": 29805,
+      "sha256": "5d269a1c28ba0064530551d909ef61fb7d8e48d50501a0722d408ae4ba25966b"
+    },
+    "matrix/1/9442d741e96b473b9f3550115e17c62b.jsonl": {
+      "bytes": 30257,
+      "sha256": "048b593db4fae273f3da5e104d569ed562faaf7219ff2161e18a504775851716"
+    },
+    "matrix/2/4c8c14af993b439995e88000102717ee.jsonl": {
+      "bytes": 29686,
+      "sha256": "cebca3d5292ffade49021cda88cfae987a25c6d9f6e58ebf866cdda23f64369d"
+    },
+    "matrix/3/d8256c2ff4ab49c58daf6bd164bf65f3.jsonl": {
+      "bytes": 30100,
+      "sha256": "93c63ceeae73fdfb59b516883355871928ecb2e86308aa9817b441922219ac7a"
+    },
+    "matrix/input.json": {
+      "bytes": 1077,
+      "sha256": "10b662fa809f90f74cd12623f5eeb6c0914c38d04f2c50337e421fc6dc62fce0"
+    },
+    "matrix/monitor/pressure.jsonl": {
+      "bytes": 545,
+      "sha256": "9a9c91f951824f6f0265bd1021dceb3862e31bbb5fce02717b59d6aa8cf5de8e"
+    },
+    "matrix/monitor/start.json": {
+      "bytes": 523,
+      "sha256": "319f0d51fd0239e7e9b4a9cd0eafdb109c6aaefa3e0522660c985575f492c683"
+    },
+    "matrix/monitor/stderr.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "matrix/monitor/stdout.log": {
+      "bytes": 1179,
+      "sha256": "34912126370f46a7cd8d93030ff2c0cc2fd39fde730523ef625d856f1cf0d137"
+    },
+    "matrix/monitor/terminal.json": {
+      "bytes": 643,
+      "sha256": "3a453277778f1f55dbb64e5a0408462675e9074fa6c8cf607f00a7cb36c45b49"
+    },
+    "matrix/output-0.txt": {
+      "bytes": 218,
+      "sha256": "8141e943aafb03c2f924667d6a242ce5ca95469a937a97d6fdbf84a309c6183a"
+    },
+    "matrix/output-1.txt": {
+      "bytes": 506,
+      "sha256": "4105f788e0028cec78f637785ca65365668d637b499bf21cbaef331fb7a1f3fa"
+    },
+    "matrix/output-2.txt": {
+      "bytes": 115,
+      "sha256": "4c4ebb71717324328c50ae83d9f6fe015616819ec6d6c0ac7feb459453c45323"
+    },
+    "matrix/output-3.txt": {
+      "bytes": 401,
+      "sha256": "ac0f106dc41bbe5963c37a38de46c7f4aeefc66833130692f4dfa68b2ee412c4"
+    },
+    "matrix/plan.json": {
+      "bytes": 913,
+      "sha256": "3d050bfcb62b152f28a1666b3fbe21aab0197bf15feea9d430d0b389b3171a73"
+    },
+    "matrix/result-0.json": {
+      "bytes": 420,
+      "sha256": "044d717c0b2e158b9a58eafd74581a02ce23db844329e12f87ba773ae84e978c"
+    },
+    "matrix/result-1.json": {
+      "bytes": 261,
+      "sha256": "5401df9faab80df0cb2d0de2ce5d1e106d341e240df5b73b399c777f6bb4008d"
+    },
+    "matrix/result-2.json": {
+      "bytes": 309,
+      "sha256": "0d48621a610a9040c3854a42e3a0b1309713eabcbcf057cc21e70994d180a1e7"
+    },
+    "matrix/result-3.json": {
+      "bytes": 261,
+      "sha256": "4876a7812f201afd67e0914b3a2cf5dfcaadb0fb7bcb15efe7dce5a8230416d8"
+    },
+    "matrix/run.py.txt": {
+      "bytes": 1648,
+      "sha256": "47f41d6d1e1e05b9ff9273d8e57082d53c4765985ff1dba005957f01a3143b75"
+    }
+  },
+  "model_tags": [
+    "qwen3:0.6b",
+    "qwen3:1.7b"
+  ],
+  "observed": "canonical: both clarify; declared: both propose exact_time for an event request",
+  "prior_http_cause": "unresolved; exact input succeeded on one diagnostic repeat",
+  "publishable": false,
+  "purpose": "single-input transport and schema-order diagnostics, not task execution or a benchmark",
+  "ranking_eligible": false,
+  "schema": "m12-formation-wire-diagnostic/v1",
+  "source_commit": "a927ee4ebd3de8c176dc3216a643684f795f1993",
+  "source_snapshot_names": {
+    "http-repeat/replay.py.txt": "http-repeat/replay.py",
+    "matrix/run.py.txt": "matrix/run.py"
+  },
+  "task_execution": false,
+  "wire_orders": [
+    "canonical",
+    "declared"
+  ]
+}

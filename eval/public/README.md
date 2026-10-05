@@ -56,20 +56,95 @@ uv run --locked mneme eval-public --suite triggerbench-development --out-dir /tm
 repository-authored fixtures into authenticated `intention-schedule`,
 `intention-update`, `intention-cancel`, and `intention-evaluate` subprocess
 commands, and route the fixtures' time, event, and condition observations
-through the production evaluator's `intention-evaluate` arguments. Selection is
-the evaluator-side intersection of the production evaluator's fired data-only
-action IDs with the available opaque IDs; the harness never executes or exposes
+through the production evaluator's `intention-evaluate` arguments. Selection
+filters the production evaluator's fired data-only action IDs against the
+available opaque IDs while preserving duplicates for rejection; the harness never executes or exposes
 an action payload or fixture gold, and it fails closed on missing auth, scope
 mismatch, gold leakage, payload execution, or unsupported semantics.
 
 The M12 fixtures are deliberately small: `pm-bench-development` has one seed
 (`7`), one case, five tasks, and seven steps; `triggerbench-development` has
-one seed (`7`), twenty one-step cases, and no calibrated baseline. Recurrence
-is represented in fixture metadata but is not forwarded as production
-recurrence plumbing. Lateness is scored only as a binary `late` safety counter,
+one seed (`7`), twenty one-step cases, and no calibrated baseline. The action
+CLI now forwards an explicit `recurrence_policy` on task creation or update;
+subprocess tests cover bounded repeated firing and invalid-policy rejection.
+The committed fixtures still carry only regularity metadata, so these suites
+do not yet exercise recurrence or establish calibrated recurrence performance.
+Lateness is scored only as a binary `late` safety counter,
 which is zero on both committed fixtures because they are easy rather than
 because the counter is inert; neither suite measures lateness magnitude or
 cost.
+
+The adapter preserves duplicate firing observations so the benchmark's existing
+duplicate-ID check can reject them; it must not normalize a duplicate execution
+into a successful single action. Separate public-subprocess regressions use five
+seeded calendars over four virtual weeks, with weekly recurrence, delayed polls,
+same-time retries, a midstream cancellation and a surviving control intention.
+These are implementation regressions, not expanded registered fixtures or an
+admitted M12 result. Injected poll delays do not measure real scheduler latency,
+and no external action payload or production scheduler runs in these tests.
+
+The development adapter also forwards an explicit `idempotency_key` on
+`task.create`, and a paired `idempotency_key` / `expected_revision` on override
+or reschedule updates and cancellation. `task.inspect` reads the public provider-issued content
+revision and scoped intention/action/status identifiers. The adapter never
+refreshes an update's precondition automatically: retries must retain their
+original key and revision. Recreating the adapter's in-memory map is possible
+by replaying the original keyed creation request before retrying an update.
+Within a live adapter, a keyed task cannot be rebound to another creation key
+or share that key with another task. Cancellation retries also retain their
+original key/revision, and partial revision/key pairs are rejected.
+
+Public-subprocess regressions drop the first successful create, update and
+cancel responses, rebuild the adapter state, and resend the original requests
+on five calendar dates. Firing and cancellation variants check conflicts,
+unchanged intention identity, one firing for uncancelled intentions, no firing
+for cancelled intentions, and no second firing on a repeated tick. This models response loss **after a
+successful subprocess exit**, not power loss or arbitrary crash points. It
+does not expand the registered fixtures or establish full M12 recovery admission.
+
+An opt-in `intention.observe` command now captures public firing identities,
+occurrences, due dates, virtual evaluation clocks and command wall duration.
+`action_timing.score_exact_time` scores these against an independently supplied
+schedule, retaining missing, pending, early, late, duplicate, cancelled and
+unexpected outcomes. It is a separate development diagnostic, not a change to
+the two registered suites. See the [exact-time diagnostic contract](../../docs/plans/m12-exact-time-development-protocol-2026-10-04.md)
+for denominators, clock semantics and the remaining M12 requirements.
+
+A separate [five-trigger window scorer](../../docs/plans/m12-trigger-window-development-2026-10-04.md)
+accepts independently declared eligibility intervals, including transient
+event/condition signals and exclusive time-window endpoints. Its development
+reports separate invalid firings, missed observed opportunities, duplicates
+and lateness from actual eligibility. It does not prove workload completeness
+or supply the planned registered multiweek corpus or calibration.
+
+Run and retain the five-seed exact-time diagnostic in a new directory:
+
+```sh
+uv run --locked python -m eval.public.action_timing_run /tmp/m12-timing-new-run
+uv run --locked python -m eval.public.action_timing_run /tmp/m12-timing-new-run --recompute
+```
+
+The runner writes its deterministic plan before execution, captures all 145
+planned operations across five isolated cases, and saves per-case reports,
+source metadata and completion status. A failed run retains completed
+operations and a failure status without copying exception text that could
+contain session tokens. Existing output directories are never overwritten.
+An abrupt process termination may leave no status file; that is incomplete.
+Recomputation checks the complete operation sequence, planned clocks and exact
+reports from saved observations. It does not execute the system again, verify
+production-runtime custody or grant benchmark admission. Fresh executions may
+have different intention IDs and command wall times. This directory is not a
+registered `eval-public` bundle and supplies no publication eligibility.
+
+Add `--sink` when creating a new diagnostic run to deliver every observed
+firing to a durable, inert SQLite sink and retry each delivery once. The
+`sink.json` annex retains both candidate observations and deliberate harness
+retries; `sink.sqlite3` is the local durable store. One receipt is committed
+per run/case/principal/intention/occurrence identity. Changed action content
+for that identity is a conflict, not a successful retry. No external action
+payload executes. The normal `--recompute` command checks the JSON annex by
+replaying deliveries into a temporary sink; it does not authenticate or
+certify the original database. Older captures without an annex still replay.
 
 ### M13 working memory
 
@@ -278,10 +353,11 @@ Bundle metadata names the backend the public CLI actually exercised
 (`backend`; `MnemoCLI` defaults to `local`). A missing or fabricated
 backend fails `test_m02_bundle_declares_backend_explicitly`. That is a
 store disclosure, including an omitted PostgreSQL path, not a
-portability claim. `verify_bundle` still has no `allowed_profile` or
-canonical-replay-seed row for `wmbs-m02-retrieval-v1` because
-`bundle.py` is outside this lease; Stage B scores through
-`score_profile` instead.
+portability claim. `bundle.py` now verifies `wmbs-m02-retrieval-v1`
+by recomputing `score_profile` against the registry-bound fixture and
+`_scoring_labels`; canonical replay binds seed `20260801`. Reproduction
+still requires the configured grounded reader used by `mnemo answer`;
+bundle tests with a synthetic CLI are plumbing checks, not measured QA evidence.
 
 ### M03 valid-time development
 
@@ -352,11 +428,12 @@ Bundle metadata names the backend the public CLI actually exercised
 (`backend`; `MnemoCLI` defaults to `local`). A missing or fabricated
 backend fails `test_m04_bundle_declares_backend_explicitly`. That is a
 store disclosure, including an omitted PostgreSQL path, not a
-portability claim. `verify_bundle` still has no `allowed_profile` or
-canonical-replay-seed row for `wmbs-m04-v1` because
-`bundle.py` is outside this lease; Stage B scores through
-`score_profile` instead. The runner passes the fixture as scoring labels
-because `bundle._scoring_labels` rejects this case-based schema.
+portability claim. `bundle.py` now verifies `wmbs-m04-v1` with the
+registry-bound fixture supplied by `_scoring_labels`, preserving each
+case/permutation/source-ablation identity and recomputing the closed scorer.
+Canonical replay binds seeds `11`, `23`, `37`, `53`, `71`. Reproduction still
+requires the configured grounded reader used by `mnemo answer`; synthetic
+CLI bundle tests establish plumbing only, not measured conflict resolution.
 
 
 ### M05 provenance development
@@ -458,13 +535,13 @@ private consolidation API. No headline. No `PILOT-READY-DEV`. Source
 `docs/plans/wmb-m06-consolidation-learning-implementation-plan.md` remains
 a PROPOSED planning artifact.
 
-`verify_bundle` still has no `allowed_profile` or
-canonical-replay-seed row for `wmbs-m06-v1` because
-`bundle.py` is outside this lease; Stage B scores through
-`score_profile` instead. The runner passes the fixture as scoring labels
-because `bundle._scoring_labels` rejects this case-based schema. The
-adapter does not call `mnemo answer`, because that command is not a
-model-free path and this cell admits no provider budget.
+`bundle.py` now supports `verify_bundle` and reproduction for
+`wmbs-m06-v1`: `_scoring_labels` supplies the registry-bound fixture and
+`score_profile` validates the complete case/cycle matrix. Canonical replay
+binds seeds `17`, `31`, `43`, `61`, `79`. The adapter does not call
+`mnemo answer`, because that command is not a model-free path and this
+cell admits no provider budget. Successful reproduction does not change
+its PROPOSED admission state or false publication flags.
 
 ### M10 calibration and abstention
 
@@ -581,3 +658,25 @@ reproduction is an optional separately signed receipt; its absence does not
 block an otherwise operator-run claim, and its presence does not relabel the
 operator or imply certification.
 
+### Native LoCoMo development evidence verification
+
+For a package created by `write_native_development_bundle`, run the verifier
+from the corresponding source checkout with an explicitly trusted, separately
+installed Python 3.11 scorer environment using the pinned LoCoMo dependencies:
+
+```sh
+uv run --locked python -m eval.public.native_bundle /path/to/package \
+  --scorer-python /path/to/locomo-scorer/bin/python
+```
+
+Success writes one JSON receipt to stdout and exits zero. The receipt includes
+the reconstructed atomic result and explicitly reports `registered: false`,
+`model_execution_verified: false` and `publication_authorized: false`. Invalid
+packages write a JSON error to stderr and exit nonzero. Invalid command-line
+arguments also exit nonzero through the argument parser.
+
+This checks exact file custody and replays saved responses through the pinned
+scorer; it does not call a memory model, install dependencies, admit a dataset,
+register a run, or provide an independent execution reproduction. Use the same
+source/protocol version as the package. Common registered bundle verification
+remains a separate contract; these development packages do not satisfy it.

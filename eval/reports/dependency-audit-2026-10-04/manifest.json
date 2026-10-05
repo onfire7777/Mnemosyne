@@ -1,0 +1,12 @@
+{
+  "files": {
+    "README.md": "97c5fb2d63bafc9ff133901682d0b62faf95938be393c51cef8d60b566251f62",
+    "after.json": "bc0c57fe4d6c227eb39b740149bf3289e8fb0d4ae0c50f8751bcb77deb25668a",
+    "audit_locks.py": "e23d017e4d9aa3b698c625f57eabc1480d49fa113b9d0568357582c43b7d88fe",
+    "before.json": "640f4b32338f638dae2631a80a0ca7dcff46b89782455d9acb0d2ed10a53dea4",
+    "lock-identities.json": "b326ef25968678d9262f72670a005691a85dd9cadd334b61900b94b8013fd308",
+    "validation.json": "4219c1ffc20a60602975bc85d1978f4e34f4a2ca250b7cceb4349c8eae39111a"
+  },
+  "publishable": false,
+  "ranking_eligible": false
+}

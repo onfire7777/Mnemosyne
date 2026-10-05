@@ -683,10 +683,18 @@ def _validate_record_v2(record: dict[str, object]) -> list[str]:
     else:
         families: set[object] = set()
         for index, metric in enumerate(metrics):
-            errors.extend(_validate_metric(metric, index))
+            if isinstance(metric, dict) and "summary_kind" in metric:
+                from leaderboard.native_metrics import validate_category_metric
+                errors.extend(validate_category_metric(metric, f"/metrics/{index}"))
+                if record.get("track_kind") != "DEVELOPMENT":
+                    errors.append("/track_kind")
+                if not isinstance(record.get("publication"), dict) or record["publication"].get("publishable") is not False:
+                    errors.append("/publication/publishable")
+            else:
+                errors.extend(_validate_metric(metric, index))
             if isinstance(metric, dict):
                 family = metric.get("family")
-                if family in _METRIC_FAMILIES:
+                if family in (*_METRIC_FAMILIES, "reference_qa"):
                     families.add(family)
         if len(families) > 1:
             errors.append("/metrics")
@@ -808,6 +816,39 @@ def _identity_value(record: dict[str, object], field: str) -> object:
     return identity.get(field)
 
 
+def _validate_projection_compatibility(value: object) -> list[str]:
+    prefix = "/compatibility_key"
+    if not isinstance(value, dict):
+        return [prefix]
+    fields = ("track_kind", "benchmark_id", "benchmark_version", "scorer_digest",
+              "division", "metric", "resource_treatment")
+    errors = _unexpected_keys(value, fields, prefix)
+    for field in fields:
+        if field not in value:
+            errors.append(f"{prefix}/{field}")
+    for field, choices in (("track_kind", _TRACK_KINDS), ("division", _DIVISIONS),
+                           ("resource_treatment", _RESOURCE_TREATMENTS)):
+        if value.get(field) not in choices:
+            errors.append(f"{prefix}/{field}")
+    for field in ("benchmark_id", "benchmark_version"):
+        if not _nonempty_string(value.get(field)):
+            errors.append(f"{prefix}/{field}")
+    digest = value.get("scorer_digest")
+    if not isinstance(digest, str) or not _SHA256.fullmatch(digest):
+        errors.append(f"{prefix}/scorer_digest")
+    metric = value.get("metric")
+    if not isinstance(metric, dict):
+        errors.append(f"{prefix}/metric")
+    else:
+        errors.extend(_unexpected_keys(metric, ("name", "family", "unit"), f"{prefix}/metric"))
+        for field in ("name", "unit"):
+            if not _nonempty_string(metric.get(field)):
+                errors.append(f"{prefix}/metric/{field}")
+        if metric.get("family") not in (*_METRIC_FAMILIES, "reference_qa"):
+            errors.append(f"{prefix}/metric/family")
+    return errors
+
+
 def validate_projection(projection: object, records: list[object]) -> list[str]:
     """Return stable JSON-pointer errors for one derived projection."""
     if not isinstance(projection, dict):
@@ -816,6 +857,38 @@ def validate_projection(projection: object, records: list[object]) -> list[str]:
     for field in _PROJECTION_REQUIRED_FIELDS:
         if field not in projection:
             errors.append(f"/{field}")
+    errors.extend(_unexpected_keys(
+        projection, (*_PROJECTION_REQUIRED_FIELDS, "weighting"), ""
+    ))
+    for field in ("projection_id", "uncertainty_method"):
+        if not _nonempty_string(projection.get(field)):
+            errors.append(f"/{field}")
+    if not isinstance(projection.get("filters"), dict):
+        errors.append("/filters")
+    exclusions = projection.get("exclusions")
+    if not isinstance(exclusions, list) or any(
+        not _nonempty_string(item) for item in exclusions
+    ):
+        errors.append("/exclusions")
+    for field in ("numerator", "denominator"):
+        if not _is_number(projection.get(field)):
+            errors.append(f"/{field}")
+    for field in _OUTCOME_COUNT_FIELDS.values():
+        value = projection.get(field)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            errors.append(f"/{field}")
+    if not isinstance(projection.get("safety_failures_visible"), bool):
+        errors.append("/safety_failures_visible")
+    weighting = projection.get("weighting")
+    if weighting is not None:
+        if not isinstance(weighting, dict):
+            errors.append("/weighting")
+        else:
+            errors.extend(_unexpected_keys(weighting, ("formula", "disclosed"), "/weighting"))
+            if "formula" in weighting and not _nonempty_string(weighting["formula"]):
+                errors.append("/weighting/formula")
+            if "disclosed" in weighting and not isinstance(weighting["disclosed"], bool):
+                errors.append("/weighting/disclosed")
     if projection.get("schema_version") != _PROJECTION_VERSION:
         errors.append("/schema_version")
     if projection.get("kind") != "exploratory":
@@ -826,14 +899,26 @@ def validate_projection(projection: object, records: list[object]) -> list[str]:
         errors.append("/official")
     if projection.get("headline") is not False:
         errors.append("/headline")
-    sources = _source_records(projection, records)
     source_ids = projection.get("source_record_ids")
     if (
         not isinstance(source_ids, list)
         or not source_ids
-        or len(sources) != len(source_ids)
+        or any(not _nonempty_string(item) for item in source_ids)
     ):
         errors.append("/source_record_ids")
+        sources = []
+    else:
+        sources = _source_records(projection, records)
+        if len(set(source_ids)) != len(source_ids) or len(sources) != len(source_ids):
+            errors.append("/source_record_ids")
+        # A duplicate record in the input must not silently select the last
+        # copy, and a duplicated selection must not count one attempt twice.
+        selected = set(source_ids)
+        matches = [item for item in records if isinstance(item, dict)
+                   and isinstance(item.get("record_id"), str)
+                   and item["record_id"] in selected]
+        if len(matches) != len(sources):
+            errors.append("/source_record_ids")
     expected = _outcome_counts(sources)
     for field, value in expected.items():
         if projection.get(field) != value:
@@ -848,6 +933,7 @@ def validate_projection(projection: object, records: list[object]) -> list[str]:
     if failed_visible and weighting is not None:
         errors.append("/weighting")
     compatibility = projection.get("compatibility_key")
+    errors.extend(_validate_projection_compatibility(compatibility))
     if isinstance(compatibility, dict) and sources:
         track = compatibility.get("track_kind")
         if isinstance(track, str) and any(

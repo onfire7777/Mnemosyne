@@ -72,6 +72,25 @@ secrets, private keys, and tokens).
 - A Mnemosyne checkout (this repo). Validation auto-detects `./.venv/bin/python`
   and falls back to `python3`. Override with `MNEMOSYNE_PYTHON=...`.
 
+For production certificate rotation, use the project's Python requirement
+(currently Python 3.12 or newer) and OpenSSL with `verify -verify_hostname`,
+`verify -attime`, and `x509 -checkend`. The TLS validators check these
+capabilities explicitly; the macOS system LibreSSL is not a substitute when
+those capabilities are missing. An absolute `MNEMOSYNE_PYTHON` can select the
+rotation transaction interpreter, but does not change every helper's
+`python3` lookup.
+
+The production runtime lock deliberately replaces ambient `PATH` with
+`/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin` before executing
+its child. Activating a virtual environment or prepending a bundled OpenSSL
+directory therefore does not configure the locked production workflow. Its
+required tools must resolve from that trusted path. Do not weaken the lock's
+path isolation, certificate validation, or expiry floor to make a workstation
+test pass. In particular, the four real-lock certificate-renewal fixture cases
+can fail on a Mac with only system Python/LibreSSL even when ordinary tests
+using the project environment succeed; record that limitation and retain the
+supported-host CI checks.
+
 ## Quick start
 
 ```bash

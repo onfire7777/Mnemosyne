@@ -1,0 +1,16 @@
+{
+  "packages_queried": 423,
+  "findings": [
+    {
+      "ecosystem": "crates.io",
+      "name": "paste",
+      "version": "1.0.15",
+      "vulns": [
+        {
+          "id": "RUSTSEC-2024-0436",
+          "modified": "2026-01-27T22:03:15.694766Z"
+        }
+      ]
+    }
+  ]
+}

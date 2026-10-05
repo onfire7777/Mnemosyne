@@ -1,0 +1,52 @@
+   Compiling answering-ort v0.1.0 (/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne/services/answering-ort)
+error: linking with `cc` failed: exit status: 1
+  |
+  = note:  "cc" "/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne/services/answering-ort/target/debug/deps/rustcjcIv4o/symbols.o" "<6 object files omitted>" "/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne/services/answering-ort/target/debug/deps/{libanswering_ort-3bf9a3a605c215a5,libnum_cpus-1316b67df4756235,liblibc-6523e13d0ffc88e6,libserde_json-e2d1847773c7a266,libmemchr-5fc0af584e538247,libitoa-9e519a847d238e22,libzmij-beb723c1a9672ab0,libsha2-3a7d5dc7acce8409,libdigest-638cf16abf4805a9,libblock_buffer-c54400925ef82826,libcrypto_common-9e6712ff3d1422dd,libgeneric_array-64d80807a19feb71,libtypenum-44c4406a83991b35,libserde-913c17228499048a,libserde_core-792172bcbf2b4650,libort-a4bf811a2beb6d18,liblibloading-540808e30d211e22,libcfg_if-18b6443adbab19bd,libort_sys-8b39d64dfb8de858,libsmallvec-e1b79da68f4f6104}.rlib" "<sysroot>/lib/rustlib/aarch64-apple-darwin/lib/{libtest-*,libgetopts-*,librustc_std_workspace_std-*,libstd-*,libpanic_unwind-*,libobject-*,libmemchr-*,libaddr2line-*,libgimli-*,libcfg_if-*,librustc_demangle-*,libstd_detect-*,libhashbrown-*,librustc_std_workspace_alloc-*,libminiz_oxide-*,libadler2-*,libunwind-*,liblibc-*,librustc_std_workspace_core-*,liballoc-*,libcore-*,libcompiler_builtins-*}.rlib" "-liconv" "-lSystem" "-lc" "-lm" "-arch" "arm64" "-mmacosx-version-min=11.0.0" "-o" "/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne/services/answering-ort/target/debug/deps/answering_ort-d26d1bf07eaa6b2e" "-Wl,-dead_strip" "-nodefaultlibs"
+  = note: some arguments are omitted. use `--verbose` to show all linker arguments
+  = note: ld: multiple errors: tapi error: malformed file
+          /Library/Developer/CommandLineTools/SDKs/MacOSX27.0.sdk/usr/lib/libiconv.2.tbd:4:20: error: unknown architecture
+                             arm64e.x1-macos, arm64e.x1-maccatalyst ]
+                             ^~~~~~~~~~~~~~~
+           in '/Library/Developer/CommandLineTools/SDKs/MacOSX27.0.sdk/usr/lib/libiconv.tbd'; tapi error: malformed file
+          /Library/Developer/CommandLineTools/SDKs/MacOSX27.0.sdk/usr/lib/libSystem.B.tbd:4:20: error: unknown architecture
+                             arm64e.x1-macos, arm64e.x1-maccatalyst ]
+                             ^~~~~~~~~~~~~~~
+           in '/Library/Developer/CommandLineTools/SDKs/MacOSX27.0.sdk/usr/lib/libSystem.tbd'; tapi error: malformed file
+          /Library/Developer/CommandLineTools/SDKs/MacOSX27.0.sdk/usr/lib/libSystem.B.tbd:4:20: error: unknown architecture
+                             arm64e.x1-macos, arm64e.x1-maccatalyst ]
+                             ^~~~~~~~~~~~~~~
+           in '/Library/Developer/CommandLineTools/SDKs/MacOSX27.0.sdk/usr/lib/libm.tbd'; tapi error: malformed file
+          /Library/Developer/CommandLineTools/SDKs/MacOSX27.0.sdk/usr/lib/libSystem.B.tbd:4:20: error: unknown architecture
+                             arm64e.x1-macos, arm64e.x1-maccatalyst ]
+                             ^~~~~~~~~~~~~~~
+           in '/Library/Developer/CommandLineTools/SDKs/MacOSX27.0.sdk/usr/lib/libc.tbd'
+          clang: error: linker command failed with exit code 1 (use -v to see invocation)
+          
+
+error: could not compile `answering-ort` (bin "answering-ort" test) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: linking with `cc` failed: exit status: 1
+  |
+  = note:  "cc" "/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne/services/answering-ort/target/debug/deps/rustcuFZEdk/symbols.o" "<231 object files omitted>" "/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne/services/answering-ort/target/debug/deps/{libnum_cpus-1316b67df4756235,liblibc-6523e13d0ffc88e6,libserde_json-e2d1847773c7a266,libmemchr-5fc0af584e538247,libitoa-9e519a847d238e22,libzmij-beb723c1a9672ab0}.rlib" "<sysroot>/lib/rustlib/aarch64-apple-darwin/lib/{libtest-*,libgetopts-*,librustc_std_workspace_std-*}.rlib" "/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne/services/answering-ort/target/debug/deps/{libsha2-3a7d5dc7acce8409,libdigest-638cf16abf4805a9,libblock_buffer-c54400925ef82826,libcrypto_common-9e6712ff3d1422dd,libgeneric_array-64d80807a19feb71,libtypenum-44c4406a83991b35,libserde-913c17228499048a,libserde_core-792172bcbf2b4650,libort-a4bf811a2beb6d18,liblibloading-540808e30d211e22,libcfg_if-18b6443adbab19bd,libort_sys-8b39d64dfb8de858,libsmallvec-e1b79da68f4f6104}.rlib" "<sysroot>/lib/rustlib/aarch64-apple-darwin/lib/{libstd-*,libpanic_unwind-*,libobject-*,libmemchr-*,libaddr2line-*,libgimli-*,libcfg_if-*,librustc_demangle-*,libstd_detect-*,libhashbrown-*,librustc_std_workspace_alloc-*,libminiz_oxide-*,libadler2-*,libunwind-*,liblibc-*,librustc_std_workspace_core-*,liballoc-*,libcore-*,libcompiler_builtins-*}.rlib" "-liconv" "-lSystem" "-lc" "-lm" "-arch" "arm64" "-mmacosx-version-min=11.0.0" "-o" "/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne/services/answering-ort/target/debug/deps/answering_ort-933d804915cc69ab" "-Wl,-dead_strip" "-nodefaultlibs"
+  = note: some arguments are omitted. use `--verbose` to show all linker arguments
+  = note: ld: multiple errors: tapi error: malformed file
+          /Library/Developer/CommandLineTools/SDKs/MacOSX27.0.sdk/usr/lib/libiconv.2.tbd:4:20: error: unknown architecture
+                             arm64e.x1-macos, arm64e.x1-maccatalyst ]
+                             ^~~~~~~~~~~~~~~
+           in '/Library/Developer/CommandLineTools/SDKs/MacOSX27.0.sdk/usr/lib/libiconv.tbd'; tapi error: malformed file
+          /Library/Developer/CommandLineTools/SDKs/MacOSX27.0.sdk/usr/lib/libSystem.B.tbd:4:20: error: unknown architecture
+                             arm64e.x1-macos, arm64e.x1-maccatalyst ]
+                             ^~~~~~~~~~~~~~~
+           in '/Library/Developer/CommandLineTools/SDKs/MacOSX27.0.sdk/usr/lib/libm.tbd'; tapi error: malformed file
+          /Library/Developer/CommandLineTools/SDKs/MacOSX27.0.sdk/usr/lib/libSystem.B.tbd:4:20: error: unknown architecture
+                             arm64e.x1-macos, arm64e.x1-maccatalyst ]
+                             ^~~~~~~~~~~~~~~
+           in '/Library/Developer/CommandLineTools/SDKs/MacOSX27.0.sdk/usr/lib/libSystem.tbd'; tapi error: malformed file
+          /Library/Developer/CommandLineTools/SDKs/MacOSX27.0.sdk/usr/lib/libSystem.B.tbd:4:20: error: unknown architecture
+                             arm64e.x1-macos, arm64e.x1-maccatalyst ]
+                             ^~~~~~~~~~~~~~~
+           in '/Library/Developer/CommandLineTools/SDKs/MacOSX27.0.sdk/usr/lib/libc.tbd'
+          clang: error: linker command failed with exit code 1 (use -v to see invocation)
+          
+
+error: could not compile `answering-ort` (lib test) due to 1 previous error

@@ -98,7 +98,9 @@ def test_streamable_http_preflight_names_the_missing_extra(monkeypatch) -> None:
     try:
         cli.main(["--backend", "local", "--store", "store.json", "mcp-serve", "--transport", "streamable-http"])
     except SystemExit as exc:
-        assert "mnemosyne-memory[mcp]" in str(exc)
+        assert "python -m pip install '.[mcp]'" in str(exc)
+        assert "repository root" in str(exc)
+        assert "mnemosyne-memory[mcp]" not in str(exc)
     else:  # pragma: no cover - the preflight must refuse
         raise AssertionError("expected mcp-serve to refuse without the mcp extra")
 

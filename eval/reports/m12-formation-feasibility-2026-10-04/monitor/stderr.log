@@ -1,0 +1,15 @@
+Traceback (most recent call last):
+  File "<frozen runpy>", line 203, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne/eval/public/action_formation_run.py", line 114, in <module>
+    result = run_development(args.output, provider)
+  File "/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne/eval/public/action_formation_run.py", line 66, in run_development
+    formation = run_case(
+        case, provider=provider, actions=actions,
+        scope=scope, emit=emit,
+    )
+  File "/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne/eval/public/action_formation.py", line 181, in run_case
+    response = validate_response(raw, allowed_actions=offered, existing_tasks=tasks)
+  File "/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne/eval/public/action_formation.py", line 77, in validate_response
+    raise ValueError('clarification cannot also perform writes')
+ValueError: clarification cannot also perform writes

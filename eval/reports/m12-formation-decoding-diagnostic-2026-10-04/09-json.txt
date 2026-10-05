@@ -1,0 +1,18 @@
+{
+  "operations": [
+    {
+      "command": "task.create",
+      "payload": {
+        "task_id": "release_packet_reminder",
+        "trigger": {
+          "type": "exact_time",
+          "payload": {
+            "at": "2030-11-28T01:00:00Z"
+          }
+        },
+        "idempotency_key": "release_packet_reminder"
+      }
+    },
+    "clarification"
+  ]
+}

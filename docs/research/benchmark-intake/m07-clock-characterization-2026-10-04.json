@@ -1,0 +1,47 @@
+{
+  "schema_version": "mnemosyne.public-lifecycle-clock-characterization/v1",
+  "source_commit": "b29543bf",
+  "backend": "local",
+  "public_commands": [
+    "ingest",
+    "queue-enqueue",
+    "consolidate-once"
+  ],
+  "synthetic_items": 1,
+  "steps": [
+    {
+      "now": "2030-01-01T00:00:00+00:00",
+      "rehearsed": false,
+      "successful_rehearsals": 0,
+      "next_rehearsal_at": "2030-01-02T00:00:00+00:00",
+      "demoted": false,
+      "receipt_sha256": "800dd29d641d7126a180f2f867648ddb8bd7f2c589ba7a9c2466ac34cd29dc74"
+    },
+    {
+      "now": "2030-01-02T00:00:00+00:00",
+      "rehearsed": true,
+      "successful_rehearsals": 1,
+      "next_rehearsal_at": "2030-01-05T00:00:00+00:00",
+      "demoted": false,
+      "receipt_sha256": "70e8ab1977c641d3bd74e5bf88c05d42e7f0f65628ee77c37fbdd81d05a404e9"
+    },
+    {
+      "now": "2030-01-03T00:00:00+00:00",
+      "rehearsed": false,
+      "successful_rehearsals": 1,
+      "next_rehearsal_at": "2030-01-05T00:00:00+00:00",
+      "demoted": false,
+      "receipt_sha256": "c2a429f0b11183b83288d48ed5a8abbf8f347ce01cceca7f7567ac9ac154f310"
+    }
+  ],
+  "model_calls": 0,
+  "benchmark_admission": false,
+  "publishable": false,
+  "limitations": [
+    "not a full M07 fixture",
+    "no months-long or five-seed coverage",
+    "no resource admission receipt",
+    "not a global virtual-clock contract",
+    "retrieval and answer behavior not evaluated"
+  ]
+}

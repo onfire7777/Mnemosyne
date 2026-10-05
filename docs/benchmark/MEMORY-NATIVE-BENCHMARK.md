@@ -3,6 +3,26 @@
 Version: 0.1.0
 Status: specification; no results claimed
 
+## Scope and landscape clarification — 2026-10-04
+
+The historical rationale below is too broad when read as a claim about every
+current public benchmark. [LongMemEval](https://github.com/xiaowu0162/LongMemEval)
+explicitly includes abstention, temporal reasoning and knowledge updates;
+[OmniMemEval](https://github.com/MemTensor/OmniMemEval) combines multiple user-
+and agent-memory evaluations. Refusal is not universally penalized, and
+temporal behavior is not universally absent. Coverage gaps must name the
+specific benchmark protocol and memory contract being tested.
+
+D1–D9 are retained and mapped into the broader
+[24-capability, 20-module whole-memory standard](../superpowers/specs/2026-07-26-whole-memory-benchmark-standard-design.md).
+That standard explicitly calls for a comprehensive benchmark program, including
+unchanged official upstream tracks and separately versioned enhanced tracks.
+The [current scope audit](../plans/benchmark-platform-scope-audit-2026-10-04.md)
+records existing development implementations and missing acceptance evidence.
+The original specification-only status below is a historical MNB release
+statement, not a claim that no related WMBS development code now exists.
+This clarification changes no dimension, scorer, threshold or publication gate.
+
 ## Why a new suite is justified
 
 Existing public memory benchmarks measure **question answering over long

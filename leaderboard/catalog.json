@@ -1,0 +1,442 @@
+{
+  "schema_version": "openmembench.scope-catalog/v1",
+  "reviewed_at": "2026-10-04",
+  "source_commit": "963a56e6a0617aff72fb3029efee9a7b4215ad08",
+  "scope_source": "docs/superpowers/specs/2026-07-26-whole-memory-benchmark-standard-design.md",
+  "status_source": "docs/plans/benchmark-platform-scope-audit-2026-10-04.md",
+  "capabilities": [
+    {
+      "id": "C01",
+      "name": "Capture and normalization",
+      "modules": [
+        "M01",
+        "M02"
+      ]
+    },
+    {
+      "id": "C02",
+      "name": "Durable persistence and replayable projections",
+      "modules": [
+        "M01",
+        "M15",
+        "M17"
+      ]
+    },
+    {
+      "id": "C03",
+      "name": "Semantic, lexical, graph, and temporal retrieval",
+      "modules": [
+        "M02"
+      ]
+    },
+    {
+      "id": "C04",
+      "name": "Temporal evolution and bitemporal as-of queries",
+      "modules": [
+        "M03"
+      ]
+    },
+    {
+      "id": "C05",
+      "name": "Correction, contradiction, multi-hypothesis belief, branch/merge",
+      "modules": [
+        "M04"
+      ]
+    },
+    {
+      "id": "C06",
+      "name": "Provenance, citation, explanation, and audit lineage",
+      "modules": [
+        "M05",
+        "M20"
+      ]
+    },
+    {
+      "id": "C07",
+      "name": "Entities, relations, preferences, user models, and procedures",
+      "modules": [
+        "M02",
+        "M14"
+      ]
+    },
+    {
+      "id": "C08",
+      "name": "Consolidation, reflection, and test-time learning",
+      "modules": [
+        "M06",
+        "M14"
+      ]
+    },
+    {
+      "id": "C09",
+      "name": "Retention, rehearsal, decay, fidelity demotion, and pruning",
+      "modules": [
+        "M07"
+      ]
+    },
+    {
+      "id": "C10",
+      "name": "Reversible forgetting and tombstoning",
+      "modules": [
+        "M08"
+      ]
+    },
+    {
+      "id": "C11",
+      "name": "Declared-surface irreversible erasure and residue control",
+      "modules": [
+        "M09"
+      ]
+    },
+    {
+      "id": "C12",
+      "name": "Calibrated uncertainty and abstention",
+      "modules": [
+        "M10"
+      ]
+    },
+    {
+      "id": "C13",
+      "name": "Prospective memory and deferred action",
+      "modules": [
+        "M12"
+      ]
+    },
+    {
+      "id": "C14",
+      "name": "Working and session memory",
+      "modules": [
+        "M13"
+      ]
+    },
+    {
+      "id": "C15",
+      "name": "Retrieved-content safety, trust, and write authority",
+      "modules": [
+        "M11"
+      ]
+    },
+    {
+      "id": "C16",
+      "name": "Authentication, authorization, tenant/user/group isolation",
+      "modules": [
+        "M11"
+      ]
+    },
+    {
+      "id": "C17",
+      "name": "Determinism, reproducibility, and replay",
+      "modules": [
+        "M15",
+        "M20"
+      ]
+    },
+    {
+      "id": "C18",
+      "name": "Backend parity and portability",
+      "modules": [
+        "M16"
+      ]
+    },
+    {
+      "id": "C19",
+      "name": "Operational custody, queues, retries, backup/restore, and recovery",
+      "modules": [
+        "M17"
+      ]
+    },
+    {
+      "id": "C20",
+      "name": "Agent-facing ABI, MCP/CLI transports, and interchange",
+      "modules": [
+        "M16",
+        "M18"
+      ]
+    },
+    {
+      "id": "C21",
+      "name": "Multimodal evidence and custody",
+      "modules": [
+        "M19"
+      ]
+    },
+    {
+      "id": "C22",
+      "name": "Public result contract, ledger, rendering, and publication",
+      "modules": [
+        "M20"
+      ]
+    },
+    {
+      "id": "C23",
+      "name": "End-to-end task and procedural utility",
+      "modules": [
+        "M14"
+      ]
+    },
+    {
+      "id": "C24",
+      "name": "Efficiency, scale, and resource behavior",
+      "modules": [
+        "M01",
+        "M02",
+        "M03",
+        "M04",
+        "M05",
+        "M06",
+        "M07",
+        "M08",
+        "M09",
+        "M10",
+        "M11",
+        "M12",
+        "M13",
+        "M14",
+        "M15",
+        "M16",
+        "M17",
+        "M18",
+        "M19"
+      ]
+    }
+  ],
+  "modules": [
+    {
+      "id": "M01",
+      "name": "Capture/durability",
+      "status": "Local development pilot exists; broader backend and failure/durability evidence remains."
+    },
+    {
+      "id": "M02",
+      "name": "Retrieval/organization",
+      "status": "Registered development cell and replay exist; full external/comparative acceptance remains."
+    },
+    {
+      "id": "M03",
+      "name": "Temporal evolution",
+      "status": "Valid-time slice exists; full transaction-time bitemporality remains."
+    },
+    {
+      "id": "M04",
+      "name": "Conflict/correction",
+      "status": "Development matrix and replay exist; full public acceptance remains."
+    },
+    {
+      "id": "M05",
+      "name": "Provenance/explanation",
+      "status": "Development cell exists; quarantines and complete outcome/lineage evidence remain."
+    },
+    {
+      "id": "M06",
+      "name": "Consolidation/learning",
+      "status": "Stage A/B development cell exists; sustained learning and non-degradation acceptance remains."
+    },
+    {
+      "id": "M07",
+      "name": "Retention/rehearsal/decay",
+      "status": "Public CLI rehearsal scheduling tested across five calendar starts spanning over a virtual year; full seeded retention, retrieval, interference, storage/cost and resource admission remain open."
+    },
+    {
+      "id": "M08",
+      "name": "Reversible forgetting",
+      "status": "Public tombstoning exists; its reversible-delete adapter contract is unresolved. Dedicated fixture, scorer and integration remain missing; restore correctness is not claimed."
+    },
+    {
+      "id": "M09",
+      "name": "Declared-surface erasure",
+      "status": "Plan exists; full benchmark and explicit surface/restore evidence missing."
+    },
+    {
+      "id": "M10",
+      "name": "Calibration/abstention",
+      "status": "Deterministic pilot exists; model-backed calibration and public-label evidence remain."
+    },
+    {
+      "id": "M11",
+      "name": "Security/isolation",
+      "status": "Plan and separate security-development infrastructure exist; full M11 benchmark missing."
+    },
+    {
+      "id": "M12",
+      "name": "Prospective action",
+      "status": "Development captures include 130 five-trigger receipts, recovery with 50 injected response losses, and 1,220 bounded fan-out operations with 750 receipts and exact replay. A separate resource run sampled at most 88 MiB RSS; this is not resource admission. The 220-conversation corpus has a public formation bridge, state/timing diagnostics and saved-trace verification. Local Qwen3 0.6B attempts remain incomplete. The schema variant scheduled no tasks and missed 17 eligible occurrences across 21 completed cases before an HTTP error; this is not a full-corpus score. A single-input follow-up exposed schema-order sensitivity, not correct formation. Draft reference captures remain unadmitted, with a verified nested-condition policy difference. Live PostgreSQL retry/BurnOS checks passed at 55ae2ef9. Full overload/implicit execution, reference calibration, cost and admission remain open."
+    },
+    {
+      "id": "M13",
+      "name": "Working memory",
+      "status": "Development probe exists; capacity and promotion-control experiment remains."
+    },
+    {
+      "id": "M14",
+      "name": "Procedural task utility",
+      "status": "Plan exists; closed-agent environment, policy/baseline/inference contract and implementation remain."
+    },
+    {
+      "id": "M15",
+      "name": "Determinism/replay",
+      "status": "Pilot composition exists; all admitted payloads and real clean-checkout reproduction remain."
+    },
+    {
+      "id": "M16",
+      "name": "Backend/transport parity",
+      "status": "Bounded local cassette exists; broader pairs, migration, resource and acceptance evidence remain."
+    },
+    {
+      "id": "M17",
+      "name": "Custody/recovery",
+      "status": "Plan exists; benchmark implementation and declared fault/recovery scope remain."
+    },
+    {
+      "id": "M18",
+      "name": "Interoperability",
+      "status": "Plan exists; benchmark implementation and fair cross-system interchange contracts remain."
+    },
+    {
+      "id": "M19",
+      "name": "Multimodal memory",
+      "status": "Plan exists, module deferred; portable modality contracts, rights, resources and implementation remain."
+    },
+    {
+      "id": "M20",
+      "name": "Publication integrity",
+      "status": "Result-v1/v2, signed ledger, renderer and publication/readiness infrastructure exist; operational admission and full public evidence remain."
+    }
+  ],
+  "benchmarks": [
+    {
+      "id": "B01",
+      "name": "LongMemEval-S",
+      "status": "Retrieval and separate QA adapters exist; the current retrieval registration is a single-system characterization, not an official comparison.",
+      "policy": "Official protocol and enhanced successor results must remain separate."
+    },
+    {
+      "id": "B02",
+      "name": "LongMemEval-V2",
+      "status": "Planned family; complete official protocol, licensed input pins, adapter and measured evidence remain required.",
+      "policy": "Official protocol and enhanced successor results must remain separate."
+    },
+    {
+      "id": "B03",
+      "name": "HippoRAG: MuSiQue / 2Wiki / HotpotQA",
+      "status": "Retrieval and reader adapter source exists; positive graph-effect and comparable reader evidence remain open.",
+      "policy": "Official protocol and enhanced successor results must remain separate."
+    },
+    {
+      "id": "B04",
+      "name": "MemoryAgentBench",
+      "status": "Development adapter source exists; official execution and upstream contribution remain open.",
+      "policy": "Official protocol and enhanced successor results must remain separate."
+    },
+    {
+      "id": "B05",
+      "name": "BEAM-1M / BEAM-10M",
+      "status": "Development adapter source exists; official scale runs and resource acceptance remain open.",
+      "policy": "Official protocol and enhanced successor results must remain separate."
+    },
+    {
+      "id": "B06",
+      "name": "LoCoMo",
+      "status": "Ingestion, pinned scoring/tokenizer, native public capture/answer and offline replay components exist. Complete runner integration, dataset license admission, runtime verification and real measured runs remain open.",
+      "policy": "Not for leading headline claims under the current publication policy."
+    },
+    {
+      "id": "B07",
+      "name": "Memora / FAMA",
+      "status": "Planned family; complete official protocol, licensed input pins, adapter and measured evidence remain required.",
+      "policy": "Official protocol and enhanced successor results must remain separate."
+    },
+    {
+      "id": "B08",
+      "name": "MemoryArena",
+      "status": "Planned family; complete official protocol, licensed input pins, adapter and measured evidence remain required.",
+      "policy": "Official protocol and enhanced successor results must remain separate."
+    },
+    {
+      "id": "B09",
+      "name": "AFTER",
+      "status": "Planned family; complete official protocol, licensed input pins, adapter and measured evidence remain required.",
+      "policy": "Official protocol and enhanced successor results must remain separate."
+    },
+    {
+      "id": "B10",
+      "name": "STATE-Bench",
+      "status": "Planned family; complete official protocol, licensed input pins, adapter and measured evidence remain required.",
+      "policy": "Official protocol and enhanced successor results must remain separate."
+    },
+    {
+      "id": "B11",
+      "name": "GroupMemBench / GateMem",
+      "status": "Planned family; complete official protocol, licensed input pins, adapter and measured evidence remain required.",
+      "policy": "Official protocol and enhanced successor results must remain separate."
+    },
+    {
+      "id": "B12",
+      "name": "PM-Bench / TriggerBench",
+      "status": "Repository-specific action probes exist; they are not official upstream results.",
+      "policy": "Official protocol and enhanced successor results must remain separate."
+    },
+    {
+      "id": "B13",
+      "name": "EvoMemBench",
+      "status": "Planned family; complete official protocol, licensed input pins, adapter and measured evidence remain required.",
+      "policy": "Official protocol and enhanced successor results must remain separate."
+    },
+    {
+      "id": "B14",
+      "name": "EMemBench",
+      "status": "Planned family; complete official protocol, licensed input pins, adapter and measured evidence remain required.",
+      "policy": "Official protocol and enhanced successor results must remain separate."
+    }
+  ],
+  "joint_scenarios": [
+    {
+      "name": "Correction with evidence",
+      "modules": [
+        "M03",
+        "M04",
+        "M05"
+      ]
+    },
+    {
+      "name": "Retain, forget, erase",
+      "modules": [
+        "M07",
+        "M08",
+        "M09"
+      ]
+    },
+    {
+      "name": "Learn without leaking",
+      "modules": [
+        "M06",
+        "M11",
+        "M14"
+      ]
+    },
+    {
+      "name": "Authorized future action",
+      "modules": [
+        "M11",
+        "M12",
+        "M17"
+      ]
+    },
+    {
+      "name": "Working-to-long-term promotion",
+      "modules": [
+        "M10",
+        "M13",
+        "M16"
+      ]
+    },
+    {
+      "name": "Recoverable public evidence",
+      "modules": [
+        "M15",
+        "M16",
+        "M17",
+        "M20"
+      ]
+    }
+  ]
+}

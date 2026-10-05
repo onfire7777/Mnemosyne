@@ -1,0 +1,4 @@
+usage: python -m eval.public.action_trigger_run [-h] [--recompute | --sink]
+                                                [--fanout]
+                                                output
+python -m eval.public.action_trigger_run: error: unrecognized arguments: --output

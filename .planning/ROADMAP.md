@@ -1,5 +1,78 @@
 # Roadmap: v2.0 Public Benchmark and Memory Leadership
 
+## Benchmark-platform scope reaffirmed — 2026-10-04
+
+The website is the public **multi-system benchmark platform** described by
+Plan B L0–L4 and the whole-memory standard, with Mnemosyne as one disclosed
+entrant. Its retained scope includes the full upstream slate, 24 capabilities,
+20 modules, joint scenarios, fair comparisons and reproducible evidence.
+The current static proof viewer and a single retrieval characterization are
+intermediate work. The [scope audit](../docs/plans/benchmark-platform-scope-audit-2026-10-04.md)
+maps original requirements to missing platform surfaces and module work.
+No phase, acceptance target or progress counter changes from this clarification.
+
+## Development evidence checkpoint — paired runs at `d59949ed`
+
+The Mnemetric website now presents benchmark families, coverage, memory systems,
+methods and explicit evidence limits. M12 development work includes real public
+CLI trigger/recovery/fan-out captures, a draft reference, resource observations,
+and a natural-language formation pipeline with stored-state/timing diagnostics
+and saved-trace consistency verification. The first local small-model invocation
+is [retained as a failed attempt](../eval/reports/m12-formation-feasibility-2026-10-04/README.md),
+not a completed benchmark or admitted result. A schema-constrained provider
+variant completed 21 cases before an HTTP error, with no task writes and 17
+missed eligible occurrences in that prefix. This incomplete attempt does not
+establish full-corpus performance or engine scheduling accuracy.
+
+Subsequent paired 1.7B prompt and decoding diagnostics retain all outputs,
+including format and semantic failures, and provider-reported token/time usage.
+They process first turns only and execute no tasks. Failed-attempt accounting
+now lists every planned case as completed, incomplete or not attempted. The separately versioned 100-case dependency extension is implemented; its
+real provider attempt completed one case, failed the next on task-ID reuse,
+and left 98 unattempted. No complete corpus score follows. The paired v2
+programmed-trigger pressure workload completed: persistent MCP stdio 320/320
+correct, CLI 200/320 with 120 missed short windows, both source-bound replays
+passed. The site retains both successes and failures with raw downloads.
+Full actual-provider execution, native overload/admission, reference calibration
+and publication eligibility remain open. No model-quality or phase-completion claim follows from these tools.
+
+The [scope audit](../docs/plans/benchmark-platform-scope-audit-2026-10-04.md)
+records the current local-versus-pushed source and CI boundary. These additions
+do not close Phase 12 protected QA, full Phase 13 upstream evidence, Phase 14
+reproduction/admission, Phase 15 exact-scale/hardware acceptance, or Phase 16
+multi-system measured launch. The phase counters below retain their original
+acceptance scope; source components alone do not complete those phases.
+
+## Status reconciliation — 2026-10-04
+
+Source inspected at `3c21be5d`. This dated reconciliation supersedes older
+prospective status statements below; historical receipts and candidate SHAs
+remain unchanged. Source delivery is distinct from measured acceptance.
+
+- N12 result-v2 dispatch landed in PR #139 (`4af5b20c`); REPRO-001 bundle
+  standard landed in PR #144 (`54dea434`). REPRO-002 remains evidence-blocked.
+- Phase 15 S2 source/development closure landed through PR #160 (`cccc2700`),
+  S3 through #162/#164 (`7db0c810`, `8691bbd6`), S4 report through #177
+  (`336d34b4`), and S5 research-only go/no-go through #199 (`118f1e51`).
+  These deliveries do not satisfy official security/calibration, real provider,
+  protected QA, exact-scale, or physical Windows/Linux 8 GiB acceptance.
+- M06 Stage A landed in #202 (`cff84192`) and Stage B registry reachability
+  in #205 (`74f23509`). The development cell remains PROPOSED, non-publishable,
+  and does not establish whole-memory capability or public admission.
+- Phase 12 protected QA, official dataset/provider evidence, REPRO-002,
+  physical 8 GiB acceptance, and publication/launch gates remain open.
+- PyPI release also requires resolving the distribution-name collision recorded
+  in `docs/coordination/2026-10-04-distribution-name-collision.md`; repository-local
+  installs remain the supported path for this source.
+
+Evidence sources: `eval/public/bundle.py`, `leaderboard/validate.py`,
+`eval/public/security_calibration.py`, `eval/public/wmbs_m06.py`,
+`eval/reports/phase-15-s2-capabilities.md`,
+`eval/reports/phase-15-s4-performance-scale.md`, and
+`research/activation-memory/GO-NO-GO.md`. Existing contract tests are evidence
+of implementation coverage, not a new execution or measurement receipt.
+
+
 ## Shipped Milestones
 
 - [x] **v1.0 Blueprint-Complete Memory Compiler** — [roadmap](milestones/v1.0-ROADMAP.md), [requirements](milestones/v1.0-REQUIREMENTS.md), [audit](milestones/v1.0-MILESTONE-AUDIT.md).
@@ -107,16 +180,14 @@ Independent third-party reproduction is recorded as
 strengthening evidence when offered, and does not gate the phase (revised v0.2.0).
 **Requirements:** REPRO-001, REPRO-002, RAIL-003, RAIL-004
 **Depends on:** Phases 11-13
-**Plans:** 1 plan frozen; implementation blocked
+**Plans:** 1/1 source plan delivered; REPRO-002 evidence remains open
 
 Plans:
 
-- [ ] 14-01-PLAN.md — Neutral reproducibility bundle standard.
+- [x] 14-01-PLAN.md — Neutral reproducibility bundle standard.
 
-**Boundary:** REPRO-001 is implementation-ready only after additive result-v2
-dispatch lands. The obsolete signed-publication reservation is released by
-the 2026-09-05 owner-confirmed unavailability disposition in the lease map; N12 is ready for
-single-owner admission after that receipt lands, but is not implemented.
+**Boundary:** N12 and REPRO-001 source implementation landed in PRs #139 and
+#144. The neutral bundle standard is implemented and contract-tested.
 REPRO-002 additionally waits for a headline-eligible pinned official result
 with complete custody/operator evidence. No development fixture closes either
 evidence gate.
@@ -131,14 +202,16 @@ It also closes the physical 8 GiB compact grounded-QA path without weakening
 the shared quality or custody gates.
 **Requirements:** CAP-004..011, CAP-012, CAP-013, RAIL-001..004
 **Depends on:** Phases 10-14
-**Plans:** 4 plans frozen; implementation remains dependency/evidence gated
+**Plans:** Source work across 6 plans delivered; full-plan acceptance remains open where noted.
 
 Plans:
 
-- [ ] 15-01-PLAN.md — S2 capability upgrades.
-- [ ] 15-02-PLAN.md — Security and calibration development evidence.
-- [ ] 15-03-PLAN.md — S4 performance, scale, and resource closure.
-- [ ] 15-04-PLAN.md — S5 research and go/no-go closure.
+- [ ] 15-01-PLAN.md — S2 source upgrades delivered; live/capability acceptance remains open.
+- [x] 15-02-PLAN.md — Security and calibration development evidence.
+- [ ] 15-03-PLAN.md — S4 source harnesses delivered; real performance, scale, provider, and physical resource acceptance remains open.
+- [x] 15-04-PLAN.md — S5 research-only go/no-go artifact; no product adoption.
+- [x] 15-05-PLAN.md — M06 Stage A development oracle and fixture.
+- [x] 15-06-PLAN.md — M06 Stage B registry reachability; PROPOSED admission.
 
 **Required plan order:** S2 capability upgrades; S3 security/calibration; S4
 performance/scale; S5 research closure. S5 remains non-gating for public launch
@@ -151,7 +224,8 @@ and test-pinned by `tests/test_planning_traceability.py`. The same merge landed
 the W2 D5 signed deletion manifest and the W3 I0R signed-session public-action
 evaluator, whose PM-Bench/TriggerBench/Working-Memory suites are development-split
 and `publishable:false` — they add no public or headline benchmark result. The
-remaining Phase 15 items (CAP-004..011) stay planned, and the W1/W4/W5 GATEs
+remaining Phase 15 items (CAP-004..011) stay planned as acceptance claims,
+despite delivered source, and the W1/W4/W5 GATEs
 remain operator-gated; none of that gated or adapter work is claimed complete.
 
 ### Phase 16: Open Leaderboard Build and Launch

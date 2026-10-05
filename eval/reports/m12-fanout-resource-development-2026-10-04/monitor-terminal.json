@@ -1,0 +1,33 @@
+{
+  "argv": [
+    "/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne/.superpowers/sdd/completion-2026-10-04/verified-venv/bin/python",
+    "-m",
+    "eval.public.action_trigger_run",
+    "/Users/admin/.local/state/mnemosyne/action-resource-runs/2026-10-04-421a1fcd-attempt2/workload",
+    "--sink",
+    "--fanout"
+  ],
+  "benchmark_verified": false,
+  "cwd": "/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne",
+  "elapsed_seconds": 304.7011161669798,
+  "finished_at": "2026-10-04T19:50:05.310128+00:00",
+  "pid": 77158,
+  "poll_seconds": 1.0,
+  "reason": "process-exited",
+  "resource_diagnostics": {
+    "admission_verified": false,
+    "disk_roots": [
+      "/Users/admin/.local/state/mnemosyne/action-resource-runs/2026-10-04-421a1fcd-attempt2"
+    ],
+    "max_sampled_logical_file_bytes": 3913523,
+    "max_sampled_rss_bytes": 92274688,
+    "measurement": "sampled-process-group-rss-and-logical-regular-file-bytes",
+    "peak_rss_verified": false,
+    "samples": 292
+  },
+  "returncode": 0,
+  "schema": "mnemosyne.monitored-command.v1",
+  "started_at": "2026-10-04T19:45:00.608271+00:00",
+  "status": "succeeded",
+  "wall_seconds": 1800
+}

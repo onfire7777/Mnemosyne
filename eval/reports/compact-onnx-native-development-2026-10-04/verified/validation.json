@@ -1,0 +1,70 @@
+{
+  "source_commit": "5cce12c6fae7a9eb0d9aa5c85aa3673747800a91",
+  "source_dirty": false,
+  "sdkroot": null,
+  "runtime_version": "1.28.0",
+  "runtime_library_sha256": "99909e99214e31fe2296c9f7fae5abc2eaf0145342efe8b0a6ed82e9ddb0a0a0",
+  "commands": {
+    "native": {
+      "argv": [
+        "cargo",
+        "test",
+        "--manifest-path",
+        "services/answering-ort/Cargo.toml",
+        "--features",
+        "onnx",
+        "--",
+        "--include-ignored"
+      ],
+      "returncode": 0,
+      "elapsed_seconds": 1.7381510410050396,
+      "log_sha256": "22c4112e454f9a735410393bd7f1ec38e3d1e2411cb66b1d28ca1457d4ee37f8"
+    },
+    "clippy": {
+      "argv": [
+        "cargo",
+        "clippy",
+        "--manifest-path",
+        "services/answering-ort/Cargo.toml",
+        "--all-targets",
+        "--features",
+        "onnx",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "returncode": 0,
+      "elapsed_seconds": 0.2396597920160275,
+      "log_sha256": "d2c6415eeb78bcf768cc8afd3d7cff8362b2df638d6bf055858ea6d3b0dc9407"
+    },
+    "format": {
+      "argv": [
+        "cargo",
+        "fmt",
+        "--check",
+        "--manifest-path",
+        "services/answering-ort/Cargo.toml"
+      ],
+      "returncode": 0,
+      "elapsed_seconds": 0.12750229198718444,
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "compatibility": {
+      "argv": [
+        ".superpowers/sdd/completion-2026-10-04/verified-venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-o",
+        "addopts=",
+        "tests/test_burnos_http_compatibility.py",
+        "tests/test_compact_answering_provider.py"
+      ],
+      "returncode": 0,
+      "elapsed_seconds": 0.9915786659985315,
+      "log_sha256": "74df7ee03c2a2e5003c74f1b6e77a5af104fe33794e55ef1eeb7a30b35ec476c"
+    }
+  },
+  "learned_quality_verified": false,
+  "physical_acceptance_verified": false
+}

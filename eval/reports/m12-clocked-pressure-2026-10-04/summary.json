@@ -1,0 +1,15 @@
+{
+  "source_commit": "04f9982486091a8f95070bf892618eabf2951d23",
+  "completed_seeds": 5,
+  "live_intentions": 320,
+  "pre_cancelled": 40,
+  "valid_firings": 207,
+  "missed_windows": 113,
+  "exact_recovered_all_seeds": true,
+  "duplicate_observations": 0,
+  "false_positives": 0,
+  "monitor_elapsed_seconds": 71.88880087499274,
+  "sampled_max_rss_bytes": 97271808,
+  "rank_eligible": false,
+  "native_capacity_verified": false
+}

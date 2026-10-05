@@ -3,18 +3,402 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: "Phase 12 CAP-003/BENCH-005 remains the operator-measurement critical path at `main@f688c747`; later merged receipts are recorded in the lease map. PR #117 is merged and owns no active lifecycle writer. PR #135 discharges P13-C, closes BENCH-007, and retires the unavailable Mac signed-publication reservation. N12 is ready for single-owner admission after this receipt lands and a fresh main/lease check; no implementation writer starts here. Phase 14 still requires N12 implementation, and official benchmark, protected, hardware, custody, and publication gates remain open."
-last_updated: "2026-09-05T01:13:00Z"
-last_activity: 2026-09-05
+stopped_at: "Phase 12 CAP-003/BENCH-005 remains the operator-measurement critical path at `main@f688c747`; later merged receipts are recorded in the lease map. PR #117 is merged and owns no active lifecycle writer. PR #135 discharges P13-C, closes BENCH-007, and retires the unavailable Mac signed-publication reservation. N12 and REPRO-001 source are delivered; Phase 15 S2-S5 source and M06 Stage A/B are delivered with acceptance boundaries retained, and official benchmark, protected, hardware, custody, and publication gates remain open."
+last_updated: "2026-10-04"
+last_activity: 2026-10-04
 progress:
   total_phases: 7
   completed_phases: 2
-  total_plans: 15
-  completed_plans: 9
+  total_plans: 17
+  completed_plans: 14
   percent: 29
 ---
 
 # Project State
+
+## Current local integration checkpoint — 2026-10-04
+
+Dependency security repair: OSV matched three fixable vulnerabilities in the
+native/provider lockfiles. Crossbeam-epoch is now 0.9.21, h2 0.4.16 and rustls
+0.23.45 (webpki 0.103.15). Six native, sixteen provider and twenty-three Python
+compatibility tests passed; the models-enabled provider path compiled. The
+rescan retains only the paste maintenance advisory. Evidence and limitations:
+`eval/reports/dependency-audit-2026-10-04`. GitHub's private critical alert remains
+unverified; this does not assert default-branch or full security clearance.
+
+The first whole-component partition plan at `db54506a` is frozen in
+`eval/reports/compact-train-partitions-2026-10-04`: 176,595 train / 22,075
+selection / 22,074 calibration rows. Hotpot selection/calibration coverage is
+only 246/249 rows. This remains a quarantined plan: semantic entity resolution,
+pre/post protected overlap, whole-component exclusions and attribution custody
+are still required. Do not rebalance survivors after screening outcomes.
+
+TRAIN document connectivity at `51bb3975` now groups all 220,744 staged rows
+into 919 components. The largest has 152,706 rows (89,667 Hotpot and 63,039
+SQuAD); only 758 Hotpot rows remain outside it. See
+`eval/reports/compact-train-groups-2026-10-04`. Random row splits would violate
+source-document isolation. At that checkpoint no partitions were assigned; semantic entity and
+protected-overlap screening remain open before training admission.
+
+Exact-source TRAIN staging at `19b9e0b9` processed 220,766 upstream rows:
+220,744 retained, 22 rejected for invalid Hotpot support indices. The independent
+raw-source audit checked every retained row and 194,069 exact spans. Evidence:
+`eval/reports/compact-train-staging-2026-10-04`. This advances row provenance and
+span validation only; all records remain quarantined with unchecked overlap.
+Next: document/entity clusters, pre/post protected-overlap policy and matcher,
+cluster-wide exclusions and frozen grouped TRAIN-derived partitions.
+
+Authorized TRAIN intake now retains five hash-verified raw assets (348,175,076
+bytes), outside Git. `eval/reports/compact-train-intake-2026-10-04` records exact
+pins, independent rehashing and an original receipt source-identity defect fixed
+in the downloader. This is quarantine only: row validation, entity/document
+clusters, pre/post protected-overlap checks and frozen grouped partitions are
+next; no training corpus or model quality gate is complete.
+
+W5 native tensor execution is now implemented behind the optional Rust `onnx`
+feature. A 314-byte synthetic graph has exact Rust/Python output parity for
+lengths 1/64/128/384/512, with clean process exit on ONNX Runtime 1.28.0 and
+ort rc.13. The earlier 1.22.1/rc.10 trial aborted at shutdown and is not a pass.
+The clean-source validation at `5cce12c6` passed 48 native tests, 23 Python
+compatibility/provider tests, Clippy and formatting. Raw evidence is retained in
+`eval/reports/compact-onnx-native-development-2026-10-04`. Linux CI job 111548962454 passed all 51 native tests, formatting and Clippy
+at `e1ad2d0c`; raw logs are retained in
+`eval/reports/compact-onnx-linux-ci-2026-10-04`. The full workflow remains pending.
+This advances the missing execution layer, not learned QA or physical 8 GiB acceptance. The experimental span-only reader now implements tokenizer/offset-preserving
+integration behind the existing Runtime interface. Ten synthetic decoded
+outputs match a separate Python reference; 51 Rust tests and 23 Python
+compatibility/provider tests passed. Clean-source logs, exact generated fixtures and
+a hash manifest are retained in `eval/reports/compact-decoded-reader-development-2026-10-04`.
+This does not close learned QA quality,
+multi-task heads or artifact admission. Next: authorized TRAIN-only data
+preparation, full artifact/configuration custody, and real compact-model
+selection; keep the default server and candidate-v19 configuration unpromoted.
+
+
+The paired v2 public-transport pressure capture at `d59949ed` completed and
+passed full source-bound replay: MCP stdio 320/320 correct, CLI 200/320 with
+120 missed short windows. Both recovered every exact-time intention and had
+no duplicate or cancelled firings. Total elapsed with setup: 12.374 s / 78.113 s;
+normal sampled pressure. Raw traces, sink databases and reproduction script are
+available on the website. The earlier v1 CLI result remains separately retained.
+This is programmed-trigger development evidence, not natural-language quality,
+competitor superiority, HTTP/BurnOS performance or native capacity acceptance.
+Next: broader overload/admission and calibrated reference evidence, alongside
+the unresolved actual-provider formation quality and original phase gates.
+Phase completion counters are unchanged.
+107 targeted pressure, sink, renderer/export and BurnOS HTTP compatibility
+checks passed; lint passed and the refreshed page was verified without
+horizontal overflow at the current 495 px viewport.
+
+The observatory UI refresh is committed at `327ba016`, with grid/list benchmark
+browsing and direct development-evidence navigation. Fifty-eight renderer/export
+checks and responsive keyboard/browser checks passed; this is not a new score.
+
+Development evidence export now bounds manifest/member reads and rejects
+duplicate manifest keys, final-component symlinks and ambiguous archive paths.
+61 rendering/export checks passed. All six existing preview downloads remain
+byte-identical. This is integrity hardening, not a new benchmark result.
+
+The proof site now links to development evidence with the dependency failure
+and paired prompt/decoding experiments. Deterministic ZIP downloads include
+manifest-checked raw files. The page explicitly separates these captures from
+admitted results and signed attempts. Fifty-seven rendering/export checks passed;
+local browser rendering verified. No deployment or admission claim follows.
+
+The evaluation ActionCLI now rejects reuse of an already-known unkeyed task ID
+before scheduling. Three regression cases reproduced the gap before the fix;
+105 identity/retry/recurrence/dependency/BurnOS checks passed afterward. Original
+keyed retries remain supported, and production/BurnOS APIs are unchanged.
+Historical failed model captures retain their original source and results.
+
+A real Qwen3 1.7B dependency attempt from `1fbaa7de` is retained: one case
+completed, the second failed on keyed task rebinding, and 98 were not attempted.
+Four responses are retained. The completed case failed final state comparison
+and missed one expected firing. Normal sampled pressure and cleanup are recorded;
+this is not full-corpus completion or host infeasibility. Capture hash and partial
+diagnostic recomputation checks pass. No acceptance counters changed.
+
+Dependency saved-trace verification now reconstructs the full frozen protocol,
+state/timing reports and inert sink rows without invoking provider or public CLI.
+Both protocols share a bounded interpreter with explicit protocol functions.
+155 dependency/formation checks passed in 34.50 seconds. Replay proves internal
+consistency only; actual full-corpus model execution and M12 admission remain open.
+
+The 100-case dependency extension now has a complete bounded-provider runner
+retaining public inputs, source identity, partial failures, state/timing reports
+and inert receipts. Four runner checks passed, including a scripted command
+provider through actual public dependency creation and firing. This is pipeline
+conformance only. Saved-trace replay and real-model full-corpus execution remain.
+
+Dependency cases now have public-only timed observation, durable inert receipts
+and evaluator-only timing diagnostics. All five scenario integration tests use
+explicit golden setup, not model formation. Twenty-three dependency checks pass,
+including false-positive scoring for blocked/cancelled dependents and duplicate
+probe controls. Full provider runner and saved-trace verification remain open.
+
+The dependency extension now has a separate state scorer that resolves public
+intention IDs to unambiguous prerequisite actions. Wrong, missing, self-linked
+and ambiguous dependencies do not receive credit; absent inspection references
+reject incomplete evidence. Public-CLI storage/inspection and corpus checks
+passed 18 tests. Timing execution, receipts and replay remain unfinished.
+
+A separately versioned 100-conversation dependency formation extension is now
+materialized with public inputs and evaluator labels. It spans five seeds and
+four weekly dates; ten corpus tests pass, including unchanged original fixture
+bytes. This is corpus availability only. Dependency identity normalization,
+scoring/execution/replay support and actual model measurements remain open.
+
+The `c4a9d32a` paired decoding diagnostic completed 22 first-turn calls: all
+11 plain-JSON outputs failed envelope validation; all 11 schema outputs passed.
+Plain JSON still substituted a timer for the first event request. No task was
+executed; semantic correctness and full M12 acceptance remain open. Evidence,
+including rejected-output usage, is retained in the decoding diagnostic folder.
+Nine capture/usage tests passed. Cleanup observed no models loaded.
+
+Provider usage accounting now preserves per-call reported tokens/timing and
+unknown counters for incomplete attempts. The retained 22-call prompt experiment
+reports 18,180 input and 3,788 generated tokens; this is not monetary cost or
+full M12 cost acceptance. Eight accounting checks pass. Existing CI at
+`30184aeb` was still active when this work began; newer commits remain local.
+
+A paired Qwen3 1.7B diagnostic at clean `cccb4b24` completed all 22 first-turn
+calls across the first 11 frozen cases. Semantic instructions fixed one
+recurrence proposal but left event/condition timer substitutions and introduced
+an unrelated task. Both profiles remain development-only; `contract-v1` stays
+the default. Raw evidence is in `m12-formation-semantic-diagnostic-2026-10-04`.
+111 formation checks and the separate retained-capture verification passed.
+The run completed in 80.544 seconds; cleanup observed no models loaded. No tasks
+were executed and no full-conversation quality or scheduling result is claimed.
+
+Failed-attempt analysis now accounts for all 220 planned cases. The initial
+capture has 0 completed / 1 incomplete / 219 not attempted; the schema capture
+has 21 / 1 / 198. Completed-prefix diagnostics retain 17 misses without a
+full-corpus score. Formation checks: 108 passed; no acceptance gate closed.
+The website refinement is committed at `ea3832d0` with 57 rendering checks.
+CI run 37238287825 on `30184aeb` remains in progress at this checkpoint; later
+local commits have not been pushed or validated by that run.
+
+At `a927ee4e`, a four-cell diagnostic holds one public input fixed while varying
+compact model and schema wire order. Both models changed from clarification to
+an incorrect exact-time proposal when keys followed declaration order. Exact
+HTTP request bytes are now retained; canonical order remains the default.
+This is adapter sensitivity evidence, not successful formation. The earlier
+HTTP failure did not repeat once, but its cause remains unknown.
+
+The schema-constrained Qwen3 0.6B attempt at clean `dec91100` has ended: 21
+cases completed, then an HTTP error stopped the next request. Its 25 successful
+responses only requested clarification; no task writes occurred and 17 eligible
+occurrences were missed in the completed prefix. All 161 pressure samples were
+normal. Raw evidence and partial diagnostics are retained; this is not a
+completed benchmark. The wrapper now records bounded HTTP error details.
+CI at pushed `55ae2ef9` passed; newer local commits require their own CI.
+
+The formation runner now retains twelve fixed public-input virtual probes per
+conversation and scoped inert receipts for every observed firing. A real local
+Qwen3 0.6B attempt at clean 88a56f24 stopped on its first invalid response,
+before any task write; all three sampled pressure readings were normal. No
+model benchmark completed. Evaluator-only timing diagnostics now score complete
+probe sequences against labeled eligibility, retaining misses, false alarms,
+duplicates and cancellation violations. A saved-trace verifier now checks full
+protocol consistency, report recomputation and durable sink rows without running
+a provider. Independent reproduction and complete provider measurements remain open.
+
+Formation execution now retains complete opt-in public schedule inspection and
+per-turn stored-state diagnostics. Extra/missing schedules, duplicate intentions,
+wrong timing and premature firing remain visible; clarification presence is not
+clarification quality. The execution artifact is v4 and the full benchmark remains
+unscored. No completed real-model formation benchmark is claimed.
+
+The formation development runner now accepts an explicitly configured bounded
+command provider and applies only allowed operations through the public action
+adapter. It retains incremental requests, raw responses, public outcomes and
+partial-failure status. Scripted command/public-CLI tests pass. The local model
+role checks the server-reported digest and offers plain JSON or schema-constrained
+output; neither establishes independent identity or isolation. Complete provenance
+admission, semantic policy and successful full-model measurement remain open. New formation creations
+now bind to public evidence CIDs of the available conversation prefix; keyed
+retries preserve the original creation CID within the adapter session. Mutation
+source context remains linked through ordered per-turn records.
+
+The [natural-language formation corpus](../docs/plans/m12-implicit-formation-development-2026-10-04.md)
+now contains 220 conversations with separate input/label files and incremental
+turn projection. Positive commitments, timing ambiguity, negatives, quoted
+instructions and multi-turn cancellation/rescheduling are represented. The
+public formation bridge can execute this corpus and diagnose stored state and
+firing timing. The first plain-JSON model attempt failed before its first task
+write; no completed candidate score or general implicit-formation capability is
+claimed. Broader/held-out coverage and full measured acceptance remain open.
+
+A [separate full fan-out resource observation](../eval/reports/m12-fanout-resource-development-2026-10-04/README.md)
+from 421a1fcd completed and replayed all 1,220 operations in 304.701 monotonic
+seconds. Its 292 samples recorded at most 88 MiB process-group RSS and 3,913,523
+logical file bytes, including temporary stores under the measured root. All
+pressure samples were normal. These sampled maxima are not certified resource
+admission and do not establish feasibility of model-heavy QA.
+
+The [draft reference plan](../docs/plans/m12-reference-development-2026-10-04.md)
+now includes explicit/fan-out sink execution, revision-guarded mutations and a
+scoped durable journal with a retained 360-operation recovery capture. Paired
+candidate/reference diagnostics replay identical plans and preserve per-case
+results; they are not calibrated non-inferiority decisions. The authenticated
+public condition regression confirms a nested boolean/number semantics difference
+that must be resolved before reference admission. Original implicit/overloaded
+corpus requirements and resource admission remain open.
+
+The [M12 acceptance evidence ledger](../docs/plans/m12-acceptance-evidence-2026-10-04.md)
+preserves every original requirement, including implicit/overloaded cases,
+reference calibration and measured resource admission. The [full bounded fan-out capture](../eval/reports/m12-fanout-sink-development-2026-10-04/README.md)
+completed 1,220 operations and replayed exactly: 750 expected firings, 750 inert
+receipts and 750 deliberately duplicated deliveries. No observed misses, false
+positives or duplicate firings occurred. Normal pressure is not resource admission.
+
+The [recovery run with its durable inert sink](../eval/reports/m12-recovery-sink-development-2026-10-04/README.md)
+completed 360 operations and 50 injected response losses. Ten eligible firings
+produced ten receipts; ten deliberate delivery retries were duplicates. Exact
+replay passed. The source receipt remains explicitly dirty; recorded harness
+hashes match the source commit. These are local development diagnostics.
+
+The [full five-trigger sink capture](../eval/reports/m12-trigger-sink-development-2026-10-04/README.md)
+completed 525 operations with 130 durable inert receipts and 260 delivery
+attempts, all deliberately repeated deliveries identified as duplicates.
+Its clean-source hashes, timing reports and sink annex were verified. A bounded
+mixed-trigger fan-out generator now covers 2/4/8/16 actions per type and reports
+each load separately; its full execution and replay are now retained. These development results
+do not establish full M12 acceptance or an external exactly-once guarantee.
+
+A [clean-source four-week recovery capture](../eval/reports/m12-operation-recovery-development-2026-10-04/README.md)
+completed 360 public operations, 50 injected response losses and 50 adapter
+resets. Ten uncancelled actions fired once and ten cancelled actions stayed
+unfired. Original revisions, recovered identities and terminal states replay
+exactly. This is client response-loss recovery, not process/power-loss or
+external side-effect recovery. Integrated sink/full-corpus admission remains open.
+
+M12 now includes a [five-trigger eligibility-window scorer](../docs/plans/m12-trigger-window-development-2026-10-04.md)
+with explicit transient-signal and endpoint rules, plus a versioned four-week
+five-seed public-CLI workload with complete ordered operation logs and replay.
+It distinguishes missed observed opportunities from windows no tick visited;
+operation completeness is verified separately from scoring. The
+[retained development execution](../eval/reports/m12-explicit-trigger-development-2026-10-04/README.md)
+completed all 525 operations with 130 valid firings, no false positives or
+misses, and 70 occurrences without eligible observed windows left unfired.
+The dirty-source capture replays exactly and does not prove admission. The real-CLI regressions cover all five explicit trigger
+types and the exclusive time-window endpoint. The registered multiweek
+corpus, calibration and complete M12 acceptance remain open.
+
+Public intention creation, updates and cancellation support opt-in, session-scoped
+idempotency keys through CLI/MCP and all three engine implementations. New keyed
+updates and cancellations also require a current-state content revision;
+recognized retries never reapply the mutation. Creation returns its original
+acknowledgement; update and cancellation return current state. Local/SQLite
+regressions passed. At `55ae2ef9`, CI run `37229007622`
+completed the live PostgreSQL job, including BurnOS session compatibility and
+prospective transitions/durable retries. The full unit-and-drift job was still
+in progress at the 2026-10-04 resource-capture checkpoint, so this evidence does
+not establish overall merge readiness. The public adapter now forwards
+keys/revisions and passes response-loss regressions after rebuilding its task
+map. Registered retry/recovery workload integration and full M12 admission
+remain open. See
+[the contract](../docs/ENGINE-CONTRACT.md#prospective-memory-contract).
+
+M12 now also has a [sink-enabled development capture](../eval/reports/m12-inert-sink-development-2026-10-04/README.md)
+from `d2af156a`: 30 inert records and 60 attempts, with all 30 deliberate
+retries identified without extra records. Reports and the sink annex replay
+exactly; earlier capture compatibility is retained. Registered retry/recovery
+evidence, full trigger coverage, calibration, cost/resource and admission
+remain open.
+
+The M12 exact-time diagnostic now has a [saved five-seed public-CLI execution](../eval/reports/m12-exact-time-development-2026-10-04/README.md)
+from clean harness source `82311010`: 145 operations, complete operation logs
+and exact report recomputation. Twenty runner/scorer checks passed. Delayed
+polling observations remain visible; this does not close M12 admission or
+full timing/cost/baseline requirements.
+
+M12 now has an [exact-time development diagnostic](../eval/reports/m12-exact-time-diagnostic-2026-10-04.md)
+with opt-in public firing/timing observations, independent expected-schedule
+scoring and real-CLI coverage over five seeded four-week timelines. The
+existing registered suites are unchanged. This advances lateness observability
+but does not close the registered corpus, full trigger-family timing,
+calibrated baseline, sink, cost/resource or admission gates.
+
+Latest prerequisite work: [offline Qwen token measurement](../docs/research/benchmark-intake/local-reader-reference-tokens-2026-10-04.md)
+verified the installed vocabulary / added-token IDs / merges against a pinned
+reference and counted the unchanged synthetic probe's message contents. Six
+real-artifact diagnostic tests passed; no model loaded. The 4,096-token
+historical context cannot accommodate the observed 4,035-token runner prompt
+plus 512 output tokens without shifting. Full-input/runtime equivalence,
+effective context for the next candidate and resource admission remain open.
+CI `37225669534` at `762f12c8` has passed all gating jobs except unit/drift,
+which was still running at inspection. Later local commits are not covered
+by that head's results; no merge or phase completion is recorded.
+
+At `4a0e4c4c`, the Mnemetric comparison/coverage/attempt surfaces and real local
+retrieval preview are implemented; the single retrieval run has an exact
+nine-file clean-checkout reproduction. It is nonpublishable and not an official
+QA or multi-system comparison. Local combined platform/BurnOS/bundle regression
+checks passed 452 tests. The latest isolated LoCoMo checks passed 145 tests;
+49 production native/reader/replay tests and the expanded 15-test reader/configuration
+suite passed.
+
+LoCoMo now includes ingestion, scoring, non-RAG prompt construction, a verified
+tokenizer, sequential native capture/answer execution, candidate-bound reader
+disclosure matching, explicit/seeded option ordering, native configuration binding
+and isolated scorer replay with optional candidate/runtime artifact checks.
+Development-only category summaries now preserve absent/incomplete/inapplicable
+measurements in result-v2 and comparison/rendering surfaces (558 combined
+regression checks passed). Development result assembly now binds one atomic QA
+record to exact artifact bytes and a fully replayed report; retrieval summaries
+remain in that report. Its 13 checks passed in both production-to-scorer and
+isolated environments; the preceding combined isolated suite passed 157 checks.
+An on-disk development package writer/verifier now preserves those artifact bytes
+and reconstructs the result through replay; 24 package/assembly checks passed.
+Registered native bundle integration and runner admission remain open.
+These remain components, not an admitted complete native benchmark runner. The
+[neutral integration contract](../docs/plans/locomo-neutral-integration-contract-2026-10-04.md)
+separates upstream model baselines from public memory-system execution and lists
+the remaining bundle, resource and admission gates. Dataset rights/admission,
+grounded-model preflight (the [latest synthetic retry](../docs/research/benchmark-intake/local-reader-feasibility-2026-10-04-repeat.json)
+again stopped on memory pressure), official measurements and broader original acceptance
+criteria remain open. CI passed on `df99593b`; the accumulated development
+changes require synchronization and new-head validation; no phase counter or measured-acceptance status changes here.
+
+## Benchmark-platform scope reaffirmed — 2026-10-04
+
+The owner's primary website objective is the full multi-system benchmark
+platform in Plan B and WMBS, including the original external slate, all 24
+capabilities / 20 modules and reproducible comparisons. A proof viewer or one
+retrieval run is not a substitute. The
+[scope audit](../docs/plans/benchmark-platform-scope-audit-2026-10-04.md)
+records the retained requirements, current source/evidence gaps and next
+website-contract work. Plan A, BurnOS compatibility and all original acceptance
+criteria remain in force. No completion counter is advanced by this review.
+
+## Status reconciliation — 2026-10-04
+
+Source inspected at `3c21be5d`. This dated reconciliation supersedes older
+prospective status statements below; historical receipts and candidate SHAs
+remain unchanged. Source delivery is distinct from measured acceptance.
+
+- N12 result-v2 dispatch landed in PR #139 (`4af5b20c`); REPRO-001 bundle
+  standard landed in PR #144 (`54dea434`). REPRO-002 remains evidence-blocked.
+- Phase 15 S2 source/development closure landed through PR #160 (`cccc2700`),
+  S3 through #162/#164 (`7db0c810`, `8691bbd6`), S4 report through #177
+  (`336d34b4`), and S5 research-only go/no-go through #199 (`118f1e51`).
+  These deliveries do not satisfy official security/calibration, real provider,
+  protected QA, exact-scale, or physical Windows/Linux 8 GiB acceptance.
+- M06 Stage A landed in #202 (`cff84192`) and Stage B registry reachability
+  in #205 (`74f23509`). The development cell remains PROPOSED, non-publishable,
+  and does not establish whole-memory capability or public admission.
+- Phase 12 protected QA, official dataset/provider evidence, REPRO-002,
+  physical 8 GiB acceptance, and publication/launch gates remain open.
+
+Evidence sources: `eval/public/bundle.py`, `leaderboard/validate.py`,
+`eval/public/security_calibration.py`, `eval/public/wmbs_m06.py`,
+`eval/reports/phase-15-s2-capabilities.md`,
+`eval/reports/phase-15-s4-performance-scale.md`, and
+`research/activation-memory/GO-NO-GO.md`. Existing contract tests are evidence
+of implementation coverage, not a new execution or measurement receipt.
+
+
 
 ## Release Attestation — Tier-B Production Evidence (2026-07-07)
 
@@ -32,14 +416,22 @@ Tier-B is CLOSED. A genuine operator-run production capture over the live self-h
 See: .planning/PROJECT.md (updated 2026-06-19)
 
 **Core value:** Build a memory compiler with lossless evidence, typed projections, safe retrieval, branchable updates, and gated self-improvement.
-**Current focus:** Plan 12-04 closure remains the measured critical path — the #46–#61 lease sweep is delivered to main and Blueprint §7 code residuals are closed; what remains is **operator measurement**, not implementation: CAP-003/BENCH-005 stay Partial pending measured EM/F1 ≥ 0.85, and 12-04-03 stays held. In parallel, the Phase 13 adapter contracts and bounded scheduled-development-regression source are merged through PR #86 (`main@661343ce`), Phase 14-15 execution contracts are frozen, and the six Phase 16 L1-L4 source packages remain complete. None of those source milestones satisfies an official benchmark, headline, launch, or publication gate.
+**Current focus:** Plan 12-04 closure remains the measured critical path — the #46–#61 lease sweep is delivered to main and Blueprint §7 code residuals are closed; what remains is **operator measurement**, not implementation: CAP-003/BENCH-005 stay Partial pending measured EM/F1 ≥ 0.85, and 12-04-03 stays held. In parallel, the Phase 13 adapter contracts and bounded scheduled-development-regression source are merged through PR #86 (`main@661343ce`), Phase 14 reproducibility source and Phase 15 S2–S5 source/research artifacts are delivered, while their open measured acceptance remains explicit, and the six Phase 16 L1-L4 source packages remain complete. None of those source milestones satisfies an official benchmark, headline, launch, or publication gate.
+
+Plan counters count the 17 enumerated GSD plans in phases 10–15: 14 checked
+source/development contracts, with 12-04, 15-01 and 15-03 acceptance still open.
+Phase 16 source packages are tracked separately. The 29% figure counts fully
+closed phases (2 of 7), not program completion or benchmark quality.
 
 ## Current Position
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 4 of 4
 Status: Plan 12-04's full lease sweep is **delivered to `main`**. **12-04-01** preserved. **12-04-02** landed via PR #46. Residual Leases **A, C, D, E, F** via PRs #47–#51; **Lease G / G-wire / G-consol** external corroboration via #52–#54; Blueprint §7 **#19a, #19a.1, #19b** counterfactual fidelity via #55–#57; **#18** multi-signal `calibrated_confidence` fuse via #58; **#12** per-example conformal via #59; **#13** AGM contraction + ATMS labels via #60; **#14** `must_keep` + pointer-to-original via #61. All sixteen merged on green required CI, ending at `main@34effb4b`; the `.planning/STATE.md` reconcile followed as PR #62 (`main@e1b02221`). Delivery was verified by content, not commit count: every product tree was byte-identical between `main` and the retired staging branch. Blueprint §7 items **#12, #13, #14, #18, #19** are now marked closed in `BLUEPRINT-PARITY-MATRIX.md` with their merge SHAs — each re-verified as genuinely wired in `src/` before marking, including `counterfactual_replay_score()`, which is no longer dead. CAP-003/BENCH-005 remain **Partial** until measured EM/F1 ≥ 0.85 — no benchmark or headline claim changed. **12-04-03** and production VM/Vault/W4–W5/headline stay Blocked. W3 memory planes + CAP-012/013 Complete history via PR #39 `main@0784340` unchanged.
-Last activity: 2026-09-05 — PR #135 records successful scheduled run
+Last activity: 2026-10-04 — reconciled delivered source against current
+roadmaps and kept measured acceptance gates open.
+
+Historical activity: 2026-09-05 — PR #135 records successful scheduled run
 `30807305055`, closes BENCH-007, and releases the obsolete signed-publication
 reservation after the owner confirmed the old Mac and its files are no longer
 available. N12 is ready for one owner's admission after this receipt lands;

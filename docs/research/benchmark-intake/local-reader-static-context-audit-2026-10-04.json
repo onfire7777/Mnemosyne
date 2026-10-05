@@ -1,0 +1,37 @@
+{
+  "chat_template_overhead_tokens": null,
+  "effective_runtime_context_tokens": null,
+  "evidence_characters": 24000,
+  "explicit_num_ctx": null,
+  "full_context_coverage_verified": false,
+  "generation_spec": {
+    "options": {
+      "num_predict": 512,
+      "seed": 1234,
+      "stop": [],
+      "temperature": 0,
+      "top_k": 1,
+      "top_p": 1.0
+    },
+    "request_envelope": {
+      "format_source": "prompt_bundle.ollama_format",
+      "message_roles": [
+        "system",
+        "user"
+      ],
+      "stream": false,
+      "think": false
+    }
+  },
+  "input_sha256": "dfd8d31db70a6059a9d7dfc533164875bf09f74f23f9ce2ccb4535b6af4ec083",
+  "model_loaded": false,
+  "protected_data": false,
+  "requested_max_output_tokens": 512,
+  "schema": "mnemosyne.static-context-audit/v1",
+  "source_commit": "8871053e64cfdcf4d63921eae3e3144ce824f88b",
+  "system_prompt_characters": 130,
+  "system_prompt_sha256": "c5f876a45ae505908f7e4f2990584194d1842c905d6e1fbb7160abe6097a2f6c",
+  "token_count": null,
+  "user_prompt_characters": 24839,
+  "user_prompt_sha256": "8c24e62a84b7fd5c4ad4588b3c1726a31c8a244ed656008d821457c22ea540bb"
+}

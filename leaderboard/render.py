@@ -14,6 +14,15 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from leaderboard.ui import page_shell
+from leaderboard.development import evidence_pages
+from leaderboard.grouping import build_comparison_index
+from leaderboard.workspace import comparison_body
+from leaderboard.history import history_body
+from leaderboard.ledger import LedgerError, verified_ledger_snapshot
+from leaderboard.explainers import systems_body
+from leaderboard.comparisons import comparisons_body
+from leaderboard.catalog import benchmarks_body, coverage_body, load_catalog
 from leaderboard.validate import (
     SCHEMA_VERSION,
     SCHEMA_VERSION_V2,
@@ -137,13 +146,24 @@ def _escape(value: object) -> str:
     return html.escape(str(value), quote=True)
 
 
-def _page(title: str, body: str) -> str:
+def _page(title: str, body: str, root: str = "") -> str:
+    return page_shell(title, body, root)
+
+
+def _interval(metric: dict[str, Any]) -> str:
+    if "summary_kind" in metric:
+        return (f"<small>{_escape(metric['status'])}; descriptive, uncertainty not estimated.</small>"
+                f"<small>Observed {_escape(metric['observed_count'])} / source {_escape(metric['source_count'])}; "
+                f"missing {_escape(metric['missing_count'])}; not applicable {_escape(metric['not_applicable_count'])}. "
+                f"Score denominator: {_escape(metric['denominator'])}.</small>"
+                + ("<small>Missing answers contribute zero to the source-denominator aggregate.</small>"
+                   if metric["family"] == "reference_qa" and metric["missing_count"] else ""))
+    interval = metric.get("confidence_interval")
+    if interval is None:
+        return "<small>Interval not supplied</small>"
     return (
-        "<!doctype html>\n"
-        '<html lang="en"><head><meta charset="utf-8">'
-        f"<title>{_escape(title)}</title></head><body>\n"
-        f"{body}\n"
-        "</body></html>\n"
+        f"<small>Interval: {_escape(interval['low'])} to "
+        f"{_escape(interval['high'])}</small>"
     )
 
 
@@ -156,8 +176,9 @@ def _record_details(record: dict[str, Any]) -> str:
     metrics = "".join(
         "<li>"
         f"{_escape(metric['family'])}: {_escape(metric['name'])} = "
-        f"{_escape(metric['value'])} {_escape(metric['unit'])}"
-        "</li>"
+        f"{_escape('—' if metric['value'] is None else metric['value'])} {_escape(metric['unit'])}"
+        + _interval(metric)
+        + "</li>"
         for metric in sorted(
             record["metrics"],
             key=lambda metric: (
@@ -213,21 +234,57 @@ def _record_details(record: dict[str, Any]) -> str:
     )
 
 
+def _export_json(value: object) -> str:
+    # Preserve record array order for its canonical identity while preventing
+    # literal markup in generated JSON. Bound raw artifacts are never rewritten.
+    return json.dumps(
+        value, sort_keys=True, indent=2, ensure_ascii=False, allow_nan=False
+    ).replace("&", "\\u0026").replace("<", "\\u003c").replace(">", "\\u003e") + "\n"
+
+
 def _render_pages(
     records: list[dict[str, Any]],
     traces: dict[str, list[dict[str, Any]]],
+    verified_artifact_ids: set[str],
 ) -> dict[Path, str]:
     pages: dict[Path, str] = {}
+    pages[Path("data/results.json")] = _export_json(records)
     index_items: list[str] = []
     for record in records:
         record_id = record["record_id"]
         record_digest = _digest(record_id)
-        index_items.append(
-            "<li>"
-            f"<a href=\"results/{record_digest}.html\">{_escape(record_id)}</a>"
-            f"{_record_details(record)}"
-            "</li>"
+        pages[Path("data") / record_digest / "result.json"] = _export_json(record)
+        downloads = (
+            '<h2>Download evidence</h2><ul>'
+            f'<li><a href="../data/{record_digest}/result.json" download>Result record (JSON)</a></li>'
         )
+        if record_id in verified_artifact_ids:
+            downloads += "".join(
+                f'<li><a href="../data/{record_digest}/{filename}" download>{label}</a></li>'
+                for filename, label in (
+                    ("build.json", "Build (JSON)"),
+                    ("config.json", "Configuration (JSON)"),
+                    ("bundle-manifest.json", "Bundle manifest (JSON)"),
+                    ("traces.jsonl", "Raw traces (JSONL)"),
+                )
+            )
+        downloads += "</ul>"
+        for metric in sorted(record["metrics"], key=lambda value: json.dumps(value, sort_keys=True)):
+            index_items.append(
+                f"<tr><td>{_escape(record['system'])}"
+                f"<small>{_escape(record['track'])}</small></td>"
+                f"<td>{_escape(record['benchmark'])}<small>"
+                f"{_escape(record['benchmark_version'])}</small></td>"
+                f"<td>{_escape(metric['name'])}<small>{_escape(metric['family'])}</small></td>"
+                f"<td>{_escape('—' if metric['value'] is None else metric['value'])} {_escape(metric['unit'])}{_interval(metric)}</td>"
+                f'<td><a href="results/{record_digest}.html">View run</a>'
+                f"<small>{_escape(record_id)}</small>"
+                f"<small>{_escape(record['publication']['label'])}; "
+                f"{'publishable' if record['publication']['publishable'] else 'not publishable'}</small>"
+                f"<small>Operator: {_escape(record['operator_entry']['operator'])}</small>"
+                f"<details><summary>Run disclosures</summary>{_record_details(record)}</details>"
+                "</td></tr>"
+            )
         trace_items: list[str] = []
         for trace in traces[record_id]:
             question_id = trace["question_id"]
@@ -238,6 +295,26 @@ def _render_pages(
                 f"{_escape(question_id)}</a>"
                 "</li>"
             )
+            family = trace.get("scoring_family")
+            if family == "deterministic-retrieval":
+                answer_label = "Retrieval output (not a generated answer)"
+            elif family == "qa":
+                answer_label = "Final answer"
+            else:
+                answer_label = "Recorded output"
+            native_fields = (
+                ("status", "Native projection status"),
+                ("request", "Question and public request"),
+                ("request_sha256", "Request byte digest"),
+                ("question_transformation", "Question transformation and option mapping"),
+                ("decoded_prediction", "Prediction passed to the category scorer"),
+                ("retrieved_dialog_ids", "Retrieved source dialog IDs"),
+                ("claim_text_custody", "Claim replay checks"),
+                ("reader_policy_matched", "Reader disclosure matches policy"),
+                ("runtime_custody_verified", "Runtime custody verified"),
+                ("run_config_sha256", "Run configuration digest"),
+                ("raw_response", "Original public response"),
+            ) if trace.get("projection_policy") == "native-explicit-abstention-v1" else ()
             evidence = "".join(
                 f"<h2>{label}</h2><pre>{_escape(trace[field])}</pre>"
                 for field, label in (
@@ -247,8 +324,8 @@ def _render_pages(
                         "authorized_retrieval_hops",
                         "Retrieved context/evidence: authorized_retrieval_hops",
                     ),
-                    ("answer", "Final answer"),
-                )
+                    ("answer", answer_label),
+                ) + native_fields
                 if field in trace
             )
             pages[
@@ -258,23 +335,91 @@ def _render_pages(
                 f"<h1>Trace {_escape(question_id)}</h1>"
                 f'<p><a href="../../results/{record_digest}.html">'
                 "Back to result</a></p>"
-                f"{evidence}",
+                f"{evidence}"
+                '<details><summary>Complete stored trace (JSON)</summary>'
+                f'<pre>{_escape(json.dumps(trace, sort_keys=True, indent=2, ensure_ascii=False))}</pre></details>',
+                root="../../",
             )
         pages[Path("results") / f"{record_digest}.html"] = _page(
             f"Result {record_id}",
             f"<h1>Result {_escape(record_id)}</h1>"
             '<p><a href="../index.html">Leaderboard</a></p>'
             f"{_record_details(record)}"
+            f"{downloads}"
             f"<h2>Disclosed traces</h2><ul>{''.join(trace_items)}</ul>",
+            root="../",
         )
+    empty = (
+        '<tr><td colspan="5" class="empty"><p>No verified results published yet.</p>'
+        '<p>Development tests are not benchmark rankings. Real results appear here '
+        'only with reproducible evidence.</p></td></tr>'
+    )
+    overview = (
+        '<section class="overview"><div><h2>Retrieval is not answer quality</h2>'
+        '<p>Recall measures whether useful evidence was found. Answer quality measures '
+        'whether the response was correct. We report them separately.</p>'
+        '<a href="methods.html">Read the methods</a></div>'
+        '<div><h2>Follow the evidence</h2><p>Every published run links its configuration, '
+        'uncertainty and question-level traces. Missing measurements stay missing.</p></div></section>'
+    )
     pages[Path("index.html")] = _page(
         "Leaderboard",
-        "<h1>Leaderboard</h1><ul>" + "".join(index_items) + "</ul>",
+        '<h1>Memory benchmarks, with evidence.</h1>'
+        '<p class="intro">Evidence for AI memory. Compare measured results and inspect the traces behind every number.</p>'
+        '<p><a href="benchmarks.html">Explore benchmark families</a> · '
+        '<a href="coverage.html">See the whole-memory coverage map</a></p>'
+        '<section aria-labelledby="results-heading"><h2 id="results-heading">Results</h2>'
+        '<div class="table-scroll" role="region" aria-label="Benchmark results" tabindex="0">'
+        f'<table class="{"" if index_items else "empty-results"}"><thead><tr>'
+        '<th scope="col">System</th><th scope="col">Benchmark</th><th scope="col">Metric</th>'
+        '<th scope="col">Result</th><th scope="col">Evidence</th></tr></thead><tbody>'
+        + ("".join(index_items) or empty)
+        + '</tbody></table></div><p><a href="data/results.json" download>'
+        'Download result data (JSON)</a></p></section>' + overview,
     )
+    pages[Path("methods.html")] = _page(
+        "Methods",
+        '<article class="prose"><h1>How to read the evidence</h1>'
+        '<p class="intro">A score is useful only when you can inspect how it was produced.</p>'
+        '<h2>Retrieval is not answer quality</h2><p>Retrieval recall measures how much '
+        'relevant evidence a system found within a stated result limit. It does not show '
+        'that a generated answer was correct. Answer quality, security, calibration, '
+        'latency and cost are separate metric families.</p>'
+        '<h2>Compare like with like</h2><p>Compare runs only when their dataset version, '
+        'split, protocol, model and resource budgets support that comparison. An interval '
+        'shows the uncertainty supplied by the run; its confidence level is not inferred. '
+        'Missing intervals and missing measurements are not zero. This site does not '
+        'calculate a universal winner across different tasks.</p>'
+        '<h2>Inspect a run</h2><p>Open a result to inspect its build and configuration '
+        'digests, publication status and individual question traces. Trace pages show '
+        'only stored evidence, retrieved evidence and answers actually disclosed in '
+        'the source. Development results are not public benchmark rankings.</p>'
+        '<h2>Publication requires more than rendering</h2><p>A local preview may contain '
+        'non-publishable development records. Rendering does not approve publication. '
+        'Public release requires the signed ledger, registered experiment, reproducible '
+        'bundle, permitted assets and governance evidence to pass the separate release gates.</p>'
+        '<h2>About the name</h2><p>Mnemetric (neh-MET-rik) combines memory with measurement. '
+        'The platform hosts multiple benchmarks; our own suite is the Mnemetric Whole-Memory '
+        'Benchmark. Each upstream benchmark retains its own name and methods.</p>'
+        '<h2>Who operates this site</h2><p>Mnemosyne is the operator entry. The project '
+        'must run supported competitors under the same disclosed protocol, retain failed '
+        'attempts, and explain missing systems. Operator-run does not mean independent '
+        'or neutral evaluation.</p>'
+        '<p><a href="systems.html">Explore memory system architectures</a></p></article>',
+    )
+    pages[Path("systems.html")] = _page("Memory systems", systems_body())
+    pages[Path("comparisons.html")] = _page("Capabilities and benchmark coverage", comparisons_body())
+    development_body, development_files = evidence_pages()
+    pages[Path("development.html")] = _page("Development evidence", development_body)
+    pages.update(development_files)
+    catalog = load_catalog()
+    pages[Path("benchmarks.html")] = _page("Benchmark catalog", benchmarks_body(catalog))
+    pages[Path("coverage.html")] = _page("Whole-memory coverage", coverage_body(catalog))
+    pages[Path("data/catalog.json")] = _export_json(catalog)
     return pages
 
 
-def _publish(pages: dict[Path, str], destination: Path) -> None:
+def _publish(pages: dict[Path, str | bytes], destination: Path) -> None:
     destination = destination.absolute()
     temporary: Path | None = None
     backup: Path | None = None
@@ -299,7 +444,10 @@ def _publish(pages: dict[Path, str], destination: Path) -> None:
         for relative, content in sorted(pages.items(), key=lambda item: str(item[0])):
             target = temporary / relative
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(content, encoding="utf-8", newline="\n")
+            if isinstance(content, bytes):
+                target.write_bytes(content)
+            else:
+                target.write_text(content, encoding="utf-8", newline="\n")
         if destination.exists():
             os.replace(destination, backup)
         try:
@@ -349,17 +497,17 @@ def _publish(pages: dict[Path, str], destination: Path) -> None:
             shutil.rmtree(backup, ignore_errors=True)
 
 
-def _verify_v2_artifacts(
+def _verify_artifacts(
     records: list[dict[str, Any]],
     traces: dict[str, str | Path],
     artifacts: dict[str, dict[str, str | Path]] | None,
-) -> dict[str, bytes]:
+) -> dict[str, dict[str, bytes]]:
     bound = artifacts or {}
-    snapshots: dict[str, bytes] = {}
+    snapshots: dict[str, dict[str, bytes]] = {}
     for record in records:
-        if record.get("schema_version") != SCHEMA_VERSION_V2:
-            continue
         record_id = str(record["record_id"])
+        if record.get("schema_version") != SCHEMA_VERSION_V2 and record_id not in bound:
+            continue
         files = bound.get(record_id)
         if not isinstance(files, dict):
             raise RenderError(f"missing artifact source: {record_id}")
@@ -380,7 +528,7 @@ def _verify_v2_artifacts(
         errors = verify_result_digests(record, payloads)
         if errors:
             raise RenderError("digest mismatch: " + ", ".join(errors))
-        snapshots[record_id] = payloads["traces.jsonl"]
+        snapshots[record_id] = payloads
     return snapshots
 
 
@@ -389,9 +537,22 @@ def render_site(
     traces: dict[str, str | Path],
     destination: str | Path,
     artifacts: dict[str, dict[str, str | Path]] | None = None,
+    *,
+    ledger_source: tuple[str | Path, str | Path] | None = None,
 ) -> None:
     """Render a complete site, replacing the destination only after validation."""
     records = _load_results(Path(results))
+    snapshot = None
+    if ledger_source is not None:
+        try:
+            ledger_path, public_key_path = ledger_source
+            snapshot = verified_ledger_snapshot(Path(ledger_path), Path(public_key_path))
+        except (LedgerError, TypeError, ValueError) as exc:
+            raise RenderError(f"invalid attempt history: {exc}") from exc
+        signed_results = [entry["result"] for entry in snapshot["entries"]
+                          if entry["status"] == "succeeded"]
+        if any(record not in signed_results for record in records):
+            raise RenderError("visible result is not present in signed attempt history")
     record_ids = {record["record_id"] for record in records}
     trace_ids = set(traces)
     missing = sorted(record_ids - trace_ids)
@@ -400,24 +561,37 @@ def render_site(
     unlinked = sorted(trace_ids - record_ids)
     if unlinked:
         raise RenderError("unlinked trace source: " + ", ".join(unlinked))
-    verified_traces = _verify_v2_artifacts(records, traces, artifacts)
+    verified_artifacts = _verify_artifacts(records, traces, artifacts)
     loaded_traces = {
         record_id: (
-            _load_traces_from_bytes(verified_traces[record_id], Path(traces[record_id]))
-            if record_id in verified_traces
+            _load_traces_from_bytes(verified_artifacts[record_id]["traces.jsonl"], Path(traces[record_id]))
+            if record_id in verified_artifacts
             else _load_traces(Path(traces[record_id]))
         )
         for record_id in sorted(record_ids)
     }
-    _publish(_render_pages(records, loaded_traces), Path(destination))
+    pages: dict[Path, str | bytes] = dict(_render_pages(records, loaded_traces, set(verified_artifacts)))
+    comparison_index = build_comparison_index(records, verified_artifacts)
+    pages[Path("data/comparison-index.json")] = _export_json(comparison_index)
+    pages[Path("compare.html")] = _page("Compare", comparison_body(comparison_index))
+    pages[Path("comparison.js")] = Path(__file__).with_name("comparison.js").read_bytes()
+    for asset in ("site.css", "site.js"):
+        pages[Path(asset)] = Path(__file__).with_name(asset).read_bytes()
+    pages[Path("attempts.html")] = _page("Attempt history", history_body(snapshot, records))
+    if snapshot is not None:
+        pages[Path("data/attempt-history.json")] = _export_json(snapshot)
+    for record_id, payloads in verified_artifacts.items():
+        for name, content in payloads.items():
+            pages[Path("data") / _digest(record_id) / name] = content
+    _publish(pages, Path(destination))
 
 
 def main(argv: list[str] | None = None) -> int:
     """Render RESULTS with RECORD_ID=TRACES mappings into DESTINATION."""
     args = sys.argv[1:] if argv is None else argv
-    if len(args) < 3:
+    if len(args) < 2:
         print(
-            "usage: render.py RESULTS DESTINATION RECORD_ID=TRACES [...]",
+            "usage: render.py RESULTS DESTINATION [RECORD_ID=TRACES ...]",
             file=sys.stderr,
         )
         return 2

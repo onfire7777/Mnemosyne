@@ -192,6 +192,69 @@ def _cli_schedule(
     return arguments
 
 
+def test_cli_and_mcp_schedule_retries_share_durable_creation(tmp_path, capsys):
+    store = tmp_path / "mcp-store.json"
+    engine = LocalMemoryEngine(store)
+    evidence_id = _seed_evidence(engine)
+    engine.close()
+    due = "2026-10-04T12:00:00+00:00"
+    arguments = [*_cli_schedule(evidence_id, due), "--idempotency-key", "request-1"]
+    first = _run_cli(capsys, store, _token(), *arguments)
+    assert _run_cli(capsys, store, _token(), *arguments) == first
+    server = _server(tmp_path)
+    replay = _mcp_call(server, "schedule_intention", {
+        **_schedule_arguments(evidence_id, due), "idempotency_key": "request-1",
+    })
+    assert replay["isError"] is False
+    assert replay["structuredContent"] == first
+
+
+def test_cli_update_retry_and_mcp_share_revision_contract(tmp_path, capsys):
+    store = tmp_path / "mcp-store.json"
+    engine = LocalMemoryEngine(store)
+    evidence_id = _seed_evidence(engine)
+    engine.close()
+    due = "2026-10-04T12:00:00+00:00"
+    first = _run_cli(capsys, store, _token(), *_cli_schedule(evidence_id, due))
+    snapshot = _run_cli(capsys, store, _token(), "intention-list", "--tenant", TENANT,
+                        "--include-revision")["intentions"][0]
+    action = {"kind": "notify", "message": "Updated once"}
+    updated = _run_cli(capsys, store, _token(), "intention-update", "--tenant", TENANT,
+        "--user", USER, "--agent", AGENT, "--intention-id", first["intention_id"],
+        "--action", json.dumps(action), "--expected-revision", snapshot["revision"],
+        "--idempotency-key", "update-1")
+    assert updated["revision"] != snapshot["revision"]
+    server = _server(tmp_path)
+    replay = _mcp_call(server, "update_intention", {
+        "tenant_id": TENANT, "user_id": USER, "agent_id": AGENT,
+        "intention_id": first["intention_id"], "action": action,
+        "expected_revision": snapshot["revision"], "idempotency_key": "update-1",
+    })
+    assert replay["isError"] is False
+    assert replay["structuredContent"] == updated
+
+
+def test_cli_cancel_retry_and_mcp_share_revision_contract(tmp_path, capsys):
+    store = tmp_path / "mcp-store.json"
+    engine = LocalMemoryEngine(store)
+    evidence_id = _seed_evidence(engine)
+    engine.close()
+    _run_cli(capsys, store, _token(), *_cli_schedule(evidence_id, "2026-10-04T12:00:00+00:00"))
+    snapshot = _run_cli(capsys, store, _token(), "intention-list", "--tenant", TENANT,
+                        "--include-revision")["intentions"][0]
+    cancelled = _run_cli(capsys, store, _token(), "intention-cancel", "--tenant", TENANT,
+        "--cancelled-by", USER, "--intention-id", snapshot["intention_id"],
+        "--expected-revision", snapshot["revision"], "--idempotency-key", "cancel-1")
+    assert cancelled["status"] == "cancelled"
+    assert cancelled["revision"] != snapshot["revision"]
+    replay = _mcp_call(_server(tmp_path), "cancel_intention", {
+        "tenant_id": TENANT, "intention_id": snapshot["intention_id"], "cancelled_by": USER,
+        "expected_revision": snapshot["revision"], "idempotency_key": "cancel-1",
+    })
+    assert replay["isError"] is False
+    assert replay["structuredContent"] == cancelled
+
+
 def test_cli_requires_signed_identity_and_preserves_timezone(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

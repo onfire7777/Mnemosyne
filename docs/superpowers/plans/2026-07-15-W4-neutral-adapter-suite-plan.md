@@ -5,6 +5,11 @@
 **Requirements:** BENCH-006/007, REPRO-001/002, LEAD-001..003, GOV-001 (Phases 13/14/16).
 **Depends on:** W1 (retrieval), and consumes adapters/capabilities from W2 (Memora/deletion/procedural) and W3 (PM-Bench/action). W4 is the measurement backbone for per-category world-best.
 
+
+## Status reconciliation — 2026-10-04
+
+Source inspection at `3c21be5d`; historical instructions below describe the original execution contract, not a request to repeat landed work. MemoryAgentBench and BEAM development adapters exist. Scheduled cadence BENCH-007 is complete with run `30807305055`; REPRO-001 source landed in #144 after N12 #139. Official/upstream evidence, broader missing adapter families, REPRO-002 and public leaderboard launch remain open. REPRO-002 now requires reproduction by construction; independent third-party reproduction is optional strengthening evidence per the current roadmap.
+
 ## Goal
 
 Wire every remaining memory-benchmark family as a neutral-harness adapter under
@@ -55,6 +60,8 @@ a weak category.
   until run under this harness; do not cite them as targets.
 
 ## Phase 1 — Conversational + agent-experience adapters
+
+Current LoCoMo prerequisite review: [pinned source and protocol intake](../../plans/locomo-upstream-intake-2026-10-04.md). Category-specific scoring and missing-context recall behavior require explicit parity work; the adapter remains open.
 
 - [ ] LoCoMo adapter (deterministic where possible; disclose judge).
 - [ ] LongMemEval-V2 adapter over the W3 working/prospective planes; report the
