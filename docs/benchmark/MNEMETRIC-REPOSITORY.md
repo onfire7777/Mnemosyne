@@ -31,8 +31,9 @@ existing deployment are unchanged. Source for both presentation sites belongs
 to Mnemetric; memory-runtime deployment and public API compatibility remain here.
 
 Mnemetric now retains official MemoryAgentBench source/configuration pins,
-complete four-split dataset inventory, SH-6k retrieval diagnostics, prepared
-answer requests and strict scoring-input joins. These do not establish full
+complete four-split dataset inventory, four-task 771-query retrieval diagnostics,
+a paired default/expanded-budget experiment, the official BM25 method baseline,
+prepared answer requests and strict scoring-input joins. These do not establish full
 benchmark execution, answer quality or superiority. Follow its current roadmap
 and verification receipts rather than interpreting legacy copies here as current
 implementation state. Hosted generation awaits an API key and spending limit;
@@ -57,6 +58,10 @@ The real CLI regression exercises two chunks individually larger than the
 default budget, verifies both can be returned under the explicit evaluation
 budget, checks all store files remain byte-identical, and repeats the default
 query to prove its result is unchanged. Bounds are validated before loading
-input files or the store. A fair benchmark still needs a declared profile,
-matched budget semantics, pinned runtime, and a fresh retained run; the new
-options alone establish neither equivalence nor answer quality.
+input files or the store. The paired 771-query experiment subsequently completed with runtime `3595dc86`
+in an isolated environment and verified unchanged frozen stores. Its expanded
+profile used top-k 10 and 65,536 estimated tokens, versus the default top-k 8
+and 4,096 estimated tokens. These retained runs establish retrieval behavior,
+not matched-tokenizer budgets or answer quality. See Mnemetric
+`docs/verification/memoryagentbench-budget-comparison-result.json`; the main
+Mnemetric dependency remains pinned to `e1ad2d0c`.
