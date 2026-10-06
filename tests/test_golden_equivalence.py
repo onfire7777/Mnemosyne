@@ -18,12 +18,16 @@ from pathlib import Path
 import pytest
 
 from eval.perf.golden_equivalence import diff, run
+from mnemosyne.canary_overlay import THIN_CANARIES_ENV
 
 GOLDEN = Path(__file__).resolve().parents[1] / "eval" / "perf" / "golden"
 
 
+@pytest.mark.parametrize("thin", ["1", "0"], ids=["thin-canaries", "full-branches"])
 @pytest.mark.parametrize("name", ["synthetic-growth", "synthetic-rails", "synthetic-conflicts", "g0-write-gating"])
-def test_engine_reproduces_the_legacy_golden_dump(name: str) -> None:
+def test_engine_reproduces_the_legacy_golden_dump(name: str, thin: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Both the thin-canary fast path and its MNEMOSYNE_THIN_CANARIES=0 fallback must be exact.
+    monkeypatch.setenv(THIN_CANARIES_ENV, thin)
     expected = json.loads(gzip.decompress((GOLDEN / f"{name}.json.gz").read_bytes()))
     actual = json.loads(json.dumps(run(name), sort_keys=True))
     for dump in (expected, actual):

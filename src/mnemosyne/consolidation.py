@@ -1314,24 +1314,13 @@ class ConsolidationWorker:
         size of the store. Any other engine keeps the export path.
         """
         engine = self.engine
-        assertions = getattr(engine, "assertions", None)
         if (
             isinstance(engine, LocalMemoryEngine)
             and getattr(type(engine), "export_tenant", None) is LocalMemoryEngine.export_tenant
-            and isinstance(assertions, dict)
         ):
-            found: set[str] = set()
-            for fact_id in budget.active_fact_ids:
-                item = assertions.get(engine._branch_key(tenant_id, candidate_branch, fact_id))
-                if (
-                    item is not None
-                    and item.tenant_id == tenant_id
-                    and item.branch == candidate_branch
-                    and item.status == "superseded"
-                    and str(item.id) == fact_id
-                ):
-                    found.add(fact_id)
-            return found
+            # Keyed lookups of the budgeted facts; a thin canary answers for the facts it
+            # never copied with its parent's status (canary_overlay).
+            return engine.superseded_fact_ids_on_branch(tenant_id, candidate_branch, budget.active_fact_ids)
         return budget.branch_superseded_ids(self._export_snapshot(tenant_id), candidate_branch)
 
     def _role_pipeline_report(self, pass_results: list[PassResult]) -> dict[str, Any]:
@@ -2440,7 +2429,8 @@ class ConsolidationWorker:
             found.append(key)
 
         engine = self.engine
-        evidence_map = getattr(engine, "evidence", None)
+        read_rows = getattr(engine, "evidence_rows_for_reading", None)
+        evidence_map = read_rows() if callable(read_rows) else getattr(engine, "evidence", None)
         if isinstance(evidence_map, dict):
             for ev in evidence_map.values():
                 if getattr(ev, "tenant_id", None) != job.tenant_id:
