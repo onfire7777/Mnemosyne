@@ -95,7 +95,7 @@ from mnemosyne.standing import (
     standing_erasure_cascade_report,
     standing_observability_record,
 )
-from mnemosyne.text import cosine, lexical_score, tokenize
+from mnemosyne.text import SparseCosine, cosine, lexical_scorer, tokenize
 from mnemosyne.workspace import self_generation_budget_report
 
 
@@ -3639,6 +3639,42 @@ class LocalMemoryEngine:
                     hit.channel = scored_channel_for_hit(kind=hit.kind, base_channel=base)
                     hits.append(hit)
         else:
+            # Local hashing embeddings: score each candidate against only the query's non-zero
+            # dimensions instead of copying and multiplying all 256 - the identical sum
+            # (SparseCosine). Stored and provider embeddings keep the full cosine.
+            sparse = (
+                SparseCosine(query_vec)
+                if type(self.adapters.embedding) is HashingEmbeddingProvider
+                else None
+            )
+            dims = int(self.adapters.embedding.dims) if sparse is not None else 0
+            if sparse is not None:
+                # Scored on the memoized candidates themselves; only the hits kept are cloned,
+                # and they get exactly the fields _embedding_for_hit would have written.
+                for template in self._candidate_templates(filt):
+                    stored_vec = self._stored_embedding_value(template, filt)
+                    if stored_vec is not None:
+                        score = cosine(query_vec, stored_vec)
+                    else:
+                        partition = str(template.metadata.get("embedding_partition") or VECTOR_PARTITION_PUBLIC)
+                        if partition == "none":
+                            continue
+                        score = sparse.hashing(template.text, dims)
+                    if score > 0:
+                        hit = _clone_candidate_hit(template)
+                        hit.metadata["stored_embedding_used"] = stored_vec is not None
+                        hit.score = score
+                        stored_raw = bool(hit.metadata.get("stored_embedding_used"))
+                        base = (
+                            "dense_media"
+                            if stored_raw and hit.metadata.get("stored_media_embedding")
+                            else "dense_hash"
+                        )
+                        hit.channel = scored_channel_for_hit(kind=hit.kind, base_channel=base)
+                        hits.append(hit)
+                return self._mark_retrieved_text_as_data(
+                    sorted(hits, key=lambda item: item.score, reverse=True)[:k]
+                )
             for hit in self._candidate_hits(filt):
                 hit_vec = self._embedding_for_hit(hit, filt)
                 if hit_vec is None:
@@ -3688,9 +3724,13 @@ class LocalMemoryEngine:
                     hit.channel = scored_channel_for_hit(kind=hit.kind, base_channel="lexical")
                     hits.append(hit)
         else:
-            for hit in self._candidate_hits(filt):
-                score = lexical_score(query, hit.text)
+            # One query against many texts: tokenize the query once and reuse each text's cached
+            # counts - the identical score (text.lexical_scorer).
+            score_text = lexical_scorer(query)
+            for template in self._candidate_templates(filt):
+                score = score_text(template.text)
                 if score > 0:
+                    hit = _clone_candidate_hit(template)
                     hit.score = score
                     hit.channel = scored_channel_for_hit(kind=hit.kind, base_channel="lexical")
                     hits.append(hit)
@@ -5208,6 +5248,15 @@ class LocalMemoryEngine:
         tests/test_engine_perf_lanes.py. Kill-switch:
         MNEMOSYNE_CANDIDATE_MEMO=0.
         """
+        return [_clone_candidate_hit(hit) for hit in self._candidate_templates(filt)]
+
+    def _candidate_templates(self, filt: dict[str, Any]) -> list[Hit]:
+        """``_candidate_hits`` without the per-hit clones - the memoized candidates themselves.
+
+        Read-only: a channel that scores every candidate clones (``_clone_candidate_hit``) only
+        the hits it keeps, instead of cloning the whole candidate list on every query. The
+        hits it returns are exactly the clones ``_candidate_hits`` would have produced.
+        """
         if not _candidate_memo_enabled():
             return self._candidate_hits_uncached(filt)
         key = (
@@ -5251,7 +5300,7 @@ class LocalMemoryEngine:
                 self._candidate_memo.move_to_end(key)
                 while len(self._candidate_memo) > _CANDIDATE_MEMO_SIZE:
                     self._candidate_memo.popitem(last=False)
-        return [_clone_candidate_hit(hit) for hit in cached]
+        return cached
 
     def _candidate_memo_deadline(self, tenant_id: Any, branch: Any, now: datetime) -> datetime | None:
         """Earliest future ``expires_at`` across the rows a candidate scan reads.
@@ -5461,6 +5510,26 @@ class LocalMemoryEngine:
         *,
         allow_fallback: bool = True,
     ) -> list[float] | None:
+        stored = self._stored_embedding_for_hit(hit, filt)
+        if stored is not None:
+            return stored
+        if not allow_fallback:
+            return None
+        partition = str(hit.metadata.get("embedding_partition") or VECTOR_PARTITION_PUBLIC)
+        if partition == "none":
+            return None
+        hit.metadata["stored_embedding_used"] = False
+        return self._embed_text(hit.text)
+
+    def _stored_embedding_for_hit(self, hit: Hit, filt: dict[str, Any] | None = None) -> list[float] | None:
+        """The evidence row's own stored embedding when policy allows using it, else None."""
+        stored = self._stored_embedding_value(hit, filt)
+        if stored is not None:
+            hit.metadata["stored_embedding_used"] = True
+        return stored
+
+    def _stored_embedding_value(self, hit: Hit, filt: dict[str, Any] | None = None) -> list[float] | None:
+        """``_stored_embedding_for_hit`` without writing ``stored_embedding_used`` into the hit."""
         if hit.kind == "evidence":
             ev = self.evidence.get(self._evidence_key(hit.tenant_id, hit.branch, hit.id))
             if ev and ev.embedding:
@@ -5479,15 +5548,8 @@ class LocalMemoryEngine:
                     access_policy=ev.access_policy,
                     embedding_partition=ev.metadata.get("embedding_partition"),
                 ):
-                    hit.metadata["stored_embedding_used"] = True
                     return ev.embedding
-        if not allow_fallback:
-            return None
-        partition = str(hit.metadata.get("embedding_partition") or VECTOR_PARTITION_PUBLIC)
-        if partition == "none":
-            return None
-        hit.metadata["stored_embedding_used"] = False
-        return self._embed_text(hit.text)
+        return None
 
     def _embed_text(self, text: str) -> list[float]:
         return self.adapters.embedding.embed(text)
