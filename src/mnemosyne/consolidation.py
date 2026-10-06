@@ -7,6 +7,7 @@ import os
 import re
 import secrets
 import subprocess
+from collections import Counter, OrderedDict, defaultdict
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
@@ -14,6 +15,7 @@ from typing import Any, Callable, Mapping, Protocol, Sequence
 from uuid import NAMESPACE_URL, uuid5
 
 from mnemosyne.access_policy import expiry_deadline, may_read_item, merge_access_policies, validate_access_policy
+from mnemosyne.cid_lists import evidence_caching_safe, evidence_epoch
 from mnemosyne.command_line import split_command
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.gate import (
@@ -35,6 +37,8 @@ from mnemosyne.text import hashing_embedding
 from mnemosyne.user_model import LatentUserProfile, UserModel
 
 CONSOLIDATE_EVIDENCE_JOB = "consolidate_evidence"
+# Base corroboration lists memoised per source list (a batch's candidates share few lists).
+_BASE_MEMO_SIZE = 16
 CONSOLIDATE_SLEEP_JOB = "consolidate_sleep"
 DEFAULT_CONSOLIDATION_PASSES = [
     "replayer",
@@ -482,6 +486,8 @@ class ConsolidationWorker:
         self._tier_cid_last: dict[tuple[str, str, str, str], tuple[int, datetime]] = {}
         self._sleep_memo: dict[str, ConsolidationRunResult] = {}
         self._sleep_last_now: dict[str, datetime] = {}
+        # Per-evidence-epoch corroboration lookups (_local_corroboration_index).
+        self._corroboration_index: dict[str, Any] | None = None
         # §23.3 / §7 #17: fact promote floor is policy.min_external_corroboration_for_fact
         # (Standing independent external count). Optional min_corroboration may only
         # raise the floor, never lower it below policy.
@@ -2044,6 +2050,28 @@ class ConsolidationWorker:
             **({"source_summary_cids": source_summary_cids} if source_summary_cids else {}),
         }
 
+    def _summary_rows_on_branch(self, tenant_id: str, branch: str, export_tenant: Any) -> list[Any]:
+        """The exported evidence rows the summary-retirement scan can act on.
+
+        That scan skips every row that is not a ``consolidation-summary`` on ``branch``. Where
+        the engine offers its evidence rows by branch, exactly those rows are converted - the
+        same dicts, in the same relative order as ``export_tenant(tenant_id)['evidence']``,
+        snapshotted before any of them is updated - instead of exporting the whole tenant
+        (every fact and relation with its full source list) once per new summary.
+        """
+        read_rows = getattr(self.engine, "evidence_rows_for_reading", None)
+        store = read_rows() if callable(read_rows) else None
+        in_branch = getattr(store, "in_branch", None)
+        if callable(in_branch):
+            return [
+                ev.to_dict()
+                for ev in list(in_branch(tenant_id, branch).values())
+                if getattr(ev, "tenant_id", None) == tenant_id
+                and not getattr(ev, "erased", False)
+                and getattr(ev, "source_type", None) == "consolidation-summary"
+            ]
+        return list(export_tenant(tenant_id).get("evidence", []))
+
     def _retire_superseded_summaries(
         self,
         tenant_id: str,
@@ -2061,11 +2089,11 @@ class ConsolidationWorker:
             return []
         source_fingerprint = _summary_source_fingerprint(source_cids, level=raptor_level)
         try:
-            snapshot = export_tenant(tenant_id)
+            summary_rows = self._summary_rows_on_branch(tenant_id, branch, export_tenant)
         except Exception:
             return []
         retired: list[str] = []
-        for row in snapshot.get("evidence", []):
+        for row in summary_rows:
             if not isinstance(row, dict):
                 continue
             cid = str(row.get("cid") or "")
@@ -2383,6 +2411,66 @@ class ConsolidationWorker:
     def _content_tokens(text: str) -> set[str]:
         return {tok.lower() for tok in re.findall(r"[A-Za-z0-9]{3,}", text or "")}
 
+    def _local_corroboration_index(self, tenant_id: str) -> dict[str, Any] | None:
+        """Lookups ``_corroboration_cids_for_job`` repeats for every candidate, built once.
+
+        Only for the in-memory engine, and only while the evidence epoch is unchanged (no
+        evidence row added, removed or modified - see mnemosyne.cid_lists): the main-branch
+        rows of the tenant the scan would consider, in store order, with their content tokens
+        and an inverted index from token to row; plus memos of the per-CID derived check and of
+        the per-source-list base list.
+        """
+        engine = self.engine
+        read_rows = getattr(engine, "evidence_rows_for_reading", None)
+        if not isinstance(engine, LocalMemoryEngine) or not callable(read_rows) or not evidence_caching_safe():
+            return None
+        store = read_rows()
+        in_branch = getattr(store, "in_branch", None)
+        # The scan treats a row with no branch as main; such rows sit outside the main view.
+        if not callable(in_branch) or in_branch(tenant_id, None) or in_branch(tenant_id, ""):
+            return None
+        epoch = evidence_epoch()
+        cache = getattr(self, "_corroboration_index", None)
+        if (
+            cache is not None
+            and cache["epoch"] == epoch
+            and cache["tenant"] == tenant_id
+            and cache["engine"] is engine
+            and cache["store"] is store
+        ):
+            return cache
+        rows: list[tuple[Any, frozenset[str]]] = []
+        postings: dict[str, list[int]] = defaultdict(list)
+        for ev in in_branch(tenant_id, "main").values():
+            if getattr(ev, "tenant_id", None) != tenant_id or getattr(ev, "erased", False):
+                continue
+            if self._is_derived_evidence_record(ev):
+                continue
+            tokens = frozenset(self._content_tokens(getattr(ev, "content", "") or ""))
+            for token in tokens:
+                postings[token].append(len(rows))
+            rows.append((getattr(ev, "cid", None), tokens))
+        cache = {
+            "epoch": epoch, "tenant": tenant_id, "engine": engine, "store": store,
+            "rows": rows, "postings": postings, "derived": {}, "base": OrderedDict(),
+        }
+        self._corroboration_index = cache
+        return cache
+
+    def _cid_is_derived_cached(self, cache: dict[str, Any], tenant_id: str, cid: str) -> bool:
+        """``_cid_is_derived_for_job`` on the in-memory engine, memoised per evidence epoch.
+
+        ``get_evidence`` hands back a deep copy of the resolved, non-erased row; the derived
+        test reads only fields the copy keeps, so the row itself gives the same answer.
+        """
+        derived = cache["derived"]
+        found = derived.get(cid)
+        if found is None:
+            ev = self.engine._evidence_row(tenant_id, "main", cid)
+            found = bool(ev is not None and not ev.erased and self._is_derived_evidence_record(ev))
+            derived[cid] = found
+        return found
+
     def _corroboration_cids_for_job(self, job: ConsolidationJob) -> list[str]:
         """CIDs used for external corroboration counting.
 
@@ -2392,6 +2480,9 @@ class ConsolidationWorker:
         major: unrelated grounded evidence must not free-ride).
         """
 
+        cache = self._local_corroboration_index(job.tenant_id)
+        if cache is not None:
+            return self._corroboration_cids_indexed(job, cache)
         base = [
             cid
             for cid in dict.fromkeys(str(item) for item in (job.source_evidence_cids or []) if item)
@@ -2458,6 +2549,64 @@ class ConsolidationWorker:
                 if self._is_derived_evidence_record(item):
                     continue
                 _maybe_add(item.get("cid"), item.get("content") or "", item)
+        return found
+
+    def _corroboration_cids_indexed(self, job: ConsolidationJob, cache: dict[str, Any]) -> list[str]:
+        """``_corroboration_cids_for_job`` from the per-epoch index: the same list, in order.
+
+        The scan visits the tenant's main rows in store order and appends a row's CID when it
+        shares at least two content tokens with the candidate and is not already listed. The
+        inverted index yields exactly the rows sharing two or more tokens; visiting them in
+        store order with the same ``seen`` test appends the same CIDs in the same order.
+        """
+        tenant_id = job.tenant_id
+        sources = tuple(job.source_evidence_cids or ())
+        memo: OrderedDict[tuple[Any, ...], list[str]] = cache["base"]
+        try:
+            base = memo.get(sources)
+        except TypeError:  # unhashable CIDs: no memo
+            sources, base = None, None  # type: ignore[assignment]
+        if base is None:
+            base = [
+                cid
+                for cid in dict.fromkeys(str(item) for item in (job.source_evidence_cids or []) if item)
+                if not self._cid_is_derived_cached(cache, tenant_id, cid)
+            ]
+            if sources is not None:
+                memo[sources] = base
+                while len(memo) > _BASE_MEMO_SIZE:
+                    memo.popitem(last=False)
+        elif sources is not None:
+            memo.move_to_end(sources)
+        needle = self._content_tokens(
+            " ".join(
+                [
+                    str(job.signature or ""),
+                    str(job.query or ""),
+                    str(job.candidate_subject or ""),
+                    str(job.candidate_predicate or ""),
+                    str(job.candidate_object or ""),
+                ]
+            )
+        )
+        found = list(base)
+        if len(needle) < 2:
+            return found
+        seen = set(found)
+        shared: Counter[int] = Counter()
+        postings = cache["postings"]
+        for token in needle:
+            shared.update(postings.get(token, ()))
+        rows = cache["rows"]
+        for index in sorted(index for index, count in shared.items() if count >= 2):
+            cid = rows[index][0]
+            if not cid:
+                continue
+            key = str(cid)
+            if key in seen:
+                continue
+            seen.add(key)
+            found.append(key)
         return found
 
     def _fact_unit_signals_for_job(self, job: ConsolidationJob) -> dict[str, Any]:

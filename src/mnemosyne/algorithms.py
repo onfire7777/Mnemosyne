@@ -15,6 +15,7 @@ from collections.abc import Callable, Collection, Mapping
 from itertools import chain
 
 from mnemosyne import text
+from mnemosyne.cid_lists import shared_or_copy
 from mnemosyne.retrieval import Hit
 from mnemosyne.text import approx_tokens, cosine
 
@@ -60,7 +61,7 @@ def rrf_fuse(
                 text=hit.text,
                 score=scores[key],
                 channel="+".join(sorted(set(channels[key]))),
-                provenance=list(hit.provenance),
+                provenance=shared_or_copy(hit.provenance),
                 trust_tier=hit.trust_tier,
                 sensitivity=hit.sensitivity,
                 metadata={
@@ -81,7 +82,7 @@ def rrf_fuse(
                 text=hit.text,
                 score=scores[key],
                 channel="+".join(sorted(set(channels[key]))),
-                provenance=list(hit.provenance),
+                provenance=shared_or_copy(hit.provenance),
                 trust_tier=hit.trust_tier,
                 sensitivity=hit.sensitivity,
                 metadata=dict(hit.metadata),
@@ -123,6 +124,86 @@ def fit_budget(hits: list[Hit], budget: int) -> tuple[list[Hit], int]:
     return kept, used
 
 
+def _sparse(vec: list[float] | None) -> tuple[dict[int, float], int] | None:
+    """Non-zero entries and length of a finite vector; None for a missing or non-finite one."""
+    if vec is None:
+        return None
+    entries: dict[int, float] = {}
+    for index, value in enumerate(vec):
+        if value != 0.0:
+            if value != value or value in (float("inf"), float("-inf")):
+                raise ValueError("non-finite vector")
+            entries[index] = value
+    return entries, len(vec)
+
+
+def _sparse_dot(left: tuple[dict[int, float], int], right: tuple[dict[int, float], int]) -> float:
+    """``_cosine_pure(a, b)`` for finite vectors, summing only terms where both are non-zero.
+
+    ``zip`` stops at the shorter vector, and every other term is a +-0.0 product, which
+    leaves the builtin ``sum``'s running value and Neumaier compensation unchanged; terms
+    are taken in increasing index order, as zip yields them, and ``x * y == y * x``.
+    """
+    a, a_len = left
+    b, b_len = right
+    limit = min(a_len, b_len)
+    return sum(value * other for index, value in a.items() if index < limit and (other := b.get(index)) is not None)
+
+
+def _mmr_select_once(
+    hits: list[Hit],
+    k: int,
+    *,
+    query_vec: list[float],
+    embed_hit: Callable[[Hit], list[float] | None],
+    mmr_lambda: float,
+) -> list[Hit]:
+    """The pure MMR loop with each hit embedded once and each cosine computed once.
+
+    Valid only for a deterministic ``embed_hit`` whose side effects are the same on every
+    call (the local engine with its built-in hashing embedder): the pure loop recomputes the
+    same vectors and the same dot products every round, so caching them changes no score,
+    no comparison and no tie-break.
+    """
+    try:
+        query = _sparse(query_vec)
+        vectors = [_sparse(embed_hit(hit)) for hit in hits]
+    except ValueError:
+        return mmr_select(hits, k, query_vec=query_vec, embed_hit=embed_hit, mmr_lambda=mmr_lambda)
+    assert query is not None
+    relevance = [_sparse_dot(query, vec) if vec is not None else 0.0 for vec in vectors]
+    pair: dict[tuple[int, int], float] = {}
+
+    def similarity(i: int, j: int) -> float:
+        key = (i, j) if i < j else (j, i)
+        found = pair.get(key)
+        if found is None:
+            found = pair[key] = _sparse_dot(vectors[i], vectors[j])  # type: ignore[arg-type]
+        return found
+
+    selected: list[int] = []
+    remaining = list(range(len(hits)))
+    while remaining and len(selected) < k:
+        best: int | None = None
+        best_score = float("-inf")
+        for i in remaining:
+            diversity_penalty = 0.0
+            if selected and vectors[i] is not None:
+                chosen = [j for j in selected if vectors[j] is not None]
+                if chosen:
+                    diversity_penalty = max(similarity(i, j) for j in chosen)
+            score = mmr_lambda * relevance[i] - (1.0 - mmr_lambda) * diversity_penalty
+            score += hits[i].score
+            if score > best_score:
+                best = i
+                best_score = score
+        if best is None:
+            break
+        selected.append(best)
+        remaining.remove(best)
+    return [hits[i] for i in selected]
+
+
 def mmr_select(
     hits: list[Hit],
     k: int,
@@ -130,6 +211,7 @@ def mmr_select(
     query_vec: list[float],
     embed_hit: Callable[[Hit], list[float] | None],
     mmr_lambda: float,
+    embed_once: bool = False,
 ) -> list[Hit]:
     """Maximal-marginal-relevance selection (spec §4.1 kernel ABI).
 
@@ -165,6 +247,9 @@ def mmr_select(
             [hit.score for hit in hits], vectors, query_vec, k, mmr_lambda
         )
         return [hits[i] for i in indices]
+    if embed_once:
+        # The caller guarantees embed_hit is deterministic with idempotent side effects.
+        return _mmr_select_once(hits, k, query_vec=query_vec, embed_hit=embed_hit, mmr_lambda=mmr_lambda)
     selected: list[Hit] = []
     remaining = list(hits)
     while remaining and len(selected) < k:
@@ -219,6 +304,47 @@ def _ppr_power_iteration_pure(
     return ranks
 
 
+def _ppr_power_iteration_closed(
+    adjacency: Mapping[str, Collection[str]],
+    matches_seed: Callable[[str], bool],
+    *,
+    iterations: int,
+    damping: float,
+    teleport: float,
+) -> dict[str, float]:
+    """Bit-identical to ``_ppr_power_iteration_pure`` for a CLOSED adjacency.
+
+    Closed: every neighbour is itself a key (both shipped engines add every edge in both
+    directions), so the pure loop's dicts always hold exactly the adjacency keys, in
+    adjacency order. A node whose rank is 0.0 then adds ``damping * 0.0 / n == 0.0`` to each
+    neighbour, and ``x + 0.0 == x`` for every non-negative x the loop produces, so skipping
+    it changes no value and no key order. Only ranked nodes are visited, still in adjacency
+    order and with each node's own neighbour collection, so every float addition happens in
+    the pure sequence. ``matches_seed`` is asked once per node, as the native kernel does.
+    """
+    nodes = list(adjacency)
+    seed_flags = [1.0 if matches_seed(node) else 0.0 for node in nodes]
+    if iterations <= 0:
+        return dict(zip(nodes, seed_flags))
+    order = {node: slot for slot, node in enumerate(nodes)}
+    seed_nodes = [node for node, flag in zip(nodes, seed_flags) if flag]
+    seed_value = teleport * 1.0
+    zero_value = teleport * 0.0
+    ranked = dict(zip(seed_nodes, [1.0] * len(seed_nodes)))
+    final: dict[str, float] = {}
+    for _ in range(iterations):
+        final = dict.fromkeys(seed_nodes, seed_value)
+        for node in sorted(ranked, key=order.__getitem__):
+            neighbors = adjacency[node]
+            if not neighbors:
+                continue
+            share = damping * ranked[node] / len(neighbors)
+            for neighbor in neighbors:
+                final[neighbor] = final.get(neighbor, zero_value) + share
+        ranked = {node: value for node, value in final.items() if value != 0.0}
+    return {node: final.get(node, zero_value) for node in nodes}
+
+
 def ppr_power_iteration(
     adjacency: Mapping[str, Collection[str]],
     matches_seed: Callable[[str], bool],
@@ -226,6 +352,7 @@ def ppr_power_iteration(
     iterations: int = 12,
     damping: float = 0.85,
     teleport: float = 0.15,
+    closed: bool = False,
 ) -> dict[str, float]:
     """Personalized PageRank by power iteration (blueprint §22.2 deep mode).
 
@@ -296,6 +423,11 @@ def ppr_power_iteration(
             teleport,
         )
         return dict(zip(nodes, scores, strict=True))
+    if closed:
+        # The caller guarantees every neighbour is a key (see _ppr_power_iteration_closed).
+        return _ppr_power_iteration_closed(
+            adjacency, matches_seed, iterations=iterations, damping=damping, teleport=teleport
+        )
     return _ppr_power_iteration_pure(
         adjacency, matches_seed, iterations=iterations, damping=damping, teleport=teleport
     )

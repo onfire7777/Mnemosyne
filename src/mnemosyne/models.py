@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal
 
+from mnemosyne.cid_lists import bump_evidence_epoch, evidence_tracked
 from mnemosyne.ids import new_id
 
 Actor = Literal["user", "assistant", "tool", "system", "external"]
@@ -61,7 +62,7 @@ def iso_utc(value: datetime | str | None) -> str | None:
     return moment.astimezone(UTC).isoformat()
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, weakref_slot=True)
 class Evidence:
     tenant_id: str
     user_id: str
@@ -83,6 +84,12 @@ class Evidence:
     cid: str | None = None
     created_at: datetime = field(default_factory=utc_now)
     erased: bool = False
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        object.__setattr__(self, name, value)
+        # A row that sits in an engine store changed: per-list caches over evidence are stale.
+        if evidence_tracked(self):
+            bump_evidence_epoch()
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)

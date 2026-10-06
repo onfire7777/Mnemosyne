@@ -123,4 +123,4 @@ def test_engine_wraps_assigned_maps_and_keeps_their_order() -> None:
     engine.relations = {}
     engine.relations["t:main:r"] = Relation(tenant_id="t", source="s", predicate="p", target="o")
     assert list(engine.relations.peers("t", "main", "s", "p", "o"))== ["t:main:r"]
-    assert indexed(engine.evidence, None) is engine.evidence
+    assert indexed(engine.evidence, "evidence") is engine.evidence
