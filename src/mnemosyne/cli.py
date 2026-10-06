@@ -1872,15 +1872,27 @@ def _consolidate_captured_batch(
         )
         if isinstance(candidate, dict) and not candidate.get("promoted")
     ]
-    if rejected:
+    if rejected and getattr(args, "consolidation_rejections", "refuse") != "report":
         raise RuntimeError(
             "capture-batch consolidation rejected semantic candidates: "
             + ", ".join(str(item.get("candidate_id") or "unknown") for item in rejected[:5])
         )
-    return {
+    summary: dict[str, Any] = {
         "jobs": [jobs[job.id].to_dict() for job in queued],
         "metrics": metrics.snapshot().to_dict(),
     }
+    if getattr(args, "consolidation_rejections", "refuse") == "report":
+        # Opt-in: the gate's rejections are reported, not fatal. Every rejected candidate's
+        # trial branch was discarded by the gate, exactly as in the default mode.
+        summary["rejected_candidates"] = [
+            {
+                "candidate_id": item.get("candidate_id"),
+                "failed_cases": list(item.get("failed_cases") or []),
+                "protected_regressions": list(item.get("protected_regressions") or []),
+            }
+            for item in rejected
+        ]
+    return summary
 
 
 def cmd_eval_query_batch(args: argparse.Namespace) -> None:
@@ -19346,6 +19358,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--consolidate",
         action="store_true",
         help="Consolidate every captured CID before atomically publishing the store",
+    )
+    capture_batch.add_argument(
+        "--consolidation-rejections",
+        choices=("refuse", "report"),
+        default="refuse",
+        help=(
+            "refuse (default): publish nothing when the promotion gate rejects any candidate. "
+            "report: publish the captured evidence and every promoted fact, and list the "
+            "gate-rejected candidates (their trial branches are discarded as always)"
+        ),
     )
     capture_batch.set_defaults(func=cmd_capture_batch)
 

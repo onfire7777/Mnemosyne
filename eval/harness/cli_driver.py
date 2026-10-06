@@ -185,12 +185,19 @@ class MnemoCLI:
         return self.run("capture", *args).json
 
     def capture_batch(
-        self, input_jsonl: Path | str, *, consolidate: bool = False
+        self, input_jsonl: Path | str, *, consolidate: bool = False, report_rejections: bool = False
     ) -> dict[str, Any]:
-        """Capture validated JSONL rows through one public CLI process."""
+        """Capture validated JSONL rows through one public CLI process.
+
+        ``report_rejections`` publishes the batch even when the promotion gate rejects some
+        candidates, listing them under ``consolidation.rejected_candidates`` (the CLI's
+        ``--consolidation-rejections report``); by default any rejection refuses the batch.
+        """
         args = ["--input-jsonl", str(input_jsonl)]
         if consolidate:
             args.append("--consolidate")
+            if report_rejections:
+                args += ["--consolidation-rejections", "report"]
         return self.run("capture-batch", *args).json
 
     def install_consolidation_gate_case(self, content: str) -> dict[str, Any]:

@@ -70,7 +70,11 @@ def run(
             capture_cli.install_consolidation_gate_case(
                 f"{first['title']}\n{first['content']}"
             )
-        captured = capture_cli.capture_batch(batch, consolidate=True)
+            # A whole corpus is one batch: a candidate the promotion gate rejects (its trial
+            # branch is discarded) must not refuse every document; it is reported instead.
+            captured = capture_cli.capture_batch(batch, consolidate=True, report_rejections=True)
+        else:
+            captured = capture_cli.capture_batch(batch, consolidate=True)
     results = captured.get("results", [])
     if len(results) != len(corpus):
         raise HippoRAGSchemaError("capture batch count does not match corpus")
@@ -260,7 +264,10 @@ def run_reader_qa(
         if isinstance(cli, MnemoCLI):
             first = benchmark["corpus"][0]
             cli.install_consolidation_gate_case(f"{first['title']}\n{first['content']}")
-        captured = cli.capture_batch(capture_path, consolidate=True).get("results")
+            # As in run(): gate-rejected candidates are reported, not fatal, for a whole corpus.
+            captured = cli.capture_batch(capture_path, consolidate=True, report_rejections=True).get("results")
+        else:
+            captured = cli.capture_batch(capture_path, consolidate=True).get("results")
         if not isinstance(captured, list) or len(captured) != len(benchmark["corpus"]):
             raise HippoRAGSchemaError("reader capture count does not match corpus")
         cid_to_doc: dict[str, str] = {}
