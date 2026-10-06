@@ -22,7 +22,7 @@ from eval.perf.golden_equivalence import diff, run
 GOLDEN = Path(__file__).resolve().parents[1] / "eval" / "perf" / "golden"
 
 
-@pytest.mark.parametrize("name", ["synthetic-growth", "synthetic-rails", "g0-write-gating"])
+@pytest.mark.parametrize("name", ["synthetic-growth", "synthetic-rails", "synthetic-conflicts", "g0-write-gating"])
 def test_engine_reproduces_the_legacy_golden_dump(name: str) -> None:
     expected = json.loads(gzip.decompress((GOLDEN / f"{name}.json.gz").read_bytes()))
     actual = json.loads(json.dumps(run(name), sort_keys=True))
@@ -48,3 +48,7 @@ def test_golden_fixtures_cover_decisions_state_and_retrieval() -> None:
     rails = json.loads(gzip.decompress((GOLDEN / "synthetic-rails.json.gz").read_bytes()))["result"]
     promoted = {rate: sum(c["promoted"] for c in rails[rate]["run"]["candidate_results"]) for rate in rails}
     assert promoted["0.0"] == 0 and promoted["1.0"] == 6 and 0 < promoted["0.5"] < 6
+    conflicts = json.loads(gzip.decompress((GOLDEN / "synthetic-conflicts.json.gz").read_bytes()))
+    statuses = [row["status"] for row in conflicts["state"]["golden-conflicts"]["assertions"]]
+    assert {"active", "superseded", "retracted"} <= set(statuses)
+    assert conflicts["state"]["golden-conflicts"]["relations"]

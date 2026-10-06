@@ -49,6 +49,7 @@ from typing import Any, Callable
 ID_RE = re.compile(r"^00000000-0000-4000-8000-[0-9a-f]{12}$")
 BOOKKEEPING_OPS = frozenset({"upsert_assertion.noop_or_reinforce", "branch", "merge", "discard"})
 MERGE_REPLAY_KEYS = frozenset({"assertions_merged", "assertion_id_map"})
+REPLAY_MARK = "_golden_merge_replay"
 # Keys whose values are wall-clock measurements, never state. Found by legacy self-consistency.
 VOLATILE_KEYS = frozenset({"metrics", "latency_ms", "elapsed_ms", "duration_ms", "took_ms", "wall_ms"})
 
@@ -134,6 +135,25 @@ def deterministic_runtime() -> Any:
 
     ticking(MemoryTools, "capture")
     ticking(ConsolidationWorker, "run_job")
+
+    # Mark the audit rows a merge writes while REPLAYING items that were already on the target
+    # branch - the legacy engine re-upserts every unchanged copy on every merge, so those rows
+    # are per-merge bookkeeping (approved contract), not facts about the memory.
+    from mnemosyne.engine import LocalMemoryEngine
+
+    original_merge = LocalMemoryEngine.merge
+
+    def marking_merge(self: Any, frm: str, into: str = "main", tenant_id: str | None = None) -> Any:
+        existing = {item.id for item in dict.values(self.assertions) if item.branch == into}
+        start = len(self.audit_log)
+        report = original_merge(self, frm, into=into, tenant_id=tenant_id)
+        for row in self.audit_log[start:]:
+            if str(row.get("op", "")).startswith("upsert_assertion") and row.get("target_id") in existing:
+                row[REPLAY_MARK] = True
+        return report
+
+    patched.append((LocalMemoryEngine, "merge", original_merge))
+    LocalMemoryEngine.merge = marking_merge
     try:
         yield clock
     finally:
@@ -250,9 +270,50 @@ def synthetic_rails() -> dict[str, Any]:
             "run": run_result.to_dict(),
             "main": [a.to_dict() for a in engine.assertions.values() if a.branch == "main"],
             "relations": [r.to_dict() for r in engine.relations.values() if r.branch == "main"],
-            "audit": [row for row in engine.audit_log if row.get("op") not in BOOKKEEPING_OPS],
+            "audit": [row for row in engine.audit_log
+                      if row.get("op") not in BOOKKEEPING_OPS and not row.get(REPLAY_MARK)],
         }
     return out
+
+
+def synthetic_conflicts() -> dict[str, Any]:
+    """Supersession chains within and across batches, trust tiers, duplicate relations, and
+    single-source facts that a forget retracts before more facts arrive."""
+    t = "golden-conflicts"
+    chains = [
+        _row(t, f"Thing {i}\nThing {i} is {COLOURS[i % 7]}. Thing {i} is {COLOURS[(i + 1) % 7]}. "
+                f"Thing {i} is {COLOURS[(i + 2) % 7]}.", f"conf:c{i}")
+        for i in range(6)
+    ]
+    relations = [
+        _row(t, f"Deal {i}\nAcme Corp acquired Beta Works. Gamma Labs partnered with Acme Corp.", f"conf:r{i}",
+             trust_tier=i % 2)
+        for i in range(2)
+    ]
+    later = [
+        _row(t, f"Later {i}\nThing {i} is {COLOURS[(i + 4) % 7]}.", f"conf:l{i}", trust_tier=[0, 2, 1][i % 3])
+        for i in range(6)
+    ]
+    # Two independent sources (the gate's corroboration floor), both forgotten later, so their
+    # facts end up retracted while newer facts about the same subjects arrive.
+    solo = [
+        _row(t, "Solo\nSolo Item 0 is Lisbon. Solo Item 1 is Oslo.", "conf:s0"),
+        _row(t, "Solo note\nSolo Item 0 is Lisbon. Solo Item 1 is Oslo.", "conf:s1", source_type="note"),
+    ]
+    replacements = [
+        _row(t, f"Solo again {i}\nSolo Item {i} is {CITIES[(i + 3) % 7]}.", f"conf:t{i}{kind}",
+             source_type=kind, trust_tier=i + 1)
+        for i in range(2)
+        for kind in ("hipporag:golden", "note")
+    ]
+    steps: list[dict[str, Any]] = [{"capture": chains}, {"capture": relations}, {"capture": later},
+                                   {"capture": solo}, {"forget": [3, 0]}, {"forget": [3, 1]},
+                                   {"capture": replacements}, {"capture": relations[:1]}, {"capture": chains[:2]}]
+    queries = [{"question_id": f"q{i}", "tenant": t, "query": q} for i, q in enumerate([
+        "What colour is Thing 2?", "Who acquired Beta Works?", "Where is Solo Item 1?", "Thing 5",
+        "Acme Corp", "Solo Item 0",
+    ])]
+    return {"gate_content": chains[0]["content"], "tenants": [t], "queries": queries, "steps": steps}
 
 
 def hipporag(corpus: str, dataset: str, n: int, data_dir: Path, questions: int = 25) -> dict[str, Any]:
@@ -271,6 +332,8 @@ def scenario(name: str, data_dir: Path | None) -> dict[str, Any] | Callable[[], 
         return synthetic_growth()
     if name == "synthetic-rails":
         return synthetic_rails
+    if name == "synthetic-conflicts":
+        return synthetic_conflicts()
     if name == "g0-write-gating":
         from eval.g0.write_gating import run_write_gating_eval
 
@@ -284,7 +347,7 @@ def scenario(name: str, data_dir: Path | None) -> dict[str, Any] | Callable[[], 
     raise SystemExit(f"unknown scenario {name}")
 
 
-SCENARIOS = ["synthetic-growth", "synthetic-rails", "g0-write-gating", "hipporag-2wiki-10", "hipporag-2wiki-20", "hipporag-2wiki-35",
+SCENARIOS = ["synthetic-growth", "synthetic-rails", "synthetic-conflicts", "g0-write-gating", "hipporag-2wiki-10", "hipporag-2wiki-20", "hipporag-2wiki-35",
              "hipporag-hotpot-10", "hipporag-hotpot-20", "hipporag-musique-10", "hipporag-musique-20"]
 
 
@@ -312,7 +375,8 @@ def _main_state(store: Path, tenant: str) -> dict[str, Any]:
         "preferences": of_tenant(engine.preferences.values()),
         "deletion_log": [row for row in engine.deletion_log if row.get("tenant_id") in {tenant, "*"}],
         "audit": [row for row in engine.audit_log
-                  if row.get("tenant_id") in {tenant, "*"} and row.get("op") not in BOOKKEEPING_OPS],
+                  if row.get("tenant_id") in {tenant, "*"} and row.get("op") not in BOOKKEEPING_OPS
+                  and not row.get(REPLAY_MARK)],
         "merges": [{k: v for k, v in row.items() if k not in MERGE_REPLAY_KEYS} for row in engine.merge_log],
         "branches": sorted(name for name, meta in engine.branches.items() if (meta or {}).get("kind") != "canary"),
     }
@@ -351,6 +415,9 @@ def run(name: str, data_dir: Path | None = None) -> dict[str, Any]:
                 steps.append(out)
             else:
                 batch, row = step["forget"]
+                if row >= len(captured[batch]):
+                    steps.append({"forget_skipped": f"capture step {batch} stored nothing"})
+                    continue
                 tenant = spec["steps"][[i for i, s in enumerate(spec["steps"]) if "capture" in s][batch]]["capture"][row]["tenant"]
                 clock.tick()
                 steps.append(_cli(["--backend", "local", "--store", str(store), "forget", "--tenant", tenant,
