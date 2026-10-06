@@ -4224,7 +4224,14 @@ class LocalMemoryEngine(CanaryOverlayMixin):
     def vector_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
         query_vec = embed_query(self.adapters.embedding, query)
         hits: list[Hit] = []
-        if text_kernels.NATIVE is not None:
+        # Local hashing embeddings have an exact sparse path that scores the memoized
+        # candidates THEMSELVES and clones only the hits it keeps. It is preferred even when
+        # the native kernel is available: the kernel needs every candidate cloned up front to
+        # hold its per-hit embedding metadata, and those clones cost more than the scan saves
+        # (measured 288 ms vs 62 ms per gate retrieve on a 300-document 2Wiki store). Both
+        # score identically - each is byte-parity-proven against the per-hit cosine loop.
+        hashing_provider = type(self.adapters.embedding) is HashingEmbeddingProvider
+        if text_kernels.NATIVE is not None and not hashing_provider:
             # Batched fast path: embedding acquisition stays per-hit in Python
             # (same security-gated _embedding_for_hit call, same metadata side
             # effects, once per hit, in candidate order), then ONE dense_scan
@@ -4255,11 +4262,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             # Local hashing embeddings: score each candidate against only the query's non-zero
             # dimensions instead of copying and multiplying all 256 - the identical sum
             # (SparseCosine). Stored and provider embeddings keep the full cosine.
-            sparse = (
-                SparseCosine(query_vec)
-                if type(self.adapters.embedding) is HashingEmbeddingProvider
-                else None
-            )
+            sparse = SparseCosine(query_vec) if hashing_provider else None
             dims = int(self.adapters.embedding.dims) if sparse is not None else 0
             if sparse is not None:
                 # Scored on the memoized candidates themselves; only the hits kept are cloned,
