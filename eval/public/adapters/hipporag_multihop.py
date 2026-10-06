@@ -26,7 +26,7 @@ _QUERY_SHARD_SIZE = 50
 # Fact candidates per promotion-gate run when a whole corpus is consolidated in one batch
 # (capture-batch --consolidation-gate-batch). The gate checks every group on one canary branch
 # and splits a failing group down to single candidates.
-_CONSOLIDATION_GATE_BATCH = 512
+_CONSOLIDATION_GATE_BATCH = 4096
 
 
 def run(
