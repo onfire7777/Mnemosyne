@@ -18,7 +18,7 @@ from collections import Counter
 from collections.abc import Sequence
 from functools import lru_cache
 from hashlib import blake2b
-from typing import Iterable
+from typing import Callable, Iterable
 
 try:
     if os.environ.get("MNEMOSYNE_PURE") == "1":
@@ -80,6 +80,38 @@ def lexical_score(query: str, text: str) -> float:
     )
 
 
+@lru_cache(maxsize=131_072)
+def _document_term_stats(text: str) -> tuple[Counter[str], float]:
+    """A document's pure-token counts and sqrt(length), computed once per distinct text."""
+    doc = Counter(_tokenize_pure(text))
+    return doc, math.sqrt(max(sum(doc.values()), 1))
+
+
+def lexical_scorer(query: str) -> Callable[[str], float]:
+    """``lexical_scorer(query)(text) == _lexical_score_pure(query, text)``, bit for bit.
+
+    Scoring one query against many candidates used to re-tokenize every candidate text on
+    every query. Here the query is tokenized once and each text's counts are cached; the
+    same terms are visited in the same order and the same float operations run in the same
+    order, so every score is identical (tests/test_text_fast_paths.py).
+    """
+    q = Counter(_tokenize_pure(query))
+    if not q:
+        return lambda text: 0.0
+    terms = list(q.items())
+
+    def score(text: str) -> float:
+        doc, root = _document_term_stats(text)
+        total = 0.0
+        for term, q_count in terms:
+            tf = doc.get(term, 0)
+            if tf:
+                total += (1.0 + math.log(tf)) * q_count
+        return total / root
+
+    return score
+
+
 def _hashing_embedding_pure(text: str, dims: int) -> tuple[float, ...]:
     vec = [0.0] * dims
     for token in _tokenize_pure(text):
@@ -114,6 +146,43 @@ def hashing_embedding(text: str, dims: int = 256) -> list[float]:
 
 def _cosine_pure(a: Iterable[float], b: Iterable[float]) -> float:
     return sum(x * y for x, y in zip(a, b, strict=False))
+
+
+@lru_cache(maxsize=131_072)
+def _hashing_nonzero(text: str, dims: int) -> dict[int, float]:
+    """The non-zero entries of ``hashing_embedding(text, dims)``, cached per distinct text."""
+    return {index: value for index, value in enumerate(_hashing_embedding_cached(text, dims)) if value != 0.0}
+
+
+class SparseCosine:
+    """Dot products against one query vector, touching only the query's non-zero entries.
+
+    ``_cosine_pure(query, v)`` sums ``q * v`` over every dimension in order with the builtin
+    ``sum``. A term whose query entry is zero is +-0.0, which changes neither the sum nor its
+    compensation, so summing only the query's non-zero dimensions, in the same increasing
+    order and with the same ``sum``, gives the identical value. Callers compare the result with ``> 0``
+    exactly as before; a sum with no non-zero term returns 0 instead of 0.0, which compares
+    the same. Only for finite vectors - the engine uses it for local hashing embeddings only.
+    """
+
+    __slots__ = ("_nonzero",)
+
+    def __init__(self, query_vec: Sequence[float]) -> None:
+        self._nonzero = [(index, value) for index, value in enumerate(query_vec) if value != 0.0]
+
+    def hashing(self, text: str, dims: int) -> float:
+        """Equal to ``_cosine_pure(query_vec, hashing_embedding(text, dims))``.
+
+        Uses the builtin ``sum`` like ``_cosine_pure``: since Python 3.12 it sums floats with
+        Neumaier compensation, and a +-0.0 term leaves both its running sum and its
+        compensation unchanged, so dropping the zero terms keeps the result bit-identical.
+        """
+        entries = _hashing_nonzero(text, dims)
+        return sum(
+            value * other
+            for index, value in self._nonzero
+            if (other := entries.get(index)) is not None
+        )
 
 
 def cosine(a: Sequence[float], b: Sequence[float]) -> float:
