@@ -29,6 +29,8 @@ import copy
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from mnemosyne.cid_lists import bump_evidence_epoch, track_evidence, untrack_evidence
+
 _MISSING = object()
 _EMPTY: dict[str, Any] = {}
 
@@ -41,7 +43,7 @@ def _relation_peer(item: Any) -> tuple[Any, ...]:
     return (item.tenant_id, item.branch, item.source, item.predicate, item.target)
 
 
-_PEER_KEYS = {"assertion": _assertion_peer, "relation": _relation_peer, None: None}
+_PEER_KEYS = {"assertion": _assertion_peer, "relation": _relation_peer, "evidence": None, None: None}
 
 
 def _rebuild(kind: str | None, items: list[tuple[str, Any]]) -> "BranchIndexedStore":
@@ -111,6 +113,14 @@ class BranchIndexedStore(dict):
     def __setitem__(self, key: str, item: Any) -> None:
         where = self._slots_for(item)
         old = self._where.get(key)
+        if self._kind == "evidence":
+            # Evidence changes invalidate per-list caches (mnemosyne.cid_lists).
+            previous = dict.get(self, key, _MISSING)
+            if previous is not item:
+                if previous is not _MISSING:
+                    untrack_evidence(previous)
+                track_evidence(item)
+            bump_evidence_epoch()
         dict.__setitem__(self, key, item)
         self._where[key] = where
         if old is None:
@@ -126,8 +136,12 @@ class BranchIndexedStore(dict):
             self._reorder(where)
 
     def __delitem__(self, key: str) -> None:
+        item = dict.__getitem__(self, key)
         dict.__delitem__(self, key)
         self._drop(key, self._where.pop(key))
+        if self._kind == "evidence":
+            untrack_evidence(item)
+            bump_evidence_epoch()
 
     def pop(self, key: str, default: Any = _MISSING) -> Any:
         if key in self:
@@ -141,9 +155,16 @@ class BranchIndexedStore(dict):
     def popitem(self) -> tuple[str, Any]:
         key, item = dict.popitem(self)
         self._drop(key, self._where.pop(key))
+        if self._kind == "evidence":
+            untrack_evidence(item)
+            bump_evidence_epoch()
         return key, item
 
     def clear(self) -> None:
+        if self._kind == "evidence":
+            for item in dict.values(self):
+                untrack_evidence(item)
+            bump_evidence_epoch()
         dict.clear(self)
         for table in (self._branch, self._branch_any, self._tenant, self._peer, self._where):
             table.clear()
