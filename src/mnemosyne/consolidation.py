@@ -1715,16 +1715,16 @@ class ConsolidationWorker:
         proposal_record = details.get("proposal_record") if isinstance(details, dict) else None
         lesson_ids: list[str] = []
         created = 0
+        # (tenant, failure signature) -> the FIRST lesson with it in store order, which is what
+        # a scan over self.learning.lessons.values() finds. Built once per pass and kept up to
+        # date below: scanning per row made a batch of N candidates cost O(N^2) (370 s of the
+        # 6119-document 2Wiki ingest).
+        lesson_index: dict[tuple[str, str], Lesson] = {}
+        for item in self.learning.lessons.values():
+            lesson_index.setdefault((item.tenant_id, item.failure_signature), item)
         for row in lesson_rows:
             signature = str(row["failure_signature"])
-            existing = next(
-                (
-                    item
-                    for item in self.learning.lessons.values()
-                    if item.tenant_id == tenant_id and item.failure_signature == signature
-                ),
-                None,
-            )
+            existing = lesson_index.get((tenant_id, signature))
             if existing:
                 lesson_ids.append(existing.id)
                 continue
@@ -1737,6 +1737,7 @@ class ConsolidationWorker:
                 status=str(row.get("status") or "candidate"),
             )
             self.learning.lessons[lesson.id] = lesson
+            lesson_index.setdefault((tenant_id, signature), lesson)
             lesson_ids.append(lesson.id)
             created += 1
         result = {
@@ -1759,16 +1760,39 @@ class ConsolidationWorker:
         proposal_record = details.get("proposal_record") if isinstance(details, dict) else None
         procedure_ids: list[str] = []
         created = 0
+        # (tenant, canonical signature) -> the FIRST procedure with it in store order, as a scan
+        # over self.learning.procedures.values() finds. A signature is a dict, so the key is its
+        # canonical JSON (equal canonical JSON means equal dicts for JSON-shaped values); a
+        # signature that will not serialise keeps the scan. Built once per pass and kept up to
+        # date below - scanning per row made a batch of N candidates cost O(N^2).
+        procedure_index: dict[tuple[str, str], Procedure] = {}
+        indexed = True
+        for item in self.learning.procedures.values():
+            try:
+                item_key = json.dumps(item.signature, sort_keys=True)
+            except (TypeError, ValueError):
+                indexed = False
+                break
+            procedure_index.setdefault((item.tenant_id, item_key), item)
         for row in procedure_rows:
             signature = dict(row["signature"])
-            existing = next(
-                (
-                    item
-                    for item in self.learning.procedures.values()
-                    if item.tenant_id == tenant_id and item.signature == signature
-                ),
-                None,
-            )
+            signature_key: str | None = None
+            if indexed:
+                try:
+                    signature_key = json.dumps(signature, sort_keys=True)
+                except (TypeError, ValueError):
+                    signature_key = None
+            if signature_key is not None:
+                existing = procedure_index.get((tenant_id, signature_key))
+            else:
+                existing = next(
+                    (
+                        item
+                        for item in self.learning.procedures.values()
+                        if item.tenant_id == tenant_id and item.signature == signature
+                    ),
+                    None,
+                )
             if existing:
                 procedure_ids.append(existing.id)
                 continue
@@ -1781,6 +1805,8 @@ class ConsolidationWorker:
                 status=str(row.get("status") or "candidate"),
             )
             self.learning.procedures[procedure.id] = procedure
+            if signature_key is not None:
+                procedure_index.setdefault((tenant_id, signature_key), procedure)
             procedure_ids.append(procedure.id)
             created += 1
         result = {
