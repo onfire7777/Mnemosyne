@@ -50,6 +50,7 @@ ID_RE = re.compile(r"^00000000-0000-4000-8000-[0-9a-f]{12}$")
 BOOKKEEPING_OPS = frozenset({"upsert_assertion.noop_or_reinforce", "branch", "merge", "discard"})
 MERGE_REPLAY_KEYS = frozenset({"assertions_merged", "assertion_id_map"})
 REPLAY_MARK = "_golden_merge_replay"
+CANARY_MARK = "_golden_canary_bookkeeping"
 # Keys whose values are wall-clock measurements, never state. Found by legacy self-consistency.
 VOLATILE_KEYS = frozenset({"metrics", "latency_ms", "elapsed_ms", "duration_ms", "took_ms", "wall_ms"})
 
@@ -144,7 +145,11 @@ def deterministic_runtime() -> Any:
     original_merge = LocalMemoryEngine.merge
 
     def marking_merge(self: Any, frm: str, into: str = "main", tenant_id: str | None = None) -> Any:
-        existing = {item.id for item in dict.values(self.assertions) if item.branch == into}
+        # Raw rows: the public attribute would settle the engine's thin canaries and hide the
+        # fast path this harness exists to check.
+        rows = getattr(self, "_assertion_items", None)
+        existing = {item.id for item in dict.values(rows if rows is not None else self.assertions)
+                    if item.branch == into}
         start = len(self.audit_log)
         report = original_merge(self, frm, into=into, tenant_id=tenant_id)
         for row in self.audit_log[start:]:
@@ -154,6 +159,38 @@ def deterministic_runtime() -> Any:
 
     patched.append((LocalMemoryEngine, "merge", original_merge))
     LocalMemoryEngine.merge = marking_merge
+
+    # A forget fans out over every branch holding the record. Legacy keeps every merged canary
+    # forever, so it also writes one audit row and one deletion-log row per leftover canary; the
+    # new engine discards merged canaries (approved contract). Rows of a forget AIMED AT a canary
+    # branch are canary bookkeeping; the main branch's rows are compared in full.
+    original_forget = LocalMemoryEngine.forget
+
+    def marking_forget(self: Any, tenant_id: str, cid: str, branch: str = "main", *args: Any, **kwargs: Any) -> Any:
+        if (self.branches.get(branch) or {}).get("kind") != "canary":
+            return original_forget(self, tenant_id, cid, branch, *args, **kwargs)
+        audit_start, deletion_start = len(self.audit_log), len(self.deletion_log)
+
+        def mark() -> None:
+            for row in [*self.audit_log[audit_start:], *self.deletion_log[deletion_start:]]:
+                row[CANARY_MARK] = True
+
+        # forget saves the store itself: mark the rows before that save, or the mark is lost.
+        persist = self._persist
+
+        def marking_persist(*a: Any, **k: Any) -> Any:
+            mark()
+            return persist(*a, **k)
+
+        self._persist = marking_persist
+        try:
+            return original_forget(self, tenant_id, cid, branch, *args, **kwargs)
+        finally:
+            del self._persist
+            mark()
+
+    patched.append((LocalMemoryEngine, "forget", original_forget))
+    LocalMemoryEngine.forget = marking_forget
     try:
         yield clock
     finally:
@@ -373,10 +410,11 @@ def _main_state(store: Path, tenant: str) -> dict[str, Any]:
         "justifications": of_tenant(engine.justifications.values()),
         "contradictions": of_tenant(engine.contradictions.values()),
         "preferences": of_tenant(engine.preferences.values()),
-        "deletion_log": [row for row in engine.deletion_log if row.get("tenant_id") in {tenant, "*"}],
+        "deletion_log": [row for row in engine.deletion_log
+                         if row.get("tenant_id") in {tenant, "*"} and not row.get(CANARY_MARK)],
         "audit": [row for row in engine.audit_log
                   if row.get("tenant_id") in {tenant, "*"} and row.get("op") not in BOOKKEEPING_OPS
-                  and not row.get(REPLAY_MARK)],
+                  and not row.get(REPLAY_MARK) and not row.get(CANARY_MARK)],
         "merges": [{k: v for k, v in row.items() if k not in MERGE_REPLAY_KEYS} for row in engine.merge_log],
         "branches": sorted(name for name, meta in engine.branches.items() if (meta or {}).get("kind") != "canary"),
     }
@@ -444,7 +482,8 @@ def _drop_volatile(value: Any) -> Any:
             if k not in VOLATILE_KEYS and not k.startswith("canary-")
         }
     if isinstance(value, list):
-        return [_drop_volatile(v) for v in value]
+        # Branch listings (branches_searched, branches_erased) name leftover canaries too.
+        return [_drop_volatile(v) for v in value if not (isinstance(v, str) and v.startswith("canary-"))]
     return value
 
 
@@ -467,27 +506,61 @@ def _sort_state(state: dict[str, Any]) -> dict[str, Any]:
     return ordered
 
 
+def _owned_id_labels(state: Any) -> dict[str, str]:
+    """Label every id that names a stored object by that object's content, not its number.
+
+    Two engines can create different numbers of internal ids (a replay that is deferred never
+    draws one) and still hold the same objects; content labels make them compare equal.
+    """
+    labels: dict[str, str] = {}
+    seen: dict[str, int] = {}
+    if not isinstance(state, dict):
+        return labels
+    for tenant, sections in sorted(state.items()):
+        if not isinstance(sections, dict):
+            continue
+        for section, rows in sorted(sections.items()):
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                ident = row.get("id") or row.get("item_id")
+                if not (isinstance(ident, str) and ID_RE.match(ident)) or ident in labels:
+                    continue
+                digest = hashlib.sha256(json.dumps(_mask(row), sort_keys=True, default=str).encode()).hexdigest()[:16]
+                base = f"{tenant}/{section}/{digest}"
+                seen[base] = seen.get(base, 0) + 1
+                labels[ident] = base if seen[base] == 1 else f"{base}#{seen[base]}"
+    return labels
+
+
 def canonical(dump: dict[str, Any]) -> dict[str, Any]:
     dump = json.loads(json.dumps(_drop_volatile(dump), sort_keys=True, default=str))
     if isinstance(dump.get("state"), dict):
         dump["state"] = {t: _sort_state(s) for t, s in dump["state"].items()}
-    labels: dict[str, str] = {}
+    labels = _owned_id_labels(dump.get("state"))
+
+    def label(value: str) -> str:
+        return labels.setdefault(value, f"L{len(labels) + 1}")
 
     def relabel(value: Any) -> Any:
         if isinstance(value, dict):
-            return {k: relabel(value[k]) for k in sorted(value)}
+            # Keys that are ids are relabelled too (e.g. shadow_tags keyed by hit id).
+            items = [((label(k) if ID_RE.match(k) else k), v) for k, v in value.items()]
+            return {k: relabel(v) for k, v in sorted(items, key=lambda kv: kv[0])}
         if isinstance(value, list):
             return [relabel(v) for v in value]
         if isinstance(value, str) and ID_RE.match(value):
-            return labels.setdefault(value, f"L{len(labels) + 1}")
+            return label(value)
         return value
 
-    # State first, in content order, so labels follow content rather than creation order.
+    # State first, in content order, so any remaining labels follow content, not creation.
     ordered = {"state": dump.get("state"), **{k: v for k, v in dump.items() if k != "state"}}
     return relabel(ordered)
 
 
-def diff(a: Any, b: Any, path: str = "", out: list[str] | None = None, limit: int = 25) -> list[str]:
+def diff(a: Any, b: Any, path: str = "", out: list[str] | None = None, limit: int = 40) -> list[str]:
     out = [] if out is None else out
     if len(out) >= limit:
         return out
