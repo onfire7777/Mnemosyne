@@ -2055,6 +2055,16 @@ Quarantine
 
 ## Owner-directed documentation consolidation — PR #120
 
+- PR #216: owner-directed performance fix outside the GoalEx lease sweep. The
+  promotion gate's supersession-rail check now reads only the budget's active
+  facts on the candidate branch instead of exporting the whole tenant once per
+  candidate (`src/mnemosyne/consolidation.py`); decision-equivalence and
+  rail-scaling tests are in `tests/test_consolidation_rail_read.py`. It is
+  **OPEN/READY** and adds this structured self-record. Exclusive File Set: those
+  two files and this lease-map entry. The 2Wiki `capture-batch --consolidate`
+  acceptance (under 600 s) is NOT met by this change and is not claimed; no
+  exact final head, merge SHA/time, or post-main CI is claimed here.
+
 - PR #214: the 2026-10-04 successor repairs development bundle verification/
   replay and recurrence forwarding, adds bounded local M16 conformance, and
   reconciles source status and installation guidance. Its exact head, checks
