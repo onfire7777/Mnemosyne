@@ -326,8 +326,9 @@ class MutationRailBudget:
             "violations": list(self.violations),
         }
 
-    def check_branch_supersessions(self, snapshot: dict[str, Any], candidate_branch: str) -> str | None:
-        branch_superseded = {
+    def branch_superseded_ids(self, snapshot: dict[str, Any], candidate_branch: str) -> set[str]:
+        """Active facts of this budget that ``snapshot`` shows superseded on ``candidate_branch``."""
+        return {
             str(row.get("id"))
             for row in snapshot.get("assertions", [])
             if isinstance(row, dict)
@@ -335,6 +336,15 @@ class MutationRailBudget:
             and row.get("status") == "superseded"
             and str(row.get("id")) in self.active_fact_ids
         }
+
+    def check_branch_supersessions(self, snapshot: dict[str, Any], candidate_branch: str) -> str | None:
+        return self.record_branch_supersessions(
+            self.branch_superseded_ids(snapshot, candidate_branch),
+            candidate_branch,
+        )
+
+    def record_branch_supersessions(self, branch_superseded: set[str], candidate_branch: str) -> str | None:
+        """Charge the supersessions a candidate branch would merge against the rate rail."""
         proposed = self.superseded_fact_ids | branch_superseded
         if len(proposed) <= self.supersessions_allowed:
             self.superseded_fact_ids = proposed
@@ -1286,6 +1296,43 @@ class ConsolidationWorker:
         except Exception:
             return {"assertions": [], "evidence": []}
         return snapshot if isinstance(snapshot, dict) else {"assertions": [], "evidence": []}
+
+    def _branch_superseded_fact_ids(
+        self,
+        tenant_id: str,
+        budget: MutationRailBudget,
+        candidate_branch: str,
+    ) -> set[str]:
+        """The only data the supersession rail reads, without copying the tenant.
+
+        Always equal to ``budget.branch_superseded_ids(self._export_snapshot(tenant_id),
+        candidate_branch)``. On the in-memory engine every assertion lives under
+        ``_branch_key(tenant, branch, id)`` (``upsert_assertion``, ``branch`` and the store
+        loader all key it that way), so each active fact of the budget is looked up on the
+        candidate branch directly. Exporting instead deep-copied every memory of the
+        tenant once per gate evaluation, which made batch consolidation quadratic in the
+        size of the store. Any other engine keeps the export path.
+        """
+        engine = self.engine
+        assertions = getattr(engine, "assertions", None)
+        if (
+            isinstance(engine, LocalMemoryEngine)
+            and getattr(type(engine), "export_tenant", None) is LocalMemoryEngine.export_tenant
+            and isinstance(assertions, dict)
+        ):
+            found: set[str] = set()
+            for fact_id in budget.active_fact_ids:
+                item = assertions.get(engine._branch_key(tenant_id, candidate_branch, fact_id))
+                if (
+                    item is not None
+                    and item.tenant_id == tenant_id
+                    and item.branch == candidate_branch
+                    and item.status == "superseded"
+                    and str(item.id) == fact_id
+                ):
+                    found.add(fact_id)
+            return found
+        return budget.branch_superseded_ids(self._export_snapshot(tenant_id), candidate_branch)
 
     def _role_pipeline_report(self, pass_results: list[PassResult]) -> dict[str, Any]:
         roles = []
@@ -2591,7 +2638,10 @@ class ConsolidationWorker:
         budget = mutation_budget or self._new_mutation_rail_budget(job.tenant_id, "main")
 
         def pre_merge_check(engine: LocalMemoryEngine, branch: str) -> str | None:
-            return budget.check_branch_supersessions(self._export_snapshot(job.tenant_id), branch)
+            return budget.record_branch_supersessions(
+                self._branch_superseded_fact_ids(job.tenant_id, budget, branch),
+                branch,
+            )
 
         result = self.gate.evaluate(job.tenant_id, candidate, apply, pre_merge_check=pre_merge_check)
         if result.promoted and hasattr(self.engine, "register_entity"):
