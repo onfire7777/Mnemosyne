@@ -40,6 +40,7 @@ from mnemosyne.calibration import (
     fuse_calibrated_confidence_from_hit,
 )
 from mnemosyne.consciousness import RealityMonitor
+from mnemosyne.branch_index import BranchIndexedStore, indexed
 from mnemosyne.ids import content_cid, evidence_cid, evidence_unscoped_cid, new_id
 from mnemosyne.journal import CIDJournal, journal_filename
 from mnemosyne.models import (
@@ -1959,6 +1960,34 @@ class LocalMemoryEngine:
         weakref.WeakValueDictionary()
     )
 
+    # The three item maps are BranchIndexedStore dicts (mnemosyne.branch_index): the same
+    # keys, values and iteration order as a plain dict, plus ordered per-branch, per-tenant
+    # and peer views so hot paths stop walking every item of every branch. Any mapping
+    # assigned to them is wrapped, so every existing writer keeps working unchanged.
+    @property
+    def evidence(self) -> BranchIndexedStore:
+        return self._evidence_items
+
+    @evidence.setter
+    def evidence(self, value: Any) -> None:
+        self._evidence_items = indexed(value, None)
+
+    @property
+    def assertions(self) -> BranchIndexedStore:
+        return self._assertion_items
+
+    @assertions.setter
+    def assertions(self, value: Any) -> None:
+        self._assertion_items = indexed(value, "assertion")
+
+    @property
+    def relations(self) -> BranchIndexedStore:
+        return self._relation_items
+
+    @relations.setter
+    def relations(self, value: Any) -> None:
+        self._relation_items = indexed(value, "relation")
+
     def __init__(
         self,
         store_path: str | os.PathLike[str] | None = None,
@@ -2145,7 +2174,7 @@ class LocalMemoryEngine:
         for cid in intention.evidence_ids:
             matches = [
                 item
-                for item in self.evidence.values()
+                for item in self.evidence.in_branch(intention.tenant_id, "main").values()
                 if (
                     item.cid == cid
                     and item.tenant_id == intention.tenant_id
@@ -2877,7 +2906,7 @@ class LocalMemoryEngine:
                 content_pointer=ev.content_pointer,
                 modality=ev.modality,
             )
-            for existing in self.evidence.values():
+            for existing in self.evidence.in_branch(ev.tenant_id, branch).values():
                 if (
                     existing.tenant_id == ev.tenant_id
                     and existing.branch == branch
@@ -3055,7 +3084,7 @@ class LocalMemoryEngine:
         with self._lock:
             rows = [
                 copy.deepcopy(ev)
-                for ev in self.evidence.values()
+                for ev in self.evidence.in_branch(tenant_id, branch).values()
                 if ev.tenant_id == tenant_id
                 and ev.branch == branch
                 and not ev.erased
@@ -3237,7 +3266,9 @@ class LocalMemoryEngine:
             self._apply_schema_fast_path_projection_status(incoming, requested_status=requested_status)
             peers = [
                 item
-                for item in self.assertions.values()
+                for item in self.assertions.peers(
+                    incoming.tenant_id, branch, incoming.subject, incoming.predicate
+                ).values()
                 if item.tenant_id == incoming.tenant_id
                 and item.branch == branch
                 and item.subject == incoming.subject
@@ -3721,7 +3752,7 @@ class LocalMemoryEngine:
 
         adjacency: dict[str, set[str]] = defaultdict(set)
         relation_by_pair: dict[tuple[str, str], tuple[Relation, dict[str, Any], Any]] = {}
-        for rel in self.relations.values():
+        for rel in self.relations.select(tenant_id, branch).values():
             if tenant_id is not None and rel.tenant_id != tenant_id:
                 continue
             if branch is not None and rel.branch != branch:
@@ -4563,7 +4594,7 @@ class LocalMemoryEngine:
     def as_of(self, subject: str, predicate: str, t: datetime, tenant_id: str | None = None, branch: str = "main") -> list[Assertion]:
         moment = t.astimezone(UTC) if t.tzinfo else t.replace(tzinfo=UTC)
         matches = []
-        for item in self.assertions.values():
+        for item in self.assertions.select(tenant_id or None, branch).values():
             if tenant_id and item.tenant_id != tenant_id:
                 continue
             if item.branch != branch:
@@ -4725,7 +4756,7 @@ class LocalMemoryEngine:
                 minimum = self.policy.min_corroboration_for_delete
                 blocking = [
                     assertion.id
-                    for assertion in self.assertions.values()
+                    for assertion in self.assertions.in_branch(tenant_id, branch).values()
                     if assertion.tenant_id == tenant_id
                     and assertion.branch == branch
                     and assertion.status == "active"
@@ -4822,7 +4853,7 @@ class LocalMemoryEngine:
                 retained_metadata_by_cid=retained_cascade_metadata,
                 metadata_by_cid=cascade_metadata,
             )
-            for assertion in self.assertions.values():
+            for assertion in self.assertions.in_branch(tenant_id, branch).values():
                 if assertion.tenant_id != tenant_id or assertion.branch != branch:
                     continue
                 if not affected_cids.intersection(assertion.source_evidence_cids):
@@ -4850,7 +4881,7 @@ class LocalMemoryEngine:
                 else:
                     preference.source_evidence_cids = surviving_sources
                     propagated["trimmed_preferences"].append(preference.id)
-            for relation in self.relations.values():
+            for relation in self.relations.in_branch(tenant_id, branch).values():
                 if relation.tenant_id != tenant_id or relation.branch != branch:
                     continue
                 if not affected_cids.intersection(relation.source_evidence_cids):
@@ -4951,9 +4982,17 @@ class LocalMemoryEngine:
     def export_tenant(self, tenant_id: str) -> dict[str, Any]:
         return {
             "tenant_id": tenant_id,
-            "evidence": [item.to_dict() for item in self.evidence.values() if item.tenant_id == tenant_id and not item.erased],
-            "assertions": [item.to_dict() for item in self.assertions.values() if item.tenant_id == tenant_id],
-            "relations": [item.to_dict() for item in self.relations.values() if item.tenant_id == tenant_id],
+            "evidence": [
+                item.to_dict()
+                for item in self.evidence.of_tenant(tenant_id).values()
+                if item.tenant_id == tenant_id and not item.erased
+            ],
+            "assertions": [
+                item.to_dict() for item in self.assertions.of_tenant(tenant_id).values() if item.tenant_id == tenant_id
+            ],
+            "relations": [
+                item.to_dict() for item in self.relations.of_tenant(tenant_id).values() if item.tenant_id == tenant_id
+            ],
             "preferences": [item.to_dict() for item in self.preferences.values() if item.tenant_id == tenant_id],
             "calibrations": [item.to_dict() for item in self.calibrations.values() if item.tenant_id == tenant_id],
             "entities": [dict(item) for item in self.entities.values() if item.get("tenant_id") == tenant_id],
@@ -4997,18 +5036,18 @@ class LocalMemoryEngine:
             branch_tenants = set(branch_meta.get("tenants") or [])
             if tenant_id is not None and tenant_id in branch_tenants:
                 return
-            for ev in list(self.evidence.values()):
+            for ev in list(self.evidence.branch_view(tenant_id, frm).values()):
                 if ev.branch == frm and (tenant_id is None or ev.tenant_id == tenant_id):
                     cloned = copy.deepcopy(ev)
                     cloned.branch = name
                     if cloned.cid:
                         self.evidence[self._evidence_key(cloned.tenant_id, name, cloned.cid)] = cloned
-            for assertion in list(self.assertions.values()):
+            for assertion in list(self.assertions.branch_view(tenant_id, frm).values()):
                 if assertion.branch == frm and (tenant_id is None or assertion.tenant_id == tenant_id):
                     cloned = copy.deepcopy(assertion)
                     cloned.branch = name
                     self.assertions[self._branch_key(cloned.tenant_id, name, cloned.id)] = cloned
-            for rel in list(self.relations.values()):
+            for rel in list(self.relations.branch_view(tenant_id, frm).values()):
                 if rel.branch == frm and (tenant_id is None or rel.tenant_id == tenant_id):
                     cloned = copy.deepcopy(rel)
                     cloned.branch = name
@@ -5025,7 +5064,7 @@ class LocalMemoryEngine:
             report = MergeReport(frm, into, 0, 0, 0, 0, [])
             for ev in [
                 item
-                for item in self.evidence.values()
+                for item in self.evidence.branch_view(tenant_id, frm).values()
                 if item.branch == frm and not item.erased and (tenant_id is None or item.tenant_id == tenant_id)
             ]:
                 if not ev.cid:
@@ -5038,7 +5077,7 @@ class LocalMemoryEngine:
                     report.evidence_added += 1
             source_assertions = [
                 item
-                for item in self.assertions.values()
+                for item in self.assertions.branch_view(tenant_id, frm).values()
                 if item.branch == frm and (tenant_id is None or item.tenant_id == tenant_id)
             ]
             # Phase 1: replay each source assertion, recording its real
@@ -5067,12 +5106,14 @@ class LocalMemoryEngine:
             report.assertion_id_map = assertion_id_map
             for rel in [
                 item
-                for item in self.relations.values()
+                for item in self.relations.branch_view(tenant_id, frm).values()
                 if item.branch == frm and (tenant_id is None or item.tenant_id == tenant_id)
             ]:
                 peers = [
                     item
-                    for item in self.relations.values()
+                    for item in self.relations.peers(
+                        rel.tenant_id, into, rel.source, rel.predicate, rel.target
+                    ).values()
                     if item.tenant_id == rel.tenant_id
                     and item.branch == into
                     and item.source == rel.source
@@ -5107,26 +5148,24 @@ class LocalMemoryEngine:
             self._require_branch(branch)
             discarded_assertion_ids = {
                 item.id
-                for item in self.assertions.values()
+                for item in self.assertions.branch_view(tenant_id, branch).values()
                 if item.branch == branch and (tenant_id is None or item.tenant_id == tenant_id)
             }
-            self.evidence = {
-                key: item
-                for key, item in self.evidence.items()
-                if not (item.branch == branch and (tenant_id is None or item.tenant_id == tenant_id))
-            }
-            self.assertions = {
-                key: item
-                for key, item in self.assertions.items()
-                if not (item.branch == branch and (tenant_id is None or item.tenant_id == tenant_id))
-            }
-            self.relations = {
-                key: item
-                for key, item in self.relations.items()
-                if not (item.branch == branch and (tenant_id is None or item.tenant_id == tenant_id))
-            }
+            # Removing the branch's keys leaves every other item in its place - the same
+            # contents and order as rebuilding the dicts without them.
+            for store in (self.evidence, self.assertions, self.relations):
+                for key in [
+                    key
+                    for key, item in store.branch_view(tenant_id, branch).items()
+                    if item.branch == branch and (tenant_id is None or item.tenant_id == tenant_id)
+                ]:
+                    del store[key]
             surviving_assertion_ids = {
-                item.id for item in self.assertions.values() if tenant_id is None or item.tenant_id == tenant_id
+                item.id
+                for item in (
+                    self.assertions.values() if tenant_id is None else self.assertions.of_tenant(tenant_id).values()
+                )
+                if tenant_id is None or item.tenant_id == tenant_id
             }
             orphaned_assertion_ids = discarded_assertion_ids - surviving_assertion_ids
             if orphaned_assertion_ids:
@@ -5146,7 +5185,7 @@ class LocalMemoryEngine:
                     or (item.a not in orphaned_assertion_ids and item.b not in orphaned_assertion_ids)
                 }
             branch_rows_remain = any(
-                item.branch == branch for item in [*self.evidence.values(), *self.assertions.values(), *self.relations.values()]
+                store.in_any_branch(branch) for store in (self.evidence, self.assertions, self.relations)
             )
             if tenant_id is not None and branch_rows_remain:
                 branch_meta = self.branches.get(branch)
@@ -5225,8 +5264,16 @@ class LocalMemoryEngine:
         """
         deadline: datetime | None = None
         policies = (
-            *(ev.access_policy for ev in self.evidence.values() if ev.tenant_id == tenant_id and ev.branch == branch),
-            *(a.access_policy for a in self.assertions.values() if a.tenant_id == tenant_id and a.branch == branch),
+            *(
+                ev.access_policy
+                for ev in self.evidence.in_branch(tenant_id, branch).values()
+                if ev.tenant_id == tenant_id and ev.branch == branch
+            ),
+            *(
+                a.access_policy
+                for a in self.assertions.in_branch(tenant_id, branch).values()
+                if a.tenant_id == tenant_id and a.branch == branch
+            ),
             *(p.access_policy for p in self.preferences.values() if p.tenant_id == tenant_id),
         )
         for policy in policies:
@@ -5245,7 +5292,7 @@ class LocalMemoryEngine:
         max_trust = int(filt.get("max_trust_tier", filt.get("min_trust_tier", default_max_trust)))
         max_sensitivity = effective_max_sensitivity(filt, self.policy.max_sensitivity)
         hits: list[Hit] = []
-        for ev in self.evidence.values():
+        for ev in self.evidence.in_branch(tenant_id, branch).values():
             if ev.erased or ev.tenant_id != tenant_id or ev.branch != branch:
                 continue
             if ev.trust_tier > max_trust or ev.sensitivity > max_sensitivity:
@@ -5309,7 +5356,7 @@ class LocalMemoryEngine:
                     metadata=metadata,
                 )
             )
-        for assertion in self.assertions.values():
+        for assertion in self.assertions.in_branch(tenant_id, branch).values():
             if assertion.tenant_id != tenant_id or assertion.branch != branch:
                 continue
             if assertion.status not in {"active", "contested"}:
@@ -5539,7 +5586,7 @@ class LocalMemoryEngine:
         changed = True
         while changed:
             changed = False
-            for item in self.evidence.values():
+            for item in self.evidence.in_branch(tenant_id, branch).values():
                 item_cid = item.cid
                 if (
                     item.tenant_id != tenant_id
@@ -5567,7 +5614,7 @@ class LocalMemoryEngine:
         changed = True
         while changed:
             changed = False
-            for item in self.evidence.values():
+            for item in self.evidence.in_branch(tenant_id, branch).values():
                 item_cid = item.cid
                 if (
                     item.tenant_id != tenant_id
@@ -5628,7 +5675,8 @@ class LocalMemoryEngine:
         for name, meta in self.branches.items():
             tenants = {
                 item.tenant_id
-                for item in [*self.evidence.values(), *self.assertions.values(), *self.relations.values()]
+                for store in (self.evidence, self.assertions, self.relations)
+                for item in store.in_any_branch(name).values()
                 if item.branch == name
             }
             tenants.update(meta.get("tenants") or [])
