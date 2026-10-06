@@ -15,7 +15,7 @@ from typing import Any, Callable, Mapping, Protocol, Sequence
 from uuid import NAMESPACE_URL, uuid5
 
 from mnemosyne.access_policy import expiry_deadline, may_read_item, merge_access_policies, validate_access_policy
-from mnemosyne.cid_lists import evidence_caching_safe, evidence_epoch
+from mnemosyne.cid_lists import CidList, evidence_caching_safe, evidence_epoch, intern_cids
 from mnemosyne.command_line import split_command
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.gate import (
@@ -277,6 +277,61 @@ class ConsolidationJob:
         return asdict(self)
 
 
+PROMOTION_GATE_BATCH_SIZE_KEY = "promotion_gate_batch_size"
+_PROMOTION_GATE_BATCH_SIZE_MAX = 1_000_000
+
+
+def _promotion_gate_batch_size(payload: Mapping[str, Any]) -> int:
+    """How many fact candidates one promotion-gate run may cover (1 = per candidate)."""
+    value = payload.get(PROMOTION_GATE_BATCH_SIZE_KEY)
+    if value is None:
+        return 1
+    if type(value) is not int or not 1 <= value <= _PROMOTION_GATE_BATCH_SIZE_MAX:
+        raise ValueError(
+            f"{PROMOTION_GATE_BATCH_SIZE_KEY} must be an integer from 1 to {_PROMOTION_GATE_BATCH_SIZE_MAX}"
+        )
+    return value
+
+
+@dataclass(slots=True)
+class _PreparedFact:
+    """A fact job whose pre-gate rails passed: its gate candidate and its canary writes."""
+
+    job: ConsolidationJob
+    candidate: Candidate
+    access_policy: dict[str, Any]
+
+    def apply(self, engine: LocalMemoryEngine, branch: str) -> None:
+        job = self.job
+        engine.upsert_assertion(
+            Assertion(
+                tenant_id=job.tenant_id,
+                subject=job.candidate_subject,
+                predicate=job.candidate_predicate,
+                object=job.candidate_object,
+                confidence=job.confidence,
+                source_evidence_cids=job.source_evidence_cids,
+                status="active",
+                trust_tier=job.trust_tier,
+                sensitivity=job.sensitivity,
+                access_policy=self.access_policy,
+            ),
+            branch=branch,
+        )
+        engine.add_relation(
+            Relation(
+                tenant_id=job.tenant_id,
+                source=job.candidate_subject,
+                predicate=job.candidate_predicate,
+                target=job.candidate_object,
+                confidence=job.confidence,
+                source_evidence_cids=job.source_evidence_cids,
+                access_policy=self.access_policy,
+            ),
+            branch=branch,
+        )
+
+
 @dataclass(slots=True)
 class PassResult:
     name: str
@@ -522,6 +577,7 @@ class ConsolidationWorker:
         source_evidence_cids = [str(cid) for cid in payload.get("source_evidence_cids", [])]
         if not source_evidence_cids:
             raise ValueError("consolidation payload requires source_evidence_cids")
+        gate_batch_size = _promotion_gate_batch_size(payload)
 
         policy = self.policy if isinstance(self.policy, OperatingPolicy) else OperatingPolicy()
         cadence_tier: str | None = None
@@ -680,6 +736,7 @@ class ConsolidationWorker:
         )
         candidate_results: list[dict[str, Any]] = []
         candidates: list[dict[str, Any]] = []
+        gate_group_stats: dict[str, Any] | None = None
         no_write_data = self._contains_no_write_data(evidence, payload)
 
         if not run_core_mutation:
@@ -708,38 +765,40 @@ class ConsolidationWorker:
                         resolver_result["details"],
                     )
                 )
+                gate_jobs: list[ConsolidationJob] = []
+                work_part = [str(cid) for cid in work_cids if cid]
+                # Candidates of one document share one merged source list: built once, and held
+                # as one shared read-only list by every fact, relation and entity it reaches.
+                merged_by_own: dict[tuple[str, ...], list[str]] = {}
                 for candidate in candidates:
                     # Union payload sources with any per-candidate CIDs so batch
                     # captures (multiple independent evidence rows) count as
                     # external corroboration under §7 #17 — not only the leaf CID.
-                    candidate_cids = [
-                        str(cid)
-                        for cid in (
-                            list(candidate.get("source_evidence_cids") or [])
-                            + list(work_cids)
-                        )
-                        if cid
-                    ]
-                    # Preserve order while de-duplicating.
-                    merged_cids = list(dict.fromkeys(candidate_cids))
-                    result = self.run_job(
-                        ConsolidationJob(
-                            tenant_id=tenant_id,
-                            signature=str(candidate["signature"]),
-                            query=str(candidate["query"]),
-                            candidate_subject=str(candidate["candidate_subject"]),
-                            candidate_predicate=str(candidate["candidate_predicate"]),
-                            candidate_object=str(candidate["candidate_object"]),
-                            source_evidence_cids=merged_cids,
-                            confidence=float(candidate.get("confidence", payload.get("confidence", 0.72))),
-                            trust_tier=int(candidate.get("trust_tier", payload.get("trust_tier", TrustTier.NORMAL))),
-                            sensitivity=int(candidate.get("sensitivity", payload.get("sensitivity", 0))),
-                            access_policy=candidate.get("access_policy") or payload.get("access_policy"),
-                            entity_key=str(candidate.get("entity_key") or "") or None,
-                        ),
-                        mutation_budget=mutation_budget,
+                    own = tuple(str(cid) for cid in (candidate.get("source_evidence_cids") or []) if cid)
+                    merged_cids = merged_by_own.get(own)
+                    if merged_cids is None:
+                        # Preserve order while de-duplicating.
+                        merged_cids = intern_cids(list(dict.fromkeys([*own, *work_part])))
+                        merged_by_own[own] = merged_cids
+                    job = ConsolidationJob(
+                        tenant_id=tenant_id,
+                        signature=str(candidate["signature"]),
+                        query=str(candidate["query"]),
+                        candidate_subject=str(candidate["candidate_subject"]),
+                        candidate_predicate=str(candidate["candidate_predicate"]),
+                        candidate_object=str(candidate["candidate_object"]),
+                        source_evidence_cids=merged_cids,
+                        confidence=float(candidate.get("confidence", payload.get("confidence", 0.72))),
+                        trust_tier=int(candidate.get("trust_tier", payload.get("trust_tier", TrustTier.NORMAL))),
+                        sensitivity=int(candidate.get("sensitivity", payload.get("sensitivity", 0))),
+                        access_policy=candidate.get("access_policy") or payload.get("access_policy"),
+                        entity_key=str(candidate.get("entity_key") or "") or None,
                     )
-                    candidate_results.append(result.to_dict())
+                    gate_jobs.append(job)
+                gate_results, gate_group_stats = self.run_jobs(
+                    gate_jobs, mutation_budget=mutation_budget, batch_size=gate_batch_size
+                )
+                candidate_results.extend(result.to_dict() for result in gate_results)
                 pass_results.append(PassResult("belief_reviser", "complete", {"candidate_count": len(candidates)}))
             else:
                 skipped.append("candidate_extraction_not_configured")
@@ -813,7 +872,10 @@ class ConsolidationWorker:
                 continue
             if pass_name == "promotion_gate" and candidate_results:
                 promoted = sum(1 for item in candidate_results if item.get("promoted"))
-                pass_results.append(PassResult(pass_name, "complete", {"promoted": promoted, "evaluated": len(candidate_results)}))
+                gate_details: dict[str, Any] = {"promoted": promoted, "evaluated": len(candidate_results)}
+                if gate_group_stats is not None:
+                    gate_details.update(gate_group_stats)
+                pass_results.append(PassResult(pass_name, "complete", gate_details))
                 continue
             skipped_name = f"{pass_name}_not_implemented"
             skipped.append(skipped_name)
@@ -2560,24 +2622,32 @@ class ConsolidationWorker:
         store order with the same ``seen`` test appends the same CIDs in the same order.
         """
         tenant_id = job.tenant_id
-        sources = tuple(job.source_evidence_cids or ())
-        memo: OrderedDict[tuple[Any, ...], list[str]] = cache["base"]
+        raw_sources = job.source_evidence_cids
+        # A shared read-only list is keyed by identity (no per-job pass over thousands of CIDs).
+        shared = type(raw_sources) is CidList
+        sources: Any = ("shared", id(raw_sources)) if shared else tuple(raw_sources or ())
+        memo: OrderedDict[Any, tuple[Any, list[str], frozenset[str]]] = cache["base"]
         try:
-            base = memo.get(sources)
+            entry = memo.get(sources)
         except TypeError:  # unhashable CIDs: no memo
-            sources, base = None, None  # type: ignore[assignment]
-        if base is None:
-            base = [
+            sources, entry = None, None
+        if entry is not None and shared and entry[0] is not raw_sources:
+            entry = None
+        if entry is None:
+            # The base list is shared read-only: callers only read the CIDs they are given.
+            base = intern_cids([
                 cid
-                for cid in dict.fromkeys(str(item) for item in (job.source_evidence_cids or []) if item)
+                for cid in dict.fromkeys(str(item) for item in (raw_sources or []) if item)
                 if not self._cid_is_derived_cached(cache, tenant_id, cid)
-            ]
+            ])
+            entry = (raw_sources, base, frozenset(base))
             if sources is not None:
-                memo[sources] = base
+                memo[sources] = entry
                 while len(memo) > _BASE_MEMO_SIZE:
                     memo.popitem(last=False)
         elif sources is not None:
             memo.move_to_end(sources)
+        base, base_members = entry[1], entry[2]
         needle = self._content_tokens(
             " ".join(
                 [
@@ -2589,25 +2659,27 @@ class ConsolidationWorker:
                 ]
             )
         )
-        found = list(base)
         if len(needle) < 2:
-            return found
-        seen = set(found)
-        shared: Counter[int] = Counter()
+            return base
+        # The scan appends, in store order, each row sharing two tokens whose CID is not yet
+        # listed. Membership in the base list is the memoised set; only new CIDs are collected.
+        extra: list[str] = []
+        extra_seen: set[str] = set()
+        counts: Counter[int] = Counter()
         postings = cache["postings"]
         for token in needle:
-            shared.update(postings.get(token, ()))
+            counts.update(postings.get(token, ()))
         rows = cache["rows"]
-        for index in sorted(index for index, count in shared.items() if count >= 2):
+        for index in sorted(index for index, count in counts.items() if count >= 2):
             cid = rows[index][0]
             if not cid:
                 continue
             key = str(cid)
-            if key in seen:
+            if key in base_members or key in extra_seen:
                 continue
-            seen.add(key)
-            found.append(key)
-        return found
+            extra_seen.add(key)
+            extra.append(key)
+        return [*base, *extra] if extra else base
 
     def _fact_unit_signals_for_job(self, job: ConsolidationJob) -> dict[str, Any]:
         """Build Standing-shaped unit_signals from the engine independent-corroboration oracle.
@@ -2662,6 +2734,170 @@ class ConsolidationWorker:
         independent external corroboration is below the policy floor (§23.3 / §7 #17),
         or when a protected regression case would break; only a fully authorized,
         non-throttled, corroborated, regression-clean candidate is promoted.
+        """
+        prepared = self._prepare_fact_job(job)
+        if isinstance(prepared, GateResult):
+            return prepared
+        return self._gate_prepared_fact(prepared, mutation_budget)
+
+    def run_jobs(
+        self,
+        jobs: Sequence[ConsolidationJob],
+        mutation_budget: MutationRailBudget | None = None,
+        *,
+        batch_size: int = 1,
+    ) -> tuple[list[GateResult], dict[str, Any] | None]:
+        """Gate ``jobs`` in order: one :meth:`run_job` each, or in groups of ``batch_size``.
+
+        ``batch_size`` 1 (the default) is exactly one :meth:`run_job` per job. Above 1 the
+        promotion gate runs once per group (blueprint §17.4 / §23.3): each job still passes
+        its own authorization, cadence and corroboration rails, then up to ``batch_size``
+        candidates are applied together on one canary branch and the union of their
+        relevant regression cases runs once. A group that passes is merged whole; one that
+        fails is discarded and split in half, recursively, down to single candidates, which
+        take the per-candidate gate. Every merge into main therefore follows a passing gate
+        run on the exact state it lands on, and every rejection is a per-candidate verdict.
+        Returns the results in job order and the group statistics (None per candidate).
+        """
+        if batch_size <= 1 or not self.gate.supports_group_evaluation():
+            return [self.run_job(job, mutation_budget=mutation_budget) for job in jobs], None
+        stats: dict[str, Any] = {
+            "gate_mode": "batch",
+            "batch_size": batch_size,
+            "group_evaluations": 0,
+            "group_promotions": 0,
+            "group_splits": 0,
+            "single_evaluations": 0,
+        }
+        results: list[GateResult | None] = [None] * len(jobs)
+        pending: list[tuple[int, _PreparedFact]] = []
+        budgets: dict[str, MutationRailBudget] = {}
+
+        def budget_for(tenant_id: str) -> MutationRailBudget:
+            if mutation_budget is not None:
+                return mutation_budget
+            if tenant_id not in budgets:
+                budgets[tenant_id] = self._new_mutation_rail_budget(tenant_id, "main")
+            return budgets[tenant_id]
+
+        def flush() -> None:
+            if pending:
+                group = list(pending)
+                pending.clear()
+                for (index, _), result in zip(
+                    group,
+                    self._gate_fact_group([item for _, item in group], budget_for(group[0][1].job.tenant_id), stats),
+                    strict=True,
+                ):
+                    results[index] = result
+
+        for index, job in enumerate(jobs):
+            prepared = self._prepare_fact_job(job)
+            if isinstance(prepared, GateResult):
+                results[index] = prepared
+                continue
+            if not self.gate.group_eligible(prepared.candidate):
+                flush()
+                stats["single_evaluations"] += 1
+                results[index] = self._gate_prepared_fact(prepared, budget_for(job.tenant_id))
+                continue
+            if pending and pending[0][1].job.tenant_id != job.tenant_id:
+                flush()
+            pending.append((index, prepared))
+            if len(pending) >= batch_size:
+                flush()
+        flush()
+        return [result for result in results if result is not None], stats
+
+    def _gate_fact_group(
+        self,
+        items: list[_PreparedFact],
+        budget: MutationRailBudget,
+        stats: dict[str, Any],
+    ) -> list[GateResult]:
+        if len(items) == 1:
+            stats["single_evaluations"] += 1
+            return [self._gate_prepared_fact(items[0], budget)]
+        tenant_id = items[0].job.tenant_id
+
+        def apply(engine: LocalMemoryEngine, branch: str) -> None:
+            for item in items:
+                item.apply(engine, branch)
+
+        def pre_merge_check(engine: LocalMemoryEngine, branch: str) -> str | None:
+            # The group's supersessions are charged only when they fit: a group that would
+            # breach the rail is split, and its parts are charged (or refused) one by one.
+            superseded = self._branch_superseded_fact_ids(tenant_id, budget, branch)
+            if len(budget.superseded_fact_ids | superseded) > budget.supersessions_allowed:
+                return "rail_violation:max_supersession_rate (group)"
+            return budget.record_branch_supersessions(superseded, branch)
+
+        stats["group_evaluations"] += 1
+        outcome = self.gate.evaluate_group(
+            tenant_id, [item.candidate for item in items], apply, pre_merge_check=pre_merge_check
+        )
+        if outcome.promoted:
+            stats["group_promotions"] += 1
+            results = []
+            for item in items:
+                self._register_promoted_fact(item)
+                # Every case relevant to this candidate passed (all of the group's did).
+                passed = [case.id for case in self.gate.relevant_cases(item.candidate)]
+                total = max(len(passed), 1)
+                results.append(
+                    GateResult(
+                        candidate_id=item.candidate.id,
+                        promoted=True,
+                        protected_regressions=[],
+                        failed_cases=[],
+                        passed_cases=passed,
+                        margin=len(passed) / total - self.gate.noise_margin,
+                        rollback_branch=None,
+                    )
+                )
+            return results
+        stats["group_splits"] += 1
+        middle = len(items) // 2
+        return self._gate_fact_group(items[:middle], budget, stats) + self._gate_fact_group(
+            items[middle:], budget, stats
+        )
+
+    def _gate_prepared_fact(
+        self, prepared: _PreparedFact, mutation_budget: MutationRailBudget | None = None
+    ) -> GateResult:
+        """The per-candidate gate of :meth:`run_job` for a job whose rails have passed."""
+        job = prepared.job
+        budget = mutation_budget or self._new_mutation_rail_budget(job.tenant_id, "main")
+
+        def pre_merge_check(engine: LocalMemoryEngine, branch: str) -> str | None:
+            return budget.record_branch_supersessions(
+                self._branch_superseded_fact_ids(job.tenant_id, budget, branch),
+                branch,
+            )
+
+        result = self.gate.evaluate(job.tenant_id, prepared.candidate, prepared.apply, pre_merge_check=pre_merge_check)
+        if result.promoted:
+            self._register_promoted_fact(prepared)
+        return result
+
+    def _register_promoted_fact(self, prepared: _PreparedFact) -> None:
+        if hasattr(self.engine, "register_entity"):
+            job = prepared.job
+            entity_key = job.entity_key or _entity_key(job.candidate_subject)
+            self.engine.register_entity(
+                job.tenant_id,
+                entity_key,
+                alias=job.candidate_subject,
+                summary=prepared.candidate.description,
+                source_evidence_cids=job.source_evidence_cids,
+                access_policy=prepared.access_policy,
+            )
+
+    def _prepare_fact_job(self, job: ConsolidationJob) -> GateResult | _PreparedFact:
+        """The rails :meth:`run_job` checks before the gate, in its order.
+
+        A :class:`GateResult` when one refuses the job; otherwise the gate candidate and
+        the writes that apply it to a canary branch.
         """
         try:
             validated_access_policy = validate_access_policy(
@@ -2744,56 +2980,7 @@ class ConsolidationWorker:
             source_evidence_cids=job.source_evidence_cids,
             unit_signals=unit_signals,
         )
-
-        def apply(engine: LocalMemoryEngine, branch: str) -> None:
-            engine.upsert_assertion(
-                Assertion(
-                    tenant_id=job.tenant_id,
-                    subject=job.candidate_subject,
-                    predicate=job.candidate_predicate,
-                    object=job.candidate_object,
-                    confidence=job.confidence,
-                    source_evidence_cids=job.source_evidence_cids,
-                    status="active",
-                    trust_tier=job.trust_tier,
-                    sensitivity=job.sensitivity,
-                    access_policy=validated_access_policy,
-                ),
-                branch=branch,
-            )
-            engine.add_relation(
-                Relation(
-                    tenant_id=job.tenant_id,
-                    source=job.candidate_subject,
-                    predicate=job.candidate_predicate,
-                    target=job.candidate_object,
-                    confidence=job.confidence,
-                    source_evidence_cids=job.source_evidence_cids,
-                    access_policy=validated_access_policy,
-                ),
-                branch=branch,
-            )
-
-        budget = mutation_budget or self._new_mutation_rail_budget(job.tenant_id, "main")
-
-        def pre_merge_check(engine: LocalMemoryEngine, branch: str) -> str | None:
-            return budget.record_branch_supersessions(
-                self._branch_superseded_fact_ids(job.tenant_id, budget, branch),
-                branch,
-            )
-
-        result = self.gate.evaluate(job.tenant_id, candidate, apply, pre_merge_check=pre_merge_check)
-        if result.promoted and hasattr(self.engine, "register_entity"):
-            entity_key = job.entity_key or _entity_key(job.candidate_subject)
-            self.engine.register_entity(
-                job.tenant_id,
-                entity_key,
-                alias=job.candidate_subject,
-                summary=candidate.description,
-                source_evidence_cids=job.source_evidence_cids,
-                access_policy=validated_access_policy,
-            )
-        return result
+        return _PreparedFact(job=job, candidate=candidate, access_policy=validated_access_policy)
 
 
 _SALIENT_ENTITY = re.compile(

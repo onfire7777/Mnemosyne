@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any, Callable, Literal, Mapping
+from hashlib import sha256
+from typing import Any, Callable, Literal, Mapping, Sequence
 
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.policy import OperatingPolicy
@@ -182,6 +183,22 @@ class GateResult:
         return asdict(self)
 
 
+@dataclass(slots=True)
+class GroupGateResult:
+    """One promotion-gate run over several candidates applied together on one canary branch."""
+
+    branch: str
+    candidate_ids: list[str]
+    promoted: bool
+    protected_regressions: list[str]
+    failed_cases: list[str]
+    passed_cases: list[str]
+    margin: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 IGNITION_N_ACTIVE = 30
 IGNITION_MIN_CURATED = 20
 IGNITION_MIN_GENUINE = 5
@@ -340,6 +357,109 @@ class PromotionGate:
             rollback_branch = branch
             self._discard(branch, tenant_id)
         return GateResult(candidate.id, promoted, protected_regressions, failed, passed, margin, rollback_branch, counterfactual)
+
+    # --- group evaluation (blueprint §17.4 / §23.3: "the gate runs once per batch") -------
+
+    def supports_group_evaluation(self) -> bool:
+        """Group runs are offered only when no rail needs a per-candidate verdict.
+
+        A counterfactual hook scores one candidate at a time and the ignition rail would
+        reject every candidate alike, so either keeps the per-candidate gate.
+        """
+        return self.counterfactual_hook is None and not self.require_ignition
+
+    def group_eligible(self, candidate: Candidate) -> bool:
+        """May ``candidate`` share a group run?
+
+        A candidate the per-candidate gate rejects whatever the cases say - one with no
+        relevant case (its margin can never be positive) or one the fact-corroboration rail
+        refuses - is evaluated alone, so its rejection is exactly the per-candidate one.
+        """
+        if not self.relevant_cases(candidate):
+            return False
+        if candidate.kind == "fact":
+            explicit = getattr(candidate, "unit_signals", None)
+            verdict = evaluate_fact_external_corroboration(
+                unit_signals=self._fact_unit_signals(candidate),
+                policy=self.policy,
+                min_external=None if explicit is not None else 1,
+            )
+            if not verdict.allowed:
+                return False
+        return True
+
+    def group_relevant_cases(self, candidates: Sequence[Candidate]) -> list[RegressionCase]:
+        """Every case relevant to any of ``candidates``, in suite order, each once."""
+        signature_terms = [set(candidate.signature.lower().split()) for candidate in candidates]
+        relevant = []
+        for case in self.cases:
+            if case.protected or case.tier == "smoke":
+                relevant.append(case)
+                continue
+            case_terms = set((case.signature + " " + case.query).lower().split())
+            if any(terms & case_terms for terms in signature_terms):
+                relevant.append(case)
+        return relevant
+
+    def evaluate_group(
+        self,
+        tenant_id: str,
+        candidates: Sequence[Candidate],
+        apply_candidates: Callable[[LocalMemoryEngine, str], None],
+        pre_merge_check: Callable[[LocalMemoryEngine, str], str | None] | None = None,
+    ) -> GroupGateResult:
+        """Apply every candidate on ONE canary branch, run the union of their relevant cases
+        once, and merge the branch only when every case passes and the rail check is clean.
+
+        The same decision rule as :meth:`evaluate` (no failed case, no protected regression,
+        margin above noise, clean pre-merge rail), taken over the combined change. A group
+        that fails is discarded whole; the caller splits it and evaluates the parts, so a
+        merge into main always follows a passing run on the exact state it lands on. Only
+        candidates :meth:`group_eligible` accepts belong here, and only while
+        :meth:`supports_group_evaluation` holds.
+        """
+        if not self.supports_group_evaluation():
+            raise ValueError("group evaluation needs no counterfactual hook and no ignition rail")
+        digest = sha256("\n".join(candidate.signature for candidate in candidates).encode("utf-8")).hexdigest()
+        branch = f"canary-batch-{digest[:16]}"
+        self._reset_branch(branch, tenant_id)
+        self._branch(branch, tenant_id)
+        apply_candidates(self.engine, branch)
+        passed: list[str] = []
+        failed: list[str] = []
+        protected_regressions: list[str] = []
+        for case in self.group_relevant_cases(candidates):
+            result = self.engine.retrieve(case.query, tenant_id=tenant_id, branch=branch, deep=case.tier != "smoke")
+            rendered = "\n".join(hit.text for hit in result.hits)
+            ok = case.expected_substring.lower() in rendered.lower() and not result.abstained
+            if ok:
+                passed.append(case.id)
+            else:
+                failed.append(case.id)
+                if case.protected:
+                    protected_regressions.append(case.id)
+        total = max(len(passed) + len(failed), 1)
+        margin = len(passed) / total - self.noise_margin
+        promoted = not protected_regressions and not failed and margin > 0
+        if promoted and pre_merge_check is not None:
+            rail_violation = pre_merge_check(self.engine, branch)
+            if rail_violation:
+                failed.append(rail_violation)
+                protected_regressions.append(rail_violation)
+                promoted = False
+        if promoted:
+            self._merge(branch, tenant_id)
+        else:
+            self._discard(branch, tenant_id)
+        return GroupGateResult(
+            branch=branch,
+            candidate_ids=[candidate.id for candidate in candidates],
+            promoted=promoted,
+            protected_regressions=protected_regressions,
+            failed_cases=failed,
+            passed_cases=passed,
+            margin=margin,
+        )
 
     @staticmethod
     def _fact_unit_signals(candidate: Candidate) -> Mapping[str, Any] | None:

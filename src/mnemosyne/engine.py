@@ -1585,6 +1585,82 @@ def _source_set(values: Any) -> frozenset[str]:
     return result
 
 
+# id(shared list) -> (the list, frozenset of its raw members)
+_MEMBER_SETS: dict[int, tuple[CidList, frozenset[Any]]] = {}
+_MEMBER_SETS_SIZE = 1 << 14
+# member set -> the shared sorted list of those members
+_SORTED_MEMBERS: dict[frozenset[Any], list[Any]] = {}
+_SORTED_MEMBERS_SIZE = 256
+# (id(left), id(right)) -> (left, right, their sorted union) for shared lists
+_SOURCE_UNIONS: dict[tuple[int, int], tuple[CidList, CidList, list[Any]]] = {}
+_SOURCE_UNIONS_SIZE = 1 << 14
+
+
+def _member_set(values: Any) -> frozenset[Any]:
+    """``frozenset(values)``, computed once per shared list."""
+    if type(values) is not CidList:
+        return frozenset(values)
+    entry = _MEMBER_SETS.get(id(values))
+    if entry is not None and entry[0] is values:
+        return entry[1]
+    result = frozenset(values)
+    # Lists of the same members (a batch's per-document orderings) share one set object.
+    found = _INTERNED_SETS.get(result)
+    if found is None:
+        _INTERNED_SETS[result] = result
+        while len(_INTERNED_SETS) > _INTERNED_SETS_SIZE:
+            del _INTERNED_SETS[next(iter(_INTERNED_SETS))]
+    else:
+        result = found
+    _MEMBER_SETS[id(values)] = (values, result)
+    while len(_MEMBER_SETS) > _MEMBER_SETS_SIZE:
+        del _MEMBER_SETS[next(iter(_MEMBER_SETS))]
+    return result
+
+
+def _union_sorted_sources(left: Any, right: Any) -> list[Any]:
+    """``intern_cids(sorted(set(left + right)))`` - the merged source list of two rows.
+
+    The result depends only on the members of both lists, so it is computed once per member
+    set (and looked up once per pair of shared lists): merging the same sources again - every
+    fact of a batch carries the whole batch's CIDs - costs no sort.
+    """
+    pair = type(left) is CidList and type(right) is CidList
+    if pair:
+        entry = _SOURCE_UNIONS.get((id(left), id(right)))
+        if entry is not None and entry[0] is left and entry[1] is right:
+            return entry[2]
+    try:
+        members = _member_set(left) | _member_set(right)
+    except TypeError:
+        # Unhashable members: the plain expression raises exactly as it always did.
+        return intern_cids(sorted(set(list(left) + list(right))))
+    result = _SORTED_MEMBERS.get(members)
+    if result is None:
+        # sorted() of the same members: no two set members compare equal, so the order is the
+        # one sorted(set(left + right)) gives.
+        result = intern_cids(sorted(members))
+        _SORTED_MEMBERS[members] = result
+        while len(_SORTED_MEMBERS) > _SORTED_MEMBERS_SIZE:
+            del _SORTED_MEMBERS[next(iter(_SORTED_MEMBERS))]
+    if pair:
+        _SOURCE_UNIONS[(id(left), id(right))] = (left, right, result)
+        while len(_SOURCE_UNIONS) > _SOURCE_UNIONS_SIZE:
+            del _SOURCE_UNIONS[next(iter(_SOURCE_UNIONS))]
+    return result
+
+
+def _row_snapshot(item: Any, times: tuple[str, ...]) -> dict[str, Any]:
+    """``item.to_dict()`` with the same content, keeping shared lists and maps shared.
+
+    ``to_dict`` is ``dataclasses.asdict`` - a deep copy that also copies a row's shared source
+    list and per-source map into private ones. A deep copy of the plain row returns those
+    read-only shared objects themselves, so audit snapshots of thousands of rows that cite the
+    same thousands of sources hold (and store) one list.
+    """
+    return copy.deepcopy(_store_row(item, times))
+
+
 # ---------------------------------------------------------------- compact store encoding
 
 _SHARED_VALUES_KEY = "shared_values"
@@ -1625,15 +1701,17 @@ class _SharedValueEncoder:
     """
 
     def __init__(self) -> None:
-        self.lists: list[list[Any]] = []
+        self.lists: list[Any] = []
         self.maps: list[dict[str, Any]] = []
         self._refs: dict[int, dict[str, int]] = {}
         self._held: list[Any] = []  # keeps ids stable while encoding
+        # member set -> [(table index, list)] of lists written in full
+        self._bases: dict[frozenset[Any], list[tuple[int, Any]]] = {}
 
     def encode(self, value: Any) -> Any:
         kind = type(value)
         if kind is CidList and len(value) >= _SHARED_VALUE_MIN:
-            return self._ref(value, self.lists, _SHARED_CIDS_REF, list)
+            return self._ref_cids(value)
         if kind is SharedMap and len(value) >= _SHARED_VALUE_MIN:
             return self._ref(value, self.maps, _SHARED_MAP_REF, dict)
         if isinstance(value, dict):
@@ -1651,10 +1729,124 @@ class _SharedValueEncoder:
             self._held.append(value)
         return dict(ref)
 
+    def _ref_cids(self, value: CidList) -> dict[str, int]:
+        """A shared CID list's table entry: in full, or as a front over a same-member list.
+
+        Consolidation gives each document's facts the batch's CIDs with that document's own
+        CIDs moved to the front, so a batch of N documents holds N lists of the same N CIDs.
+        Each is written once, and every one but the first as ``{"base": i, "front": [...]}``:
+        exactly ``front + [cid for cid in table[i] if cid not in front]``.
+        """
+        ref = self._refs.get(id(value))
+        if ref is not None:
+            return dict(ref)
+        index = len(self.lists)
+        try:
+            members: frozenset[Any] | None = _member_set(value)
+        except TypeError:
+            members = None
+        entry: Any = None
+        if members is not None:
+            for base_index, base in self._bases.get(members, ()):
+                front = _front_over(value, base)
+                if front is not None:
+                    entry = {_SHARED_DELTA_BASE: base_index, _SHARED_DELTA_FRONT: front}
+                    break
+        if entry is None and members is not None:
+            # No list written so far is the shared order: the first lists met may each have a
+            # different CID in front. Rebuild the common order from one of them and this list,
+            # write it once, and read both as fronts over it (only if that reproduces this list).
+            for _, base in list(self._bases.get(members, ())):
+                order = _common_order(value, base)
+                front = _front_over(value, order) if order is not None else None
+                if front is not None:
+                    order_index = len(self.lists)
+                    self.lists.append(list(order))
+                    self._bases[members].insert(0, (order_index, order))
+                    index = len(self.lists)
+                    entry = {_SHARED_DELTA_BASE: order_index, _SHARED_DELTA_FRONT: front}
+                    break
+        if entry is None:
+            entry = list(value)
+            if members is not None:
+                bases = self._bases.setdefault(members, [])
+                if len(bases) < _SHARED_DELTA_BASES:
+                    bases.append((index, value))
+        self.lists.append(entry)
+        ref = {_SHARED_CIDS_REF: index}
+        self._refs[id(value)] = ref
+        self._held.append(value)
+        return dict(ref)
+
+
+_SHARED_DELTA_BASE = "base"
+_SHARED_DELTA_FRONT = "front"
+# A list is written as a front over a base only for a front this short ...
+_SHARED_DELTA_FRONT_MAX = 8
+# ... and is compared with at most this many same-member lists written in full.
+_SHARED_DELTA_BASES = 4
+
+
+def _front_over(values: list[Any], base: list[Any]) -> list[Any] | None:
+    """The shortest ``front`` with ``values == front + [x for x in base if x not in front]``."""
+    count = len(values)
+    for size in range(min(_SHARED_DELTA_FRONT_MAX, count) + 1):
+        front = values[:size]
+        front_members = set(front)
+        position = size
+        matched = True
+        for item in base:
+            if item in front_members:
+                continue
+            if position >= count or not (values[position] is item or values[position] == item):
+                matched = False
+                break
+            position += 1
+        if matched and position == count:
+            return list(front)
+    return None
+
+
+def _common_order(values: list[Any], base: list[Any]) -> list[Any] | None:
+    """The order ``values`` and ``base`` share once each one's first CID is put back.
+
+    For ``values = [a, *W without a]`` and ``base = [b, *W without b]`` this is ``W`` with
+    ``a`` re-inserted before the CID that follows it in ``base``. Only a candidate: the caller
+    keeps it only when ``values`` is exactly a front over it.
+    """
+    if len(values) < 2 or len(base) < 2 or values[0] == base[0]:
+        return None
+    moved, rest, tail = values[0], values[1:], base[1:]
+    try:
+        position = tail.index(moved)
+    except ValueError:
+        return None
+    if position + 1 >= len(tail):
+        return [*rest, moved]
+    try:
+        at = rest.index(tail[position + 1])
+    except ValueError:
+        return None
+    return [*rest[:at], moved, *rest[at:]]
+
+
+def _expand_shared_cids(entries: list[Any]) -> list[Any]:
+    """The ``cid_lists`` table back as shared lists (a front entry follows its base)."""
+    lists: list[Any] = []
+    for entry in entries:
+        if isinstance(entry, dict):
+            front = list(entry[_SHARED_DELTA_FRONT])
+            front_members = set(front)
+            base = lists[entry[_SHARED_DELTA_BASE]]
+            lists.append(intern_cids(front + [item for item in base if item not in front_members]))
+        else:
+            lists.append(intern_cids(entry))
+    return lists
+
 
 def _decode_shared_values(data: Any, shared: dict[str, Any]) -> Any:
     """Resolve the references ``_SharedValueEncoder`` wrote back into shared objects."""
-    lists = [intern_cids(values) for values in shared.get("cid_lists") or []]
+    lists = _expand_shared_cids(shared.get("cid_lists") or [])
     maps = [shared_map(values) for values in shared.get("maps") or []]
 
     def decode(value: Any) -> Any:
@@ -1724,9 +1916,7 @@ def _merge_relation_state(target: Relation, incoming: Relation) -> None:
         if target.valid_to is None or incoming.valid_to is None
         else max(target.valid_to, incoming.valid_to)
     )
-    target.source_evidence_cids = intern_cids(sorted(
-        set(target.source_evidence_cids + incoming.source_evidence_cids)
-    ))
+    target.source_evidence_cids = _union_sorted_sources(target.source_evidence_cids, incoming.source_evidence_cids)
     target.access_policy = merge_access_policies(
         [target.access_policy, incoming.access_policy],
         tenant_id=target.tenant_id,
@@ -3063,7 +3253,8 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             "justifications": [item.to_dict() for item in self.justifications.values()],
             "contradictions": [item.to_dict() for item in self.contradictions.values()],
             "calibrations": [item.to_dict() for item in self.calibrations.values()],
-            "entities": list(self.entities.values()),
+            # An entity named by every fact of a batch cites the batch's whole shared list.
+            "entities": encoder.encode(list(self.entities.values())),
             "intentions": [item.to_dict() for item in self.intentions.values()],
             "working_memory": [item.to_dict() for item in self.working_memory.values()],
             "audit_log": encoder.encode(self.audit_log),
@@ -3593,13 +3784,15 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             same = [item for item in peers if item.object == incoming.object]
             if same:
                 winner = max(same, key=lambda item: item.confidence)
-                before = winner.to_dict() if audit else None
+                before = _row_snapshot(winner, _ASSERTION_TIMES) if audit else None
                 winner.access_policy = merge_access_policies(
                     [winner.access_policy, incoming.access_policy],
                     tenant_id=winner.tenant_id,
                 )
                 winner.confidence = max(winner.confidence, incoming.confidence)
-                winner.source_evidence_cids = intern_cids(sorted(set(winner.source_evidence_cids + incoming.source_evidence_cids)))
+                winner.source_evidence_cids = _union_sorted_sources(
+                    winner.source_evidence_cids, incoming.source_evidence_cids
+                )
                 winner.trust_tier = more_trusted(winner.trust_tier, incoming.trust_tier)
                 winner.last_accessed = utc_now() if now is None else now
                 self._apply_projection_reality_monitoring(winner)
@@ -3609,7 +3802,11 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                         "engine",
                         "upsert_assertion.noop_or_reinforce",
                         winner.id,
-                        {"before": before, "after": winner.to_dict(), "source_evidence_cids": winner.source_evidence_cids},
+                        {
+                            "before": before,
+                            "after": _row_snapshot(winner, _ASSERTION_TIMES),
+                            "source_evidence_cids": winner.source_evidence_cids,
+                        },
                         source="assertion",
                         trust_tier=winner.trust_tier,
                     )
@@ -4444,7 +4641,10 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             tenant_id=tenant_id,
             location="entity.access_policy",
         )
-        source_cids = list(source_evidence_cids or [])
+        # A shared list is used as it is: it is read-only, and merging it is memoised.
+        source_cids = (
+            source_evidence_cids if type(source_evidence_cids) is CidList else list(source_evidence_cids or [])
+        )
         aliases = {canonical}
         if alias and alias.strip():
             aliases.add(alias.strip())
@@ -4482,7 +4682,9 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 row["summary"] = summary
             row["access_policy"] = effective_access_policy
             row["aliases"] = sorted(set(row.get("aliases", [])) | aliases)
-            row["source_evidence_cids"] = sorted(set(row.get("source_evidence_cids", [])) | set(source_cids))
+            # sorted(set(existing) | set(incoming)) as one shared read-only list: an entity named
+            # by every fact of a batch would otherwise hold its own copy of the batch's sources.
+            row["source_evidence_cids"] = _union_sorted_sources(row.get("source_evidence_cids", []), source_cids)
             row["updated_at"] = utc_now().isoformat()
             self.entities[key] = row
             self._audit(tenant_id, "engine", "register_entity", canonical, {"aliases": row["aliases"]})

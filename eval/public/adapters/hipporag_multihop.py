@@ -23,6 +23,10 @@ class HippoRAGSchemaError(ValueError):
 
 
 _QUERY_SHARD_SIZE = 50
+# Fact candidates per promotion-gate run when a whole corpus is consolidated in one batch
+# (capture-batch --consolidation-gate-batch). The gate checks every group on one canary branch
+# and splits a failing group down to single candidates.
+_CONSOLIDATION_GATE_BATCH = 512
 
 
 def run(
@@ -72,7 +76,9 @@ def run(
             )
             # A whole corpus is one batch: a candidate the promotion gate rejects (its trial
             # branch is discarded) must not refuse every document; it is reported instead.
-            captured = capture_cli.capture_batch(batch, consolidate=True, report_rejections=True)
+            captured = capture_cli.capture_batch(
+                batch, consolidate=True, report_rejections=True, gate_batch=_CONSOLIDATION_GATE_BATCH
+            )
         else:
             captured = capture_cli.capture_batch(batch, consolidate=True)
     results = captured.get("results", [])
@@ -265,7 +271,12 @@ def run_reader_qa(
             first = benchmark["corpus"][0]
             cli.install_consolidation_gate_case(f"{first['title']}\n{first['content']}")
             # As in run(): gate-rejected candidates are reported, not fatal, for a whole corpus.
-            captured = cli.capture_batch(capture_path, consolidate=True, report_rejections=True).get("results")
+            captured = cli.capture_batch(
+                capture_path,
+                consolidate=True,
+                report_rejections=True,
+                gate_batch=_CONSOLIDATION_GATE_BATCH,
+            ).get("results")
         else:
             captured = cli.capture_batch(capture_path, consolidate=True).get("results")
         if not isinstance(captured, list) or len(captured) != len(benchmark["corpus"]):
