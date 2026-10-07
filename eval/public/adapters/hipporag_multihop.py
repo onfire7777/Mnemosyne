@@ -23,6 +23,29 @@ class HippoRAGSchemaError(ValueError):
 
 
 _QUERY_SHARD_SIZE = 50
+# Fact candidates per promotion-gate run when a whole corpus is consolidated in one batch
+# (capture-batch --consolidation-gate-batch). The gate checks every group on one canary branch
+# and splits a failing group down to single candidates.
+_CONSOLIDATION_GATE_BATCH = 4096
+
+
+def _capture_batch_argv(input_jsonl: Path) -> tuple[str, ...]:
+    """The public capture-batch command for a whole benchmark corpus.
+
+    Built here rather than in MnemoCLI.capture_batch because the retained action-pressure and
+    action-recovery evidence pins the SHA-256 of eval/harness/cli_driver.py and replays only
+    against that exact file.
+    """
+    return (
+        "capture-batch",
+        "--input-jsonl",
+        str(input_jsonl),
+        "--consolidate",
+        "--consolidation-rejections",
+        "report",
+        "--consolidation-gate-batch",
+        str(_CONSOLIDATION_GATE_BATCH),
+    )
 
 
 def run(
@@ -70,7 +93,16 @@ def run(
             capture_cli.install_consolidation_gate_case(
                 f"{first['title']}\n{first['content']}"
             )
-        captured = capture_cli.capture_batch(batch, consolidate=True)
+            # A whole corpus is one batch: a candidate the promotion gate rejects (its trial
+            # branch is discarded) must not refuse every document; it is reported instead, and
+            # the gate runs once per group of candidates rather than once per candidate.
+            # Sent through MnemoCLI.run, not capture_batch: the retained action-pressure and
+            # action-recovery evidence pins the SHA-256 of eval/harness/cli_driver.py, so that
+            # file must stay byte-for-byte as recorded (eval/public/action_pressure.py
+            # recompute()).
+            captured = capture_cli.run(*_capture_batch_argv(batch)).json
+        else:
+            captured = capture_cli.capture_batch(batch, consolidate=True)
     results = captured.get("results", [])
     if len(results) != len(corpus):
         raise HippoRAGSchemaError("capture batch count does not match corpus")
@@ -260,7 +292,11 @@ def run_reader_qa(
         if isinstance(cli, MnemoCLI):
             first = benchmark["corpus"][0]
             cli.install_consolidation_gate_case(f"{first['title']}\n{first['content']}")
-        captured = cli.capture_batch(capture_path, consolidate=True).get("results")
+            # As in run(): gate-rejected candidates are reported, not fatal, for a whole corpus.
+            # As in run(): rejections are reported, and the gate runs once per group.
+            captured = cli.run(*_capture_batch_argv(capture_path)).json.get("results")
+        else:
+            captured = cli.capture_batch(capture_path, consolidate=True).get("results")
         if not isinstance(captured, list) or len(captured) != len(benchmark["corpus"]):
             raise HippoRAGSchemaError("reader capture count does not match corpus")
         cid_to_doc: dict[str, str] = {}

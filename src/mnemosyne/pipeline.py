@@ -41,6 +41,7 @@ from datetime import datetime, timezone
 from typing import Any, Mapping, Protocol, Sequence
 
 from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
+from mnemosyne.cid_lists import shared_or_copy
 from mnemosyne.models import Hit, RetrievalResult, parse_dt, utc_now
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.retrieval import (
@@ -140,7 +141,7 @@ def _clone_hit(hit: Hit) -> Hit:
         text=hit.text,
         score=hit.score,
         channel=hit.channel,
-        provenance=list(hit.provenance),
+        provenance=shared_or_copy(hit.provenance),
         trust_tier=hit.trust_tier,
         sensitivity=hit.sensitivity,
         metadata=copy.deepcopy(hit.metadata),

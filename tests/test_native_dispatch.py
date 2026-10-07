@@ -162,8 +162,15 @@ def test_engine_scans_byte_identical_both_modes():
 def test_vector_search_native_single_dense_scan_crossing(monkeypatch):
     """Native vector_search makes exactly ONE dense_scan FFI crossing covering
     every candidate row (embeddings stay per-hit in Python for the security
-    gate + metadata side effects)."""
+    gate + metadata side effects) - for a PROVIDER embedding.
+
+    With the local hashing provider the exact sparse path wins end to end (it scores the
+    memoized candidates themselves and clones only the hits it keeps, where the kernel needs
+    every candidate cloned up front), so vector_search prefers it and crosses the FFI not at
+    all. test_engine_scans_byte_identical_both_modes proves the two score identically.
+    """
     from mnemosyne import text as text_mod
+    from mnemosyne.retrieval import HashingEmbeddingProvider
 
     if text_mod.NATIVE is None:
         pytest.skip("pure mode active (MNEMOSYNE_PURE=1); no batch path")
@@ -177,6 +184,20 @@ def test_vector_search_native_single_dense_scan_crossing(monkeypatch):
         return real(query_vec, rows)
 
     monkeypatch.setattr(native, "dense_scan", counting)
+    assert type(engine.adapters.embedding) is HashingEmbeddingProvider
+    hits = engine.vector_search("alpha beta", 12, {"tenant_id": TENANT})
+    assert len(hits) == 12
+    assert calls == []  # the exact sparse path: no crossing, no whole-list clone
+
+    class Provider(HashingEmbeddingProvider):
+        """Not the hashing provider by type: the sparse path does not apply to it."""
+
+    import dataclasses
+
+    engine.adapters = dataclasses.replace(
+        engine.adapters, embedding=Provider(dims=engine.adapters.embedding.dims)
+    )
+    engine._candidate_memo.clear()
     hits = engine.vector_search("alpha beta", 12, {"tenant_id": TENANT})
     assert len(hits) == 12
     assert calls == [20]  # one crossing, all 20 candidates in the batch
