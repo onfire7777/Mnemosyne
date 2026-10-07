@@ -1361,6 +1361,25 @@ class MemoryTools:
         self._record_retrieval(payload, start)
         return lean_retrieval_payload(payload) if lean else payload
 
+    def index_passages(
+        self,
+        tenant_id: str,
+        branch: str = "main",
+        workers: int = 8,
+        progress: Any = None,
+    ) -> dict[str, Any]:
+        """Build the passage graph for every passage a reader of ``tenant_id`` may see."""
+        passage_graph = getattr(self.engine.adapters, "passage_graph", None)
+        if passage_graph is None:
+            return {"configured": False, "reason": "no passage index is configured (--passage-index)"}
+        filt = self._read_context(tenant_id, role="reader")
+        filt.update({"branch": branch, "query_mode": "passages"})
+        passages = self.engine.passage_candidates(filt)
+        report = passage_graph.index(
+            tenant_id, passages, self.engine.adapters.embedding, workers=workers, progress=progress
+        )
+        return {"configured": True, **report}
+
     def deep_search(
         self,
         tenant_id: str,
@@ -1830,6 +1849,10 @@ class MemoryTools:
             if outcome.get("erased"):
                 erased_branches.append(target)
             per_branch[target] = outcome
+        passage_graph = getattr(getattr(self.engine, "adapters", None), "passage_graph", None)
+        if passage_graph is not None and erased_branches:
+            # The passage index holds triples and vectors derived from this passage's text.
+            per_branch[erased_branches[0]]["passage_index_purge"] = passage_graph.purge(tenant_id, [cid])
         if (
             mode is ErasureMode.HARD_DELETE_LEGAL
             and live_pointers

@@ -4283,16 +4283,23 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     hits.append(hit)
         return self._mark_retrieved_text_as_data(sorted(hits, key=lambda item: item.score, reverse=True)[:k])
 
+    def passage_candidates(self, filt: dict[str, Any]) -> list[Hit]:
+        """Every source passage ``filt`` may read, as memoized read-only rows - clone to change."""
+        from mnemosyne.passages import is_passage
+
+        scoped = {**filt, "query_mode": "passages"}
+        templates = self._candidate_templates(scoped)
+        candidates = self._candidate_hits(scoped) if hasattr(templates, "finish") else templates
+        return [hit for hit in candidates if is_passage(hit)]
+
     def lexical_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
         tenant_id = str(filt.get("tenant_id") or "")
         branch = str(filt.get("branch") or "main")
         if filt.get("query_mode") == "passages" and self.adapters.lexical_retriever is None:
             from mnemosyne.passages import rank_passages
 
-            templates = self._candidate_templates(filt)
-            candidates = self._candidate_hits(filt) if hasattr(templates, "finish") else templates
             return self._mark_retrieved_text_as_data(
-                [_clone_candidate_hit(hit) for hit in rank_passages(self, query, candidates, k)]
+                [_clone_candidate_hit(hit) for hit in rank_passages(self, query, self.passage_candidates(filt), k)]
             )
         if self.adapters.lexical_retriever is not None:
             hits = self.adapters.lexical_retriever.search(

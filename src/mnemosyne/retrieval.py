@@ -1913,6 +1913,8 @@ class RetrievalAdapters:
     graph_backend: str = "local-ppr"
     lexical_retriever: LexicalRetriever | None = None
     graph_retriever: GraphRetriever | None = None
+    #: mnemosyne.passages.PassageGraphIndex - HippoRAG 2 ranking for query_mode=passages.
+    passage_graph: Any = None
 
 
 def retrieval_adapters_from_env(prefix: str = "MNEMOSYNE") -> RetrievalAdapters:
