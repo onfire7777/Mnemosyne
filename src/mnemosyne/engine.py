@@ -22,7 +22,6 @@ from typing import Any, Literal, Protocol, Sequence, runtime_checkable
 from mnemosyne import text as text_kernels
 from mnemosyne.access_policy import (
     VECTOR_PARTITION_PUBLIC,
-    AccessDecision,
     apply_relation_redactions,
     apply_statement_redactions,
     apply_text_redactions,
@@ -1547,61 +1546,6 @@ def _access_context_key(context: Mapping[str, Any] | None) -> str | None:
 def _policy_expires(access_policy: Any) -> bool:
     """An access policy whose verdict depends on the wall clock (``expires_at``)."""
     return isinstance(access_policy, Mapping) and bool(access_policy.get("expires_at"))
-
-
-# (id(policy), tenant, sensitivity, status, erased, context key, ceiling) -> (policy, decision).
-# The entry holds the policy itself, so its id cannot be reused while the entry is cached.
-_READ_DECISIONS: dict[tuple[Any, ...], tuple[Any, AccessDecision]] = {}
-_READ_DECISIONS_SIZE = 1 << 17
-
-
-def _read_decision(
-    *,
-    item_tenant_id: str,
-    sensitivity: int,
-    access_policy: Any,
-    context: Mapping[str, Any] | None,
-    policy_max_sensitivity: int,
-    status: str = "active",
-    erased: bool = False,
-    context_key: str | None = None,
-) -> AccessDecision:
-    """``may_read_item`` memoised per stored access-policy object.
-
-    The predicate is a pure function of the policy's and the context's contents, the row's
-    tenant, sensitivity and status, and the policy ceiling (verified against
-    ``access_policy.may_read_item``), and ``AccessDecision`` is frozen - so one result object
-    is shared. A stored policy is never mutated in place: a row that needs a different policy
-    is assigned a new dict (``validate_access_policy`` / ``merge_access_policies`` both build
-    one), so the policy object identifies its contents. A policy whose verdict moves with the
-    wall clock (``expires_at``), or a context that cannot be keyed exactly, is never cached.
-    """
-    key: tuple[Any, ...] | None = None
-    if not _policy_expires(access_policy):
-        if context_key is None:
-            context_key = _access_context_key(context)
-        if context_key is not None:
-            key = (
-                id(access_policy), item_tenant_id, int(sensitivity), status, erased,
-                context_key, int(policy_max_sensitivity),
-            )
-            entry = _READ_DECISIONS.get(key)
-            if entry is not None and entry[0] is access_policy:
-                return entry[1]
-    decision = may_read_item(
-        item_tenant_id=item_tenant_id,
-        sensitivity=sensitivity,
-        access_policy=access_policy,
-        context=context,
-        policy_max_sensitivity=policy_max_sensitivity,
-        status=status,
-        erased=erased,
-    )
-    if key is not None:
-        _READ_DECISIONS[key] = (access_policy, decision)
-        while len(_READ_DECISIONS) > _READ_DECISIONS_SIZE:
-            del _READ_DECISIONS[next(iter(_READ_DECISIONS))]
-    return decision
 
 
 @lru_cache(maxsize=1 << 18)
@@ -4446,14 +4390,13 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             )
             if verdict is None:
                 continue
-            relation_decision = _read_decision(
+            relation_decision = may_read_item(
                 item_tenant_id=rel.tenant_id,
                 sensitivity=int(verdict[1]),
                 access_policy=rel.access_policy,
                 context=graph_filter,
                 policy_max_sensitivity=self.policy.max_sensitivity,
                 status="active",
-                context_key=security_context_key,
             )
             if not relation_decision.allowed:
                 continue
@@ -5136,7 +5079,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             or is_retired_summary_metadata(ev.metadata)
         ):
             return facts
-        decision = _read_decision(
+        decision = may_read_item(
             item_tenant_id=ev.tenant_id,
             sensitivity=int(ev.sensitivity),
             access_policy=ev.access_policy,
@@ -6368,7 +6311,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 continue
             if ev.trust_tier > max_trust or ev.sensitivity > max_sensitivity:
                 continue
-            decision = _read_decision(
+            decision = may_read_item(
                 item_tenant_id=ev.tenant_id,
                 sensitivity=int(ev.sensitivity),
                 access_policy=ev.access_policy,
@@ -6436,7 +6379,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 continue
             if assertion.trust_tier > max_trust or assertion.sensitivity > max_sensitivity:
                 continue
-            decision = _read_decision(
+            decision = may_read_item(
                 item_tenant_id=assertion.tenant_id,
                 sensitivity=int(assertion.sensitivity),
                 access_policy=assertion.access_policy,
@@ -6484,7 +6427,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         for pref in self.preferences.values() if include_preferences else ():
             if pref.tenant_id != tenant_id or pref.status != "active":
                 continue
-            decision = _read_decision(
+            decision = may_read_item(
                 item_tenant_id=pref.tenant_id,
                 sensitivity=0,
                 access_policy=pref.access_policy,
@@ -6557,7 +6500,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         if hit.kind == "evidence":
             ev = self._evidence_row(hit.tenant_id, hit.branch, hit.id)
             if ev and ev.embedding:
-                decision = _read_decision(
+                decision = may_read_item(
                     item_tenant_id=ev.tenant_id,
                     sensitivity=int(ev.sensitivity),
                     access_policy=ev.access_policy,
