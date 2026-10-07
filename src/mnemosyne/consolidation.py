@@ -277,6 +277,24 @@ class ConsolidationJob:
         return asdict(self)
 
 
+def _signature_bucket(signature: Any) -> tuple[str, ...] | None:
+    """A bucket key for a procedure signature: its field names, sorted.
+
+    Only the NAMES, never the values. Two equal dicts necessarily have equal key sets, so
+    they always land in the same bucket - which a key built from values could not promise
+    (``{"t": 1}`` and ``{"t": 1.0}`` are equal dicts whose canonical JSON differs). The match
+    inside a bucket is then real dict equality, so this finds exactly what a scan over the
+    whole store found: the first procedure in store order whose signature compares equal.
+    Returns None for a signature that is not a mapping of strings, which keeps the scan.
+    """
+    if not isinstance(signature, Mapping):
+        return None
+    names = list(signature)
+    if not all(type(name) is str for name in names):
+        return None
+    return tuple(sorted(names))
+
+
 PROMOTION_GATE_BATCH_SIZE_KEY = "promotion_gate_batch_size"
 _PROMOTION_GATE_BATCH_SIZE_MAX = 1_000_000
 
@@ -1765,25 +1783,30 @@ class ConsolidationWorker:
         # canonical JSON (equal canonical JSON means equal dicts for JSON-shaped values); a
         # signature that will not serialise keeps the scan. Built once per pass and kept up to
         # date below - scanning per row made a batch of N candidates cost O(N^2).
-        procedure_index: dict[tuple[str, str], Procedure] = {}
+        # The canonical JSON of a signature is only a BUCKET key, never the match: JSON text
+        # does not preserve Python dict equality ({"t": 1} and {"t": 1.0} are equal dicts but
+        # different text). Each bucket keeps its procedures in store order and the match is the
+        # first one that compares equal, exactly what the scan found.
+        procedure_index: dict[tuple[str, tuple[str, ...]], list[Procedure]] = {}
         indexed = True
         for item in self.learning.procedures.values():
-            try:
-                item_key = json.dumps(item.signature, sort_keys=True)
-            except (TypeError, ValueError):
+            item_key = _signature_bucket(item.signature)
+            if item_key is None:
                 indexed = False
                 break
-            procedure_index.setdefault((item.tenant_id, item_key), item)
+            procedure_index.setdefault((item.tenant_id, item_key), []).append(item)
         for row in procedure_rows:
             signature = dict(row["signature"])
-            signature_key: str | None = None
-            if indexed:
-                try:
-                    signature_key = json.dumps(signature, sort_keys=True)
-                except (TypeError, ValueError):
-                    signature_key = None
+            signature_key: tuple[str, ...] | None = _signature_bucket(signature) if indexed else None
             if signature_key is not None:
-                existing = procedure_index.get((tenant_id, signature_key))
+                existing = next(
+                    (
+                        item
+                        for item in procedure_index.get((tenant_id, signature_key), ())
+                        if item.signature == signature
+                    ),
+                    None,
+                )
             else:
                 existing = next(
                     (
@@ -1806,7 +1829,7 @@ class ConsolidationWorker:
             )
             self.learning.procedures[procedure.id] = procedure
             if signature_key is not None:
-                procedure_index.setdefault((tenant_id, signature_key), procedure)
+                procedure_index.setdefault((tenant_id, signature_key), []).append(procedure)
             procedure_ids.append(procedure.id)
             created += 1
         result = {
