@@ -29,6 +29,25 @@ _QUERY_SHARD_SIZE = 50
 _CONSOLIDATION_GATE_BATCH = 4096
 
 
+def _capture_batch_argv(input_jsonl: Path) -> tuple[str, ...]:
+    """The public capture-batch command for a whole benchmark corpus.
+
+    Built here rather than in MnemoCLI.capture_batch because the retained action-pressure and
+    action-recovery evidence pins the SHA-256 of eval/harness/cli_driver.py and replays only
+    against that exact file.
+    """
+    return (
+        "capture-batch",
+        "--input-jsonl",
+        str(input_jsonl),
+        "--consolidate",
+        "--consolidation-rejections",
+        "report",
+        "--consolidation-gate-batch",
+        str(_CONSOLIDATION_GATE_BATCH),
+    )
+
+
 def run(
     value: dict[str, Any], cli: MnemoCLI
 ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
@@ -75,10 +94,13 @@ def run(
                 f"{first['title']}\n{first['content']}"
             )
             # A whole corpus is one batch: a candidate the promotion gate rejects (its trial
-            # branch is discarded) must not refuse every document; it is reported instead.
-            captured = capture_cli.capture_batch(
-                batch, consolidate=True, report_rejections=True, gate_batch=_CONSOLIDATION_GATE_BATCH
-            )
+            # branch is discarded) must not refuse every document; it is reported instead, and
+            # the gate runs once per group of candidates rather than once per candidate.
+            # Sent through MnemoCLI.run, not capture_batch: the retained action-pressure and
+            # action-recovery evidence pins the SHA-256 of eval/harness/cli_driver.py, so that
+            # file must stay byte-for-byte as recorded (eval/public/action_pressure.py
+            # recompute()).
+            captured = capture_cli.run(*_capture_batch_argv(batch)).json
         else:
             captured = capture_cli.capture_batch(batch, consolidate=True)
     results = captured.get("results", [])
@@ -271,12 +293,8 @@ def run_reader_qa(
             first = benchmark["corpus"][0]
             cli.install_consolidation_gate_case(f"{first['title']}\n{first['content']}")
             # As in run(): gate-rejected candidates are reported, not fatal, for a whole corpus.
-            captured = cli.capture_batch(
-                capture_path,
-                consolidate=True,
-                report_rejections=True,
-                gate_batch=_CONSOLIDATION_GATE_BATCH,
-            ).get("results")
+            # As in run(): rejections are reported, and the gate runs once per group.
+            captured = cli.run(*_capture_batch_argv(capture_path)).json.get("results")
         else:
             captured = cli.capture_batch(capture_path, consolidate=True).get("results")
         if not isinstance(captured, list) or len(captured) != len(benchmark["corpus"]):

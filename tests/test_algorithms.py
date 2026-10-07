@@ -141,10 +141,14 @@ def test_ppr_power_iteration_defaults_are_pinned_exactly():
     """
     from mnemosyne.algorithms import ppr_power_iteration
 
+    # ``closed`` selects an equal-by-construction evaluation order for an adjacency whose
+    # every neighbour is a key (see algorithms._ppr_power_iteration_closed); it defaults to
+    # False, so the pinned numeric constants below are what an unqualified call uses.
     assert ppr_power_iteration.__kwdefaults__ == {
         "iterations": 12,
         "damping": 0.85,
         "teleport": 0.15,
+        "closed": False,
     }
     assert ppr_power_iteration.__kwdefaults__["teleport"] != 1.0 - 0.85
 
