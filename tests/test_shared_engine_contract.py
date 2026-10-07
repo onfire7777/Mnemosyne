@@ -2347,7 +2347,12 @@ def test_shared_engine_contract_deep_search_abstains_on_summary_derived_graph_su
         tenant, raw_cid, {"quarantine_reason": "source-withheld-for-gist-contract"}
     )
 
-    result = engine.deep_search(raw_cid, tenant, filt={"min_trust_tier": 2})
+    # Summary text no longer carries its source CIDs, so search by the topic instead.
+    result = engine.deep_search(
+        "deep retrieval graph abstention original source inspection generated summaries",
+        tenant,
+        filt={"min_trust_tier": 2},
+    )
     relation_hits = [hit for hit in result.hits if hit.kind == "relation"]
 
     assert result.hits

@@ -49,15 +49,15 @@
       ],
       [
         "evidence",
-        "0ee9d316a95986bbef080abeb9a4b8c71996ba1572de71e9d372e54d07fc5965",
-        "0x1.960242b6ea7bdp-5",
-        "dense_hash+rerank"
-      ],
-      [
-        "evidence",
         "8806ebd91f0559ba3999176a896381179a4db78201c9ed7e6c203793bd7d41f3",
         "0x1.1146bc7a57dcbp-1",
         "dense_hash+lexical+rerank"
+      ],
+      [
+        "evidence",
+        "0ee9d316a95986bbef080abeb9a4b8c71996ba1572de71e9d372e54d07fc5965",
+        "0x1.960242b6ea7bdp-5",
+        "dense_hash+rerank"
       ]
     ],
     "mmr_lambda": 0.72,

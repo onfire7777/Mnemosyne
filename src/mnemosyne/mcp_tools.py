@@ -1328,6 +1328,7 @@ class MemoryTools:
         token_budget: int | None = None,
         lean: bool = False,
         session_identity: SessionIdentity | None = None,
+        query_mode: str | None = None,
     ) -> dict[str, Any]:
         filt = self._read_context(
             tenant_id,
@@ -1352,6 +1353,8 @@ class MemoryTools:
         )
         if token_budget is not None:
             filt["token_budget"] = token_budget
+        if query_mode is not None:
+            filt["query_mode"] = query_mode
         start = perf_counter()
         result = self.engine.retrieve(query=query, tenant_id=tenant_id, branch=branch, filt=filt)
         payload = result.to_dict()

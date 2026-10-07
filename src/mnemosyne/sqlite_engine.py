@@ -152,7 +152,7 @@ from mnemosyne.sqlite_schema import (
 )
 from mnemosyne.standing import standing_erasure_cascade_report
 from mnemosyne.text import cosine, lexical_score, tokenize
-from mnemosyne.workspace import self_generation_budget_report
+from mnemosyne.workspace import self_generation_budget_report, source_backed_summary
 
 LEXICAL_BACKEND = "sqlite-fts5"
 GRAPH_BACKEND = "sqlite-cached-ppr"
@@ -1324,6 +1324,11 @@ class SqliteEngine:
             item = _evidence_from_row(row)
             if LocalMemoryEngine._classify_evidence_reality(item) not in {"self_generated", "simulated"}:
                 continue
+            if source_backed_summary(
+                item, lambda cid: self.get_evidence(tenant_id, cid, branch),
+                LocalMemoryEngine._classify_evidence_reality,
+            ):
+                continue
             events += 1
             byte_count += len(item.content or "")
         return events, byte_count
@@ -1408,7 +1413,10 @@ class SqliteEngine:
                     )
                 return cid
             budget_report: dict[str, Any] | None = None
-            if reality_class in {"self_generated", "simulated"}:
+            if reality_class in {"self_generated", "simulated"} and not source_backed_summary(
+                ev, lambda cid: self.get_evidence(ev.tenant_id, cid, branch),
+                LocalMemoryEngine._classify_evidence_reality, branch=branch,
+            ):
                 current_events, current_bytes = self._self_generation_budget_usage(
                     conn, tenant_id=ev.tenant_id, branch=branch
                 )
@@ -2281,6 +2289,12 @@ class SqliteEngine:
             return LocalMemoryEngine._mark_retrieved_text_as_data(hits)
         oracle = self._scan_oracle(filt)
         candidates = oracle._candidate_hits(filt)
+        if filt.get("query_mode") == "passages":
+            from mnemosyne.passages import rank_passages
+
+            return LocalMemoryEngine._mark_retrieved_text_as_data(
+                rank_passages(self, query, candidates, k)
+            )
         allowed_evidence_cids: set[str] | None = None
         tokens = tokenize(query)
         if tenant_id and tokens and fts_safe_query(tokens):
@@ -3910,6 +3924,7 @@ class SqliteEngine:
         spec §4.2 ideal is erase-across-all-branches). This port MATCHES the shipped
         oracle rather than diverging; the spec>shipped gap is recorded in the Task-9
         report."""
+        self._passage_bm25_index = None
         mode = ErasureMode(erasure_mode)
         from mnemosyne.postgres_engine import (
             _bytes_to_cid,

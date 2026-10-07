@@ -784,20 +784,12 @@ class ConsolidationWorker:
                     )
                 )
                 gate_jobs: list[ConsolidationJob] = []
-                work_part = [str(cid) for cid in work_cids if cid]
-                # Candidates of one document share one merged source list: built once, and held
-                # as one shared read-only list by every fact, relation and entity it reaches.
-                merged_by_own: dict[tuple[str, ...], list[str]] = {}
                 for candidate in candidates:
-                    # Union payload sources with any per-candidate CIDs so batch
-                    # captures (multiple independent evidence rows) count as
-                    # external corroboration under §7 #17 — not only the leaf CID.
-                    own = tuple(str(cid) for cid in (candidate.get("source_evidence_cids") or []) if cid)
-                    merged_cids = merged_by_own.get(own)
-                    if merged_cids is None:
-                        # Preserve order while de-duplicating.
-                        merged_cids = intern_cids(list(dict.fromkeys([*own, *work_part])))
-                        merged_by_own[own] = merged_cids
+                    # Batch membership is not support for a claim. The external
+                    # corroboration gate evaluates this candidate's actual sources.
+                    source_cids = intern_cids(list(dict.fromkeys(
+                        str(cid) for cid in candidate.get("source_evidence_cids", []) if cid
+                    )))
                     job = ConsolidationJob(
                         tenant_id=tenant_id,
                         signature=str(candidate["signature"]),
@@ -805,7 +797,7 @@ class ConsolidationWorker:
                         candidate_subject=str(candidate["candidate_subject"]),
                         candidate_predicate=str(candidate["candidate_predicate"]),
                         candidate_object=str(candidate["candidate_object"]),
-                        source_evidence_cids=merged_cids,
+                        source_evidence_cids=source_cids,
                         confidence=float(candidate.get("confidence", payload.get("confidence", 0.72))),
                         trust_tier=int(candidate.get("trust_tier", payload.get("trust_tier", TrustTier.NORMAL))),
                         sensitivity=int(candidate.get("sensitivity", payload.get("sensitivity", 0))),
@@ -2078,13 +2070,13 @@ class ConsolidationWorker:
                 sort_keys=True,
             ).encode("utf-8")
         ).hexdigest()
-        content_lines = ["Source evidence CIDs: " + ", ".join(source_cids)]
-        if source_summary_cids:
-            content_lines.append("Source summary CIDs: " + ", ".join(source_summary_cids))
-        content = "\n".join(content_lines) + "\n\n" + summary_text
+        # Provenance lives in metadata, not the searchable text - but the evidence CID hashes
+        # content only, so two summaries with the same words over different sources or levels
+        # would collapse into one row. One fingerprint token keeps each hierarchy node distinct.
+        source_fingerprint = _summary_source_fingerprint(source_cids, level=raptor_level)
+        content = f"{summary_text}\n\n[gist {source_fingerprint}]"
         first = evidence[0]
         generated_at = datetime.now(UTC).isoformat()
-        source_fingerprint = _summary_source_fingerprint(source_cids, level=raptor_level)
         summary_metadata = {
             "kind": "abstractive_gist",
             "strategy": summary.get("strategy"),
@@ -2586,9 +2578,8 @@ class ConsolidationWorker:
         """CIDs used for external corroboration counting.
 
         Starts from ``job.source_evidence_cids`` only. Optionally unions other
-        tenant/main evidence whose content shares ≥2 significant tokens with the
-        candidate SPO/query/signature — never a bare tenant-wide dump (Review
-        major: unrelated grounded evidence must not free-ride).
+        tenant/main evidence containing all subject/object tokens. Two incidental
+        shared words (often just the entity name) are not corroboration.
         """
 
         cache = self._local_corroboration_index(job.tenant_id)
@@ -2599,17 +2590,7 @@ class ConsolidationWorker:
             for cid in dict.fromkeys(str(item) for item in (job.source_evidence_cids or []) if item)
             if not self._cid_is_derived_for_job(job, cid)
         ]
-        needle = self._content_tokens(
-            " ".join(
-                [
-                    str(job.signature or ""),
-                    str(job.query or ""),
-                    str(job.candidate_subject or ""),
-                    str(job.candidate_predicate or ""),
-                    str(job.candidate_object or ""),
-                ]
-            )
-        )
+        needle = self._content_tokens(f"{job.candidate_subject} {job.candidate_object}")
         if len(needle) < 2:
             return base
         found = list(base)
@@ -2625,7 +2606,7 @@ class ConsolidationWorker:
                 return
             if record is None and self._cid_is_derived_for_job(job, key):
                 return
-            if len(self._content_tokens(content) & needle) < 2:
+            if not needle <= self._content_tokens(content):
                 return
             seen.add(key)
             found.append(key)
@@ -2666,8 +2647,8 @@ class ConsolidationWorker:
         """``_corroboration_cids_for_job`` from the per-epoch index: the same list, in order.
 
         The scan visits the tenant's main rows in store order and appends a row's CID when it
-        shares at least two content tokens with the candidate and is not already listed. The
-        inverted index yields exactly the rows sharing two or more tokens; visiting them in
+        contains all candidate subject/object tokens and is not already listed. The
+        inverted index yields exactly those rows; visiting them in
         store order with the same ``seen`` test appends the same CIDs in the same order.
         """
         tenant_id = job.tenant_id
@@ -2697,20 +2678,10 @@ class ConsolidationWorker:
         elif sources is not None:
             memo.move_to_end(sources)
         base, base_members = entry[1], entry[2]
-        needle = self._content_tokens(
-            " ".join(
-                [
-                    str(job.signature or ""),
-                    str(job.query or ""),
-                    str(job.candidate_subject or ""),
-                    str(job.candidate_predicate or ""),
-                    str(job.candidate_object or ""),
-                ]
-            )
-        )
+        needle = self._content_tokens(f"{job.candidate_subject} {job.candidate_object}")
         if len(needle) < 2:
             return base
-        # The scan appends, in store order, each row sharing two tokens whose CID is not yet
+        # The scan appends, in store order, each row covering the claim terms whose CID is not yet
         # listed. Membership in the base list is the memoised set; only new CIDs are collected.
         extra: list[str] = []
         extra_seen: set[str] = set()
@@ -2719,7 +2690,7 @@ class ConsolidationWorker:
         for token in needle:
             counts.update(postings.get(token, ()))
         rows = cache["rows"]
-        for index in sorted(index for index, count in counts.items() if count >= 2):
+        for index in sorted(index for index, count in counts.items() if count == len(needle)):
             cid = rows[index][0]
             if not cid:
                 continue
@@ -3074,7 +3045,7 @@ def _extract_simple_fact(
             words = re.findall(r"[A-Za-z][A-Za-z'-]*", connector.lower())
             predicate = " ".join(words)
             if not predicate or all(word in {"and", "or", "but"} for word in words):
-                predicate = "related_to"
+                continue
             facts.add((left.group().strip(), predicate, right.group().strip()))
     return sorted(facts, key=lambda fact: tuple(part.casefold() for part in fact))
 
@@ -4254,6 +4225,17 @@ def _normalize_candidate(row: Any, evidence: Sequence[Evidence], payload: dict[s
     missing = [key for key, value in candidate.items() if not value]
     if missing:
         raise ValueError(f"candidate extractor candidate missing fields: {', '.join(missing)}")
+    available = {item.cid for item in evidence if item.cid}
+    sources = row.get("source_evidence_cids")
+    # A single input is unambiguous; a multi-document extractor must cite its
+    # sources explicitly instead of silently attributing the entire batch.
+    if sources is None and len(available) == 1:
+        sources = list(available)
+    if not isinstance(sources, list) or not sources or any(
+        not isinstance(cid, str) or cid not in available for cid in sources
+    ):
+        raise ValueError("candidate extractor requires source_evidence_cids from the supplied evidence")
+    candidate["source_evidence_cids"] = list(dict.fromkeys(sources))
     candidate["confidence"] = float(row.get("confidence", payload.get("confidence", 0.72)))
     candidate["trust_tier"] = int(row.get("trust_tier", payload.get("trust_tier", _max_evidence_trust(evidence))))
     candidate["sensitivity"] = int(row.get("sensitivity", payload.get("sensitivity", _max_evidence_sensitivity(evidence))))

@@ -1975,10 +1975,22 @@ def cmd_eval_query_batch(args: argparse.Namespace) -> None:
         tools.engine.policy = replace(tools.engine.policy, **overrides)
     results = []
     for row in rows:
-        search = tools.search(tenant_id=row["tenant"], query=row["query"])
+        search_kwargs = {}
+        if getattr(args, "retrieval_mode", None):
+            search_kwargs["query_mode"] = args.retrieval_mode
+        search = tools.search(tenant_id=row["tenant"], query=row["query"], **search_kwargs)
         explanation = search.get("explain") if isinstance(search, dict) else None
         if not isinstance(explanation, dict):
             raise ValueError("evaluation search result is missing embedded explanation")
+        if getattr(args, "compact", False):
+            search = {
+                "hits": [{key: hit[key] for key in ("id", "kind", "provenance", "metadata")
+                          if key in hit} for hit in search.get("hits", [])],
+                "confidence": search.get("confidence"),
+                "abstained": search.get("abstained"),
+            }
+            explanation = {key: explanation[key] for key in ("channels", "adapters", "query_mode")
+                           if key in explanation}
         results.append(
             {
                 "question_id": row["question_id"],
@@ -19398,6 +19410,10 @@ def build_parser() -> argparse.ArgumentParser:
                                   help="read-only evaluation token budget (1..262144)")
     eval_query_batch.add_argument("--retrieval-top-k", type=int,
                                   help="read-only evaluation result limit (1..100)")
+    eval_query_batch.add_argument("--retrieval-mode", choices=("passages",),
+                                  help="rank source passages by relevance without memory layout/recency")
+    eval_query_batch.add_argument("--compact", action="store_true",
+                                  help="omit passage text and repeated diagnostics from evaluation output")
     eval_query_batch.set_defaults(func=cmd_eval_query_batch)
 
     answer = sub.add_parser("answer")

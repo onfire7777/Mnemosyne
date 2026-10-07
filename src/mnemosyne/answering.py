@@ -695,7 +695,19 @@ class GroundedAnswerOrchestrator:
             record_access=False,
         )
         if result.abstained:
-            raise LookupError("retrieval abstained")
+            # Incomplete first-hop coverage is exactly why a decomposer needs
+            # another hop. Keep hard grounding gates, but defer answerability
+            # until source-bound expansion and final claim validation finish.
+            explain = result.explain
+            if (
+                not result.hits
+                or explain.get("gist_support", {}).get("applied")
+                or explain.get("standing", {}).get("abstention_gate", {}).get("active")
+                or explain.get("answer_grounding_floor", {}).get("active")
+                or explain.get("reality_monitoring", {}).get("ungrounded_only")
+                or not explain.get("confidence", {}).get("query_support")
+            ):
+                raise LookupError("retrieval abstained")
         referenced: set[str] = set()
         channels: set[str] = set()
         for hit in result.hits:

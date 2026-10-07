@@ -104,13 +104,29 @@ def test_prediction_scoring_is_standalone_and_deterministic() -> None:
         score_predictions(questions, {})
 
 
+def test_passage_adapter_runs_compact_public_cli_end_to_end(tmp_path):
+    from eval.harness.cli_driver import MnemoCLI
+
+    value = {"assets": {
+        "2wikimultihopqa_corpus.json": [{"title": "Mars", "text": "Mars is red."}],
+        "2wikimultihopqa.json": [{"_id": "q", "answer": "red",
+                                  "question": "What color is Mars?",
+                                  "supporting_facts": [["Mars", 0]]}],
+    }}
+    _, traces, metrics = run(value, MnemoCLI(store=str(tmp_path / "store.json")))
+    assert metrics["metrics"]["recall_at_5"] == 1.0
+    assert traces[0]["ranked_retrieved_hits"] == ["2wiki:p00000"]
+    assert traces[0]["stored_corpus"]["count"] == 1
+    assert "stored_records" not in traces[0]
+
+
 def test_retrieval_bundle_contract_has_no_qa_columns() -> None:
     source = Path(__file__).parents[1] / "eval/public/adapters/hipporag_multihop.py"
     text = source.read_text(encoding="utf-8")
     run_body = text.split("def run(", 1)[1].split("def normalize", 1)[0]
     assert "qa-em-f1" not in run_body
     assert "score_predictions" not in run_body
-    assert hipporag_multihop._QUERY_SHARD_SIZE == 50
+    assert hipporag_multihop._QUERY_SHARD_SIZE == 10_000
 
 
 def test_adapter_uses_public_batch_search_and_explain() -> None:
@@ -161,6 +177,9 @@ def test_adapter_uses_public_batch_search_and_explain() -> None:
     assert benchmark["dataset"] == "hotpot"
     assert traces[0]["graph_evidence"]["observed"] is True
     assert metrics["metrics"] == {"recall_at_2": 1.0, "recall_at_5": 1.0}
+    assert "stored_records" not in traces[0]
+    assert traces[0]["stored_corpus"]["count"] == 1
+    assert len(traces[0]["stored_corpus"]["doc_ids_sha256"]) == 64
 
 
 def test_reader_qa_is_additive_gold_isolated_and_graph_provenance_linked() -> None:
