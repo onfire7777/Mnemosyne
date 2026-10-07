@@ -29,7 +29,12 @@ from typing import Iterable, Mapping, Sequence
 def resolve_retrieved_doc_ids(
     hits: Iterable[Mapping[str, object]], cid_to_doc: Mapping[str, str]
 ) -> list[str]:
-    """Map direct and graph-projection hits back to corpus document ids."""
+    """Map ranked hits without turning a provenance list into ranked passages.
+
+    Direct passage IDs take precedence. A projection can identify a passage
+    only when all its mapped provenance identifies that one document.
+    Multi-source facts do not establish an ordering of their source passages.
+    """
 
     retrieved: list[str] = []
     for hit in hits:
@@ -40,14 +45,19 @@ def resolve_retrieved_doc_ids(
             else []
         )
         provenance = hit.get("provenance", [])
+        direct = cid_to_doc.get(hit.get("id")) if isinstance(hit.get("id"), str) else None
+        if direct is not None:
+            if direct not in retrieved:
+                retrieved.append(direct)
+            continue
         candidates = [
-            hit.get("id"),
             *(provenance if isinstance(provenance, list | tuple) else []),
             *(source_cids if isinstance(source_cids, list | tuple) else []),
         ]
-        for cid in candidates:
-            doc_id = cid_to_doc.get(cid) if isinstance(cid, str) else None
-            if doc_id is not None and doc_id not in retrieved:
+        mapped = {cid_to_doc[cid] for cid in candidates if isinstance(cid, str) and cid in cid_to_doc}
+        if len(mapped) == 1:
+            doc_id = next(iter(mapped))
+            if doc_id not in retrieved:
                 retrieved.append(doc_id)
     return retrieved
 

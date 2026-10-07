@@ -1035,6 +1035,7 @@ def run_retrieval_pipeline(
     effective_filter = strip_workspace_broadcast_filter(filt)
     effective_filter.update({"tenant_id": tenant_id, "branch": branch, "_retrieval_deep": deep})
     query_mode = require_supported_query_mode(query_mode_from_filter(effective_filter))
+    passage_mode = query_mode == "passages"
     retrieval_instant = (
         parse_dt(effective_filter.get("as_of"))
         or parse_dt(effective_filter.get("evaluated_at"))
@@ -1044,7 +1045,7 @@ def run_retrieval_pipeline(
     prospective_requested = isinstance(effective_filter.get("prospective_owner"), dict)
     working_requested = _working_route_requested(effective_filter)
     k = policy.deep_top_k if deep else policy.top_k
-    graph_k = max(4, k // 2)
+    graph_k = max(k, policy.rerank_width)
     token_budget = requested_token_budget(effective_filter, policy)
     cache_key = (
         None
@@ -1102,7 +1103,21 @@ def run_retrieval_pipeline(
             if stored:
                 _result_cache_put(cache_key, result)
         return result
-    if parallel_channels_enabled():
+    if passage_mode:
+        from mnemosyne.passages import is_passage
+
+        # Hashing is a lexical fallback, not an independent semantic channel.
+        # Give passage search a useful candidate pool before the final cutoff.
+        width = max(100, policy.rerank_width, k * 4)
+        lexical = ops.lexical_search(query, width, effective_filter)
+        dense = (
+            ops.vector_search(query, width, effective_filter)
+            if ops.adapters.embedding.name != "local-hashing" else []
+        )
+        lexical = [hit for hit in lexical if is_passage(hit)]
+        dense = [hit for hit in dense if is_passage(hit)]
+        graph, prospective, working, working_explain = [], [], [], {}
+    elif parallel_channels_enabled():
         with ThreadPoolExecutor(max_workers=5) as pool:
             dense_future = pool.submit(ops.vector_search, query, policy.rerank_width, effective_filter)
             lexical_future = pool.submit(ops.lexical_search, query, policy.rerank_width, effective_filter)
@@ -1173,15 +1188,27 @@ def run_retrieval_pipeline(
             else ([], {})
         )
     ranked_routes = [dense, lexical, graph, prospective, working]
-    fused = ops._rrf(ranked_routes, k=max(k * 2, policy.rerank_width))
+    fused = (
+        ops._rrf(ranked_routes, k=max(k * 2, policy.rerank_width, 100 if passage_mode else 0))
+        if not passage_mode or dense else lexical
+    )
     collapsed_turns = 0
     if working:
         fused, collapsed_turns = _collapse_session_duplicates(fused)
-    reranked = ops.adapters.reranker.rerank(query, fused, k=max(k * 2, k))
+    reranked = (
+        fused if passage_mode and ops.adapters.reranker.name == "local-similarity"
+        else ops.adapters.reranker.rerank(query, fused, k=max(k * 2, k))
+    )
     reranked, schema_fast_path = schema_fast_path_rerank(query, reranked, policy)
-    diversified = ops._mmr(query, reranked, k=max(k, 1))
-    activated = ops._apply_standing_scores(apply_activation_scores(diversified, policy))
-    ordered = ops._u_curve_order(activated)
+    diversified = reranked[:k] if passage_mode else ops._mmr(query, reranked, k=max(k, 1))
+    activated = (
+        diversified if passage_mode else ops._apply_standing_scores(
+            apply_activation_scores(diversified, policy, now=retrieval_instant)
+        )
+    )
+    # Retrieval exposes a relevance ranking. U-curve layout is a presentation
+    # decision for a reader prompt and must not move rank 2 to the last slot.
+    ordered = activated
     ordered, schema_fast_path_final = schema_fast_path_rerank(query, ordered, policy)
     schema_fast_path = ops._merge_schema_fast_path_reports(schema_fast_path, schema_fast_path_final)
     ordered, workspace_retrieval_advisory = apply_workspace_retrieval_advisory(
@@ -1320,6 +1347,10 @@ def run_retrieval_pipeline(
         ]
     if working_requested:
         explain["working_memory"] = working_explain
+    if passage_mode:
+        explain["query_mode"] = "passages"
+        explain["activation"] = {"applied": False, "reason": "passage_relevance_order"}
+        explain["candidate_width"] = width
     result = RetrievalResult(
         query=query,
         hits=budgeted,

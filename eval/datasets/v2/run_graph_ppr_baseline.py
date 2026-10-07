@@ -57,7 +57,10 @@ def _run_retrieval(
     if consolidate:
         capture_cli.install_consolidation_gate_case(runtime_rows[0]["content"])
     captured = (
-        capture_cli.capture_batch(capture_path, consolidate=True)
+        capture_cli.run(
+            "capture-batch", "--input-jsonl", str(capture_path),
+            "--consolidate", "--consolidation-rejections", "report",
+        ).json
         if consolidate
         else capture_cli.capture_batch(capture_path)
     )

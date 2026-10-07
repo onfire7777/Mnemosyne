@@ -7,7 +7,6 @@ import json
 import math
 import tempfile
 from collections.abc import Mapping
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -22,7 +21,7 @@ class HippoRAGSchemaError(ValueError):
     """Pinned HippoRAG assets cannot be normalized without ambiguity."""
 
 
-_QUERY_SHARD_SIZE = 50
+_QUERY_SHARD_SIZE = 10_000
 # Fact candidates per promotion-gate run when a whole corpus is consolidated in one batch
 # (capture-batch --consolidation-gate-batch). The gate checks every group on one canary branch
 # and splits a failing group down to single candidates.
@@ -115,6 +114,12 @@ def run(
             raise HippoRAGSchemaError("capture batch returned a duplicate CID")
         cid_to_doc[cid] = document["doc_id"]
     stored = [document["doc_id"] for document in corpus]
+    stored_corpus = {
+        "count": len(stored),
+        "doc_ids_sha256": hashlib.sha256(
+            json.dumps(stored, separators=(",", ":")).encode("utf-8")
+        ).hexdigest(),
+    }
 
     def make_trace(
         question: dict[str, Any],
@@ -129,7 +134,9 @@ def run(
             "question_id": question["question_id"],
             "ranked_retrieved_hits": ranked,
             "scoring_family": "deterministic-retrieval",
-            "stored_records": stored,
+            # benchmark.json already carries the corpus. Repeating every ID
+            # for every question made traces and scoring memory O(Q * corpus).
+            "stored_corpus": stored_corpus,
         }
 
     if isinstance(eval_cli, MnemoCLI):
@@ -159,8 +166,14 @@ def run(
                 )
                 batches.append(path)
                 expected_counts.append(len(chunk))
-            with ThreadPoolExecutor(max_workers=4) as executor:
-                payloads = list(executor.map(eval_cli.eval_query_batch, batches))
+            # One long-lived CLI process per bounded batch, instead of loading
+            # the complete store twenty times for a 1,000-question suite.
+            payloads = [eval_cli.run(
+                "eval-query-batch", "--input-jsonl", str(path),
+                "--retrieval-mode", "passages", "--retrieval-top-k", "24",
+                "--retrieval-token-budget", "16384",
+                "--compact",
+            ).json for path in batches]
         evaluated: list[dict[str, Any]] = []
         for payload, expected_count in zip(payloads, expected_counts, strict=True):
             if not isinstance(payload, Mapping):

@@ -110,7 +110,7 @@ from mnemosyne.standing import (
     standing_observability_record,
 )
 from mnemosyne.text import SparseCosine, cosine, lexical_scorer, tokenize
-from mnemosyne.workspace import self_generation_budget_report
+from mnemosyne.workspace import self_generation_budget_report, source_backed_summary
 
 
 def _normalize_json_value(value: Any, *, path: str) -> Any:
@@ -3235,6 +3235,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         # Every mutator funnels through here; bump BEFORE the store_path early
         # return so in-memory engines invalidate the candidate memo too.
         self._store_version += 1
+        self._passage_bm25_index = None
         if self._persistence_aborted:
             raise RuntimeError("deferred persistence transaction was aborted")
         if self._read_only:
@@ -3446,7 +3447,10 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 self._persist()
                 return cid
             budget_report: dict[str, Any] | None = None
-            if reality_class in {"self_generated", "simulated"}:
+            if reality_class in {"self_generated", "simulated"} and not source_backed_summary(
+                ev, lambda cid: self.get_evidence(ev.tenant_id, cid, branch),
+                self._classify_evidence_reality, branch=branch,
+            ):
                 current_events, current_bytes = self._self_generation_budget_usage(
                     tenant_id=ev.tenant_id,
                     branch=branch,
@@ -3536,6 +3540,11 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             if key_tenant != tenant_id or key_branch != branch or item.erased:
                 continue
             if self._classify_evidence_reality(item) not in {"self_generated", "simulated"}:
+                continue
+            if source_backed_summary(
+                item, lambda cid: self.get_evidence(tenant_id, cid, branch),
+                self._classify_evidence_reality,
+            ):
                 continue
             events += 1
             byte_count += len(item.content or "")
@@ -4277,6 +4286,14 @@ class LocalMemoryEngine(CanaryOverlayMixin):
     def lexical_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
         tenant_id = str(filt.get("tenant_id") or "")
         branch = str(filt.get("branch") or "main")
+        if filt.get("query_mode") == "passages" and self.adapters.lexical_retriever is None:
+            from mnemosyne.passages import rank_passages
+
+            templates = self._candidate_templates(filt)
+            candidates = self._candidate_hits(filt) if hasattr(templates, "finish") else templates
+            return self._mark_retrieved_text_as_data(
+                [_clone_candidate_hit(hit) for hit in rank_passages(self, query, candidates, k)]
+            )
         if self.adapters.lexical_retriever is not None:
             hits = self.adapters.lexical_retriever.search(
                 query,
@@ -6388,6 +6405,10 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     metadata=metadata,
                 )
             )
+        if filt.get("query_mode") == "passages":
+            from mnemosyne.passages import is_passage
+
+            return [hit for hit in hits if is_passage(hit)]
         for assertion in (
             self.assertions.in_branch(tenant_id, branch).values() if assertion_items is None else assertion_items
         ):

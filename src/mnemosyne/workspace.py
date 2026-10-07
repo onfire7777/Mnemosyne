@@ -884,6 +884,33 @@ def _cycle_consistency(
     }
 
 
+def source_backed_summary(
+    evidence: Evidence, lookup: Any, classify: Any, *, branch: str | None = None,
+) -> bool:
+    """Separate sourced consolidation from autonomous self-generation budgets.
+
+    This only exempts a write from the autonomous-event cap. The summary
+    remains self-generated for authority, corroboration, and answer grounding.
+    Missing, erased, cross-scope, or derived sources never grant the exemption.
+    """
+    if evidence.source_type != "consolidation-summary":
+        return False
+    sources = evidence.metadata.get("source_evidence_cids")
+    if not isinstance(sources, list) or not sources:
+        return False
+    for cid in sources:
+        if not isinstance(cid, str):
+            return False
+        source = lookup(cid)
+        if (
+            source is None or source.erased
+            or source.tenant_id != evidence.tenant_id or source.branch != (branch or evidence.branch)
+            or classify(source) != "grounded"
+        ):
+            return False
+    return True
+
+
 def self_generation_budget_report(
     *,
     current_events: int,

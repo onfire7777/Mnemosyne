@@ -109,7 +109,7 @@ def test_groups_merge_only_after_a_passing_run_and_rejections_are_per_candidate(
             for result in job["result"]["candidate_results"]:
                 evaluated.append(result["candidate_id"])
             for item in job["result"]["pass_results"]:
-                if item["name"] == "promotion_gate":
+                if item["name"] == "promotion_gate" and item["status"] == "complete":
                     assert item["details"]["gate_mode"] == "batch" and item["details"]["batch_size"] == 4
                     group_runs += item["details"]["group_evaluations"]
     poisoned = {candidate for candidate in evaluated if _poisoned(candidate)}

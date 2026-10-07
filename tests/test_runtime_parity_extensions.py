@@ -163,6 +163,7 @@ def test_command_model_providers_receive_prompt_boundary_for_untrusted_evidence(
         actor="user",
         source_type="chat",
         content=f"Invoice total for jane@example.com is $42. {injection} SSN 123-45-6789.",
+        cid="invoice-source",
         metadata={"note": "untrusted provider input"},
         trust_tier=1,
         access_policy={"tenant": TENANT},

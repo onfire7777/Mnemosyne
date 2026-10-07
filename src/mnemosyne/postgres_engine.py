@@ -106,7 +106,7 @@ from mnemosyne.standing import (
     standing_observability_record,
 )
 from mnemosyne.text import cosine, hashing_embedding, lexical_score, tokenize
-from mnemosyne.workspace import self_generation_budget_report
+from mnemosyne.workspace import self_generation_budget_report, source_backed_summary
 
 
 class PostgresUnavailableError(RuntimeError):
@@ -1842,7 +1842,10 @@ class PostgresEngine:
                     cid_bytes=cid_bytes,
                 )
                 budget_report: dict[str, Any] | None = None
-                if reality_class in {"self_generated", "simulated"}:
+                if reality_class in {"self_generated", "simulated"} and not source_backed_summary(
+                    ev, lambda source_cid: self.get_evidence(ev.tenant_id, source_cid, branch),
+                    self._classify_budget_evidence, branch=branch,
+                ):
                     current_events, current_bytes = self._self_generation_budget_usage(
                         cur,
                         tenant_id=db_tenant_id,
@@ -2010,33 +2013,35 @@ class PostgresEngine:
                 return row_cid
         return None
 
+    @classmethod
+    def _classify_budget_evidence(cls, item: Evidence) -> str:
+        return cls._classify_evidence_row_reality(
+            {"actor": item.actor, "source_type": item.source_type, "trust_tier": item.trust_tier},
+            item.metadata,
+        )
+
     def _self_generation_budget_usage(self, cur: Any, *, tenant_id: UUID, branch: str) -> tuple[int, int]:
         cur.execute(
             """
-            SELECT COUNT(*)::int AS event_count,
-                   COALESCE(SUM(LENGTH(COALESCE(content, ''))), 0)::int AS byte_count
+            SELECT cid, actor, source_type, content, metadata, trust_tier
             FROM evidence
             WHERE tenant_id = %s
               AND branch = %s
               AND erased = false
-              AND (
-                COALESCE(metadata->>'reality_class', '') IN ('self_generated', 'simulated')
-                OR lower(actor::text) = 'assistant'
-                OR lower(source_type) LIKE '%%summary%%'
-                OR lower(source_type) LIKE '%%trace%%'
-                OR lower(source_type) LIKE '%%analysis%%'
-                OR lower(source_type) LIKE '%%consolidation%%'
-                OR lower(source_type) LIKE '%%simulation%%'
-                OR lower(source_type) LIKE '%%synthetic%%'
-                OR lower(source_type) LIKE '%%hypothesis%%'
-              )
             """,
             (tenant_id, branch),
         )
-        row = cur.fetchone()
-        if not row:
-            return 0, 0
-        return int(row[0] or 0), int(row[1] or 0)
+        records = {
+            _bytes_to_cid(row[0]): Evidence(
+                tenant_id=str(tenant_id), user_id="", actor=str(row[1]), source_type=row[2],
+                content=row[3] or "", metadata=dict(row[4] or {}), trust_tier=row[5],
+                branch=branch, cid=_bytes_to_cid(row[0]),
+            ) for row in cur.fetchall()
+        }
+        budgeted = [item for item in records.values()
+                    if self._classify_budget_evidence(item) in {"self_generated", "simulated"}
+                    and not source_backed_summary(item, records.get, self._classify_budget_evidence)]
+        return len(budgeted), sum(len(item.content) for item in budgeted)
 
     def get_evidence(self, tenant_id: str, cid: str, branch: str = "main") -> Evidence | None:
         db_tenant_id = _stable_uuid("tenant", tenant_id)
@@ -2998,6 +3003,20 @@ class PostgresEngine:
     def lexical_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
         tenant_id = str(filt["tenant_id"])
         branch = str(filt.get("branch", "main"))
+        if filt.get("query_mode") == "passages" and self.adapters.lexical_retriever is None:
+            from mnemosyne.passages import rank_passages
+
+            snapshot = self.export_tenant_filtered(tenant_id, filt)
+            candidates = [Hit(
+                id=row["cid"], kind="evidence", tenant_id=tenant_id, branch=branch,
+                text=row.get("content") or "", score=0.0, channel="candidate",
+                provenance=[row["cid"]], trust_tier=int(row.get("trust_tier", 0)),
+                sensitivity=int(row.get("sensitivity", 0)),
+                metadata={**(row.get("metadata") or {}),
+                          "source_type": row.get("source_type"), "actor": row.get("actor")},
+            ) for row in snapshot.get("evidence", [])
+                if row.get("branch", "main") == branch and not row.get("erased")]
+            return self._mark_retrieved_text_as_data(rank_passages(self, query, candidates, k))
         if self.adapters.lexical_retriever is not None:
             hits = self.adapters.lexical_retriever.search(
                 query,
@@ -4856,6 +4875,7 @@ class PostgresEngine:
         requested_by: str = "user",
         erasure_mode: ErasureMode | str = ErasureMode.TOMBSTONE_RECOMPUTE,
     ) -> dict[str, Any]:
+        self._passage_bm25_index = None
         mode = ErasureMode(erasure_mode)
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         cid_bytes = _cid_to_bytes(cid)

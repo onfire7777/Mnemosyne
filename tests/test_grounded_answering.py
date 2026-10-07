@@ -63,6 +63,28 @@ class FailingDecomposer:
         raise RuntimeError("provider unavailable")
 
 
+@pytest.mark.parametrize("hard_gate", [False, True])
+def test_incomplete_query_coverage_can_expand_but_hard_grounding_gate_cannot(monkeypatch, hard_gate):
+    engine = _engine()
+    original = engine.retrieve
+
+    def low_coverage(*args, **kwargs):
+        result = original(*args, **kwargs)
+        result.abstained = True
+        result.explain["confidence"]["query_support"]["score"] = 0.1
+        result.explain["answer_grounding_floor"]["active"] = hard_gate
+        return result
+
+    monkeypatch.setattr(engine, "retrieve", low_coverage)
+    orchestrator = GroundedAnswerOrchestrator(engine, RecordingDecomposer({"queries": []}))
+    if hard_gate:
+        with pytest.raises(LookupError, match="retrieval abstained"):
+            orchestrator._retrieve("Ada owns project Zephyr", _context())
+    else:
+        referenced, _ = orchestrator._retrieve("Ada owns project Zephyr", _context())
+        assert referenced
+
+
 def _context() -> AnswerReadContext:
     return AnswerReadContext(
         tenant_id="tenant-a",
