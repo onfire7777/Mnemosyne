@@ -10,8 +10,11 @@ import secrets
 import threading
 import weakref
 from collections import OrderedDict, defaultdict
+from collections.abc import Mapping
+from functools import lru_cache
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from dataclasses import fields as dataclass_fields
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, Protocol, Sequence, runtime_checkable
@@ -40,6 +43,17 @@ from mnemosyne.calibration import (
     fuse_calibrated_confidence_from_hit,
 )
 from mnemosyne.consciousness import RealityMonitor
+from mnemosyne.branch_index import BranchIndexedStore, indexed
+from mnemosyne.canary_overlay import CanaryOverlayMixin
+from mnemosyne.cid_lists import (
+    CidList,
+    SharedMap,
+    bump_evidence_epoch,
+    evidence_caching_safe,
+    evidence_epoch,
+    intern_cids,
+    shared_map,
+)
 from mnemosyne.ids import content_cid, evidence_cid, evidence_unscoped_cid, new_id
 from mnemosyne.journal import CIDJournal, journal_filename
 from mnemosyne.models import (
@@ -52,6 +66,7 @@ from mnemosyne.models import (
     Preference,
     Relation,
     RetrievalResult,
+    dt_to_json,
     iso_utc,
     utc_now,
 )
@@ -94,7 +109,7 @@ from mnemosyne.standing import (
     standing_erasure_cascade_report,
     standing_observability_record,
 )
-from mnemosyne.text import cosine, lexical_score, tokenize
+from mnemosyne.text import SparseCosine, cosine, lexical_scorer, tokenize
 from mnemosyne.workspace import self_generation_budget_report
 
 
@@ -1474,6 +1489,432 @@ def _int_or_default(value: Any, *, default: int) -> int:
         return default
 
 
+# Full relation-hit security (large) is needed only for relations that become hits.
+_RELATION_SECURITY_MEMO_SIZE = 512
+# Verdicts are two ints: one per distinct shared source list, bounded generously.
+_RELATION_VERDICT_MEMO_SIZE = 1 << 17
+_SECURITY_ROW_MEMO_SIZE = 1 << 18
+
+
+class _RowSecurity:
+    """What relation security reads from one evidence row (see _security_row_facts)."""
+
+    __slots__ = (
+        "readable", "expires", "trust_tier", "sensitivity", "reality_class", "security_entry",
+        "root", "weight", "counts_self_generated", "rejected", "duplicate", "accepted",
+    )
+
+    def __init__(self) -> None:
+        self.readable = False
+        self.expires = False
+        self.trust_tier = 0
+        self.sensitivity = 0
+        self.reality_class = ""
+        self.security_entry: dict[str, Any] | None = None
+        self.root = ""
+        self.weight = 0.0
+        self.counts_self_generated = False
+        self.rejected: dict[str, Any] | None = None
+        self.duplicate: dict[str, Any] | None = None
+        self.accepted: dict[str, Any] | None = None
+
+
+_ROW_MISSING = _RowSecurity()  # a CID that resolves to no row: never readable
+# Retrieval-filter keys the access predicate never reads (verified against access_policy.py):
+# they must not split the relation-security memo, or no canary could reuse another's result.
+_SECURITY_CONTEXT_IGNORED = frozenset({"branch", "_retrieval_deep"})
+
+
+def _no_json(value: Any) -> Any:
+    raise TypeError(f"not JSON: {type(value).__name__}")
+
+
+def _access_context_key(context: Mapping[str, Any] | None) -> str | None:
+    """A stable key for the access context, or None when it cannot be keyed exactly."""
+    if not context:
+        return ""
+    try:
+        return json.dumps(
+            {str(key): value for key, value in context.items() if key not in _SECURITY_CONTEXT_IGNORED},
+            sort_keys=True,
+            default=_no_json,
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _policy_expires(access_policy: Any) -> bool:
+    """An access policy whose verdict depends on the wall clock (``expires_at``)."""
+    return isinstance(access_policy, Mapping) and bool(access_policy.get("expires_at"))
+
+
+@lru_cache(maxsize=1 << 18)
+def _node_tokens(node_lower: str) -> frozenset[str]:
+    """``set(tokenize(node_lower))`` as a cached frozenset (tokenize is pure)."""
+    return frozenset(tokenize(node_lower))
+
+
+# Memos keyed by a set of CIDs hold large keys and results: keep few (a batch shares one set).
+_SET_MEMO_SIZE = 64
+# id(shared list) -> (the list, its CID set); equal sets are one interned frozenset.
+_SOURCE_SETS: dict[int, tuple[CidList, frozenset[str]]] = {}
+_SOURCE_SETS_SIZE = 1 << 16
+_INTERNED_SETS: dict[frozenset[str], frozenset[str]] = {}
+_INTERNED_SETS_SIZE = 256
+
+
+def _source_set(values: Any) -> frozenset[str]:
+    """``frozenset(str(c) for c in values if c)`` - cached per shared list, equal sets shared."""
+    shared = type(values) is CidList
+    if shared:
+        entry = _SOURCE_SETS.get(id(values))
+        if entry is not None and entry[0] is values:
+            return entry[1]
+    result = frozenset(str(item) for item in values if item)
+    found = _INTERNED_SETS.get(result)
+    if found is None:
+        _INTERNED_SETS[result] = result
+        while len(_INTERNED_SETS) > _INTERNED_SETS_SIZE:
+            del _INTERNED_SETS[next(iter(_INTERNED_SETS))]
+    else:
+        result = found
+    if shared:
+        _SOURCE_SETS[id(values)] = (values, result)
+        while len(_SOURCE_SETS) > _SOURCE_SETS_SIZE:
+            del _SOURCE_SETS[next(iter(_SOURCE_SETS))]
+    return result
+
+
+# id(shared list) -> (the list, frozenset of its raw members)
+_MEMBER_SETS: dict[int, tuple[CidList, frozenset[Any]]] = {}
+_MEMBER_SETS_SIZE = 1 << 14
+# member set -> the shared sorted list of those members
+_SORTED_MEMBERS: dict[frozenset[Any], list[Any]] = {}
+_SORTED_MEMBERS_SIZE = 256
+# (id(left), id(right)) -> (left, right, their sorted union) for shared lists
+_SOURCE_UNIONS: dict[tuple[int, int], tuple[CidList, CidList, list[Any]]] = {}
+_SOURCE_UNIONS_SIZE = 1 << 14
+
+
+def _member_set(values: Any) -> frozenset[Any]:
+    """``frozenset(values)``, computed once per shared list."""
+    if type(values) is not CidList:
+        return frozenset(values)
+    entry = _MEMBER_SETS.get(id(values))
+    if entry is not None and entry[0] is values:
+        return entry[1]
+    result = frozenset(values)
+    # Lists of the same members (a batch's per-document orderings) share one set object.
+    found = _INTERNED_SETS.get(result)
+    if found is None:
+        _INTERNED_SETS[result] = result
+        while len(_INTERNED_SETS) > _INTERNED_SETS_SIZE:
+            del _INTERNED_SETS[next(iter(_INTERNED_SETS))]
+    else:
+        result = found
+    _MEMBER_SETS[id(values)] = (values, result)
+    while len(_MEMBER_SETS) > _MEMBER_SETS_SIZE:
+        del _MEMBER_SETS[next(iter(_MEMBER_SETS))]
+    return result
+
+
+def _union_sorted_sources(left: Any, right: Any) -> list[Any]:
+    """``intern_cids(sorted(set(left + right)))`` - the merged source list of two rows.
+
+    The result depends only on the members of both lists, so it is computed once per member
+    set (and looked up once per pair of shared lists): merging the same sources again - every
+    fact of a batch carries the whole batch's CIDs - costs no sort.
+    """
+    pair = type(left) is CidList and type(right) is CidList
+    if pair:
+        entry = _SOURCE_UNIONS.get((id(left), id(right)))
+        if entry is not None and entry[0] is left and entry[1] is right:
+            return entry[2]
+    try:
+        members = _member_set(left) | _member_set(right)
+    except TypeError:
+        # Unhashable members: the plain expression raises exactly as it always did.
+        return intern_cids(sorted(set(list(left) + list(right))))
+    result = _SORTED_MEMBERS.get(members)
+    if result is None:
+        # sorted() of the same members: no two set members compare equal, so the order is the
+        # one sorted(set(left + right)) gives.
+        result = intern_cids(sorted(members))
+        _SORTED_MEMBERS[members] = result
+        while len(_SORTED_MEMBERS) > _SORTED_MEMBERS_SIZE:
+            del _SORTED_MEMBERS[next(iter(_SORTED_MEMBERS))]
+    if pair:
+        _SOURCE_UNIONS[(id(left), id(right))] = (left, right, result)
+        while len(_SOURCE_UNIONS) > _SOURCE_UNIONS_SIZE:
+            del _SOURCE_UNIONS[next(iter(_SOURCE_UNIONS))]
+    return result
+
+
+def _row_snapshot(item: Any, times: tuple[str, ...]) -> dict[str, Any]:
+    """``item.to_dict()`` with the same content, keeping shared lists and maps shared.
+
+    ``to_dict`` is ``dataclasses.asdict`` - a deep copy that also copies a row's shared source
+    list and per-source map into private ones. A deep copy of the plain row returns those
+    read-only shared objects themselves, so audit snapshots of thousands of rows that cite the
+    same thousands of sources hold (and store) one list.
+    """
+    return copy.deepcopy(_store_row(item, times))
+
+
+# ---------------------------------------------------------------- compact store encoding
+
+_SHARED_VALUES_KEY = "shared_values"
+_SHARED_CIDS_REF = "$mnemosyne:shared_cids"
+_SHARED_MAP_REF = "$mnemosyne:shared_map"
+#: Wrapper for a user value that would otherwise read back as a reference (see encode).
+_SHARED_ESCAPE = "$mnemosyne:literal"
+_SHARED_MARKERS = frozenset({_SHARED_CIDS_REF, _SHARED_MAP_REF, _SHARED_ESCAPE})
+# Only shared values at least this large are written by reference; smaller ones stay inline.
+_SHARED_VALUE_MIN = 16
+_EVIDENCE_TIMES = ("created_at",)
+_ASSERTION_TIMES = ("valid_from", "valid_to", "transaction_time", "expired_at", "last_accessed")
+_RELATION_TIMES = ("valid_from", "valid_to")
+_FIELD_NAMES: dict[type, tuple[str, ...]] = {}
+
+
+def _store_row(item: Any, times: tuple[str, ...]) -> dict[str, Any]:
+    """``item.to_dict()`` for Evidence/Assertion/Relation without the deep copy.
+
+    Their ``to_dict`` is ``dataclasses.asdict`` (a deep copy) with these timestamps
+    rendered; nothing here mutates the row, so the same values serialise identically.
+    """
+    cls = type(item)
+    names = _FIELD_NAMES.get(cls)
+    if names is None:
+        names = _FIELD_NAMES[cls] = tuple(field.name for field in dataclass_fields(cls))
+    row = {name: getattr(item, name) for name in names}
+    for name in times:
+        row[name] = dt_to_json(row[name])
+    return row
+
+
+class _SharedValueEncoder:
+    """Rebuilds store sections, writing each large shared list or map only once.
+
+    A batch gives thousands of facts, relations and audit rows the same source list (and
+    the same per-source reality map); written inline the store grows with rows x sources.
+    Each ``CidList``/``SharedMap`` of at least ``_SHARED_VALUE_MIN`` entries is replaced by a
+    one-key reference into the ``shared_values`` table; everything else is rebuilt as plain
+    dicts and lists, which serialise exactly as before.
+    """
+
+    def __init__(self) -> None:
+        self.lists: list[Any] = []
+        self.maps: list[dict[str, Any]] = []
+        self._refs: dict[int, dict[str, int]] = {}
+        self._held: list[Any] = []  # keeps ids stable while encoding
+        # member set -> [(table index, list)] of lists written in full
+        self._bases: dict[frozenset[Any], list[tuple[int, Any]]] = {}
+
+    def encode(self, value: Any) -> Any:
+        kind = type(value)
+        if kind is CidList and len(value) >= _SHARED_VALUE_MIN:
+            return self._ref_cids(value)
+        if kind is SharedMap and len(value) >= _SHARED_VALUE_MIN:
+            return self._ref(value, self.maps, _SHARED_MAP_REF, dict)
+        if isinstance(value, dict):
+            encoded = {key: self.encode(item) for key, item in value.items()}
+            if len(encoded) == 1 and next(iter(encoded)) in _SHARED_MARKERS:
+                # Metadata and access policies are user-controlled, so a row may legitimately
+                # hold a one-key dict named exactly like a reference. Wrapped here, it decodes
+                # back to itself instead of being read as a reference into the shared table.
+                return {_SHARED_ESCAPE: encoded}
+            return encoded
+        if isinstance(value, (list, tuple)):
+            return [self.encode(item) for item in value]
+        return value
+
+    def _ref(self, value: Any, table: list[Any], marker: str, plain: type) -> dict[str, int]:
+        ref = self._refs.get(id(value))
+        if ref is None:
+            ref = {marker: len(table)}
+            table.append(plain(value))
+            self._refs[id(value)] = ref
+            self._held.append(value)
+        return dict(ref)
+
+    def _ref_cids(self, value: CidList) -> dict[str, int]:
+        """A shared CID list's table entry: in full, or as a front over a same-member list.
+
+        Consolidation gives each document's facts the batch's CIDs with that document's own
+        CIDs moved to the front, so a batch of N documents holds N lists of the same N CIDs.
+        Each is written once, and every one but the first as ``{"base": i, "front": [...]}``:
+        exactly ``front + [cid for cid in table[i] if cid not in front]``.
+        """
+        ref = self._refs.get(id(value))
+        if ref is not None:
+            return dict(ref)
+        index = len(self.lists)
+        try:
+            members: frozenset[Any] | None = _member_set(value)
+        except TypeError:
+            members = None
+        entry: Any = None
+        if members is not None:
+            for base_index, base in self._bases.get(members, ()):
+                front = _front_over(value, base)
+                if front is not None:
+                    entry = {_SHARED_DELTA_BASE: base_index, _SHARED_DELTA_FRONT: front}
+                    break
+        if entry is None and members is not None:
+            # No list written so far is the shared order: the first lists met may each have a
+            # different CID in front. Rebuild the common order from one of them and this list,
+            # write it once, and read both as fronts over it (only if that reproduces this list).
+            for _, base in list(self._bases.get(members, ())):
+                order = _common_order(value, base)
+                front = _front_over(value, order) if order is not None else None
+                if front is not None:
+                    order_index = len(self.lists)
+                    self.lists.append(list(order))
+                    self._bases[members].insert(0, (order_index, order))
+                    index = len(self.lists)
+                    entry = {_SHARED_DELTA_BASE: order_index, _SHARED_DELTA_FRONT: front}
+                    break
+        if entry is None:
+            entry = list(value)
+            if members is not None:
+                bases = self._bases.setdefault(members, [])
+                if len(bases) < _SHARED_DELTA_BASES:
+                    bases.append((index, value))
+        self.lists.append(entry)
+        ref = {_SHARED_CIDS_REF: index}
+        self._refs[id(value)] = ref
+        self._held.append(value)
+        return dict(ref)
+
+
+_SHARED_DELTA_BASE = "base"
+_SHARED_DELTA_FRONT = "front"
+# A list is written as a front over a base only for a front this short ...
+_SHARED_DELTA_FRONT_MAX = 8
+# ... and is compared with at most this many same-member lists written in full.
+_SHARED_DELTA_BASES = 4
+
+
+def _front_over(values: list[Any], base: list[Any]) -> list[Any] | None:
+    """The shortest ``front`` with ``values == front + [x for x in base if x not in front]``."""
+    count = len(values)
+    for size in range(min(_SHARED_DELTA_FRONT_MAX, count) + 1):
+        front = values[:size]
+        front_members = set(front)
+        position = size
+        matched = True
+        for item in base:
+            if item in front_members:
+                continue
+            if position >= count or not (values[position] is item or values[position] == item):
+                matched = False
+                break
+            position += 1
+        if matched and position == count:
+            return list(front)
+    return None
+
+
+def _common_order(values: list[Any], base: list[Any]) -> list[Any] | None:
+    """The order ``values`` and ``base`` share once each one's first CID is put back.
+
+    For ``values = [a, *W without a]`` and ``base = [b, *W without b]`` this is ``W`` with
+    ``a`` re-inserted before the CID that follows it in ``base``. Only a candidate: the caller
+    keeps it only when ``values`` is exactly a front over it.
+    """
+    if len(values) < 2 or len(base) < 2 or values[0] == base[0]:
+        return None
+    moved, rest, tail = values[0], values[1:], base[1:]
+    try:
+        position = tail.index(moved)
+    except ValueError:
+        return None
+    if position + 1 >= len(tail):
+        return [*rest, moved]
+    try:
+        at = rest.index(tail[position + 1])
+    except ValueError:
+        return None
+    return [*rest[:at], moved, *rest[at:]]
+
+
+def _expand_shared_cids(entries: list[Any]) -> list[Any]:
+    """The ``cid_lists`` table back as shared lists (a front entry follows its base)."""
+    lists: list[Any] = []
+    for entry in entries:
+        if isinstance(entry, dict):
+            front = list(entry[_SHARED_DELTA_FRONT])
+            front_members = set(front)
+            base = lists[entry[_SHARED_DELTA_BASE]]
+            lists.append(intern_cids(front + [item for item in base if item not in front_members]))
+        else:
+            lists.append(intern_cids(entry))
+    return lists
+
+
+def _decode_shared_values(data: Any, shared: dict[str, Any]) -> Any:
+    """Resolve the references ``_SharedValueEncoder`` wrote back into shared objects."""
+    lists = _expand_shared_cids(shared.get("cid_lists") or [])
+    maps = [shared_map(values) for values in shared.get("maps") or []]
+
+    def decode(value: Any) -> Any:
+        if isinstance(value, dict):
+            if len(value) == 1:
+                if _SHARED_ESCAPE in value:
+                    # A user value that merely looks like a reference: unwrap it unchanged.
+                    inner = value[_SHARED_ESCAPE]
+                    return {key: decode(item) for key, item in inner.items()} if isinstance(inner, dict) else decode(inner)
+                index = value.get(_SHARED_CIDS_REF)
+                if type(index) is int and 0 <= index < len(lists):
+                    return lists[index]
+                index = value.get(_SHARED_MAP_REF)
+                if type(index) is int and 0 <= index < len(maps):
+                    return maps[index]
+                # Anything else named like a reference is data: a store written before this
+                # encoding, or a hand-edited one, must still open.
+            return {key: decode(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [decode(item) for item in value]
+        return value
+
+    return decode(data)
+
+
+def _shared_or_copy(values: Any) -> list[Any]:
+    """A private copy of a source list - or the shared read-only list itself, which needs none."""
+    return values if type(values) is CidList else list(values)
+
+
+# id(shared list) -> (the list, its CIDs as non-empty strings): shared lists never change.
+_NORMALIZED_SOURCES: dict[int, tuple[CidList, list[str]]] = {}
+_NORMALIZED_SOURCES_SIZE = 8192
+
+
+def _normalized_sources(values: CidList) -> list[str]:
+    """``[str(cid) for cid in values if str(cid)]`` for a shared list, computed once."""
+    entry = _NORMALIZED_SOURCES.get(id(values))
+    if entry is not None and entry[0] is values:
+        return entry[1]
+    normalized = intern_cids([str(cid) for cid in values if str(cid)])
+    _NORMALIZED_SOURCES[id(values)] = (values, normalized)
+    while len(_NORMALIZED_SOURCES) > _NORMALIZED_SOURCES_SIZE:
+        del _NORMALIZED_SOURCES[next(iter(_NORMALIZED_SOURCES))]
+    return normalized
+
+
+def _share_sources(item: Any) -> Any:
+    """Give a row about to be stored the shared read-only form of its source list.
+
+    Same CIDs in the same order, as one object shared by every row with that list (see
+    mnemosyne.cid_lists), so copies are free and per-list work is done once.
+    """
+    cids = getattr(item, "source_evidence_cids", None)
+    if isinstance(cids, list) and type(cids) is not CidList:
+        item.source_evidence_cids = intern_cids(cids)
+    return item
+
+
 def _relation_windows_overlap(left: Relation, right: Relation) -> bool:
     """Return whether two half-open relation validity windows overlap."""
 
@@ -1492,9 +1933,7 @@ def _merge_relation_state(target: Relation, incoming: Relation) -> None:
         if target.valid_to is None or incoming.valid_to is None
         else max(target.valid_to, incoming.valid_to)
     )
-    target.source_evidence_cids = sorted(
-        set(target.source_evidence_cids + incoming.source_evidence_cids)
-    )
+    target.source_evidence_cids = _union_sorted_sources(target.source_evidence_cids, incoming.source_evidence_cids)
     target.access_policy = merge_access_policies(
         [target.access_policy, incoming.access_policy],
         tenant_id=target.tenant_id,
@@ -1916,11 +2355,35 @@ def _copy_jsonish(value: Any) -> Any:
     built exclusively from dicts, lists, and immutable scalars — without
     deepcopy's per-object dispatch overhead.
     """
+    if type(value) is CidList or type(value) is SharedMap:
+        return value  # shared and read-only: deepcopy returns it too
     if isinstance(value, dict):
         return {key: _copy_jsonish(item) for key, item in value.items()}
     if isinstance(value, list):
         return [_copy_jsonish(item) for item in value]
     return value
+
+
+class _CandidateTemplates(list):
+    """Candidates of a thin canary, projected from its parent's cached projections.
+
+    The templates carry the parent's branch until a channel keeps one: ``finish`` relabels the
+    kept clone with the canary's name and gives an inherited assertion its current access
+    stamps (a deferred merge replay re-stamps ``last_accessed``; see canary_overlay).
+    """
+
+    def __init__(self, *, branch_override: str, engine: Any, tenant_id: str) -> None:
+        super().__init__()
+        self.branch_override = branch_override
+        self.engine = engine
+        self.tenant_id = tenant_id
+        self.inherited: set[int] = set()
+
+    def finish(self, hit: Hit, template: Hit) -> Hit:
+        hit.branch = self.branch_override
+        if id(template) in self.inherited:
+            self.engine._overlay_patch_access(hit, self.tenant_id)
+        return hit
 
 
 def _clone_candidate_hit(hit: Hit) -> Hit:
@@ -1938,14 +2401,14 @@ def _clone_candidate_hit(hit: Hit) -> Hit:
         text=hit.text,
         score=hit.score,
         channel=hit.channel,
-        provenance=list(hit.provenance),
+        provenance=_shared_or_copy(hit.provenance),
         trust_tier=hit.trust_tier,
         sensitivity=hit.sensitivity,
         metadata=_copy_jsonish(hit.metadata),
     )
 
 
-class LocalMemoryEngine:
+class LocalMemoryEngine(CanaryOverlayMixin):
     """A deterministic local engine that implements the blueprint contract.
 
     It is intentionally dependency-light so the regression suite can run
@@ -1958,6 +2421,46 @@ class LocalMemoryEngine:
     _writer_owners: weakref.WeakValueDictionary[str, LocalMemoryEngine] = (
         weakref.WeakValueDictionary()
     )
+
+    # The three item maps are BranchIndexedStore dicts (mnemosyne.branch_index): the same
+    # keys, values and iteration order as a plain dict, plus ordered per-branch, per-tenant
+    # and peer views so hot paths stop walking every item of every branch. Any mapping
+    # assigned to them is wrapped, so every existing writer keeps working unchanged.
+    #
+    # Thin canaries (mnemosyne.canary_overlay) keep gate canaries as overlays and defer merge
+    # replays that only re-stamp facts. Used outside an overlay-aware operation, these three
+    # attributes first SETTLE: deferred replays are applied and live overlays become the full
+    # physical branches legacy builds. Code unaware of overlays therefore sees the legacy state.
+    @property
+    def evidence(self) -> BranchIndexedStore:
+        if (self._overlays or self._overlay_flush_needed) and not self._overlay_depth:
+            self._overlay_settle(reset=False)
+        return self._evidence_items
+
+    @evidence.setter
+    def evidence(self, value: Any) -> None:
+        self._evidence_items = indexed(value, "evidence")
+        bump_evidence_epoch()  # a whole new set of rows: per-list caches are stale
+
+    @property
+    def assertions(self) -> BranchIndexedStore:
+        if (self._overlays or self._overlay_flush_needed or self._overlay_states) and not self._overlay_depth:
+            self._overlay_settle(reset=True)
+        return self._assertion_items
+
+    @assertions.setter
+    def assertions(self, value: Any) -> None:
+        self._assertion_items = indexed(value, "assertion")
+
+    @property
+    def relations(self) -> BranchIndexedStore:
+        if (self._overlays or self._overlay_flush_needed or self._overlay_states) and not self._overlay_depth:
+            self._overlay_settle(reset=True)
+        return self._relation_items
+
+    @relations.setter
+    def relations(self, value: Any) -> None:
+        self._relation_items = indexed(value, "relation")
 
     def __init__(
         self,
@@ -1983,6 +2486,17 @@ class LocalMemoryEngine:
             )
         self.adapters = adapters
         self._lock = threading.RLock()
+        self._overlay_init()
+        # (shared source list, scope...) -> (list, evidence epoch, relation-hit security)
+        self._relation_security_memo: dict[tuple[Any, ...], tuple[Any, int, Any]] = {}
+        # (shared source list, scope...) -> (list, evidence epoch, (trust_tier, sensitivity) | None)
+        self._relation_verdict_memo: dict[tuple[Any, ...], tuple[Any, int, Any]] = {}
+        # (id(evidence row), scope...) -> (row, evidence epoch, _RowSecurity)
+        self._security_row_memo: dict[tuple[Any, ...], tuple[Any, int, Any]] = {}
+        # (shared source list, tenant, branch read) -> (list, evidence epoch, corroboration report)
+        self._corroboration_memo: dict[tuple[Any, ...], tuple[Any, int, Any]] = {}
+        # (shared source list, tenant, branch read) -> (list, evidence epoch, reality monitoring)
+        self._projection_memo: dict[tuple[Any, ...], tuple[Any, int, Any]] = {}
         self.branches: dict[str, dict[str, Any]] = {
             "main": {"from": None, "kind": "protected", "created_at": utc_now().isoformat()}
         }
@@ -2145,7 +2659,7 @@ class LocalMemoryEngine:
         for cid in intention.evidence_ids:
             matches = [
                 item
-                for item in self.evidence.values()
+                for item in self.evidence.in_branch(intention.tenant_id, "main").values()
                 if (
                     item.cid == cid
                     and item.tenant_id == intention.tenant_id
@@ -2713,6 +3227,10 @@ class LocalMemoryEngine:
                 raise
             return expired
 
+    def _bump_store_version(self) -> None:
+        """The memo-invalidating half of ``_persist``, for writes that are not persisted."""
+        self._store_version += 1
+
     def _persist(self) -> None:
         # Every mutator funnels through here; bump BEFORE the store_path early
         # return so in-memory engines invalidate the candidate memo too.
@@ -2740,23 +3258,30 @@ class LocalMemoryEngine:
         parent.mkdir(parents=True, exist_ok=True)
         if parent_created:
             parent.chmod(0o700)
+        encoder = _SharedValueEncoder()
         data = {
             "policy": self.policy.to_dict(),
             "branches": self.branches,
-            "evidence": [item.to_dict() for item in self.evidence.values()],
-            "assertions": [item.to_dict() for item in self.assertions.values()],
-            "relations": [item.to_dict() for item in self.relations.values()],
+            # Same JSON as each row's to_dict(), without deep-copying shared source lists.
+            "evidence": encoder.encode([_store_row(item, _EVIDENCE_TIMES) for item in self.evidence.values()]),
+            "assertions": encoder.encode([_store_row(item, _ASSERTION_TIMES) for item in self.assertions.values()]),
+            "relations": encoder.encode([_store_row(item, _RELATION_TIMES) for item in self.relations.values()]),
             "preferences": [item.to_dict() for item in self.preferences.values()],
             "justifications": [item.to_dict() for item in self.justifications.values()],
             "contradictions": [item.to_dict() for item in self.contradictions.values()],
             "calibrations": [item.to_dict() for item in self.calibrations.values()],
-            "entities": list(self.entities.values()),
+            # An entity named by every fact of a batch cites the batch's whole shared list.
+            "entities": encoder.encode(list(self.entities.values())),
             "intentions": [item.to_dict() for item in self.intentions.values()],
             "working_memory": [item.to_dict() for item in self.working_memory.values()],
-            "audit_log": self.audit_log,
-            "deletion_log": self.deletion_log,
-            "merge_log": self.merge_log,
+            "audit_log": encoder.encode(self.audit_log),
+            "deletion_log": encoder.encode(self.deletion_log),
+            "merge_log": encoder.encode(self.merge_log),
         }
+        if encoder.lists or encoder.maps:
+            # Large shared source lists and per-source maps are written once (see
+            # _SharedValueEncoder); a store without any keeps the exact former layout.
+            data[_SHARED_VALUES_KEY] = {"cid_lists": encoder.lists, "maps": encoder.maps}
         tmp = self.store_path.with_suffix(self.store_path.suffix + ".tmp")
         payload = json.dumps(data, indent=2, sort_keys=True)
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -2793,6 +3318,10 @@ class LocalMemoryEngine:
 
     def _load(self) -> None:
         data = json.loads(self.store_path.read_text(encoding="utf-8"))
+        shared = data.pop(_SHARED_VALUES_KEY, None) if isinstance(data, dict) else None
+        # Always decoded, even with no shared table: a store with no large shared value can
+        # still carry an escaped user dict that merely looks like a reference (see encode).
+        data = _decode_shared_values(data, shared if isinstance(shared, dict) else {})
         self.policy = OperatingPolicy.from_dict(data.get("policy"))
         branches = data.get("branches")
         if isinstance(branches, list):
@@ -2821,11 +3350,11 @@ class LocalMemoryEngine:
             for ev in (Evidence.from_dict(item) for item in data.get("evidence", []))
         }
         self.assertions = {
-            self._branch_key(item.tenant_id, item.branch, item.id): item
+            self._branch_key(item.tenant_id, item.branch, item.id): _share_sources(item)
             for item in (Assertion.from_dict(row) for row in data.get("assertions", []))
         }
         self.relations = {
-            self._branch_key(item.tenant_id, item.branch, item.id): item
+            self._branch_key(item.tenant_id, item.branch, item.id): _share_sources(item)
             for item in (Relation.from_dict(row) for row in data.get("relations", []))
         }
         self.preferences = {item.id: item for item in (Preference.from_dict(row) for row in data.get("preferences", []))}
@@ -2877,7 +3406,7 @@ class LocalMemoryEngine:
                 content_pointer=ev.content_pointer,
                 modality=ev.modality,
             )
-            for existing in self.evidence.values():
+            for existing in self.evidence.in_branch(ev.tenant_id, branch).values():
                 if (
                     existing.tenant_id == ev.tenant_id
                     and existing.branch == branch
@@ -3014,9 +3543,13 @@ class LocalMemoryEngine:
 
     def get_evidence(self, tenant_id: str, cid: str, branch: str = "main") -> Evidence | None:
         with self._lock:
-            ev = self.evidence.get(self._evidence_key(tenant_id, branch, cid))
+            # A deep copy, so reading the row directly is safe; a thin canary's row is its
+            # parent's, and the copy a full branch would hand out carries the canary's name.
+            ev = self._evidence_row(tenant_id, branch, cid)
             if ev and not ev.erased:
-                return copy.deepcopy(ev)
+                clone = copy.deepcopy(ev)
+                clone.branch = branch
+                return clone
             return None
 
     def evidence_created_at(self, tenant_id: str, cid: str, branch: str = "main") -> datetime | None:
@@ -3028,7 +3561,7 @@ class LocalMemoryEngine:
         """
 
         with self._lock:
-            ev = self.evidence.get(self._evidence_key(tenant_id, branch, cid))
+            ev = self._evidence_row(tenant_id, branch, cid)
             if ev and not ev.erased:
                 return ev.created_at
             return None
@@ -3044,7 +3577,7 @@ class LocalMemoryEngine:
         found: dict[str, datetime] = {}
         with self._lock:
             for cid in dict.fromkeys(cids):
-                ev = self.evidence.get(self._evidence_key(tenant_id, branch, cid))
+                ev = self._evidence_row(tenant_id, branch, cid)
                 if ev and not ev.erased and ev.created_at is not None:
                     found[cid] = ev.created_at
         return found
@@ -3055,7 +3588,7 @@ class LocalMemoryEngine:
         with self._lock:
             rows = [
                 copy.deepcopy(ev)
-                for ev in self.evidence.values()
+                for ev in self.evidence.in_branch(tenant_id, branch).values()
                 if ev.tenant_id == tenant_id
                 and ev.branch == branch
                 and not ev.erased
@@ -3220,6 +3753,25 @@ class LocalMemoryEngine:
             return True
 
     def upsert_assertion(self, assertion: Assertion, branch: str = "main") -> str:
+        if self._overlays and branch in self._overlays:
+            return self._overlay_upsert_assertion(assertion, branch)
+        return self._upsert_assertion_core(assertion, branch)
+
+    def _upsert_assertion_core(
+        self,
+        assertion: Assertion,
+        branch: str = "main",
+        *,
+        now: datetime | None = None,
+        audit: bool = True,
+        persist: bool = True,
+    ) -> str:
+        """The body of ``upsert_assertion``.
+
+        ``now``/``audit``/``persist`` exist for replaying a merge later (canary_overlay): the
+        replay must carry the merge's own timestamp, and its audit rows are per-merge
+        bookkeeping. Called with the defaults it is exactly the public method.
+        """
         access_policy = validate_access_policy(
             assertion.access_policy,
             tenant_id=assertion.tenant_id,
@@ -3227,17 +3779,19 @@ class LocalMemoryEngine:
         )
         with self._lock:
             self._require_branch(branch)
-            incoming = copy.deepcopy(assertion)
+            incoming = _share_sources(copy.deepcopy(assertion))
             incoming.access_policy = access_policy
             incoming.branch = branch
-            incoming.transaction_time = utc_now()
+            incoming.transaction_time = utc_now() if now is None else now
             requested_status = incoming.status
             incoming.status = "active" if incoming.status == "candidate" else incoming.status
             self._apply_projection_reality_monitoring(incoming)
             self._apply_schema_fast_path_projection_status(incoming, requested_status=requested_status)
             peers = [
                 item
-                for item in self.assertions.values()
+                for item in self.assertions.peers(
+                    incoming.tenant_id, branch, incoming.subject, incoming.predicate
+                ).values()
                 if item.tenant_id == incoming.tenant_id
                 and item.branch == branch
                 and item.subject == incoming.subject
@@ -3248,26 +3802,33 @@ class LocalMemoryEngine:
             same = [item for item in peers if item.object == incoming.object]
             if same:
                 winner = max(same, key=lambda item: item.confidence)
-                before = winner.to_dict()
+                before = _row_snapshot(winner, _ASSERTION_TIMES) if audit else None
                 winner.access_policy = merge_access_policies(
                     [winner.access_policy, incoming.access_policy],
                     tenant_id=winner.tenant_id,
                 )
                 winner.confidence = max(winner.confidence, incoming.confidence)
-                winner.source_evidence_cids = sorted(set(winner.source_evidence_cids + incoming.source_evidence_cids))
-                winner.trust_tier = more_trusted(winner.trust_tier, incoming.trust_tier)
-                winner.last_accessed = utc_now()
-                self._apply_projection_reality_monitoring(winner)
-                self._audit(
-                    winner.tenant_id,
-                    "engine",
-                    "upsert_assertion.noop_or_reinforce",
-                    winner.id,
-                    {"before": before, "after": winner.to_dict(), "source_evidence_cids": winner.source_evidence_cids},
-                    source="assertion",
-                    trust_tier=winner.trust_tier,
+                winner.source_evidence_cids = _union_sorted_sources(
+                    winner.source_evidence_cids, incoming.source_evidence_cids
                 )
-                self._persist()
+                winner.trust_tier = more_trusted(winner.trust_tier, incoming.trust_tier)
+                winner.last_accessed = utc_now() if now is None else now
+                self._apply_projection_reality_monitoring(winner)
+                if audit:
+                    self._audit(
+                        winner.tenant_id,
+                        "engine",
+                        "upsert_assertion.noop_or_reinforce",
+                        winner.id,
+                        {
+                            "before": before,
+                            "after": _row_snapshot(winner, _ASSERTION_TIMES),
+                            "source_evidence_cids": winner.source_evidence_cids,
+                        },
+                        source="assertion",
+                        trust_tier=winner.trust_tier,
+                    )
+                self._persist() if persist else self._bump_store_version()
                 return winner.id
 
             conflicts = [item for item in peers if item.object != incoming.object]
@@ -3304,32 +3865,34 @@ class LocalMemoryEngine:
                     incoming.status = "superseded"
                     incoming.valid_to = current.valid_from
                     op = "upsert_assertion.historical_superseded"
-                self._audit(
-                    incoming.tenant_id,
-                    "engine",
-                    op,
-                    incoming.id,
-                    {"conflict_with": current.id, "source_evidence_cids": incoming.source_evidence_cids},
-                    source="assertion",
-                    trust_tier=incoming.trust_tier,
-                )
+                if audit:
+                    self._audit(
+                        incoming.tenant_id,
+                        "engine",
+                        op,
+                        incoming.id,
+                        {"conflict_with": current.id, "source_evidence_cids": incoming.source_evidence_cids},
+                        source="assertion",
+                        trust_tier=incoming.trust_tier,
+                    )
 
             key = self._branch_key(incoming.tenant_id, branch, incoming.id)
             self.assertions[key] = incoming
-            self._audit(
-                incoming.tenant_id,
-                "engine",
-                "upsert_assertion",
-                incoming.id,
-                {
-                    "statement": incoming.statement(),
-                    "status": incoming.status,
-                    "source_evidence_cids": incoming.source_evidence_cids,
-                },
-                source="assertion",
-                trust_tier=incoming.trust_tier,
-            )
-            self._persist()
+            if audit:
+                self._audit(
+                    incoming.tenant_id,
+                    "engine",
+                    "upsert_assertion",
+                    incoming.id,
+                    {
+                        "statement": incoming.statement(),
+                        "status": incoming.status,
+                        "source_evidence_cids": incoming.source_evidence_cids,
+                    },
+                    source="assertion",
+                    trust_tier=incoming.trust_tier,
+                )
+            self._persist() if persist else self._bump_store_version()
             return incoming.id
 
     def assemble_system_prompt(self, *, tenant_id: str, hits: Any, sink: str = "system_prompt") -> str:
@@ -3417,10 +3980,46 @@ class LocalMemoryEngine:
         branch: str,
         source_evidence_cids: list[str],
     ) -> dict[str, Any]:
+        """Reality monitoring of a fact from the evidence rows its CIDs resolve to.
+
+        Depends only on the set of CIDs, the tenant and those rows, so for a shared source list
+        it is computed once per evidence epoch. Each caller gets its own top-level dict and
+        ``classes``; the large per-CID ``source_classes`` map is shared read-only.
+        """
+        if not evidence_caching_safe():
+            return self._projection_reality_monitoring_compute(
+                tenant_id=tenant_id, branch=branch, source_evidence_cids=source_evidence_cids
+            )
+        # Reads only the SET of CIDs: every ordering of the same sources shares one result.
+        key = (_source_set(source_evidence_cids), tenant_id, self._evidence_resolution_branch(tenant_id, branch))
+        epoch = evidence_epoch()
+        entry = self._projection_memo.get(key)
+        if entry is not None and entry[1] == epoch:
+            cached = entry[2]
+        else:
+            cached = self._projection_reality_monitoring_compute(
+                tenant_id=tenant_id, branch=branch, source_evidence_cids=source_evidence_cids
+            )
+            cached["source_classes"] = shared_map(cached["source_classes"])
+            if evidence_epoch() == epoch:
+                memo = self._projection_memo
+                memo.pop(key, None)
+                memo[key] = (None, epoch, cached)
+                while len(memo) > _SET_MEMO_SIZE:
+                    del memo[next(iter(memo))]
+        return {**cached, "classes": dict(cached["classes"])}
+
+    def _projection_reality_monitoring_compute(
+        self,
+        *,
+        tenant_id: str,
+        branch: str,
+        source_evidence_cids: list[str],
+    ) -> dict[str, Any]:
         classes: dict[str, int] = {}
         source_classes: dict[str, str] = {}
         for cid in sorted({str(item) for item in source_evidence_cids if item}):
-            ev = self.evidence.get(self._evidence_key(tenant_id, branch, cid))
+            ev = self._evidence_row(tenant_id, branch, cid)
             reality_class = self._classify_evidence_reality(ev) if ev is not None and not ev.erased else "unknown"
             classes[reality_class] = classes.get(reality_class, 0) + 1
             source_classes[cid] = reality_class
@@ -3468,6 +4067,13 @@ class LocalMemoryEngine:
         }
 
     def add_relation(self, relation: Relation, branch: str = "main") -> str:
+        if self._overlays and branch in self._overlays:
+            # Writes only the new relation; an overlay needs no copies for that.
+            with self._lock, self._overlay_context():
+                return self._add_relation_core(relation, branch)
+        return self._add_relation_core(relation, branch)
+
+    def _add_relation_core(self, relation: Relation, branch: str = "main") -> str:
         access_policy = validate_access_policy(
             relation.access_policy,
             tenant_id=relation.tenant_id,
@@ -3475,7 +4081,7 @@ class LocalMemoryEngine:
         )
         with self._lock:
             self._require_branch(branch)
-            item = copy.deepcopy(relation)
+            item = _share_sources(copy.deepcopy(relation))
             item.access_policy = access_policy
             item.branch = branch
             key = self._branch_key(item.tenant_id, branch, item.id)
@@ -3580,7 +4186,14 @@ class LocalMemoryEngine:
     def vector_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
         query_vec = embed_query(self.adapters.embedding, query)
         hits: list[Hit] = []
-        if text_kernels.NATIVE is not None:
+        # Local hashing embeddings have an exact sparse path that scores the memoized
+        # candidates THEMSELVES and clones only the hits it keeps. It is preferred even when
+        # the native kernel is available: the kernel needs every candidate cloned up front to
+        # hold its per-hit embedding metadata, and those clones cost more than the scan saves
+        # (measured 288 ms vs 62 ms per gate retrieve on a 300-document 2Wiki store). Both
+        # score identically - each is byte-parity-proven against the per-hit cosine loop.
+        hashing_provider = type(self.adapters.embedding) is HashingEmbeddingProvider
+        if text_kernels.NATIVE is not None and not hashing_provider:
             # Batched fast path: embedding acquisition stays per-hit in Python
             # (same security-gated _embedding_for_hit call, same metadata side
             # effects, once per hit, in candidate order), then ONE dense_scan
@@ -3608,6 +4221,42 @@ class LocalMemoryEngine:
                     hit.channel = scored_channel_for_hit(kind=hit.kind, base_channel=base)
                     hits.append(hit)
         else:
+            # Local hashing embeddings: score each candidate against only the query's non-zero
+            # dimensions instead of copying and multiplying all 256 - the identical sum
+            # (SparseCosine). Stored and provider embeddings keep the full cosine.
+            sparse = SparseCosine(query_vec) if hashing_provider else None
+            dims = int(self.adapters.embedding.dims) if sparse is not None else 0
+            if sparse is not None:
+                # Scored on the memoized candidates themselves; only the hits kept are cloned,
+                # and they get exactly the fields _embedding_for_hit would have written.
+                templates = self._candidate_templates(filt)
+                finish = getattr(templates, "finish", None)
+                for template in templates:
+                    stored_vec = self._stored_embedding_value(template, filt)
+                    if stored_vec is not None:
+                        score = cosine(query_vec, stored_vec)
+                    else:
+                        partition = str(template.metadata.get("embedding_partition") or VECTOR_PARTITION_PUBLIC)
+                        if partition == "none":
+                            continue
+                        score = sparse.hashing(template.text, dims)
+                    if score > 0:
+                        hit = _clone_candidate_hit(template)
+                        if finish is not None:
+                            hit = finish(hit, template)
+                        hit.metadata["stored_embedding_used"] = stored_vec is not None
+                        hit.score = score
+                        stored_raw = bool(hit.metadata.get("stored_embedding_used"))
+                        base = (
+                            "dense_media"
+                            if stored_raw and hit.metadata.get("stored_media_embedding")
+                            else "dense_hash"
+                        )
+                        hit.channel = scored_channel_for_hit(kind=hit.kind, base_channel=base)
+                        hits.append(hit)
+                return self._mark_retrieved_text_as_data(
+                    sorted(hits, key=lambda item: item.score, reverse=True)[:k]
+                )
             for hit in self._candidate_hits(filt):
                 hit_vec = self._embedding_for_hit(hit, filt)
                 if hit_vec is None:
@@ -3657,9 +4306,17 @@ class LocalMemoryEngine:
                     hit.channel = scored_channel_for_hit(kind=hit.kind, base_channel="lexical")
                     hits.append(hit)
         else:
-            for hit in self._candidate_hits(filt):
-                score = lexical_score(query, hit.text)
+            # One query against many texts: tokenize the query once and reuse each text's cached
+            # counts - the identical score (text.lexical_scorer).
+            score_text = lexical_scorer(query)
+            templates = self._candidate_templates(filt)
+            finish = getattr(templates, "finish", None)
+            for template in templates:
+                score = score_text(template.text)
                 if score > 0:
+                    hit = _clone_candidate_hit(template)
+                    if finish is not None:
+                        hit = finish(hit, template)
                     hit.score = score
                     hit.channel = scored_channel_for_hit(kind=hit.kind, base_channel="lexical")
                     hits.append(hit)
@@ -3715,32 +4372,45 @@ class LocalMemoryEngine:
             )
             return self._mark_retrieved_text_as_data(hits)
 
+        seed_matches: dict[str, bool] = {}
+
         def matches_seed(node: str) -> bool:
-            node_lower = node.lower()
-            return node_lower in seed_set or bool(set(tokenize(node_lower)) & seed_set)
+            # Pure in ``node``: answered once per node and call instead of once per PPR
+            # iteration; node token sets are cached across calls (tokenize is pure).
+            found = seed_matches.get(node)
+            if found is None:
+                node_lower = node.lower()
+                found = node_lower in seed_set or not _node_tokens(node_lower).isdisjoint(seed_set)
+                seed_matches[node] = found
+            return found
 
         adjacency: dict[str, set[str]] = defaultdict(set)
-        relation_by_pair: dict[tuple[str, str], tuple[Relation, dict[str, Any], Any]] = {}
-        for rel in self.relations.values():
+        relation_by_pair: dict[tuple[str, str], tuple[Relation, dict[str, Any], Any, Any]] = {}
+        security_context_key = _access_context_key(graph_filter)
+        # (relation, its branch): a thin canary lists its parent's relations as its own.
+        for rel, rel_branch in self._graph_relation_rows(tenant_id, branch):
             if tenant_id is not None and rel.tenant_id != tenant_id:
                 continue
-            if branch is not None and rel.branch != branch:
+            if branch is not None and rel_branch != branch:
                 continue
             if not self._valid_at(rel.valid_from, rel.valid_to, moment):
                 continue
-            security = self._relation_hit_security(
+            # (trust_tier, sensitivity) or None: all the graph needs. The full security dict -
+            # the same function of the same rows - is built only for relations that become hits.
+            verdict = self._relation_security_verdict(
                 rel,
-                branch=rel.branch,
+                branch=rel_branch,
                 include_quarantined=include_quarantined,
                 max_trust=max_trust,
                 max_sensitivity=max_sensitivity,
                 access_context=graph_filter,
+                context_key=security_context_key,
             )
-            if security is None:
+            if verdict is None:
                 continue
             relation_decision = may_read_item(
                 item_tenant_id=rel.tenant_id,
-                sensitivity=int(security["sensitivity"]),
+                sensitivity=int(verdict[1]),
                 access_policy=rel.access_policy,
                 context=graph_filter,
                 policy_max_sensitivity=self.policy.max_sensitivity,
@@ -3750,13 +4420,28 @@ class LocalMemoryEngine:
                 continue
             adjacency[rel.source.lower()].add(rel.target.lower())
             adjacency[rel.target.lower()].add(rel.source.lower())
-            relation_by_pair[(rel.source.lower(), rel.target.lower())] = (rel, security, relation_decision)
-            relation_by_pair[(rel.target.lower(), rel.source.lower())] = (rel, security, relation_decision)
+            relation_by_pair[(rel.source.lower(), rel.target.lower())] = (rel, verdict, relation_decision, rel_branch)
+            relation_by_pair[(rel.target.lower(), rel.source.lower())] = (rel, verdict, relation_decision, rel_branch)
+
+        def hit_security(rel: Relation, rel_branch: str) -> dict[str, Any]:
+            security = self._relation_hit_security(
+                rel,
+                branch=rel_branch,
+                include_quarantined=include_quarantined,
+                max_trust=max_trust,
+                max_sensitivity=max_sensitivity,
+                access_context=graph_filter,
+                context_key=security_context_key,
+            )
+            assert security is not None  # same rows and ceilings as its verdict
+            return security
+
         hits: list[Hit] = []
         seen_relation_ids: set[str] = set()
-        for rel, security, relation_decision in {row[0].id: row for row in relation_by_pair.values()}.values():
+        for rel, _verdict, relation_decision, rel_branch in {row[0].id: row for row in relation_by_pair.values()}.values():
             if not (matches_seed(rel.source) and matches_seed(rel.target)):
                 continue
+            security = hit_security(rel, rel_branch)
             text, privacy_metadata = apply_relation_redactions(
                 source=rel.source,
                 predicate=rel.predicate,
@@ -3773,7 +4458,7 @@ class LocalMemoryEngine:
                     id=rel.id,
                     kind="relation",
                     tenant_id=rel.tenant_id,
-                    branch=rel.branch,
+                    branch=rel_branch,
                     text=text,
                     score=float(rel.confidence),
                     channel="graph_ppr",
@@ -3786,7 +4471,7 @@ class LocalMemoryEngine:
                         "target": relation_fields["target"],
                         "confidence": rel.confidence,
                         "created_at": iso_utc(rel.valid_from),
-                        "source_evidence_cids": list(rel.source_evidence_cids),
+                        "source_evidence_cids": _shared_or_copy(rel.source_evidence_cids),
                         "reality_class": security["reality_class"],
                         "source_evidence_status": security["source_evidence_status"],
                         "source_evidence_security": security["source_evidence_security"],
@@ -3799,12 +4484,13 @@ class LocalMemoryEngine:
                 return self._mark_retrieved_text_as_data(hits)
         for seed in seed_set:
             adjacency.setdefault(seed, [])
-        ranks = ppr_power_iteration(adjacency, matches_seed)
+        # Every edge was added in both directions and every seed is a key: the graph is closed.
+        ranks = ppr_power_iteration(adjacency, matches_seed, closed=True)
         # node -> relation row index, built once (was an O(V*E) per-node linear
         # scan). First-match semantics replicated exactly: for each node the
         # winning row is the one the linear scan found FIRST in relation_by_pair
         # insertion order — the earliest pair mentioning the node in either slot.
-        relation_by_node: dict[str, tuple[Relation, dict[str, Any], Any]] = {}
+        relation_by_node: dict[str, tuple[Relation, dict[str, Any], Any, Any]] = {}
         for pair, row in relation_by_pair.items():
             for pair_node in pair:
                 if pair_node not in relation_by_node:
@@ -3814,9 +4500,10 @@ class LocalMemoryEngine:
                 continue
             relation_row = relation_by_node.get(node)
             if relation_row:
-                rel, security, relation_decision = relation_row
+                rel, _verdict, relation_decision, rel_branch = relation_row
                 if rel.id in seen_relation_ids:
                     continue
+                security = hit_security(rel, rel_branch)
                 text, privacy_metadata = apply_relation_redactions(
                     source=rel.source,
                     predicate=rel.predicate,
@@ -3833,7 +4520,7 @@ class LocalMemoryEngine:
                         id=rel.id,
                         kind="relation",
                         tenant_id=rel.tenant_id,
-                        branch=rel.branch,
+                        branch=rel_branch,
                         text=text,
                         score=score,
                         channel="graph_ppr",
@@ -3846,7 +4533,7 @@ class LocalMemoryEngine:
                             "target": relation_fields["target"],
                             "confidence": rel.confidence,
                             "created_at": iso_utc(rel.valid_from),
-                            "source_evidence_cids": list(rel.source_evidence_cids),
+                            "source_evidence_cids": _shared_or_copy(rel.source_evidence_cids),
                             "reality_class": security["reality_class"],
                             "source_evidence_status": security["source_evidence_status"],
                             "source_evidence_security": security["source_evidence_security"],
@@ -3975,7 +4662,10 @@ class LocalMemoryEngine:
             tenant_id=tenant_id,
             location="entity.access_policy",
         )
-        source_cids = list(source_evidence_cids or [])
+        # A shared list is used as it is: it is read-only, and merging it is memoised.
+        source_cids = (
+            source_evidence_cids if type(source_evidence_cids) is CidList else list(source_evidence_cids or [])
+        )
         aliases = {canonical}
         if alias and alias.strip():
             aliases.add(alias.strip())
@@ -4013,7 +4703,9 @@ class LocalMemoryEngine:
                 row["summary"] = summary
             row["access_policy"] = effective_access_policy
             row["aliases"] = sorted(set(row.get("aliases", [])) | aliases)
-            row["source_evidence_cids"] = sorted(set(row.get("source_evidence_cids", [])) | set(source_cids))
+            # sorted(set(existing) | set(incoming)) as one shared read-only list: an entity named
+            # by every fact of a batch would otherwise hold its own copy of the batch's sources.
+            row["source_evidence_cids"] = _union_sorted_sources(row.get("source_evidence_cids", []), source_cids)
             row["updated_at"] = utc_now().isoformat()
             self.entities[key] = row
             self._audit(tenant_id, "engine", "register_entity", canonical, {"aliases": row["aliases"]})
@@ -4041,6 +4733,8 @@ class LocalMemoryEngine:
         }
 
     def _record_retrieval_access(self, hits: list[Hit]) -> dict[str, int]:
+        if self._overlays and any(hit.branch in self._overlays for hit in hits):
+            return self._overlay_record_access(hits)
         if self._read_only:
             return {"assertions": 0, "evidence": 0}
         touched_assertions = 0
@@ -4139,9 +4833,13 @@ class LocalMemoryEngine:
     def _hit_source_evidence_cids(hit: Hit) -> list[str]:
         raw = hit.metadata.get("source_evidence_cids")
         if isinstance(raw, list | tuple):
+            if type(raw) is CidList:
+                return _normalized_sources(raw)
             return [str(cid) for cid in raw if str(cid)]
         if isinstance(raw, str) and raw:
             return [raw]
+        if type(hit.provenance) is CidList:
+            return _normalized_sources(hit.provenance)
         return [str(cid) for cid in hit.provenance if str(cid)]
 
     def _filter_graph_adapter_hits(
@@ -4200,20 +4898,288 @@ class LocalMemoryEngine:
         max_trust: int,
         max_sensitivity: int,
         access_context: dict[str, Any] | None = None,
+        context_key: str | None = None,
     ) -> dict[str, Any] | None:
+        """Security of a relation hit, derived from the evidence rows it cites.
+
+        A pure function of the relation's tenant and ordered source list, the rows those CIDs
+        resolve to, the trust/sensitivity ceilings and the access context. For a shared source
+        list (mnemosyne.cid_lists) it is computed once and reused while no evidence row has
+        changed (evidence epoch). Rows with an expiring access policy depend on the wall clock
+        and are never cached.
+        """
+        return self._relation_security_memoised(
+            relation, branch=branch, include_quarantined=include_quarantined, max_trust=max_trust,
+            max_sensitivity=max_sensitivity, access_context=access_context, context_key=context_key, full=True,
+        )
+
+    def _relation_security_verdict(
+        self,
+        relation: Relation,
+        *,
+        branch: str,
+        include_quarantined: bool,
+        max_trust: int,
+        max_sensitivity: int,
+        access_context: dict[str, Any] | None = None,
+        context_key: str | None = None,
+    ) -> tuple[int, int] | None:
+        """``(trust_tier, sensitivity)`` of ``_relation_hit_security``, or None exactly when it is."""
+        return self._relation_security_memoised(
+            relation, branch=branch, include_quarantined=include_quarantined, max_trust=max_trust,
+            max_sensitivity=max_sensitivity, access_context=access_context, context_key=context_key, full=False,
+        )
+
+    def _relation_security_memoised(
+        self,
+        relation: Relation,
+        *,
+        branch: str,
+        include_quarantined: bool,
+        max_trust: int,
+        max_sensitivity: int,
+        access_context: dict[str, Any] | None,
+        context_key: str | None,
+        full: bool,
+    ) -> Any:
+        if context_key is None:
+            context_key = _access_context_key(access_context)
+        source = relation.source_evidence_cids
+        if type(source) is not CidList or context_key is None or not evidence_caching_safe():
+            return self._relation_security_from_facts(
+                relation, branch=branch, include_quarantined=include_quarantined, max_trust=max_trust,
+                max_sensitivity=max_sensitivity, access_context=access_context, context_key=context_key, full=full,
+            )[0]
+        memo_key = (
+            id(source), relation.tenant_id, self._evidence_resolution_branch(relation.tenant_id, branch),
+            bool(include_quarantined), int(max_trust), int(max_sensitivity), int(self.policy.max_sensitivity),
+            context_key,
+        )
+        memo, limit = (
+            (self._relation_security_memo, _RELATION_SECURITY_MEMO_SIZE)
+            if full
+            else (self._relation_verdict_memo, _RELATION_VERDICT_MEMO_SIZE)
+        )
+        epoch = evidence_epoch()
+        entry = memo.get(memo_key)
+        if entry is not None and entry[0] is source and entry[1] == epoch:
+            return entry[2]
+        result, cacheable = self._relation_security_from_facts(
+            relation, branch=branch, include_quarantined=include_quarantined, max_trust=max_trust,
+            max_sensitivity=max_sensitivity, access_context=access_context, context_key=context_key, full=full,
+        )
+        if cacheable and evidence_epoch() == epoch:
+            memo.pop(memo_key, None)
+            memo[memo_key] = (source, epoch, result)
+            while len(memo) > limit:
+                del memo[next(iter(memo))]
+        return result
+
+    def _relation_security_from_facts(
+        self,
+        relation: Relation,
+        *,
+        branch: str,
+        include_quarantined: bool,
+        max_trust: int,
+        max_sensitivity: int,
+        access_context: dict[str, Any] | None,
+        context_key: str | None,
+        full: bool,
+    ) -> tuple[Any, bool]:
+        """``_relation_hit_security_compute`` from per-row facts: (result, cacheable).
+
+        Same rows visited in the same order, the same first-failure exits, the same
+        maxima, and the corroboration report assembled exactly as
+        ``_independent_corroboration_report_from_evidence`` builds it (same entries, same
+        order, same float accumulation). With ``full=False`` the result is only
+        ``(trust_tier, sensitivity)``. Not cacheable when any inspected row's access expires.
+        """
         source_cids = [cid for cid in relation.source_evidence_cids if cid]
         if not source_cids:
-            return None
+            return None, True
+        cacheable = True
+        facts_list: list[_RowSecurity] = []
+        for cid in source_cids:
+            ev = self._evidence_row(relation.tenant_id, branch, cid)
+            facts = self._security_row_facts(
+                ev, tenant_id=relation.tenant_id, include_quarantined=include_quarantined,
+                access_context=access_context, context_key=context_key,
+            )
+            if facts.expires:
+                cacheable = False
+            if not facts.readable:
+                return None, cacheable
+            facts_list.append(facts)
+        trust_tier = max(facts.trust_tier for facts in facts_list)
+        sensitivity = max(facts.sensitivity for facts in facts_list)
+        if trust_tier > max_trust or sensitivity > max_sensitivity:
+            return None, cacheable
+        if not full:
+            return (trust_tier, sensitivity), cacheable
+        roots: set[str] = set()
+        accepted: list[dict[str, Any]] = []
+        rejected: list[dict[str, Any]] = []
+        self_generated_count = 0
+        trust_sum = 0.0
+        for facts in facts_list:
+            if facts.counts_self_generated:
+                self_generated_count += 1
+            if facts.rejected is not None:
+                rejected.append(facts.rejected)
+                continue
+            if facts.root in roots:
+                rejected.append(facts.duplicate)
+                continue
+            roots.add(facts.root)
+            trust_sum += facts.weight
+            accepted.append(facts.accepted)
+        corroboration = {
+            "independent_corroboration_count": len(accepted),
+            "independent_corroboration_weight": round(min(trust_sum, 5.0) / 5.0, 6),
+            "self_generated_corroboration_count": self_generated_count,
+            "rejected_corroboration_count": len(rejected),
+            "accepted_corroborators": accepted,
+            "rejected_corroborators": rejected,
+        }
+        return {
+            "trust_tier": trust_tier,
+            "sensitivity": sensitivity,
+            "reality_class": self._aggregate_reality_classes([facts.reality_class for facts in facts_list]),
+            "source_evidence_status": "source_evidence_visible",
+            "independent_corroboration": corroboration,
+            "source_evidence_security": [facts.security_entry for facts in facts_list],
+        }, cacheable
+
+    def _security_row_facts(
+        self,
+        ev: Evidence | None,
+        *,
+        tenant_id: str,
+        include_quarantined: bool,
+        access_context: dict[str, Any] | None,
+        context_key: str | None,
+    ) -> _RowSecurity:
+        """Everything relation security reads from one evidence row, once per row and epoch."""
+        if ev is None:
+            return _ROW_MISSING
+        caching = context_key is not None and evidence_caching_safe()
+        key = (id(ev), tenant_id, bool(include_quarantined), context_key, int(self.policy.max_sensitivity))
+        epoch = evidence_epoch()
+        if caching:
+            entry = self._security_row_memo.get(key)
+            if entry is not None and entry[0] is ev and entry[1] == epoch:
+                return entry[2]
+        facts = self._security_row_facts_compute(
+            ev, tenant_id=tenant_id, include_quarantined=include_quarantined, access_context=access_context
+        )
+        if caching and not facts.expires and evidence_epoch() == epoch:
+            memo = self._security_row_memo
+            memo.pop(key, None)
+            memo[key] = (ev, epoch, facts)
+            while len(memo) > _SECURITY_ROW_MEMO_SIZE:
+                del memo[next(iter(memo))]
+        return facts
+
+    def _security_row_facts_compute(
+        self,
+        ev: Evidence,
+        *,
+        tenant_id: str,
+        include_quarantined: bool,
+        access_context: dict[str, Any] | None,
+    ) -> _RowSecurity:
+        facts = _RowSecurity()
+        facts.expires = _policy_expires(ev.access_policy)
+        if (
+            ev.erased
+            or (not include_quarantined and ev.metadata.get("quarantine_reason"))
+            or is_retired_summary_metadata(ev.metadata)
+        ):
+            return facts
+        decision = may_read_item(
+            item_tenant_id=ev.tenant_id,
+            sensitivity=int(ev.sensitivity),
+            access_policy=ev.access_policy,
+            context={**dict(access_context or {}), "tenant_id": tenant_id},
+            policy_max_sensitivity=self.policy.max_sensitivity,
+            status="active",
+            erased=ev.erased,
+        )
+        if not decision.allowed:
+            return facts
+        facts.readable = True
+        facts.trust_tier = int(ev.trust_tier)
+        facts.sensitivity = int(ev.sensitivity)
+        reality_class = self._classify_evidence_reality(ev)
+        facts.reality_class = reality_class
+        facts.security_entry = {
+            "cid": ev.cid,
+            "trust_tier": facts.trust_tier,
+            "sensitivity": facts.sensitivity,
+            "reality_class": reality_class,
+            "access_policy_enforced": True,
+        }
+        # As _independent_corroboration_report_from_evidence classifies one row.
+        cid = ev.cid or ""
+        metadata = ev.metadata if isinstance(ev.metadata, dict) else {}
+        reason = None
+        if ev.erased:
+            reason = "erased"
+        elif metadata.get("quarantine_reason"):
+            reason = "quarantined"
+        elif is_retired_summary_metadata(metadata):
+            reason = "retired"
+        elif is_write_tainted(ev.capability_tags):
+            reason = "sanitized_data_only"
+        if reason is None and reality_class != "grounded":
+            reason = f"not_grounded:{reality_class}"
+            facts.counts_self_generated = reality_class in {"self_generated", "simulated"}
+        if reason is None and self._has_self_generated_ancestor(metadata):
+            reason = "shares_self_generated_ancestor"
+        root = self._independent_source_key(ev)
+        facts.root = root
+        facts.rejected = None if reason is None else {"cid": cid, "reason": reason, "reality_class": reality_class}
+        facts.duplicate = {"cid": cid, "reason": "duplicate_source_root", "reality_class": reality_class}
+        weight = trust_weight(facts.trust_tier)
+        facts.weight = weight
+        facts.accepted = {"cid": cid, "root": root, "trust_tier": facts.trust_tier, "weight": round(weight, 6)}
+        return facts
+
+    def _evidence_resolution_branch(self, tenant_id: str, branch: str) -> str:
+        """The branch whose rows ``_evidence_row(tenant_id, branch, cid)`` reads.
+
+        An overlay canary that holds no evidence of its own reads its parent's rows exactly.
+        """
+        overlay = (self._overlays or {}).get(branch)
+        if overlay is not None and overlay.tenant_id == tenant_id and not self._evidence_items.in_branch(tenant_id, branch):
+            return overlay.parent
+        return branch
+
+    def _relation_hit_security_compute(
+        self,
+        relation: Relation,
+        *,
+        branch: str,
+        include_quarantined: bool,
+        max_trust: int,
+        max_sensitivity: int,
+        access_context: dict[str, Any] | None = None,
+    ) -> tuple[dict[str, Any] | None, bool]:
+        """(security, cacheable): cacheable is False when an inspected row's access expires."""
+        source_cids = [cid for cid in relation.source_evidence_cids if cid]
+        if not source_cids:
+            return None, True
 
         source_rows: list[Evidence] = []
         for cid in source_cids:
-            ev = self.evidence.get(self._evidence_key(relation.tenant_id, branch, cid))
+            ev = self._evidence_row(relation.tenant_id, branch, cid)
             if ev is None or ev.erased:
-                return None
+                return None, True
             if not include_quarantined and ev.metadata.get("quarantine_reason"):
-                return None
+                return None, True
             if is_retired_summary_metadata(ev.metadata):
-                return None
+                return None, True
             decision = may_read_item(
                 item_tenant_id=ev.tenant_id,
                 sensitivity=int(ev.sensitivity),
@@ -4223,14 +5189,19 @@ class LocalMemoryEngine:
                 status="active",
                 erased=ev.erased,
             )
-            if not decision.allowed:
-                return None
+            if _policy_expires(ev.access_policy):
+                cacheable = False
+                if not decision.allowed:
+                    return None, cacheable
+            elif not decision.allowed:
+                return None, all(not _policy_expires(row.access_policy) for row in source_rows)
             source_rows.append(ev)
+        cacheable = all(not _policy_expires(row.access_policy) for row in source_rows)
 
         trust_tier = max(int(ev.trust_tier) for ev in source_rows)
         sensitivity = max(int(ev.sensitivity) for ev in source_rows)
         if trust_tier > max_trust or sensitivity > max_sensitivity:
-            return None
+            return None, cacheable
 
         reality_classes = [self._classify_evidence_reality(ev) for ev in source_rows]
         corroboration = self._independent_corroboration_report_from_evidence(source_rows)
@@ -4250,7 +5221,7 @@ class LocalMemoryEngine:
                 }
                 for ev in source_rows
             ],
-        }
+        }, cacheable
 
     def _standing_signals_for_hit(self, hit: Hit, reality_class: str) -> dict[str, Any]:
         activation = hit.metadata.get("activation") if isinstance(hit.metadata, dict) else {}
@@ -4300,10 +5271,48 @@ class LocalMemoryEngine:
         branch: str,
         source_evidence_cids: list[str],
     ) -> dict[str, Any]:
+        """Independent-corroboration report over the evidence rows the CIDs resolve to.
+
+        Depends only on the set of CIDs, the tenant and the rows; for a shared source list it
+        is computed once per evidence epoch. Every caller gets its own top-level lists.
+        """
+        if not evidence_caching_safe():
+            return self._independent_corroboration_report_compute(
+                tenant_id=tenant_id, branch=branch, source_evidence_cids=source_evidence_cids
+            )
+        # The report reads only the SET of CIDs: every ordering of the same sources shares it.
+        key = (_source_set(source_evidence_cids), tenant_id, self._evidence_resolution_branch(tenant_id, branch))
+        epoch = evidence_epoch()
+        entry = self._corroboration_memo.get(key)
+        if entry is not None and entry[1] == epoch:
+            report = entry[2]
+        else:
+            report = self._independent_corroboration_report_compute(
+                tenant_id=tenant_id, branch=branch, source_evidence_cids=source_evidence_cids
+            )
+            if evidence_epoch() == epoch:
+                memo = self._corroboration_memo
+                memo.pop(key, None)
+                memo[key] = (None, epoch, report)
+                while len(memo) > _SET_MEMO_SIZE:
+                    del memo[next(iter(memo))]
+        return {
+            **report,
+            "accepted_corroborators": list(report["accepted_corroborators"]),
+            "rejected_corroborators": list(report["rejected_corroborators"]),
+        }
+
+    def _independent_corroboration_report_compute(
+        self,
+        *,
+        tenant_id: str,
+        branch: str,
+        source_evidence_cids: list[str],
+    ) -> dict[str, Any]:
         rows: list[Evidence] = []
         missing: list[str] = []
         for cid in sorted({str(item) for item in source_evidence_cids if item}):
-            ev = self.evidence.get(self._evidence_key(tenant_id, branch, cid))
+            ev = self._evidence_row(tenant_id, branch, cid)
             if ev is None:
                 missing.append(cid)
             else:
@@ -4421,7 +5430,7 @@ class LocalMemoryEngine:
                     text=hit.text,
                     score=max(hit.score, 0.0) * multiplier,
                     channel=hit.channel,
-                    provenance=list(hit.provenance),
+                    provenance=_shared_or_copy(hit.provenance),
                     trust_tier=hit.trust_tier,
                     sensitivity=hit.sensitivity,
                     metadata=metadata,
@@ -4563,7 +5572,7 @@ class LocalMemoryEngine:
     def as_of(self, subject: str, predicate: str, t: datetime, tenant_id: str | None = None, branch: str = "main") -> list[Assertion]:
         moment = t.astimezone(UTC) if t.tzinfo else t.replace(tzinfo=UTC)
         matches = []
-        for item in self.assertions.values():
+        for item in self.assertions.select(tenant_id or None, branch).values():
             if tenant_id and item.tenant_id != tenant_id:
                 continue
             if item.branch != branch:
@@ -4725,7 +5734,7 @@ class LocalMemoryEngine:
                 minimum = self.policy.min_corroboration_for_delete
                 blocking = [
                     assertion.id
-                    for assertion in self.assertions.values()
+                    for assertion in self.assertions.in_branch(tenant_id, branch).values()
                     if assertion.tenant_id == tenant_id
                     and assertion.branch == branch
                     and assertion.status == "active"
@@ -4822,7 +5831,7 @@ class LocalMemoryEngine:
                 retained_metadata_by_cid=retained_cascade_metadata,
                 metadata_by_cid=cascade_metadata,
             )
-            for assertion in self.assertions.values():
+            for assertion in self.assertions.in_branch(tenant_id, branch).values():
                 if assertion.tenant_id != tenant_id or assertion.branch != branch:
                     continue
                 if not affected_cids.intersection(assertion.source_evidence_cids):
@@ -4850,7 +5859,7 @@ class LocalMemoryEngine:
                 else:
                     preference.source_evidence_cids = surviving_sources
                     propagated["trimmed_preferences"].append(preference.id)
-            for relation in self.relations.values():
+            for relation in self.relations.in_branch(tenant_id, branch).values():
                 if relation.tenant_id != tenant_id or relation.branch != branch:
                     continue
                 if not affected_cids.intersection(relation.source_evidence_cids):
@@ -4949,11 +5958,44 @@ class LocalMemoryEngine:
             return {"erased": True, "cid": cid, "erasure_mode": mode.value, "propagated": propagated}
 
     def export_tenant(self, tenant_id: str) -> dict[str, Any]:
+        # Branches with a merge audit row for this tenant (or "*"), built once: the merge_log
+        # selection below used to rescan the whole audit log for every merge row.
+        merge_targets: set[Any] = set()
+        merge_targets_exact = True
+        for audit in self.audit_log:
+            if audit.get("op") == "merge" and audit.get("tenant_id") in {tenant_id, "*"}:
+                try:
+                    merge_targets.add(audit.get("target_id"))
+                except TypeError:
+                    merge_targets_exact = False
+
+        def merged_here(item: dict[str, Any]) -> bool:
+            source = item.get("from_branch")
+            if merge_targets_exact:
+                try:
+                    return source in merge_targets
+                except TypeError:
+                    pass
+            return any(
+                audit.get("op") == "merge"
+                and audit.get("target_id") == source
+                and audit.get("tenant_id") in {tenant_id, "*"}
+                for audit in self.audit_log
+            )
+
         return {
             "tenant_id": tenant_id,
-            "evidence": [item.to_dict() for item in self.evidence.values() if item.tenant_id == tenant_id and not item.erased],
-            "assertions": [item.to_dict() for item in self.assertions.values() if item.tenant_id == tenant_id],
-            "relations": [item.to_dict() for item in self.relations.values() if item.tenant_id == tenant_id],
+            "evidence": [
+                item.to_dict()
+                for item in self.evidence.of_tenant(tenant_id).values()
+                if item.tenant_id == tenant_id and not item.erased
+            ],
+            "assertions": [
+                item.to_dict() for item in self.assertions.of_tenant(tenant_id).values() if item.tenant_id == tenant_id
+            ],
+            "relations": [
+                item.to_dict() for item in self.relations.of_tenant(tenant_id).values() if item.tenant_id == tenant_id
+            ],
             "preferences": [item.to_dict() for item in self.preferences.values() if item.tenant_id == tenant_id],
             "calibrations": [item.to_dict() for item in self.calibrations.values() if item.tenant_id == tenant_id],
             "entities": [dict(item) for item in self.entities.values() if item.get("tenant_id") == tenant_id],
@@ -4966,16 +6008,7 @@ class LocalMemoryEngine:
             ],
             "audit_log": [item for item in self.audit_log if item.get("tenant_id") == tenant_id],
             "deletion_log": [item for item in self.deletion_log if item.get("tenant_id") == tenant_id],
-            "merge_log": [
-                item
-                for item in self.merge_log
-                if any(
-                    audit.get("op") == "merge"
-                    and audit.get("target_id") == item.get("from_branch")
-                    and audit.get("tenant_id") in {tenant_id, "*"}
-                    for audit in self.audit_log
-                )
-            ],
+            "merge_log": [item for item in self.merge_log if merged_here(item)],
         }
 
     def export_tenant_filtered(self, tenant_id: str, access_context: dict[str, Any]) -> dict[str, Any]:
@@ -4986,6 +6019,8 @@ class LocalMemoryEngine:
         )
 
     def branch(self, name: str, frm: str = "main", kind: str = "scratch", tenant_id: str | None = None) -> None:
+        if self._overlay_create(name, frm, kind, tenant_id):
+            return
         with self._lock:
             if name in self.branches and tenant_id is None:
                 return
@@ -4997,18 +6032,18 @@ class LocalMemoryEngine:
             branch_tenants = set(branch_meta.get("tenants") or [])
             if tenant_id is not None and tenant_id in branch_tenants:
                 return
-            for ev in list(self.evidence.values()):
+            for ev in list(self.evidence.branch_view(tenant_id, frm).values()):
                 if ev.branch == frm and (tenant_id is None or ev.tenant_id == tenant_id):
                     cloned = copy.deepcopy(ev)
                     cloned.branch = name
                     if cloned.cid:
                         self.evidence[self._evidence_key(cloned.tenant_id, name, cloned.cid)] = cloned
-            for assertion in list(self.assertions.values()):
+            for assertion in list(self.assertions.branch_view(tenant_id, frm).values()):
                 if assertion.branch == frm and (tenant_id is None or assertion.tenant_id == tenant_id):
                     cloned = copy.deepcopy(assertion)
                     cloned.branch = name
                     self.assertions[self._branch_key(cloned.tenant_id, name, cloned.id)] = cloned
-            for rel in list(self.relations.values()):
+            for rel in list(self.relations.branch_view(tenant_id, frm).values()):
                 if rel.branch == frm and (tenant_id is None or rel.tenant_id == tenant_id):
                     cloned = copy.deepcopy(rel)
                     cloned.branch = name
@@ -5019,13 +6054,16 @@ class LocalMemoryEngine:
             self._persist()
 
     def merge(self, frm: str, into: str = "main", tenant_id: str | None = None) -> MergeReport:
+        overlay = self._overlays.get(frm) if self._overlays else None
+        if overlay is not None and into == overlay.parent and tenant_id in {None, overlay.tenant_id}:
+            return self._merge_overlay(frm, into, tenant_id)
         with self._lock:
             self._require_branch(frm)
             self._require_branch(into)
             report = MergeReport(frm, into, 0, 0, 0, 0, [])
             for ev in [
                 item
-                for item in self.evidence.values()
+                for item in self.evidence.branch_view(tenant_id, frm).values()
                 if item.branch == frm and not item.erased and (tenant_id is None or item.tenant_id == tenant_id)
             ]:
                 if not ev.cid:
@@ -5038,7 +6076,7 @@ class LocalMemoryEngine:
                     report.evidence_added += 1
             source_assertions = [
                 item
-                for item in self.assertions.values()
+                for item in self.assertions.branch_view(tenant_id, frm).values()
                 if item.branch == frm and (tenant_id is None or item.tenant_id == tenant_id)
             ]
             # Phase 1: replay each source assertion, recording its real
@@ -5067,12 +6105,14 @@ class LocalMemoryEngine:
             report.assertion_id_map = assertion_id_map
             for rel in [
                 item
-                for item in self.relations.values()
+                for item in self.relations.branch_view(tenant_id, frm).values()
                 if item.branch == frm and (tenant_id is None or item.tenant_id == tenant_id)
             ]:
                 peers = [
                     item
-                    for item in self.relations.values()
+                    for item in self.relations.peers(
+                        rel.tenant_id, into, rel.source, rel.predicate, rel.target
+                    ).values()
                     if item.tenant_id == rel.tenant_id
                     and item.branch == into
                     and item.source == rel.source
@@ -5103,30 +6143,30 @@ class LocalMemoryEngine:
     def discard(self, branch: str, tenant_id: str | None = None) -> None:
         if branch == "main":
             raise ValueError("main branch cannot be discarded")
+        if self._overlays and branch in self._overlays:
+            return self._discard_overlay(branch, tenant_id)
         with self._lock:
             self._require_branch(branch)
             discarded_assertion_ids = {
                 item.id
-                for item in self.assertions.values()
+                for item in self.assertions.branch_view(tenant_id, branch).values()
                 if item.branch == branch and (tenant_id is None or item.tenant_id == tenant_id)
             }
-            self.evidence = {
-                key: item
-                for key, item in self.evidence.items()
-                if not (item.branch == branch and (tenant_id is None or item.tenant_id == tenant_id))
-            }
-            self.assertions = {
-                key: item
-                for key, item in self.assertions.items()
-                if not (item.branch == branch and (tenant_id is None or item.tenant_id == tenant_id))
-            }
-            self.relations = {
-                key: item
-                for key, item in self.relations.items()
-                if not (item.branch == branch and (tenant_id is None or item.tenant_id == tenant_id))
-            }
+            # Removing the branch's keys leaves every other item in its place - the same
+            # contents and order as rebuilding the dicts without them.
+            for store in (self.evidence, self.assertions, self.relations):
+                for key in [
+                    key
+                    for key, item in store.branch_view(tenant_id, branch).items()
+                    if item.branch == branch and (tenant_id is None or item.tenant_id == tenant_id)
+                ]:
+                    del store[key]
             surviving_assertion_ids = {
-                item.id for item in self.assertions.values() if tenant_id is None or item.tenant_id == tenant_id
+                item.id
+                for item in (
+                    self.assertions.values() if tenant_id is None else self.assertions.of_tenant(tenant_id).values()
+                )
+                if tenant_id is None or item.tenant_id == tenant_id
             }
             orphaned_assertion_ids = discarded_assertion_ids - surviving_assertion_ids
             if orphaned_assertion_ids:
@@ -5146,7 +6186,7 @@ class LocalMemoryEngine:
                     or (item.a not in orphaned_assertion_ids and item.b not in orphaned_assertion_ids)
                 }
             branch_rows_remain = any(
-                item.branch == branch for item in [*self.evidence.values(), *self.assertions.values(), *self.relations.values()]
+                store.in_any_branch(branch) for store in (self.evidence, self.assertions, self.relations)
             )
             if tenant_id is not None and branch_rows_remain:
                 branch_meta = self.branches.get(branch)
@@ -5169,6 +6209,25 @@ class LocalMemoryEngine:
         tests/test_engine_perf_lanes.py. Kill-switch:
         MNEMOSYNE_CANDIDATE_MEMO=0.
         """
+        templates = self._candidate_templates(filt)
+        finish = getattr(templates, "finish", None)
+        if finish is not None:
+            return [finish(_clone_candidate_hit(hit), hit) for hit in templates]
+        return [_clone_candidate_hit(hit) for hit in templates]
+
+    def _candidate_templates(self, filt: dict[str, Any]) -> list[Hit]:
+        """``_candidate_hits`` without the per-hit clones - the memoized candidates themselves.
+
+        Read-only: a channel that scores every candidate clones (``_clone_candidate_hit``) only
+        the hits it keeps, instead of cloning the whole candidate list on every query. The
+        hits it returns are exactly the clones ``_candidate_hits`` would have produced.
+        """
+        if self._overlays:
+            overlay = self._overlays.get(filt.get("branch", "main"))
+            if overlay is not None:
+                templates = self._overlay_candidate_templates(filt, overlay)
+                if templates is not None:
+                    return templates
         if not _candidate_memo_enabled():
             return self._candidate_hits_uncached(filt)
         key = (
@@ -5212,7 +6271,7 @@ class LocalMemoryEngine:
                 self._candidate_memo.move_to_end(key)
                 while len(self._candidate_memo) > _CANDIDATE_MEMO_SIZE:
                     self._candidate_memo.popitem(last=False)
-        return [_clone_candidate_hit(hit) for hit in cached]
+        return cached
 
     def _candidate_memo_deadline(self, tenant_id: Any, branch: Any, now: datetime) -> datetime | None:
         """Earliest future ``expires_at`` across the rows a candidate scan reads.
@@ -5225,8 +6284,16 @@ class LocalMemoryEngine:
         """
         deadline: datetime | None = None
         policies = (
-            *(ev.access_policy for ev in self.evidence.values() if ev.tenant_id == tenant_id and ev.branch == branch),
-            *(a.access_policy for a in self.assertions.values() if a.tenant_id == tenant_id and a.branch == branch),
+            *(
+                ev.access_policy
+                for ev in self.evidence.in_branch(tenant_id, branch).values()
+                if ev.tenant_id == tenant_id and ev.branch == branch
+            ),
+            *(
+                a.access_policy
+                for a in self.assertions.in_branch(tenant_id, branch).values()
+                if a.tenant_id == tenant_id and a.branch == branch
+            ),
             *(p.access_policy for p in self.preferences.values() if p.tenant_id == tenant_id),
         )
         for policy in policies:
@@ -5237,7 +6304,19 @@ class LocalMemoryEngine:
                 deadline = candidate
         return deadline
 
-    def _candidate_hits_uncached(self, filt: dict[str, Any]) -> list[Hit]:
+    def _candidate_hits_uncached(
+        self,
+        filt: dict[str, Any],
+        *,
+        evidence_items: Any = None,
+        assertion_items: Any = None,
+        include_preferences: bool = True,
+    ) -> list[Hit]:
+        """Project the branch's readable rows into candidate hits.
+
+        ``evidence_items``/``assertion_items`` replace the branch's own rows - a thin canary
+        projects single rows through this same code (canary_overlay).
+        """
         tenant_id = filt.get("tenant_id")
         branch = filt.get("branch", "main")
         include_quarantined = bool(filt.get("include_quarantined", False))
@@ -5245,7 +6324,7 @@ class LocalMemoryEngine:
         max_trust = int(filt.get("max_trust_tier", filt.get("min_trust_tier", default_max_trust)))
         max_sensitivity = effective_max_sensitivity(filt, self.policy.max_sensitivity)
         hits: list[Hit] = []
-        for ev in self.evidence.values():
+        for ev in self.evidence.in_branch(tenant_id, branch).values() if evidence_items is None else evidence_items:
             if ev.erased or ev.tenant_id != tenant_id or ev.branch != branch:
                 continue
             if ev.trust_tier > max_trust or ev.sensitivity > max_sensitivity:
@@ -5309,7 +6388,9 @@ class LocalMemoryEngine:
                     metadata=metadata,
                 )
             )
-        for assertion in self.assertions.values():
+        for assertion in (
+            self.assertions.in_branch(tenant_id, branch).values() if assertion_items is None else assertion_items
+        ):
             if assertion.tenant_id != tenant_id or assertion.branch != branch:
                 continue
             if assertion.status not in {"active", "contested"}:
@@ -5344,7 +6425,7 @@ class LocalMemoryEngine:
                     text=text,
                     score=0.0,
                     channel="candidate",
-                    provenance=list(assertion.source_evidence_cids),
+                    provenance=_shared_or_copy(assertion.source_evidence_cids),
                     trust_tier=assertion.trust_tier,
                     sensitivity=assertion.sensitivity,
                     metadata={
@@ -5361,7 +6442,7 @@ class LocalMemoryEngine:
                     },
                 )
             )
-        for pref in self.preferences.values():
+        for pref in self.preferences.values() if include_preferences else ():
             if pref.tenant_id != tenant_id or pref.status != "active":
                 continue
             decision = may_read_item(
@@ -5414,8 +6495,28 @@ class LocalMemoryEngine:
         *,
         allow_fallback: bool = True,
     ) -> list[float] | None:
+        stored = self._stored_embedding_for_hit(hit, filt)
+        if stored is not None:
+            return stored
+        if not allow_fallback:
+            return None
+        partition = str(hit.metadata.get("embedding_partition") or VECTOR_PARTITION_PUBLIC)
+        if partition == "none":
+            return None
+        hit.metadata["stored_embedding_used"] = False
+        return self._embed_text(hit.text)
+
+    def _stored_embedding_for_hit(self, hit: Hit, filt: dict[str, Any] | None = None) -> list[float] | None:
+        """The evidence row's own stored embedding when policy allows using it, else None."""
+        stored = self._stored_embedding_value(hit, filt)
+        if stored is not None:
+            hit.metadata["stored_embedding_used"] = True
+        return stored
+
+    def _stored_embedding_value(self, hit: Hit, filt: dict[str, Any] | None = None) -> list[float] | None:
+        """``_stored_embedding_for_hit`` without writing ``stored_embedding_used`` into the hit."""
         if hit.kind == "evidence":
-            ev = self.evidence.get(self._evidence_key(hit.tenant_id, hit.branch, hit.id))
+            ev = self._evidence_row(hit.tenant_id, hit.branch, hit.id)
             if ev and ev.embedding:
                 decision = may_read_item(
                     item_tenant_id=ev.tenant_id,
@@ -5432,15 +6533,8 @@ class LocalMemoryEngine:
                     access_policy=ev.access_policy,
                     embedding_partition=ev.metadata.get("embedding_partition"),
                 ):
-                    hit.metadata["stored_embedding_used"] = True
                     return ev.embedding
-        if not allow_fallback:
-            return None
-        partition = str(hit.metadata.get("embedding_partition") or VECTOR_PARTITION_PUBLIC)
-        if partition == "none":
-            return None
-        hit.metadata["stored_embedding_used"] = False
-        return self._embed_text(hit.text)
+        return None
 
     def _embed_text(self, text: str) -> list[float]:
         return self.adapters.embedding.embed(text)
@@ -5457,6 +6551,9 @@ class LocalMemoryEngine:
             query_vec=embed_query(self.adapters.embedding, query),
             embed_hit=lambda hit: self._embedding_for_hit(hit, allow_fallback=True),
             mmr_lambda=self.policy.mmr_lambda,
+            # The built-in hashing embedder is pure and _embedding_for_hit only re-writes the
+            # same stored_embedding_used flag, so each hit may be embedded once (exact).
+            embed_once=type(self.adapters.embedding) is HashingEmbeddingProvider,
         )
 
     @staticmethod
@@ -5539,7 +6636,7 @@ class LocalMemoryEngine:
         changed = True
         while changed:
             changed = False
-            for item in self.evidence.values():
+            for item in self.evidence.in_branch(tenant_id, branch).values():
                 item_cid = item.cid
                 if (
                     item.tenant_id != tenant_id
@@ -5567,7 +6664,7 @@ class LocalMemoryEngine:
         changed = True
         while changed:
             changed = False
-            for item in self.evidence.values():
+            for item in self.evidence.in_branch(tenant_id, branch).values():
                 item_cid = item.cid
                 if (
                     item.tenant_id != tenant_id
@@ -5628,7 +6725,8 @@ class LocalMemoryEngine:
         for name, meta in self.branches.items():
             tenants = {
                 item.tenant_id
-                for item in [*self.evidence.values(), *self.assertions.values(), *self.relations.values()]
+                for store in (self.evidence, self.assertions, self.relations)
+                for item in store.in_any_branch(name).values()
                 if item.branch == name
             }
             tenants.update(meta.get("tenants") or [])

@@ -1824,6 +1824,14 @@ def _consolidate_captured_batch(
         raise ValueError(
             "capture-batch --consolidate requires at least one regression gate case"
         )
+    gate_batch = getattr(args, "consolidation_gate_batch", 1)
+    if type(gate_batch) is not int or gate_batch < 1:
+        raise ValueError("--consolidation-gate-batch must be a positive integer")
+    if gate_batch > 1:
+        from mnemosyne.consolidation import PROMOTION_GATE_BATCH_SIZE_KEY
+
+        for payload in grouped.values():
+            payload[PROMOTION_GATE_BATCH_SIZE_KEY] = gate_batch
 
     queue = InProcessQueue()
     metrics = MetricsRegistry()
@@ -1872,15 +1880,27 @@ def _consolidate_captured_batch(
         )
         if isinstance(candidate, dict) and not candidate.get("promoted")
     ]
-    if rejected:
+    if rejected and getattr(args, "consolidation_rejections", "refuse") != "report":
         raise RuntimeError(
             "capture-batch consolidation rejected semantic candidates: "
             + ", ".join(str(item.get("candidate_id") or "unknown") for item in rejected[:5])
         )
-    return {
+    summary: dict[str, Any] = {
         "jobs": [jobs[job.id].to_dict() for job in queued],
         "metrics": metrics.snapshot().to_dict(),
     }
+    if getattr(args, "consolidation_rejections", "refuse") == "report":
+        # Opt-in: the gate's rejections are reported, not fatal. Every rejected candidate's
+        # trial branch was discarded by the gate, exactly as in the default mode.
+        summary["rejected_candidates"] = [
+            {
+                "candidate_id": item.get("candidate_id"),
+                "failed_cases": list(item.get("failed_cases") or []),
+                "protected_regressions": list(item.get("protected_regressions") or []),
+            }
+            for item in rejected
+        ]
+    return summary
 
 
 def cmd_eval_query_batch(args: argparse.Namespace) -> None:
@@ -19346,6 +19366,28 @@ def build_parser() -> argparse.ArgumentParser:
         "--consolidate",
         action="store_true",
         help="Consolidate every captured CID before atomically publishing the store",
+    )
+    capture_batch.add_argument(
+        "--consolidation-rejections",
+        choices=("refuse", "report"),
+        default="refuse",
+        help=(
+            "refuse (default): publish nothing when the promotion gate rejects any candidate. "
+            "report: publish the captured evidence and every promoted fact, and list the "
+            "gate-rejected candidates (their trial branches are discarded as always)"
+        ),
+    )
+    capture_batch.add_argument(
+        "--consolidation-gate-batch",
+        type=int,
+        default=1,
+        metavar="N",
+        help=(
+            "promotion-gate candidates per gate run (default 1: one run per candidate). "
+            "Above 1 the gate runs once per group of up to N candidates on one canary branch; "
+            "a failing group is split in half until single candidates take the per-candidate "
+            "gate, so every merge follows a passing run and every rejection is per candidate"
+        ),
     )
     capture_batch.set_defaults(func=cmd_capture_batch)
 

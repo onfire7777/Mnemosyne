@@ -7,6 +7,7 @@ import os
 import re
 import secrets
 import subprocess
+from collections import Counter, OrderedDict, defaultdict
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
@@ -14,6 +15,7 @@ from typing import Any, Callable, Mapping, Protocol, Sequence
 from uuid import NAMESPACE_URL, uuid5
 
 from mnemosyne.access_policy import expiry_deadline, may_read_item, merge_access_policies, validate_access_policy
+from mnemosyne.cid_lists import CidList, evidence_caching_safe, evidence_epoch, intern_cids
 from mnemosyne.command_line import split_command
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.gate import (
@@ -35,6 +37,8 @@ from mnemosyne.text import hashing_embedding
 from mnemosyne.user_model import LatentUserProfile, UserModel
 
 CONSOLIDATE_EVIDENCE_JOB = "consolidate_evidence"
+# Base corroboration lists memoised per source list (a batch's candidates share few lists).
+_BASE_MEMO_SIZE = 16
 CONSOLIDATE_SLEEP_JOB = "consolidate_sleep"
 DEFAULT_CONSOLIDATION_PASSES = [
     "replayer",
@@ -273,6 +277,79 @@ class ConsolidationJob:
         return asdict(self)
 
 
+def _signature_bucket(signature: Any) -> tuple[str, ...] | None:
+    """A bucket key for a procedure signature: its field names, sorted.
+
+    Only the NAMES, never the values. Two equal dicts necessarily have equal key sets, so
+    they always land in the same bucket - which a key built from values could not promise
+    (``{"t": 1}`` and ``{"t": 1.0}`` are equal dicts whose canonical JSON differs). The match
+    inside a bucket is then real dict equality, so this finds exactly what a scan over the
+    whole store found: the first procedure in store order whose signature compares equal.
+    Returns None for a signature that is not a mapping of strings, which keeps the scan.
+    """
+    if not isinstance(signature, Mapping):
+        return None
+    names = list(signature)
+    if not all(type(name) is str for name in names):
+        return None
+    return tuple(sorted(names))
+
+
+PROMOTION_GATE_BATCH_SIZE_KEY = "promotion_gate_batch_size"
+_PROMOTION_GATE_BATCH_SIZE_MAX = 1_000_000
+
+
+def _promotion_gate_batch_size(payload: Mapping[str, Any]) -> int:
+    """How many fact candidates one promotion-gate run may cover (1 = per candidate)."""
+    value = payload.get(PROMOTION_GATE_BATCH_SIZE_KEY)
+    if value is None:
+        return 1
+    if type(value) is not int or not 1 <= value <= _PROMOTION_GATE_BATCH_SIZE_MAX:
+        raise ValueError(
+            f"{PROMOTION_GATE_BATCH_SIZE_KEY} must be an integer from 1 to {_PROMOTION_GATE_BATCH_SIZE_MAX}"
+        )
+    return value
+
+
+@dataclass(slots=True)
+class _PreparedFact:
+    """A fact job whose pre-gate rails passed: its gate candidate and its canary writes."""
+
+    job: ConsolidationJob
+    candidate: Candidate
+    access_policy: dict[str, Any]
+
+    def apply(self, engine: LocalMemoryEngine, branch: str) -> None:
+        job = self.job
+        engine.upsert_assertion(
+            Assertion(
+                tenant_id=job.tenant_id,
+                subject=job.candidate_subject,
+                predicate=job.candidate_predicate,
+                object=job.candidate_object,
+                confidence=job.confidence,
+                source_evidence_cids=job.source_evidence_cids,
+                status="active",
+                trust_tier=job.trust_tier,
+                sensitivity=job.sensitivity,
+                access_policy=self.access_policy,
+            ),
+            branch=branch,
+        )
+        engine.add_relation(
+            Relation(
+                tenant_id=job.tenant_id,
+                source=job.candidate_subject,
+                predicate=job.candidate_predicate,
+                target=job.candidate_object,
+                confidence=job.confidence,
+                source_evidence_cids=job.source_evidence_cids,
+                access_policy=self.access_policy,
+            ),
+            branch=branch,
+        )
+
+
 @dataclass(slots=True)
 class PassResult:
     name: str
@@ -482,6 +559,8 @@ class ConsolidationWorker:
         self._tier_cid_last: dict[tuple[str, str, str, str], tuple[int, datetime]] = {}
         self._sleep_memo: dict[str, ConsolidationRunResult] = {}
         self._sleep_last_now: dict[str, datetime] = {}
+        # Per-evidence-epoch corroboration lookups (_local_corroboration_index).
+        self._corroboration_index: dict[str, Any] | None = None
         # §23.3 / §7 #17: fact promote floor is policy.min_external_corroboration_for_fact
         # (Standing independent external count). Optional min_corroboration may only
         # raise the floor, never lower it below policy.
@@ -516,6 +595,7 @@ class ConsolidationWorker:
         source_evidence_cids = [str(cid) for cid in payload.get("source_evidence_cids", [])]
         if not source_evidence_cids:
             raise ValueError("consolidation payload requires source_evidence_cids")
+        gate_batch_size = _promotion_gate_batch_size(payload)
 
         policy = self.policy if isinstance(self.policy, OperatingPolicy) else OperatingPolicy()
         cadence_tier: str | None = None
@@ -674,6 +754,7 @@ class ConsolidationWorker:
         )
         candidate_results: list[dict[str, Any]] = []
         candidates: list[dict[str, Any]] = []
+        gate_group_stats: dict[str, Any] | None = None
         no_write_data = self._contains_no_write_data(evidence, payload)
 
         if not run_core_mutation:
@@ -702,38 +783,40 @@ class ConsolidationWorker:
                         resolver_result["details"],
                     )
                 )
+                gate_jobs: list[ConsolidationJob] = []
+                work_part = [str(cid) for cid in work_cids if cid]
+                # Candidates of one document share one merged source list: built once, and held
+                # as one shared read-only list by every fact, relation and entity it reaches.
+                merged_by_own: dict[tuple[str, ...], list[str]] = {}
                 for candidate in candidates:
                     # Union payload sources with any per-candidate CIDs so batch
                     # captures (multiple independent evidence rows) count as
                     # external corroboration under §7 #17 — not only the leaf CID.
-                    candidate_cids = [
-                        str(cid)
-                        for cid in (
-                            list(candidate.get("source_evidence_cids") or [])
-                            + list(work_cids)
-                        )
-                        if cid
-                    ]
-                    # Preserve order while de-duplicating.
-                    merged_cids = list(dict.fromkeys(candidate_cids))
-                    result = self.run_job(
-                        ConsolidationJob(
-                            tenant_id=tenant_id,
-                            signature=str(candidate["signature"]),
-                            query=str(candidate["query"]),
-                            candidate_subject=str(candidate["candidate_subject"]),
-                            candidate_predicate=str(candidate["candidate_predicate"]),
-                            candidate_object=str(candidate["candidate_object"]),
-                            source_evidence_cids=merged_cids,
-                            confidence=float(candidate.get("confidence", payload.get("confidence", 0.72))),
-                            trust_tier=int(candidate.get("trust_tier", payload.get("trust_tier", TrustTier.NORMAL))),
-                            sensitivity=int(candidate.get("sensitivity", payload.get("sensitivity", 0))),
-                            access_policy=candidate.get("access_policy") or payload.get("access_policy"),
-                            entity_key=str(candidate.get("entity_key") or "") or None,
-                        ),
-                        mutation_budget=mutation_budget,
+                    own = tuple(str(cid) for cid in (candidate.get("source_evidence_cids") or []) if cid)
+                    merged_cids = merged_by_own.get(own)
+                    if merged_cids is None:
+                        # Preserve order while de-duplicating.
+                        merged_cids = intern_cids(list(dict.fromkeys([*own, *work_part])))
+                        merged_by_own[own] = merged_cids
+                    job = ConsolidationJob(
+                        tenant_id=tenant_id,
+                        signature=str(candidate["signature"]),
+                        query=str(candidate["query"]),
+                        candidate_subject=str(candidate["candidate_subject"]),
+                        candidate_predicate=str(candidate["candidate_predicate"]),
+                        candidate_object=str(candidate["candidate_object"]),
+                        source_evidence_cids=merged_cids,
+                        confidence=float(candidate.get("confidence", payload.get("confidence", 0.72))),
+                        trust_tier=int(candidate.get("trust_tier", payload.get("trust_tier", TrustTier.NORMAL))),
+                        sensitivity=int(candidate.get("sensitivity", payload.get("sensitivity", 0))),
+                        access_policy=candidate.get("access_policy") or payload.get("access_policy"),
+                        entity_key=str(candidate.get("entity_key") or "") or None,
                     )
-                    candidate_results.append(result.to_dict())
+                    gate_jobs.append(job)
+                gate_results, gate_group_stats = self.run_jobs(
+                    gate_jobs, mutation_budget=mutation_budget, batch_size=gate_batch_size
+                )
+                candidate_results.extend(result.to_dict() for result in gate_results)
                 pass_results.append(PassResult("belief_reviser", "complete", {"candidate_count": len(candidates)}))
             else:
                 skipped.append("candidate_extraction_not_configured")
@@ -807,7 +890,10 @@ class ConsolidationWorker:
                 continue
             if pass_name == "promotion_gate" and candidate_results:
                 promoted = sum(1 for item in candidate_results if item.get("promoted"))
-                pass_results.append(PassResult(pass_name, "complete", {"promoted": promoted, "evaluated": len(candidate_results)}))
+                gate_details: dict[str, Any] = {"promoted": promoted, "evaluated": len(candidate_results)}
+                if gate_group_stats is not None:
+                    gate_details.update(gate_group_stats)
+                pass_results.append(PassResult(pass_name, "complete", gate_details))
                 continue
             skipped_name = f"{pass_name}_not_implemented"
             skipped.append(skipped_name)
@@ -1314,24 +1400,13 @@ class ConsolidationWorker:
         size of the store. Any other engine keeps the export path.
         """
         engine = self.engine
-        assertions = getattr(engine, "assertions", None)
         if (
             isinstance(engine, LocalMemoryEngine)
             and getattr(type(engine), "export_tenant", None) is LocalMemoryEngine.export_tenant
-            and isinstance(assertions, dict)
         ):
-            found: set[str] = set()
-            for fact_id in budget.active_fact_ids:
-                item = assertions.get(engine._branch_key(tenant_id, candidate_branch, fact_id))
-                if (
-                    item is not None
-                    and item.tenant_id == tenant_id
-                    and item.branch == candidate_branch
-                    and item.status == "superseded"
-                    and str(item.id) == fact_id
-                ):
-                    found.add(fact_id)
-            return found
+            # Keyed lookups of the budgeted facts; a thin canary answers for the facts it
+            # never copied with its parent's status (canary_overlay).
+            return engine.superseded_fact_ids_on_branch(tenant_id, candidate_branch, budget.active_fact_ids)
         return budget.branch_superseded_ids(self._export_snapshot(tenant_id), candidate_branch)
 
     def _role_pipeline_report(self, pass_results: list[PassResult]) -> dict[str, Any]:
@@ -1658,16 +1733,16 @@ class ConsolidationWorker:
         proposal_record = details.get("proposal_record") if isinstance(details, dict) else None
         lesson_ids: list[str] = []
         created = 0
+        # (tenant, failure signature) -> the FIRST lesson with it in store order, which is what
+        # a scan over self.learning.lessons.values() finds. Built once per pass and kept up to
+        # date below: scanning per row made a batch of N candidates cost O(N^2) (370 s of the
+        # 6119-document 2Wiki ingest).
+        lesson_index: dict[tuple[str, str], Lesson] = {}
+        for item in self.learning.lessons.values():
+            lesson_index.setdefault((item.tenant_id, item.failure_signature), item)
         for row in lesson_rows:
             signature = str(row["failure_signature"])
-            existing = next(
-                (
-                    item
-                    for item in self.learning.lessons.values()
-                    if item.tenant_id == tenant_id and item.failure_signature == signature
-                ),
-                None,
-            )
+            existing = lesson_index.get((tenant_id, signature))
             if existing:
                 lesson_ids.append(existing.id)
                 continue
@@ -1680,6 +1755,7 @@ class ConsolidationWorker:
                 status=str(row.get("status") or "candidate"),
             )
             self.learning.lessons[lesson.id] = lesson
+            lesson_index.setdefault((tenant_id, signature), lesson)
             lesson_ids.append(lesson.id)
             created += 1
         result = {
@@ -1702,16 +1778,44 @@ class ConsolidationWorker:
         proposal_record = details.get("proposal_record") if isinstance(details, dict) else None
         procedure_ids: list[str] = []
         created = 0
+        # (tenant, canonical signature) -> the FIRST procedure with it in store order, as a scan
+        # over self.learning.procedures.values() finds. A signature is a dict, so the key is its
+        # canonical JSON (equal canonical JSON means equal dicts for JSON-shaped values); a
+        # signature that will not serialise keeps the scan. Built once per pass and kept up to
+        # date below - scanning per row made a batch of N candidates cost O(N^2).
+        # The canonical JSON of a signature is only a BUCKET key, never the match: JSON text
+        # does not preserve Python dict equality ({"t": 1} and {"t": 1.0} are equal dicts but
+        # different text). Each bucket keeps its procedures in store order and the match is the
+        # first one that compares equal, exactly what the scan found.
+        procedure_index: dict[tuple[str, tuple[str, ...]], list[Procedure]] = {}
+        indexed = True
+        for item in self.learning.procedures.values():
+            item_key = _signature_bucket(item.signature)
+            if item_key is None:
+                indexed = False
+                break
+            procedure_index.setdefault((item.tenant_id, item_key), []).append(item)
         for row in procedure_rows:
             signature = dict(row["signature"])
-            existing = next(
-                (
-                    item
-                    for item in self.learning.procedures.values()
-                    if item.tenant_id == tenant_id and item.signature == signature
-                ),
-                None,
-            )
+            signature_key: tuple[str, ...] | None = _signature_bucket(signature) if indexed else None
+            if signature_key is not None:
+                existing = next(
+                    (
+                        item
+                        for item in procedure_index.get((tenant_id, signature_key), ())
+                        if item.signature == signature
+                    ),
+                    None,
+                )
+            else:
+                existing = next(
+                    (
+                        item
+                        for item in self.learning.procedures.values()
+                        if item.tenant_id == tenant_id and item.signature == signature
+                    ),
+                    None,
+                )
             if existing:
                 procedure_ids.append(existing.id)
                 continue
@@ -1724,6 +1828,8 @@ class ConsolidationWorker:
                 status=str(row.get("status") or "candidate"),
             )
             self.learning.procedures[procedure.id] = procedure
+            if signature_key is not None:
+                procedure_index.setdefault((tenant_id, signature_key), []).append(procedure)
             procedure_ids.append(procedure.id)
             created += 1
         result = {
@@ -2055,6 +2161,28 @@ class ConsolidationWorker:
             **({"source_summary_cids": source_summary_cids} if source_summary_cids else {}),
         }
 
+    def _summary_rows_on_branch(self, tenant_id: str, branch: str, export_tenant: Any) -> list[Any]:
+        """The exported evidence rows the summary-retirement scan can act on.
+
+        That scan skips every row that is not a ``consolidation-summary`` on ``branch``. Where
+        the engine offers its evidence rows by branch, exactly those rows are converted - the
+        same dicts, in the same relative order as ``export_tenant(tenant_id)['evidence']``,
+        snapshotted before any of them is updated - instead of exporting the whole tenant
+        (every fact and relation with its full source list) once per new summary.
+        """
+        read_rows = getattr(self.engine, "evidence_rows_for_reading", None)
+        store = read_rows() if callable(read_rows) else None
+        in_branch = getattr(store, "in_branch", None)
+        if callable(in_branch):
+            return [
+                ev.to_dict()
+                for ev in list(in_branch(tenant_id, branch).values())
+                if getattr(ev, "tenant_id", None) == tenant_id
+                and not getattr(ev, "erased", False)
+                and getattr(ev, "source_type", None) == "consolidation-summary"
+            ]
+        return list(export_tenant(tenant_id).get("evidence", []))
+
     def _retire_superseded_summaries(
         self,
         tenant_id: str,
@@ -2072,11 +2200,11 @@ class ConsolidationWorker:
             return []
         source_fingerprint = _summary_source_fingerprint(source_cids, level=raptor_level)
         try:
-            snapshot = export_tenant(tenant_id)
+            summary_rows = self._summary_rows_on_branch(tenant_id, branch, export_tenant)
         except Exception:
             return []
         retired: list[str] = []
-        for row in snapshot.get("evidence", []):
+        for row in summary_rows:
             if not isinstance(row, dict):
                 continue
             cid = str(row.get("cid") or "")
@@ -2394,6 +2522,66 @@ class ConsolidationWorker:
     def _content_tokens(text: str) -> set[str]:
         return {tok.lower() for tok in re.findall(r"[A-Za-z0-9]{3,}", text or "")}
 
+    def _local_corroboration_index(self, tenant_id: str) -> dict[str, Any] | None:
+        """Lookups ``_corroboration_cids_for_job`` repeats for every candidate, built once.
+
+        Only for the in-memory engine, and only while the evidence epoch is unchanged (no
+        evidence row added, removed or modified - see mnemosyne.cid_lists): the main-branch
+        rows of the tenant the scan would consider, in store order, with their content tokens
+        and an inverted index from token to row; plus memos of the per-CID derived check and of
+        the per-source-list base list.
+        """
+        engine = self.engine
+        read_rows = getattr(engine, "evidence_rows_for_reading", None)
+        if not isinstance(engine, LocalMemoryEngine) or not callable(read_rows) or not evidence_caching_safe():
+            return None
+        store = read_rows()
+        in_branch = getattr(store, "in_branch", None)
+        # The scan treats a row with no branch as main; such rows sit outside the main view.
+        if not callable(in_branch) or in_branch(tenant_id, None) or in_branch(tenant_id, ""):
+            return None
+        epoch = evidence_epoch()
+        cache = getattr(self, "_corroboration_index", None)
+        if (
+            cache is not None
+            and cache["epoch"] == epoch
+            and cache["tenant"] == tenant_id
+            and cache["engine"] is engine
+            and cache["store"] is store
+        ):
+            return cache
+        rows: list[tuple[Any, frozenset[str]]] = []
+        postings: dict[str, list[int]] = defaultdict(list)
+        for ev in in_branch(tenant_id, "main").values():
+            if getattr(ev, "tenant_id", None) != tenant_id or getattr(ev, "erased", False):
+                continue
+            if self._is_derived_evidence_record(ev):
+                continue
+            tokens = frozenset(self._content_tokens(getattr(ev, "content", "") or ""))
+            for token in tokens:
+                postings[token].append(len(rows))
+            rows.append((getattr(ev, "cid", None), tokens))
+        cache = {
+            "epoch": epoch, "tenant": tenant_id, "engine": engine, "store": store,
+            "rows": rows, "postings": postings, "derived": {}, "base": OrderedDict(),
+        }
+        self._corroboration_index = cache
+        return cache
+
+    def _cid_is_derived_cached(self, cache: dict[str, Any], tenant_id: str, cid: str) -> bool:
+        """``_cid_is_derived_for_job`` on the in-memory engine, memoised per evidence epoch.
+
+        ``get_evidence`` hands back a deep copy of the resolved, non-erased row; the derived
+        test reads only fields the copy keeps, so the row itself gives the same answer.
+        """
+        derived = cache["derived"]
+        found = derived.get(cid)
+        if found is None:
+            ev = self.engine._evidence_row(tenant_id, "main", cid)
+            found = bool(ev is not None and not ev.erased and self._is_derived_evidence_record(ev))
+            derived[cid] = found
+        return found
+
     def _corroboration_cids_for_job(self, job: ConsolidationJob) -> list[str]:
         """CIDs used for external corroboration counting.
 
@@ -2403,6 +2591,9 @@ class ConsolidationWorker:
         major: unrelated grounded evidence must not free-ride).
         """
 
+        cache = self._local_corroboration_index(job.tenant_id)
+        if cache is not None:
+            return self._corroboration_cids_indexed(job, cache)
         base = [
             cid
             for cid in dict.fromkeys(str(item) for item in (job.source_evidence_cids or []) if item)
@@ -2440,7 +2631,8 @@ class ConsolidationWorker:
             found.append(key)
 
         engine = self.engine
-        evidence_map = getattr(engine, "evidence", None)
+        read_rows = getattr(engine, "evidence_rows_for_reading", None)
+        evidence_map = read_rows() if callable(read_rows) else getattr(engine, "evidence", None)
         if isinstance(evidence_map, dict):
             for ev in evidence_map.values():
                 if getattr(ev, "tenant_id", None) != job.tenant_id:
@@ -2469,6 +2661,74 @@ class ConsolidationWorker:
                     continue
                 _maybe_add(item.get("cid"), item.get("content") or "", item)
         return found
+
+    def _corroboration_cids_indexed(self, job: ConsolidationJob, cache: dict[str, Any]) -> list[str]:
+        """``_corroboration_cids_for_job`` from the per-epoch index: the same list, in order.
+
+        The scan visits the tenant's main rows in store order and appends a row's CID when it
+        shares at least two content tokens with the candidate and is not already listed. The
+        inverted index yields exactly the rows sharing two or more tokens; visiting them in
+        store order with the same ``seen`` test appends the same CIDs in the same order.
+        """
+        tenant_id = job.tenant_id
+        raw_sources = job.source_evidence_cids
+        # A shared read-only list is keyed by identity (no per-job pass over thousands of CIDs).
+        shared = type(raw_sources) is CidList
+        sources: Any = ("shared", id(raw_sources)) if shared else tuple(raw_sources or ())
+        memo: OrderedDict[Any, tuple[Any, list[str], frozenset[str]]] = cache["base"]
+        try:
+            entry = memo.get(sources)
+        except TypeError:  # unhashable CIDs: no memo
+            sources, entry = None, None
+        if entry is not None and shared and entry[0] is not raw_sources:
+            entry = None
+        if entry is None:
+            # The base list is shared read-only: callers only read the CIDs they are given.
+            base = intern_cids([
+                cid
+                for cid in dict.fromkeys(str(item) for item in (raw_sources or []) if item)
+                if not self._cid_is_derived_cached(cache, tenant_id, cid)
+            ])
+            entry = (raw_sources, base, frozenset(base))
+            if sources is not None:
+                memo[sources] = entry
+                while len(memo) > _BASE_MEMO_SIZE:
+                    memo.popitem(last=False)
+        elif sources is not None:
+            memo.move_to_end(sources)
+        base, base_members = entry[1], entry[2]
+        needle = self._content_tokens(
+            " ".join(
+                [
+                    str(job.signature or ""),
+                    str(job.query or ""),
+                    str(job.candidate_subject or ""),
+                    str(job.candidate_predicate or ""),
+                    str(job.candidate_object or ""),
+                ]
+            )
+        )
+        if len(needle) < 2:
+            return base
+        # The scan appends, in store order, each row sharing two tokens whose CID is not yet
+        # listed. Membership in the base list is the memoised set; only new CIDs are collected.
+        extra: list[str] = []
+        extra_seen: set[str] = set()
+        counts: Counter[int] = Counter()
+        postings = cache["postings"]
+        for token in needle:
+            counts.update(postings.get(token, ()))
+        rows = cache["rows"]
+        for index in sorted(index for index, count in counts.items() if count >= 2):
+            cid = rows[index][0]
+            if not cid:
+                continue
+            key = str(cid)
+            if key in base_members or key in extra_seen:
+                continue
+            extra_seen.add(key)
+            extra.append(key)
+        return [*base, *extra] if extra else base
 
     def _fact_unit_signals_for_job(self, job: ConsolidationJob) -> dict[str, Any]:
         """Build Standing-shaped unit_signals from the engine independent-corroboration oracle.
@@ -2523,6 +2783,170 @@ class ConsolidationWorker:
         independent external corroboration is below the policy floor (§23.3 / §7 #17),
         or when a protected regression case would break; only a fully authorized,
         non-throttled, corroborated, regression-clean candidate is promoted.
+        """
+        prepared = self._prepare_fact_job(job)
+        if isinstance(prepared, GateResult):
+            return prepared
+        return self._gate_prepared_fact(prepared, mutation_budget)
+
+    def run_jobs(
+        self,
+        jobs: Sequence[ConsolidationJob],
+        mutation_budget: MutationRailBudget | None = None,
+        *,
+        batch_size: int = 1,
+    ) -> tuple[list[GateResult], dict[str, Any] | None]:
+        """Gate ``jobs`` in order: one :meth:`run_job` each, or in groups of ``batch_size``.
+
+        ``batch_size`` 1 (the default) is exactly one :meth:`run_job` per job. Above 1 the
+        promotion gate runs once per group (blueprint §17.4 / §23.3): each job still passes
+        its own authorization, cadence and corroboration rails, then up to ``batch_size``
+        candidates are applied together on one canary branch and the union of their
+        relevant regression cases runs once. A group that passes is merged whole; one that
+        fails is discarded and split in half, recursively, down to single candidates, which
+        take the per-candidate gate. Every merge into main therefore follows a passing gate
+        run on the exact state it lands on, and every rejection is a per-candidate verdict.
+        Returns the results in job order and the group statistics (None per candidate).
+        """
+        if batch_size <= 1 or not self.gate.supports_group_evaluation():
+            return [self.run_job(job, mutation_budget=mutation_budget) for job in jobs], None
+        stats: dict[str, Any] = {
+            "gate_mode": "batch",
+            "batch_size": batch_size,
+            "group_evaluations": 0,
+            "group_promotions": 0,
+            "group_splits": 0,
+            "single_evaluations": 0,
+        }
+        results: list[GateResult | None] = [None] * len(jobs)
+        pending: list[tuple[int, _PreparedFact]] = []
+        budgets: dict[str, MutationRailBudget] = {}
+
+        def budget_for(tenant_id: str) -> MutationRailBudget:
+            if mutation_budget is not None:
+                return mutation_budget
+            if tenant_id not in budgets:
+                budgets[tenant_id] = self._new_mutation_rail_budget(tenant_id, "main")
+            return budgets[tenant_id]
+
+        def flush() -> None:
+            if pending:
+                group = list(pending)
+                pending.clear()
+                for (index, _), result in zip(
+                    group,
+                    self._gate_fact_group([item for _, item in group], budget_for(group[0][1].job.tenant_id), stats),
+                    strict=True,
+                ):
+                    results[index] = result
+
+        for index, job in enumerate(jobs):
+            prepared = self._prepare_fact_job(job)
+            if isinstance(prepared, GateResult):
+                results[index] = prepared
+                continue
+            if not self.gate.group_eligible(prepared.candidate):
+                flush()
+                stats["single_evaluations"] += 1
+                results[index] = self._gate_prepared_fact(prepared, budget_for(job.tenant_id))
+                continue
+            if pending and pending[0][1].job.tenant_id != job.tenant_id:
+                flush()
+            pending.append((index, prepared))
+            if len(pending) >= batch_size:
+                flush()
+        flush()
+        return [result for result in results if result is not None], stats
+
+    def _gate_fact_group(
+        self,
+        items: list[_PreparedFact],
+        budget: MutationRailBudget,
+        stats: dict[str, Any],
+    ) -> list[GateResult]:
+        if len(items) == 1:
+            stats["single_evaluations"] += 1
+            return [self._gate_prepared_fact(items[0], budget)]
+        tenant_id = items[0].job.tenant_id
+
+        def apply(engine: LocalMemoryEngine, branch: str) -> None:
+            for item in items:
+                item.apply(engine, branch)
+
+        def pre_merge_check(engine: LocalMemoryEngine, branch: str) -> str | None:
+            # The group's supersessions are charged only when they fit: a group that would
+            # breach the rail is split, and its parts are charged (or refused) one by one.
+            superseded = self._branch_superseded_fact_ids(tenant_id, budget, branch)
+            if len(budget.superseded_fact_ids | superseded) > budget.supersessions_allowed:
+                return "rail_violation:max_supersession_rate (group)"
+            return budget.record_branch_supersessions(superseded, branch)
+
+        stats["group_evaluations"] += 1
+        outcome = self.gate.evaluate_group(
+            tenant_id, [item.candidate for item in items], apply, pre_merge_check=pre_merge_check
+        )
+        if outcome.promoted:
+            stats["group_promotions"] += 1
+            results = []
+            for item in items:
+                self._register_promoted_fact(item)
+                # Every case relevant to this candidate passed (all of the group's did).
+                passed = [case.id for case in self.gate.relevant_cases(item.candidate)]
+                total = max(len(passed), 1)
+                results.append(
+                    GateResult(
+                        candidate_id=item.candidate.id,
+                        promoted=True,
+                        protected_regressions=[],
+                        failed_cases=[],
+                        passed_cases=passed,
+                        margin=len(passed) / total - self.gate.noise_margin,
+                        rollback_branch=None,
+                    )
+                )
+            return results
+        stats["group_splits"] += 1
+        middle = len(items) // 2
+        return self._gate_fact_group(items[:middle], budget, stats) + self._gate_fact_group(
+            items[middle:], budget, stats
+        )
+
+    def _gate_prepared_fact(
+        self, prepared: _PreparedFact, mutation_budget: MutationRailBudget | None = None
+    ) -> GateResult:
+        """The per-candidate gate of :meth:`run_job` for a job whose rails have passed."""
+        job = prepared.job
+        budget = mutation_budget or self._new_mutation_rail_budget(job.tenant_id, "main")
+
+        def pre_merge_check(engine: LocalMemoryEngine, branch: str) -> str | None:
+            return budget.record_branch_supersessions(
+                self._branch_superseded_fact_ids(job.tenant_id, budget, branch),
+                branch,
+            )
+
+        result = self.gate.evaluate(job.tenant_id, prepared.candidate, prepared.apply, pre_merge_check=pre_merge_check)
+        if result.promoted:
+            self._register_promoted_fact(prepared)
+        return result
+
+    def _register_promoted_fact(self, prepared: _PreparedFact) -> None:
+        if hasattr(self.engine, "register_entity"):
+            job = prepared.job
+            entity_key = job.entity_key or _entity_key(job.candidate_subject)
+            self.engine.register_entity(
+                job.tenant_id,
+                entity_key,
+                alias=job.candidate_subject,
+                summary=prepared.candidate.description,
+                source_evidence_cids=job.source_evidence_cids,
+                access_policy=prepared.access_policy,
+            )
+
+    def _prepare_fact_job(self, job: ConsolidationJob) -> GateResult | _PreparedFact:
+        """The rails :meth:`run_job` checks before the gate, in its order.
+
+        A :class:`GateResult` when one refuses the job; otherwise the gate candidate and
+        the writes that apply it to a canary branch.
         """
         try:
             validated_access_policy = validate_access_policy(
@@ -2605,56 +3029,7 @@ class ConsolidationWorker:
             source_evidence_cids=job.source_evidence_cids,
             unit_signals=unit_signals,
         )
-
-        def apply(engine: LocalMemoryEngine, branch: str) -> None:
-            engine.upsert_assertion(
-                Assertion(
-                    tenant_id=job.tenant_id,
-                    subject=job.candidate_subject,
-                    predicate=job.candidate_predicate,
-                    object=job.candidate_object,
-                    confidence=job.confidence,
-                    source_evidence_cids=job.source_evidence_cids,
-                    status="active",
-                    trust_tier=job.trust_tier,
-                    sensitivity=job.sensitivity,
-                    access_policy=validated_access_policy,
-                ),
-                branch=branch,
-            )
-            engine.add_relation(
-                Relation(
-                    tenant_id=job.tenant_id,
-                    source=job.candidate_subject,
-                    predicate=job.candidate_predicate,
-                    target=job.candidate_object,
-                    confidence=job.confidence,
-                    source_evidence_cids=job.source_evidence_cids,
-                    access_policy=validated_access_policy,
-                ),
-                branch=branch,
-            )
-
-        budget = mutation_budget or self._new_mutation_rail_budget(job.tenant_id, "main")
-
-        def pre_merge_check(engine: LocalMemoryEngine, branch: str) -> str | None:
-            return budget.record_branch_supersessions(
-                self._branch_superseded_fact_ids(job.tenant_id, budget, branch),
-                branch,
-            )
-
-        result = self.gate.evaluate(job.tenant_id, candidate, apply, pre_merge_check=pre_merge_check)
-        if result.promoted and hasattr(self.engine, "register_entity"):
-            entity_key = job.entity_key or _entity_key(job.candidate_subject)
-            self.engine.register_entity(
-                job.tenant_id,
-                entity_key,
-                alias=job.candidate_subject,
-                summary=candidate.description,
-                source_evidence_cids=job.source_evidence_cids,
-                access_policy=validated_access_policy,
-            )
-        return result
+        return _PreparedFact(job=job, candidate=candidate, access_policy=validated_access_policy)
 
 
 _SALIENT_ENTITY = re.compile(

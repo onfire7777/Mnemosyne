@@ -21,6 +21,7 @@ from threading import RLock
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from mnemosyne.access_policy import apply_text_redactions, effective_max_sensitivity, may_read_item
+from mnemosyne.cid_lists import shared_or_copy
 from mnemosyne.command_line import split_command
 from mnemosyne.evidence_redaction import redaction_findings
 from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES, enforce_byte_limit, validate_byte_limit
@@ -1228,7 +1229,7 @@ class LocalSimilarityReranker:
                 text=hit.text,
                 score=max(0.0, self.lexical_weight * lexical + self.dense_weight * dense),
                 channel=f"{hit.channel}+rerank",
-                provenance=list(hit.provenance),
+                provenance=shared_or_copy(hit.provenance),
                 trust_tier=hit.trust_tier,
                 sensitivity=hit.sensitivity,
                 metadata={**hit.metadata, "reranker": self.name},
@@ -1893,7 +1894,7 @@ class HttpReranker:
                     text=hit.text,
                     score=float(score),
                     channel=f"{hit.channel}+rerank",
-                    provenance=list(hit.provenance),
+                    provenance=shared_or_copy(hit.provenance),
                     trust_tier=hit.trust_tier,
                     sensitivity=hit.sensitivity,
                     metadata={**hit.metadata, "reranker": self.name},
@@ -2753,7 +2754,7 @@ def apply_activation_scores(hits: Sequence[Hit], policy: OperatingPolicy, *, now
                 text=hit.text,
                 score=max(hit.score, 0.0) * (0.5 + max(0.0, min(1.0, activation))),
                 channel=hit.channel,
-                provenance=list(hit.provenance),
+                provenance=shared_or_copy(hit.provenance),
                 trust_tier=hit.trust_tier,
                 sensitivity=hit.sensitivity,
                 metadata=metadata,
@@ -2878,7 +2879,7 @@ class GraphSignalCache:
                 text=hit.text,
                 score=hit.score,
                 channel=hit.channel,
-                provenance=list(hit.provenance),
+                provenance=shared_or_copy(hit.provenance),
                 trust_tier=hit.trust_tier,
                 sensitivity=hit.sensitivity,
                 metadata={**hit.metadata, "graph_signal_cached": True},
