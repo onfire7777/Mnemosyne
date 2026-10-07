@@ -100,6 +100,12 @@ def run(
             # file must stay byte-for-byte as recorded (eval/public/action_pressure.py
             # recompute()).
             captured = capture_cli.run(*_capture_batch_argv(batch)).json
+            # Build the HippoRAG passage graph when one is configured (--passage-index or
+            # MNEMOSYNE_PASSAGE_INDEX); a no-op otherwise. OpenIE runs once per passage and is
+            # kept in the index file, so only a corpus seen for the first time is slow.
+            replace(capture_cli, timeout_s=max(capture_cli.timeout_s, 86_400.0)).run(
+                "index-passages", "--tenant", tenant
+            )
         else:
             captured = capture_cli.capture_batch(batch, consolidate=True)
     results = captured.get("results", [])

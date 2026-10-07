@@ -31,6 +31,8 @@ native = ["mnemosyne-native"]
 # registry (full wiring: Task 8). Never a runtime dependency — the default
 # install stays exactly ["cryptography>=50"].
 sqlitevec = ["sqlite-vec>=0.1.9"]
+# The HippoRAG passage graph (--passage-index): vector maths and Personalized PageRank.
+graph = ["numpy>=2.1"]
 
 [tool.uv.sources]
 mnemosyne-native = { path = "rust/mnemosyne-native" }
@@ -42,6 +44,7 @@ dev = [
   "hypothesis>=6.100",
   "pytest-benchmark>=5.1",
   "jsonschema>=4.26.0",
+  "numpy>=2.1",
 ]
 
 [project.scripts]

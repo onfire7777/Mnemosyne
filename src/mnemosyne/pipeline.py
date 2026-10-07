@@ -731,6 +731,10 @@ class RetrievalPipelineOps(Protocol):
 
     def lexical_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]: ...
 
+    def passage_candidates(self, filt: dict[str, Any]) -> list[Hit]:
+        """Every source passage ``filt`` may read; read-only, clone before changing one."""
+        ...
+
     def graph_ppr(
         self,
         seeds: list[str],
@@ -1103,19 +1107,29 @@ def run_retrieval_pipeline(
             if stored:
                 _result_cache_put(cache_key, result)
         return result
+    passage_graph_explain: dict[str, Any] | None = None
     if passage_mode:
         from mnemosyne.passages import is_passage
 
-        # Hashing is a lexical fallback, not an independent semantic channel.
-        # Give passage search a useful candidate pool before the final cutoff.
         width = max(100, policy.rerank_width, k * 4)
-        lexical = ops.lexical_search(query, width, effective_filter)
-        dense = (
-            ops.vector_search(query, width, effective_filter)
-            if ops.adapters.embedding.name != "local-hashing" else []
-        )
-        lexical = [hit for hit in lexical if is_passage(hit)]
-        dense = [hit for hit in dense if is_passage(hit)]
+        passage_graph = getattr(ops.adapters, "passage_graph", None)
+        if passage_graph is not None:
+            # HippoRAG 2: fact-seeded Personalized PageRank over the passages this caller
+            # may read; the ranking it returns is final, not one channel to fuse.
+            ranked, passage_graph_explain = passage_graph.rank(
+                query, ops.passage_candidates(effective_filter), ops.adapters.embedding, width
+            )
+            lexical, dense = [], ops._mark_retrieved_text_as_data(ranked)
+        else:
+            # Hashing is a lexical fallback, not an independent semantic channel.
+            # Give passage search a useful candidate pool before the final cutoff.
+            lexical = ops.lexical_search(query, width, effective_filter)
+            dense = (
+                ops.vector_search(query, width, effective_filter)
+                if ops.adapters.embedding.name != "local-hashing" else []
+            )
+            lexical = [hit for hit in lexical if is_passage(hit)]
+            dense = [hit for hit in dense if is_passage(hit)]
         graph, prospective, working, working_explain = [], [], [], {}
     elif parallel_channels_enabled():
         with ThreadPoolExecutor(max_workers=5) as pool:
@@ -1188,10 +1202,13 @@ def run_retrieval_pipeline(
             else ([], {})
         )
     ranked_routes = [dense, lexical, graph, prospective, working]
-    fused = (
-        ops._rrf(ranked_routes, k=max(k * 2, policy.rerank_width, 100 if passage_mode else 0))
-        if not passage_mode or dense else lexical
-    )
+    if passage_graph_explain is not None:
+        fused = dense
+    else:
+        fused = (
+            ops._rrf(ranked_routes, k=max(k * 2, policy.rerank_width, 100 if passage_mode else 0))
+            if not passage_mode or dense else lexical
+        )
     collapsed_turns = 0
     if working:
         fused, collapsed_turns = _collapse_session_duplicates(fused)
@@ -1351,6 +1368,8 @@ def run_retrieval_pipeline(
         explain["query_mode"] = "passages"
         explain["activation"] = {"applied": False, "reason": "passage_relevance_order"}
         explain["candidate_width"] = width
+        if passage_graph_explain is not None:
+            explain["passage_graph"] = passage_graph_explain
     result = RetrievalResult(
         query=query,
         hits=budgeted,

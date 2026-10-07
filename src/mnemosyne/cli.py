@@ -469,6 +469,45 @@ def load_retrieval_adapters(args: argparse.Namespace) -> RetrievalAdapters:
             timeout_seconds=timeout,
         )
 
+    passage_graph = None
+    if getattr(args, "passage_index", None):
+        from mnemosyne.passages import ChatModel, PassageGraphIndex, PassageIndexStore
+
+        try:
+            import numpy  # noqa: F401
+        except ImportError as exc:
+            raise SystemExit("--passage-index needs numpy: install mnemosyne-memory[graph]") from exc
+        if not args.passage_chat_model:
+            raise SystemExit("--passage-index needs --passage-chat-model, the OpenIE model it was built with.")
+        if evaluation_read_only and not Path(args.passage_index).is_file():
+            raise SystemExit("evaluation read-only mode needs an existing --passage-index file")
+        chat = None
+        if args.passage_chat_url:
+            key_env = args.passage_chat_api_key_env
+            chat = ChatModel(
+                url=args.passage_chat_url,
+                model=args.passage_chat_model,
+                api_key=os.environ.get(key_env) if key_env else None,
+                reasoning_effort=args.passage_chat_reasoning_effort,
+            )
+        passage_embedder = None
+        if args.passage_embedding_url:
+            passage_embedder = HttpEmbeddingProvider(
+                url=args.passage_embedding_url,
+                model=args.passage_embedding_model,
+                dims=int(args.passage_embedding_dims),
+                timeout_seconds=max(timeout, 120.0),
+                query_prefix="",
+                cache_size=0,
+            )
+        passage_graph = PassageGraphIndex(
+            store=PassageIndexStore(args.passage_index, read_only=evaluation_read_only),
+            extractor=args.passage_chat_model,
+            chat=chat,
+            embedder=passage_embedder,
+            recognition_filter=bool(args.passage_recognition_filter),
+        )
+
     return RetrievalAdapters(
         embedding=embedding,
         reranker=reranker,
@@ -476,6 +515,7 @@ def load_retrieval_adapters(args: argparse.Namespace) -> RetrievalAdapters:
         graph_backend=args.graph_backend,
         lexical_retriever=lexical_retriever,
         graph_retriever=graph_retriever,
+        passage_graph=passage_graph,
     )
 
 
@@ -1870,7 +1910,7 @@ def _consolidate_captured_batch(
     if failed:
         detail = failed[0].last_error or f"job status {failed[0].status}"
         raise RuntimeError(f"capture-batch consolidation failed: {detail}")
-    rejected = [
+    not_promoted = [
         candidate
         for job in queued
         for candidate in (
@@ -1880,6 +1920,17 @@ def _consolidate_captured_batch(
         )
         if isinstance(candidate, dict) and not candidate.get("promoted")
     ]
+
+    def awaiting_corroboration(candidate: dict[str, Any]) -> bool:
+        # A fact only one source states is not wrong, just not a belief yet: its evidence is
+        # kept and a later capture can corroborate it. That must not refuse the whole batch.
+        cases = [str(case) for case in candidate.get("failed_cases") or []]
+        return bool(cases) and not candidate.get("protected_regressions") and all(
+            case.startswith("fact_external_corroboration:") for case in cases
+        )
+
+    rejected = [candidate for candidate in not_promoted if not awaiting_corroboration(candidate)]
+    awaiting = len(not_promoted) - len(rejected)
     if rejected and getattr(args, "consolidation_rejections", "refuse") != "report":
         raise RuntimeError(
             "capture-batch consolidation rejected semantic candidates: "
@@ -1888,6 +1939,7 @@ def _consolidate_captured_batch(
     summary: dict[str, Any] = {
         "jobs": [jobs[job.id].to_dict() for job in queued],
         "metrics": metrics.snapshot().to_dict(),
+        "awaiting_corroboration": awaiting,
     }
     if getattr(args, "consolidation_rejections", "refuse") == "report":
         # Opt-in: the gate's rejections are reported, not fatal. Every rejected candidate's
@@ -1901,6 +1953,18 @@ def _consolidate_captured_batch(
             for item in rejected
         ]
     return summary
+
+
+def cmd_index_passages(args: argparse.Namespace) -> None:
+    """Extract triples for, and embed, a tenant's readable passages (the HippoRAG passage graph)."""
+    tools = load_tools(args)
+    report = tools.index_passages(
+        args.tenant,
+        branch=args.branch,
+        workers=args.workers,
+        progress=lambda line: print(line, file=sys.stderr, flush=True),
+    )
+    emit({"ok": True, **report})
 
 
 def cmd_eval_query_batch(args: argparse.Namespace) -> None:
@@ -18858,6 +18922,45 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--reranker-url", default=os.environ.get("MNEMOSYNE_RERANKER_URL"))
     parser.add_argument("--reranker-model", default=os.environ.get("MNEMOSYNE_RERANKER_MODEL"))
     parser.add_argument("--reranker-api-key", default=os.environ.get("MNEMOSYNE_RERANKER_API_KEY"))
+    parser.add_argument(
+        "--passage-index",
+        default=os.environ.get("MNEMOSYNE_PASSAGE_INDEX"),
+        help="SQLite file of the HippoRAG passage graph (OpenIE triples and vectors); "
+        "when set, query_mode=passages ranks by it",
+    )
+    parser.add_argument(
+        "--passage-chat-url",
+        default=os.environ.get("MNEMOSYNE_PASSAGE_CHAT_URL"),
+        help="OpenAI-compatible chat completions URL for passage OpenIE and the recognition filter",
+    )
+    parser.add_argument(
+        "--passage-chat-model",
+        default=os.environ.get("MNEMOSYNE_PASSAGE_CHAT_MODEL"),
+        help="chat model that builds (and so names) the passage index",
+    )
+    parser.add_argument(
+        "--passage-chat-api-key-env",
+        default=os.environ.get("MNEMOSYNE_PASSAGE_CHAT_API_KEY_ENV"),
+        help="name of the environment variable that holds the chat API key",
+    )
+    parser.add_argument(
+        "--passage-chat-reasoning-effort", default=os.environ.get("MNEMOSYNE_PASSAGE_CHAT_REASONING_EFFORT")
+    )
+    parser.add_argument(
+        "--passage-embedding-url",
+        default=os.environ.get("MNEMOSYNE_PASSAGE_EMBEDDING_URL"),
+        help="OpenAI-compatible embeddings URL for the passage graph (default: the main embedding provider)",
+    )
+    parser.add_argument("--passage-embedding-model", default=os.environ.get("MNEMOSYNE_PASSAGE_EMBEDDING_MODEL"))
+    parser.add_argument(
+        "--passage-embedding-dims", type=int, default=int(os.environ.get("MNEMOSYNE_PASSAGE_EMBEDDING_DIMS", "1024"))
+    )
+    parser.add_argument(
+        "--passage-recognition-filter",
+        action="store_true",
+        default=env_flag("MNEMOSYNE_PASSAGE_RECOGNITION_FILTER", default=False),
+        help="let the chat model drop linked facts that do not help the question (one call per query)",
+    )
     parser.add_argument("--retrieval-timeout", type=float, default=float(os.environ.get("MNEMOSYNE_RETRIEVAL_TIMEOUT", "30")))
     parser.add_argument(
         "--lexical-provider",
@@ -19402,6 +19505,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     capture_batch.set_defaults(func=cmd_capture_batch)
+
+    index_passages = sub.add_parser(
+        "index-passages", help="index a tenant's readable passages for --retrieval-mode passages"
+    )
+    index_passages.add_argument("--tenant", required=True)
+    index_passages.add_argument("--branch", default="main")
+    index_passages.add_argument("--workers", type=int, default=8)
+    index_passages.set_defaults(func=cmd_index_passages)
 
     eval_query_batch = sub.add_parser("eval-query-batch")
     eval_query_batch.add_argument("--input-jsonl", type=Path, required=True)

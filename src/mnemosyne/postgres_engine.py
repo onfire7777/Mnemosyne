@@ -3000,23 +3000,33 @@ class PostgresEngine:
                 )
         return pref.id
 
+    def passage_candidates(self, filt: dict[str, Any]) -> list[Hit]:
+        """Every source passage ``filt`` may read, from the authorized filtered export."""
+        from mnemosyne.passages import is_passage
+
+        tenant_id = str(filt["tenant_id"])
+        branch = str(filt.get("branch", "main"))
+        snapshot = self.export_tenant_filtered(tenant_id, filt)
+        candidates = [Hit(
+            id=row["cid"], kind="evidence", tenant_id=tenant_id, branch=branch,
+            text=row.get("content") or "", score=0.0, channel="candidate",
+            provenance=[row["cid"]], trust_tier=int(row.get("trust_tier", 0)),
+            sensitivity=int(row.get("sensitivity", 0)),
+            metadata={**(row.get("metadata") or {}),
+                      "source_type": row.get("source_type"), "actor": row.get("actor")},
+        ) for row in snapshot.get("evidence", [])
+            if row.get("branch", "main") == branch and not row.get("erased")]
+        return [hit for hit in candidates if is_passage(hit)]
+
     def lexical_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
         tenant_id = str(filt["tenant_id"])
         branch = str(filt.get("branch", "main"))
         if filt.get("query_mode") == "passages" and self.adapters.lexical_retriever is None:
             from mnemosyne.passages import rank_passages
 
-            snapshot = self.export_tenant_filtered(tenant_id, filt)
-            candidates = [Hit(
-                id=row["cid"], kind="evidence", tenant_id=tenant_id, branch=branch,
-                text=row.get("content") or "", score=0.0, channel="candidate",
-                provenance=[row["cid"]], trust_tier=int(row.get("trust_tier", 0)),
-                sensitivity=int(row.get("sensitivity", 0)),
-                metadata={**(row.get("metadata") or {}),
-                          "source_type": row.get("source_type"), "actor": row.get("actor")},
-            ) for row in snapshot.get("evidence", [])
-                if row.get("branch", "main") == branch and not row.get("erased")]
-            return self._mark_retrieved_text_as_data(rank_passages(self, query, candidates, k))
+            return self._mark_retrieved_text_as_data(
+                rank_passages(self, query, self.passage_candidates(filt), k)
+            )
         if self.adapters.lexical_retriever is not None:
             hits = self.adapters.lexical_retriever.search(
                 query,

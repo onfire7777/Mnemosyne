@@ -2264,6 +2264,13 @@ class SqliteEngine:
             sorted(hits, key=lambda item: item.score, reverse=True)[:k]
         )
 
+    def passage_candidates(self, filt: dict[str, Any]) -> list[Hit]:
+        """Every source passage ``filt`` may read (fresh rows from the scan oracle)."""
+        from mnemosyne.passages import is_passage
+
+        scoped = {**filt, "query_mode": "passages"}
+        return [hit for hit in self._scan_oracle(scoped)._candidate_hits(scoped) if is_passage(hit)]
+
     def lexical_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
         """FTS5-prefiltered lexical scan (spec §4.2).
 
@@ -2287,14 +2294,14 @@ class SqliteEngine:
                 hits, tenant_id=tenant_id, branch=branch, k=k, adapter_name="lexical"
             )
             return LocalMemoryEngine._mark_retrieved_text_as_data(hits)
-        oracle = self._scan_oracle(filt)
-        candidates = oracle._candidate_hits(filt)
         if filt.get("query_mode") == "passages":
             from mnemosyne.passages import rank_passages
 
             return LocalMemoryEngine._mark_retrieved_text_as_data(
-                rank_passages(self, query, candidates, k)
+                rank_passages(self, query, self.passage_candidates(filt), k)
             )
+        oracle = self._scan_oracle(filt)
+        candidates = oracle._candidate_hits(filt)
         allowed_evidence_cids: set[str] | None = None
         tokens = tokenize(query)
         if tenant_id and tokens and fts_safe_query(tokens):
