@@ -52,6 +52,15 @@ def test_name_cooccurrence_does_not_assert_a_relation():
     assert _extract_simple_fact("Mara owns Helios.") == [("Mara", "owns", "Helios")]
 
 
+def test_fact_extractor_rejects_the_junk_it_promoted_on_2wiki():
+    # Shapes of the top hits seen on the 2Wiki probe of 7 Oct 2026.
+    assert _extract_simple_fact("Suramarit's son and Monivong's heir ruled.") == []
+    assert _extract_simple_fact("By the s Kim's own account it rained.") == []
+    assert _extract_simple_fact("Lothair II of Lotharingia ruled.") == []
+    assert _extract_simple_fact("Hladnik's early-' s features Ples.") == []
+    assert _extract_simple_fact("Alice's manager approved Bob.") == [("Alice", "manager approved", "Bob")]
+
+
 def test_ranked_passages_do_not_expand_provenance_into_corpus_order():
     mapping = {"a": "doc-a", "b": "doc-b", "c": "doc-c"}
     hits = [

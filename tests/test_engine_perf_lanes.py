@@ -47,6 +47,8 @@ def _freeze_time(monkeypatch: pytest.MonkeyPatch) -> None:
         "mnemosyne.engine.utc_now",
         "mnemosyne.retrieval.utc_now",
         "mnemosyne.sqlite_engine.utc_now",
+        # The retrieval pipeline reads the request instant once and hands it to activation.
+        "mnemosyne.pipeline.utc_now",
     ):
         monkeypatch.setattr(target, lambda: FROZEN_NOW)
 
