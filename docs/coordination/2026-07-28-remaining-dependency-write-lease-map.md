@@ -2055,6 +2055,32 @@ Quarantine
 
 ## Owner-directed documentation consolidation — PR #120
 
+- PR #217: owner-directed batch-scale ingest fix outside the GoalEx lease sweep,
+  the successor to PR #216. The promotion gate can now run once per batch of fact
+  candidates on one canary branch instead of once per candidate
+  (`src/mnemosyne/gate.py`, `src/mnemosyne/consolidation.py`), opt-in through
+  `capture-batch --consolidation-gate-batch N` with the default `1` preserving the
+  per-candidate gate exactly; a failing group is discarded and split in half down to
+  single candidates, so every merge into main follows a passing gate run on the state
+  it lands on. Supporting work: shared interned source lists and a compact store
+  encoding (`src/mnemosyne/engine.py`, `src/mnemosyne/cid_lists.py`), the read
+  predicate memoised per stored access-policy object, the exact sparse dense path
+  preferred over the native kernel for hashing embeddings, indexed lesson and
+  procedure stores, and opt-in reporting of gate rejections in `capture-batch`
+  (`src/mnemosyne/cli.py`, `eval/public/adapters/hipporag_multihop.py`).
+  `eval/harness/cli_driver.py` is deliberately byte-identical to its recorded state,
+  because `eval/public/action_pressure.py` pins its SHA-256 for retained replay.
+  Measured on this host: the 6119-document 2Wiki corpus (59,867 candidates)
+  `capture-batch --consolidate` in **296 s and 333 s across two runs**, against a
+  600 s acceptance and a baseline that never completed; all 11 golden scenarios
+  IDENTICAL to legacy `2083ffc4` with and without the native kernels. It is
+  **OPEN/READY** and adds this structured self-record. Exclusive File Set: the files
+  named above, `tests/test_batched_promotion_gate.py`,
+  `tests/test_read_decision_memo.py`, `tests/test_store_shared_values.py`,
+  `tests/test_native_dispatch.py`, `tests/test_algorithms.py`,
+  `tests/test_capture_batch_rejections.py` and this lease-map entry. No exact final
+  head, merge SHA/time, or post-main CI is claimed here.
+
 - PR #216: owner-directed performance fix outside the GoalEx lease sweep. The
   promotion gate's supersession-rail check now reads only the budget's active
   facts on the candidate branch instead of exporting the whole tenant once per
