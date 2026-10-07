@@ -5460,7 +5460,10 @@ def test_cli_search_surfaces_gist_only_abstention(tmp_path: Path) -> None:
     exported = run_cli(store, "export", "--tenant", TENANT)
     summary = next(item for item in exported["evidence"] if item["source_type"] == "consolidation-summary")
 
-    result = run_cli(store, "search", "--tenant", TENANT, "--query", ingested["cid"])
+    # Only the summary carries its fingerprint token (source CIDs left its text).
+    fingerprint = summary["metadata"]["summary"]["source_fingerprint"]
+    result = run_cli(store, "search", "--tenant", TENANT, "--query", fingerprint)
+    assert ingested["cid"]
 
     assert result["abstained"] is True
     assert result["uncertainty_note"] == "Only gist-tier memory support was retrieved; inspect source evidence before answering."

@@ -60,6 +60,11 @@ class _MassSupersessionExtractor:
         self.n = n
 
     def extract(self, tenant_id, payload, evidence):
+        # Each candidate cites the evidence that states it - two independent reports per
+        # entity, so it passes the external-corroboration rail and reaches the supersession rail.
+        cited: dict[str, list[str]] = {}
+        for item in evidence:
+            cited.setdefault(item.content.split()[0], []).append(item.cid)
         return {
             "candidates": [
                 {
@@ -70,6 +75,7 @@ class _MassSupersessionExtractor:
                     "candidate_object": "beta",
                     "confidence": 0.7,
                     "trust_tier": int(TrustTier.DIRECT_USER),
+                    "source_evidence_cids": cited[f"entity-{i}"],
                 }
                 for i in range(self.n)
             ],
@@ -82,8 +88,14 @@ def test_mass_supersession_pass_is_clamped_to_five_percent():
     _seed_active_population(engine)
     before = {a.id for a in active_assertions(engine)}
     source_cids = [
-        add_evidence(engine, content=f"fact {i} value beta", trust_tier=int(TrustTier.DIRECT_USER))
+        add_evidence(
+            engine,
+            content=f"entity-{i} value beta{suffix}",
+            trust_tier=int(TrustTier.DIRECT_USER),
+            source_identity=f"report-{report}:{i}",
+        )
         for i in range(ACTIVE_COUNT)
+        for report, suffix in (("a", "."), ("b", ", confirmed."))
     ]
     worker = ConsolidationWorker(
         engine,

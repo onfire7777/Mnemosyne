@@ -228,9 +228,13 @@ def test_capture_batch_consolidates_every_cid_only_when_opted_in(tmp_path: Path)
                     "trust_tier": 0,
                 }
             )
+            # Each fact is stated by two independent documents: a fact one source states
+            # waits for corroboration instead of riding in on batch membership.
             for source_identity, content in (
                 ("d1", "Mara is the owner of Helios."),
                 ("d2", "Helios is a project shipping in Q3 2026."),
+                ("d3", "Mara is the owner of Helios"),
+                ("d4", "Helios is a project shipping in Q3 2026"),
             )
         )
         + "\n",
@@ -272,7 +276,7 @@ def test_capture_batch_consolidates_every_cid_only_when_opted_in(tmp_path: Path)
         (item["tenant_id"], item["source_identity"], item["access_policy"]["tenant"])
         for item in payload["evidence"]
         if item["cid"] in captured_cids
-    } == {("eval", "d1", "eval"), ("eval", "d2", "eval")}
+    } == {("eval", f"d{n}", "eval") for n in range(1, 5)}
 
 
 def test_capture_batch_consolidation_preserves_user_boundaries(tmp_path: Path) -> None:

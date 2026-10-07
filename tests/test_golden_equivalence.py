@@ -4,7 +4,13 @@ The fixtures in eval/perf/golden were dumped by eval/perf/golden_equivalence.py 
 2083ffc4 - before the batch-scale engine work - under its deterministic runtime. Every gate
 decision, the final main-branch state and the eval-query-batch output must stay byte for byte
 the same; only branch bookkeeping (merged canaries, per-merge reinforce rows) is excluded, as the
-harness documents. Regenerate only from the legacy engine:
+harness documents.
+
+synthetic-growth, synthetic-rails and synthetic-conflicts were re-dumped on 7 Oct 2026 from the
+engine that made these deliberate changes (docs/recall-integrity-fixes-2026-10-07.md): a fact
+cites only the evidence it came from, not the whole batch; name co-occurrence makes no fact;
+search keeps relevance order (no U-curve). g0-write-gating did not change. Otherwise regenerate
+only from the engine the fixtures were dumped from:
 
     python eval/perf/golden_equivalence.py dump --scenario NAME --src <2083ffc4 checkout>/src --out x.json
 """
@@ -46,7 +52,13 @@ def test_golden_fixtures_cover_decisions_state_and_retrieval() -> None:
         for candidate in job["result"]["candidate_results"]
     ]
     assert errors and all("rejected semantic candidates" in error for error in errors)
-    assert len(candidates) > 50 and all(candidate["promoted"] for candidate in candidates)
+    # Since 7 Oct 2026 a fact cites only its own source, so one stated once waits for
+    # corroboration instead of riding in on batch membership (docs/recall-integrity-fixes-2026-10-07.md).
+    awaiting = [c for c in candidates if not c["promoted"]]
+    assert len(candidates) - len(awaiting) > 20
+    assert all(
+        case.startswith("fact_external_corroboration:") for c in awaiting for case in c["failed_cases"]
+    ) and all(c["failed_cases"] for c in awaiting)
     assert growth["queries"]["count"] == 9
     assert growth["state"]["golden-a"]["assertions"] and growth["state"]["golden-b"]["assertions"]
     rails = json.loads(gzip.decompress((GOLDEN / "synthetic-rails.json.gz").read_bytes()))["result"]

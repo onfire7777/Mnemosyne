@@ -2383,7 +2383,8 @@ def test_mcp_search_surfaces_gist_only_abstention(tmp_path: Path) -> None:
     )
     summary = next(item for item in summary_run.pass_results if item["name"] == "summarizer")["details"]
 
-    searched = mcp_call(server, "search", {"tenant_id": TENANT, "query": captured["cid"]})
+    # Only the summary carries its fingerprint token (source CIDs left its text).
+    searched = mcp_call(server, "search", {"tenant_id": TENANT, "query": summary["source_fingerprint"]})
 
     assert searched["abstained"] is True
     assert searched["uncertainty_note"] == "Only gist-tier memory support was retrieved; inspect source evidence before answering."
@@ -2838,7 +2839,8 @@ def test_mcp_http_transport_surfaces_gist_only_abstention(tmp_path: Path) -> Non
                 "method": "tools/call",
                 "params": {
                     "name": "search",
-                    "arguments": {"tenant_id": TENANT, "query": captured_content["cid"]},
+                    # Only the summary carries its fingerprint token (source CIDs left its text).
+                    "arguments": {"tenant_id": TENANT, "query": summary["source_fingerprint"]},
                 },
             },
         )

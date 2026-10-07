@@ -3009,6 +3009,21 @@ _SALIENT_ENTITY = re.compile(
 )
 
 
+_FUNCTION_WORDS = frozenset(
+    "a an the by in on at for from with to of as after before during when while although but "
+    "and or if he she it they his her its their this that these those there then also later "
+    "however into onto over under between".split()
+)
+
+
+def _entity_span(span: str) -> str:
+    """A capitalised span without leading function words or a trailing possessive."""
+    words = span.split()
+    while words and words[0].lower() in _FUNCTION_WORDS:
+        words.pop(0)
+    return re.sub(r"'s?$", "", " ".join(words))
+
+
 def _extract_simple_fact(
     text: str, *, strip_title: bool = False
 ) -> list[tuple[str, str, str]]:
@@ -3043,10 +3058,20 @@ def _extract_simple_fact(
         for left, right in zip(entities, entities[1:], strict=False):
             connector = sentence[left.end() : right.start()].strip(" ,;:()[]{}")
             words = re.findall(r"[A-Za-z][A-Za-z'-]*", connector.lower())
-            predicate = " ".join(words)
-            if not predicate or all(word in {"and", "or", "but"} for word in words):
+            subject, obj = _entity_span(left.group()), _entity_span(right.group())
+            # A relation is a short verb-bearing phrase between two names. Coordination
+            # ("X's son and Y's"), possessive fragments ("' s"), bare prepositions ("X of Y")
+            # and sentence-initial function words ("By ...", "The ...") are not facts.
+            if (
+                not subject
+                or not obj
+                or not words
+                or len(words) > 4
+                or any(word in {"and", "or", "but"} or len(word) == 1 for word in words)
+                or all(word in _FUNCTION_WORDS for word in words)
+            ):
                 continue
-            facts.add((left.group().strip(), predicate, right.group().strip()))
+            facts.add((subject, " ".join(words), obj))
     return sorted(facts, key=lambda fact: tuple(part.casefold() for part in fact))
 
 
