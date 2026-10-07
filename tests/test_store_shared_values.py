@@ -139,6 +139,46 @@ def test_front_encoding_round_trips_arbitrary_lists() -> None:
         assert all(row["cids"] is value for row, value in zip(decoded["rows"], values, strict=True))
 
 
+MARKER_METADATA = {
+    "$mnemosyne:shared_cids": 0,
+    "$mnemosyne:shared_map": 99,
+    "$mnemosyne:literal": {"$mnemosyne:shared_cids": 1},
+    "nested": [{"$mnemosyne:shared_cids": 7}, {"ok": 1}],
+}
+
+
+def test_user_values_that_look_like_shared_references_survive_a_round_trip(tmp_path: Path) -> None:
+    """Metadata is user-controlled, so a row may hold a one-key dict named like a reference."""
+    for documents in (5, 40):  # below and above the sharing threshold
+        store = tmp_path / f"store-{documents}.json"
+        engine = LocalMemoryEngine(store_path=store)
+        for key, value in MARKER_METADATA.items():
+            engine.append_evidence(Evidence(tenant_id="t", user_id="u", actor="user", source_type="note",
+                                            content=f"marker {key}", source_identity=f"m{key}",
+                                            metadata={key: value}))
+        _fill(engine, documents)
+        expected = json.loads(_legacy_payload(engine))
+        del engine
+        reloaded = LocalMemoryEngine(store_path=store, read_only=True)
+        assert json.loads(_legacy_payload(reloaded)) == expected
+        kept = {
+            row.content.removeprefix("marker "): row.metadata
+            for row in reloaded.evidence.values()
+            if row.content.startswith("marker ")
+        }
+        assert set(kept) == set(MARKER_METADATA)
+        for key, value in MARKER_METADATA.items():
+            # The engine adds its own projection keys; the user's marker key is untouched.
+            assert kept[key][key] == value
+
+
+def test_a_reference_index_out_of_range_is_read_as_data_not_a_crash(tmp_path: Path) -> None:
+    from mnemosyne.engine import _decode_shared_values
+
+    payload = {"rows": [{"$mnemosyne:shared_cids": 42}, {"$mnemosyne:shared_map": "x"}]}
+    assert _decode_shared_values(payload, {}) == payload
+
+
 def test_reloaded_state_equals_the_state_written(tmp_path: Path) -> None:
     store = tmp_path / "store.json"
     engine = LocalMemoryEngine(store_path=store)

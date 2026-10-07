@@ -1666,6 +1666,9 @@ def _row_snapshot(item: Any, times: tuple[str, ...]) -> dict[str, Any]:
 _SHARED_VALUES_KEY = "shared_values"
 _SHARED_CIDS_REF = "$mnemosyne:shared_cids"
 _SHARED_MAP_REF = "$mnemosyne:shared_map"
+#: Wrapper for a user value that would otherwise read back as a reference (see encode).
+_SHARED_ESCAPE = "$mnemosyne:literal"
+_SHARED_MARKERS = frozenset({_SHARED_CIDS_REF, _SHARED_MAP_REF, _SHARED_ESCAPE})
 # Only shared values at least this large are written by reference; smaller ones stay inline.
 _SHARED_VALUE_MIN = 16
 _EVIDENCE_TIMES = ("created_at",)
@@ -1715,7 +1718,13 @@ class _SharedValueEncoder:
         if kind is SharedMap and len(value) >= _SHARED_VALUE_MIN:
             return self._ref(value, self.maps, _SHARED_MAP_REF, dict)
         if isinstance(value, dict):
-            return {key: self.encode(item) for key, item in value.items()}
+            encoded = {key: self.encode(item) for key, item in value.items()}
+            if len(encoded) == 1 and next(iter(encoded)) in _SHARED_MARKERS:
+                # Metadata and access policies are user-controlled, so a row may legitimately
+                # hold a one-key dict named exactly like a reference. Wrapped here, it decodes
+                # back to itself instead of being read as a reference into the shared table.
+                return {_SHARED_ESCAPE: encoded}
+            return encoded
         if isinstance(value, (list, tuple)):
             return [self.encode(item) for item in value]
         return value
@@ -1852,10 +1861,18 @@ def _decode_shared_values(data: Any, shared: dict[str, Any]) -> Any:
     def decode(value: Any) -> Any:
         if isinstance(value, dict):
             if len(value) == 1:
-                if _SHARED_CIDS_REF in value:
-                    return lists[value[_SHARED_CIDS_REF]]
-                if _SHARED_MAP_REF in value:
-                    return maps[value[_SHARED_MAP_REF]]
+                if _SHARED_ESCAPE in value:
+                    # A user value that merely looks like a reference: unwrap it unchanged.
+                    inner = value[_SHARED_ESCAPE]
+                    return {key: decode(item) for key, item in inner.items()} if isinstance(inner, dict) else decode(inner)
+                index = value.get(_SHARED_CIDS_REF)
+                if type(index) is int and 0 <= index < len(lists):
+                    return lists[index]
+                index = value.get(_SHARED_MAP_REF)
+                if type(index) is int and 0 <= index < len(maps):
+                    return maps[index]
+                # Anything else named like a reference is data: a store written before this
+                # encoding, or a hand-edited one, must still open.
             return {key: decode(item) for key, item in value.items()}
         if isinstance(value, list):
             return [decode(item) for item in value]
@@ -3302,8 +3319,9 @@ class LocalMemoryEngine(CanaryOverlayMixin):
     def _load(self) -> None:
         data = json.loads(self.store_path.read_text(encoding="utf-8"))
         shared = data.pop(_SHARED_VALUES_KEY, None) if isinstance(data, dict) else None
-        if isinstance(shared, dict):
-            data = _decode_shared_values(data, shared)
+        # Always decoded, even with no shared table: a store with no large shared value can
+        # still carry an escaped user dict that merely looks like a reference (see encode).
+        data = _decode_shared_values(data, shared if isinstance(shared, dict) else {})
         self.policy = OperatingPolicy.from_dict(data.get("policy"))
         branches = data.get("branches")
         if isinstance(branches, list):
