@@ -749,6 +749,14 @@ _PAST_CUE = re.compile(
 )
 
 
+#: Words that frame a question about a conversation ("what did I ask you ...") rather than say
+#: what it is about: an answer from a time span need not repeat them.
+_RECALL_FRAMING = re.compile(
+    r"\b(ask|asked|asking|say|said|tell|told|talk|talked|mention|mentioned|discuss|discussed|"
+    r"speak|spoke|remember|recall|happen|happened|do|did|done)\b"
+)
+
+
 @dataclass(frozen=True, slots=True)
 class TimeWindow:
     """A span of local time a question names, and the question without the words that named it."""
@@ -757,6 +765,13 @@ class TimeWindow:
     end: datetime
     label: str
     rest: str
+
+
+def window_support_query(window: TimeWindow) -> str:
+    """What a time-span answer must cover: the rest of the question without its framing, so
+    "what did I ask you yesterday" needs nothing more than the span, and "what did I say
+    about Leeds yesterday" still needs Leeds."""
+    return " ".join(_RECALL_FRAMING.sub(" ", window.rest).split())
 
 
 def query_time_window(query: str, now: datetime) -> TimeWindow | None:

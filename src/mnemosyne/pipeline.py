@@ -61,6 +61,7 @@ from mnemosyne.retrieval import (
     query_mode_from_filter,
     query_support,
     query_time_window,
+    window_support_query,
     prospective_memory_hits,
     require_supported_query_mode,
     schema_fast_path_rerank,
@@ -1405,9 +1406,15 @@ def run_retrieval_pipeline(
     threshold = conformal_threshold(calibration) if calibration else policy.abstention_threshold
     # A graph-ranked answer is supported by the facts that linked it to the question as well
     # as by its own words, and a time-span question by the span itself.
-    linked_facts = [" ".join(fact) for fact in (passage_graph_explain or {}).get("linked_facts", [])]
-    support_report = query_support(window.rest if window is not None else query, budgeted, linked_facts)
-    insufficient_support = support_report["score"] < QUERY_SUPPORT_THRESHOLD and not (window is not None and budgeted)
+    graph_explain = passage_graph_explain or {}
+    linked_facts = [
+        " ".join(fact)
+        for fact in [*graph_explain.get("linked_facts", []), *(graph_explain.get("second_hop") or {}).get("linked_facts", [])]
+    ]
+    support_report = query_support(
+        window_support_query(window) if window is not None else query, budgeted, linked_facts
+    )
+    insufficient_support = support_report["score"] < QUERY_SUPPORT_THRESHOLD
     confidence = ops._confidence(query, budgeted, support_score=support_report["score"])
     prediction_set_size = ops._prediction_set_size(budgeted, threshold)
     entropy = semantic_entropy([hit.text for hit in budgeted])

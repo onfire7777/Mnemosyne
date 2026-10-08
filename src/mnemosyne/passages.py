@@ -124,6 +124,24 @@ Passages:
 List the numbers of the passages needed to answer the question, most useful first. Include a passage about an intermediate person, place or thing the question depends on, even when it does not mention the question's words. Answer with one compact JSON object: {"passages": [numbers]}.
 """
 
+SECOND_HOP_PROMPT = """You plan the second step of a memory search.
+
+Question: {question}
+
+Passages found by the first search:
+{passages}
+
+Some questions need two steps: first an intermediate person, place or thing (the director of a film), then a fact about it (where that director was born). The passages may name the intermediate without holding that fact.
+
+Write ONE search for what is still missing:
+- Name the intermediate exactly as the passages spell it, followed by the fact the question needs, for example "Jane Doe nationality" or "Paul Moreau date of birth".
+- When the question compares two things, name every intermediate it needs in the same search, for example "Anna Berg date of death, Paul Moreau date of death".
+- Never write an answer, a date or a sentence: only names and what is needed about them.
+- If the passages already hold everything the question needs, use an empty string.
+
+Answer with one compact JSON object: {"query": "..."}.
+"""
+
 RECOGNITION_PROMPT = """You select facts from a memory that help answer a question.
 
 Question: {question}
@@ -335,6 +353,9 @@ def build_passage_graph(
     embedding_dims: int = 1024,
     recognition_filter: bool = False,
     rerank_top: int = 0,
+    rerank_model: str | None = None,
+    rerank_reasoning_effort: str | None = None,
+    second_hop: bool = False,
     read_only: bool = False,
 ) -> PassageGraphIndex:
     """The passage graph for one index file and its (OpenAI-compatible) chat and embedding endpoints."""
@@ -348,6 +369,12 @@ def build_passage_graph(
         ChatModel(url=chat_url, model=extractor, api_key=chat_api_key, reasoning_effort=reasoning_effort)
         if chat_url else None
     )
+    # A separate (larger) local model may rerank and write second-hop searches; OpenIE and the
+    # index keep the extractor, so changing it never invalidates the stored triples.
+    rerank_chat = (
+        ChatModel(url=chat_url, model=rerank_model, api_key=chat_api_key, reasoning_effort=rerank_reasoning_effort)
+        if chat_url and rerank_model else None
+    )
     embedder = (
         HttpEmbeddingProvider(url=embedding_url, model=embedding_model, dims=int(embedding_dims),
                               timeout_seconds=120.0, query_prefix="", cache_size=0)
@@ -360,6 +387,8 @@ def build_passage_graph(
         embedder=embedder,
         recognition_filter=recognition_filter,
         rerank_top=max(0, int(rerank_top)),
+        rerank_chat=rerank_chat,
+        second_hop=bool(second_hop),
     )
 
 
@@ -384,6 +413,9 @@ def passage_graph_from_env(environ: Mapping[str, str] | None = None, *, read_onl
         embedding_dims=int(env.get("MNEMOSYNE_PASSAGE_EMBEDDING_DIMS", "1024")),
         recognition_filter=env.get("MNEMOSYNE_PASSAGE_RECOGNITION_FILTER", "").lower() in _TRUE,
         rerank_top=int(env.get("MNEMOSYNE_PASSAGE_RERANK_TOP", "0")),
+        rerank_model=env.get("MNEMOSYNE_PASSAGE_RERANK_MODEL") or None,
+        rerank_reasoning_effort=env.get("MNEMOSYNE_PASSAGE_RERANK_REASONING_EFFORT") or None,
+        second_hop=env.get("MNEMOSYNE_PASSAGE_SECOND_HOP", "").lower() in _TRUE,
         read_only=read_only,
     )
 
@@ -471,6 +503,22 @@ class PassageGraphIndex:
     dense_mix: float = 0.1
     #: Let the chat model reorder the top N passages (0 = off; one call per query).
     rerank_top: int = 0
+    #: Model for reranking and second-hop searches (None = ``chat``, the extractor).
+    rerank_chat: ChatModel | None = None
+    #: Passage text the reranker sees in total: each passage gets an equal share of at most
+    #: 600 characters, so a wide head still fits a 4k-token local context.
+    rerank_chars: int = 9000
+    #: Ask the chat model for a follow-up search (the bridge person, place or thing a two-step
+    #: question needs), walk the graph again with it and fuse both rankings (one call per query).
+    second_hop: bool = False
+    #: Top passages the follow-up search is written from.
+    second_hop_top: int = 5
+    #: Reciprocal-rank fusion of the two walks: a small constant and half weight for the second
+    #: keep the first hop's head on top and lift the second's best few into the top five (a
+    #: plateau on the 2Wiki DEVELOPMENT split, k 1-3 and weight 0.3-0.6: recall@5 0.914 ->
+    #: 0.928; k 60 at full weight buried the first hop's answers: 0.788).
+    second_hop_rrf_k: int = 2
+    second_hop_weight: float = 0.5
     max_disclosed_sensitivity: int = 1
     query_template: str = "Instruct: {task}\nQuery: {query}"
     #: Seconds a query may wait for its embedding before search falls back to BM25.
@@ -670,6 +718,8 @@ class PassageGraphIndex:
             "chat_url": getattr(self.chat, "url", None),
             "embedding_model": getattr(self.embedder, "model", None),
             "rerank_top": self.rerank_top,
+            "rerank_model": getattr(self.rerank_chat or self.chat, "model", None),
+            "second_hop": self.second_hop,
             "live_index": self.live_index,
             "pending_scopes": pending,
             **status,
@@ -800,10 +850,12 @@ class PassageGraphIndex:
 
     def _rerank(self, question: str, head: Sequence[Hit]) -> list[int]:
         """Positions in ``head`` the chat model picked, most useful first; [] on any failure."""
-        listed = "\n".join(f"[{n}] {' '.join(hit.text.split())[:600]}" for n, hit in enumerate(head, 1))
+        chat = self.rerank_chat or self.chat
+        share = max(160, min(600, int(self.rerank_chars) // max(len(head), 1)))
+        listed = "\n".join(f"[{n}] {' '.join(hit.text.split())[:share]}" for n, hit in enumerate(head, 1))
         prompt = RERANK_PROMPT.replace("{question}", question).replace("{passages}", listed)
         try:
-            picked = self.chat.json(prompt).get("passages") if self.chat else None
+            picked = chat.json(prompt).get("passages") if chat else None
         except (ValueError, OSError):
             return []
         chosen: list[int] = []
@@ -856,22 +908,16 @@ class PassageGraphIndex:
             embedder = replace(embedder, timeout_seconds=min(float(embedder.timeout_seconds), self.query_timeout_seconds))
         return _embed(embedder, [text])[0]
 
-    def rank(self, query: str, passages: Sequence[Hit], embedder: Any, k: int) -> tuple[list[Hit], dict[str, Any]]:
-        """The caller's passages in HippoRAG 2 order, best first, at most ``k``."""
+    def _walk(self, graph: _Graph, query: str, embedder: Any) -> tuple[Any, dict[str, Any]]:
+        """HippoRAG 2 scores of every graph passage for one query: fact-seeded PPR, else dense."""
         import numpy as np
 
-        embedder = self.embedder or embedder
-        _require_semantic(embedder)
-        if not passages:
-            return [], {"applied": False, "reason": "no_passages"}
-        started = time.perf_counter()
-        graph = self._graph(passages[0].tenant_id, passages, embedder)
         query_fact = np.asarray(self._query_vector(FACT_TASK, query, embedder), dtype=np.float32)
         query_passage = np.asarray(self._query_vector(PASSAGE_TASK, query, embedder), dtype=np.float32)
         dense = graph.passage_vectors @ query_passage
         if graph.indexed.any():
             dense = np.where(graph.indexed, dense, float(dense[graph.indexed].min()))
-        explain: dict[str, Any] = {"applied": True, "graph": graph.stats}
+        explain: dict[str, Any] = {}
         scores = dense.astype(np.float64)
         linked: list[int] = []
         if len(graph.facts):
@@ -904,14 +950,76 @@ class PassageGraphIndex:
                             (dense - d_low) / ((d_high - d_low) or 1.0)
                         )
         explain["route"] = "ppr" if linked else "dense"
-        ranked = [i for i in np.argsort(-scores, kind="stable").tolist() if graph.indexed[i]]
+        return scores, explain
+
+    @staticmethod
+    def _order(graph: _Graph, scores: Any) -> list[int]:
+        import numpy as np
+
+        return [i for i in np.argsort(-scores, kind="stable").tolist() if graph.indexed[i]]
+
+    def _follow_up(self, question: str, head: Sequence[Hit]) -> str | None:
+        """The chat model's search for the missing step of a two-step question; None if none."""
+        chat = self.rerank_chat or self.chat
+        if chat is None or not head:
+            return None
+        listed = "\n".join(f"[{n}] {' '.join(hit.text.split())[:500]}" for n, hit in enumerate(head, 1))
+        prompt = SECOND_HOP_PROMPT.replace("{question}", question).replace("{passages}", listed)
+        try:
+            value = chat.json(prompt).get("query")
+        except (ValueError, OSError):
+            return None
+        if not isinstance(value, str):
+            return None
+        return " ".join(value.split())[:300] or None
+
+    def _second_hop(
+        self, query: str, graph: _Graph, passages: Sequence[Hit], ranked: list[int], embedder: Any
+    ) -> tuple[list[int], dict[int, float] | None, dict[str, Any]]:
+        """The first-hop order fused (reciprocal rank) with a walk from the follow-up search."""
+        follow = self._follow_up(query, [passages[i] for i in ranked[: self.second_hop_top]])
+        explain: dict[str, Any] = {"query": follow, "applied": False}
+        if not follow or follow.casefold() == query.casefold():
+            return ranked, None, explain
+        try:
+            scores, walked = self._walk(graph, follow, embedder)
+        except (ValueError, OSError) as exc:
+            explain["error"] = f"{type(exc).__name__}: {exc}"[:200]
+            return ranked, None, explain
+        explain.update(applied=True, route=walked["route"], linked_facts=walked.get("linked_facts", []))
+        fused: dict[int, float] = {}
+        for order, weight in ((ranked, 1.0), (self._order(graph, scores), self.second_hop_weight)):
+            for position, i in enumerate(order, 1):
+                fused[i] = fused.get(i, 0.0) + weight / (self.second_hop_rrf_k + position)
+        return sorted(fused, key=lambda i: -fused[i]), fused, explain
+
+    def rank(self, query: str, passages: Sequence[Hit], embedder: Any, k: int) -> tuple[list[Hit], dict[str, Any]]:
+        """The caller's passages in HippoRAG 2 order, best first, at most ``k``."""
+        import numpy as np
+
+        embedder = self.embedder or embedder
+        _require_semantic(embedder)
+        if not passages:
+            return [], {"applied": False, "reason": "no_passages"}
+        started = time.perf_counter()
+        graph = self._graph(passages[0].tenant_id, passages, embedder)
+        explain: dict[str, Any] = {"applied": True, "graph": graph.stats}
+        scores, walked = self._walk(graph, query, embedder)
+        explain.update(walked)
+        ranked = self._order(graph, scores)
         final = {i: float(scores[i]) for i in ranked}
-        if self.rerank_top > 0 and self.chat is not None and ranked:
+        reranker = self.rerank_chat or self.chat
+        if self.second_hop and reranker is not None and ranked:
+            ranked, fused, explain["second_hop"] = self._second_hop(query, graph, passages, ranked, embedder)
+            if fused is not None:
+                final = fused
+        if self.rerank_top > 0 and reranker is not None and ranked:
             head = ranked[: self.rerank_top]
             chosen = self._rerank(query, [passages[i] for i in head])
             if chosen:
                 first = [head[j] for j in chosen]
-                ranked = first + [i for i in ranked if i not in set(first)]
+                taken = set(first)
+                ranked = first + [i for i in ranked if i not in taken]
                 final = {i: 1.0 / (1 + position) for position, i in enumerate(ranked)}
             explain["reranked"] = len(chosen)
         unindexed = np.flatnonzero(~graph.indexed).tolist()
