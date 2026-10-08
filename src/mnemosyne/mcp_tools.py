@@ -1333,6 +1333,7 @@ class MemoryTools:
         lean: bool = False,
         session_identity: SessionIdentity | None = None,
         query_mode: str | None = None,
+        evaluated_at: str | None = None,
     ) -> dict[str, Any]:
         filt = self._read_context(
             tenant_id,
@@ -1359,6 +1360,11 @@ class MemoryTools:
             filt["token_budget"] = token_budget
         if query_mode is not None:
             filt["query_mode"] = query_mode
+        if evaluated_at is not None:
+            # The instant the question is asked at (ISO 8601): "yesterday" is relative to it.
+            if parse_dt(evaluated_at) is None:
+                raise ValueError("evaluated_at must be an ISO 8601 timestamp")
+            filt["evaluated_at"] = evaluated_at
         start = perf_counter()
         result = self.engine.retrieve(query=query, tenant_id=tenant_id, branch=branch, filt=filt)
         payload = result.to_dict()

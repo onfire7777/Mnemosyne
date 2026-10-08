@@ -57,8 +57,10 @@ from mnemosyne.retrieval import (
     apply_workspace_retrieval_advisory,
     gist_support_report,
     global_sensemaking_projection,
+    TimeWindow,
     query_mode_from_filter,
     query_support,
+    query_time_window,
     prospective_memory_hits,
     require_supported_query_mode,
     schema_fast_path_rerank,
@@ -500,6 +502,76 @@ def _same_words(first: str, second: str, *, spoken: bool = False) -> bool:
     """
 
     return not _line_readings(first, spoken=spoken).isdisjoint(_line_readings(second, spoken=spoken))
+
+
+_SPEAKER_VERBS_USER = frozenset({"ask", "asked", "say", "said", "tell", "told", "mention", "mentioned", "want", "wanted", "request", "requested"})
+_SPEAKER_VERBS_ASSISTANT = frozenset({"say", "said", "tell", "told", "answer", "answered", "reply", "replied", "suggest", "suggested"})
+
+
+def _asked_speaker(question: str) -> str | None:
+    """'user' for "what did I ask / say", 'assistant' for "what did you say", else None."""
+    words = set(re.findall(r"[a-z']+", question.lower()))
+    if words & {"i", "me", "my"} and words & _SPEAKER_VERBS_USER:
+        return "user"
+    if "you" in words and words & _SPEAKER_VERBS_ASSISTANT:
+        return "assistant"
+    return None
+
+
+def _time_window_route(
+    ops: RetrievalPipelineOps,
+    window: TimeWindow,
+    effective_filter: dict[str, Any],
+    *,
+    tenant_id: str,
+    branch: str,
+    passage_graph: Any,
+) -> tuple[list[Hit], dict[str, Any]]:
+    """The passages made inside the window a question names ("what did I ask you yesterday"),
+    ranked by what the rest of the question asks for: earliest first for "first", newest
+    first for "last", otherwise by relevance; the speaker it asks about goes first."""
+    from dataclasses import replace
+
+    from mnemosyne.passages import rank_passages
+
+    candidates = ops.passage_candidates(effective_filter)
+    question = window.rest or "what happened"
+    explain: dict[str, Any] = {
+        "label": window.label, "start": window.start.isoformat(), "end": window.end.isoformat(),
+    }
+    ranked: list[Hit] | None = None
+    if passage_graph is not None:
+        try:
+            ranked, _graph_explain = passage_graph.rank(question, candidates, ops.adapters.embedding, len(candidates))
+        except (ValueError, OSError) as exc:
+            explain["fallback"] = f"bm25 ({type(exc).__name__})"
+    if ranked is None:
+        ranked = rank_passages(ops, question, candidates, len(candidates))
+    seen = {hit.id for hit in ranked}
+    # Passages the ranking did not score still belong to the window, in stored order.
+    ranked = list(ranked) + [replace(hit, metadata=dict(hit.metadata)) for hit in candidates if hit.id not in seen]
+    times = ops.evidence_created_at_many(tenant_id, [hit.id for hit in ranked], branch)
+    inside: list[tuple[datetime, Hit]] = []
+    for hit in ranked:
+        moment = times.get(hit.id)
+        if moment is None:
+            continue
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=timezone.utc)
+        if window.start <= moment < window.end:
+            inside.append((moment, hit))
+    if re.search(r"\b(first|earliest)\b", question):
+        inside.sort(key=lambda item: item[0])
+    elif re.search(r"\b(last|latest|most recent|recently)\b", question):
+        inside.sort(key=lambda item: item[0], reverse=True)
+    hits = [hit for _moment, hit in inside]
+    speaker = _asked_speaker(question)
+    if speaker is not None:
+        said = [hit for hit in hits if (hit.metadata.get("actor") == "user") == (speaker == "user")]
+        hits = said + [hit for hit in hits if hit not in said]
+        explain["speaker"] = speaker
+    explain["passages"] = len(hits)
+    return hits, explain
 
 
 def _cap_fact_hits(hits: list[Hit], *, slots: int) -> list[Hit]:
@@ -1128,10 +1200,21 @@ def run_retrieval_pipeline(
     semantic = passage_graph is not None and not passage_mode
     graph_ranked: list[Hit] | None = None
     graph_fallback: str | None = None
-    if passage_graph is not None:
-        from mnemosyne.passages import is_passage
-
-        width = max(100, policy.rerank_width, k * 4)
+    width = max(100, policy.rerank_width, k * 4)
+    # "What did I ask you yesterday?": a question that names a time span is answered from the
+    # passages made inside it. Needs the passage route (graph or passage mode); as_of is a
+    # different question (what was true then), handled by the deep path.
+    window = (
+        query_time_window(query, retrieval_instant)
+        if (passage_graph is not None or passage_mode) and not effective_filter.get("as_of")
+        else None
+    )
+    window_explain: dict[str, Any] | None = None
+    if window is not None:
+        window_hits, window_explain = _time_window_route(
+            ops, window, effective_filter, tenant_id=tenant_id, branch=branch, passage_graph=passage_graph
+        )
+    elif passage_graph is not None:
         try:
             # HippoRAG 2: fact-seeded Personalized PageRank over the passages this caller
             # may read. A model that is down or slow falls back to BM25, never to an error.
@@ -1141,7 +1224,12 @@ def run_retrieval_pipeline(
         except (ValueError, OSError) as exc:
             graph_fallback = f"{type(exc).__name__}: {str(exc)[:160]}"
             passage_graph_explain = {"applied": False, "fallback": "bm25", "reason": graph_fallback}
-    if semantic:
+    if window is not None:
+        dense = ops._mark_retrieved_text_as_data(window_hits)
+        lexical, graph, prospective, working, working_explain = [], [], [], [], {}
+    elif semantic:
+        from mnemosyne.passages import is_passage
+
         dense = (
             ops._mark_retrieved_text_as_data(graph_ranked)
             if graph_ranked is not None
@@ -1259,7 +1347,7 @@ def run_retrieval_pipeline(
             else ([], {})
         )
     ranked_routes = [dense, lexical, graph, prospective, working]
-    if passage_mode and graph_ranked is not None:
+    if window is not None or (passage_mode and graph_ranked is not None):
         fused = dense
     else:
         fused = (
@@ -1271,7 +1359,7 @@ def run_retrieval_pipeline(
         fused, collapsed_turns = _collapse_session_duplicates(fused)
     # Passage and graph-ranked search keep their relevance order: the local hashing
     # reranker and MMR would re-sort it by surface tokens.
-    relevance_order = passage_mode or semantic
+    relevance_order = passage_mode or semantic or window is not None
     reranked = (
         fused if relevance_order and ops.adapters.reranker.name == "local-similarity"
         else ops.adapters.reranker.rerank(query, fused, k=max(k * 2, k))
@@ -1315,8 +1403,11 @@ def run_retrieval_pipeline(
     )
     calibration = ops._calibration_for(tenant_id, "fact")
     threshold = conformal_threshold(calibration) if calibration else policy.abstention_threshold
-    support_report = query_support(query, budgeted)
-    insufficient_support = support_report["score"] < QUERY_SUPPORT_THRESHOLD
+    # A graph-ranked answer is supported by the facts that linked it to the question as well
+    # as by its own words, and a time-span question by the span itself.
+    linked_facts = [" ".join(fact) for fact in (passage_graph_explain or {}).get("linked_facts", [])]
+    support_report = query_support(window.rest if window is not None else query, budgeted, linked_facts)
+    insufficient_support = support_report["score"] < QUERY_SUPPORT_THRESHOLD and not (window is not None and budgeted)
     confidence = ops._confidence(query, budgeted, support_score=support_report["score"])
     prediction_set_size = ops._prediction_set_size(budgeted, threshold)
     entropy = semantic_entropy([hit.text for hit in budgeted])
@@ -1431,11 +1522,13 @@ def run_retrieval_pipeline(
         explain["working_memory"] = working_explain
     if passage_mode:
         explain["query_mode"] = "passages"
-    if passage_mode or semantic:
+    if relevance_order:
         explain["activation"] = {"applied": False, "reason": "passage_relevance_order"}
         explain["candidate_width"] = width
     if passage_graph_explain is not None:
         explain["passage_graph"] = passage_graph_explain
+    if window_explain is not None:
+        explain["time_window"] = window_explain
     result = RetrievalResult(
         query=query,
         hits=budgeted,

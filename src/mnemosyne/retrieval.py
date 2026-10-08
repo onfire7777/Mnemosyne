@@ -739,7 +739,94 @@ def similar_query_terms(left: str, right: str) -> bool:
     return bool(len(left) >= 4 and len(right) >= 4 and (left.startswith(right[:4]) or right.startswith(left[:4])))
 
 
-def query_support(query: str, hits: Sequence[Hit]) -> dict[str, Any]:
+_WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+_MONTHS = ("january", "february", "march", "april", "may", "june", "july", "august",
+           "september", "october", "november", "december")
+_DAY_PARTS = {"morning": (5, 12), "afternoon": (12, 17), "evening": (17, 24), "tonight": (17, 24), "night": (18, 24)}
+_SMALL_NUMBERS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "a": 1}
+_PAST_CUE = re.compile(
+    r"\b(did|was|were|had|remember|recall|said|told|asked|talked|mentioned|happened|discussed|spoke|first thing|last thing)\b"
+)
+
+
+@dataclass(frozen=True, slots=True)
+class TimeWindow:
+    """A span of local time a question names, and the question without the words that named it."""
+
+    start: datetime
+    end: datetime
+    label: str
+    rest: str
+
+
+def query_time_window(query: str, now: datetime) -> TimeWindow | None:
+    """The time span a question names, in the asker's local time, or None.
+
+    Deterministic, no model: today, yesterday, the day before yesterday, this morning /
+    afternoon / evening, tonight, last night, (on / last) <weekday> with an optional part of
+    the day, this week, last week, N days ago, and in <month>. ``now`` is the instant the
+    question is asked at; local time is this machine's time zone.
+    """
+    from datetime import timedelta
+
+    text = " ".join(re.findall(r"[a-z0-9']+", query.lower()))
+    # Only a question about what was said or done then: "I'm tired today" or "what's the
+    # weather tonight" must still search all of memory.
+    if not _PAST_CUE.search(text):
+        return None
+    local = now.astimezone()
+    today = local.replace(hour=0, minute=0, second=0, microsecond=0)
+    day: datetime | None = None
+    found: re.Match[str] | None = None
+
+    def rest_without(match: re.Match[str]) -> str:
+        return " ".join((text[: match.start()] + " " + text[match.end():]).split())
+
+    if found := re.search(r"\b(?:the )?day before yesterday\b", text):
+        day, label = today - timedelta(days=2), "the day before yesterday"
+    elif found := re.search(r"\blast night\b", text):
+        start = today - timedelta(days=1) + timedelta(hours=18)
+        return TimeWindow(start, today + timedelta(hours=5), "last night", rest_without(found))
+    elif found := re.search(r"\byesterday\b", text):
+        day, label = today - timedelta(days=1), "yesterday"
+    elif found := re.search(r"\b(\d+|" + "|".join(_SMALL_NUMBERS) + r") days? ago\b", text):
+        count = found.group(1)
+        day = today - timedelta(days=int(count) if count.isdigit() else _SMALL_NUMBERS[count])
+        label = found.group(0)
+    elif found := re.search(r"\blast week\b", text):
+        start = today - timedelta(days=today.weekday() + 7)
+        return TimeWindow(start, start + timedelta(days=7), "last week", rest_without(found))
+    elif found := re.search(r"\bthis week\b", text):
+        return TimeWindow(today - timedelta(days=today.weekday()), local, "this week", rest_without(found))
+    elif found := re.search(r"\b(?:(last|on|this past) )?(" + "|".join(_WEEKDAYS) + r")\b", text):
+        offset = (today.weekday() - _WEEKDAYS.index(found.group(2))) % 7
+        if offset == 0 and found.group(1) in {"last", "this past"}:
+            offset = 7
+        day, label = today - timedelta(days=offset), found.group(2)
+    elif found := re.search(r"\b(?:in|during|back in) (" + "|".join(_MONTHS) + r")\b", text):
+        month = _MONTHS.index(found.group(1)) + 1
+        year = local.year if month <= local.month else local.year - 1
+        start = today.replace(year=year, month=month, day=1)
+        end = start.replace(year=year + 1, month=1) if month == 12 else start.replace(month=month + 1)
+        return TimeWindow(start, end, found.group(1), rest_without(found))
+    elif found := re.search(r"\b(today|this (?:morning|afternoon|evening)|tonight)\b", text):
+        day, label = today, found.group(1)
+    if day is None or found is None:
+        return None
+    rest = rest_without(found)
+    part = next((name for name in _DAY_PARTS if re.search(rf"\b{name}\b", found.group(0) + " " + rest)), None)
+    if part is not None:
+        first, last = _DAY_PARTS[part]
+        rest = " ".join(re.sub(rf"\b(?:in the |this |that )?{part}\b", " ", rest).split())
+        label = label if part in label else f"{label} {part}"
+        return TimeWindow(day + timedelta(hours=first), day + timedelta(hours=last), label, rest)
+    return TimeWindow(day, day + timedelta(days=1), label, rest)
+
+
+def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = ()) -> dict[str, Any]:
+    """Share of the query's content words that the top hits cover. ``extra_texts`` adds what
+    linked the hits to the question (the passage graph's facts): a second-hop answer rarely
+    repeats the question's words, but the fact that led to it does."""
     query_terms: list[str] = []
     for token in tokenize(query):
         term = normalise_query_term(token)
@@ -756,8 +843,8 @@ def query_support(query: str, hits: Sequence[Hit]) -> dict[str, Any]:
         }
 
     evidence_terms: list[str] = []
-    for hit in hits[:8]:
-        evidence_terms.extend(normalise_query_term(token) for token in tokenize(hit.text) if len(token) > 2)
+    for text in [hit.text for hit in hits[:8]] + list(extra_texts):
+        evidence_terms.extend(normalise_query_term(token) for token in tokenize(text) if len(token) > 2)
     matched_terms = [
         term
         for term in query_terms
