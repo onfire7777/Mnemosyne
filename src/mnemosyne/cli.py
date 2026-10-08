@@ -2038,6 +2038,9 @@ def cmd_eval_query_batch(args: argparse.Namespace) -> None:
 
         # Evaluation-only overlay: read-only engine never persists this policy.
         tools.engine.policy = replace(tools.engine.policy, **overrides)
+    passage_graph = getattr(tools.engine.adapters, "passage_graph", None)
+    if passage_graph is not None and getattr(args, "retrieval_mode", None) == "passages":
+        passage_graph.prepare([row["query"] for row in rows], tools.engine.adapters.embedding)
     results = []
     for row in rows:
         search_kwargs = {}
