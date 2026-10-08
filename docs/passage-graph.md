@@ -84,7 +84,7 @@ and reproduced to the third decimal.
 
 | 2Wiki | dev recall@5 | held-out recall@2 | held-out recall@5 (95% CI) | per query |
 |---|---:|---:|---:|---:|
-| BM25 passages | 0.665 | 0.560 | 0.664 | 15 ms |
+| BM25 passages | 0.665 | 0.561 | 0.664 | 15 ms |
 | dense (qwen3-embedding:8b) | 0.761 | - | - | 5 ms |
 | passage graph (defaults) | 0.914 | 0.656 | 0.880 (0.867-0.892) | 0.16 s |
 | passage graph + `--passage-rerank-top 10` | 0.932 | 0.766 | **0.917 (0.906-0.927)** | 0.52 s |
