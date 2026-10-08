@@ -401,6 +401,7 @@ class PassageGraphIndex:
     max_disclosed_sensitivity: int = 1
     query_template: str = "Instruct: {task}\nQuery: {query}"
     _cache: tuple[tuple[Any, ...], _Graph] | None = field(default=None, repr=False)
+    _query_vectors: dict[str, Any] = field(default_factory=dict, repr=False)
     _cache_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     @property
@@ -662,6 +663,25 @@ class PassageGraphIndex:
         keys = {(phrase_key(s), " ".join(p.lower().split()), phrase_key(o)) for s, p, o in chosen}
         return [index for index in ranked_facts if graph.facts[index] in keys]
 
+    def prepare(self, queries: Sequence[str], embedder: Any, *, batch_size: int = 64) -> None:
+        """Embed a batch of queries up front (in memory, this process only).
+
+        A batch evaluation that also calls the chat model per query would otherwise make a
+        small GPU swap the embedding and chat models on every question.
+        """
+        embedder = self.embedder or embedder
+        texts = list(dict.fromkeys(
+            self.query_template.format(task=task, query=query) for query in queries for task in (FACT_TASK, PASSAGE_TASK)
+        ))
+        for chunk in _chunks(texts, batch_size):
+            for text, vector in zip(chunk, _embed(embedder, list(chunk))):
+                self._query_vectors[text] = vector
+
+    def _query_vector(self, task: str, query: str, embedder: Any) -> Any:
+        text = self.query_template.format(task=task, query=query)
+        vector = self._query_vectors.get(text)
+        return vector if vector is not None else embedder.embed(text)
+
     def rank(self, query: str, passages: Sequence[Hit], embedder: Any, k: int) -> tuple[list[Hit], dict[str, Any]]:
         """The caller's passages in HippoRAG 2 order, best first, at most ``k``."""
         import numpy as np
@@ -672,10 +692,8 @@ class PassageGraphIndex:
             return [], {"applied": False, "reason": "no_passages"}
         started = time.perf_counter()
         graph = self._graph(passages[0].tenant_id, passages, embedder)
-        query_fact = np.asarray(embedder.embed(self.query_template.format(task=FACT_TASK, query=query)), dtype=np.float32)
-        query_passage = np.asarray(
-            embedder.embed(self.query_template.format(task=PASSAGE_TASK, query=query)), dtype=np.float32
-        )
+        query_fact = np.asarray(self._query_vector(FACT_TASK, query, embedder), dtype=np.float32)
+        query_passage = np.asarray(self._query_vector(PASSAGE_TASK, query, embedder), dtype=np.float32)
         dense = graph.passage_vectors @ query_passage
         if graph.indexed.any():
             dense = np.where(graph.indexed, dense, float(dense[graph.indexed].min()))

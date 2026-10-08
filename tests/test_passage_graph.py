@@ -205,6 +205,23 @@ def test_forget_purges_what_the_index_derived_from_the_passage(tmp_path) -> None
     assert "Ermengarde of Tours" not in _ranked(engine, "When did Lothair II's mother pass away?")
 
 
+def test_prepared_query_vectors_are_used_instead_of_the_embedder(tmp_path) -> None:
+    engine, graph, _chat, _cids = _setup(tmp_path)
+    MemoryTools(engine).index_passages(TENANT)
+    question = "When did Lothair II's mother pass away?"
+    expected = _ranked(engine, question)
+    graph.prepare([question], BagEmbedder())
+
+    class Refusing(BagEmbedder):
+        def embed(self, text: str) -> list[float]:
+            raise AssertionError("query was embedded again")
+
+    graph.embedder = Refusing()
+    graph._cache = None
+    assert graph.store.vectors(TENANT, "passage", "bag|64", [_cids["Lothair II"]])
+    assert _ranked(engine, question) == expected
+
+
 def test_read_only_index_refuses_to_write(tmp_path) -> None:
     PassageIndexStore(tmp_path / "index.sqlite").close()
     graph = PassageGraphIndex(
