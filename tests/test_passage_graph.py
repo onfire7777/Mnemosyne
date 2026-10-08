@@ -17,6 +17,8 @@ from mnemosyne.mcp_tools import MemoryTools  # noqa: E402
 from mnemosyne.models import Evidence  # noqa: E402
 from mnemosyne.passages import (  # noqa: E402
     OPENIE_PROMPT,
+    RERANK_PROMPT,
+    SECOND_HOP_PROMPT,
     PassageGraphIndex,
     PassageIndexStore,
     _embed,
@@ -407,3 +409,123 @@ def test_mcp_server_wires_the_graph_and_reports_it(tmp_path, monkeypatch) -> Non
         assert found["hits"] and found["explain"]["passage_graph"]["fallback"] == "bm25"
         assert _passage_graph_health(server)["configured"] is True
     assert _passage_graph_health(object()) == {"configured": False}
+
+
+# -- second hop and a wider rerank (memory upgrade phase 3) ---------------------------------
+
+
+class HopChat(ScriptedChat):
+    """OpenIE from the table; a second-hop prompt gets a fixed follow-up search."""
+
+    def __init__(self, follow_up: object = "When did Ermengarde of Tours pass away") -> None:
+        super().__init__()
+        self.follow_up = follow_up
+        self.prompts: list[str] = []
+
+    def json(self, prompt: str) -> dict:
+        if prompt.startswith(SECOND_HOP_PROMPT[:40]):
+            self.prompts.append(prompt)
+            if isinstance(self.follow_up, Exception):
+                raise self.follow_up
+            return {"query": self.follow_up}
+        if prompt.startswith(RERANK_PROMPT[:40]):
+            self.prompts.append(prompt)
+            return {"passages": []}
+        return super().json(prompt)
+
+
+def _passage_search(engine, query: str):
+    result = engine.retrieve(
+        query, tenant_id=TENANT, filt={"query_mode": "passages", "role": "reader"}, record_access=False
+    )
+    return [hit.text.split("\n")[0] for hit in result.hits], result.explain["passage_graph"]
+
+
+def test_second_hop_fuses_a_walk_from_the_follow_up_search(tmp_path) -> None:
+    engine, graph, _chat, _cids = _setup(tmp_path)
+    MemoryTools(engine).index_passages(TENANT)
+    # A dense first hop: the bridge passage shares no word with the question.
+    graph.link_top_k = 0
+    question = "Lothair II marriage"
+    first_hop = _ranked(engine, question)
+    hop = HopChat()
+    graph.chat, graph.second_hop = hop, True  # type: ignore[assignment]
+    titles, explain = _passage_search(engine, question)
+    assert explain["second_hop"]["applied"] is True
+    assert explain["second_hop"]["query"] == hop.follow_up
+    assert "Lothair II" in hop.prompts[0]
+    # The follow-up lifts the bridge passage; the first hop's best answer stays on top.
+    assert titles.index("Ermengarde of Tours") < first_hop.index("Ermengarde of Tours")
+    assert titles[0] == first_hop[0]
+    graph.second_hop_weight = 0.0
+    assert _passage_search(engine, question)[0] == first_hop
+
+
+@pytest.mark.parametrize("follow_up", ["", None, OSError("model is not running")])
+def test_second_hop_without_a_follow_up_keeps_the_first_ranking(tmp_path, follow_up) -> None:
+    engine, graph, _chat, _cids = _setup(tmp_path)
+    MemoryTools(engine).index_passages(TENANT)
+    question = "When did Lothair II's mother pass away?"
+    expected = _ranked(engine, question)
+    graph.chat, graph.second_hop = HopChat(follow_up), True  # type: ignore[assignment]
+    titles, explain = _passage_search(engine, question)
+    assert titles == expected
+    assert explain["second_hop"]["applied"] is False
+
+
+def test_second_hop_whose_search_cannot_be_embedded_keeps_the_first_ranking(tmp_path) -> None:
+    engine, graph, _chat, _cids = _setup(tmp_path)
+    MemoryTools(engine).index_passages(TENANT)
+    question = "When did Lothair II's mother pass away?"
+    expected = _ranked(engine, question)
+
+    class FollowUpDown(BagEmbedder):
+        def embed(self, text: str) -> list[float]:
+            if "Ermengarde of Tours pass away" in text:
+                raise OSError("timed out")
+            return super().embed(text)
+
+    graph.chat, graph.second_hop, graph.embedder = HopChat(), True, FollowUpDown()  # type: ignore[assignment]
+    titles, explain = _passage_search(engine, question)
+    assert titles == expected
+    assert explain["second_hop"]["applied"] is False and "timed out" in explain["second_hop"]["error"]
+
+
+def test_a_wide_rerank_shares_its_text_budget_and_uses_the_rerank_model(tmp_path) -> None:
+    from types import SimpleNamespace
+
+    _engine, graph, chat, _cids = _setup(tmp_path)
+    rerank = HopChat()
+    graph.rerank_chat = rerank  # type: ignore[assignment]
+    head = [SimpleNamespace(text="memory " * 300) for _ in range(30)]
+
+    def longest(prompt: str) -> tuple[int, int]:
+        lines = [line.split("] ", 1)[1] for line in prompt.splitlines() if re.match(r"\[\d+\] ", line)]
+        return len(lines), max(len(line) for line in lines)
+
+    graph._rerank("question", head)  # type: ignore[arg-type]
+    assert longest(rerank.prompts[-1]) == (30, 300)
+    graph._rerank("question", head[:5])  # type: ignore[arg-type]
+    assert longest(rerank.prompts[-1]) == (5, 600)
+    assert chat.openie_calls == 0
+
+
+def test_passage_graph_from_env_reads_the_rerank_model_and_second_hop(tmp_path) -> None:
+    from mnemosyne.passages import passage_graph_from_env
+
+    graph = passage_graph_from_env({
+        "MNEMOSYNE_PASSAGE_INDEX": str(tmp_path / "i.sqlite"),
+        "MNEMOSYNE_PASSAGE_CHAT_MODEL": "qwen3:4b-instruct",
+        "MNEMOSYNE_PASSAGE_CHAT_URL": "http://127.0.0.1:11434/v1/chat/completions",
+        "MNEMOSYNE_PASSAGE_RERANK_MODEL": "qwen3:8b",
+        "MNEMOSYNE_PASSAGE_RERANK_REASONING_EFFORT": "none",
+        "MNEMOSYNE_PASSAGE_SECOND_HOP": "1",
+    })
+    assert graph is not None and graph.second_hop is True
+    assert graph.rerank_chat is not None and graph.rerank_chat.model == "qwen3:8b"
+    assert graph.rerank_chat.reasoning_effort == "none"
+    # The index stays named after the extractor, so a new rerank model keeps every triple.
+    assert graph.openie_model == "qwen3:4b-instruct|openie.v1"
+    health = graph.health()
+    assert health["rerank_model"] == "qwen3:8b" and health["second_hop"] is True
+    graph.store.close()

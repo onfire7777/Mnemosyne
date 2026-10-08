@@ -490,6 +490,9 @@ def load_retrieval_adapters(args: argparse.Namespace) -> RetrievalAdapters:
                 embedding_dims=int(args.passage_embedding_dims),
                 recognition_filter=bool(args.passage_recognition_filter),
                 rerank_top=int(args.passage_rerank_top),
+                rerank_model=getattr(args, "passage_rerank_model", None),
+                rerank_reasoning_effort=getattr(args, "passage_rerank_reasoning_effort", None),
+                second_hop=bool(getattr(args, "passage_second_hop", False)),
                 read_only=evaluation_read_only,
             )
         except ValueError as exc:
@@ -18982,6 +18985,20 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=int(os.environ.get("MNEMOSYNE_PASSAGE_RERANK_TOP", "0")),
         help="let the chat model reorder the top N graph passages (0 = off; one call per query)",
+    )
+    parser.add_argument(
+        "--passage-rerank-model",
+        default=os.environ.get("MNEMOSYNE_PASSAGE_RERANK_MODEL"),
+        help="separate local chat model for reranking and second-hop searches (default: --passage-chat-model)",
+    )
+    parser.add_argument(
+        "--passage-rerank-reasoning-effort", default=os.environ.get("MNEMOSYNE_PASSAGE_RERANK_REASONING_EFFORT")
+    )
+    parser.add_argument(
+        "--passage-second-hop",
+        action="store_true",
+        default=env_flag("MNEMOSYNE_PASSAGE_SECOND_HOP", default=False),
+        help="ask the chat model for a follow-up search and fuse a second graph walk (one call per query)",
     )
     parser.add_argument(
         "--passage-recognition-filter",
