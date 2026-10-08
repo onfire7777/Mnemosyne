@@ -503,6 +503,12 @@ class PromotionGate:
             self.engine.merge(branch, into="main", tenant_id=tenant_id)
         except TypeError:
             self.engine.merge(branch, into="main")
+        if not isinstance(self.engine, LocalMemoryEngine):
+            # A row store (SQLite, Postgres) copies the whole tenant into a canary and keeps the
+            # copy after the merge, so every promoted fact used to leave a full copy behind. The
+            # in-memory engine drops its thin canary itself (canary_overlay) and, with thin
+            # canaries off, keeps the branch exactly as the golden fixtures record.
+            self._discard(branch, tenant_id)
 
     def _discard(self, branch: str, tenant_id: str) -> None:
         try:

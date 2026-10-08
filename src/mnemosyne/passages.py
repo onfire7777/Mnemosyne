@@ -11,8 +11,9 @@ The graph is an INDEX of what each passage says, never a belief. It is rebuilt f
 passages the caller may already read, so it can only reorder evidence the caller could see
 anyway; extracted triples never become assertions and never leave this module as hits.
 What it derives from passage text (triples, vectors) lives in a sidecar SQLite file keyed by
-(scope, evidence CID) - facts and entity phrases by the sha256 of their text - and is purged
-when the source passage is erased.
+the sha256 of the text, so a passage two tenants both hold is extracted and embedded once; a
+membership table (scope, evidence CID -> text hash) says which tenant holds which passage, and
+what no remaining passage of any tenant derives is purged when a source passage is erased.
 """
 
 from __future__ import annotations
@@ -234,12 +235,33 @@ class ChatModel:
 
 
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS passages (
+  scope TEXT NOT NULL, cid TEXT NOT NULL, sha TEXT NOT NULL,
+  PRIMARY KEY (scope, cid));
+CREATE INDEX IF NOT EXISTS passages_by_sha ON passages (sha);
 CREATE TABLE IF NOT EXISTS openie (
-  scope TEXT NOT NULL, sha TEXT NOT NULL, model TEXT NOT NULL, triples TEXT NOT NULL,
-  PRIMARY KEY (scope, sha, model));
+  sha TEXT NOT NULL, model TEXT NOT NULL, triples TEXT NOT NULL,
+  PRIMARY KEY (sha, model));
 CREATE TABLE IF NOT EXISTS vectors (
-  scope TEXT NOT NULL, sha TEXT NOT NULL, kind TEXT NOT NULL, model TEXT NOT NULL, vec BLOB NOT NULL,
-  PRIMARY KEY (scope, sha, kind, model));
+  sha TEXT NOT NULL, kind TEXT NOT NULL, model TEXT NOT NULL, vec BLOB NOT NULL,
+  PRIMARY KEY (sha, kind, model));
+"""
+# The first layout keyed openie and passage vectors by (scope, evidence CID): the same text under
+# two tenants, or under two source identities, was extracted twice. Its rows are carried over
+# keyed by the CID and re-keyed to the text hash the next time the passage is indexed, so nothing
+# already extracted is extracted again.
+_MIGRATE_V1 = """
+BEGIN;
+ALTER TABLE openie RENAME TO openie_v1;
+ALTER TABLE vectors RENAME TO vectors_v1;
+""" + _SCHEMA + """
+INSERT OR IGNORE INTO openie (sha, model, triples) SELECT sha, model, triples FROM openie_v1;
+INSERT OR IGNORE INTO vectors (sha, kind, model, vec) SELECT sha, kind, model, vec FROM vectors_v1;
+INSERT OR IGNORE INTO passages (scope, cid, sha) SELECT scope, sha, sha FROM openie_v1;
+INSERT OR IGNORE INTO passages (scope, cid, sha) SELECT scope, sha, sha FROM vectors_v1 WHERE kind = 'passage';
+DROP TABLE openie_v1;
+DROP TABLE vectors_v1;
+COMMIT;
 """
 
 
@@ -249,92 +271,136 @@ def _chunks(values: Sequence[Any], size: int) -> Iterable[Sequence[Any]]:
 
 
 class PassageIndexStore:
-    """SQLite sidecar of what was derived from passage TEXT: OpenIE triples and vectors."""
+    """SQLite sidecar of what was derived from passage TEXT: OpenIE triples and vectors.
+
+    Triples and vectors are keyed by the sha256 of the text they came from, shared by every
+    scope (tenant) that holds the text; ``passages`` records which scope holds which passage,
+    by evidence CID, and is what every read goes through, so a scope only ever sees rows for
+    passages it registered. Writes of a passage's derivatives therefore happen once per text,
+    reads stay per scope, and a purge drops only what no scope still derives.
+    """
 
     def __init__(self, path: str | os.PathLike[str], *, read_only: bool = False) -> None:
         self.path = Path(path)
         self.read_only = read_only
         if read_only:
             self._conn = sqlite3.connect(f"{self.path.resolve().as_uri()}?mode=ro", uri=True, check_same_thread=False)
+            if "scope" in self._columns("openie"):
+                raise ValueError("the passage index has the old per-tenant layout; open it writable once to migrate it")
         else:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
-            self._conn.executescript(_SCHEMA)
+            if "scope" in self._columns("openie"):
+                self._conn.executescript(_MIGRATE_V1)
+            else:
+                self._conn.executescript(_SCHEMA)
             if os.name == "posix":
                 os.chmod(self.path, 0o600)
         self._lock = threading.Lock()
 
+    def _columns(self, table: str) -> set[str]:
+        return {row[1] for row in self._conn.execute(f"PRAGMA table_info({table})")}
+
     def close(self) -> None:
         self._conn.close()
 
-    def _select(self, sql: str, scope: str, extra: tuple[Any, ...], shas: Iterable[str]) -> list[tuple[Any, ...]]:
+    def _select(self, sql: str, params: tuple[Any, ...], keys: Iterable[str]) -> list[tuple[Any, ...]]:
         rows: list[tuple[Any, ...]] = []
-        keys = list(dict.fromkeys(shas))
+        wanted = list(dict.fromkeys(keys))
         with self._lock:
-            for chunk in _chunks(keys, 900):
+            for chunk in _chunks(wanted, 900):
                 marks = ",".join("?" * len(chunk))
-                rows.extend(self._conn.execute(sql.format(marks=marks), (scope, *extra, *chunk)).fetchall())
+                rows.extend(self._conn.execute(sql.format(marks=marks), (*params, *chunk)).fetchall())
         return rows
 
-    def openie(self, scope: str, model: str, shas: Iterable[str]) -> dict[str, list[list[str]]]:
-        rows = self._select(
-            "SELECT sha, triples FROM openie WHERE scope = ? AND model = ? AND sha IN ({marks})",
-            scope, (model,), shas,
-        )
-        return {sha: json.loads(triples) for sha, triples in rows}
+    def register(self, scope: str, shas: Mapping[str, str]) -> None:
+        """Record that ``scope`` holds these passages (evidence CID -> text sha256).
 
-    def put_openie(self, scope: str, model: str, sha: str, triples: list[list[str]]) -> None:
+        A passage carried over from the first layout is still keyed by its CID; it is re-keyed
+        to its text hash here, so what was extracted and embedded for it is kept.
+        """
+        with self._lock, self._conn:
+            for cid, sha in shas.items():
+                if self._conn.execute("SELECT 1 FROM passages WHERE sha = ? LIMIT 1", (cid,)).fetchone() is not None:
+                    self._conn.execute("UPDATE OR IGNORE openie SET sha = ? WHERE sha = ?", (sha, cid))
+                    self._conn.execute("DELETE FROM openie WHERE sha = ?", (cid,))
+                    self._conn.execute("UPDATE OR IGNORE vectors SET sha = ? WHERE sha = ? AND kind = 'passage'", (sha, cid))
+                    self._conn.execute("DELETE FROM vectors WHERE sha = ? AND kind = 'passage'", (cid,))
+                    self._conn.execute("UPDATE passages SET sha = ? WHERE sha = ?", (sha, cid))
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO passages (scope, cid, sha) VALUES (?, ?, ?)", (scope, cid, sha)
+                )
+
+    def openie(self, scope: str, model: str, cids: Iterable[str]) -> dict[str, list[list[str]]]:
+        """Triples of the scope's passages, by evidence CID."""
+        rows = self._select(
+            "SELECT p.cid, o.triples FROM passages p JOIN openie o ON o.sha = p.sha "
+            "WHERE p.scope = ? AND o.model = ? AND p.cid IN ({marks})",
+            (scope, model), cids,
+        )
+        return {cid: json.loads(triples) for cid, triples in rows}
+
+    def put_openie(self, sha: str, model: str, triples: list[list[str]]) -> None:
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT OR REPLACE INTO openie (scope, sha, model, triples) VALUES (?, ?, ?, ?)",
-                (scope, sha, model, json.dumps(triples, ensure_ascii=False)),
+                "INSERT OR REPLACE INTO openie (sha, model, triples) VALUES (?, ?, ?)",
+                (sha, model, json.dumps(triples, ensure_ascii=False)),
             )
 
-    def vectors(self, scope: str, kind: str, model: str, shas: Iterable[str]) -> dict[str, bytes]:
-        rows = self._select(
-            "SELECT sha, vec FROM vectors WHERE scope = ? AND kind = ? AND model = ? AND sha IN ({marks})",
-            scope, (kind, model), shas,
-        )
-        return {sha: bytes(vec) for sha, vec in rows}
+    def vectors(self, scope: str, kind: str, model: str, keys: Iterable[str]) -> dict[str, bytes]:
+        """Passage vectors by evidence CID (through the scope's registrations); fact and entity
+        vectors by the sha256 of their text."""
+        if kind == "passage":
+            rows = self._select(
+                "SELECT p.cid, v.vec FROM passages p JOIN vectors v ON v.sha = p.sha "
+                "WHERE p.scope = ? AND v.kind = 'passage' AND v.model = ? AND p.cid IN ({marks})",
+                (scope, model), keys,
+            )
+        else:
+            rows = self._select(
+                "SELECT sha, vec FROM vectors WHERE kind = ? AND model = ? AND sha IN ({marks})", (kind, model), keys
+            )
+        return {key: bytes(vec) for key, vec in rows}
 
-    def put_vectors(self, scope: str, kind: str, model: str, items: Sequence[tuple[str, list[float]]]) -> None:
+    def put_vectors(self, kind: str, model: str, items: Sequence[tuple[str, list[float]]]) -> None:
         with self._lock, self._conn:
             self._conn.executemany(
-                "INSERT OR REPLACE INTO vectors (scope, sha, kind, model, vec) VALUES (?, ?, ?, ?, ?)",
-                [(scope, sha, kind, model, array("f", vector).tobytes()) for sha, vector in items],
+                "INSERT OR REPLACE INTO vectors (sha, kind, model, vec) VALUES (?, ?, ?, ?)",
+                [(sha, kind, model, array("f", vector).tobytes()) for sha, vector in items],
             )
 
     def purge(self, scope: str, passage_cids: Iterable[str]) -> dict[str, int]:
-        """Erasure: drop a passage's triples and vector, then every fact or entity vector no
-        remaining passage of the scope still derives."""
-        shas = list(dict.fromkeys(passage_cids))
+        """Erasure: forget that the scope holds these passages; drop the triples and vector of
+        any text no scope holds any more, then every fact or entity vector no remaining passage
+        derives."""
+        cids = list(dict.fromkeys(passage_cids))
         with self._lock, self._conn:
-            removed = 0
-            for chunk in _chunks(shas, 900):
+            released: set[str] = set()
+            for chunk in _chunks(cids, 900):
                 marks = ",".join("?" * len(chunk))
-                removed += self._conn.execute(
-                    f"DELETE FROM openie WHERE scope = ? AND sha IN ({marks})", (scope, *chunk)
-                ).rowcount
-                self._conn.execute(
-                    f"DELETE FROM vectors WHERE scope = ? AND kind = 'passage' AND sha IN ({marks})", (scope, *chunk)
+                released.update(
+                    sha for (sha,) in self._conn.execute(
+                        f"SELECT sha FROM passages WHERE scope = ? AND cid IN ({marks})", (scope, *chunk)
+                    )
                 )
+                self._conn.execute(f"DELETE FROM passages WHERE scope = ? AND cid IN ({marks})", (scope, *chunk))
+            removed = 0
+            for sha in released:
+                if self._conn.execute("SELECT 1 FROM passages WHERE sha = ? LIMIT 1", (sha,)).fetchone() is None:
+                    removed += self._conn.execute("DELETE FROM openie WHERE sha = ?", (sha,)).rowcount
+                    self._conn.execute("DELETE FROM vectors WHERE sha = ? AND kind = 'passage'", (sha,))
             live: set[str] = set()
-            for (triples,) in self._conn.execute("SELECT triples FROM openie WHERE scope = ?", (scope,)):
+            for (triples,) in self._conn.execute("SELECT triples FROM openie"):
                 for subject, predicate, obj in json.loads(triples):
                     live.update(
                         (text_sha(fact_text(subject, predicate, obj)), text_sha(phrase_key(subject)), text_sha(phrase_key(obj)))
                     )
             orphans = [
                 (sha, kind)
-                for sha, kind in self._conn.execute(
-                    "SELECT sha, kind FROM vectors WHERE scope = ? AND kind IN ('fact', 'entity')", (scope,)
-                )
+                for sha, kind in self._conn.execute("SELECT sha, kind FROM vectors WHERE kind IN ('fact', 'entity')")
                 if sha not in live
             ]
-            self._conn.executemany(
-                "DELETE FROM vectors WHERE scope = ? AND sha = ? AND kind = ?",
-                [(scope, sha, kind) for sha, kind in orphans],
-            )
+            self._conn.executemany("DELETE FROM vectors WHERE sha = ? AND kind = ?", orphans)
         return {"passages": removed, "derived_vectors": len(orphans)}
 
 
@@ -579,8 +645,15 @@ class PassageGraphIndex:
             else:
                 withheld += 1
         model = self.openie_model
+        # Derivatives are keyed by the text, so a passage already indexed for another tenant (or
+        # under another source identity) is neither extracted nor embedded again.
+        shas = {cid: text_sha(text) for cid, text in texts.items()}
+        cids_by_sha: dict[str, list[str]] = defaultdict(list)
+        for cid, sha in shas.items():
+            cids_by_sha[sha].append(cid)
+        self.store.register(scope, shas)
         extracted = self.store.openie(scope, model, texts)
-        todo = [(sha, text) for sha, text in texts.items() if sha not in extracted]
+        todo = list({shas[cid]: text for cid, text in texts.items() if cid not in extracted}.items())
         failures: list[str] = []
         chat = self.chat
 
@@ -596,11 +669,12 @@ class PassageGraphIndex:
                 except Exception as exc:  # noqa: BLE001 - one bad answer must not stop the batch
                     failures.append(f"{type(exc).__name__}: {str(exc)[:160]}")
                     continue
-                self.store.put_openie(scope, model, sha, triples)
-                extracted[sha] = triples
+                self.store.put_openie(sha, model, triples)
+                for cid in cids_by_sha[sha]:
+                    extracted[cid] = triples
                 if progress is not None and (done % 100 == 0 or done == len(futures)):
                     progress(f"openie {done}/{len(futures)} ({time.perf_counter() - started:.0f}s)")
-        kinds: dict[str, dict[str, str]] = {"passage": dict(texts), "fact": {}, "entity": {}}
+        kinds: dict[str, dict[str, str]] = {"passage": {shas[cid]: text for cid, text in texts.items()}, "fact": {}, "entity": {}}
         for triples in extracted.values():
             for subject, predicate, obj in triples:
                 fact = fact_text(subject, predicate, obj)
@@ -610,16 +684,17 @@ class PassageGraphIndex:
         embed_model = _embedding_model_key(embedder)
         embedded: dict[str, int] = {}
         for kind, items in kinds.items():
-            present = self.store.vectors(scope, kind, embed_model, items)
+            if kind == "passage":
+                present = {shas[cid] for cid in self.store.vectors(scope, kind, embed_model, texts)}
+            else:
+                present = set(self.store.vectors(scope, kind, embed_model, items))
             missing = [(sha, text) for sha, text in items.items() if sha not in present]
             chunks = list(_chunks(missing, batch_size))
             # Several batches in flight keep a server's parallel slots busy; map keeps the order.
             with ThreadPoolExecutor(max_workers=max(1, min(workers, 4))) as pool:
                 batches = pool.map(lambda chunk: _embed(embedder, [text for _sha, text in chunk]), chunks)
                 for number, (chunk, vectors) in enumerate(zip(chunks, batches), 1):
-                    self.store.put_vectors(
-                        scope, kind, embed_model, [(sha, vec) for (sha, _t), vec in zip(chunk, vectors)]
-                    )
+                    self.store.put_vectors(kind, embed_model, [(sha, vec) for (sha, _t), vec in zip(chunk, vectors)])
                     if progress is not None and number % 20 == 0:
                         progress(f"embed {kind} {number * batch_size}/{len(missing)}")
             embedded[kind] = len(missing)

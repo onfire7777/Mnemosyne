@@ -438,8 +438,9 @@ def run(name: str, data_dir: Path | None = None) -> dict[str, Any]:
                 path = work / f"batch-{index}.jsonl"
                 path.write_text("".join(json.dumps(r, sort_keys=True) + "\n" for r in step["capture"]), encoding="utf-8")
                 try:
+                    # The fixtures record the per-candidate gate; capture-batch now batches by default.
                     out = _cli(["--backend", "local", "--store", str(store), "capture-batch", "--input-jsonl", str(path),
-                                "--consolidate"])
+                                "--consolidate", "--consolidation-gate-batch", "1"])
                 except Exception as exc:  # noqa: BLE001 - a refused batch is a recorded outcome
                     failure = f"{type(exc).__name__}: {exc}"
                 else:
