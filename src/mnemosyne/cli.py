@@ -19540,13 +19540,14 @@ def build_parser() -> argparse.ArgumentParser:
     capture_batch.add_argument(
         "--consolidation-gate-batch",
         type=int,
-        default=1,
+        default=64,
         metavar="N",
         help=(
-            "promotion-gate candidates per gate run (default 1: one run per candidate). "
-            "Above 1 the gate runs once per group of up to N candidates on one canary branch; "
-            "a failing group is split in half until single candidates take the per-candidate "
-            "gate, so every merge follows a passing run and every rejection is per candidate"
+            "promotion-gate candidates per gate run (default 64). The gate runs once per group "
+            "of up to N candidates on one canary branch; a failing group is split in half until "
+            "single candidates take the per-candidate gate, so every merge follows a passing run "
+            "and every rejection is per candidate. 1 checks every candidate on its own canary, "
+            "which copies the tenant once per candidate and is quadratic in a big batch"
         ),
     )
     capture_batch.set_defaults(func=cmd_capture_batch)

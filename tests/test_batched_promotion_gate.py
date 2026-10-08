@@ -42,9 +42,9 @@ def _without(text: str, run_dir: Path) -> Any:
     return json.loads(text.replace(json.dumps(str(run_dir))[1:-1], "RUN"))
 
 
-def test_a_batch_of_one_is_exactly_the_per_candidate_gate(tmp_path: Path) -> None:
+def test_the_default_gate_batch_is_sixty_four(tmp_path: Path) -> None:
     store_a, out_a = _run_growth(tmp_path / "a", [])
-    store_b, out_b = _run_growth(tmp_path / "b", ["--consolidation-gate-batch", "1"])
+    store_b, out_b = _run_growth(tmp_path / "b", ["--consolidation-gate-batch", "64"])
     assert _without(store_a.read_text(encoding="utf-8"), tmp_path / "a") == _without(
         store_b.read_text(encoding="utf-8"), tmp_path / "b"
     )
@@ -157,7 +157,7 @@ def test_batch_size_is_validated() -> None:
         with pytest.raises(ValueError):
             consolidation._promotion_gate_batch_size({"promotion_gate_batch_size": bad})
     args = cli.build_parser().parse_args(["capture-batch", "--input-jsonl", "x.jsonl", "--consolidate"])
-    assert args.consolidation_gate_batch == 1
+    assert args.consolidation_gate_batch == 64
 
 
 def test_sorted_source_union_matches_the_plain_expression() -> None:

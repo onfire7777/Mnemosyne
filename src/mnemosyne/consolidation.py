@@ -7,7 +7,7 @@ import os
 import re
 import secrets
 import subprocess
-from collections import Counter, OrderedDict, defaultdict
+from collections import OrderedDict, defaultdict
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
@@ -2517,51 +2517,81 @@ class ConsolidationWorker:
     def _local_corroboration_index(self, tenant_id: str) -> dict[str, Any] | None:
         """Lookups ``_corroboration_cids_for_job`` repeats for every candidate, built once.
 
-        Only for the in-memory engine, and only while the evidence epoch is unchanged (no
-        evidence row added, removed or modified - see mnemosyne.cid_lists): the main-branch
-        rows of the tenant the scan would consider, in store order, with their content tokens
-        and an inverted index from token to row; plus memos of the per-CID derived check and of
-        the per-source-list base list.
+        Valid while nothing in the tenant's evidence changes: the main-branch rows the scan
+        would consider, in store order, with their content tokens and an inverted index from
+        token to row; plus memos of the per-CID derived check and of the per-source-list base
+        list. The in-memory engine is watched through the global evidence epoch (every tracked
+        row's attribute writes move it - see mnemosyne.cid_lists). A row store is watched
+        through its own ``write_fingerprint`` and read with ``main_evidence``, instead of
+        exporting the whole tenant once per candidate. Tokenizing is memoised per CID across
+        rebuilds, so a rebuild after a write is one pass over the rows, not a regex over every
+        text again.
         """
         engine = self.engine
         read_rows = getattr(engine, "evidence_rows_for_reading", None)
-        if not isinstance(engine, LocalMemoryEngine) or not callable(read_rows) or not evidence_caching_safe():
-            return None
-        store = read_rows()
-        in_branch = getattr(store, "in_branch", None)
-        # The scan treats a row with no branch as main; such rows sit outside the main view.
-        if not callable(in_branch) or in_branch(tenant_id, None) or in_branch(tenant_id, ""):
-            return None
-        epoch = evidence_epoch()
+        store: Any = None
+        rows_iter: Any = None
+        if isinstance(engine, LocalMemoryEngine) and callable(read_rows):
+            if not evidence_caching_safe():
+                return None
+            store = read_rows()
+            in_branch = getattr(store, "in_branch", None)
+            # The scan treats a row with no branch as main; such rows sit outside the main view.
+            if not callable(in_branch) or in_branch(tenant_id, None) or in_branch(tenant_id, ""):
+                return None
+            epoch: Any = ("local", evidence_epoch())
+            rows_iter = in_branch(tenant_id, "main").values()
+        else:
+            fingerprint = getattr(engine, "write_fingerprint", None)
+            main_evidence = getattr(engine, "main_evidence", None)
+            if not callable(fingerprint) or not callable(main_evidence):
+                return None
+            epoch = ("store", fingerprint(tenant_id))
         cache = getattr(self, "_corroboration_index", None)
-        if (
-            cache is not None
-            and cache["epoch"] == epoch
-            and cache["tenant"] == tenant_id
-            and cache["engine"] is engine
-            and cache["store"] is store
-        ):
+        same_source = cache is not None and cache["tenant"] == tenant_id and cache["engine"] is engine
+        if same_source and cache["epoch"] == epoch and cache["store"] is store:
             return cache
+        if rows_iter is None:
+            rows_iter = main_evidence(tenant_id)
+        # cid -> (content, tokens); the content is compared so an edited row is re-tokenized.
+        tokens_memo: dict[str, tuple[str, frozenset[str]]] = cache["tokens"] if same_source else {}
         rows: list[tuple[Any, frozenset[str]]] = []
-        postings: dict[str, list[int]] = defaultdict(list)
-        for ev in in_branch(tenant_id, "main").values():
+        postings: dict[str, set[int]] = defaultdict(set)
+        by_cid: dict[str, Any] = {}
+        for ev in rows_iter:
             if getattr(ev, "tenant_id", None) != tenant_id or getattr(ev, "erased", False):
                 continue
+            cid = getattr(ev, "cid", None)
+            if store is None and cid:
+                by_cid[str(cid)] = ev
             if self._is_derived_evidence_record(ev):
                 continue
-            tokens = frozenset(self._content_tokens(getattr(ev, "content", "") or ""))
+            content = getattr(ev, "content", "") or ""
+            memo = tokens_memo.get(cid) if cid else None
+            if memo is not None and memo[0] == content:
+                tokens = memo[1]
+            else:
+                tokens = frozenset(self._content_tokens(content))
+                if cid:
+                    tokens_memo[cid] = (content, tokens)
             for token in tokens:
-                postings[token].append(len(rows))
-            rows.append((getattr(ev, "cid", None), tokens))
+                postings[token].add(len(rows))
+            rows.append((cid, tokens))
+        if store is not None:
+            def lookup(cid: str) -> Any:
+                return engine._evidence_row(tenant_id, "main", cid)
+        else:
+            lookup = by_cid.get
         cache = {
             "epoch": epoch, "tenant": tenant_id, "engine": engine, "store": store,
-            "rows": rows, "postings": postings, "derived": {}, "base": OrderedDict(),
+            "rows": rows, "postings": postings, "lookup": lookup, "tokens": tokens_memo,
+            "derived": {}, "base": OrderedDict(),
         }
         self._corroboration_index = cache
         return cache
 
     def _cid_is_derived_cached(self, cache: dict[str, Any], tenant_id: str, cid: str) -> bool:
-        """``_cid_is_derived_for_job`` on the in-memory engine, memoised per evidence epoch.
+        """``_cid_is_derived_for_job`` from the index, memoised per evidence epoch.
 
         ``get_evidence`` hands back a deep copy of the resolved, non-erased row; the derived
         test reads only fields the copy keeps, so the row itself gives the same answer.
@@ -2569,7 +2599,7 @@ class ConsolidationWorker:
         derived = cache["derived"]
         found = derived.get(cid)
         if found is None:
-            ev = self.engine._evidence_row(tenant_id, "main", cid)
+            ev = cache["lookup"](cid)
             found = bool(ev is not None and not ev.erased and self._is_derived_evidence_record(ev))
             derived[cid] = found
         return found
@@ -2683,14 +2713,23 @@ class ConsolidationWorker:
             return base
         # The scan appends, in store order, each row covering the claim terms whose CID is not yet
         # listed. Membership in the base list is the memoised set; only new CIDs are collected.
+        # The rows covering every term are the intersection of the terms' posting sets, taken
+        # from the rarest term outwards, so a claim about one named entity costs that entity's
+        # few rows rather than a walk over every row that says 'born' or 'located'.
         extra: list[str] = []
         extra_seen: set[str] = set()
-        counts: Counter[int] = Counter()
         postings = cache["postings"]
-        for token in needle:
-            counts.update(postings.get(token, ()))
+        sets = [postings.get(token) for token in needle]
+        if any(members is None for members in sets):
+            return base
+        sets.sort(key=len)
+        covering = set(sets[0])
+        for members in sets[1:]:
+            covering &= members
+            if not covering:
+                return base
         rows = cache["rows"]
-        for index in sorted(index for index, count in counts.items() if count == len(needle)):
+        for index in sorted(covering):
             cid = rows[index][0]
             if not cid:
                 continue

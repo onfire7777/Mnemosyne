@@ -529,3 +529,91 @@ def test_passage_graph_from_env_reads_the_rerank_model_and_second_hop(tmp_path) 
     health = graph.health()
     assert health["rerank_model"] == "qwen3:8b" and health["second_hop"] is True
     graph.store.close()
+
+
+# -- one text, many tenants: derivatives are keyed by the text ---------------------------------
+
+
+def test_a_text_two_tenants_hold_is_extracted_once_and_purged_last(tmp_path) -> None:
+    engine, graph, chat, cids = _setup(tmp_path)
+    other = "other-tenant"
+    other_cids = {}
+    for text in PASSAGES:
+        other_cids[text.split("\n")[0]] = engine.append_evidence(Evidence(
+            tenant_id=other, user_id="u", actor="user", source_type="document",
+            content=text, access_policy={"tenant": other},
+        ))
+    tools = MemoryTools(engine)
+    tools.index_passages(TENANT)
+    assert chat.openie_calls == len(PASSAGES)
+    report = tools.index_passages(other)
+    assert chat.openie_calls == len(PASSAGES), "the same text was extracted again for the second tenant"
+    assert report["openie_new"] == 0 and report["embedded"]["passage"] == 0
+    assert report["passages"] == len(PASSAGES)
+    target = cids["Ermengarde of Tours"]
+    other_target = other_cids["Ermengarde of Tours"]
+    assert target != other_target
+    assert graph.store.openie(other, graph.openie_model, [other_target])
+    # Each tenant still only sees its own passages.
+    assert graph.store.openie(other, graph.openie_model, [target]) == {}
+    date_vector = hashlib.sha256(phrase_key("20 March 851").encode()).hexdigest()
+    tools.forget(TENANT, target)
+    assert graph.store.openie(TENANT, graph.openie_model, [target]) == {}
+    # The other tenant still holds the text, so nothing derived from it is dropped.
+    assert graph.store.openie(other, graph.openie_model, [other_target])
+    assert graph.store.vectors(other, "passage", "bag|64", [other_target])
+    assert graph.store.vectors(other, "entity", "bag|64", [date_vector])
+    tools.forget(other, other_target)
+    assert graph.store.openie(other, graph.openie_model, [other_target]) == {}
+    assert graph.store.vectors(other, "entity", "bag|64", [date_vector]) == {}
+
+
+def test_a_first_layout_index_is_migrated_without_extracting_again(tmp_path) -> None:
+    import sqlite3
+    from array import array
+
+    from mnemosyne.passages import OPENIE_VERSION
+
+    text = "Turin\nTurin is a city in Piedmont where many people died of plague."
+    cid = LocalMemoryEngine().append_evidence(Evidence(
+        tenant_id=TENANT, user_id="u", actor="user", source_type="document",
+        content=text, access_policy={"tenant": TENANT},
+    ))
+    path = tmp_path / "index.sqlite"
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE openie (scope TEXT NOT NULL, sha TEXT NOT NULL, model TEXT NOT NULL, triples TEXT NOT NULL,
+          PRIMARY KEY (scope, sha, model));
+        CREATE TABLE vectors (scope TEXT NOT NULL, sha TEXT NOT NULL, kind TEXT NOT NULL, model TEXT NOT NULL,
+          vec BLOB NOT NULL, PRIMARY KEY (scope, sha, kind, model));
+    """)
+    conn.execute("INSERT INTO openie VALUES (?, ?, ?, ?)",
+                 (TENANT, cid, f"scripted|{OPENIE_VERSION}", json.dumps(PASSAGES[text])))
+    conn.execute("INSERT INTO vectors VALUES (?, ?, 'passage', 'bag|64', ?)",
+                 (TENANT, cid, array("f", BagEmbedder().embed(text)).tobytes()))
+    conn.commit()
+    conn.close()
+    with pytest.raises(ValueError, match="migrate"):
+        PassageIndexStore(path, read_only=True)
+
+    engine, graph, chat, cids = _setup(tmp_path)
+    assert cids["Turin"] == cid
+    assert graph.store.openie(TENANT, graph.openie_model, [cid]) == {cid: PASSAGES[text]}
+    report = MemoryTools(engine).index_passages(TENANT)
+    assert chat.openie_calls == len(PASSAGES) - 1
+    assert report["openie_new"] == len(PASSAGES) - 1 and report["embedded"]["passage"] == len(PASSAGES) - 1
+    assert graph.store.openie(TENANT, graph.openie_model, [cid]) == {cid: PASSAGES[text]}
+    assert graph.store.vectors(TENANT, "passage", "bag|64", [cid])
+    # Re-keyed to the text: a second tenant with the same passage is served from it too.
+    other_cid = engine.append_evidence(Evidence(
+        tenant_id="other-tenant", user_id="u", actor="user", source_type="document",
+        content=text, access_policy={"tenant": "other-tenant"},
+    ))
+    calls = chat.openie_calls
+    MemoryTools(engine).index_passages("other-tenant")
+    assert chat.openie_calls == calls
+    assert graph.store.openie("other-tenant", graph.openie_model, [other_cid]) == {other_cid: PASSAGES[text]}
+    result = engine.retrieve(
+        "Turin plague", tenant_id=TENANT, filt={"query_mode": "passages", "role": "reader"}, record_access=False
+    )
+    assert result.explain["passage_graph"]["route"] == "ppr"

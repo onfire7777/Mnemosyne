@@ -1346,6 +1346,24 @@ class SqliteEngine:
             return None
         return _evidence_from_row(row)
 
+    def write_fingerprint(self, tenant_id: str) -> tuple[int, int]:
+        """Moves whenever anything in the tenant's database changes: this engine's own writes
+        (``total_changes`` of its one cached connection) and commits by any other connection
+        (``PRAGMA data_version``). Caches over the tenant's rows key on it."""
+        with self._lock:
+            conn = self._connect(tenant_id)
+            return conn.total_changes, conn.execute("PRAGMA data_version").fetchone()[0]
+
+    def main_evidence(self, tenant_id: str) -> list[Evidence]:
+        """Every live main-branch evidence row of the tenant, in insertion order."""
+        conn = self._connect(tenant_id)
+        with self._lock:
+            rows = conn.execute(
+                "SELECT * FROM evidence WHERE tenant_id = ? AND branch = 'main' AND erased = 0 ORDER BY rowid",
+                (tenant_id,),
+            ).fetchall()
+        return [_evidence_from_row(row) for row in rows]
+
     # --- MemoryEngine Protocol surface (stubs name their implementing task) --
 
     def append_evidence(self, ev: Evidence, branch: str = "main") -> str:
@@ -2032,9 +2050,7 @@ class SqliteEngine:
         cached: tuple[LocalMemoryEngine, dict[str, bytes | None]]
         if tenant_id:
             with self._lock:
-                conn = self._connect(tenant_id)
-                data_version = conn.execute("PRAGMA data_version").fetchone()[0]
-                key = (tenant_id, branch, max_trust, max_sensitivity, conn.total_changes, data_version)
+                key = (tenant_id, branch, max_trust, max_sensitivity, *self.write_fingerprint(tenant_id))
                 cached = self._scan_oracle_memo.get(key)
                 if cached is None:
                     cached = self._hydrate_scan_oracle(filt)
