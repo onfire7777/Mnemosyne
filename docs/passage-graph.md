@@ -73,28 +73,47 @@ Optional, one chat call per query each: `--passage-recognition-filter` drops lin
 that do not help the question; `--passage-rerank-top N` lets the chat model reorder the top
 N passages.
 
-## Results (7 Oct 2026, this PC: i9-9900K, RTX 3080 10 GB, local Ollama)
+## Results (7-8 Oct 2026, this PC: i9-9900K, RTX 3080 10 GB, local Ollama)
 
-Everything was chosen on a 2Wiki development split built from 2WikiMultihopQA dev questions
-outside the HippoRAG sample (`_scratch/recall90/prepare_dev.py`: 400 questions, 2,771
-passages). The held-out HippoRAG 2Wiki sample (1,000 questions, 6,119 passages) was scored
-only with those fixed settings, through the public adapter end to end (capture-batch with
-consolidation, index-passages, eval-query-batch). Each held-out configuration was run twice
-and reproduced to the third decimal.
+Every setting was chosen on a 2Wiki development split built from 2WikiMultihopQA dev
+questions outside the HippoRAG sample (`_scratch/recall90/prepare_dev.py`: 400 questions,
+2,771 passages). The three held-out HippoRAG samples (1,000 questions each) were scored only
+with those fixed settings, through the public adapter end to end (capture-batch with
+consolidation, index-passages, eval-query-batch). HotpotQA and MuSiQue were never tuned on.
+Raw reports: `C:\Users\Onfire\MnemetricData\runs\final-*.json`.
 
-| 2Wiki | dev recall@5 | held-out recall@2 | held-out recall@5 (95% CI) | per query |
-|---|---:|---:|---:|---:|
-| BM25 passages | 0.665 | 0.561 | 0.664 | 15 ms |
-| dense (qwen3-embedding:8b) | 0.761 | - | - | 5 ms |
-| passage graph (defaults) | 0.914 | 0.656 | 0.880 (0.867-0.892) | 0.16 s |
-| passage graph + `--passage-rerank-top 10` | 0.932 | 0.766 | **0.917 (0.906-0.927)** | 0.52 s |
+2Wiki development split (recall@5): BM25 0.665, dense (qwen3-embedding:8b) 0.761, passage
+graph 0.914, passage graph + `--passage-rerank-top 10` 0.932.
 
-The graph alone generalised less well than dev suggested (0.914 -> 0.880); the rerank of the
-top ten passages by the chat model carries the held-out result over 0.90. Before this work the
-same suite scored 0.140.
+Held-out, recall@5 (95% bootstrap interval) and recall@2:
 
-Cost: OpenIE of the 6,119 held-out passages took 90 minutes on the local GPU (qwen3:4b-instruct,
-eight parallel requests, about 10 triples per passage), then embeddings; this is paid once per
-passage and kept in the index. A warm suite run (capture with consolidation, index check, 1,000
-queries) takes 4 minutes, or 10 with the rerank. HotpotQA and MuSiQue were not yet measured with
-the graph; their BM25 passage-mode figures are 0.728 and 0.428.
+| Held-out set | passages | BM25 passages | passage graph | graph + rerank top 10 | recall@2 (graph + rerank) |
+|---|---:|---:|---:|---:|---:|
+| 2Wiki | 6,119 | 0.664 | 0.880 (0.867-0.892) | **0.917 (0.906-0.927)** | 0.766 |
+| HotpotQA | 9,811 | 0.728 | 0.882 (0.867-0.897) | **0.935 (0.924-0.945)** | 0.808 |
+| MuSiQue | 11,656 | 0.428 | 0.619 (0.600-0.638) | **0.667 (0.649-0.686)** | 0.475 |
+
+Before this work the 2Wiki suite scored 0.140. The graph alone generalised less well than the
+dev split suggested (0.914 -> 0.880 on 2Wiki); the rerank of the top ten passages by the chat
+model is what carries 2Wiki and HotpotQA over 0.90. MuSiQue (two to four hops) stays far
+below; it needs a second retrieval hop.
+
+Cost: OpenIE ran at about one passage a second on the local GPU (qwen3:4b-instruct, eight
+parallel requests, about 10 triples per passage): 90 minutes for 2Wiki, about four hours
+each for HotpotQA and MuSiQue including embeddings. It is paid once per passage and kept in the
+index.
+
+## Acceptance status against `recall-90-fix-prompt.md`
+
+- Recall@5 >= 0.90: met on 2Wiki and HotpotQA with the rerank; not met on MuSiQue.
+- Whole suite <= 600 s: met for 2Wiki without the rerank (253 s); not met with it (612 s), nor
+  for HotpotQA (801 s / 1,176 s) or MuSiQue (614 s / 956 s), where capture with
+  consolidation and the index check alone take 300-545 s.
+- Query latency p50 <= 100 ms / p95 <= 300 ms: not measured per query. Batch averages, including
+  process start and graph build, are 0.16-0.27 s per question for the graph and 0.52-0.65 s
+  with the rerank.
+- Reproducibility: two 2Wiki runs gave identical recall@5 (0.87975 and 0.917); the graph run's
+  recall@2 moved by 0.0005 (0.65575 -> 0.65625) after queries switched to batched embedding,
+  which changes floating-point ties. Byte-identical metrics across shard sizes are not shown.
+- Scorer peak memory: not measured.
+- Self-generation rolling budget: not done; only source-backed summaries are exempt.

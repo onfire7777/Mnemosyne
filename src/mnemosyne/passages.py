@@ -325,11 +325,16 @@ def _embedding_model_key(embedder: Any) -> str:
 
 
 def _embed(embedder: Any, texts: Sequence[str]) -> list[list[float]]:
+    from mnemosyne.retrieval import _coerce_vector
+
     embed_many = getattr(embedder, "embed_many", None)
     vectors = list(embed_many(list(texts))) if callable(embed_many) else [embedder.embed(text) for text in texts]
     if len(vectors) != len(texts):
         raise ValueError("embedding provider must return one vector per text")
-    return vectors
+    validated = [_coerce_vector(vector, field="passage embedding") for vector in vectors]
+    if any(len(vector) != int(embedder.dims) for vector in validated):
+        raise ValueError("passage embedding dimensions must match the provider")
+    return validated
 
 
 def _require_semantic(embedder: Any) -> None:
@@ -680,7 +685,7 @@ class PassageGraphIndex:
     def _query_vector(self, task: str, query: str, embedder: Any) -> Any:
         text = self.query_template.format(task=task, query=query)
         vector = self._query_vectors.get(text)
-        return vector if vector is not None else embedder.embed(text)
+        return vector if vector is not None else _embed(embedder, [text])[0]
 
     def rank(self, query: str, passages: Sequence[Hit], embedder: Any, k: int) -> tuple[list[Hit], dict[str, Any]]:
         """The caller's passages in HippoRAG 2 order, best first, at most ``k``."""
