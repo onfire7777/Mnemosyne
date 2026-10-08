@@ -26,7 +26,7 @@ import threading
 import time
 from array import array
 from collections import Counter, defaultdict
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, replace
 from math import log
@@ -320,6 +320,74 @@ class PassageIndexStore:
         return {"passages": removed, "derived_vectors": len(orphans)}
 
 
+_TRUE = {"1", "true", "yes", "on"}
+
+
+def build_passage_graph(
+    index: str | os.PathLike[str],
+    *,
+    extractor: str,
+    chat_url: str | None = None,
+    chat_api_key: str | None = None,
+    reasoning_effort: str | None = None,
+    embedding_url: str | None = None,
+    embedding_model: str | None = None,
+    embedding_dims: int = 1024,
+    recognition_filter: bool = False,
+    rerank_top: int = 0,
+    read_only: bool = False,
+) -> PassageGraphIndex:
+    """The passage graph for one index file and its (OpenAI-compatible) chat and embedding endpoints."""
+    from mnemosyne.retrieval import HttpEmbeddingProvider
+
+    try:
+        import numpy  # noqa: F401
+    except ImportError as exc:
+        raise ValueError("the passage graph needs numpy: install mnemosyne-memory[graph]") from exc
+    chat = (
+        ChatModel(url=chat_url, model=extractor, api_key=chat_api_key, reasoning_effort=reasoning_effort)
+        if chat_url else None
+    )
+    embedder = (
+        HttpEmbeddingProvider(url=embedding_url, model=embedding_model, dims=int(embedding_dims),
+                              timeout_seconds=120.0, query_prefix="", cache_size=0)
+        if embedding_url else None
+    )
+    return PassageGraphIndex(
+        store=PassageIndexStore(index, read_only=read_only),
+        extractor=extractor,
+        chat=chat,
+        embedder=embedder,
+        recognition_filter=recognition_filter,
+        rerank_top=max(0, int(rerank_top)),
+    )
+
+
+def passage_graph_from_env(environ: Mapping[str, str] | None = None, *, read_only: bool = False) -> PassageGraphIndex | None:
+    """The passage graph MNEMOSYNE_PASSAGE_* configure, or None when no index is set."""
+    env = os.environ if environ is None else environ
+    index = env.get("MNEMOSYNE_PASSAGE_INDEX")
+    if not index:
+        return None
+    extractor = env.get("MNEMOSYNE_PASSAGE_CHAT_MODEL")
+    if not extractor:
+        raise ValueError("MNEMOSYNE_PASSAGE_INDEX needs MNEMOSYNE_PASSAGE_CHAT_MODEL, the OpenIE model it was built with")
+    key_env = env.get("MNEMOSYNE_PASSAGE_CHAT_API_KEY_ENV")
+    return build_passage_graph(
+        index,
+        extractor=extractor,
+        chat_url=env.get("MNEMOSYNE_PASSAGE_CHAT_URL"),
+        chat_api_key=env.get(key_env) if key_env else None,
+        reasoning_effort=env.get("MNEMOSYNE_PASSAGE_CHAT_REASONING_EFFORT"),
+        embedding_url=env.get("MNEMOSYNE_PASSAGE_EMBEDDING_URL"),
+        embedding_model=env.get("MNEMOSYNE_PASSAGE_EMBEDDING_MODEL"),
+        embedding_dims=int(env.get("MNEMOSYNE_PASSAGE_EMBEDDING_DIMS", "1024")),
+        recognition_filter=env.get("MNEMOSYNE_PASSAGE_RECOGNITION_FILTER", "").lower() in _TRUE,
+        rerank_top=int(env.get("MNEMOSYNE_PASSAGE_RERANK_TOP", "0")),
+        read_only=read_only,
+    )
+
+
 def _embedding_model_key(embedder: Any) -> str:
     return f"{getattr(embedder, 'model', None) or embedder.name}|{int(embedder.dims)}"
 
@@ -405,9 +473,20 @@ class PassageGraphIndex:
     rerank_top: int = 0
     max_disclosed_sensitivity: int = 1
     query_template: str = "Instruct: {task}\nQuery: {query}"
+    #: Seconds a query may wait for its embedding before search falls back to BM25.
+    query_timeout_seconds: float = 30.0
+    #: Index new memories in a background thread (a long-running server turns this on).
+    live_index: bool = False
+    live_debounce_seconds: float = 1.0
     _cache: tuple[tuple[Any, ...], _Graph] | None = field(default=None, repr=False)
     _query_vectors: dict[str, Any] = field(default_factory=dict, repr=False)
     _cache_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    _erased: set[str] = field(default_factory=set, repr=False)
+    _live_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    _live_wake: threading.Event = field(default_factory=threading.Event, repr=False)
+    _live_jobs: dict[str, tuple[Callable[[], Sequence[Hit]], Any]] = field(default_factory=dict, repr=False)
+    _live_worker: threading.Thread | None = field(default=None, repr=False)
+    _live_status: dict[str, Any] = field(default_factory=lambda: {"running": False, "failures": 0}, repr=False)
 
     @property
     def openie_model(self) -> str:
@@ -445,6 +524,8 @@ class PassageGraphIndex:
         withheld = 0
         for hit in passages:
             # Keyed by evidence CID: content-addressed, and exactly what erasure names.
+            if hit.id in self._erased:
+                continue
             if self.disclosable(hit):
                 texts.setdefault(hit.id, hit.text)
             else:
@@ -494,6 +575,10 @@ class PassageGraphIndex:
                     if progress is not None and number % 20 == 0:
                         progress(f"embed {kind} {number * batch_size}/{len(missing)}")
             embedded[kind] = len(missing)
+        raced = self._erased.intersection(texts)
+        if raced:
+            # Forgotten while this run was extracting it: drop what the run wrote back.
+            self.store.purge(scope, raced)
         self._cache = None
         return {
             "scope": scope,
@@ -511,10 +596,84 @@ class PassageGraphIndex:
         }
 
     def purge(self, scope: str, passage_cids: Iterable[str]) -> dict[str, int]:
+        passage_cids = list(passage_cids)
+        self._erased.update(passage_cids)
         self._cache = None
         if self.store.read_only:
             return {"passages": 0, "derived_vectors": 0}
         return self.store.purge(scope, passage_cids)
+
+    # -- live indexing (a long-running server) ----------------------------------------------
+
+    def schedule(self, scope: str, collect: Callable[[], Sequence[Hit]], embedder: Any) -> bool:
+        """Index ``scope`` soon, in a background thread; returns at once.
+
+        ``collect`` returns the passages a reader of the scope may see. Calls within the
+        debounce window coalesce into one run, and a run only extracts and embeds what is
+        new. A model that is down costs nothing here: the run fails, is recorded in
+        :meth:`health`, and the next capture (or ``index-passages``) catches up. Until a
+        passage is indexed, search still finds it by BM25.
+        """
+        if not self.live_index or self.chat is None or self.store.read_only:
+            return False
+        with self._live_lock:
+            self._live_jobs[scope] = (collect, embedder)
+            if self._live_worker is None or not self._live_worker.is_alive():
+                self._live_worker = threading.Thread(target=self._live_loop, name="passage-index", daemon=True)
+                self._live_worker.start()
+            self._live_wake.set()
+        return True
+
+    def _live_loop(self) -> None:
+        while True:
+            self._live_wake.wait()
+            time.sleep(self.live_debounce_seconds)
+            with self._live_lock:
+                jobs = dict(self._live_jobs)
+                self._live_jobs.clear()
+                self._live_wake.clear()
+                self._live_status["running"] = True
+            for scope, (collect, embedder) in jobs.items():
+                try:
+                    report = self.index(scope, collect(), embedder, workers=4)
+                    summary = {key: report[key] for key in ("passages", "openie_new", "openie_failures", "embedded", "seconds")}
+                    with self._live_lock:
+                        self._live_status.update(last_report=summary, last_error=None,
+                                                 last_indexed_at=time.strftime("%Y-%m-%dT%H:%M:%S%z"))
+                except Exception as exc:  # noqa: BLE001 - a model that is down must not stop the worker
+                    with self._live_lock:
+                        self._live_status["last_error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
+                        self._live_status["failures"] += 1
+            with self._live_lock:
+                self._live_status["running"] = False
+
+    def wait_idle(self, timeout: float = 60.0) -> bool:
+        """Block until no live run is pending or running (tests, shutdown); False on timeout."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            with self._live_lock:
+                idle = not self._live_jobs and not self._live_wake.is_set() and not self._live_status["running"]
+            if idle:
+                return True
+            time.sleep(0.05)
+        return False
+
+    def health(self) -> dict[str, Any]:
+        """What a health check reports: the models it is set up with and how live indexing goes."""
+        with self._live_lock:
+            status = dict(self._live_status)
+            pending = len(self._live_jobs)
+        return {
+            "configured": True,
+            "index": str(self.store.path),
+            "extractor": self.extractor,
+            "chat_url": getattr(self.chat, "url", None),
+            "embedding_model": getattr(self.embedder, "model", None),
+            "rerank_top": self.rerank_top,
+            "live_index": self.live_index,
+            "pending_scopes": pending,
+            **status,
+        }
 
     # -- graph (read path) ------------------------------------------------------------------
 
@@ -691,7 +850,11 @@ class PassageGraphIndex:
     def _query_vector(self, task: str, query: str, embedder: Any) -> Any:
         text = self.query_template.format(task=task, query=query)
         vector = self._query_vectors.get(text)
-        return vector if vector is not None else _embed(embedder, [text])[0]
+        if vector is not None:
+            return vector
+        if hasattr(embedder, "timeout_seconds") and hasattr(embedder, "__dataclass_fields__"):
+            embedder = replace(embedder, timeout_seconds=min(float(embedder.timeout_seconds), self.query_timeout_seconds))
+        return _embed(embedder, [text])[0]
 
     def rank(self, query: str, passages: Sequence[Hit], embedder: Any, k: int) -> tuple[list[Hit], dict[str, Any]]:
         """The caller's passages in HippoRAG 2 order, best first, at most ``k``."""

@@ -502,6 +502,20 @@ def _same_words(first: str, second: str, *, spoken: bool = False) -> bool:
     return not _line_readings(first, spoken=spoken).isdisjoint(_line_readings(second, spoken=spoken))
 
 
+def _cap_fact_hits(hits: list[Hit], *, slots: int) -> list[Hit]:
+    """At most ``slots`` extracted facts (assertions, relations) among the hits, in order:
+    the memories they came from carry the answer, and are ranked themselves."""
+    kept: list[Hit] = []
+    facts = 0
+    for hit in hits:
+        if hit.kind in {"assertion", "relation"}:
+            if facts >= slots:
+                continue
+            facts += 1
+        kept.append(hit)
+    return kept
+
+
 def _collapse_session_duplicates(hits: list[Hit]) -> tuple[list[Hit], int]:
     """One turn, one hit.
 
@@ -1108,18 +1122,61 @@ def run_retrieval_pipeline(
                 _result_cache_put(cache_key, result)
         return result
     passage_graph_explain: dict[str, Any] | None = None
-    if passage_mode:
+    passage_graph = getattr(ops.adapters, "passage_graph", None)
+    # With a passage graph configured, ordinary search ranks source passages with it too;
+    # the hashing "dense" channel and its reranker are lexical noise next to it.
+    semantic = passage_graph is not None and not passage_mode
+    graph_ranked: list[Hit] | None = None
+    graph_fallback: str | None = None
+    if passage_graph is not None:
         from mnemosyne.passages import is_passage
 
         width = max(100, policy.rerank_width, k * 4)
-        passage_graph = getattr(ops.adapters, "passage_graph", None)
-        if passage_graph is not None:
+        try:
             # HippoRAG 2: fact-seeded Personalized PageRank over the passages this caller
-            # may read; the ranking it returns is final, not one channel to fuse.
-            ranked, passage_graph_explain = passage_graph.rank(
+            # may read. A model that is down or slow falls back to BM25, never to an error.
+            graph_ranked, passage_graph_explain = passage_graph.rank(
                 query, ops.passage_candidates(effective_filter), ops.adapters.embedding, width
             )
-            lexical, dense = [], ops._mark_retrieved_text_as_data(ranked)
+        except (ValueError, OSError) as exc:
+            graph_fallback = f"{type(exc).__name__}: {str(exc)[:160]}"
+            passage_graph_explain = {"applied": False, "fallback": "bm25", "reason": graph_fallback}
+    if semantic:
+        dense = (
+            ops._mark_retrieved_text_as_data(graph_ranked)
+            if graph_ranked is not None
+            else ops.lexical_search(query, width, {**effective_filter, "query_mode": "passages"})
+        )
+        # Passages come from the graph; lexical keeps facts, preferences and summaries.
+        lexical = [
+            hit for hit in ops.lexical_search(query, policy.rerank_width, effective_filter)
+            if not is_passage(hit)
+        ]
+        graph = []
+        prospective = prospective_memory_hits(
+            ops, query, policy.rerank_width, effective_filter, as_of=retrieval_instant
+        )
+        working, working_explain = (
+            _working_memory_route(
+                ops,
+                query=query,
+                tenant_id=tenant_id,
+                branch=branch,
+                k=policy.rerank_width,
+                effective_filter=effective_filter,
+                policy=policy,
+                evaluated_at=retrieval_instant,
+            )
+            if working_requested
+            else ([], {})
+        )
+    elif passage_mode:
+        from mnemosyne.passages import is_passage
+
+        width = max(100, policy.rerank_width, k * 4)
+        if graph_ranked is not None:
+            # The graph ranking is final in passage mode, not one channel to fuse.
+            lexical, dense = [], ops._mark_retrieved_text_as_data(graph_ranked)
         else:
             # Hashing is a lexical fallback, not an independent semantic channel.
             # Give passage search a useful candidate pool before the final cutoff.
@@ -1202,7 +1259,7 @@ def run_retrieval_pipeline(
             else ([], {})
         )
     ranked_routes = [dense, lexical, graph, prospective, working]
-    if passage_graph_explain is not None:
+    if passage_mode and graph_ranked is not None:
         fused = dense
     else:
         fused = (
@@ -1212,14 +1269,22 @@ def run_retrieval_pipeline(
     collapsed_turns = 0
     if working:
         fused, collapsed_turns = _collapse_session_duplicates(fused)
+    # Passage and graph-ranked search keep their relevance order: the local hashing
+    # reranker and MMR would re-sort it by surface tokens.
+    relevance_order = passage_mode or semantic
     reranked = (
-        fused if passage_mode and ops.adapters.reranker.name == "local-similarity"
+        fused if relevance_order and ops.adapters.reranker.name == "local-similarity"
         else ops.adapters.reranker.rerank(query, fused, k=max(k * 2, k))
     )
     reranked, schema_fast_path = schema_fast_path_rerank(query, reranked, policy)
-    diversified = reranked[:k] if passage_mode else ops._mmr(query, reranked, k=max(k, 1))
+    if semantic:
+        diversified = _cap_fact_hits(reranked, slots=max(1, k // 4))[:k]
+    elif passage_mode:
+        diversified = reranked[:k]
+    else:
+        diversified = ops._mmr(query, reranked, k=max(k, 1))
     activated = (
-        diversified if passage_mode else ops._apply_standing_scores(
+        diversified if relevance_order else ops._apply_standing_scores(
             apply_activation_scores(diversified, policy, now=retrieval_instant)
         )
     )
@@ -1366,10 +1431,11 @@ def run_retrieval_pipeline(
         explain["working_memory"] = working_explain
     if passage_mode:
         explain["query_mode"] = "passages"
+    if passage_mode or semantic:
         explain["activation"] = {"applied": False, "reason": "passage_relevance_order"}
         explain["candidate_width"] = width
-        if passage_graph_explain is not None:
-            explain["passage_graph"] = passage_graph_explain
+    if passage_graph_explain is not None:
+        explain["passage_graph"] = passage_graph_explain
     result = RetrievalResult(
         query=query,
         hits=budgeted,

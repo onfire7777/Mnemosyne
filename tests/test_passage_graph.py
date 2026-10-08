@@ -259,3 +259,151 @@ def test_read_only_index_refuses_to_write(tmp_path) -> None:
     )
     with pytest.raises(ValueError, match="read-only"):
         graph.index(TENANT, [], BagEmbedder())
+
+
+# -- ordinary search, live indexing and model failure (memory upgrade phase 2) ---------------
+
+
+def _default_ranked(engine, query: str) -> tuple[list[str], dict]:
+    result = engine.retrieve(query, tenant_id=TENANT, filt={"role": "reader"}, record_access=False)
+    titles = [hit.text.split("\n")[0] for hit in result.hits if hit.kind == "evidence"]
+    return titles, result.explain
+
+
+def test_default_search_ranks_passages_with_the_graph(tmp_path) -> None:
+    engine, graph, _chat, _cids = _setup(tmp_path)
+    MemoryTools(engine).index_passages(TENANT)
+    titles, explain = _default_ranked(engine, "When did Lothair II's mother pass away?")
+    # Without the graph the answer passage, which never names Lothair II, ranks below two.
+    assert "Ermengarde of Tours" in titles[:2]
+    assert explain["passage_graph"]["route"] == "ppr"
+    assert explain["activation"]["reason"] == "passage_relevance_order"
+
+
+def test_default_search_caps_extracted_fact_slots(tmp_path) -> None:
+    from mnemosyne.models import Assertion
+
+    engine, graph, _chat, cids = _setup(tmp_path)
+    MemoryTools(engine).index_passages(TENANT)
+    for n in range(6):
+        engine.upsert_assertion(Assertion(
+            tenant_id=TENANT, subject=f"Lothair II fact {n}", predicate="mother", object="Ermengarde of Tours",
+            source_evidence_cids=[cids["Lothair II"]], status="active", access_policy={"tenant": TENANT},
+        ))
+    result = engine.retrieve("Lothair II mother", tenant_id=TENANT, filt={"role": "reader"}, record_access=False)
+    facts = [hit for hit in result.hits if hit.kind in {"assertion", "relation"}]
+    assert len(facts) <= max(1, engine.policy.top_k // 4)
+
+
+def test_a_model_that_is_down_falls_back_to_bm25(tmp_path) -> None:
+    engine, graph, _chat, _cids = _setup(tmp_path)
+    MemoryTools(engine).index_passages(TENANT)
+
+    class Down(BagEmbedder):
+        def embed(self, text: str) -> list[float]:
+            raise OSError("connection refused")
+
+    graph.embedder = Down()
+    graph._query_vectors.clear()
+    for filt in ({"role": "reader"}, {"role": "reader", "query_mode": "passages"}):
+        result = engine.retrieve("Ermengarde of Tours", tenant_id=TENANT, filt=filt, record_access=False)
+        assert result.explain["passage_graph"]["fallback"] == "bm25"
+        assert result.hits[0].text.startswith("Ermengarde of Tours")
+
+
+def test_a_new_memory_is_indexed_in_the_background(tmp_path) -> None:
+    engine, graph, chat, _cids = _setup(tmp_path)
+    tools = MemoryTools(engine)
+    tools.index_passages(TENANT)
+    graph.live_index, graph.live_debounce_seconds = True, 0.01
+    calls = chat.openie_calls
+    made = tools.capture(TENANT, "u", "user", "document", "Rotrude\nRotrude was a daughter of Ermengarde of Tours.")
+    assert made["created"] is True
+    assert graph.wait_idle(10)
+    assert chat.openie_calls == calls + 1
+    assert graph.store.openie(TENANT, graph.openie_model, [made["cid"]])
+    assert graph.store.vectors(TENANT, "passage", "bag|64", [made["cid"]])
+    assert graph.health()["last_report"]["openie_new"] == 1
+    titles, _explain = _default_ranked(engine, "Rotrude daughter")
+    assert titles[0] == "Rotrude"
+
+
+def test_live_indexing_failure_never_fails_a_capture(tmp_path) -> None:
+    engine, graph, chat, _cids = _setup(tmp_path)
+    graph.live_index, graph.live_debounce_seconds = True, 0.01
+
+    class Broken(ScriptedChat):
+        def json(self, prompt: str) -> dict:
+            raise OSError("model is not running")
+
+    graph.chat = Broken()  # type: ignore[assignment]
+    made = MemoryTools(engine).capture(TENANT, "u", "user", "document", "Pippin\nPippin was a son of Lothair II.")
+    assert made["created"] is True
+    assert graph.wait_idle(10)
+    health = graph.health()
+    assert health["live_index"] is True and health["running"] is False
+    # One extraction failed; the passage is still found, by BM25.
+    assert health["last_report"]["openie_failures"] >= 1
+    result = engine.retrieve("Pippin", tenant_id=TENANT, filt={"role": "reader"}, record_access=False)
+    assert any(hit.text.startswith("Pippin") for hit in result.hits)
+
+
+def test_a_passage_forgotten_mid_index_is_not_written_back(tmp_path) -> None:
+    engine, graph, _chat, cids = _setup(tmp_path)
+    target = cids["Turin"]
+    graph.purge(TENANT, [target])
+    MemoryTools(engine).index_passages(TENANT)
+    assert graph.store.openie(TENANT, graph.openie_model, [target]) == {}
+    assert graph.store.vectors(TENANT, "passage", "bag|64", [target]) == {}
+
+
+def test_default_search_keeps_unreadable_passages_out(tmp_path) -> None:
+    engine, graph, _chat, _cids = _setup(tmp_path)
+    engine.append_evidence(Evidence(
+        tenant_id=TENANT, user_id="u", actor="user", source_type="document",
+        content="Secret ledger\nErmengarde of Tours kept a secret ledger.", sensitivity=3,
+        access_policy={"tenant": TENANT},
+    ))
+    MemoryTools(engine).index_passages(TENANT)
+    titles, _explain = _default_ranked(engine, "Ermengarde of Tours secret ledger")
+    assert "Secret ledger" not in titles
+
+
+def test_passage_graph_from_env(tmp_path) -> None:
+    from mnemosyne.passages import passage_graph_from_env
+
+    assert passage_graph_from_env({}) is None
+    with pytest.raises(ValueError, match="CHAT_MODEL"):
+        passage_graph_from_env({"MNEMOSYNE_PASSAGE_INDEX": str(tmp_path / "i.sqlite")})
+    graph = passage_graph_from_env({
+        "MNEMOSYNE_PASSAGE_INDEX": str(tmp_path / "i.sqlite"),
+        "MNEMOSYNE_PASSAGE_CHAT_MODEL": "qwen3:4b-instruct",
+        "MNEMOSYNE_PASSAGE_CHAT_URL": "http://127.0.0.1:11434/v1/chat/completions",
+        "MNEMOSYNE_PASSAGE_EMBEDDING_URL": "http://127.0.0.1:11434/v1/embeddings",
+        "MNEMOSYNE_PASSAGE_EMBEDDING_MODEL": "qwen3-embedding:8b",
+        "MNEMOSYNE_PASSAGE_RERANK_TOP": "10",
+    })
+    assert graph is not None and graph.chat is not None and graph.embedder.dims == 1024
+    assert graph.rerank_top == 10 and graph.openie_model == "qwen3:4b-instruct|openie.v1"
+    graph.store.close()
+
+
+def test_mcp_server_wires_the_graph_and_reports_it(tmp_path, monkeypatch) -> None:
+    from mnemosyne.mcp_server import MnemosyneMcpServer, _passage_graph_health
+
+    monkeypatch.setenv("MNEMOSYNE_PASSAGE_INDEX", str(tmp_path / "index.sqlite"))
+    monkeypatch.setenv("MNEMOSYNE_PASSAGE_CHAT_MODEL", "scripted")
+    # Nothing listens on port 9: every model call is refused at once.
+    monkeypatch.setenv("MNEMOSYNE_PASSAGE_CHAT_URL", "http://127.0.0.1:9/v1/chat/completions")
+    monkeypatch.setenv("MNEMOSYNE_PASSAGE_EMBEDDING_URL", "http://127.0.0.1:9/v1/embeddings")
+    with MnemosyneMcpServer(store_path=tmp_path / "store.json") as server:
+        assert server.engine.adapters.passage_graph is server.passage_graph
+        assert server.passage_graph.live_index is True
+        server.passage_graph.live_debounce_seconds = 0.01
+        made = server.tools.capture(TENANT, "u", "user", "document", "Charles\nCharles was a king.")
+        assert made["created"] is True
+        assert server.passage_graph.wait_idle(30)
+        found = server.tools.search(TENANT, "Charles king")
+        assert found["hits"] and found["explain"]["passage_graph"]["fallback"] == "bm25"
+        assert _passage_graph_health(server)["configured"] is True
+    assert _passage_graph_health(object()) == {"configured": False}
