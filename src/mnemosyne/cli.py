@@ -506,6 +506,7 @@ def load_retrieval_adapters(args: argparse.Namespace) -> RetrievalAdapters:
             chat=chat,
             embedder=passage_embedder,
             recognition_filter=bool(args.passage_recognition_filter),
+            rerank_top=max(0, int(args.passage_rerank_top)),
         )
 
     return RetrievalAdapters(
@@ -18954,6 +18955,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--passage-embedding-model", default=os.environ.get("MNEMOSYNE_PASSAGE_EMBEDDING_MODEL"))
     parser.add_argument(
         "--passage-embedding-dims", type=int, default=int(os.environ.get("MNEMOSYNE_PASSAGE_EMBEDDING_DIMS", "1024"))
+    )
+    parser.add_argument(
+        "--passage-rerank-top",
+        type=int,
+        default=int(os.environ.get("MNEMOSYNE_PASSAGE_RERANK_TOP", "0")),
+        help="let the chat model reorder the top N graph passages (0 = off; one call per query)",
     )
     parser.add_argument(
         "--passage-recognition-filter",
