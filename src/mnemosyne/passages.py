@@ -114,6 +114,16 @@ Passage:
 {passage}
 """
 
+RERANK_PROMPT = """You select the passages a question needs.
+
+Question: {question}
+
+Passages:
+{passages}
+
+List the numbers of the passages needed to answer the question, most useful first. Include a passage about an intermediate person, place or thing the question depends on, even when it does not mention the question's words. Answer with one compact JSON object: {"passages": [numbers]}.
+"""
+
 RECOGNITION_PROMPT = """You select facts from a memory that help answer a question.
 
 Question: {question}
@@ -364,8 +374,10 @@ def _matrix(np: Any, blobs: dict[str, bytes], shas: Sequence[str], dims: int) ->
 class PassageGraphIndex:
     """HippoRAG 2 retrieval over a caller's readable passages (needs numpy).
 
-    Defaults are HippoRAG 2's: five linked facts, passage-node weight 0.05, damping 0.5,
-    synonym edges at cosine 0.8 (at most 100 per entity).
+    Five linked facts, passage-node weight 0.05 and damping 0.5 are HippoRAG 2's. Synonym
+    edges at cosine 0.95 (HippoRAG 2: 0.8) and a 0.1 dense mix were chosen on a 2Wiki
+    DEVELOPMENT split with qwen3-embedding (0.8 joined ~17 phrases per entity and diluted
+    the walk: recall@5 0.854 -> 0.914); never on held-out data.
     """
 
     store: PassageIndexStore
@@ -380,8 +392,12 @@ class PassageGraphIndex:
     link_top_k: int = 5
     passage_node_weight: float = 0.05
     damping: float = 0.5
-    synonym_threshold: float = 0.8
+    synonym_threshold: float = 0.95
     synonym_top_k: int = 100
+    #: Weight of the min-max dense passage score added to the min-max PageRank score (0 = pure PPR).
+    dense_mix: float = 0.1
+    #: Let the chat model reorder the top N passages (0 = off; one call per query).
+    rerank_top: int = 0
     max_disclosed_sensitivity: int = 1
     query_template: str = "Instruct: {task}\nQuery: {query}"
     _cache: tuple[tuple[Any, ...], _Graph] | None = field(default=None, repr=False)
@@ -461,11 +477,16 @@ class PassageGraphIndex:
         for kind, items in kinds.items():
             present = self.store.vectors(scope, kind, embed_model, items)
             missing = [(sha, text) for sha, text in items.items() if sha not in present]
-            for number, chunk in enumerate(_chunks(missing, batch_size), 1):
-                vectors = _embed(embedder, [text for _sha, text in chunk])
-                self.store.put_vectors(scope, kind, embed_model, [(sha, vec) for (sha, _t), vec in zip(chunk, vectors)])
-                if progress is not None and number % 20 == 0:
-                    progress(f"embed {kind} {number * batch_size}/{len(missing)}")
+            chunks = list(_chunks(missing, batch_size))
+            # Several batches in flight keep a server's parallel slots busy; map keeps the order.
+            with ThreadPoolExecutor(max_workers=max(1, min(workers, 4))) as pool:
+                batches = pool.map(lambda chunk: _embed(embedder, [text for _sha, text in chunk]), chunks)
+                for number, (chunk, vectors) in enumerate(zip(chunks, batches), 1):
+                    self.store.put_vectors(
+                        scope, kind, embed_model, [(sha, vec) for (sha, _t), vec in zip(chunk, vectors)]
+                    )
+                    if progress is not None and number % 20 == 0:
+                        progress(f"embed {kind} {number * batch_size}/{len(missing)}")
             embedded[kind] = len(missing)
         self._cache = None
         return {
@@ -612,6 +633,21 @@ class PassageGraphIndex:
             x = nxt
         return x
 
+    def _rerank(self, question: str, head: Sequence[Hit]) -> list[int]:
+        """Positions in ``head`` the chat model picked, most useful first; [] on any failure."""
+        listed = "\n".join(f"[{n}] {' '.join(hit.text.split())[:600]}" for n, hit in enumerate(head, 1))
+        prompt = RERANK_PROMPT.replace("{question}", question).replace("{passages}", listed)
+        try:
+            picked = self.chat.json(prompt).get("passages") if self.chat else None
+        except (ValueError, OSError):
+            return []
+        chosen: list[int] = []
+        for value in picked if isinstance(picked, list) else []:
+            if isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= len(head):
+                if value - 1 not in chosen:
+                    chosen.append(value - 1)
+        return chosen
+
     def _recognize(self, question: str, graph: _Graph, ranked_facts: list[int]) -> list[int]:
         if self.chat is None or not ranked_facts:
             return ranked_facts
@@ -670,9 +706,22 @@ class PassageGraphIndex:
                 if reset.sum() > 0:
                     reset /= reset.sum()
                     scores = self._ppr(graph, reset)[: graph.n_passages]
+                    if self.dense_mix > 0:
+                        p_low, p_high = float(scores.min()), float(scores.max())
+                        scores = (scores - p_low) / ((p_high - p_low) or 1.0) + self.dense_mix * (
+                            (dense - d_low) / ((d_high - d_low) or 1.0)
+                        )
         explain["route"] = "ppr" if linked else "dense"
         ranked = [i for i in np.argsort(-scores, kind="stable").tolist() if graph.indexed[i]]
         final = {i: float(scores[i]) for i in ranked}
+        if self.rerank_top > 0 and self.chat is not None and ranked:
+            head = ranked[: self.rerank_top]
+            chosen = self._rerank(query, [passages[i] for i in head])
+            if chosen:
+                first = [head[j] for j in chosen]
+                ranked = first + [i for i in ranked if i not in set(first)]
+                final = {i: 1.0 / (1 + position) for position, i in enumerate(ranked)}
+            explain["reranked"] = len(chosen)
         unindexed = np.flatnonzero(~graph.indexed).tolist()
         if unindexed:
             # Reciprocal-rank merge with BM25 over the passages the graph cannot see.
