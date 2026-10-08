@@ -2046,7 +2046,9 @@ def cmd_eval_query_batch(args: argparse.Namespace) -> None:
         search_kwargs = {}
         if getattr(args, "retrieval_mode", None):
             search_kwargs["query_mode"] = args.retrieval_mode
+        started = time.perf_counter()
         search = tools.search(tenant_id=row["tenant"], query=row["query"], **search_kwargs)
+        latency_ms = round((time.perf_counter() - started) * 1000.0, 3)
         explanation = search.get("explain") if isinstance(search, dict) else None
         if not isinstance(explanation, dict):
             raise ValueError("evaluation search result is missing embedded explanation")
@@ -2059,20 +2061,50 @@ def cmd_eval_query_batch(args: argparse.Namespace) -> None:
             }
             explanation = {key: explanation[key] for key in ("channels", "adapters", "query_mode")
                            if key in explanation}
-        results.append(
-            {
-                "question_id": row["question_id"],
-                "search": search,
-                "explanation": explanation,
-            }
-        )
+        result = {"question_id": row["question_id"], "search": search, "explanation": explanation}
+        if getattr(args, "compact", False):
+            result["latency_ms"] = latency_ms
+        results.append(result)
     payload = {"count": len(results), "ok": True, "results": results}
+    if getattr(args, "compact", False):
+        payload["peak_rss_mb"] = _peak_rss_mb()
     if overrides:
         payload["evaluation_policy"] = {
             "token_budget": tools.engine.policy.token_budget,
             "top_k": tools.engine.policy.top_k,
         }
     emit(payload)
+
+
+def _peak_rss_mb() -> float | None:
+    """This process's peak resident memory in MB (None where the platform will not say)."""
+    try:
+        if os.name == "nt":
+            import ctypes
+            from ctypes import wintypes
+
+            class Counters(ctypes.Structure):
+                _fields_ = [("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD)] + [
+                    (name, ctypes.c_size_t) for name in (
+                        "PeakWorkingSetSize", "WorkingSetSize", "QuotaPeakPagedPoolUsage",
+                        "QuotaPagedPoolUsage", "QuotaPeakNonPagedPoolUsage", "QuotaNonPagedPoolUsage",
+                        "PagefileUsage", "PeakPagefileUsage",
+                    )
+                ]
+
+            counters = Counters()
+            counters.cb = ctypes.sizeof(counters)
+            psapi = ctypes.WinDLL("psapi")
+            process = ctypes.windll.kernel32.GetCurrentProcess()
+            if psapi.GetProcessMemoryInfo(process, ctypes.byref(counters), counters.cb):
+                return round(counters.PeakWorkingSetSize / 1048576, 1)
+            return None
+        import resource
+
+        peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        return round(peak / (1048576 if sys.platform == "darwin" else 1024), 1)
+    except (OSError, AttributeError, ImportError):
+        return None
 
 
 def _answer_context(value: object) -> Any:

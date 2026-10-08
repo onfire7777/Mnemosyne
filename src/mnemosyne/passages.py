@@ -675,9 +675,15 @@ class PassageGraphIndex:
         small GPU swap the embedding and chat models on every question.
         """
         embedder = self.embedder or embedder
-        texts = list(dict.fromkeys(
-            self.query_template.format(task=task, query=query) for query in queries for task in (FACT_TASK, PASSAGE_TASK)
-        ))
+        texts = [
+            text
+            for text in dict.fromkeys(
+                self.query_template.format(task=task, query=query)
+                for query in queries
+                for task in (FACT_TASK, PASSAGE_TASK)
+            )
+            if text not in self._query_vectors
+        ]
         for chunk in _chunks(texts, batch_size):
             for text, vector in zip(chunk, _embed(embedder, list(chunk))):
                 self._query_vectors[text] = vector
