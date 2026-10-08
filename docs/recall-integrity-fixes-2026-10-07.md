@@ -1,8 +1,10 @@
 # Retrieval integrity fixes — 2026-10-07
 
 Implemented in `C:\Users\Onfire\Documents\Codex\Mnemosyne`, based on the supplied
-Mnemetric brief. The original `docs/recall-90-fix-prompt.md` and `_scratch/benchmark`
-reproduction scripts were not present in the supplied local project locations.
+Mnemetric brief. The initial implementation did not locate the original brief or
+reproduction scripts. They were subsequently located at
+`C:\Users\Onfire\Desktop\QT projects\Mnemosyne\docs\recall-90-fix-prompt.md`
+and `C:\Users\Onfire\Desktop\QT projects\Mnemosyne\_scratch\benchmark`.
 The current source, Desktop Mnemetric harness/reports, and MnemetricData corpus
 and diagnostics were inspected instead. The checkout is newer than the brief's
 `e1ad2d0c` pin; the starting revision was `1e19ac52`.
@@ -111,6 +113,11 @@ Use the compact passage route on an existing clean evaluation store:
   it is correct-by-filtering rather than an optimized server-side BM25 index.
 
 ## Remaining model/research work
+
+This section records the initial integrity implementation, not current project
+acceptance. Subsequent graph/model work and its reported held-out measurements
+are documented in [passage-graph.md](passage-graph.md). Those results do not close
+the rolling-budget, all-suite, latency or exact-replay acceptance requirements.
 
 No 90% recall claim is made. A learned embedding model, a learned cross-encoder,
 and an actual OpenIE/synonym/PPR HippoRAG implementation were not installed or

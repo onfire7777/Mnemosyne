@@ -19,12 +19,41 @@ from mnemosyne.passages import (  # noqa: E402
     OPENIE_PROMPT,
     PassageGraphIndex,
     PassageIndexStore,
+    _embed,
     clean_triples,
     phrase_key,
 )
 from mnemosyne.retrieval import RetrievalAdapters  # noqa: E402
 
 TENANT = "graph-tenant"
+
+
+@pytest.mark.parametrize("vector", [[1.0], [float("nan"), 0.0], [float("inf"), 0.0], [True, 0.0]])
+@pytest.mark.parametrize("batched", [False, True])
+def test_passage_embedding_rejects_invalid_vectors(vector, batched):
+    class InvalidEmbedder:
+        dims = 2
+
+        def embed(self, text):
+            return vector
+
+    provider = InvalidEmbedder()
+    if batched:
+        provider.embed_many = lambda texts: [vector for _ in texts]
+    with pytest.raises(ValueError):
+        _embed(provider, ["synthetic passage"])
+
+
+def test_passage_embedding_preserves_valid_batch():
+    class Provider:
+        dims = 2
+
+        def embed_many(self, texts):
+            return [[1, 0] for _ in texts]
+
+    assert _embed(Provider(), ["one", "two"]) == [[1.0, 0.0], [1.0, 0.0]]
+
+
 PASSAGES = {
     "Lothair II\nLothair II's mother was Ermengarde of Tours.": [
         ["Lothair II", "mother", "Ermengarde of Tours"],
