@@ -131,6 +131,13 @@ class MnemosyneMcpServer:
             else _env_flag("MNEMOSYNE_REQUIRE_RUNTIME_RESIDENCY", default=False)
         )
         self.stateless = stateless
+        # MNEMOSYNE_PASSAGE_* turn on the local passage graph for search, and live indexing:
+        # a long-running server indexes each new memory in the background.
+        from mnemosyne.passages import passage_graph_from_env
+
+        self.passage_graph = passage_graph_from_env()
+        if self.passage_graph is not None:
+            self.passage_graph.live_index = True
         self.auth_token = (
             auth_token if auth_token is not None else _env_or_file_secret("MNEMOSYNE_MCP_TOKEN")
         )
@@ -300,6 +307,10 @@ class MnemosyneMcpServer:
             else:
                 engine = LocalMemoryEngine(store_path=self.store_path)
                 runtime_state = RuntimeState.from_store_path(self.store_path)
+            if self.passage_graph is not None and getattr(engine, "adapters", None) is not None:
+                from dataclasses import replace as _replace
+
+                engine.adapters = _replace(engine.adapters, passage_graph=self.passage_graph)
             if self.queue_backend == "postgres":
                 dsn = self.postgres_dsn or os.environ.get("MNEMOSYNE_POSTGRES_DSN")
                 if not dsn:
@@ -989,6 +1000,11 @@ def serve_sdk_stdio(**kwargs: Any) -> None:
         server.mnemosyne_mcp_facade.close()
 
 
+def _passage_graph_health(facade: Any) -> dict[str, Any]:
+    graph = getattr(facade, "passage_graph", None)
+    return graph.health() if graph is not None else {"configured": False}
+
+
 def build_sdk_streamable_http_app(
     *,
     streamable_http_path: str = "/mcp",
@@ -1032,6 +1048,7 @@ def build_sdk_streamable_http_app(
                     "transport": "mcp-sdk-streamable-http",
                     "rpc_path": _normalize_http_path(streamable_http_path),
                     "stateless": bool(manager_stateless),
+                    "passage_graph": _passage_graph_health(getattr(sdk_server, "mnemosyne_mcp_facade", None)),
                 }
             )
 
@@ -1258,6 +1275,7 @@ def build_http_server(
                     "session_exchange_path": session_exchange_path,
                     "backend": facade.backend,
                     "stateless": facade.stateless,
+                    "passage_graph": _passage_graph_health(facade),
                     "production_profile": bool(facade.production_profile),
                     "auth_token_required": bool(facade.auth_token),
                     "session_required": bool(facade.require_session),

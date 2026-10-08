@@ -471,43 +471,29 @@ def load_retrieval_adapters(args: argparse.Namespace) -> RetrievalAdapters:
 
     passage_graph = None
     if getattr(args, "passage_index", None):
-        from mnemosyne.passages import ChatModel, PassageGraphIndex, PassageIndexStore
+        from mnemosyne.passages import build_passage_graph
 
-        try:
-            import numpy  # noqa: F401
-        except ImportError as exc:
-            raise SystemExit("--passage-index needs numpy: install mnemosyne-memory[graph]") from exc
         if not args.passage_chat_model:
             raise SystemExit("--passage-index needs --passage-chat-model, the OpenIE model it was built with.")
         if evaluation_read_only and not Path(args.passage_index).is_file():
             raise SystemExit("evaluation read-only mode needs an existing --passage-index file")
-        chat = None
-        if args.passage_chat_url:
-            key_env = args.passage_chat_api_key_env
-            chat = ChatModel(
-                url=args.passage_chat_url,
-                model=args.passage_chat_model,
-                api_key=os.environ.get(key_env) if key_env else None,
+        key_env = args.passage_chat_api_key_env
+        try:
+            passage_graph = build_passage_graph(
+                args.passage_index,
+                extractor=args.passage_chat_model,
+                chat_url=args.passage_chat_url,
+                chat_api_key=os.environ.get(key_env) if key_env else None,
                 reasoning_effort=args.passage_chat_reasoning_effort,
+                embedding_url=args.passage_embedding_url,
+                embedding_model=args.passage_embedding_model,
+                embedding_dims=int(args.passage_embedding_dims),
+                recognition_filter=bool(args.passage_recognition_filter),
+                rerank_top=int(args.passage_rerank_top),
+                read_only=evaluation_read_only,
             )
-        passage_embedder = None
-        if args.passage_embedding_url:
-            passage_embedder = HttpEmbeddingProvider(
-                url=args.passage_embedding_url,
-                model=args.passage_embedding_model,
-                dims=int(args.passage_embedding_dims),
-                timeout_seconds=max(timeout, 120.0),
-                query_prefix="",
-                cache_size=0,
-            )
-        passage_graph = PassageGraphIndex(
-            store=PassageIndexStore(args.passage_index, read_only=evaluation_read_only),
-            extractor=args.passage_chat_model,
-            chat=chat,
-            embedder=passage_embedder,
-            recognition_filter=bool(args.passage_recognition_filter),
-            rerank_top=max(0, int(args.passage_rerank_top)),
-        )
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
 
     return RetrievalAdapters(
         embedding=embedding,

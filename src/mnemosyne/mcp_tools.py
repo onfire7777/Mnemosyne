@@ -807,6 +807,8 @@ class MemoryTools:
         same_cid = cid == expected_cid
         created = not existed_before and stored and same_cid
         idempotent = existed_before and stored and same_cid
+        if created:
+            self._index_later(tenant_id, branch)
         return {"cid": cid, "branch": branch, "created": created, "idempotent": idempotent}
 
     def ingest(
@@ -849,7 +851,7 @@ class MemoryTools:
             )
         if content is None and data is None:
             raise ValueError("ingest requires content or data")
-        return self.ingestion.ingest(
+        result = self.ingestion.ingest(
             IngestRequest(
                 tenant_id=tenant_id,
                 user_id=user_id,
@@ -868,6 +870,8 @@ class MemoryTools:
             ),
             branch=branch,
         ).to_dict()
+        self._index_later(tenant_id, branch)
+        return result
 
     def residency_policy(self) -> dict[str, object]:
         return self.ingestion.residency_policy()
@@ -1372,13 +1376,30 @@ class MemoryTools:
         passage_graph = getattr(self.engine.adapters, "passage_graph", None)
         if passage_graph is None:
             return {"configured": False, "reason": "no passage index is configured (--passage-index)"}
-        filt = self._read_context(tenant_id, role="reader")
-        filt.update({"branch": branch, "query_mode": "passages"})
-        passages = self.engine.passage_candidates(filt)
         report = passage_graph.index(
-            tenant_id, passages, self.engine.adapters.embedding, workers=workers, progress=progress
+            tenant_id, self._reader_passages(tenant_id, branch), self.engine.adapters.embedding,
+            workers=workers, progress=progress,
         )
         return {"configured": True, **report}
+
+    def _reader_passages(self, tenant_id: str, branch: str) -> list[Any]:
+        """The passages a reader of ``tenant_id`` may see: what the passage graph indexes."""
+        filt = self._read_context(tenant_id, role="reader")
+        filt.update({"branch": branch, "query_mode": "passages"})
+        return self.engine.passage_candidates(filt)
+
+    def _index_later(self, tenant_id: str, branch: str) -> None:
+        """Queue the tenant's new passages for the live passage index (no-op unless a server
+        turned live indexing on). Never raises: a capture must not fail over the index."""
+        passage_graph = getattr(getattr(self.engine, "adapters", None), "passage_graph", None)
+        if passage_graph is None or not passage_graph.live_index:
+            return
+        try:
+            passage_graph.schedule(
+                tenant_id, lambda: self._reader_passages(tenant_id, branch), self.engine.adapters.embedding
+            )
+        except Exception:  # noqa: BLE001 - indexing is best effort; the batch command catches up
+            return
 
     def deep_search(
         self,
