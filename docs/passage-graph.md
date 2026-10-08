@@ -72,3 +72,29 @@ PageRank score. Without linked facts the route falls back to dense passage score
 Optional, one chat call per query each: `--passage-recognition-filter` drops linked facts
 that do not help the question; `--passage-rerank-top N` lets the chat model reorder the top
 N passages.
+
+## Results (7 Oct 2026, this PC: i9-9900K, RTX 3080 10 GB, local Ollama)
+
+Everything was chosen on a 2Wiki development split built from 2WikiMultihopQA dev questions
+outside the HippoRAG sample (`_scratch/recall90/prepare_dev.py`: 400 questions, 2,771
+passages). The held-out HippoRAG 2Wiki sample (1,000 questions, 6,119 passages) was scored
+only with those fixed settings, through the public adapter end to end (capture-batch with
+consolidation, index-passages, eval-query-batch). Each held-out configuration was run twice
+and reproduced to the third decimal.
+
+| 2Wiki | dev recall@5 | held-out recall@2 | held-out recall@5 (95% CI) | per query |
+|---|---:|---:|---:|---:|
+| BM25 passages | 0.665 | 0.560 | 0.664 | 15 ms |
+| dense (qwen3-embedding:8b) | 0.761 | - | - | 5 ms |
+| passage graph (defaults) | 0.914 | 0.656 | 0.880 (0.867-0.892) | 0.16 s |
+| passage graph + `--passage-rerank-top 10` | 0.932 | 0.766 | **0.917 (0.906-0.927)** | 0.52 s |
+
+The graph alone generalised less well than dev suggested (0.914 -> 0.880); the rerank of the
+top ten passages by the chat model carries the held-out result over 0.90. Before this work the
+same suite scored 0.140.
+
+Cost: OpenIE of the 6,119 held-out passages took 90 minutes on the local GPU (qwen3:4b-instruct,
+eight parallel requests, about 10 triples per passage), then embeddings; this is paid once per
+passage and kept in the index. A warm suite run (capture with consolidation, index check, 1,000
+queries) takes 4 minutes, or 10 with the rerank. HotpotQA and MuSiQue were not yet measured with
+the graph; their BM25 passage-mode figures are 0.728 and 0.428.
