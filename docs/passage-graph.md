@@ -1,4 +1,4 @@
-# Passage graph (HippoRAG 2) for `query_mode=passages`
+# Passage graph (HippoRAG 2): how Mnemosyne ranks memories with local models
 
 Mnemosyne can rank source passages with the HippoRAG 2 recipe: an LLM extracts facts
 (OpenIE triples) from every passage once, an embedding model embeds passages, facts and
@@ -6,8 +6,20 @@ entity phrases, and a query is answered by Personalized PageRank seeded with the
 closest to the question. This is what lets a two-hop question ("When did Lothair II's
 mother die?") reach the passage about the mother, which never names Lothair II.
 
-It is off unless configured, and it only changes `query_mode=passages`. Ordinary memory
-search, consolidation and capture behave exactly as before.
+It is off unless configured. When it is configured:
+
+- `query_mode=passages` returns the graph ranking alone (what the benchmarks measure);
+- ordinary `search` and `deep_search` rank source passages with the graph too, and fuse them
+  with facts, preferences, summaries, working memory and intentions from the other channels.
+  Extracted facts get at most `top_k / 4` result slots, and the hashing dense channel, the local
+  hashing reranker, MMR and activation no longer re-sort the passages;
+- a long-running MCP server indexes every new capture or ingest in a background thread
+  (debounced by a second), so a new memory joins the graph within seconds. Until it does, BM25
+  finds it.
+
+If a model is down or slow, search falls back to BM25 (`explain.passage_graph.fallback`) and a
+capture never fails; `/healthz` reports `passage_graph` with the last indexing run and error.
+Without the graph, every path behaves exactly as before.
 
 ## What it is, and what it is not
 

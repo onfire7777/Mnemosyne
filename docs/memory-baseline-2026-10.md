@@ -19,6 +19,12 @@ which searches a fresh copy so the real store is never touched.
 
 No search answers a time question: nothing turns "yesterday" or "on Tuesday" into a date range.
 
+After the default search started ranking with the local passage graph (live indexing, same
+questions, same store copy): **recall@5 0.782** (facts 1.00, events 0.94, conversation 0.81,
+overheard 0.70, two-hop 0.83, time 0.00), 7 abstentions, p50 / p95 97 / 123 ms. Indexing the
+742 lines from scratch took 20 minutes on the local GPU (OpenIE, then embeddings), shared with
+another indexing job.
+
 ## 2. LongMemEval-S (chat memory, 500 questions, about 50 sessions each)
 
 `eval/longmemeval_recall.py`, in-process, one engine per question as the public adapter does.
