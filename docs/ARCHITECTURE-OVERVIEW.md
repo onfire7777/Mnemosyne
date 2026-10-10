@@ -16,7 +16,7 @@
 > signed deletion manifest merged (PR #39) · **6/6 headline SLOs proven** · ~**82%** blended
 > complete. Remaining ~18% = Tier-B *real-infrastructure operational evidence*, not code.
 
-- **Package:** `mnemosyne-memory` v1.0.1 · Python ≥3.12 · Apache-2.0
+- **Package:** `mnemosyne-memory` v1.1.0 · Python ≥3.12 · Apache-2.0
 - **Entry points:** `mneme` (CLI, 119 subcommands) · `mneme-mcp` (MCP server, 60 tools)
 - **Source:** ~71,822 lines across 73 `.py` files in `src/mnemosyne/` (including the `providers/` subpackage)
 - **Wiki:** [Home](https://github.com/onfire7777/Mnemosyne/wiki) ·
