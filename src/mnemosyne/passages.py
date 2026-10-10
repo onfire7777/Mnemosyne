@@ -410,13 +410,17 @@ _TRUE = {"1", "true", "yes", "on"}
 def build_passage_graph(
     index: str | os.PathLike[str],
     *,
-    extractor: str,
+    extractor: str = "",
     chat_url: str | None = None,
     chat_api_key: str | None = None,
     reasoning_effort: str | None = None,
     embedding_url: str | None = None,
     embedding_model: str | None = None,
+    embedding_api_key: str | None = None,
     embedding_dims: int = 1024,
+    query_task: str | None = None,
+    query_timeout_seconds: float | None = None,
+    embedding_body: str | None = None,
     recognition_filter: bool = False,
     rerank_top: int = 0,
     rerank_model: str | None = None,
@@ -424,7 +428,11 @@ def build_passage_graph(
     second_hop: bool = False,
     read_only: bool = False,
 ) -> PassageGraphIndex:
-    """The passage graph for one index file and its (OpenAI-compatible) chat and embedding endpoints."""
+    """The passage graph for one index file and its (OpenAI-compatible) chat and embedding endpoints.
+
+    Without an ``extractor`` the index is embeddings-only: no OpenIE, no graph walk, passages
+    ranked by the cosine of their embedding to the question.
+    """
     from mnemosyne.retrieval import HttpEmbeddingProvider
 
     try:
@@ -442,10 +450,16 @@ def build_passage_graph(
         if chat_url and rerank_model else None
     )
     embedder = (
-        HttpEmbeddingProvider(url=embedding_url, model=embedding_model, dims=int(embedding_dims),
-                              timeout_seconds=120.0, query_prefix="", cache_size=0)
+        HttpEmbeddingProvider(url=embedding_url, model=embedding_model, api_key=embedding_api_key,
+                              dims=int(embedding_dims), timeout_seconds=120.0, query_prefix="", cache_size=0,
+                              extra_body_json=embedding_body or None)
         if embedding_url else None
     )
+    tuned: dict[str, Any] = {}
+    if query_task:
+        tuned["passage_task"] = query_task
+    if query_timeout_seconds:
+        tuned["query_timeout_seconds"] = float(query_timeout_seconds)
     return PassageGraphIndex(
         store=PassageIndexStore(index, read_only=read_only),
         extractor=extractor,
@@ -455,6 +469,7 @@ def build_passage_graph(
         rerank_top=max(0, int(rerank_top)),
         rerank_chat=rerank_chat,
         second_hop=bool(second_hop),
+        **tuned,
     )
 
 
@@ -464,19 +479,28 @@ def passage_graph_from_env(environ: Mapping[str, str] | None = None, *, read_onl
     index = env.get("MNEMOSYNE_PASSAGE_INDEX")
     if not index:
         return None
-    extractor = env.get("MNEMOSYNE_PASSAGE_CHAT_MODEL")
-    if not extractor:
-        raise ValueError("MNEMOSYNE_PASSAGE_INDEX needs MNEMOSYNE_PASSAGE_CHAT_MODEL, the OpenIE model it was built with")
+    extractor = env.get("MNEMOSYNE_PASSAGE_CHAT_MODEL") or ""
+    embedding_url = env.get("MNEMOSYNE_PASSAGE_EMBEDDING_URL")
+    if not extractor and not embedding_url:
+        raise ValueError(
+            "MNEMOSYNE_PASSAGE_INDEX needs MNEMOSYNE_PASSAGE_CHAT_MODEL, the OpenIE model it was built "
+            "with, or MNEMOSYNE_PASSAGE_EMBEDDING_URL alone for an embeddings-only index"
+        )
     key_env = env.get("MNEMOSYNE_PASSAGE_CHAT_API_KEY_ENV")
+    embedding_key_env = env.get("MNEMOSYNE_PASSAGE_EMBEDDING_API_KEY_ENV")
     return build_passage_graph(
         index,
         extractor=extractor,
         chat_url=env.get("MNEMOSYNE_PASSAGE_CHAT_URL"),
         chat_api_key=env.get(key_env) if key_env else None,
         reasoning_effort=env.get("MNEMOSYNE_PASSAGE_CHAT_REASONING_EFFORT"),
-        embedding_url=env.get("MNEMOSYNE_PASSAGE_EMBEDDING_URL"),
+        embedding_url=embedding_url,
         embedding_model=env.get("MNEMOSYNE_PASSAGE_EMBEDDING_MODEL"),
+        embedding_api_key=env.get(embedding_key_env) if embedding_key_env else None,
         embedding_dims=int(env.get("MNEMOSYNE_PASSAGE_EMBEDDING_DIMS", "1024")),
+        query_task=env.get("MNEMOSYNE_PASSAGE_QUERY_TASK") or None,
+        query_timeout_seconds=float(env.get("MNEMOSYNE_PASSAGE_QUERY_TIMEOUT") or 0) or None,
+        embedding_body=env.get("MNEMOSYNE_PASSAGE_EMBEDDING_BODY") or None,
         recognition_filter=env.get("MNEMOSYNE_PASSAGE_RECOGNITION_FILTER", "").lower() in _TRUE,
         rerank_top=int(env.get("MNEMOSYNE_PASSAGE_RERANK_TOP", "0")),
         rerank_model=env.get("MNEMOSYNE_PASSAGE_RERANK_MODEL") or None,
@@ -553,7 +577,8 @@ class PassageGraphIndex:
 
     store: PassageIndexStore
     #: Names the OpenIE extraction the index holds (the chat model that built it); queries
-    #: need it even when no chat endpoint is configured for them.
+    #: need it even when no chat endpoint is configured for them. Empty = an embeddings-only
+    #: index: nothing is extracted and passages are ranked by cosine alone.
     extractor: str
     chat: ChatModel | None = None
     #: Embedding provider for passages, facts and entities; None = the engine's own (which
@@ -589,6 +614,12 @@ class PassageGraphIndex:
     query_template: str = "Instruct: {task}\nQuery: {query}"
     #: Seconds a query may wait for its embedding before search falls back to BM25.
     query_timeout_seconds: float = 30.0
+    #: Instruction on the query side of the passage embedding (documents are embedded bare).
+    passage_task: str = PASSAGE_TASK
+    #: An embeddings-only index scores passages by cosine. A best score at or above this floor
+    #: supports an answer that shares no word with the question (chosen on BurnOS's own
+    #: development questions with qwen3-embedding-8b; see docs/passage-graph.md).
+    support_floor: float = 0.55
     #: Index new memories in a background thread (a long-running server turns this on).
     live_index: bool = False
     live_debounce_seconds: float = 1.0
@@ -605,6 +636,11 @@ class PassageGraphIndex:
     @property
     def openie_model(self) -> str:
         return f"{self.extractor}|{OPENIE_VERSION}"
+
+    @property
+    def embeddings_only(self) -> bool:
+        """No OpenIE and no graph walk: passages are ranked by their dense score alone."""
+        return not self.extractor
 
     def disclosable(self, hit: Hit) -> bool:
         """Only passages at or below the disclosure ceiling are sent to the models."""
@@ -629,7 +665,7 @@ class PassageGraphIndex:
         """Extract triples for, and embed, every disclosable passage not yet indexed."""
         if self.store.read_only:
             raise ValueError("the passage index is open read-only")
-        if self.chat is None:
+        if self.chat is None and not self.embeddings_only:
             raise ValueError("indexing passages needs a chat model for OpenIE")
         embedder = self.embedder or embedder
         _require_semantic(embedder)
@@ -652,8 +688,10 @@ class PassageGraphIndex:
         for cid, sha in shas.items():
             cids_by_sha[sha].append(cid)
         self.store.register(scope, shas)
-        extracted = self.store.openie(scope, model, texts)
-        todo = list({shas[cid]: text for cid, text in texts.items() if cid not in extracted}.items())
+        extracted = {} if self.embeddings_only else self.store.openie(scope, model, texts)
+        todo = [] if self.embeddings_only else list(
+            {shas[cid]: text for cid, text in texts.items() if cid not in extracted}.items()
+        )
         failures: list[str] = []
         chat = self.chat
 
@@ -737,7 +775,7 @@ class PassageGraphIndex:
         :meth:`health`, and the next capture (or ``index-passages``) catches up. Until a
         passage is indexed, search still finds it by BM25.
         """
-        if not self.live_index or self.chat is None or self.store.read_only:
+        if not self.live_index or self.store.read_only or (self.chat is None and not self.embeddings_only):
             return False
         with self._live_lock:
             self._live_jobs[scope] = (collect, embedder)
@@ -966,7 +1004,7 @@ class PassageGraphIndex:
             for text in dict.fromkeys(
                 self.query_template.format(task=task, query=query)
                 for query in queries
-                for task in (FACT_TASK, PASSAGE_TASK)
+                for task in ((self.passage_task,) if self.embeddings_only else (FACT_TASK, self.passage_task))
             )
             if text not in self._query_vectors
         ]
@@ -987,8 +1025,11 @@ class PassageGraphIndex:
         """HippoRAG 2 scores of every graph passage for one query: fact-seeded PPR, else dense."""
         import numpy as np
 
-        query_fact = np.asarray(self._query_vector(FACT_TASK, query, embedder), dtype=np.float32)
-        query_passage = np.asarray(self._query_vector(PASSAGE_TASK, query, embedder), dtype=np.float32)
+        # An index without facts has nothing to link: one query embedding, not two.
+        query_fact = (
+            np.asarray(self._query_vector(FACT_TASK, query, embedder), dtype=np.float32) if len(graph.facts) else None
+        )
+        query_passage = np.asarray(self._query_vector(self.passage_task, query, embedder), dtype=np.float32)
         dense = graph.passage_vectors @ query_passage
         if graph.indexed.any():
             dense = np.where(graph.indexed, dense, float(dense[graph.indexed].min()))
@@ -1083,6 +1124,12 @@ class PassageGraphIndex:
         explain.update(walked)
         ranked = self._order(graph, scores)
         final = {i: float(scores[i]) for i in ranked}
+        # An embeddings-only index hands back cosines: one scale for every question, so a
+        # caller can tell a strong match from the best of a bad lot.
+        cosine = self.embeddings_only and bool(ranked)
+        if cosine:
+            explain["score_scale"] = "cosine"
+            explain["top_score"] = round(final[ranked[0]], 4)
         reranker = self.rerank_chat or self.chat
         if self.second_hop and reranker is not None and ranked:
             ranked, fused, explain["second_hop"] = self._second_hop(query, graph, passages, ranked, embedder)
@@ -1105,8 +1152,14 @@ class PassageGraphIndex:
             fused = {i: 1.0 / (60 + rank) for rank, i in enumerate(ranked, 1)}
             for rank, i in enumerate(others, 1):
                 fused[i] = 1.0 / (60 + rank)
+            if cosine:
+                # Stay on the cosine scale: a passage not embedded yet takes the score of the
+                # embedded passage it shares a rank with.
+                for rank, i in enumerate(others, 1):
+                    final[i] = final[ranked[min(rank, len(ranked)) - 1]]
+            else:
+                final = fused
             ranked = sorted(fused, key=lambda i: -fused[i])
-            final = fused
             explain["unindexed_passages"] = len(unindexed)
         explain["seconds"] = round(time.perf_counter() - started, 4)
         hits = [

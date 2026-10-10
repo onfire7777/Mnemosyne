@@ -1225,6 +1225,11 @@ def run_retrieval_pipeline(
         except (ValueError, OSError) as exc:
             graph_fallback = f"{type(exc).__name__}: {str(exc)[:160]}"
             passage_graph_explain = {"applied": False, "fallback": "bm25", "reason": graph_fallback}
+            if getattr(passage_graph, "embeddings_only", False):
+                # Without its one model an embeddings-only index has nothing to add: search as
+                # if none were configured, so the scores stay on the scale callers know.
+                semantic = False
+                passage_graph_explain["fallback"] = "default"
     if window is not None:
         dense = ops._mark_retrieved_text_as_data(window_hits)
         lexical, graph, prospective, working, working_explain = [], [], [], [], {}
@@ -1348,8 +1353,19 @@ def run_retrieval_pipeline(
             else ([], {})
         )
     ranked_routes = [dense, lexical, graph, prospective, working]
+    # An embeddings-only index scores every passage by cosine, one scale for every question:
+    # its order is final and its scores are kept; what only the other channels found follows.
+    cosine_ranked = (
+        semantic and graph_ranked is not None and (passage_graph_explain or {}).get("score_scale") == "cosine"
+    )
     if window is not None or (passage_mode and graph_ranked is not None):
         fused = dense
+    elif cosine_ranked:
+        found = {(hit.kind, hit.id) for hit in dense}
+        fused = dense + [
+            hit for hit in ops._rrf([lexical, prospective, working], k=max(k * 2, policy.rerank_width))
+            if (hit.kind, hit.id) not in found
+        ]
     else:
         fused = (
             ops._rrf(ranked_routes, k=max(k * 2, policy.rerank_width, 100 if passage_mode else 0))
@@ -1414,8 +1430,17 @@ def run_retrieval_pipeline(
     support_report = query_support(
         window_support_query(window) if window is not None else query, budgeted, linked_facts
     )
-    insufficient_support = support_report["score"] < QUERY_SUPPORT_THRESHOLD
-    confidence = ops._confidence(query, budgeted, support_score=support_report["score"])
+    support_score = support_report["score"]
+    if cosine_ranked:
+        # Found by meaning: a best cosine at or above the index's floor supports the answer
+        # even when it shares no word with the question.
+        top_score = float(graph_explain.get("top_score") or 0.0)
+        floor = float(getattr(passage_graph, "support_floor", 1.0))
+        support_report["semantic"] = {"top_score": top_score, "floor": floor, "supported": top_score >= floor}
+        if top_score >= floor:
+            support_score = 1.0
+    insufficient_support = support_score < QUERY_SUPPORT_THRESHOLD
+    confidence = ops._confidence(query, budgeted, support_score=support_score)
     prediction_set_size = ops._prediction_set_size(budgeted, threshold)
     entropy = semantic_entropy([hit.text for hit in budgeted])
     gist_support = gist_support_report(budgeted)

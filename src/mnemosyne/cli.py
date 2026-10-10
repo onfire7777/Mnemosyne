@@ -473,21 +473,29 @@ def load_retrieval_adapters(args: argparse.Namespace) -> RetrievalAdapters:
     if getattr(args, "passage_index", None):
         from mnemosyne.passages import build_passage_graph
 
-        if not args.passage_chat_model:
-            raise SystemExit("--passage-index needs --passage-chat-model, the OpenIE model it was built with.")
+        if not args.passage_chat_model and not args.passage_embedding_url:
+            raise SystemExit(
+                "--passage-index needs --passage-chat-model, the OpenIE model it was built with, "
+                "or --passage-embedding-url alone for an embeddings-only index."
+            )
         if evaluation_read_only and not Path(args.passage_index).is_file():
             raise SystemExit("evaluation read-only mode needs an existing --passage-index file")
         key_env = args.passage_chat_api_key_env
+        embedding_key_env = getattr(args, "passage_embedding_api_key_env", None)
         try:
             passage_graph = build_passage_graph(
                 args.passage_index,
-                extractor=args.passage_chat_model,
+                extractor=args.passage_chat_model or "",
                 chat_url=args.passage_chat_url,
                 chat_api_key=os.environ.get(key_env) if key_env else None,
                 reasoning_effort=args.passage_chat_reasoning_effort,
                 embedding_url=args.passage_embedding_url,
                 embedding_model=args.passage_embedding_model,
+                embedding_api_key=os.environ.get(embedding_key_env) if embedding_key_env else None,
                 embedding_dims=int(args.passage_embedding_dims),
+                query_task=os.environ.get("MNEMOSYNE_PASSAGE_QUERY_TASK") or None,
+                query_timeout_seconds=float(os.environ.get("MNEMOSYNE_PASSAGE_QUERY_TIMEOUT") or 0) or None,
+                embedding_body=os.environ.get("MNEMOSYNE_PASSAGE_EMBEDDING_BODY") or None,
                 recognition_filter=bool(args.passage_recognition_filter),
                 rerank_top=int(args.passage_rerank_top),
                 rerank_model=getattr(args, "passage_rerank_model", None),
@@ -19099,6 +19107,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="OpenAI-compatible embeddings URL for the passage graph (default: the main embedding provider)",
     )
     parser.add_argument("--passage-embedding-model", default=os.environ.get("MNEMOSYNE_PASSAGE_EMBEDDING_MODEL"))
+    parser.add_argument(
+        "--passage-embedding-api-key-env",
+        default=os.environ.get("MNEMOSYNE_PASSAGE_EMBEDDING_API_KEY_ENV"),
+        help="name of the environment variable that holds the embeddings API key",
+    )
     parser.add_argument(
         "--passage-embedding-dims", type=int, default=int(os.environ.get("MNEMOSYNE_PASSAGE_EMBEDDING_DIMS", "1024"))
     )
