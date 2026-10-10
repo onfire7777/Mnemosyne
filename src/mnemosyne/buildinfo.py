@@ -28,7 +28,7 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
-_FALLBACK_VERSION = "1.1.0"
+_FALLBACK_VERSION = "1.2.0"
 _COMMIT_ENV = "MNEMOSYNE_BUILD_COMMIT"
 _COMMIT_FILE = "_build_commit.txt"
 _COMMIT_RE = re.compile(r"^[0-9a-fA-F]{7,64}$")
