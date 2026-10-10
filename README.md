@@ -19,7 +19,7 @@ reproducible evaluations, and documented limitations—not a leaderboard claim.
 ![Backend](https://img.shields.io/badge/backends-local%20%7C%20sqlite%20%7C%20postgres-informational)
 ![Protocol](https://img.shields.io/badge/MCP-stdio%20%7C%20HTTP%20%7C%20SDK-blueviolet)
 
-Mnemosyne (`mnemosyne-memory`, v1.0.1) develops the **Mnemosyne v2 build blueprint**:
+Mnemosyne (`mnemosyne-memory`, v1.1.0) develops the **Mnemosyne v2 build blueprint**:
 agent memory as a compiler, not just a vector store. Evidence is the source of
 truth; typed projections make it useful for retrieval and reasoning.
 
