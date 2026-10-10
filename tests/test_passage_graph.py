@@ -617,3 +617,134 @@ def test_a_first_layout_index_is_migrated_without_extracting_again(tmp_path) -> 
         "Turin plague", tenant_id=TENANT, filt={"query_mode": "passages", "role": "reader"}, record_access=False
     )
     assert result.explain["passage_graph"]["route"] == "ppr"
+
+
+# -- embeddings-only index: no OpenIE, passages ranked by cosine ------------------------------
+
+
+def _passage(text: str) -> Evidence:
+    return Evidence(
+        tenant_id=TENANT, user_id="u", actor="user", source_type="document", content=text,
+        access_policy={"tenant": TENANT},
+    )
+
+
+def _dense_setup(tmp_path, embedder=None, texts=PASSAGES):
+    index = PassageGraphIndex(
+        store=PassageIndexStore(tmp_path / "dense.sqlite"), extractor="", embedder=embedder or BagEmbedder()
+    )
+    engine = LocalMemoryEngine(adapters=RetrievalAdapters(passage_graph=index))
+    for text in texts:
+        engine.append_evidence(_passage(text))
+    return engine, index
+
+
+def _search(engine, query: str):
+    return engine.retrieve(query, tenant_id=TENANT, filt={"role": "reader"}, record_access=False)
+
+
+def test_embeddings_only_index_needs_no_chat_model_and_scores_by_cosine(tmp_path) -> None:
+    engine, index = _dense_setup(tmp_path)
+    assert index.embeddings_only and index.chat is None
+    report = MemoryTools(engine).index_passages(TENANT)
+    assert report["openie_new"] == 0
+    assert report["embedded"] == {"passage": len(PASSAGES), "fact": 0, "entity": 0}
+    result = _search(engine, "Ermengarde of Tours passed away")
+    explain = result.explain["passage_graph"]
+    assert explain["route"] == "dense" and explain["score_scale"] == "cosine"
+    assert result.hits[0].text.startswith("Ermengarde of Tours")
+    scores = [hit.score for hit in result.hits]
+    # Cosines, best first - not reciprocal ranks, which never exceed 1/61.
+    assert scores == sorted(scores, reverse=True) and 0.5 < scores[0] <= 1.0
+    assert scores[0] == pytest.approx(explain["top_score"], abs=1e-3)
+
+
+class MeaningEmbedder:
+    """Two meanings and no shared words: anything about a cat, and everything else."""
+
+    name = "test-meaning"
+    model = "meaning"
+    dims = 2
+
+    def embed(self, text: str) -> list[float]:
+        about_cat = re.search(r"\b(feline|cat)\b", text.split("Query:")[-1].lower())
+        return [1.0, 0.0] if about_cat else [0.0, 1.0]
+
+    def embed_many(self, texts: list[str]) -> list[list[float]]:
+        return [self.embed(text) for text in texts]
+
+
+def test_a_match_by_meaning_supports_an_answer_that_shares_no_word(tmp_path) -> None:
+    engine, index = _dense_setup(
+        tmp_path, MeaningEmbedder(), ["Miso\nMy cat is called Miso.", "Bike\nThe red bike is in the shed."]
+    )
+    MemoryTools(engine).index_passages(TENANT)
+    result = _search(engine, "feline companion")
+    support = result.explain["confidence"]["query_support"]
+    assert result.hits[0].text.startswith("Miso")
+    assert support["score"] == 0.0 and support["semantic"]["supported"] is True
+    assert "did not cover enough query terms" not in (result.uncertainty_note or "")
+    # Below the floor the same match is only the best of a bad lot: search abstains.
+    index.support_floor = 1.01
+    again = _search(engine, "feline companion animal")
+    assert again.explain["confidence"]["query_support"]["semantic"]["supported"] is False
+    assert again.abstained
+
+
+def test_an_embeddings_only_index_that_cannot_embed_searches_as_if_unconfigured(tmp_path) -> None:
+    engine, index = _dense_setup(tmp_path)
+    MemoryTools(engine).index_passages(TENANT)
+
+    class Down(BagEmbedder):
+        def embed(self, text: str) -> list[float]:
+            raise OSError("connection refused")
+
+    index.embedder = Down()
+    result = _search(engine, "Ermengarde of Tours")
+    explain = result.explain["passage_graph"]
+    assert explain["fallback"] == "default" and "score_scale" not in explain
+    assert result.hits and result.explain["activation"].get("reason") != "passage_relevance_order"
+
+
+def test_a_passage_not_embedded_yet_stays_on_the_cosine_scale(tmp_path) -> None:
+    engine, _index = _dense_setup(tmp_path)
+    MemoryTools(engine).index_passages(TENANT)
+    engine.append_evidence(_passage("Late note\nThe archive of Lotharingia reopened in spring."))
+    result = _search(engine, "archive of Lotharingia")
+    explain = result.explain["passage_graph"]
+    assert explain["score_scale"] == "cosine" and explain["unindexed_passages"] == 1
+    late = next(hit for hit in result.hits if hit.text.startswith("Late note"))
+    assert late.score == pytest.approx(explain["top_score"], abs=1e-3)
+
+
+def test_a_new_memory_joins_an_embeddings_only_index_in_the_background(tmp_path) -> None:
+    engine, index = _dense_setup(tmp_path)
+    tools = MemoryTools(engine)
+    index.live_index, index.live_debounce_seconds = True, 0.01
+    made = tools.capture(TENANT, "u", "user", "document", "Rotrude\nRotrude was a daughter of Ermengarde of Tours.")
+    assert made["created"] is True and index.wait_idle(10)
+    assert index.store.vectors(TENANT, "passage", "bag|64", [made["cid"]])
+    assert index.health()["last_report"]["embedded"]["passage"] == len(PASSAGES) + 1
+
+
+def test_passage_graph_from_env_builds_an_embeddings_only_index(tmp_path) -> None:
+    from mnemosyne.passages import passage_graph_from_env
+
+    index = passage_graph_from_env({
+        "MNEMOSYNE_PASSAGE_INDEX": str(tmp_path / "e.sqlite"),
+        "MNEMOSYNE_PASSAGE_EMBEDDING_URL": "https://openrouter.ai/api/v1/embeddings",
+        "MNEMOSYNE_PASSAGE_EMBEDDING_MODEL": "qwen/qwen3-embedding-8b",
+        "MNEMOSYNE_PASSAGE_EMBEDDING_API_KEY_ENV": "TEST_EMBEDDING_KEY",
+        "TEST_EMBEDDING_KEY": "secret",
+        "MNEMOSYNE_PASSAGE_EMBEDDING_BODY": '{"provider": {"order": ["A"]}, "model": "other"}',
+        "MNEMOSYNE_PASSAGE_QUERY_TASK": "Find the line that answers",
+        "MNEMOSYNE_PASSAGE_QUERY_TIMEOUT": "1.5",
+    })
+    assert index is not None and index.embeddings_only and index.chat is None
+    assert index.embedder.api_key == "secret" and index.passage_task == "Find the line that answers"
+    assert index.query_timeout_seconds == 1.5
+    # Routing hints ride along; they can never replace the model or the text.
+    assert index.embedder._payload("t") == {
+        "input": "t", "model": "qwen/qwen3-embedding-8b", "provider": {"order": ["A"]},
+    }
+    index.store.close()

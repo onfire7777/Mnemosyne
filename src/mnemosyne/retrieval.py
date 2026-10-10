@@ -1361,6 +1361,20 @@ class HttpEmbeddingProvider:
     cache_path: str | None = None
     cache_ttl_seconds: float = 86400.0
     cache_scope: str = "default"
+    #: A JSON object merged into every request body: routing hints a gateway understands
+    #: (OpenRouter's ``{"provider": {"order": [...]}}``), never part of the text embedded.
+    extra_body_json: str | None = None
+
+    def _payload(self, texts: object) -> dict[str, object]:
+        payload: dict[str, object] = {"input": texts}
+        if self.model:
+            payload["model"] = self.model
+        if self.extra_body_json:
+            extra = json.loads(self.extra_body_json)
+            if not isinstance(extra, dict):
+                raise ValueError("embedding extra body must be a JSON object")
+            payload.update({key: value for key, value in extra.items() if key not in payload})
+        return payload
 
     def embed(self, text: str) -> list[float]:
         cache_key = _http_embedding_cache_key(self, text)
@@ -1384,10 +1398,7 @@ class HttpEmbeddingProvider:
         admission rule SqliteEngine's A1 embedding cache hardcodes. Engines
         route private-partition content here.
         """
-        payload: dict[str, object] = {"input": text}
-        if self.model:
-            payload["model"] = self.model
-        response = _post_json(self.url, payload, self.api_key, self.timeout_seconds)
+        response = _post_json(self.url, self._payload(text), self.api_key, self.timeout_seconds)
         return _normalize_vector(_extract_embedding(response), self.dims)
 
     def purge_cache(self) -> None:
@@ -1446,9 +1457,7 @@ class HttpEmbeddingProvider:
             index, text, _cache_key = missing[0]
             results[index] = self.embed(text)
             return [vector for vector in results if vector is not None]
-        payload: dict[str, object] = {"input": [text for _index, text, _cache_key in missing]}
-        if self.model:
-            payload["model"] = self.model
+        payload = self._payload([text for _index, text, _cache_key in missing])
         try:
             response = _post_json(self.url, payload, self.api_key, self.timeout_seconds)
         except _ProviderHttpError as exc:

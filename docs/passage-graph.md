@@ -57,6 +57,50 @@ Ollama: `ollama pull qwen3:4b-instruct` and `ollama pull qwen3-embedding:8b`. Se
 `OLLAMA_NUM_PARALLEL=8` so OpenIE requests run eight at a time (models of the `qwen35`
 architecture do not support parallel requests; `qwen3` does).
 
+## Embeddings-only index (no OpenIE, a hosted embedding model)
+
+Leave the chat model out and give only the embedding endpoint: the index then extracts nothing
+and ranks passages by the cosine between the question and each passage. This is the retrieval
+behind the 92.4% LongMemEval-S run (qwen3-embedding-8b, 1,024 dimensions, top-10 by cosine),
+and what BurnOS runs since v0.17.0, through its own OpenRouter key:
+
+```
+MNEMOSYNE_PASSAGE_INDEX=C:\Users\me\AppData\Local\BurnOS\embedding-index.sqlite
+MNEMOSYNE_PASSAGE_EMBEDDING_URL=https://openrouter.ai/api/v1/embeddings
+MNEMOSYNE_PASSAGE_EMBEDDING_MODEL=qwen/qwen3-embedding-8b
+MNEMOSYNE_PASSAGE_EMBEDDING_API_KEY_ENV=OPENROUTER_API_KEY     # the NAME of the variable holding the key
+MNEMOSYNE_PASSAGE_EMBEDDING_BODY={"provider":{"order":["DeepInfra","Nebius"]}}
+MNEMOSYNE_PASSAGE_QUERY_TASK=Given a question a user asks about their past conversations with an assistant, retrieve the conversation that contains the answer
+MNEMOSYNE_PASSAGE_QUERY_TIMEOUT=1.5
+```
+
+What differs from the graph:
+
+- **Scores are cosines**, one scale for every question (`explain.passage_graph.score_scale`),
+  and the cosine order is final: the other channels only add what they alone found. A caller
+  that filters by score can tell a strong match from the best of a bad lot.
+- **A match by meaning is support.** When the best cosine reaches `support_floor` (0.55), search
+  does not abstain for want of shared words (`explain.confidence.query_support.semantic`).
+- **A model that does not answer** makes search run as if no index were configured
+  (`fallback: "default"`), so scores stay on the scale callers already know.
+- **A question waits `QUERY_TIMEOUT` seconds for its embedding**, then search goes on as if no
+  index were configured. Measured on OpenRouter, 10 Oct 2026: one call takes about 0.4 s
+  (DeepInfra) or 0.65 s (Nebius), but both providers of qwen3-embedding-8b paused together for
+  about 20 seconds roughly once a minute, and about a third of calls fell in a pause; another
+  embedding model on the same gateway never paused. Asking a second provider at the same moment
+  did not help, so there is no retry.
+- `EMBEDDING_BODY` is a JSON object merged into every request body: routing hints only, it
+  cannot replace the model or the text. Vectors of the two providers agree to cosine
+  0.995-0.998, so either may answer.
+- Every passage text and every question is sent to the embedding endpoint. Passages above the
+  disclosure ceiling still never are.
+
+BurnOS's own 45 development questions (742 lines), recall@5: default search 0.319, the local
+passage graph 0.782, this index 0.848. Embedding the 742 lines took 10 seconds. The 0.55 floor
+was chosen on those questions plus 16 that the store cannot answer: 39 of the 41 questions
+that name no time stay supported, by shared words or by meaning, and 2 of the 16 are supported
+by meaning alone.
+
 ## Index, then query
 
 ```
