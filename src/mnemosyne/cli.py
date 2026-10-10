@@ -1591,19 +1591,33 @@ def cmd_idp_authz_policy_rollout_check(args: argparse.Namespace) -> None:
     emit({"ok": True, "rollout": rollout})
 
 
-def cmd_capture(args: argparse.Namespace) -> None:
+def _capture_metadata(args: argparse.Namespace) -> dict[str, Any] | None:
+    """Evidence metadata for ``capture``: ``--metadata`` plus the episode fields.
+
+    The episode fields come from ``--session-id``/``--turn-index`` and win over a
+    same-named key in ``--metadata``, so a turn cannot be labelled with one
+    session and filed under another.
+    """
+
     from mnemosyne.answering import episode_metadata
 
-    tools = load_tools(args)
-    metadata = None
+    metadata = _json_object_arg(getattr(args, "metadata", None), "--metadata")
     if args.session_id is not None or args.turn_index is not None:
         if args.session_id is None or args.turn_index is None or args.source_identity is None:
             raise ValueError("episode capture requires --session-id, --source-identity, and --turn-index")
-        metadata = episode_metadata(
-            session_id=args.session_id,
-            source_identity=args.source_identity,
-            turn_index=args.turn_index,
-        )
+        metadata = {
+            **(metadata or {}),
+            **episode_metadata(
+                session_id=args.session_id,
+                source_identity=args.source_identity,
+                turn_index=args.turn_index,
+            ),
+        }
+    return metadata
+
+
+def cmd_capture(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
     emit(
         tools.capture(
             tenant_id=args.tenant,
@@ -1612,7 +1626,7 @@ def cmd_capture(args: argparse.Namespace) -> None:
             source_type=args.source_type,
             source_identity=args.source_identity,
             session_id=args.session_id,
-            metadata=metadata,
+            metadata=_capture_metadata(args),
             content=args.content,
             branch=args.branch,
             trust_tier=args.trust_tier,
@@ -1646,6 +1660,7 @@ def cmd_working_seed(args: argparse.Namespace) -> None:
 def cmd_working_query(args: argparse.Namespace) -> None:
     emit(load_tools(args).working_query(
         **_working_scope(args), as_of=args.as_of,
+        limit=args.limit, kinds=args.kind or None,
         session_identity=args.session_identity,
     ))
 
@@ -2410,6 +2425,7 @@ def cmd_preference(args: argparse.Namespace) -> None:
             explicit=args.explicit,
             confidence=args.confidence,
             source_evidence_cids=args.evidence_cid,
+            access_policy=_json_object_arg(args.access_policy, "--access-policy"),
             role=args.role,
             source_trust_tier=args.source_trust_tier,
         )
@@ -2425,6 +2441,12 @@ def cmd_search(args: argparse.Namespace) -> None:
             branch=args.branch,
             min_trust_tier=args.min_trust_tier,
             max_trust_tier=args.max_trust_tier,
+            session_id=args.session_id,
+            token_budget=args.token_budget,
+            lean=args.lean,
+            query_mode=args.query_mode,
+            evaluated_at=args.evaluated_at,
+            session_identity=getattr(args, "session_identity", None),
             **_read_context_kwargs(args),
         )
     )
@@ -2432,7 +2454,18 @@ def cmd_search(args: argparse.Namespace) -> None:
 
 def cmd_deep_search(args: argparse.Namespace) -> None:
     tools = load_tools(args)
-    emit(tools.deep_search(tenant_id=args.tenant, query=args.query, branch=args.branch, **_read_context_kwargs(args)))
+    emit(
+        tools.deep_search(
+            tenant_id=args.tenant,
+            query=args.query,
+            branch=args.branch,
+            session_id=args.session_id,
+            token_budget=args.token_budget,
+            lean=args.lean,
+            session_identity=getattr(args, "session_identity", None),
+            **_read_context_kwargs(args),
+        )
+    )
 
 
 def cmd_explain(args: argparse.Namespace) -> None:
@@ -2524,6 +2557,7 @@ def cmd_forget(args: argparse.Namespace) -> None:
             role=args.role,
             source_trust_tier=args.source_trust_tier,
             erasure_mode=args.erasure_mode,
+            all_branches=args.all_branches,
         )
     )
 
@@ -2563,6 +2597,28 @@ def parse_json_arg(value: str, default: Any) -> Any:
     if not value:
         return default
     return json.loads(value)
+
+
+def _json_object_arg(value: str | None, flag: str) -> dict[str, Any] | None:
+    """Parse an optional JSON-object flag; an omitted flag stays ``None``."""
+
+    if value is None:
+        return None
+    parsed = json.loads(value)
+    if not isinstance(parsed, dict):
+        raise ValueError(f"{flag} must be a JSON object")
+    return parsed
+
+
+def _json_array_arg(value: str | None, flag: str) -> list[Any] | None:
+    """Parse an optional JSON-array flag; an omitted flag stays ``None``."""
+
+    if value is None:
+        return None
+    parsed = json.loads(value)
+    if not isinstance(parsed, list):
+        raise ValueError(f"{flag} must be a JSON array")
+    return parsed
 
 
 def _load_calibration_dataset(args: argparse.Namespace) -> list[dict[str, Any]]:
@@ -8703,8 +8759,23 @@ def cmd_profile_correct(args: argparse.Namespace) -> None:
             args.user,
             args.id,
             args.statement,
-            context=parse_json_arg(args.context, {}),
+            context=_json_object_arg(args.context, "--context"),
             confidence=args.confidence,
+            role=args.role,
+            source_trust_tier=args.source_trust_tier,
+        )
+    )
+
+
+def cmd_profile_retire(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(
+        tools.profile_retire(
+            tenant_id=args.tenant,
+            user_id=args.user,
+            id=args.id,
+            role=args.role,
+            source_trust_tier=args.source_trust_tier,
         )
     )
 
@@ -8761,13 +8832,39 @@ def cmd_graph_as_of(args: argparse.Namespace) -> None:
 
 def cmd_prefetch(args: argparse.Namespace) -> None:
     tools = load_tools(args)
-    emit(tools.prefetch(args.tenant, candidates=parse_json_arg(args.candidates, []), branch=args.branch))
+    emit(
+        tools.prefetch(
+            args.tenant,
+            candidates=parse_json_arg(args.candidates, []),
+            branch=args.branch,
+            role=args.role,
+            user_id=args.user,
+            capability_tags=args.capability_tag or None,
+            purpose=args.purpose,
+        )
+    )
 
 
 def cmd_trajectory_log(args: argparse.Namespace) -> None:
     tools = load_tools(args)
     emit(
         tools.trajectory_log(
+            tenant_id=args.tenant,
+            user_id=args.user,
+            session_id=args.session,
+            task=args.task,
+            steps=parse_json_arg(args.steps, []),
+            outcome=args.outcome,
+            reward=args.reward,
+            memory_version=args.memory_version,
+        )
+    )
+
+
+def cmd_trajectory_record(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(
+        tools.trajectory_record(
             tenant_id=args.tenant,
             user_id=args.user,
             session_id=args.session,
@@ -8793,6 +8890,16 @@ def cmd_lesson_induce(args: argparse.Namespace) -> None:
 def cmd_procedure_induce(args: argparse.Namespace) -> None:
     tools = load_tools(args)
     emit(tools.procedure_induce(args.lesson_id))
+
+
+def cmd_lesson_propose(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.lesson_propose(args.trajectory_id))
+
+
+def cmd_procedure_propose(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.procedure_propose(args.lesson_id))
 
 
 def cmd_lesson_promote(args: argparse.Namespace) -> None:
@@ -8870,6 +8977,7 @@ def cmd_intention_schedule(args: argparse.Namespace) -> None:
             evidence_ids=args.evidence_cid,
             priority=args.priority,
             dependencies=args.dependency,
+            reschedule_history=_json_array_arg(args.reschedule_history, "--reschedule-history"),
             idempotency_key=args.idempotency_key,
             recurrence_policy=(
                 parse_json_arg(args.recurrence_policy, None)
@@ -18830,6 +18938,20 @@ def cmd_eval_public(args: argparse.Namespace) -> None:
     print(json.dumps(result, sort_keys=True))
 
 
+#: CLI commands whose name differs from the MCP tool they run, mapped to that
+#: tool's own hyphenated name, which is accepted as an alias. With these, every
+#: tool in ``mcp_tools.TOOL_SPEC`` is reachable as ``mneme <tool-name>``.
+MCP_TOOL_COMMAND_ALIASES: dict[str, str] = {
+    "assert": "assert-fact",
+    "intention-schedule": "schedule-intention",
+    "intention-cancel": "cancel-intention",
+    "intention-update": "update-intention",
+    "intention-evaluate": "evaluate-intentions",
+    "intention-list": "list-intentions",
+}
+_CANONICAL_COMMAND: dict[str, str] = {alias: command for command, alias in MCP_TOOL_COMMAND_ALIASES.items()}
+
+
 def build_parser() -> argparse.ArgumentParser:
     from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES
 
@@ -19476,6 +19598,7 @@ def build_parser() -> argparse.ArgumentParser:
     capture.add_argument("--content", required=True)
     capture.add_argument("--branch", default="main")
     capture.add_argument("--trust-tier", type=int, default=0)
+    capture.add_argument("--metadata", help="JSON object stored as the evidence metadata")
     capture.set_defaults(func=cmd_capture)
 
     def add_working_scope(command: argparse.ArgumentParser) -> None:
@@ -19501,6 +19624,8 @@ def build_parser() -> argparse.ArgumentParser:
     working_query = sub.add_parser("working-query")
     add_working_scope(working_query)
     working_query.add_argument("--as-of", required=True)
+    working_query.add_argument("--limit", type=int, help="Return at most this many items")
+    working_query.add_argument("--kind", action="append", default=[], help="Only items of this kind; repeat for several")
     working_query.set_defaults(func=cmd_working_query)
 
     working_promote = sub.add_parser("working-promote")
@@ -19606,7 +19731,7 @@ def build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("--run-consolidation-once", action="store_true")
     ingest.set_defaults(func=cmd_ingest)
 
-    assertion = sub.add_parser("assert")
+    assertion = sub.add_parser("assert", aliases=[MCP_TOOL_COMMAND_ALIASES["assert"]])
     assertion.add_argument("--tenant", required=True)
     assertion.add_argument("--user")
     assertion.add_argument("--subject", required=True)
@@ -19654,6 +19779,7 @@ def build_parser() -> argparse.ArgumentParser:
     preference.add_argument("--evidence-cid", action="append", default=[])
     preference.add_argument("--role", default="agent", choices=["reader", "agent", "consolidator", "operator"])
     preference.add_argument("--source-trust-tier", type=int)
+    preference.add_argument("--access-policy", help="JSON object stored as the preference's access policy")
     preference.set_defaults(func=cmd_preference)
 
     search = sub.add_parser("search")
@@ -19662,6 +19788,11 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--branch", default="main")
     search.add_argument("--min-trust-tier", type=int)
     search.add_argument("--max-trust-tier", type=int)
+    search.add_argument("--session-id", help="Also read this session's working memory; needs --session-token for it")
+    search.add_argument("--token-budget", type=int, help="Cap the returned context at this many tokens")
+    search.add_argument("--lean", action="store_true", help="Return the compact payload without diagnostics")
+    search.add_argument("--query-mode", help="Retrieval mode, for example passages")
+    search.add_argument("--evaluated-at", help="ISO 8601 instant the question is asked at")
     _add_read_context_args(search)
     search.set_defaults(func=cmd_search)
 
@@ -19669,6 +19800,9 @@ def build_parser() -> argparse.ArgumentParser:
     deep.add_argument("--tenant", required=True)
     deep.add_argument("--query", required=True)
     deep.add_argument("--branch", default="main")
+    deep.add_argument("--session-id", help="Also read this session's working memory; needs --session-token for it")
+    deep.add_argument("--token-budget", type=int, help="Cap the returned context at this many tokens")
+    deep.add_argument("--lean", action="store_true", help="Return the compact payload without diagnostics")
     _add_read_context_args(deep)
     deep.set_defaults(func=cmd_deep_search)
 
@@ -19742,6 +19876,12 @@ def build_parser() -> argparse.ArgumentParser:
     forget.add_argument("--role", default="operator", choices=["reader", "agent", "consolidator", "operator"])
     forget.add_argument("--source-trust-tier", type=int, default=0)
     forget.add_argument("--erasure-mode", default="tombstone_recompute", choices=["tombstone_recompute", "hard_delete_legal"])
+    forget.add_argument(
+        "--all-branches",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Erase from every branch holding the cid (default); --no-all-branches erases on --branch only",
+    )
     forget.set_defaults(func=cmd_forget)
 
     export = sub.add_parser("export")
@@ -20134,9 +20274,19 @@ def build_parser() -> argparse.ArgumentParser:
     profile_correct.add_argument("--user", required=True)
     profile_correct.add_argument("--id", required=True)
     profile_correct.add_argument("--statement", required=True)
-    profile_correct.add_argument("--context", default="{}")
+    profile_correct.add_argument("--context", help="JSON object scope for the correction; omit to keep the corrected entry's scope")
     profile_correct.add_argument("--confidence", type=float, default=0.95)
+    profile_correct.add_argument("--role", default="agent", choices=["reader", "agent", "consolidator", "operator"])
+    profile_correct.add_argument("--source-trust-tier", type=int, default=0)
     profile_correct.set_defaults(func=cmd_profile_correct)
+
+    profile_retire = sub.add_parser("profile-retire")
+    profile_retire.add_argument("--tenant", required=True)
+    profile_retire.add_argument("--user", required=True)
+    profile_retire.add_argument("--id", required=True)
+    profile_retire.add_argument("--role", default="operator", choices=["reader", "agent", "consolidator", "operator"])
+    profile_retire.add_argument("--source-trust-tier", type=int, default=0)
+    profile_retire.set_defaults(func=cmd_profile_retire)
 
     profile_record_mistake = sub.add_parser("profile-record-mistake")
     profile_record_mistake.add_argument("--tenant", required=True)
@@ -20192,6 +20342,10 @@ def build_parser() -> argparse.ArgumentParser:
     prefetch.add_argument("--tenant", required=True)
     prefetch.add_argument("--candidates", required=True, help="JSON array of {query, probability, reason, metadata?}")
     prefetch.add_argument("--branch", default="main")
+    prefetch.add_argument("--role", default="agent", choices=["reader", "agent", "consolidator", "operator"])
+    prefetch.add_argument("--user")
+    prefetch.add_argument("--capability-tag", action="append", default=[])
+    prefetch.add_argument("--purpose")
     prefetch.set_defaults(func=cmd_prefetch)
 
     trajectory_log = sub.add_parser("trajectory-log")
@@ -20214,7 +20368,7 @@ def build_parser() -> argparse.ArgumentParser:
     trajectory_record.add_argument("--outcome", required=True, choices=["success", "failure"])
     trajectory_record.add_argument("--reward", type=float, required=True)
     trajectory_record.add_argument("--memory-version", required=True)
-    trajectory_record.set_defaults(func=cmd_trajectory_log)
+    trajectory_record.set_defaults(func=cmd_trajectory_record)
 
     trajectory_attribute = sub.add_parser("trajectory-attribute")
     trajectory_attribute.add_argument("--tenant")
@@ -20229,7 +20383,7 @@ def build_parser() -> argparse.ArgumentParser:
     lesson_propose = sub.add_parser("lesson-propose")
     lesson_propose.add_argument("--tenant")
     lesson_propose.add_argument("--trajectory-id", required=True)
-    lesson_propose.set_defaults(func=cmd_lesson_induce)
+    lesson_propose.set_defaults(func=cmd_lesson_propose)
 
     procedure_induce = sub.add_parser("procedure-induce")
     procedure_induce.add_argument("--tenant")
@@ -20239,7 +20393,7 @@ def build_parser() -> argparse.ArgumentParser:
     procedure_propose = sub.add_parser("procedure-propose")
     procedure_propose.add_argument("--tenant")
     procedure_propose.add_argument("--lesson-id", required=True)
-    procedure_propose.set_defaults(func=cmd_procedure_induce)
+    procedure_propose.set_defaults(func=cmd_procedure_propose)
 
     lesson_promote = sub.add_parser("lesson-promote")
     lesson_promote.add_argument("--tenant")
@@ -20282,7 +20436,7 @@ def build_parser() -> argparse.ArgumentParser:
     procedure_rollback.add_argument("--source-trust-tier", type=int)
     procedure_rollback.set_defaults(func=cmd_procedure_rollback)
 
-    intention_schedule = sub.add_parser("intention-schedule")
+    intention_schedule = sub.add_parser("intention-schedule", aliases=[MCP_TOOL_COMMAND_ALIASES["intention-schedule"]])
     intention_schedule.add_argument("--tenant", required=True)
     intention_schedule.add_argument("--user", required=True)
     intention_schedule.add_argument("--agent", required=True)
@@ -20294,10 +20448,11 @@ def build_parser() -> argparse.ArgumentParser:
     intention_schedule.add_argument("--priority", default="normal")
     intention_schedule.add_argument("--dependency", action="append", default=[])
     intention_schedule.add_argument("--recurrence-policy")
+    intention_schedule.add_argument("--reschedule-history", help="JSON array of earlier reschedule records")
     intention_schedule.add_argument("--idempotency-key")
     intention_schedule.set_defaults(func=cmd_intention_schedule)
 
-    intention_cancel = sub.add_parser("intention-cancel")
+    intention_cancel = sub.add_parser("intention-cancel", aliases=[MCP_TOOL_COMMAND_ALIASES["intention-cancel"]])
     intention_cancel.add_argument("--tenant", required=True)
     intention_cancel.add_argument("--intention-id", required=True)
     intention_cancel.add_argument("--expected-revision")
@@ -20305,7 +20460,7 @@ def build_parser() -> argparse.ArgumentParser:
     intention_cancel.add_argument("--cancelled-by")
     intention_cancel.set_defaults(func=cmd_intention_cancel)
 
-    intention_update = sub.add_parser("intention-update")
+    intention_update = sub.add_parser("intention-update", aliases=[MCP_TOOL_COMMAND_ALIASES["intention-update"]])
     intention_update.add_argument("--tenant", required=True)
     intention_update.add_argument("--intention-id", required=True)
     intention_update.add_argument("--user", required=True)
@@ -20317,14 +20472,14 @@ def build_parser() -> argparse.ArgumentParser:
     intention_update.add_argument("--idempotency-key")
     intention_update.set_defaults(func=cmd_intention_update)
 
-    intention_evaluate = sub.add_parser("intention-evaluate")
+    intention_evaluate = sub.add_parser("intention-evaluate", aliases=[MCP_TOOL_COMMAND_ALIASES["intention-evaluate"]])
     intention_evaluate.add_argument("--tenant", required=True)
     intention_evaluate.add_argument("--evaluated-at", required=True)
     intention_evaluate.add_argument("--trigger-context", required=True)
     intention_evaluate.add_argument("--operating-point", required=True)
     intention_evaluate.set_defaults(func=cmd_intention_evaluate)
 
-    intention_list = sub.add_parser("intention-list")
+    intention_list = sub.add_parser("intention-list", aliases=[MCP_TOOL_COMMAND_ALIASES["intention-list"]])
     intention_list.add_argument("--tenant", required=True)
     intention_list.add_argument("--include-revision", action="store_true")
     intention_list.set_defaults(func=cmd_intention_list)
@@ -21174,6 +21329,9 @@ def main(argv: list[str] | None = None) -> int:
     maybe_autotune()
     parser = build_parser()
     args = parser.parse_args(argv)
+    # An MCP-name alias runs as the command it names, so the session and
+    # authorization checks keyed on the command name apply to it unchanged.
+    args.command = _CANONICAL_COMMAND.get(args.command, args.command)
     if args.evaluation_read_only and (
         args.backend != "local"
         or args.command not in {"search", "explain", "answer", "eval-query-batch", "eval-answer-batch"}
