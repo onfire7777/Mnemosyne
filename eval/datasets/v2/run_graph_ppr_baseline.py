@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from eval.datasets.v2.run_grounded_qa_v2 import _jsonl, _retrieval_score, load_dataset
+from eval.datasets.v2.qa_v2_helpers import _jsonl, _retrieval_score, load_dataset
 from eval.harness.cli_driver import MnemoCLI
 from eval.harness.metrics import resolve_retrieved_doc_ids
 from mnemosyne.answering import AnswerLimits, _source_bound_anchors

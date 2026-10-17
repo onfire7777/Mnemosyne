@@ -18945,63 +18945,6 @@ def cmd_capability(args: argparse.Namespace) -> None:
         print(f"export {key}={shlex.quote(value)}")
 
 
-def cmd_eval_public(args: argparse.Namespace) -> None:
-    """Run, verify, or reproduce a custody-preserving public evaluation bundle."""
-    repo_root = Path(__file__).resolve().parents[2]
-    if str(repo_root) not in sys.path:
-        sys.path.insert(0, str(repo_root))
-    from eval.public.bundle import reproduce_bundle, verify_bundle, verify_report, write_report
-    from eval.public.runner import run_public_suite
-
-    supplied = {
-        "candidate_manifest": args.candidate_manifest,
-        "runtime_manifest": args.runtime_manifest,
-        "attempt_ledger": args.attempt_ledger,
-        "dataset_dir": args.dataset_dir,
-        "out_dir": args.out_dir,
-        "reproduced_bundle": args.reproduced_bundle,
-        "report_output": args.report_output,
-        "report_note": args.report_note,
-    }
-    if args.verify_report:
-        if any(supplied[key] is not None for key in ("candidate_manifest", "runtime_manifest", "attempt_ledger", "dataset_dir", "out_dir", "reproduced_bundle", "report_output")):
-            raise ValueError("--verify-report accepts only --report-note")
-        if args.report_note is None:
-            raise ValueError("--report-note is required with --verify-report")
-        result = verify_report(args.verify_report, args.report_note)
-    elif args.write_report:
-        if args.candidate_manifest is not None or args.runtime_manifest is not None or args.attempt_ledger is not None or args.dataset_dir is not None or args.out_dir is not None:
-            raise ValueError("--write-report does not accept --dataset-dir or --out-dir")
-        if args.reproduced_bundle is None or args.report_output is None or args.report_note is None:
-            raise ValueError("--reproduced-bundle, --report-output, and --report-note are required with --write-report")
-        result = write_report(args.write_report, args.reproduced_bundle, args.report_output, args.report_note)
-    elif args.verify_bundle:
-        if any(supplied[key] is not None for key in supplied):
-            raise ValueError("--verify-bundle does not accept output/report arguments")
-        result = verify_bundle(args.verify_bundle)
-    elif args.reproduce_bundle:
-        if any(supplied[key] is not None for key in ("candidate_manifest", "runtime_manifest", "attempt_ledger", "dataset_dir", "reproduced_bundle", "report_output", "report_note")):
-            raise ValueError("--reproduce-bundle accepts only --out-dir")
-        if args.out_dir is None:
-            raise ValueError("--out-dir is required with --reproduce-bundle")
-        result = reproduce_bundle(args.reproduce_bundle, args.out_dir)
-    else:
-        if any(supplied[key] is not None for key in ("reproduced_bundle", "report_output", "report_note")):
-            raise ValueError("--suite does not accept report arguments")
-        if args.out_dir is None:
-            raise ValueError("--out-dir is required with --suite")
-        result = run_public_suite(
-            args.suite,
-            args.out_dir,
-            dataset_dir=args.dataset_dir,
-            candidate_manifest_path=args.candidate_manifest,
-            runtime_manifest_path=args.runtime_manifest,
-            attempt_ledger_path=args.attempt_ledger,
-            ollama_url=args.ollama_url,
-        )
-    print(json.dumps(result, sort_keys=True))
-
-
 #: CLI commands whose name differs from the MCP tool they run, mapped to that
 #: tool's own hyphenated name, which is accepted as an alias. With these, every
 #: tool in ``mcp_tools.TOOL_SPEC`` is reachable as ``mneme <tool-name>``.
@@ -21429,24 +21372,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     residency_policy = sub.add_parser("residency-policy")
     residency_policy.set_defaults(func=cmd_residency_policy)
-
-    eval_public = sub.add_parser("eval-public")
-    action = eval_public.add_mutually_exclusive_group(required=True)
-    action.add_argument("--suite")
-    action.add_argument("--verify-bundle", type=Path)
-    action.add_argument("--reproduce-bundle", type=Path)
-    action.add_argument("--write-report", type=Path)
-    action.add_argument("--verify-report", type=Path)
-    eval_public.add_argument("--out-dir", type=Path)
-    eval_public.add_argument("--dataset-dir", type=Path)
-    eval_public.add_argument("--candidate-manifest", type=Path)
-    eval_public.add_argument("--runtime-manifest", type=Path)
-    eval_public.add_argument("--attempt-ledger", type=Path)
-    eval_public.add_argument("--ollama-url", default="http://127.0.0.1:11434")
-    eval_public.add_argument("--reproduced-bundle", type=Path)
-    eval_public.add_argument("--report-output", type=Path)
-    eval_public.add_argument("--report-note", type=Path)
-    eval_public.set_defaults(func=cmd_eval_public)
 
     consolidate_once = sub.add_parser("consolidate-once")
     consolidate_once.set_defaults(func=cmd_consolidate_once)

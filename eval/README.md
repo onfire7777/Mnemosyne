@@ -1,5 +1,11 @@
 # Mnemosyne §33 Evaluation / SLO Measurement Harness
 
+> The public benchmarks, the WMBS suite, the leaderboard and their retained evidence live in
+> [Mnemetric](https://github.com/onfire7777/Mnemetric), which tests Mnemosyne only through its CLI and MCP server. What stays
+> here is Mnemosyne's own engineering: this harness, the G0 gate (`eval/g0`), the white-box benches
+> (`eval/benches`, `eval/perf`, `eval/scale`, `eval/latency`, `eval/latency_warm`, `eval/replay_fidelity`),
+> the compact answering tooling and the evidence those read.
+
 This is the **proof harness** the blueprint calls the "single largest gap between
 'looks done' and 'blueprint-complete'" (§E). It drives **only the public CLI**
 (`python -m mnemosyne.cli ...`) — never internal modules — and turns every Goal /

@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 
 from eval.harness.metrics import recall_at_k, resolve_retrieved_doc_ids
-from eval.public.adapters.hipporag_multihop import normalize
+from eval.datasets.hipporag_loader import normalize
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Evidence
 from mnemosyne.policy import OperatingPolicy

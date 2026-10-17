@@ -15731,8 +15731,8 @@ def test_cli_graph_as_of_valid_time_development_timelines_are_observable(
 ) -> None:
     fixture = json.loads(
         (
-            Path(__file__).resolve().parents[1]
-            / "eval/public/fixtures/wmbs-m03-valid-time-development.json"
+            Path(__file__).resolve().parent
+            / "fixtures/wmbs-m03-valid-time-development.json"
         ).read_text(encoding="utf-8")
     )
     seed = fixture["seeds"][0]
