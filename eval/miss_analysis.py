@@ -82,7 +82,7 @@ def main() -> None:
         graph._query_vectors.update(json.loads(args.query_vectors.read_text(encoding="utf-8")))
     graph.prepare(queries, embedder)
     if args.query_vectors:
-        args.query_vectors.write_text(json.dumps(graph._query_vectors), encoding="utf-8")
+        args.query_vectors.write_text(json.dumps(graph._query_vectors), encoding="utf-8", newline="\n")
     types = question_types(args.dataset_dir)
 
     rows, started = [], time.perf_counter()
@@ -121,7 +121,7 @@ def main() -> None:
         "graph": summary("graph"), "final": summary("final"), "rows": rows,
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps(report, indent=1), encoding="utf-8")
+    args.out.write_text(json.dumps(report, indent=1), encoding="utf-8", newline="\n")
     print(json.dumps({k: v for k, v in report.items() if k != "rows"}, indent=1))
 
 

@@ -393,7 +393,7 @@ def test_cli_validates_one_record_and_arrays(
     payload: object, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     path = tmp_path / "records.json"
-    path.write_text(json.dumps(payload), encoding="utf-8")
+    path.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
 
     assert validate.main([str(path)]) == 0
     assert capsys.readouterr().err == ""
@@ -407,7 +407,7 @@ def test_cli_enforces_json_nesting_boundary(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     path = tmp_path / "records.json"
-    path.write_text("[" * (depth - 1) + "{}" + "]" * (depth - 1), encoding="utf-8")
+    path.write_text("[" * (depth - 1) + "{}" + "]" * (depth - 1), encoding="utf-8", newline="\n")
 
     assert validate.main([str(path)]) == expected
     capsys.readouterr()
@@ -473,7 +473,7 @@ def test_cli_rejects_scalar_array_members(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     path = tmp_path / "records.json"
-    path.write_text(json.dumps([_retrieval_record(), 1]), encoding="utf-8")
+    path.write_text(json.dumps([_retrieval_record(), 1]), encoding="utf-8", newline="\n")
 
     assert validate.main([str(path)]) == 1
     assert capsys.readouterr().err == "/1\n"
@@ -485,7 +485,7 @@ def test_cli_accepts_supersession_outside_input_array(
     path = tmp_path / "records.json"
     record = _retrieval_record()
     record["history"] = {"supersedes": "external-record"}
-    path.write_text(json.dumps([record]), encoding="utf-8")
+    path.write_text(json.dumps([record]), encoding="utf-8", newline="\n")
 
     assert validate.main([str(path)]) == 0
     assert capsys.readouterr().err == ""
@@ -496,7 +496,7 @@ def test_cli_rejects_duplicate_record_ids(
 ) -> None:
     path = tmp_path / "records.json"
     record = _retrieval_record()
-    path.write_text(json.dumps([record, record]), encoding="utf-8")
+    path.write_text(json.dumps([record, record]), encoding="utf-8", newline="\n")
 
     assert validate.main([str(path)]) == 1
     assert capsys.readouterr().err == "/1/record_id\n"
@@ -510,7 +510,7 @@ def test_cli_rejects_internal_supersession_cycles(
     second = _judged_qa_record()
     first["history"] = {"supersedes": second["record_id"]}
     second["history"] = {"supersedes": first["record_id"]}
-    path.write_text(json.dumps([first, second]), encoding="utf-8")
+    path.write_text(json.dumps([first, second]), encoding="utf-8", newline="\n")
 
     assert validate.main([str(path)]) == 1
     assert capsys.readouterr().err == "/0/history/supersedes\n/1/history/supersedes\n"
@@ -547,7 +547,7 @@ def test_cli_reports_contract_violations(
     path = tmp_path / "record.json"
     record = _retrieval_record()
     del record["bundle_digest"]
-    path.write_text(json.dumps(record), encoding="utf-8")
+    path.write_text(json.dumps(record), encoding="utf-8", newline="\n")
 
     assert validate.main([str(path)]) == 1
     assert capsys.readouterr().err == "/bundle_digest\n"
@@ -561,7 +561,7 @@ def test_cli_indexes_contract_violations_in_arrays(
     del first["bundle_digest"]
     second = _judged_qa_record()
     del second["trace_index_digest"]
-    path.write_text(json.dumps([first, second]), encoding="utf-8")
+    path.write_text(json.dumps([first, second]), encoding="utf-8", newline="\n")
 
     assert validate.main([str(path)]) == 1
     assert capsys.readouterr().err == "/0/bundle_digest\n/1/trace_index_digest\n"
@@ -576,7 +576,7 @@ def test_cli_reports_unreadable_or_invalid_json(
     assert capsys.readouterr().err == f"error: cannot read JSON: {missing}\n"
 
     invalid = tmp_path / "invalid.json"
-    invalid.write_text("{", encoding="utf-8")
+    invalid.write_text("{", encoding="utf-8", newline="\n")
     assert validate.main([str(invalid)]) == 2
     assert capsys.readouterr().err == f"error: invalid JSON: {invalid}\n"
 
@@ -589,7 +589,7 @@ def test_cli_rejects_excessively_nested_json(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     path = tmp_path / "nested.json"
-    path.write_text("[" * 10_000 + "]" * 10_000, encoding="utf-8")
+    path.write_text("[" * 10_000 + "]" * 10_000, encoding="utf-8", newline="\n")
 
     assert validate.main([str(path)]) == 2
     assert capsys.readouterr().err == f"error: invalid JSON: {path}\n"
@@ -603,7 +603,7 @@ def test_cli_rejects_non_finite_json_numbers(
     path.write_text(
         json.dumps(_retrieval_record()).replace("0.75", constant, 1),
         encoding="utf-8",
-    )
+     newline="\n")
 
     assert validate.main([str(path)]) == 2
     assert capsys.readouterr().err == f"error: invalid JSON: {path}\n"
@@ -1089,7 +1089,7 @@ def test_cli_rejects_duplicate_atomic_identity_keys(
     second = _v2_development_record()
     second["record_id"] = "synthetic-v2-dev-002"
     path = tmp_path / "records.json"
-    path.write_text(json.dumps([first, second]), encoding="utf-8")
+    path.write_text(json.dumps([first, second]), encoding="utf-8", newline="\n")
 
     assert validate.main([str(path)]) == 1
     assert "/1/identity" in capsys.readouterr().err
@@ -1287,7 +1287,7 @@ def test_cli_validates_v2_record(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     path = tmp_path / "v2.json"
-    path.write_text(json.dumps(_v2_development_record()), encoding="utf-8")
+    path.write_text(json.dumps(_v2_development_record()), encoding="utf-8", newline="\n")
 
     assert validate.main([str(path)]) == 0
     assert capsys.readouterr().err == ""

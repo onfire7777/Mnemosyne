@@ -97,7 +97,7 @@ def test_report_requires_matching_verified_reproduction_and_binds_note(
     assert payload["generated_at"].endswith("Z")
     assert payload["command"][0:2] == ["mneme", "eval-public"]
 
-    note.write_text(note.read_text().replace(result["sha256"], "0" * 64))
+    note.write_text(note.read_text().replace(result["sha256"], "0" * 64), newline="\n")
     with pytest.raises(BundleError, match="note binding"):
         verify_report(report, note)
 
@@ -119,7 +119,7 @@ def test_report_refuses_mismatched_reproduction(tmp_path: Path) -> None:
     manifest["files"]["traces.jsonl"] = hashlib.sha256(traces.read_bytes()).hexdigest()
     (reproduced / "bundle-manifest.json").write_text(
         json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n"
-    )
+    , newline="\n")
     with pytest.raises(BundleError):
         write_report(source, reproduced, tmp_path / "report.json", tmp_path / "note.md")
 
@@ -144,7 +144,7 @@ def test_capture_batch_matches_capture_and_rejects_schema_before_writes(
             }
         )
         + "\n"
-    )
+    , newline="\n")
     result = cli.capture_batch(rows)
     assert result["ok"] is True and result["count"] == 2
     assert len(result["results"]) == 2
@@ -155,7 +155,7 @@ def test_capture_batch_matches_capture_and_rejects_schema_before_writes(
             {"tenant": "t", "user": "u", "source_type": "benchmark", "content": "gamma"}
         )
         + "\n{}\n"
-    )
+    , newline="\n")
     before = cli.search("t", "gamma")
     with pytest.raises(CLIError, match="invalid schema"):
         cli.capture_batch(bad)
@@ -184,7 +184,7 @@ def test_capture_batch_rejects_symlinked_store_without_touching_target(
         )
         + "\n",
         encoding="utf-8",
-    )
+     newline="\n")
 
     with pytest.raises(CLIError, match="real file"):
         MnemoCLI(store=str(linked_store)).capture_batch(rows)
@@ -239,7 +239,7 @@ def test_capture_batch_consolidates_every_cid_only_when_opted_in(tmp_path: Path)
         )
         + "\n",
         encoding="utf-8",
-    )
+     newline="\n")
 
     default_store = tmp_path / "default.json"
     MnemoCLI(store=str(default_store)).capture_batch(rows)
@@ -326,7 +326,7 @@ def test_capture_batch_consolidation_preserves_user_boundaries(tmp_path: Path) -
         )
         + "\n",
         encoding="utf-8",
-    )
+     newline="\n")
     store = tmp_path / "mixed-users.json"
     cli = MnemoCLI(store=str(store))
     cli.install_consolidation_gate_case("Alice is the owner of Atlas.")
@@ -404,7 +404,7 @@ def test_capture_batch_consolidation_preserves_trust_boundaries(tmp_path: Path) 
         )
         + "\n",
         encoding="utf-8",
-    )
+     newline="\n")
     store = tmp_path / "mixed-trust.json"
     cli = MnemoCLI(store=str(store))
     cli.install_consolidation_gate_case("Mara is the owner of Helios.")
@@ -466,7 +466,7 @@ def test_capture_batch_consolidation_requires_a_regression_gate(tmp_path: Path) 
         )
         + "\n",
         encoding="utf-8",
-    )
+     newline="\n")
 
     with pytest.raises(CLIError, match="regression gate case"):
         MnemoCLI(store=str(tmp_path / "store.json")).capture_batch(
@@ -496,7 +496,7 @@ def test_capture_batch_consolidation_failure_preserves_original_store(
         )
         + "\n",
         encoding="utf-8",
-    )
+     newline="\n")
 
     class FailingExtractor:
         def extract(self, *_args: object, **_kwargs: object) -> dict[str, object]:
@@ -538,7 +538,7 @@ def test_capture_batch_rejects_symlink(tmp_path: Path) -> None:
     target.write_text(
         json.dumps({"tenant": "t", "user": "u", "source_type": "x", "content": "x"})
         + "\n"
-    )
+    , newline="\n")
     linked = tmp_path / "linked.jsonl"
     linked.symlink_to(target)
     with pytest.raises(CLIError, match="real file"):
@@ -564,7 +564,7 @@ def test_capture_batch_preserves_only_safe_episode_adjacency_metadata(
             }
         )
         + "\n"
-    )
+    , newline="\n")
     cli.capture_batch(rows)
     evidence = json.loads(store.read_text())["evidence"][0]
     assert evidence["session_id"] == "session-a"
@@ -593,7 +593,7 @@ def test_capture_batch_preserves_only_safe_episode_adjacency_metadata(
                 }
             )
             + "\n"
-        )
+        , newline="\n")
         before = store.read_bytes()
         with pytest.raises(CLIError):
             cli.capture_batch(bad)
@@ -642,7 +642,7 @@ def test_evaluation_read_only_allows_concurrent_queries_without_store_writes(
             }
         )
         + "\n"
-    )
+    , newline="\n")
     cli.capture_batch(rows)
     state_files = [store, *tmp_path.glob("store.json.runtime.json")]
     before_names = {path.name for path in tmp_path.iterdir()}
@@ -695,27 +695,27 @@ def test_evaluation_query_batch_matches_public_search_explain_and_is_read_only(
             }
         )
         + "\n"
-    )
+    , newline="\n")
     cli.capture_batch(rows)
     queries = tmp_path / "queries.jsonl"
     query_rows = [
         {"question_id": "q1", "tenant": "t", "query": "alpha"},
         {"question_id": "q2", "tenant": "t", "query": "graph"},
     ]
-    queries.write_text("".join(json.dumps(row) + "\n" for row in query_rows))
+    queries.write_text("".join(json.dumps(row) + "\n" for row in query_rows), newline="\n")
     reversed_queries = tmp_path / "reversed.jsonl"
     reversed_queries.write_text(
         "".join(json.dumps(row) + "\n" for row in reversed(query_rows))
-    )
+    , newline="\n")
     singles = []
     for index, row in enumerate(query_rows):
         path = tmp_path / f"single-{index}.jsonl"
-        path.write_text(json.dumps(row) + "\n")
+        path.write_text(json.dumps(row) + "\n", newline="\n")
         singles.append(path)
     duplicate = tmp_path / "duplicate.jsonl"
     duplicate.write_text(
         '{"question_id":"q","question_id":"other","tenant":"t","query":"x"}\n'
-    )
+    , newline="\n")
     before = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
     read_only = replace(cli, global_flags=["--evaluation-read-only"])
     result = read_only.eval_query_batch(queries)
@@ -776,7 +776,7 @@ else:
                 {"claims": [], "unresolved": True, "metadata": metadata})
 json.dump(response, sys.stdout)
 """
-    )
+    , newline="\n")
     provider.chmod(0o700)
     env = {
         **_QUERY_CUSTODY_ENV,
@@ -817,7 +817,7 @@ json.dump(response, sys.stdout)
             json.dumps({"question_id": question_id, "question": "Ada", "context": context}) + "\n"
             for question_id in ("q2", "q1")
         )
-    )
+    , newline="\n")
     before[rows.name] = rows.read_bytes()
     batch = read_only.eval_answer_batch(rows)
     assert [row["question_id"] for row in batch["results"]] == ["q2", "q1"]
@@ -859,7 +859,7 @@ def test_capture_batch_paraphrase_uses_initial_decomposition_and_reaches_reader(
                 ("d2", "Helios ships in Q3 2026."),
             )
         ) + "\n"
-    )
+    , newline="\n")
     cli.capture_batch(captures)
     provider = tmp_path / "decomposing-provider.py"
     provider.write_text(
@@ -882,7 +882,7 @@ else:
                 "unresolved": False, "metadata": metadata}
 json.dump(response, sys.stdout)
 """
-    )
+    , newline="\n")
     env = {
         **_QUERY_CUSTODY_ENV,
         "MNEMOSYNE_QUERY_DECOMPOSER_PROVIDER": "command",
@@ -896,7 +896,7 @@ json.dump(response, sys.stdout)
     rows.write_text(json.dumps({
         "question_id": "q1", "question": "When does Mara's project ship?",
         "context": {"tenant_id": "dev", "user_id": "dev-user", "role": "reader"},
-    }) + "\n")
+    }) + "\n", newline="\n")
     result = replace(
         cli, global_flags=["--evaluation-read-only"], env=env
     ).eval_answer_batch(rows)["results"][0]
@@ -920,7 +920,7 @@ def test_answer_batch_prevalidates_and_provider_failures_leave_no_state(
     provider = tmp_path / "slow-provider.py"
     provider.write_text(
         f"import pathlib,time\npathlib.Path({str(marker)!r}).write_text('called')\ntime.sleep(1)\n"
-    )
+    , newline="\n")
     env = {
         **_QUERY_CUSTODY_ENV,
         "MNEMOSYNE_QUERY_DECOMPOSER_PROVIDER": "command",
@@ -937,7 +937,7 @@ def test_answer_batch_prevalidates_and_provider_failures_leave_no_state(
     bad.write_text(
         json.dumps({"question_id": "q1", "question": "Ada", "context": context})
         + "\n{}\n"
-    )
+    , newline="\n")
     before = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
     with pytest.raises(CLIError, match="invalid schema"):
         read_only.eval_answer_batch(bad)
@@ -960,7 +960,7 @@ def test_capture_batch_rolls_back_a_later_capture_failure(
     from mnemosyne import cli as cli_module
 
     store = tmp_path / "store.json"
-    store.write_text('{"original":true}\n')
+    store.write_text('{"original":true}\n', newline="\n")
     rows = tmp_path / "rows.jsonl"
     rows.write_text(
         "".join(
@@ -970,7 +970,7 @@ def test_capture_batch_rolls_back_a_later_capture_failure(
             + "\n"
             for value in ("one", "two")
         )
-    )
+    , newline="\n")
 
     class FailingTools:
         def __init__(self, staged: Path) -> None:
@@ -983,7 +983,7 @@ def test_capture_batch_rolls_back_a_later_capture_failure(
 
         def capture(self, **kwargs: object) -> dict[str, object]:
             self.calls += 1
-            self.staged.write_text(json.dumps({"captured": self.calls}))
+            self.staged.write_text(json.dumps({"captured": self.calls}), newline="\n")
             if self.calls == 2:
                 raise RuntimeError("injected later failure")
             return {"ok": True}
@@ -1045,7 +1045,7 @@ def test_cli_qa_run_verify_reproduce_and_report_round_trip(tmp_path: Path, monke
         "abstention": protocol["abstention"], "transport_retries": 0,
     }
     candidate_path = tmp_path / "candidate.json"
-    candidate_path.write_text(json.dumps(candidate, sort_keys=True, separators=(",", ":")) + "\n")
+    candidate_path.write_text(json.dumps(candidate, sort_keys=True, separators=(",", ":")) + "\n", newline="\n")
     source, reproduced = tmp_path / "qa-source", tmp_path / "qa-reproduced"
     report, note = tmp_path / "qa-report.json", tmp_path / "qa-report.md"
     monkeypatch.setattr(public_runner, "require_clean_candidate_checkout", lambda _sha: None)
@@ -1063,7 +1063,7 @@ def test_eval_batch_explicit_retrieval_policy_does_not_mutate_store(tmp_path: Pa
     for suffix in ('first', 'second'):
         cli.capture('t', 'u', 'alpha evidence ' * 1200 + suffix, source_identity=suffix)
     batch = tmp_path / 'queries.jsonl'
-    batch.write_text(json.dumps({'question_id': 'q', 'tenant': 't', 'query': 'alpha evidence'}) + '\n')
+    batch.write_text(json.dumps({'question_id': 'q', 'tenant': 't', 'query': 'alpha evidence'}) + '\n', newline="\n")
     readonly = replace(cli, global_flags=['--evaluation-read-only'])
     before = {p.name: p.read_bytes() for p in tmp_path.iterdir() if p.is_file()}
     baseline = readonly.run('eval-query-batch', '--input-jsonl', str(batch)).json

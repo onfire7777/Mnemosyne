@@ -7,7 +7,6 @@ import ipaddress
 import inspect
 import json
 import os
-import shlex
 import socket
 import ssl
 import subprocess
@@ -50,6 +49,7 @@ from mnemosyne.retrieval import (
     semantic_entropy,
 )
 from mnemosyne.security import SessionIdentity, SessionTokenVerifier
+from mnemosyne.command_line import join_command
 
 
 TENANT = "tenant-runtime"
@@ -276,7 +276,7 @@ def start_mcp_http_server(**kwargs: object) -> tuple[ThreadingHTTPServer, thread
 
 def fake_session_secret_command(tmp_path: Path, response: dict[str, object], *, name: str = "fake-session-secret") -> str:
     response_file = tmp_path / f"{name}.json"
-    response_file.write_text(json.dumps(response, sort_keys=True), encoding="utf-8")
+    response_file.write_text(json.dumps(response, sort_keys=True), encoding="utf-8", newline="\n")
     script = tmp_path / f"{name}.py"
     script.write_text(
         "\n".join(
@@ -294,8 +294,8 @@ def fake_session_secret_command(tmp_path: Path, response: dict[str, object], *, 
             ]
         ),
         encoding="utf-8",
-    )
-    return " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(response_file)))
+     newline="\n")
+    return join_command((sys.executable, str(script), str(response_file)))
 
 
 def stop_mcp_http_server(server: ThreadingHTTPServer, thread: threading.Thread) -> None:
@@ -371,8 +371,8 @@ def fake_kms_command(tmp_path: Path) -> tuple[str, Path]:
             ]
         ),
         encoding="utf-8",
-    )
-    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(state)))
+     newline="\n")
+    command = join_command((sys.executable, str(script), str(state)))
     return command, state
 
 
@@ -401,8 +401,8 @@ def fake_parametric_command(tmp_path: Path) -> tuple[str, Path]:
             ]
         ),
         encoding="utf-8",
-    )
-    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(state)))
+     newline="\n")
+    command = join_command((sys.executable, str(script), str(state)))
     return command, state
 
 
@@ -635,7 +635,7 @@ def test_command_media_embedding_provider_validates_json_contract(tmp_path: Path
             ]
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     embedder.chmod(0o755)
 
     vector = CommandMediaEmbeddingProvider(str(embedder), dims=3).embed_media(
@@ -1418,7 +1418,7 @@ reviewed_by = "human"
 ```
 """,
         encoding="utf-8",
-    )
+     newline="\n")
     git("add", "memory.md")
     git("commit", "-m", "add direct source truth")
     head = git("rev-parse", "HEAD")
@@ -1573,7 +1573,7 @@ valid_from = "2026-06-20T00:00:00Z"
 ```
 """,
         encoding="utf-8",
-    )
+     newline="\n")
     git("add", "memory.md")
     git("commit", "-m", "add mcp source truth")
 
@@ -1696,15 +1696,16 @@ valid_from = "2026-06-20T00:00:00Z"
 
 def test_official_mcp_sdk_adapter_lists_tools_and_calls_capture_search(tmp_path: Path) -> None:
     pytest.importorskip("mcp")
-    from mcp import types
+    import mcp_types as types
+    from tests.sdk_helper import sdk_handler
 
     server = build_sdk_server(store_path=tmp_path / "sdk-store.json", auth_token="token")
 
     async def exercise() -> None:
-        list_handler = server.request_handlers[types.ListToolsRequest]
-        call_handler = server.request_handlers[types.CallToolRequest]
+        list_handler = sdk_handler(server, types.ListToolsRequest)
+        call_handler = sdk_handler(server, types.CallToolRequest)
         listed = await list_handler(types.ListToolsRequest())
-        tools_by_name = {tool.name: tool for tool in listed.root.tools}
+        tools_by_name = {tool.name: tool for tool in listed.tools}
 
         denied = await call_handler(
             types.CallToolRequest(
@@ -1766,22 +1767,22 @@ def test_official_mcp_sdk_adapter_lists_tools_and_calls_capture_search(tmp_path:
         )
 
         assert set(tools_by_name) == {item["name"] for item in TOOL_SPEC}
-        assert tools_by_name["capture"].inputSchema["additionalProperties"] is False
-        assert denied.root.isError is True
-        assert "unauthorized" in denied.root.content[0].text
-        assert invalid.root.isError is True
-        assert "Input validation error" in invalid.root.content[0].text
-        assert captured.root.isError is False
-        assert captured.root.structuredContent["cid"]
-        assert searched.root.isError is False
-        assert searched.root.structuredContent["hits"]
+        assert tools_by_name["capture"].input_schema["additionalProperties"] is False
+        assert denied.is_error is True
+        assert "unauthorized" in denied.content[0].text
+        assert invalid.is_error is True
+        assert "Input validation error" in invalid.content[0].text
+        assert captured.is_error is False
+        assert captured.structured_content["cid"]
+        assert searched.is_error is False
+        assert searched.structured_content["hits"]
 
     asyncio.run(exercise())
 
 
 def test_official_mcp_sdk_streamable_http_adapter_lists_tools_and_calls_capture_search(tmp_path: Path) -> None:
     pytest.importorskip("mcp")
-    httpx = pytest.importorskip("httpx")
+    httpx = pytest.importorskip("httpx2")
     from mcp.client.session import ClientSession
     from mcp.client.streamable_http import streamable_http_client
 
@@ -1824,11 +1825,11 @@ def test_official_mcp_sdk_streamable_http_adapter_lists_tools_and_calls_capture_
 
         assert len(tools.tools) == len(TOOL_SPEC)
         assert any(tool.name == "capture" for tool in tools.tools)
-        assert result.isError is False
-        assert captured.isError is False
-        assert captured.structuredContent["cid"]
-        assert searched.isError is False
-        assert searched.structuredContent["hits"][0]["provenance"] == [captured.structuredContent["cid"]]
+        assert result.is_error is False
+        assert captured.is_error is False
+        assert captured.structured_content["cid"]
+        assert searched.is_error is False
+        assert searched.structured_content["hits"][0]["provenance"] == [captured.structured_content["cid"]]
 
     asyncio.run(exercise())
 
@@ -2277,7 +2278,8 @@ def test_sdk_streamable_builder_preserves_facade_stateless_mode(
             self.lifespan = lifespan
             self.state = type("State", (), {})()
 
-    setattr(fastmcp_server, "StreamableHTTPASGIApp", FakeStreamableHTTPASGIApp)
+    # mcp 2.x keeps both classes in streamable_http_manager
+    setattr(streamable_manager, "StreamableHTTPASGIApp", FakeStreamableHTTPASGIApp)
     setattr(streamable_manager, "StreamableHTTPSessionManager", FakeStreamableHTTPSessionManager)
     setattr(starlette_applications, "Starlette", FakeStarlette)
     setattr(starlette_responses, "JSONResponse", FakeJSONResponse)
@@ -3260,7 +3262,7 @@ def test_mcp_http_session_exchange_refreshes_file_jwks_rotation_on_unknown_kid(t
     old_jwks, old_idp_token = make_oidc_token(oidc_payload(jti="old-idp-session"), kid="old-idp-key")
     new_jwks, new_idp_token = make_oidc_token(oidc_payload(jti="new-idp-session"), kid="new-idp-key")
     jwks_file = tmp_path / "idp-jwks.json"
-    jwks_file.write_text(json.dumps(old_jwks), encoding="utf-8")
+    jwks_file.write_text(json.dumps(old_jwks), encoding="utf-8", newline="\n")
     server, thread, base = start_mcp_http_server(
         store_path=tmp_path / "store.json",
         auth_token=auth_token,
@@ -3278,7 +3280,7 @@ def test_mcp_http_session_exchange_refreshes_file_jwks_rotation_on_unknown_kid(t
             {"idp_token": old_idp_token},
             headers={"Authorization": f"Bearer {auth_token}"},
         )
-        jwks_file.write_text(json.dumps(new_jwks), encoding="utf-8")
+        jwks_file.write_text(json.dumps(new_jwks), encoding="utf-8", newline="\n")
         new_status, new_exchange = http_json(
             "POST",
             f"{base}/session/exchange",
@@ -3330,7 +3332,7 @@ def test_mcp_http_session_exchange_maps_claims_through_authz_policy(tmp_path: Pa
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     server, thread, base = start_mcp_http_server(
         store_path=tmp_path / "store.json",
         auth_token=auth_token,
@@ -4465,7 +4467,8 @@ def test_mcp_server_session_overrides_self_asserted_authority(tmp_path: Path) ->
 
 def test_official_mcp_sdk_adapter_binds_signed_session_like_json_rpc(tmp_path: Path) -> None:
     pytest.importorskip("mcp")
-    from mcp import types
+    import mcp_types as types
+    from tests.sdk_helper import sdk_handler
 
     server = build_sdk_server(
         store_path=tmp_path / "sdk-session-store.json",
@@ -4475,7 +4478,7 @@ def test_official_mcp_sdk_adapter_binds_signed_session_like_json_rpc(tmp_path: P
     token = mcp_session_token(role="agent", source_trust_tier=3)
 
     async def exercise() -> None:
-        call_handler = server.request_handlers[types.CallToolRequest]
+        call_handler = sdk_handler(server, types.CallToolRequest)
         denied = await call_handler(
             types.CallToolRequest(
                 params={
@@ -4530,21 +4533,22 @@ def test_official_mcp_sdk_adapter_binds_signed_session_like_json_rpc(tmp_path: P
             )
         )
 
-        assert denied.root.isError is True
-        assert "session token required" in denied.root.content[0].text
-        assert mismatch.root.isError is True
-        assert "session tenant mismatch" in mismatch.root.content[0].text
-        assert captured.root.isError is False
-        assert captured.root.structuredContent["cid"]
-        assert searched.root.isError is False
-        assert searched.root.structuredContent["hits"][0]["provenance"] == [captured.root.structuredContent["cid"]]
+        assert denied.is_error is True
+        assert "session token required" in denied.content[0].text
+        assert mismatch.is_error is True
+        assert "session tenant mismatch" in mismatch.content[0].text
+        assert captured.is_error is False
+        assert captured.structured_content["cid"]
+        assert searched.is_error is False
+        assert searched.structured_content["hits"][0]["provenance"] == [captured.structured_content["cid"]]
 
     asyncio.run(exercise())
 
 
 def test_caller_context_without_leakage_across_json_rpc_and_sdk(tmp_path: Path) -> None:
     pytest.importorskip("mcp")
-    from mcp import types
+    import mcp_types as types
+    from tests.sdk_helper import sdk_handler
 
     query = "transport-caller-context-needle"
     protected = f"{query} raw-secret-payload"
@@ -4609,7 +4613,7 @@ def test_caller_context_without_leakage_across_json_rpc_and_sdk(tmp_path: Path) 
     )
 
     async def exercise() -> None:
-        call = sdk.request_handlers[types.CallToolRequest]
+        call = sdk_handler(sdk, types.CallToolRequest)
         capture_result = await call(
             types.CallToolRequest(
                 params={
@@ -4624,7 +4628,7 @@ def test_caller_context_without_leakage_across_json_rpc_and_sdk(tmp_path: Path) 
                 }
             )
         )
-        sdk_cid = capture_result.root.structuredContent["cid"]
+        sdk_cid = capture_result.structured_content["cid"]
         for name in ("search", "deep_search", "explain"):
             allowed = await call(
                 types.CallToolRequest(
@@ -4638,18 +4642,18 @@ def test_caller_context_without_leakage_across_json_rpc_and_sdk(tmp_path: Path) 
                     }
                 )
             )
-            assert any(hit["id"] == sdk_cid for hit in allowed.root.structuredContent["hits"])
+            assert any(hit["id"] == sdk_cid for hit in allowed.structured_content["hits"])
             denied = await call(
                 types.CallToolRequest(
                     params={"name": name, "arguments": {"session_token": reader_token, "query": query}}
                 )
             )
-            encoded = json.dumps(denied.root.structuredContent, sort_keys=True)
-            assert denied.root.isError is False
-            assert denied.root.structuredContent["hits"] == []
+            encoded = json.dumps(denied.structured_content, sort_keys=True)
+            assert denied.is_error is False
+            assert denied.structured_content["hits"] == []
             assert protected not in encoded
             assert sdk_cid not in encoded
-            assert denied.root.structuredContent["explain"]["gist_support"]["gist_hit_ids"] == []
+            assert denied.structured_content["explain"]["gist_support"]["gist_hit_ids"] == []
             assert "denial" not in encoded
             assert "hidden" not in encoded
 

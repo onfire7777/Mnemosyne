@@ -447,7 +447,7 @@ def _write_reproducibility_bundle(
     (root / "traces.jsonl").write_bytes(traces)
     (root / "config.json").write_bytes(config)
     (root / "build.json").write_bytes(build)
-    (root / "uv.lock").write_text("locked-wheelhouse\n", encoding="utf-8")
+    (root / "uv.lock").write_text("locked-wheelhouse\n", encoding="utf-8", newline="\n")
     written["uv.lock"] = (root / "uv.lock").read_bytes()
 
     inventory_files = {
@@ -861,7 +861,7 @@ def test_non_finite_duplicate_and_deep_json_fail_closed(tmp_path: Path) -> None:
     metrics["value"] = math.inf
     (bundle["root"] / "metrics.json").write_text(
         json.dumps(metrics, allow_nan=True) + "\n", encoding="utf-8"
-    )
+    , newline="\n")
     with pytest.raises(BundleError, match="non-finite|invalid JSON"):
         verify_bundle(bundle["root"])
 
@@ -869,7 +869,7 @@ def test_non_finite_duplicate_and_deep_json_fail_closed(tmp_path: Path) -> None:
     (duplicate["root"] / REPRO_MANIFEST_NAME).write_text(
         '{"schema_version":"%s","schema_version":"%s"}\n' % (REPRO_SCHEMA_ID, REPRO_SCHEMA_ID),
         encoding="utf-8",
-    )
+     newline="\n")
     with pytest.raises(BundleError, match="duplicate"):
         verify_bundle(duplicate["root"])
 
@@ -910,7 +910,7 @@ def test_missing_raw_traces_config_build_or_operator_fail_closed(tmp_path: Path)
 def test_unhashed_lock_named_file_is_scanned_and_rejected(tmp_path: Path) -> None:
     bundle = _write_reproducibility_bundle(tmp_path / "lock-secret")
     leaked = bundle["root"] / "credentials.jsonl.lock"
-    leaked.write_text("sk_test_" + ("B" * 20) + "\n", encoding="utf-8")
+    leaked.write_text("sk_test_" + ("B" * 20) + "\n", encoding="utf-8", newline="\n")
     with pytest.raises(BundleError, match="secret|inventory"):
         verify_bundle(bundle["root"])
 
@@ -923,7 +923,7 @@ def test_unhashed_lock_named_file_is_not_copied_on_reproduce(
         "eval.public.bundle._assert_reproduction_checkout", lambda _sha: None
     )
     extra = bundle["root"] / "sidecar.jsonl.lock"
-    extra.write_text("not-a-secret\n", encoding="utf-8")
+    extra.write_text("not-a-secret\n", encoding="utf-8", newline="\n")
     destination = tmp_path / "lock-dest"
     with pytest.raises(BundleError, match="inventory"):
         reproduce_bundle(bundle["root"], destination)
@@ -944,7 +944,7 @@ def test_schema_constraints_are_enforced_not_just_file_presence(tmp_path: Path) 
 
 def test_listed_sibling_lock_file_fails_inventory(tmp_path: Path) -> None:
     bundle = _write_reproducibility_bundle(tmp_path / "listed-lock")
-    (bundle["root"] / "traces.jsonl.lock").write_text("not-a-secret\n", encoding="utf-8")
+    (bundle["root"] / "traces.jsonl.lock").write_text("not-a-secret\n", encoding="utf-8", newline="\n")
     with pytest.raises(BundleError, match="inventory"):
         verify_bundle(bundle["root"])
 
@@ -979,7 +979,7 @@ def test_reproduce_cleanup_does_not_delete_foreign_destination(
         target_path = Path(target)
         if target_path == destination:
             destination.mkdir()
-            (destination / "marker.txt").write_text("keep\n", encoding="utf-8")
+            (destination / "marker.txt").write_text("keep\n", encoding="utf-8", newline="\n")
             raise OSError("simulated rename collision")
         return original_rename(self, target)
 
@@ -1201,7 +1201,7 @@ def test_reproduce_deletes_incomplete_output_and_does_not_use_shell(
 
     colliding = tmp_path / "collision"
     colliding.mkdir()
-    (colliding / "stale.txt").write_text("stale\n", encoding="utf-8")
+    (colliding / "stale.txt").write_text("stale\n", encoding="utf-8", newline="\n")
     with pytest.raises(FileExistsError):
         reproduce_bundle(bundle["root"], colliding)
 
@@ -1212,7 +1212,7 @@ def test_reproduce_deletes_incomplete_output_and_does_not_use_shell(
 
 def test_mutated_command_or_lock_fails_before_destination(tmp_path: Path) -> None:
     bundle = _write_reproducibility_bundle(tmp_path / "lock")
-    (bundle["root"] / "uv.lock").write_text("tampered-lock\n", encoding="utf-8")
+    (bundle["root"] / "uv.lock").write_text("tampered-lock\n", encoding="utf-8", newline="\n")
     destination = tmp_path / "should-not-exist"
     with pytest.raises(BundleError):
         reproduce_bundle(bundle["root"], destination)
@@ -1289,6 +1289,7 @@ def test_clean_checkout_runs_exact_documented_argv(tmp_path: Path) -> None:
         "LANG": "C",
         "LC_ALL": "C",
         "PATH": os.environ["PATH"],
+        "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),  # Windows DNS and sockets need it
         "TZ": "UTC",
         "UV_CACHE_DIR": str(tmp_path / "uv-cache"),
         "UV_PROJECT_ENVIRONMENT": str(REPO_ROOT / ".venv"),
@@ -1344,10 +1345,10 @@ def test_clean_checkout_denials_emit_no_partial_destination(
         bundle = _write_reproducibility_bundle(tmp_path / "deny-source", run_commit=sha)
     destination = tmp_path / "deny-dest"
     if mutation == "dirty":
-        (clone / "extra-untracked.txt").write_text("dirty\n", encoding="utf-8")
+        (clone / "extra-untracked.txt").write_text("dirty\n", encoding="utf-8", newline="\n")
     if mutation == "output-collision":
         destination.mkdir()
-        (destination / "partial.json").write_text("{}\n", encoding="utf-8")
+        (destination / "partial.json").write_text("{}\n", encoding="utf-8", newline="\n")
     command = [
         "uv",
         "run",
@@ -1367,6 +1368,7 @@ def test_clean_checkout_denials_emit_no_partial_destination(
         "LANG": "C",
         "LC_ALL": "C",
         "PATH": os.environ["PATH"],
+        "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),  # Windows DNS and sockets need it
         "TZ": "UTC",
         "UV_CACHE_DIR": str(tmp_path / "uv-cache"),
         "UV_PROJECT_ENVIRONMENT": str(REPO_ROOT / ".venv"),

@@ -66,7 +66,7 @@ def run(
                     for row in rows
                 ),
                 encoding="utf-8",
-            )
+             newline="\n")
             captured = question_cli.capture_batch(batch)
             results = captured.get("results")
             if not isinstance(results, list) or len(results) != len(rows):

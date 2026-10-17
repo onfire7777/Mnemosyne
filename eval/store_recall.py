@@ -114,7 +114,7 @@ def main() -> None:
         "seconds": round(seconds, 1), "rows": rows_out,
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps(report, indent=1), encoding="utf-8")
+    args.out.write_text(json.dumps(report, indent=1), encoding="utf-8", newline="\n")
     print(json.dumps({k: v for k, v in report.items() if k != "rows"}))
 
 

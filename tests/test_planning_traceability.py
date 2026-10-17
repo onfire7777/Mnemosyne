@@ -378,7 +378,7 @@ def test_unrecorded_post_baseline_merge_is_detected(
     lease_without_receipt = tmp_path / "lease-map-missing-receipt.md"
     lease_without_receipt.write_text(
         "This lease map records no receipts.\n", encoding="utf-8"
-    )
+    , newline="\n")
     monkeypatch.setitem(globals(), "DEPENDENCY_LEASE_MAP", lease_without_receipt)
     assert pr_number in _unrecorded_merged_prs(stale_baseline), (
         f"PR #{pr_number} landed after {stale_baseline} and is absent from the "
@@ -424,7 +424,7 @@ def test_unstructured_pr_mention_does_not_count_as_a_record(
     prose_only.write_text(
         f"PR #{pr_number} was discussed here, and PR #{pr_number} is pending.\n",
         encoding="utf-8",
-    )
+     newline="\n")
     monkeypatch.setitem(globals(), "DEPENDENCY_LEASE_MAP", prose_only)
     assert pr_number in _unrecorded_merged_prs(stale_baseline), (
         "a prose mention must not be accepted as a lease-map record"
@@ -433,7 +433,7 @@ def test_unstructured_pr_mention_does_not_count_as_a_record(
     structured = tmp_path / "lease-map-structured.md"
     structured.write_text(
         f"- PR #{pr_number}: delivered, receipts recorded.\n", encoding="utf-8"
-    )
+    , newline="\n")
     monkeypatch.setitem(globals(), "DEPENDENCY_LEASE_MAP", structured)
     assert pr_number not in _unrecorded_merged_prs(stale_baseline), (
         "a structured entry must be accepted as a lease-map record"
@@ -462,7 +462,7 @@ def test_stale_alternate_canonical_baseline_claim_fails(
     duplicate_goal.write_text(
         goal_text + "\nThe current canonical baseline is `main@deadbeef`.\n",
         encoding="utf-8",
-    )
+     newline="\n")
     monkeypatch.setitem(globals(), "GOAL", duplicate_goal)
 
     try:
@@ -516,7 +516,7 @@ def test_non_ancestral_baseline_commit_fails(tmp_path: Path, monkeypatch) -> Non
             .replace(baseline, non_ancestor)
             .replace(baseline[:8], non_ancestor[:8]),
             encoding="utf-8",
-        )
+         newline="\n")
         monkeypatch.setitem(globals(), global_name, substituted)
 
     try:
@@ -714,7 +714,7 @@ def test_goalex_round_cleanup_contract_is_behaviorally_reproducible() -> None:
         git("init", "-q")
         git("config", "user.email", "test@example.invalid")
         git("config", "user.name", "Test")
-        (repo / ".gitignore").write_text("ignored/\n", encoding="utf-8")
+        (repo / ".gitignore").write_text("ignored/\n", encoding="utf-8", newline="\n")
         tracked = repo / "tracked.txt"
         tracked.write_bytes(b"A\n")
         git("add", ".gitignore", "tracked.txt")
@@ -821,12 +821,12 @@ def _topology_fixture(
     ):
         file = repo / path
         file.parent.mkdir(parents=True, exist_ok=True)
-        file.write_text(text, encoding="utf-8")
+        file.write_text(text, encoding="utf-8", newline="\n")
     git("add", ".")
     git("commit", "-qm", "anchor")
     anchor = git("rev-parse", "HEAD")
 
-    (repo / ".planning/STATE.md").write_text("parent state\n", encoding="utf-8")
+    (repo / ".planning/STATE.md").write_text("parent state\n", encoding="utf-8", newline="\n")
     git("add", ".planning/STATE.md")
     git("commit", "-qm", "permitted parent")
     parent = git("rev-parse", "HEAD")
@@ -1030,9 +1030,9 @@ def test_topology_refresh_verifier_executes_trusted_parent_bytes(
     tmp_path: Path,
 ) -> None:
     repo, _, parent, anchor = _topology_fixture(tmp_path)
-    (repo / "immutable.txt").write_text("unauthorized\n", encoding="utf-8")
+    (repo / "immutable.txt").write_text("unauthorized\n", encoding="utf-8", newline="\n")
     candidate_verifier = repo / "infra" / "scripts" / "verify-topology-refresh.py"
-    candidate_verifier.write_text("raise SystemExit(0)\n", encoding="utf-8")
+    candidate_verifier.write_text("raise SystemExit(0)\n", encoding="utf-8", newline="\n")
     subprocess.run(
         ["git", "add", "immutable.txt", str(candidate_verifier.relative_to(repo))],
         cwd=repo,
@@ -1102,7 +1102,7 @@ def test_topology_refresh_verifier_requires_trusted_parent_bytes(
     repo, _, _, anchor = _topology_fixture(tmp_path / "empty")
     (repo / "infra" / "scripts" / "verify-topology-refresh.py").write_text(
         "", encoding="utf-8"
-    )
+    , newline="\n")
     subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-qm", "empty verifier"], cwd=repo, check=True)
     parent = subprocess.run(
@@ -1184,7 +1184,7 @@ def test_topology_refresh_verifier_rejects_non_ancestral_candidate(
     assert result.stdout == "candidate does not descend from permitted parent\n"
 
     grafts = repo / ".git" / "info" / "grafts"
-    grafts.write_text(f"{unrelated} {parent}\n", encoding="ascii")
+    grafts.write_text(f"{unrelated} {parent}\n", encoding="ascii", newline="\n")
     forged = subprocess.run(
         ["git", "merge-base", "--is-ancestor", parent, unrelated],
         cwd=repo,
@@ -1219,7 +1219,7 @@ def test_topology_refresh_verifier_requires_anchor_ancestry(tmp_path: Path) -> N
 
 def test_topology_refresh_verifier_ignores_git_replacement_refs(tmp_path: Path) -> None:
     repo, _, parent, anchor = _topology_fixture(tmp_path)
-    (repo / "immutable.txt").write_text("unauthorized\n", encoding="utf-8")
+    (repo / "immutable.txt").write_text("unauthorized\n", encoding="utf-8", newline="\n")
     subprocess.run(["git", "add", "immutable.txt"], cwd=repo, check=True)
     subprocess.run(
         ["git", "commit", "-qm", "unauthorized change"], cwd=repo, check=True
@@ -1254,7 +1254,7 @@ def test_topology_refresh_verifier_rejects_non_lifecycle_drift(
         elif change == "rename":
             (repo / "immutable.txt").rename(repo / path)
         elif change != "mode":
-            (repo / path).write_text(content, encoding="utf-8")
+            (repo / path).write_text(content, encoding="utf-8", newline="\n")
         subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
         if change == "mode":
             subprocess.run(
@@ -1281,7 +1281,7 @@ def test_topology_refresh_verifier_rejects_reverted_intermediate_drift(
     repo, _, parent, anchor = _topology_fixture(tmp_path)
     (repo / "secret.txt").write_text(
         "reachable but absent from tip\n", encoding="utf-8"
-    )
+    , newline="\n")
     subprocess.run(["git", "add", "secret.txt"], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-qm", "transient drift"], cwd=repo, check=True)
     (repo / "secret.txt").unlink()
@@ -1332,11 +1332,10 @@ def test_topology_refresh_verifier_rejects_reverted_anchor_drift(
     secret_tree = subprocess.run(
         ["git", "mktree"],
         cwd=repo,
-        input=root_entries + f"100644 blob {secret_blob}\tsecret.txt\n",
+        input=(root_entries + f"100644 blob {secret_blob}\tsecret.txt\n").encode(),  # bytes: text mode writes CRLF on Windows
         check=True,
         capture_output=True,
-        text=True,
-    ).stdout.strip()
+    ).stdout.decode().strip()
     transient = subprocess.run(
         ["git", "commit-tree", secret_tree, "-p", base_anchor, "-m", "transient"],
         cwd=repo,
@@ -1404,11 +1403,10 @@ def test_topology_refresh_verifier_rejects_empty_tree_addition(tmp_path: Path) -
     root_tree = subprocess.run(
         ["git", "mktree"],
         cwd=repo,
-        input=root_entries + f"040000 tree {empty_tree}\temptydir\n",
+        input=(root_entries + f"040000 tree {empty_tree}\temptydir\n").encode(),  # bytes: text mode writes CRLF on Windows
         check=True,
         capture_output=True,
-        text=True,
-    ).stdout.strip()
+    ).stdout.decode().strip()
     candidate = subprocess.run(
         ["git", "commit-tree", root_tree, "-p", candidate, "-m", "empty tree"],
         cwd=repo,
@@ -1447,11 +1445,10 @@ def test_topology_refresh_verifier_rejects_lifecycle_tree(tmp_path: Path) -> Non
     root_tree = subprocess.run(
         ["git", "mktree"],
         cwd=repo,
-        input=root_entries + f"040000 tree {empty_tree}\tGOAL.md\n",
+        input=(root_entries + f"040000 tree {empty_tree}\tGOAL.md\n").encode(),  # bytes: text mode writes CRLF on Windows
         check=True,
         capture_output=True,
-        text=True,
-    ).stdout.strip()
+    ).stdout.decode().strip()
     parent = subprocess.run(
         ["git", "commit-tree", root_tree, "-p", candidate, "-m", "bad parent"],
         cwd=repo,
@@ -1481,7 +1478,7 @@ def test_topology_refresh_verifier_rejects_lifecycle_missing_or_different(
 ) -> None:
     repo, _, parent, anchor = _topology_fixture(tmp_path)
     (repo / "GOAL.md").unlink()
-    (repo / ".planning/STATE.md").write_text("different\n", encoding="utf-8")
+    (repo / ".planning/STATE.md").write_text("different\n", encoding="utf-8", newline="\n")
     subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-qm", "bad lifecycle"], cwd=repo, check=True)
     candidate = subprocess.run(
@@ -1686,7 +1683,7 @@ def test_goal_topology_bootstrap_normalizes_status_under_errexit(
     tool_dir = tmp_path / "bin"
     tool_dir.mkdir()
     python = tool_dir / "python3"
-    python.write_text("#!/bin/sh\nexit 3\n", encoding="utf-8")
+    python.write_text("#!/bin/sh\nexit 3\n", encoding="utf-8", newline="\n")
     python.chmod(0o755)
     goal = GOAL.read_text(encoding="utf-8")
     command = goal.split("```sh\n", 1)[1].split("\n```", 1)[0]
@@ -1741,10 +1738,10 @@ def test_goal_topology_bootstrap_disables_sitecustomize(tmp_path: Path) -> None:
     site_hook = "import os; os._exit(0)\n"
     (Path(site_packages) / "sitecustomize.py").write_text(
         site_hook, encoding="utf-8"
-    )
+    , newline="\n")
     (Path(site_packages) / "zz_sitecustomize_probe.pth").write_text(
         site_hook, encoding="utf-8"
-    )
+    , newline="\n")
     control = subprocess.run([str(python), "-I", "-c", "raise SystemExit(2)"])
     assert control.returncode == 0
 

@@ -53,14 +53,14 @@ def edit_json(root, name, update):
     path = root / name
     value = json.loads(path.read_text())
     update(value)
-    path.write_text(json.dumps(value))
+    path.write_text(json.dumps(value), newline="\n")
 
 
 def edit_trace(root, update):
     path = root / 'operations.jsonl'
     rows = [json.loads(line) for line in path.read_text().splitlines()]
     update(rows)
-    path.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+    path.write_text(''.join(json.dumps(row) + '\n' for row in rows), newline="\n")
 
 
 def test_replay_reconstructs_both_reports_and_database_without_executing_provider(artifact, monkeypatch):
@@ -155,7 +155,7 @@ def test_symlink_artifact_is_rejected(artifact, tmp_path):
 
 
 def test_duplicate_json_keys_are_rejected(artifact):
-    (artifact / 'status.json').write_text('{"status":"failed","status":"completed"}')
+    (artifact / 'status.json').write_text('{"status":"failed","status":"completed"}', newline="\n")
     with pytest.raises(ValueError):
         replay.recompute(artifact)
 

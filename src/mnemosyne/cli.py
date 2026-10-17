@@ -9766,7 +9766,7 @@ def _ops_report_retain_sink(retention_dir: str, tenant_id: str) -> "Any":
         head = str(document.get("head_link_sha256") or "")[:16]
         path = target_dir / f"audit-chain-{tenant_id}-{head}.json"
         serialized = json.dumps(document, indent=2, sort_keys=True) + "\n"
-        path.write_text(serialized, encoding="utf-8")
+        path.write_text(serialized, encoding="utf-8", newline="\n")
         raw = path.read_bytes()
         try:
             reloaded = json.loads(raw)
@@ -9946,7 +9946,7 @@ def cmd_ops_report(args: argparse.Namespace) -> None:
     if args.dashboard_html:
         dashboard_path = Path(args.dashboard_html).expanduser()
         dashboard_path.parent.mkdir(parents=True, exist_ok=True)
-        dashboard_path.write_text(dashboard_html, encoding="utf-8")
+        dashboard_path.write_text(dashboard_html, encoding="utf-8", newline="\n")
     dashboard_package: dict[str, Any] | None = None
     if args.dashboard_package_dir:
         package_dir = Path(args.dashboard_package_dir).expanduser()
@@ -9954,8 +9954,8 @@ def cmd_ops_report(args: argparse.Namespace) -> None:
         package_dashboard = package_dir / "ops-dashboard.html"
         package_snapshot = package_dir / "ops-report.json"
         package_manifest = package_dir / "manifest.json"
-        package_dashboard.write_text(dashboard_html, encoding="utf-8")
-        package_snapshot.write_text(json.dumps({"ok": payload["ok"], "report": report}, indent=2, sort_keys=True), encoding="utf-8")
+        package_dashboard.write_text(dashboard_html, encoding="utf-8", newline="\n")
+        package_snapshot.write_text(json.dumps({"ok": payload["ok"], "report": report}, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
         manifest = {
             "kind": "mnemosyne.ops_dashboard_package",
             "version": 1,
@@ -9969,7 +9969,7 @@ def cmd_ops_report(args: argparse.Namespace) -> None:
             "counts": report["counts"],
             "tripwires": report["tripwires"],
         }
-        package_manifest.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+        package_manifest.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
         dashboard_package = {
             "dir": str(package_dir),
             "dashboard_path": str(package_dashboard),
@@ -10043,7 +10043,7 @@ def cmd_ops_metrics_push(args: argparse.Namespace) -> None:
             out = Path(args.dashboard_html_out).expanduser()
             out.parent.mkdir(parents=True, exist_ok=True)
             tmp = out.with_name(out.name + ".tmp")
-            tmp.write_text(render_ops_dashboard(report), encoding="utf-8")
+            tmp.write_text(render_ops_dashboard(report), encoding="utf-8", newline="\n")
             tmp.replace(out)
             result["dashboard_html_out"] = str(out)
         return result
@@ -11196,7 +11196,7 @@ async def _streamable_http_iteration(
     client_cert: tuple[str, str] | None = None,
 ) -> dict[str, Any]:
     try:
-        import httpx
+        import httpx2 as httpx  # the MCP SDK 2.x client's own HTTP library
         from mcp.client.session import ClientSession
         from mcp.client.streamable_http import streamable_http_client
     except ImportError as exc:  # pragma: no cover - optional dependency failure is reported structurally.
@@ -11241,7 +11241,7 @@ async def _streamable_http_iteration(
                         "duration_ms": round((time.monotonic() - started) * 1000, 3),
                         "initialize": {
                             "ok": initialized is not None,
-                            "protocolVersion": getattr(initialized, "protocolVersion", None),
+                            "protocolVersion": getattr(initialized, "protocol_version", None),
                         },
                         "tools_list": {
                             "ok": tool_contract["ok"],
@@ -11534,7 +11534,7 @@ def _write_deployment_soak_evidence(
     for item in report["checks"]:
         file_name = _deployment_evidence_file_name(int(item["index"]), str(item["name"]))
         path = checks_dir / file_name
-        path.write_text(json.dumps(item, indent=2, sort_keys=True), encoding="utf-8")
+        path.write_text(json.dumps(item, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
         relative_path = f"{checks_dir.name}/{file_name}"
         check_files.append(
             {
@@ -11558,7 +11558,7 @@ def _write_deployment_soak_evidence(
         "check_files": check_files,
     }
     report["evidence_bundle"] = bundle
-    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
     report_sha256 = _file_sha256(report_path)
     manifest = {
         "kind": "mnemosyne.deployment_soak_evidence",
@@ -11576,7 +11576,7 @@ def _write_deployment_soak_evidence(
         "summary": report["summary"],
         "checks": check_files,
     }
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
     return bundle
 
 
@@ -14026,7 +14026,7 @@ def cmd_audit_chain_export(args: argparse.Namespace) -> None:
         emit({"ok": False, "tenant_id": args.tenant, "error": str(exc)})
         raise SystemExit(1) from exc
     output = Path(args.output).expanduser()
-    output.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    output.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     emit(
         {
             "ok": True,
@@ -18592,6 +18592,8 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
             source_type="provider-check",
             content="Provider Health is configured.",
             trust_tier=0,
+            # an extractor must cite the evidence it read; the probe sample needs an id to cite
+            cid="provider-health-sample",
         )
     ]
     sample_candidates = [

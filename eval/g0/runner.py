@@ -710,14 +710,14 @@ def write_report(report: dict[str, Any], out_dir: Path, *, write_baseline: bool 
     json_path = out_dir / "report.json"
     md_path = out_dir / "report.md"
     text = json.dumps(report, indent=2, sort_keys=True, allow_nan=False)
-    json_path.write_text(text + "\n")
-    md_path.write_text(render_markdown(report))
+    json_path.write_text(text + "\n", newline="\n")
+    md_path.write_text(render_markdown(report), newline="\n")
     paths = {"json": json_path, "markdown": md_path}
     if write_baseline:
         baseline_name = report["baseline"]["name"]
         baseline_path = out_dir.parent / "baselines" / f"{baseline_name}.json"
         baseline_path.parent.mkdir(parents=True, exist_ok=True)
-        baseline_path.write_text(text + "\n")
+        baseline_path.write_text(text + "\n", newline="\n")
         paths["baseline"] = baseline_path
     return paths
 

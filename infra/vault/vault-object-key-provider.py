@@ -229,7 +229,7 @@ def get_or_create_key(req: dict[str, Any]) -> dict[str, Any]:
         "ciphertext": ciphertext,
     }
     tmp = wrap_path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(record, sort_keys=True, indent=2), encoding="utf-8")
+    tmp.write_text(json.dumps(record, sort_keys=True, indent=2), encoding="utf-8", newline="\n")
     tmp.chmod(0o600)
     tmp.replace(wrap_path)
     return {"key": _b64(dek)}
@@ -278,7 +278,7 @@ def rotate_key(req: dict[str, Any]) -> dict[str, Any]:
         new_ct = resp.get("data", {}).get("ciphertext")
         if isinstance(new_ct, str):
             record["ciphertext"] = new_ct
-            wrap_path.write_text(json.dumps(record, sort_keys=True, indent=2), encoding="utf-8")
+            wrap_path.write_text(json.dumps(record, sort_keys=True, indent=2), encoding="utf-8", newline="\n")
     return {"rotated": True, "latest_version": version}
 
 

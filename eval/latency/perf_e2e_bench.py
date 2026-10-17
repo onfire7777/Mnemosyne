@@ -176,7 +176,7 @@ def main() -> int:
     results = run(args.sizes, args.calls, args.warmup, args.queries)
     if args.json:
         args.json.parent.mkdir(parents=True, exist_ok=True)
-        args.json.write_text(json.dumps(results, indent=2))
+        args.json.write_text(json.dumps(results, indent=2), newline="\n")
         print(f"[perf-e2e] JSON -> {args.json}")
     return 0
 

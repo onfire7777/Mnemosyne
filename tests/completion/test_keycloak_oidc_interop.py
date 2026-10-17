@@ -76,7 +76,7 @@ def _sig_only_jwks(tmp_path: Path) -> Path:
     sig = {"keys": [k for k in jwks["keys"] if k.get("use") == "sig"]}
     assert sig["keys"], "Keycloak JWKS unexpectedly has no sig key"
     path = tmp_path / "jwks.sig-only.json"
-    path.write_text(json.dumps(sig))
+    path.write_text(json.dumps(sig), newline="\n")
     return path
 
 

@@ -52,7 +52,7 @@ def _run_retrieval(
         for row in dataset["corpus"]
     ]
     capture_path = output / "capture.jsonl"
-    capture_path.write_text(_jsonl(runtime_rows), encoding="utf-8")
+    capture_path.write_text(_jsonl(runtime_rows), encoding="utf-8", newline="\n")
     capture_cli = MnemoCLI(store=str(store), timeout_s=3600.0)
     if consolidate:
         capture_cli.install_consolidation_gate_case(runtime_rows[0]["content"])
@@ -79,7 +79,7 @@ def _run_retrieval(
         for row in dataset["queries"]
     ]
     query_path = output / "queries.jsonl"
-    query_path.write_text(_jsonl(query_rows), encoding="utf-8")
+    query_path.write_text(_jsonl(query_rows), encoding="utf-8", newline="\n")
     queried = MnemoCLI(
         store=str(store),
         global_flags=["--evaluation-read-only"],
@@ -136,7 +136,7 @@ def _run_retrieval(
     }
     (output / "metrics.json").write_text(
         json.dumps(metrics, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    , newline="\n")
     return metrics
 
 
@@ -176,7 +176,7 @@ def run_baseline(output: Path) -> dict[str, Any]:
     }
     (output / "summary.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    , newline="\n")
     return summary
 
 

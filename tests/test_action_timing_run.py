@@ -67,22 +67,22 @@ def test_recompute_rejects_missing_or_inconsistent_evidence(completed, tmp_path,
         else:
             row = next(r for r in rows if r["command"] == "intention.observe")
             row["response"]["evaluated_at"] = "2040-01-01T00:00:00Z"
-        operations.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+        operations.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8", newline="\n")
     elif change == "report":
         path = output / "reports.json"
         value = json.loads(path.read_text())
         value["cases"][0]["report"]["duplicate_observations"] = False
-        path.write_text(json.dumps(value), encoding="utf-8")
+        path.write_text(json.dumps(value), encoding="utf-8", newline="\n")
     elif change == "plan":
         path = output / "plan.json"
         value = json.loads(path.read_text())
         value["cases"][0]["expected"].pop()
-        path.write_text(json.dumps(value), encoding="utf-8")
+        path.write_text(json.dumps(value), encoding="utf-8", newline="\n")
     else:
         path = output / "sink.json"
         value = json.loads(path.read_text())
         value["cases"][0]["snapshot"]["attempts"].pop()
-        path.write_text(json.dumps(value), encoding="utf-8")
+        path.write_text(json.dumps(value), encoding="utf-8", newline="\n")
     with pytest.raises(ValueError):
         recompute(output)
 

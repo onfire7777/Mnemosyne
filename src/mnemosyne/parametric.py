@@ -465,7 +465,7 @@ class ParametricArtifactStore:
             "payload": payload or {},
         }
         tmp = path.with_suffix(path.suffix + ".tmp")
-        tmp.write_text(json.dumps(body, indent=2, sort_keys=True), encoding="utf-8")
+        tmp.write_text(json.dumps(body, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
         tmp.replace(path)
         return artifact.artifact_uri
 

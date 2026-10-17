@@ -146,7 +146,7 @@ def test_native_population_replays_missingness_empty_retrieval_and_tampering(tmp
     tenant = "locomo:" + sha256(b"synthetic").hexdigest()
     _, evidence = _capture_plan(normalize_dialogs(source, caption_policy="exclude-caption")["records"], tenant)
     store = tmp_path / "synthetic-store"
-    store.write_text("synthetic transport; no engine or model execution")
+    store.write_text("synthetic transport; no engine or model execution", newline="\n")
     conversation = {"sample_id": "synthetic", "tenant_id": tenant,
                     "cli": MnemoCLI(store=str(store)), "evidence": evidence}
 

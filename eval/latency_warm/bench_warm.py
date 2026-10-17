@@ -581,12 +581,12 @@ def write_reports(report: dict[str, Any]) -> tuple[Path, Path]:
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     json_path = REPORTS_DIR / f"warm_latency_{stamp}.json"
-    json_path.write_text(json.dumps(report, indent=2))
-    (REPORTS_DIR / "warm_latency_latest.json").write_text(json.dumps(report, indent=2))
+    json_path.write_text(json.dumps(report, indent=2), newline="\n")
+    (REPORTS_DIR / "warm_latency_latest.json").write_text(json.dumps(report, indent=2), newline="\n")
     md = render_markdown(report)
     md_path = REPORTS_DIR / f"warm_latency_{stamp}.md"
-    md_path.write_text(md)
-    (REPORTS_DIR / "warm_latency_latest.md").write_text(md)
+    md_path.write_text(md, newline="\n")
+    (REPORTS_DIR / "warm_latency_latest.md").write_text(md, newline="\n")
     return json_path, md_path
 
 

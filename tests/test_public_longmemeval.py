@@ -415,7 +415,7 @@ def test_candidate_manifest_o_excl_rejects_symlink_and_concurrent_writers(tmp_pa
     }
     monkeypatch.setattr(runner, "_current_clean_head", lambda _root: "a" * 40)
     target = tmp_path / "target"
-    target.write_text("unchanged")
+    target.write_text("unchanged", newline="\n")
     linked = tmp_path / "linked.json"
     linked.symlink_to(target)
     with pytest.raises(ValueError, match="symlinks"):

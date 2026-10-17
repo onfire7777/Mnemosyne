@@ -153,7 +153,7 @@ def evaluate(dataset: dict[str, Any], cli: MnemoCLI) -> dict[str, Any]:
     ]
     with tempfile.TemporaryDirectory(prefix="mneme-qa-v2-") as temp:
         capture_path = Path(temp) / "corpus.jsonl"
-        capture_path.write_text(_jsonl(runtime_rows), encoding="utf-8")
+        capture_path.write_text(_jsonl(runtime_rows), encoding="utf-8", newline="\n")
         if isinstance(cli, MnemoCLI):
             cli.install_consolidation_gate_case(runtime_rows[0]["content"])
         captured = cli.capture_batch(capture_path, consolidate=True)
@@ -177,7 +177,7 @@ def evaluate(dataset: dict[str, Any], cli: MnemoCLI) -> dict[str, Any]:
         if any(_GOLD_FIELDS & set(row) for row in answer_rows):
             raise AssertionError("gold fields crossed the scorer boundary")
         answer_path = Path(temp) / "answers.jsonl"
-        answer_path.write_text(_jsonl(answer_rows), encoding="utf-8")
+        answer_path.write_text(_jsonl(answer_rows), encoding="utf-8", newline="\n")
         answer_cli = (
             replace(
                 cli,

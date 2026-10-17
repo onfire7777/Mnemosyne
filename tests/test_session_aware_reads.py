@@ -556,15 +556,16 @@ def test_the_new_arguments_are_declared_in_closed_schemas(tmp_path: Path) -> Non
 
 def test_sdk_adapter_serves_a_session_search(tmp_path: Path) -> None:
     pytest.importorskip("mcp")
-    from mcp import types
+    import mcp_types as types
+    from tests.sdk_helper import sdk_handler
 
     tenant, user = "tenant-sdk", "user-sdk"
     server = build_sdk_server(store_path=tmp_path / "sdk-store.json", session_secret=SECRET)
     token = SessionTokenVerifier(SECRET).sign(_identity(tenant, user))
 
     async def call(name: str, arguments: dict[str, Any]) -> Any:
-        handler = server.request_handlers[types.CallToolRequest]
-        return (await handler(types.CallToolRequest(params={"name": name, "arguments": arguments}))).root
+        handler = sdk_handler(server, types.CallToolRequest)
+        return (await handler(types.CallToolRequest(params={"name": name, "arguments": arguments})))
 
     async def exercise() -> tuple[Any, Any, Any]:
         captured = await call("capture", {
@@ -574,7 +575,7 @@ def test_sdk_adapter_serves_a_session_search(tmp_path: Path) -> None:
         seeded = await call("working_seed", {
             "session_token": token, "tenant_id": tenant, "session_id": SESSION, "user_id": user,
             "agent_id": AGENT, "task_id": "talk", "branch": "main", "kind": "intermediate_conclusion",
-            "content": NOTE, "evidence_ids": [captured.structuredContent["cid"]], "ttl_seconds": 600,
+            "content": NOTE, "evidence_ids": [captured.structured_content["cid"]], "ttl_seconds": 600,
             "created_at": (datetime.now(UTC) - timedelta(seconds=30)).isoformat(),
         })
         found = await call("search", {
@@ -589,11 +590,11 @@ def test_sdk_adapter_serves_a_session_search(tmp_path: Path) -> None:
     finally:
         server.mnemosyne_mcp_facade.close()
 
-    assert seeded.isError is False, seeded.content[0].text
-    assert found.isError is False, found.content[0].text
-    assert "explain" not in found.structuredContent
-    assert any("four hundred" in hit["text"] for hit in found.structuredContent["hits"])
-    assert refused.isError is True and "verified session identity is required" in refused.content[0].text
+    assert seeded.is_error is False, seeded.content[0].text
+    assert found.is_error is False, found.content[0].text
+    assert "explain" not in found.structured_content
+    assert any("four hundred" in hit["text"] for hit in found.structured_content["hits"])
+    assert refused.is_error is True and "verified session identity is required" in refused.content[0].text
 
 
 # ---------------------------------------------------------------------------
@@ -613,8 +614,8 @@ def test_build_commit_from_a_checkouts_loose_ref(tmp_path: Path) -> None:
     package = _checkout(tmp_path)
     git = tmp_path / ".git"
     (git / "refs" / "heads").mkdir(parents=True)
-    (git / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
-    (git / "refs" / "heads" / "main").write_text(COMMIT + "\n", encoding="utf-8")
+    (git / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8", newline="\n")
+    (git / "refs" / "heads" / "main").write_text(COMMIT + "\n", encoding="utf-8", newline="\n")
 
     assert buildinfo._git_commit(package) == COMMIT[:8]
 
@@ -623,11 +624,11 @@ def test_build_commit_from_packed_refs_and_a_detached_head(tmp_path: Path) -> No
     package = _checkout(tmp_path)
     git = tmp_path / ".git"
     git.mkdir()
-    (git / "HEAD").write_text("ref: refs/heads/feature\n", encoding="utf-8")
-    (git / "packed-refs").write_text(f"# pack-refs\n{COMMIT} refs/heads/feature\n", encoding="utf-8")
+    (git / "HEAD").write_text("ref: refs/heads/feature\n", encoding="utf-8", newline="\n")
+    (git / "packed-refs").write_text(f"# pack-refs\n{COMMIT} refs/heads/feature\n", encoding="utf-8", newline="\n")
     assert buildinfo._git_commit(package) == COMMIT[:8]
 
-    (git / "HEAD").write_text(COMMIT.upper() + "\n", encoding="utf-8")
+    (git / "HEAD").write_text(COMMIT.upper() + "\n", encoding="utf-8", newline="\n")
     assert buildinfo._git_commit(package) == COMMIT[:8]
 
 
@@ -636,11 +637,11 @@ def test_build_commit_from_a_linked_worktree(tmp_path: Path) -> None:
     worktree_git = main_git / "worktrees" / "lane"
     (main_git / "refs" / "heads").mkdir(parents=True)
     worktree_git.mkdir(parents=True)
-    (main_git / "refs" / "heads" / "lane").write_text(COMMIT + "\n", encoding="utf-8")
-    (worktree_git / "HEAD").write_text("ref: refs/heads/lane\n", encoding="utf-8")
-    (worktree_git / "commondir").write_text("../..\n", encoding="utf-8")
+    (main_git / "refs" / "heads" / "lane").write_text(COMMIT + "\n", encoding="utf-8", newline="\n")
+    (worktree_git / "HEAD").write_text("ref: refs/heads/lane\n", encoding="utf-8", newline="\n")
+    (worktree_git / "commondir").write_text("../..\n", encoding="utf-8", newline="\n")
     package = _checkout(tmp_path / "lane")
-    (tmp_path / "lane" / ".git").write_text(f"gitdir: {worktree_git}\n", encoding="utf-8")
+    (tmp_path / "lane" / ".git").write_text(f"gitdir: {worktree_git}\n", encoding="utf-8", newline="\n")
 
     assert buildinfo._git_commit(package) == COMMIT[:8]
 
@@ -650,8 +651,8 @@ def test_an_installed_copy_never_reports_an_enclosing_projects_commit(tmp_path: 
 
     git = tmp_path / ".git"
     (git / "refs" / "heads").mkdir(parents=True)
-    (git / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
-    (git / "refs" / "heads" / "main").write_text(COMMIT + "\n", encoding="utf-8")
+    (git / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8", newline="\n")
+    (git / "refs" / "heads" / "main").write_text(COMMIT + "\n", encoding="utf-8", newline="\n")
     installed = tmp_path / ".venv" / "Lib" / "site-packages" / "mnemosyne"
     installed.mkdir(parents=True)
 

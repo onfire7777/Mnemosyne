@@ -49,10 +49,10 @@ def test_inconsistent_partial_evidence_is_rejected(tmp_path, damage):
             next(r for r in rows if r['stage'] == 'observation_response' and r['command'] == 'intention.observe')['probe'] = False if damage == 'boolean_probe' else 10
         else:
             rows.reverse()
-        path.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+        path.write_text(''.join(json.dumps(row) + '\n' for row in rows), newline="\n")
         with pytest.raises(ValueError):
             summarize(root)
         return
-    path.write_text(json.dumps(value))
+    path.write_text(json.dumps(value), newline="\n")
     with pytest.raises(ValueError):
         summarize(root)

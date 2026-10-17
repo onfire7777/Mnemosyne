@@ -49,7 +49,7 @@ case \"${0##*/}\" in
 esac
 """,
         encoding="utf-8",
-    )
+     newline="\n")
     executable.chmod(0o755)
 
 

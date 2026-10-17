@@ -33,7 +33,7 @@ def _record() -> dict[str, object]:
 
 
 def _write(path: Path, record: dict[str, object]) -> Path:
-    path.write_text(json.dumps(record), encoding="utf-8")
+    path.write_text(json.dumps(record), encoding="utf-8", newline="\n")
     return path
 
 
@@ -151,7 +151,7 @@ def test_cli_returns_two_for_malformed_or_duplicate_key_json(
     raw: str,
 ) -> None:
     path = tmp_path / "invalid.json"
-    path.write_text(raw, encoding="utf-8")
+    path.write_text(raw, encoding="utf-8", newline="\n")
 
     assert main([str(path)]) == 2
     output = capsys.readouterr()
@@ -180,7 +180,7 @@ def test_cli_returns_two_for_unreadable_or_unparseable_input(
     if invalid_input == "invalid-utf8":
         path.write_bytes(b"\xff")
     elif invalid_input == "oversized-int":
-        path.write_text("9" * 5000, encoding="utf-8")
+        path.write_text("9" * 5000, encoding="utf-8", newline="\n")
 
     assert main([str(path)]) == 2
     output = capsys.readouterr()

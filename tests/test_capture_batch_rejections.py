@@ -21,7 +21,7 @@ def test_report_mode_publishes_the_batch_and_lists_the_rejected_candidates(tmp_p
                 continue
             path = tmp_path / f"batch-{index}.jsonl"
             path.write_text("".join(json.dumps(row, sort_keys=True) + "\n" for row in step["capture"]),
-                            encoding="utf-8")
+                            encoding="utf-8", newline="\n")
             argv = ["--backend", "local", "--store", str(store), "capture-batch", "--input-jsonl", str(path),
                     "--consolidate"]
             before = store.read_bytes() if store.exists() else None

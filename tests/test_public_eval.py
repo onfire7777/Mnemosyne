@@ -271,7 +271,7 @@ def test_m01_bundle_rejects_unknown_trace_claim_fields(tmp_path: Path) -> None:
             json.dumps(trace, sort_keys=True, separators=(",", ":")) + "\n"
             for trace in traces
         )
-    )
+    , newline="\n")
     _refresh_digest(out, "traces.jsonl")
 
     with pytest.raises(BundleError, match="generalized scoring") as exc_info:
@@ -730,7 +730,7 @@ def test_action_bundle_rejects_registry_and_trace_tampering(
         traces[0][field] = "tampered"
         (tampered / "traces.jsonl").write_text(
             "".join(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n" for row in traces)
-        )
+        , newline="\n")
         _refresh_digest(tampered, "traces.jsonl")
     with pytest.raises(BundleError):
         verify_bundle(tampered)
@@ -739,7 +739,7 @@ def test_action_bundle_rejects_registry_and_trace_tampering(
 def test_bundle_detects_mutation_links_secrets_and_count_drift(tmp_path: Path) -> None:
     out = tmp_path / "bundle"
     run_public_suite("smoke", out)
-    (out / "metrics.json").write_text("{}\n")
+    (out / "metrics.json").write_text("{}\n", newline="\n")
     with pytest.raises(BundleError, match="digest"):
         verify_bundle(out)
 
@@ -755,7 +755,7 @@ def test_bundle_detects_mutation_links_secrets_and_count_drift(tmp_path: Path) -
     traces = (
         out3 / "traces.jsonl"
     ).read_text() + '"ghp_abcdefghijklmnopqrstuvwxyz0123456789"\n'
-    (out3 / "traces.jsonl").write_text(traces)
+    (out3 / "traces.jsonl").write_text(traces, newline="\n")
     _refresh_digest(out3, "traces.jsonl")
     with pytest.raises(BundleError, match="secret"):
         verify_bundle(out3)
@@ -763,7 +763,7 @@ def test_bundle_detects_mutation_links_secrets_and_count_drift(tmp_path: Path) -
     out3_end = tmp_path / "secret-end"
     run_public_suite("smoke", out3_end)
     traces = (out3_end / "traces.jsonl").read_text() + '"-----END PRIVATE KEY-----"\n'
-    (out3_end / "traces.jsonl").write_text(traces)
+    (out3_end / "traces.jsonl").write_text(traces, newline="\n")
     _refresh_digest(out3_end, "traces.jsonl")
     with pytest.raises(BundleError, match="secret"):
         verify_bundle(out3_end)
@@ -774,7 +774,7 @@ def test_bundle_detects_mutation_links_secrets_and_count_drift(tmp_path: Path) -
     metrics["trace_count"] += 1
     (out4 / "metrics.json").write_text(
         json.dumps(metrics, sort_keys=True, separators=(",", ":")) + "\n"
-    )
+    , newline="\n")
     _refresh_digest(out4, "metrics.json")
     with pytest.raises(BundleError, match="count"):
         verify_bundle(out4)
@@ -817,7 +817,7 @@ def test_bundle_rejects_wrong_or_blended_metric_family(tmp_path: Path) -> None:
             json.dumps(trace, sort_keys=True, separators=(",", ":")) + "\n"
             for trace in traces
         )
-    )
+    , newline="\n")
     _refresh_digest(blended, "traces.jsonl")
     with pytest.raises(BundleError, match="blended"):
         verify_bundle(blended)
@@ -862,7 +862,7 @@ def test_bundle_binds_traces_and_metric_to_anchored_benchmark(tmp_path: Path) ->
             json.dumps(trace, sort_keys=True, separators=(",", ":")) + "\n"
             for trace in traces
         )
-    )
+    , newline="\n")
     _refresh_digest(out, "traces.jsonl")
     with pytest.raises(BundleError, match="anchored benchmark questions"):
         verify_bundle(out)
@@ -969,7 +969,7 @@ def test_qa_family_requires_disclosed_reader_and_judge(tmp_path: Path) -> None:
             json.dumps(trace, sort_keys=True, separators=(",", ":")) + "\n"
             for trace in traces
         )
-    )
+    , newline="\n")
     for name in ("config.json", "metrics.json", "traces.jsonl"):
         _refresh_digest(out, name)
     with pytest.raises(BundleError, match="reader and judge"):
@@ -982,7 +982,7 @@ def test_qa_candidate_is_validated_before_adapter_execution(
     import eval.public.runner as runner
 
     candidate = tmp_path / "candidate.json"
-    candidate.write_text("{}")
+    candidate.write_text("{}", newline="\n")
     called = False
 
     def adapter(*_args: object) -> object:
@@ -1256,7 +1256,7 @@ def test_qa_bundle_discloses_reader_and_recomputes_benchmark_labels(
         shutil.copytree(out, attacked)
         rows = [json.loads(line) for line in (attacked / "traces.jsonl").read_text().splitlines()]
         mutate(rows[0])
-        (attacked / "traces.jsonl").write_text("".join(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n" for row in rows))
+        (attacked / "traces.jsonl").write_text("".join(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n" for row in rows), newline="\n")
         _refresh_digest(attacked, "traces.jsonl")
         with pytest.raises(BundleError, match=message):
             verify_bundle(attacked)
@@ -2034,7 +2034,7 @@ def _refresh_digest(bundle: Path, name: str) -> None:
 
 
 def _rewrite_json(path: Path, value: object) -> None:
-    path.write_text(json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n")
+    path.write_text(json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n", newline="\n")
 
 
 def _canonical_digest(value: object) -> str:

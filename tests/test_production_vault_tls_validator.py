@@ -255,7 +255,7 @@ fi
 exec "$REAL_OPENSSL" "$@"
 """,
         encoding="utf-8",
-    )
+     newline="\n")
     fake_openssl.chmod(0o755)
 
     proc = _run(

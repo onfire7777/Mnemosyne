@@ -73,7 +73,7 @@ def test_dependency_replay_rejects_changed_evidence(artifact, mutation):
         else:
             row = next(r for r in rows if r['stage'] == 'turn_completed' and r['turn'] == 1)
             row['tasks'][1]['schedule']['dependencies'] = []
-        path.write_text(''.join(json.dumps(r) + '\n' for r in rows))
+        path.write_text(''.join(json.dumps(r) + '\n' for r in rows), newline="\n")
     else:
         path = artifact / ('source.json' if mutation == 'source' else 'formation-timing.json')
         value = json.loads(path.read_text())
@@ -81,6 +81,6 @@ def test_dependency_replay_rejects_changed_evidence(artifact, mutation):
             value['harness_files']['eval/public/action_dependency_observe.py'] = '0' * 64
         else:
             value['cases'][0]['metrics']['true_positives'] = 1000
-        path.write_text(json.dumps(value))
+        path.write_text(json.dumps(value), newline="\n")
     with pytest.raises(ValueError):
         replay.recompute(artifact)

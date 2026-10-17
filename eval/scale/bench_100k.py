@@ -369,5 +369,5 @@ def run_synthetic_harness() -> dict[str, Any]:
 def write_phase15_s4_receipt(receipt: dict[str, Any], path: Path) -> Path:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    target.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8", newline="\n")
     return target

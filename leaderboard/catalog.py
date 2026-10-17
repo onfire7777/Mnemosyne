@@ -9,7 +9,7 @@ from leaderboard.ui import icon
 
 
 def load_catalog() -> dict:
-    catalog = json.loads(Path(__file__).with_name("catalog.json").read_text())
+    catalog = json.loads(Path(__file__).with_name("catalog.json").read_text(encoding="utf-8"))
     if catalog.get("schema_version") != "openmembench.scope-catalog/v1":
         raise ValueError("unsupported scope catalog")
     if not re.fullmatch(r"[0-9a-f]{40}", catalog.get("source_commit", "")):

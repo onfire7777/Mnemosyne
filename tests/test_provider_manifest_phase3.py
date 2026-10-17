@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-import shlex
+from mnemosyne.command_line import join_command
 import subprocess
 import sys
 import threading
@@ -60,9 +60,8 @@ def _command(tmp_path: Path, role: str, state: Path) -> str:
             ]
         ),
         encoding="utf-8",
-    )
-    return " ".join(
-        shlex.quote(item) for item in (sys.executable, str(script), role, str(state))
+     newline="\n")
+    return join_command((sys.executable, str(script), role, str(state))
     )
 
 
@@ -172,7 +171,7 @@ def test_provider_manifest_runs_http_retrieval_and_all_consolidation_role_checks
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     try:
         report = _run_cli(

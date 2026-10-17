@@ -83,19 +83,19 @@ def install(root: Path, base: Path) -> Path:
                 "root=Path(__file__).resolve().parents[1]\n"
                 "sys.path.insert(0,str(root/'lib'))\n"
                 f"runpy.run_path(str(root/'libexec'/'{name}.py'),run_name='__main__')\n"
-            )
+            , newline="\n")
             launcher.chmod(0o500)
             for target in (implementation, launcher):
-                files[str(target.relative_to(destination))] = hashlib.sha256(target.read_bytes()).hexdigest()
+                files[target.relative_to(destination).as_posix()] = hashlib.sha256(target.read_bytes()).hexdigest()
         for path in (destination / "lib").rglob("*"):
             if path.is_symlink():
                 raise ValueError("grounded runtime source contains a symlink")
             if path.is_file():
                 path.chmod(stat.S_IRUSR)
-                files[str(path.relative_to(destination))] = hashlib.sha256(path.read_bytes()).hexdigest()
+                files[path.relative_to(destination).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
         manifest = {"commit": commit, "files": dict(sorted(files.items())), "schema": "grounded-runtime-v1"}
         manifest_path = destination / "manifest.json"
-        manifest_path.write_text(json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n")
+        manifest_path.write_text(json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n", newline="\n")
         manifest_path.chmod(0o400)
         for directory in sorted(
             (path for path in destination.rglob("*") if path.is_dir()),

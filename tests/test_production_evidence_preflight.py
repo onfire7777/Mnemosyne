@@ -98,12 +98,12 @@ def _minimal_production_manifest(
         input_root.mkdir(parents=True, exist_ok=True)
         tool.parent.mkdir(parents=True, exist_ok=True)
         if not tool.exists():
-            tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8", newline="\n")
             tool.chmod(0o755)
         if not asset.exists():
-            asset.write_text('{"asset": "fixture"}\n', encoding="utf-8")
+            asset.write_text('{"asset": "fixture"}\n', encoding="utf-8", newline="\n")
         if not c2pa_asset.exists():
-            c2pa_asset.write_text("fixture c2pa asset\n", encoding="utf-8")
+            c2pa_asset.write_text("fixture c2pa asset\n", encoding="utf-8", newline="\n")
         if not suite.exists():
             suite.write_text(
                 json.dumps(
@@ -121,7 +121,7 @@ def _minimal_production_manifest(
                     }
                 ),
                 encoding="utf-8",
-            )
+             newline="\n")
 
     manifest: dict[str, Any] = {
         "kind": "mnemosyne-production-soak-manifest",
@@ -152,7 +152,7 @@ def _minimal_production_manifest(
         provenance_check["args"] = ["--suite", str(suite)]
     if mutate is not None:
         mutate(manifest)
-    path.write_text(json.dumps(manifest), encoding="utf-8")
+    path.write_text(json.dumps(manifest), encoding="utf-8", newline="\n")
 
 
 def _production_provider_manifest_payload(
@@ -175,7 +175,7 @@ def test_redaction_scan_rejects_symlinked_tree_root(tmp_path: Path) -> None:
     external.mkdir()
     (external / "operator-note.txt").write_text(
         "non-secret operator note\n", encoding="utf-8"
-    )
+    , newline="\n")
     linked_root = tmp_path / "linked-root"
     try:
         linked_root.symlink_to(external, target_is_directory=True)
@@ -201,7 +201,7 @@ def test_redaction_tree_scan_rejects_symlinked_output_root(tmp_path: Path) -> No
     external.mkdir()
     (external / "retained-artifact.txt").write_text(
         "retained artifact\n", encoding="utf-8"
-    )
+    , newline="\n")
     out_root = tmp_path / "linked-output-root"
     try:
         out_root.symlink_to(external, target_is_directory=True)
@@ -223,8 +223,8 @@ def test_redaction_tree_scan_scans_nested_redaction_scan_files(tmp_path: Path) -
     nested = out_root / "input-artifacts" / "redaction-scan.json"
     root_scan = out_root / "redaction-scan.json"
     nested.parent.mkdir(parents=True)
-    nested.write_text("nested retained artifact\n", encoding="utf-8")
-    root_scan.write_text('{"ok": true}\n', encoding="utf-8")
+    nested.write_text("nested retained artifact\n", encoding="utf-8", newline="\n")
+    root_scan.write_text('{"ok": true}\n', encoding="utf-8", newline="\n")
 
     scan = scan_evidence_tree(out_root)
 
@@ -247,7 +247,7 @@ def test_redaction_scan_detects_dsn_vault_and_bearer_secret_shapes(
         )
         + "\n",
         encoding="utf-8",
-    )
+     newline="\n")
 
     scan = scan_evidence_paths([evidence], scope="test")
     kinds = {finding["kind"] for finding in scan["findings"]}
@@ -519,7 +519,7 @@ def test_capture_production_evidence_rejects_relative_output_root(
 def test_capture_production_evidence_rejects_malformed_manifest(tmp_path: Path) -> None:
     manifest = tmp_path / "production-soak.json"
     out_root = tmp_path / "capture"
-    manifest.write_text("{", encoding="utf-8")
+    manifest.write_text("{", encoding="utf-8", newline="\n")
 
     proc = subprocess.run(
         [
@@ -645,7 +645,7 @@ def test_capture_production_evidence_preflight_rejects_unrendered_template(
             REPO / "infra" / "templates" / "production-soak-manifest.template.json"
         ).read_text(encoding="utf-8"),
         encoding="utf-8",
-    )
+     newline="\n")
     out_root = tmp_path / "capture"
     proc = subprocess.run(
         [
@@ -671,7 +671,7 @@ def test_capture_production_evidence_rejects_existing_output_root(
     manifest = tmp_path / "production-soak.json"
     out_root = tmp_path / "capture"
     out_root.mkdir()
-    (out_root / "stale.txt").write_text("stale previous evidence", encoding="utf-8")
+    (out_root / "stale.txt").write_text("stale previous evidence", encoding="utf-8", newline="\n")
     _minimal_production_manifest(manifest)
 
     proc = subprocess.run(
@@ -879,7 +879,7 @@ def test_capture_production_evidence_preflight_records_input_artifacts(
     out_root = tmp_path / "capture"
     artifact = tmp_path / "production-inputs" / "cases.json"
     artifact.parent.mkdir()
-    artifact.write_text('{"ok": true}\n', encoding="utf-8")
+    artifact.write_text('{"ok": true}\n', encoding="utf-8", newline="\n")
 
     def add_external_artifact_path(payload: dict[str, Any]) -> None:
         payload["checks"][0]["args"] = ["--cases", str(artifact)]
@@ -974,7 +974,7 @@ def test_capture_production_evidence_preflight_rejects_symlinked_argument_artifa
     artifact = tmp_path / "production-inputs" / "cases.json"
     linked_artifact = tmp_path / "production-inputs" / "linked-cases.json"
     artifact.parent.mkdir()
-    artifact.write_text('{"ok": true}\n', encoding="utf-8")
+    artifact.write_text('{"ok": true}\n', encoding="utf-8", newline="\n")
     try:
         linked_artifact.symlink_to(artifact)
     except OSError as exc:
@@ -1011,7 +1011,7 @@ def test_capture_production_evidence_preflight_rejects_symlinked_manifest_artifa
     artifact_dir = tmp_path / "production-inputs" / "gate-suite"
     linked_dir = tmp_path / "production-inputs" / "linked-gate-suite"
     artifact_dir.mkdir(parents=True)
-    (artifact_dir / "cases.json").write_text('{"ok": true}\n', encoding="utf-8")
+    (artifact_dir / "cases.json").write_text('{"ok": true}\n', encoding="utf-8", newline="\n")
     try:
         linked_dir.symlink_to(artifact_dir, target_is_directory=True)
     except OSError as exc:
@@ -1123,7 +1123,7 @@ def test_capture_production_evidence_preflight_records_manifest_input_artifacts(
     out_root = tmp_path / "capture"
     artifact = tmp_path / "production-inputs" / "row-10-full-suite-evidence.json"
     artifact.parent.mkdir()
-    artifact.write_text('{"full_suite": true}\n', encoding="utf-8")
+    artifact.write_text('{"full_suite": true}\n', encoding="utf-8", newline="\n")
 
     def add_manifest_input_artifact(payload: dict[str, Any]) -> None:
         payload["checks"][0]["input_artifacts"] = [str(artifact)]
@@ -1185,7 +1185,7 @@ def test_capture_production_evidence_preflight_records_equals_form_input_artifac
     out_root = tmp_path / "capture"
     artifact = tmp_path / "production-inputs" / "cases.json"
     artifact.parent.mkdir()
-    artifact.write_text('{"ok": true}\n', encoding="utf-8")
+    artifact.write_text('{"ok": true}\n', encoding="utf-8", newline="\n")
 
     def add_external_artifact_path(payload: dict[str, Any]) -> None:
         payload["checks"][0]["args"] = [f"--cases={artifact}"]
@@ -1244,7 +1244,7 @@ def test_capture_production_evidence_preflight_snapshots_and_rewrites_tool_execu
     tool_payload = b"\x00\x01not utf-8 executable bytes"
     tool.write_bytes(tool_payload)
     tool.chmod(0o755)
-    artifact.write_text('{"retained": true}\n', encoding="utf-8")
+    artifact.write_text('{"retained": true}\n', encoding="utf-8", newline="\n")
 
     def add_tool_path(payload: dict[str, Any]) -> None:
         payload["checks"][0]["input_artifacts"] = [str(artifact)]
@@ -1328,7 +1328,7 @@ def test_capture_production_evidence_records_provider_command_executable_digest(
     provider_manifest.write_text(
         json.dumps(_production_provider_manifest_payload()),
         encoding="utf-8",
-    )
+     newline="\n")
 
     def add_provider_manifest(payload: dict[str, Any]) -> None:
         check = next(
@@ -1410,12 +1410,12 @@ def test_capture_production_evidence_env_file_supplies_provider_command(
             )
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     env_file = tmp_path / "runtime-provider.env"
     env_file.write_text(
         f'export MNEMOSYNE_SESSION_SECRET_COMMAND="{tool}"\n',
         encoding="utf-8",
-    )
+     newline="\n")
     env_file.chmod(0o600)
 
     def add_provider_manifest(payload: dict[str, Any]) -> None:
@@ -1463,7 +1463,7 @@ def test_capture_production_evidence_env_file_rejects_unallowlisted_keys(
     manifest = tmp_path / "production-soak.json"
     out_root = tmp_path / "capture"
     env_file = tmp_path / "runtime-provider.env"
-    env_file.write_text('export PYTHONPATH="/tmp/unsafe"\n', encoding="utf-8")
+    env_file.write_text('export PYTHONPATH="/tmp/unsafe"\n', encoding="utf-8", newline="\n")
     env_file.chmod(0o600)
     _minimal_production_manifest(manifest)
 
@@ -1518,7 +1518,7 @@ def test_capture_production_evidence_rewrites_env_c2pa_tool_to_retained_snapshot
     suite.write_text(
         json.dumps({"name": "production-c2pa", "cases": []}),
         encoding="utf-8",
-    )
+     newline="\n")
 
     def add_suite_without_tool(payload: dict[str, Any]) -> None:
         check = next(
@@ -1576,7 +1576,7 @@ def test_capture_production_evidence_rejects_relative_provider_command_executabl
     provider_manifest.write_text(
         json.dumps(_production_provider_manifest_payload()),
         encoding="utf-8",
-    )
+     newline="\n")
 
     def add_provider_manifest(payload: dict[str, Any]) -> None:
         check = next(
@@ -1614,13 +1614,13 @@ def test_capture_production_evidence_rejects_provider_command_argument(
     out_root = tmp_path / "capture"
     tool = tmp_path / "bin" / "session-secret-provider"
     tool.parent.mkdir()
-    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8", newline="\n")
     tool.chmod(0o755)
     provider_manifest = tmp_path / "provider-manifest.production.json"
     provider_manifest.write_text(
         json.dumps(_production_provider_manifest_payload()),
         encoding="utf-8",
-    )
+     newline="\n")
 
     def add_provider_manifest(payload: dict[str, Any]) -> None:
         check = next(
@@ -1662,10 +1662,10 @@ def _run_preflight_with_provider_manifest(
     out_root = tmp_path / "capture"
     tool = tmp_path / "bin" / "session-secret-provider"
     tool.parent.mkdir()
-    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8", newline="\n")
     tool.chmod(0o755)
     provider_manifest = tmp_path / "provider-manifest.production.json"
-    provider_manifest.write_text(json.dumps(provider_payload), encoding="utf-8")
+    provider_manifest.write_text(json.dumps(provider_payload), encoding="utf-8", newline="\n")
 
     def add_provider_manifest(payload: dict[str, Any]) -> None:
         check = next(
@@ -1771,7 +1771,7 @@ def test_capture_production_evidence_preflight_rejects_symlinked_tool_executable
     tool = tmp_path / "bin" / "c2patool-real"
     link = tmp_path / "bin" / "c2patool-link"
     tool.parent.mkdir()
-    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8", newline="\n")
     tool.chmod(0o755)
     try:
         link.symlink_to(tool)
@@ -1813,7 +1813,7 @@ def test_capture_production_evidence_preflight_rejects_non_executable_tool(
     out_root = tmp_path / "capture"
     tool = tmp_path / "bin" / "c2patool"
     tool.parent.mkdir()
-    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8", newline="\n")
 
     def add_non_executable_tool_path(payload: dict[str, Any]) -> None:
         check = next(
@@ -1960,9 +1960,9 @@ def test_capture_production_evidence_preflight_snapshots_provenance_suite_assets
     tool.parent.mkdir()
     asset.parent.mkdir()
     tool_payload = "#!/bin/sh\nexit 0\n"
-    tool.write_text(tool_payload, encoding="utf-8")
+    tool.write_text(tool_payload, encoding="utf-8", newline="\n")
     tool.chmod(0o755)
-    asset.write_text('{"asset":"redacted-c2pa-fixture"}\n', encoding="utf-8")
+    asset.write_text('{"asset":"redacted-c2pa-fixture"}\n', encoding="utf-8", newline="\n")
     suite.write_text(
         json.dumps(
             {
@@ -1978,7 +1978,7 @@ def test_capture_production_evidence_preflight_snapshots_provenance_suite_assets
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     def add_suite_path(payload: dict[str, Any]) -> None:
         check = next(
@@ -2094,7 +2094,7 @@ def test_capture_production_evidence_preflight_rejects_symlinked_provenance_suit
     suite = tmp_path / "production-inputs" / "provenance-trust-suite.json"
     linked_suite = tmp_path / "production-inputs" / "linked-suite.json"
     suite.parent.mkdir()
-    suite.write_text('{"cases": []}\n', encoding="utf-8")
+    suite.write_text('{"cases": []}\n', encoding="utf-8", newline="\n")
     try:
         linked_suite.symlink_to(suite)
     except OSError as exc:
@@ -2139,9 +2139,9 @@ def test_capture_production_evidence_preflight_rejects_symlinked_suite_asset(
     suite = tmp_path / "production-inputs" / "provenance-trust-suite.json"
     tool.parent.mkdir()
     asset.parent.mkdir()
-    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8", newline="\n")
     tool.chmod(0o755)
-    asset.write_text('{"asset":"redacted-c2pa-fixture"}\n', encoding="utf-8")
+    asset.write_text('{"asset":"redacted-c2pa-fixture"}\n', encoding="utf-8", newline="\n")
     try:
         linked_asset.symlink_to(asset)
     except OSError as exc:
@@ -2155,7 +2155,7 @@ def test_capture_production_evidence_preflight_rejects_symlinked_suite_asset(
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     def add_suite_path(payload: dict[str, Any]) -> None:
         check = next(
@@ -2195,9 +2195,9 @@ def test_capture_production_evidence_preflight_rewrites_equals_form_suite_path(
     suite = tmp_path / "production-inputs" / "provenance-trust-suite.json"
     tool.parent.mkdir()
     asset.parent.mkdir()
-    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8", newline="\n")
     tool.chmod(0o755)
-    asset.write_text('{"asset":"redacted-c2pa-fixture"}\n', encoding="utf-8")
+    asset.write_text('{"asset":"redacted-c2pa-fixture"}\n', encoding="utf-8", newline="\n")
     suite.write_text(
         json.dumps(
             {
@@ -2207,7 +2207,7 @@ def test_capture_production_evidence_preflight_rewrites_equals_form_suite_path(
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     def add_equals_form_suite_path(payload: dict[str, Any]) -> None:
         check = next(
@@ -2354,7 +2354,7 @@ def test_capture_production_evidence_preflight_rejects_bare_suite_option(
     out_root = tmp_path / "capture"
     tool = tmp_path / "bin" / "c2patool"
     tool.parent.mkdir()
-    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8", newline="\n")
     tool.chmod(0o755)
 
     def add_bare_suite(payload: dict[str, Any]) -> None:
@@ -2393,7 +2393,7 @@ def test_capture_production_evidence_preflight_rejects_relative_suite_path(
     out_root = tmp_path / "capture"
     tool = tmp_path / "bin" / "c2patool"
     tool.parent.mkdir()
-    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8", newline="\n")
     tool.chmod(0o755)
 
     def add_relative_suite(payload: dict[str, Any]) -> None:
@@ -2502,7 +2502,7 @@ def test_capture_production_evidence_preflight_rejects_suite_repo_local_tool(
     asset = tmp_path / "production-inputs" / "asset.json"
     suite = tmp_path / "production-inputs" / "provenance-trust-suite.json"
     asset.parent.mkdir()
-    asset.write_text('{"asset":"redacted-c2pa-fixture"}\n', encoding="utf-8")
+    asset.write_text('{"asset":"redacted-c2pa-fixture"}\n', encoding="utf-8", newline="\n")
     suite.write_text(
         json.dumps(
             {
@@ -2512,7 +2512,7 @@ def test_capture_production_evidence_preflight_rejects_suite_repo_local_tool(
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     def add_suite_path(payload: dict[str, Any]) -> None:
         check = next(
@@ -2551,7 +2551,7 @@ def test_capture_production_evidence_preflight_rejects_suite_repo_local_asset(
     suite = tmp_path / "production-inputs" / "provenance-trust-suite.json"
     tool.parent.mkdir()
     suite.parent.mkdir()
-    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8", newline="\n")
     tool.chmod(0o755)
     suite.write_text(
         json.dumps(
@@ -2567,7 +2567,7 @@ def test_capture_production_evidence_preflight_rejects_suite_repo_local_asset(
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     def add_suite_path(payload: dict[str, Any]) -> None:
         check = next(
@@ -2605,7 +2605,7 @@ def test_capture_production_evidence_preflight_rejects_invalid_suite_tool_path_b
     asset = tmp_path / "production-inputs" / "asset.json"
     suite = tmp_path / "production-inputs" / "provenance-trust-suite.json"
     asset.parent.mkdir()
-    asset.write_text('{"asset":"redacted-c2pa-fixture"}\n', encoding="utf-8")
+    asset.write_text('{"asset":"redacted-c2pa-fixture"}\n', encoding="utf-8", newline="\n")
     suite.write_text(
         json.dumps(
             {
@@ -2615,7 +2615,7 @@ def test_capture_production_evidence_preflight_rejects_invalid_suite_tool_path_b
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     def add_suite_path(payload: dict[str, Any]) -> None:
         check = next(
@@ -2655,7 +2655,7 @@ def test_capture_production_evidence_preflight_rejects_invalid_suite_asset_path_
     suite = tmp_path / "production-inputs" / "provenance-trust-suite.json"
     tool.parent.mkdir()
     suite.parent.mkdir()
-    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8", newline="\n")
     tool.chmod(0o755)
     suite.write_text(
         json.dumps(
@@ -2668,7 +2668,7 @@ def test_capture_production_evidence_preflight_rejects_invalid_suite_asset_path_
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     def add_suite_path(payload: dict[str, Any]) -> None:
         check = next(
@@ -2714,7 +2714,7 @@ def test_capture_production_evidence_preflight_rejects_suite_in_global_args(
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     def add_suite_global_args(payload: dict[str, Any]) -> None:
         check = next(
@@ -2753,12 +2753,12 @@ def test_capture_production_evidence_preflight_rejects_c2pa_tool_in_global_args(
     suite = tmp_path / "production-inputs" / "provenance-trust-suite.json"
     tool.parent.mkdir()
     suite.parent.mkdir()
-    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8", newline="\n")
     tool.chmod(0o755)
     suite.write_text(
         json.dumps({"name": "production-c2pa", "cases": []}),
         encoding="utf-8",
-    )
+     newline="\n")
 
     def add_global_tool(payload: dict[str, Any]) -> None:
         check = next(
@@ -2835,7 +2835,7 @@ def test_capture_production_evidence_preflight_rejects_secret_input_artifact(
             'MDEyMzQ1Njc4OWFiY2RlZg"}'
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     def add_secret_artifact_path(payload: dict[str, Any]) -> None:
         payload["checks"][0]["args"] = ["--cases", str(artifact)]
@@ -2999,7 +2999,7 @@ def test_capture_production_evidence_uses_staged_input_snapshot_after_source_mut
     linked_input_root = tmp_path / "linked-production-inputs"
     fake_python = tmp_path / "fake-python"
     source_artifact.parent.mkdir()
-    source_artifact.write_text('{"value": "original"}\n', encoding="utf-8")
+    source_artifact.write_text('{"value": "original"}\n', encoding="utf-8", newline="\n")
     try:
         linked_input_root.symlink_to(source_artifact.parent, target_is_directory=True)
     except OSError as exc:
@@ -3074,7 +3074,7 @@ fi
 exec "$REAL_PYTHON" "$@"
 """,
         encoding="utf-8",
-    )
+     newline="\n")
     fake_python.chmod(0o755)
 
     proc = subprocess.run(
@@ -3298,7 +3298,7 @@ fi
 exec "$REAL_PYTHON" "$@"
 """,
         encoding="utf-8",
-    )
+     newline="\n")
     fake_python.chmod(0o755)
 
     proc = subprocess.run(
@@ -3400,7 +3400,7 @@ fi
 exec "$REAL_PYTHON" "$@"
 """,
         encoding="utf-8",
-    )
+     newline="\n")
     fake_python.chmod(0o755)
 
     proc = subprocess.run(
@@ -3443,7 +3443,7 @@ def test_capture_production_evidence_fails_if_generated_bundle_contains_symlink(
     fingerprint_record = tmp_path / "mnemosyne-production-bundle-fingerprint.json"
     fake_python = tmp_path / "fake-python"
     outside = tmp_path / "outside-generated-artifact.txt"
-    outside.write_text("outside generated artifact\n", encoding="utf-8")
+    outside.write_text("outside generated artifact\n", encoding="utf-8", newline="\n")
     probe = tmp_path / "symlink-probe"
     try:
         probe.symlink_to(outside)
@@ -3516,7 +3516,7 @@ fi
 exec "$REAL_PYTHON" "$@"
 """,
         encoding="utf-8",
-    )
+     newline="\n")
     fake_python.chmod(0o755)
 
     proc = subprocess.run(
@@ -3626,7 +3626,7 @@ fi
 exec "$REAL_PYTHON" "$@"
 """,
         encoding="utf-8",
-    )
+     newline="\n")
     fake_python.chmod(0o755)
 
     proc = subprocess.run(
@@ -3770,7 +3770,7 @@ fi
 exec "$REAL_PYTHON" "$@"
 """,
         encoding="utf-8",
-    )
+     newline="\n")
     fake_python.chmod(0o755)
 
     proc = subprocess.run(
@@ -4021,7 +4021,7 @@ fi
 exec "$REAL_PYTHON" "$@"
 """,
         encoding="utf-8",
-    )
+     newline="\n")
     fake_python.chmod(0o755)
 
     proc = subprocess.run(
@@ -4108,16 +4108,16 @@ def test_production_evidence_binary_custody_paths_only_exempts_binary_input_arti
     )
     (input_artifacts / "0002-suite.json").write_text(
         '{"suite": "text"}\n', encoding="utf-8"
-    )
+    , newline="\n")
     # UTF-8 text that merely LOOKS like a binary asset by name -- must still be scanned.
     (input_artifacts / "0003-asset.c2pa").write_text(
         "totally text pretending to be binary\n", encoding="utf-8"
-    )
+    , newline="\n")
     # Nested assets: the custody walk must recurse, and nested text must still be scanned.
     nested_dir = input_artifacts / "nested" / "deep"
     nested_dir.mkdir(parents=True)
     (nested_dir / "asset.bin").write_bytes(b"\xff\xd8\xff\xe0 nested binary blob")
-    (nested_dir / "notes.txt").write_text("nested text notes\n", encoding="utf-8")
+    (nested_dir / "notes.txt").write_text("nested text notes\n", encoding="utf-8", newline="\n")
     tool_snapshot = tool_artifacts / "0001-c2patool"
     tool_snapshot.write_bytes(b"\x00\x01 binary tool bytes")
 
@@ -4273,7 +4273,7 @@ def test_cli_production_evidence_verify_accepts_binary_provenance_asset(
         binary_asset.read_text(encoding="utf-8")
 
     _minimal_production_manifest(manifest)
-    fake_python.write_text(_release_capture_fake_python(), encoding="utf-8")
+    fake_python.write_text(_release_capture_fake_python(), encoding="utf-8", newline="\n")
     fake_python.chmod(0o755)
 
     capture = subprocess.run(
@@ -4362,8 +4362,8 @@ def test_production_evidence_path_rewrites_fold_in_executable_tool_references(
     tool_snapshot_last = bundle / "tool-artifacts" / "0008-suite.tool-verify.sh-abc"
     suite_snapshot = bundle / "input-artifacts" / "0021-provenance-trust-suite.json"
     for path in (tool_snapshot_first, tool_snapshot_last):
-        path.write_text("#!/bin/sh\necho ok\n", encoding="utf-8")
-    suite_snapshot.write_text("{}\n", encoding="utf-8")
+        path.write_text("#!/bin/sh\necho ok\n", encoding="utf-8", newline="\n")
+    suite_snapshot.write_text("{}\n", encoding="utf-8", newline="\n")
 
     custody_tool = "/opt/mnemosyne-custody/c2pa/c2pa-verify-host.sh"
     custody_suite = "/opt/mnemosyne-custody/input-artifacts/provenance-trust-suite.json"

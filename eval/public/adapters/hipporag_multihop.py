@@ -86,7 +86,7 @@ def run(
                 for document in corpus
             ),
             encoding="utf-8",
-        )
+         newline="\n")
         if isinstance(capture_cli, MnemoCLI):
             first = corpus[0]
             capture_cli.install_consolidation_gate_case(
@@ -169,7 +169,7 @@ def run(
                         for question in chunk
                     ),
                     encoding="utf-8",
-                )
+                 newline="\n")
                 batches.append(path)
                 expected_counts.append(len(chunk))
             # One long-lived CLI process per bounded batch, instead of loading
@@ -307,7 +307,7 @@ def run_reader_qa(
                 for document in benchmark["corpus"]
             ),
             encoding="utf-8",
-        )
+         newline="\n")
         if isinstance(cli, MnemoCLI):
             first = benchmark["corpus"][0]
             cli.install_consolidation_gate_case(f"{first['title']}\n{first['content']}")
@@ -340,7 +340,7 @@ def run_reader_qa(
                 for question in benchmark["questions"]
             ),
             encoding="utf-8",
-        )
+         newline="\n")
         answer_cli = (
             replace(cli, global_flags=[*cli.global_flags, "--evaluation-read-only"])
             if isinstance(cli, MnemoCLI)

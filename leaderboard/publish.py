@@ -175,7 +175,7 @@ def publish_site(
                     allow_nan=False,
                 ),
                 encoding="utf-8",
-            )
+             newline="\n")
             if verified_artifacts:
                 render_site(
                     result_path,

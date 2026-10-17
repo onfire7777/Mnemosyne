@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -20,6 +19,7 @@ from mnemosyne.audit_chain import (
     local_hmac_provider,
     verify_audit_chain,
 )
+from mnemosyne.command_line import join_command
 
 TENANT = "tenant-a"
 
@@ -125,7 +125,7 @@ def test_canonical_entry_sha256_rejects_non_json_entries() -> None:
 
 
 def vault_style_command() -> str:
-    return shlex.join(
+    return join_command(
         [
             sys.executable,
             "-c",
@@ -150,10 +150,10 @@ def test_command_hmac_provider_round_trip_and_failures() -> None:
     result = verify_audit_chain(document, ENTRIES, tenant_id=TENANT, hmac_provider=provider)
     assert result["verified"] is True
 
-    failing = command_hmac_provider(shlex.join([sys.executable, "-c", "raise SystemExit(3)"]))
+    failing = command_hmac_provider(join_command([sys.executable, "-c", "raise SystemExit(3)"]))
     with pytest.raises(AuditChainError, match="exited 3"):
         failing("deadbeef")
-    silent = command_hmac_provider(shlex.join([sys.executable, "-c", "pass"]))
+    silent = command_hmac_provider(join_command([sys.executable, "-c", "pass"]))
     with pytest.raises(AuditChainError, match="produced no output"):
         silent("deadbeef")
 
@@ -184,7 +184,7 @@ def test_cli_audit_chain_export_and_verify_round_trip(tmp_path: Path) -> None:
     assert capture.returncode == 0, capture.stderr
 
     secret_file = tmp_path / "audit-hmac-secret"
-    secret_file.write_text("dev-secret\n", encoding="utf-8")
+    secret_file.write_text("dev-secret\n", encoding="utf-8", newline="\n")
     chain_file = tmp_path / "audit-chain.json"
 
     exported = run_raw_cli(
@@ -221,7 +221,7 @@ def test_cli_audit_chain_export_and_verify_round_trip(tmp_path: Path) -> None:
     state = json.loads(store.read_text(encoding="utf-8"))
     assert state["audit_log"], "expected audit entries in the store"
     state["audit_log"][0]["operation"] = "rewritten"
-    store.write_text(json.dumps(state), encoding="utf-8")
+    store.write_text(json.dumps(state), encoding="utf-8", newline="\n")
 
     tampered = run_raw_cli(
         store,

@@ -101,12 +101,12 @@ def _write_stub_tool(tmp_path: Path, report: dict) -> str:
     payload.write_text(
         "import json, sys\nprint(json.dumps(%r))\n" % report,
         encoding="utf-8",
-    )
+     newline="\n")
     tool = tmp_path / "c2patool-stub.sh"
     tool.write_text(
         "#!/usr/bin/env bash\nexec %s %s\n" % (sys.executable, payload),
         encoding="utf-8",
-    )
+     newline="\n")
     tool.chmod(tool.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
     return str(tool)
 

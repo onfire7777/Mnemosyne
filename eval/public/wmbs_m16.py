@@ -420,7 +420,7 @@ def run_matrix(output_dir):
             json.dumps(EXPECTED, sort_keys=True).encode()
         ).hexdigest(),
         source_sha256={
-            str(p.relative_to(Path(__file__).resolve().parents[2])): hashlib.sha256(
+            p.relative_to(Path(__file__).resolve().parents[2]).as_posix(): hashlib.sha256(
                 p.read_bytes()
             ).hexdigest()
             for p in (
@@ -433,7 +433,7 @@ def run_matrix(output_dir):
     )
     (root / "report.json").write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n"
-    )
+    , newline="\n")
     return report
 
 

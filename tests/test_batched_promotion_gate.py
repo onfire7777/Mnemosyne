@@ -31,7 +31,7 @@ def _run_growth(run_dir: Path, extra: list[str]) -> tuple[Path, list[Any]]:
                 continue
             path = run_dir / f"batch-{index}.jsonl"
             path.write_text("".join(json.dumps(row, sort_keys=True) + "\n" for row in step["capture"]),
-                            encoding="utf-8")
+                            encoding="utf-8", newline="\n")
             outputs.append(g._cli(["--backend", "local", "--store", str(store), "capture-batch",
                                    "--input-jsonl", str(path), "--consolidate",
                                    "--consolidation-rejections", "report", *extra]))

@@ -33,11 +33,11 @@ def test_modified_or_escaping_evidence_cannot_be_exported(tmp_path, damage):
     shutil.copytree(source / name, tmp_path / name)
     root = tmp_path / name
     if damage == 'bytes':
-        (root / 'README.md').write_text('altered')
+        (root / 'README.md').write_text('altered', newline="\n")
     else:
         manifest = json.loads((root / 'manifest.json').read_text())
         manifest['files']['../outside.txt'] = '0' * 64
-        (root / 'manifest.json').write_text(json.dumps(manifest))
+        (root / 'manifest.json').write_text(json.dumps(manifest), newline="\n")
     with pytest.raises(ValueError):
         evidence_pages(tmp_path)
 
@@ -51,11 +51,11 @@ def test_manifest_bounds_and_unambiguous_archive_paths(tmp_path, damage):
     if damage == 'large_manifest':
         path.write_bytes(b' ' * (1024 * 1024 + 1))
     elif damage == 'duplicate_key':
-        path.write_text('{"files":{},"files":{"README.md":"x"}}')
+        path.write_text('{"files":{},"files":{"README.md":"x"}}', newline="\n")
     elif damage == 'alias_path':
         manifest = json.loads(path.read_text())
         manifest['files']['./README.md'] = manifest['files']['README.md']
-        path.write_text(json.dumps(manifest))
+        path.write_text(json.dumps(manifest), newline="\n")
     else:
         target = tmp_path / 'outside.json'
         path.rename(target)

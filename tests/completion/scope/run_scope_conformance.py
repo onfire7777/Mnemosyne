@@ -130,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
                 "deferred_real_deployment_validation": list(mod.REAL_DEPLOYMENT_VALIDATION),
             }
         args.json.parent.mkdir(parents=True, exist_ok=True)
-        args.json.write_text(json.dumps(artifact, indent=2))
+        args.json.write_text(json.dumps(artifact, indent=2), newline="\n")
         if not args.quiet:
             print(f"\nJSON evidence artifact -> {args.json}")
 

@@ -1605,7 +1605,7 @@ def test_r25_semantic_verifier_rejects_signed_but_incomplete_manifest(
     manifest = _valid_manifest()
     mutate(manifest)
     manifest_path = tmp_path / "deletion-manifest.json"
-    manifest_path.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
+    manifest_path.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8", newline="\n")
     sign_evidence_manifest(manifest_path, private_key)
     assert verify_evidence_manifest_signature(manifest_path, public_key)["verified"] is True
     # Go through the combined path, not the in-memory dict: the threat this
@@ -1682,7 +1682,7 @@ def test_r25_complete_manifest_is_signed_then_semantically_verified(tmp_path: Pa
     semantic = verifier.verify_deletion_manifest(manifest)
     assert semantic == {"complete": True, "errors": []}
     manifest_path = tmp_path / "deletion-manifest.json"
-    manifest_path.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
+    manifest_path.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8", newline="\n")
     sign_evidence_manifest(manifest_path, private_key)
     verified = verify_evidence_manifest_signature(manifest_path, public_key)
     assert verified["verified"] is True
@@ -1859,18 +1859,18 @@ def test_r25_signed_verification_fails_closed_on_tamper_and_malformed_bytes(tmp_
 
     # Semantically complete but tampered after signing: only the signature fails.
     tampered = dict(manifest, reason="opaque:" + "1" * 64)
-    manifest_path.write_text(json.dumps(tampered, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    manifest_path.write_text(json.dumps(tampered, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     result = verifier.verify_signed_deletion_manifest(manifest_path, public_key)
     assert result["complete"] is False
     assert any("signature" in error for error in result["errors"])
 
-    manifest_path.write_text("not-json", encoding="utf-8")
+    manifest_path.write_text("not-json", encoding="utf-8", newline="\n")
     result = verifier.verify_signed_deletion_manifest(manifest_path, public_key)
     assert result["complete"] is False
     assert result["errors"]
 
     # Hostile nesting must fail closed at parse time, not crash the verifier.
-    manifest_path.write_text("[" * 100_000 + "]" * 100_000, encoding="utf-8")
+    manifest_path.write_text("[" * 100_000 + "]" * 100_000, encoding="utf-8", newline="\n")
     result = verifier.verify_signed_deletion_manifest(manifest_path, public_key)
     assert result["complete"] is False
     assert result["errors"]

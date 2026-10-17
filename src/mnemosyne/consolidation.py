@@ -3207,6 +3207,7 @@ _SECRET_KEY_RE = re.compile(
 _SECRET_VALUE_RE = re.compile(
     r"\b(?:Bearer\s+[A-Za-z0-9._~+/=-]+|sk-[A-Za-z0-9]{8,}|gh[pousr]_[A-Za-z0-9_]+|[A-Za-z0-9+/]{32,}={0,2})\b"
 )
+_CONTENT_ID_RE = re.compile(r"[0-9a-f]{64}")
 _CONTROL_MARKER_RE = re.compile(r"(?:^|\b)(?:system|developer|assistant|tool)\s*:", re.I)
 _CONTROL_DIRECTIVE_RE = re.compile(
     r"\b(ignore|disregard|override|forget|reveal|exfiltrate|execute|run|call|write|update|delete|"
@@ -3639,6 +3640,13 @@ def _provider_proposal_record_value(
         for key, child in value.items():
             key_text = str(key)
             if not _provider_proposal_safe_key(key_text):
+                continue
+            # Evidence ids are content hashes, not secrets: redacting them as "secret-like hex" broke
+            # every provider's source citations on replay. Only exact sha256 ids are kept as they are.
+            if key_text.endswith("_cids") and isinstance(child, list) and child and all(
+                isinstance(item, str) and _CONTENT_ID_RE.fullmatch(item) for item in child
+            ):
+                result[key_text] = list(child)[:_PROVIDER_PROPOSAL_MAX_ITEMS]
                 continue
             result[key_text] = _provider_proposal_record_value(
                 child,

@@ -140,12 +140,12 @@ def _retamper(bundle: Path, name: str, payload: object) -> None:
     """Rewrite one bundle file and re-seal the manifest around it."""
     (bundle / name).write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    , newline="\n")
     manifest = json.loads((bundle / "bundle-manifest.json").read_text(encoding="utf-8"))
     manifest["files"][name] = hashlib.sha256((bundle / name).read_bytes()).hexdigest()
     (bundle / "bundle-manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    , newline="\n")
 
 
 def test_bundle_pins_the_scored_denominator_to_the_fixture(

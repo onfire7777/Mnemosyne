@@ -682,7 +682,7 @@ class SkillStore:
         packed = base64.b64encode(zlib.compress(json.dumps(payload).encode("utf-8"), 9)).decode("ascii")
         out.parent.mkdir(parents=True, exist_ok=True)
         view = f"---\nname: {row['name']}\ndescription: {json.dumps(about)}\n---\n"
-        out.write_text(f"{view}{fw['document'].rstrip()}\n\n{BS_HEAD}2\n{packed}\n-->\n", encoding="utf-8")
+        out.write_text(f"{view}{fw['document'].rstrip()}\n\n{BS_HEAD}2\n{packed}\n-->\n", encoding="utf-8", newline="\n")
         return {"skill_id": row["skill_id"], "revision": row["revision"], "path": str(out), "kind": "burnskill",
                 "bytes": out.stat().st_size}
 

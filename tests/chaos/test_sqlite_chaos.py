@@ -246,7 +246,7 @@ def test_projection_sidecar_corruption_and_deletion_trigger_rebuild(tmp_path: Pa
     stored = json.loads(proj_path.read_text(encoding="utf-8"))
     for name in stored:
         stored[name]["fingerprint"] = "0" * 64
-    proj_path.write_text(json.dumps(stored), encoding="utf-8")
+    proj_path.write_text(json.dumps(stored), encoding="utf-8", newline="\n")
 
     engine_b = SqliteEngine(root)  # fresh registry cache (simulated restart)
     rebuilt = engine_b.ensure_projections(tenant)

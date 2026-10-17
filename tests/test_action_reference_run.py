@@ -31,7 +31,7 @@ def test_reference_tampering_is_rejected(tmp_path, damage):
             record['response']['firing_observations'][0]['intention_id'] = 'forged'
         else:
             record['response']['evaluation_wall_ms'] = -1
-        path.write_text(''.join(json.dumps(r) + '\n' for r in records))
+        path.write_text(''.join(json.dumps(r) + '\n' for r in records), newline="\n")
     else:
         name = {'identity': 'source.json', 'sink': 'sink.json', 'status': 'status.json'}[damage]
         path = output / name
@@ -42,7 +42,7 @@ def test_reference_tampering_is_rejected(tmp_path, damage):
             value['cases'][0]['snapshot']['receipts'].pop()
         else:
             value['completed_operations'] -= 1
-        path.write_text(json.dumps(value))
+        path.write_text(json.dumps(value), newline="\n")
     with pytest.raises(ValueError):
         action_reference_run.recompute(output)
 

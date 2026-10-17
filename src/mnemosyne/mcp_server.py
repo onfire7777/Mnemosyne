@@ -913,7 +913,7 @@ def build_sdk_server(**kwargs: Any) -> Any:
     """Build an official MCP SDK server around the Mnemosyne tool facade."""
 
     try:
-        from mcp import types
+        import mcp_types as types
         from mcp.server.lowlevel import Server
     except ImportError as exc:  # pragma: no cover - exercised when optional extra is absent.
         raise RuntimeError("Official MCP SDK mode requires `mnemosyne-memory[mcp]`.") from exc
@@ -924,14 +924,17 @@ def build_sdk_server(**kwargs: Any) -> Any:
         schemas_by_name = {item["name"]: item["inputSchema"] for item in tool_specs}
         from mnemosyne.buildinfo import build_version
 
-        server = Server("mnemosyne-memory", version=build_version())
+        async def list_tools(_ctx: Any, _params: Any) -> Any:
+            return types.ListToolsResult(tools=[types.Tool(**item) for item in tool_specs])
 
-        @server.list_tools()
-        async def list_tools() -> list[Any]:
-            return [types.Tool(**item) for item in tool_specs]
+        async def on_call_tool(_ctx: Any, params: Any) -> Any:
+            result = await call_tool(params.name, params.arguments)
+            if isinstance(result, types.CallToolResult):
+                return result
+            # a tool's own value: its JSON as text plus the value itself, as 1.x's SDK wrapped it
+            return types.CallToolResult.model_validate(result if "content" in result else _tool_result(result))
 
-        @server.call_tool(validate_input=False)
-        async def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any] | Any:
+        async def call_tool(name: str, arguments: dict[str, Any] | None) -> dict[str, Any] | Any:
             raw_arguments = dict(arguments or {})
             auth_params: dict[str, Any] = {}
             if "auth_token" in raw_arguments:
@@ -974,32 +977,32 @@ def build_sdk_server(**kwargs: Any) -> Any:
                 raise ValueError("unauthorized: valid MCP auth token required")
             return facade.tools._skills()
 
-        @server.list_prompts()
-        async def list_prompts() -> list[Any]:
-            return [types.Prompt(name=s["name"], description=s["applicability"] or None)
-                    for s in skills().search("")["skills"]]
+        async def list_prompts(_ctx: Any, _params: Any) -> Any:
+            return types.ListPromptsResult(prompts=[types.Prompt(name=s["name"], description=s["applicability"] or None)
+                                                    for s in skills().search("")["skills"]])
 
-        @server.get_prompt()
-        async def get_prompt(name: str, arguments: dict[str, str] | None) -> Any:
+        async def get_prompt(_ctx: Any, params: Any) -> Any:
             # shortcut: the first 20000 characters; a longer document is read on with skill_get.
-            got = skills().get(name, section="document", limit=20000)
+            got = skills().get(params.name, section="document", limit=20000)
             return types.GetPromptResult(description=f"The skill {got['name']}", messages=[types.PromptMessage(
                 role="user", content=types.TextContent(type="text", text=got["text"]))])
 
-        @server.list_resources()
-        async def list_resources() -> list[Any]:
+        async def list_resources(_ctx: Any, _params: Any) -> Any:
             store = skills()
-            return [types.Resource(uri=f"skill://{s['skill_id']}/{f}", name=f"{s['name']}/{f}")
-                    for s in store.search("")["skills"] for f in store.files(s["skill_id"])]
+            return types.ListResourcesResult(resources=[
+                types.Resource(uri=f"skill://{s['skill_id']}/{f}", name=f"{s['name']}/{f}")
+                for s in store.search("")["skills"] for f in store.files(s["skill_id"])])
 
-        @server.read_resource()
-        async def read_resource(uri: Any) -> Any:
-            from mcp.server.lowlevel.helper_types import ReadResourceContents
-
-            skill_id, _, path = str(uri).removeprefix("skill://").partition("/")
+        async def read_resource(_ctx: Any, params: Any) -> Any:
+            skill_id, _, path = str(params.uri).removeprefix("skill://").partition("/")
             got = skills().get(skill_id, attachment=path, limit=20000)
-            return [ReadResourceContents(content=got["text"], mime_type="text/plain")]
+            return types.ReadResourceResult(contents=[types.TextResourceContents(
+                uri=str(params.uri), text=got["text"], mime_type="text/plain")])
 
+        server = Server("mnemosyne-memory", version=build_version(), on_list_tools=list_tools,
+                        on_call_tool=on_call_tool, on_list_prompts=list_prompts, on_get_prompt=get_prompt,
+                        on_list_resources=list_resources, on_read_resource=read_resource)
+        server.mnemosyne_call_tool = call_tool  # the dispatch itself, for in-process callers and tests
         server.mnemosyne_mcp_facade = facade
     except BaseException:
         # Release without masking the construction error.
@@ -1050,8 +1053,7 @@ def build_sdk_streamable_http_app(
     """Build an official MCP SDK StreamableHTTP ASGI app."""
 
     try:
-        from mcp.server.fastmcp.server import StreamableHTTPASGIApp
-        from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+        from mcp.server.streamable_http_manager import StreamableHTTPASGIApp, StreamableHTTPSessionManager
         from starlette.applications import Starlette
         from starlette.responses import JSONResponse
         from starlette.routing import Route

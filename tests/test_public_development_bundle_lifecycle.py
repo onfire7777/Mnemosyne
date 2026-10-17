@@ -67,7 +67,7 @@ def test_registered_development_bundle_round_trip(
         (damaged / name).write_bytes(raw)
         manifest = json.loads((damaged / "bundle-manifest.json").read_text())
         manifest["files"][name] = hashlib.sha256(raw).hexdigest()
-        (damaged / "bundle-manifest.json").write_text(json.dumps(manifest))
+        (damaged / "bundle-manifest.json").write_text(json.dumps(manifest), newline="\n")
         with pytest.raises(BundleError):
             verify_bundle(damaged)
 

@@ -116,7 +116,7 @@ def sign_evidence_manifest(
         "signature_b64": base64.b64encode(signature).decode("ascii"),
     }
     target = signature_path or default_signature_path(manifest_path)
-    target.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    target.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     return {**document, "signature_path": str(target)}
 
 

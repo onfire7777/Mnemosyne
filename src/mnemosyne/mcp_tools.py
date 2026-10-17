@@ -1813,6 +1813,13 @@ class MemoryTools:
         )
         if normalized_valid_from is not None:
             assertion.valid_from = normalized_valid_from
+        else:
+            # A supersede made in the same clock tick as the original (Windows' clock is coarse)
+            # would read as two equally new values - contested - instead of a replacement.
+            previous = record.get("valid_from")
+            previous_at = datetime.fromisoformat(previous) if isinstance(previous, str) else previous
+            if isinstance(previous_at, datetime) and assertion.valid_from <= previous_at:
+                assertion.valid_from = previous_at + timedelta(microseconds=1)
         assertion_id = self.engine.upsert_assertion(assertion, branch=branch)
         return {
             "id": assertion_id,

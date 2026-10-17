@@ -139,7 +139,7 @@ def test_v2_development_record_renders_when_artifacts_are_bound(
 
 def test_render_error_does_not_leave_partial_destination(tmp_path: Path) -> None:
     results = tmp_path / "results.json"
-    results.write_text("{", encoding="utf-8")
+    results.write_text("{", encoding="utf-8", newline="\n")
     output = tmp_path / "site"
 
     with pytest.raises(RenderError):

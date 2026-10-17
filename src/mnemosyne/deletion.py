@@ -24,11 +24,25 @@ from typing import Any, Protocol, Sequence
 from uuid import UUID
 from weakref import WeakKeyDictionary
 
+from ._file_lock import exclusive_file_lock
 from .deletion_manifest import is_safe_surface_label
 from .models import Evidence
 from .security import SecurityPolicy, SessionIdentity
 
 SCHEMA = "mnemosyne.deletion_manifest.v1"
+_LAST_STAMP = datetime.min.replace(tzinfo=UTC)
+_STAMP_LOCK = threading.Lock()
+
+
+def _stamp() -> str:
+    """Now, strictly after the previous stamp: Windows' coarse clock would let a retry repeat its first attempt's time."""
+    global _LAST_STAMP
+    with _STAMP_LOCK:
+        now = datetime.now(UTC)
+        _LAST_STAMP = now if now > _LAST_STAMP else _LAST_STAMP + timedelta(microseconds=1)
+        return _LAST_STAMP.isoformat()
+
+
 _OPAQUE_KEY = secrets.token_bytes(32)
 # Object schemes whose keys are envelope-encrypted, so dropping the key really
 # does render the object unrecoverable.  Everything else fails closed.
@@ -134,7 +148,7 @@ class LedgerRecord:
     fingerprint: str
     tenant_id: str
     generation: int
-    requested_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    requested_at: str = field(default_factory=lambda: _stamp())
     receipts: dict[tuple[str, str], SurfaceReceipt] = field(default_factory=dict)
     manifest: dict[str, Any] | None = None
     revision: int = 0
@@ -193,10 +207,6 @@ class SQLiteDeletionLedger:
     durable = True
 
     def __init__(self, path: str | Path) -> None:
-        # Fail at construction, not mid-saga, on platforms without POSIX flock.
-        import fcntl
-
-        self._fcntl = fcntl
         self.path = Path(path)
         parent_created = not self.path.parent.exists()
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -261,13 +271,9 @@ class SQLiteDeletionLedger:
     @contextmanager
     def operation_lock(self) -> Any:
         """Serialize coordinators sharing this ledger, including other processes."""
-        lock_path = self.path.with_suffix(self.path.suffix + ".lock")
-        with lock_path.open("a+b") as lock_file:
-            self._fcntl.flock(lock_file.fileno(), self._fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                self._fcntl.flock(lock_file.fileno(), self._fcntl.LOCK_UN)
+        # flock on POSIX, msvcrt on Windows: the same cross-process exclusion either way
+        with exclusive_file_lock(self.path.with_suffix(self.path.suffix + ".lock")):
+            yield
 
     @staticmethod
     def _receipts(record: LedgerRecord) -> str:
@@ -312,7 +318,7 @@ class SQLiteDeletionLedger:
                 "SELECT COALESCE(MAX(generation), 0) + 1 FROM deletion_operations WHERE tenant_id = ?",
                 (stored_tenant,),
             ).fetchone()[0]
-            requested_at = datetime.now(UTC).isoformat()
+            requested_at = _stamp()
             connection.execute(
                 "INSERT INTO deletion_operations "
                 "(operation_id, fingerprint, tenant_id, generation, requested_at, receipts_json, manifest_json, revision) "
@@ -621,7 +627,7 @@ class DeletionCoordinator:
         receipt.error_code = None
         if kind in {"object", "backup", "cache"}:
             receipt.attempts += 1
-            receipt.attempted_at = datetime.now(UTC).isoformat()
+            receipt.attempted_at = _stamp()
             # Ledger checkpoint faults are journal infrastructure failures and
             # propagate; only surface interactions are recorded on the receipt.
             self.ledger.checkpoint(record)
@@ -672,7 +678,7 @@ class DeletionCoordinator:
             if not destructive_attempted:
                 receipt.attempts += 1
                 destructive_attempted = True
-                receipt.attempted_at = datetime.now(UTC).isoformat()
+                receipt.attempted_at = _stamp()
                 # Persist ambiguity before the external side effect.  A crash
                 # after commit therefore resumes by probing every reference.
                 self.ledger.checkpoint(record)
@@ -835,7 +841,7 @@ class DeletionCoordinator:
         # transient error code; a verified surface must not carry one.
         receipt.error_code = None
         receipt.verified_removed = True
-        receipt.verified_at = datetime.now(UTC).isoformat()
+        receipt.verified_at = _stamp()
         receipt.checkpoint = secrets.token_hex(8)
         return True
 
@@ -891,7 +897,7 @@ class DeletionCoordinator:
             return
         if not crash_resuming:
             receipt.attempts += 1
-            receipt.attempted_at = datetime.now(UTC).isoformat()
+            receipt.attempted_at = _stamp()
             # Persist the ambiguous state before the engine side effect. A
             # restarted operation probes each target before deciding whether
             # another destructive call is necessary.  Ledger checkpoint faults
@@ -1158,7 +1164,7 @@ class DeletionCoordinator:
             "operation_id": record.operation_id,
             "request_id": record.operation_id,
             "requested_at": record.requested_at,
-            "completed_at": datetime.now(UTC).isoformat() if complete else None,
+            "completed_at": _stamp() if complete else None,
             "mode": request["mode"],
             "requested_by_role": request["requested_by_role"],
             # Keyed by the ledger, not by a per-process key: a durable ledger

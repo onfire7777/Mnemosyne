@@ -45,7 +45,7 @@ def test_s3_config_from_env_reads_credentials_file(tmp_path) -> None:
     creds.write_text(
         '{"identities":[{"name":"m","credentials":[{"accessKey":"AK","secretKey":"SK"}]}]}',
         encoding="utf-8",
-    )
+     newline="\n")
     cfg = s3_config_from_env(
         {
             "MNEMOSYNE_S3_ENDPOINT": "https://s3.mnemo.local",
@@ -58,7 +58,7 @@ def test_s3_config_from_env_reads_credentials_file(tmp_path) -> None:
 
 def test_load_seaweed_credentials_flat_shape(tmp_path) -> None:
     creds = tmp_path / "flat.json"
-    creds.write_text('{"accessKey":"A","secretKey":"S"}', encoding="utf-8")
+    creds.write_text('{"accessKey":"A","secretKey":"S"}', encoding="utf-8", newline="\n")
     assert _load_seaweed_credentials(creds) == ("A", "S")
 
 

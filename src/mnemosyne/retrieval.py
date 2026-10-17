@@ -1808,9 +1808,10 @@ class CommandMediaEmbeddingProvider:
         metadata: dict[str, object] | None = None,
     ) -> list[float]:
         enforce_byte_limit(payload, limit=self.max_media_bytes, label="media embedding payload")
-        with tempfile.NamedTemporaryFile() as tmp:
+        # closed before the command reads it (Windows locks an open temp file); deleted on exit
+        with tempfile.NamedTemporaryFile(delete_on_close=False) as tmp:
             tmp.write(payload)
-            tmp.flush()
+            tmp.close()
             request = {
                 "path": tmp.name,
                 "media_type": media_type,

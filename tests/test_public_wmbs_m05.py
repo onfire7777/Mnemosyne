@@ -634,6 +634,7 @@ def test_trace_enforces_frozen_evidence_handle_bounds(handles) -> None:
         (False, "x" * 65537, False),
         (True, "contradictory answer", False),
     ],
+    ids=["missing", "none", "empty", "blank", "oversize", "contradictory"],
 )
 def test_trace_rejects_missing_or_contradictory_answer_text(
     abstained, answer_text, missing

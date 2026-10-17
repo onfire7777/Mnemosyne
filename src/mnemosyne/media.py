@@ -86,9 +86,10 @@ class CommandMediaTextExtractor:
     ) -> MediaExtractionResult:
         enforce_byte_limit(payload, limit=self.max_media_bytes, label="media extraction payload")
         suffix = _suffix_for_media_type(media_type)
-        with tempfile.NamedTemporaryFile(suffix=suffix) as tmp:
+        # closed before the command reads it (Windows locks an open temp file); deleted on exit
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete_on_close=False) as tmp:
             tmp.write(payload)
-            tmp.flush()
+            tmp.close()
             completed = subprocess.run(
                 [*self.command, tmp.name],
                 check=True,

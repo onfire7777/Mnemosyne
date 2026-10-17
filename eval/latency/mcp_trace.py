@@ -604,8 +604,8 @@ def main() -> None:
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     json_path = REPORTS_DIR / f"{prefix}.json"
     md_path = REPORTS_DIR / f"{prefix}.md"
-    json_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    md_path.write_text(_render_markdown(report), encoding="utf-8")
+    json_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
+    md_path.write_text(_render_markdown(report), encoding="utf-8", newline="\n")
 
     print(f"wrote {json_path}")
     print(f"wrote {md_path}")

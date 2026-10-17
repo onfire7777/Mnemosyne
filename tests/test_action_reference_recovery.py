@@ -22,7 +22,7 @@ def test_full_durable_reference_recovery_replays_with_sink(tmp_path):
     records = [json.loads(line) for line in (output / 'operations.jsonl').read_text().splitlines()]
     row = next(r for r in records if r['command'] == 'task.update' and 'expected_revision' in r['resolved_payload'])
     row['resolved_payload']['expected_revision'] = '0' * 64
-    (output / 'operations.jsonl').write_text(''.join(json.dumps(r) + '\n' for r in records))
+    (output / 'operations.jsonl').write_text(''.join(json.dumps(r) + '\n' for r in records), newline="\n")
     with pytest.raises(ValueError):
         recovery.recompute(output)
 
@@ -48,7 +48,7 @@ def test_reference_recovery_requires_distinct_identity_and_sink(tmp_path):
     path = output / 'source.json'
     source = json.loads(path.read_text())
     source['sink_enabled'] = False
-    path.write_text(json.dumps(source))
+    path.write_text(json.dumps(source), newline="\n")
     with pytest.raises(ValueError, match='identity and sink'):
         recovery.recompute(output)
 

@@ -296,7 +296,7 @@ def _renderer_base_env() -> dict[str, str]:
 
 def _write_executable(path: Path) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8", newline="\n")
     path.chmod(0o755)
     return str(path)
 
@@ -404,7 +404,7 @@ def _write_render_env_file(tmp_path: Path, env: dict[str, str]) -> Path:
         f"export {name}={shlex.quote(env[name])}"
         for name in _placeholders()
     ]
-    env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    env_file.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     env_file.chmod(0o600)
     return env_file
 
@@ -422,7 +422,7 @@ def _write_runtime_env_file(
         for name in selected_names
         if name in env
     ]
-    runtime_env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    runtime_env_file.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     runtime_env_file.chmod(0o600)
     return runtime_env_file
 
@@ -435,14 +435,14 @@ def _populate_required_input_artifacts(
         path = evidence_dir / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
         if relative_path == "provenance-trust-suite.json":
-            path.write_text(suite_payload, encoding="utf-8")
+            path.write_text(suite_payload, encoding="utf-8", newline="\n")
         elif relative_path == "provider-manifest.production.json":
             path.write_text(
                 PROVIDER_MANIFEST_TEMPLATE.read_text(encoding="utf-8"),
                 encoding="utf-8",
-            )
+             newline="\n")
         else:
-            path.write_text("{}\n", encoding="utf-8")
+            path.write_text("{}\n", encoding="utf-8", newline="\n")
 
 
 def _provider_manifest_env_refs() -> list[str]:
@@ -850,7 +850,7 @@ def test_renderer_runtime_env_file_rejects_unexpected_keys(tmp_path: Path) -> No
         'export MNEMOSYNE_EMBEDDING_URL="https://providers.example.com/embedding"\n'
         'export NOT_ALLOWED_RUNTIME_SECRET="nope"\n',
         encoding="utf-8",
-    )
+     newline="\n")
     runtime_env_file.chmod(0o600)
 
     proc = subprocess.run(
@@ -1114,7 +1114,7 @@ def test_renderer_check_environment_rejects_absolute_artifact_outside_evidence_d
     env = _filled_render_env(tmp_path)
     _populate_required_input_artifacts(env)
     outside_artifact = tmp_path / "external-auth-ops-bundle.json"
-    outside_artifact.write_text("{}\n", encoding="utf-8")
+    outside_artifact.write_text("{}\n", encoding="utf-8", newline="\n")
     custom_template = tmp_path / "production-soak.custom.json"
     custom_template.write_text(
         PRODUCTION_TEMPLATE.read_text(encoding="utf-8").replace(
@@ -1123,7 +1123,7 @@ def test_renderer_check_environment_rejects_absolute_artifact_outside_evidence_d
             1,
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     proc = subprocess.run(
         [*RENDERER_CMD, "--check-environment", "--template", str(custom_template)],
@@ -1159,7 +1159,7 @@ def test_renderer_check_environment_rejects_symlinked_input_artifact(
     evidence_dir = Path(env["MNEMOSYNE_PROD_EVIDENCE_DIR"])
     target_artifact = evidence_dir / "auth-ops-bundle.json"
     symlink_target = evidence_dir / "auth-ops-bundle.real.json"
-    symlink_target.write_text("{}\n", encoding="utf-8")
+    symlink_target.write_text("{}\n", encoding="utf-8", newline="\n")
     target_artifact.unlink()
     try:
         target_artifact.symlink_to(symlink_target)
@@ -1345,7 +1345,7 @@ def test_renderer_check_environment_fails_on_invalid_provenance_suite_asset_path
 ) -> None:
     env = _filled_render_env(tmp_path)
     outside_asset = tmp_path / "outside-suite-asset.txt"
-    outside_asset.write_text("asset\n", encoding="utf-8")
+    outside_asset.write_text("asset\n", encoding="utf-8", newline="\n")
     _populate_required_input_artifacts(
         env,
         suite_payload=json.dumps({"cases": [{"asset_path": str(outside_asset)}]})
@@ -1396,7 +1396,7 @@ def test_renderer_check_environment_rejects_escaped_manifest_artifact_path(
     outside_artifact = (
         Path(env["MNEMOSYNE_PROD_EVIDENCE_DIR"]).parent / "outside-auth-ops-bundle.json"
     )
-    outside_artifact.write_text("{}\n", encoding="utf-8")
+    outside_artifact.write_text("{}\n", encoding="utf-8", newline="\n")
     template = tmp_path / "production-soak-manifest.template.json"
     template.write_text(
         (REPO / "infra" / "templates" / "production-soak-manifest.template.json")
@@ -1407,7 +1407,7 @@ def test_renderer_check_environment_rejects_escaped_manifest_artifact_path(
             1,
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     proc = subprocess.run(
         [*RENDERER_CMD, "--check-environment", "--template", str(template)],
@@ -1441,7 +1441,7 @@ def test_renderer_check_environment_rejects_escaped_provenance_suite_asset_path(
     env = _filled_render_env(tmp_path)
     evidence_dir = Path(env["MNEMOSYNE_PROD_EVIDENCE_DIR"])
     outside_asset = evidence_dir.parent / "outside-suite-asset.txt"
-    outside_asset.write_text("asset\n", encoding="utf-8")
+    outside_asset.write_text("asset\n", encoding="utf-8", newline="\n")
     _populate_required_input_artifacts(
         env,
         suite_payload=json.dumps(
@@ -1486,8 +1486,8 @@ def test_renderer_check_environment_accepts_provenance_suite_assets(
     evidence_dir = Path(env["MNEMOSYNE_PROD_EVIDENCE_DIR"])
     asset = evidence_dir / "suite-asset.txt"
     c2pa_asset = evidence_dir / "suite-c2pa-asset.txt"
-    asset.write_text("asset\n", encoding="utf-8")
-    c2pa_asset.write_text("c2pa asset\n", encoding="utf-8")
+    asset.write_text("asset\n", encoding="utf-8", newline="\n")
+    c2pa_asset.write_text("c2pa asset\n", encoding="utf-8", newline="\n")
     _populate_required_input_artifacts(
         env,
         suite_payload=json.dumps(
@@ -1705,7 +1705,7 @@ def test_renderer_check_environment_rejects_non_executable_c2pa_tool(
 ) -> None:
     env = _filled_render_env(tmp_path)
     tool = tmp_path / "bin" / "not-executable-c2patool"
-    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8", newline="\n")
     tool.chmod(0o600)
     env["MNEMOSYNE_PROD_C2PA_TOOL"] = str(tool)
 
@@ -1732,7 +1732,7 @@ def test_renderer_output_rejects_non_executable_c2pa_tool(tmp_path: Path) -> Non
     env = _filled_render_env(tmp_path)
     _populate_required_input_artifacts(env)
     tool = tmp_path / "bin" / "not-executable-c2patool"
-    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8", newline="\n")
     tool.chmod(0o600)
     env["MNEMOSYNE_PROD_C2PA_TOOL"] = str(tool)
 
@@ -1840,7 +1840,7 @@ def test_renderer_rejects_secret_bearing_manifest_args(tmp_path: Path) -> None:
         ).read_text(encoding="utf-8")
     )
     payload["checks"][0]["global_args"] = ["--postgres-dsn", "postgresql://db/prod"]
-    template.write_text(json.dumps(payload), encoding="utf-8")
+    template.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
 
     proc = subprocess.run(
         [*RENDERER_CMD, "--output", str(output), "--template", str(template)],
@@ -1867,7 +1867,7 @@ def test_renderer_rejects_token_suffix_manifest_args(tmp_path: Path) -> None:
         ).read_text(encoding="utf-8")
     )
     payload["checks"][0]["args"] = ["--github-token", "from-env-instead"]
-    template.write_text(json.dumps(payload), encoding="utf-8")
+    template.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
 
     proc = subprocess.run(
         [*RENDERER_CMD, "--output", str(output), "--template", str(template)],

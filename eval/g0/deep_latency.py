@@ -152,7 +152,7 @@ def main(argv: list[str] | None = None) -> int:
     report = run_deep_latency_eval()
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
-        args.out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+        args.out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", newline="\n")
     if args.print_json or not args.out:
         print(json.dumps(report, indent=2, sort_keys=True))
     return 0

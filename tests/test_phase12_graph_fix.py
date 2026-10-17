@@ -123,7 +123,7 @@ def test_capture_batch_persists_every_extracted_fact_with_provenance(
         )
         + "\n",
         encoding="utf-8",
-    )
+     newline="\n")
     store = tmp_path / "store.json"
     cli = MnemoCLI(store=str(store))
     cli.install_consolidation_gate_case("Mara owns Helios.")
@@ -172,7 +172,7 @@ def test_reconsolidating_identical_evidence_keeps_relations_idempotent(
         )
         + "\n",
         encoding="utf-8",
-    )
+     newline="\n")
     store = tmp_path / "store.json"
     cli = MnemoCLI(store=str(store))
     cli.install_consolidation_gate_case("Mara owns Helios.")
@@ -239,7 +239,7 @@ def test_graph_fix_preserves_dense_lexical_single_hop_retrieval(
         )
         + "\n",
         encoding="utf-8",
-    )
+     newline="\n")
     query = tmp_path / "query.jsonl"
     query.write_text(
         json.dumps(
@@ -251,7 +251,7 @@ def test_graph_fix_preserves_dense_lexical_single_hop_retrieval(
         )
         + "\n",
         encoding="utf-8",
-    )
+     newline="\n")
 
     observed: list[tuple[str, bool]] = []
     for name, consolidate in (("baseline", False), ("postfix", True)):
