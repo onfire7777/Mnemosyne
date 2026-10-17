@@ -553,6 +553,16 @@ TOOL_SPEC: list[dict[str, Any]] = [
         "arguments": ["path"],
     },
     {
+        "name": "framework_regenerate",
+        "description": "Convert a skill's kept files again, as a new draft revision.",
+        "arguments": ["skill_id"],
+    },
+    {
+        "name": "skill_ask",
+        "description": "Answer a question about a skill from its framework and source only.",
+        "arguments": ["skill_id", "question"],
+    },
+    {
         "name": "framework_status",
         "description": "A skill's conversion: phase, coverage of its source, audit results, needs and effects.",
         "arguments": ["skill_id"],
@@ -566,7 +576,7 @@ TOOL_SPEC: list[dict[str, Any]] = [
     {
         "name": "skill_get",
         "description": "A skill's framework: overview, a section (steps, warnings, constraints, "
-                       "definitions, principles, cases, examples, document, source), one node with its "
+                       "definitions, principles, cases, examples, document, source, graph), one node with its "
                        "edges and sources, or an attachment - paged.",
         "arguments": ["skill_id"],
     },
@@ -2724,25 +2734,33 @@ class MemoryTools:
         payload["security"] = decision
         return payload
 
-    # Skills: complete Proper Thinking frameworks in one file beside the store (frameworks/skills.py).
+    # Skills: complete frameworks (mnemosyne.frameworks) in one file beside the store (mnemosyne.skills).
     def _skills(self) -> Any:
         from pathlib import Path
 
-        from mnemosyne.frameworks.skills import SkillStore
+        from mnemosyne.skills import SkillStore
 
-        path = os.environ.get("MNEMOSYNE_FRAMEWORKS_DB")
+        path = os.environ.get("MNEMOSYNE_SKILLS_DB")
         if not path:
             root = getattr(self.engine, "root_dir", None)
             store = getattr(self.engine, "store_path", None)
             if root is None and store is None:
-                raise ValueError("skills need a store on disk (sqlite or local backend) or MNEMOSYNE_FRAMEWORKS_DB")
-            path = str(Path(root) / "frameworks.sqlite" if root is not None else Path(store).parent / "frameworks.sqlite")
+                raise ValueError("skills need a store on disk (sqlite or local backend) or MNEMOSYNE_SKILLS_DB")
+            path = str(Path(root) / "skills.sqlite" if root is not None else Path(store).parent / "skills.sqlite")
         return SkillStore.at(path)
 
     def framework_import(self, path: str, model: str = "", name: str | None = None) -> dict[str, Any]:
-        from mnemosyne.frameworks.app_config import DEFAULT_OPENAI_MODEL
+        from mnemosyne.frameworks import DEFAULT_MODEL
 
-        return self._skills().import_skill(path, model or DEFAULT_OPENAI_MODEL, name)
+        return self._skills().import_skill(path, model or DEFAULT_MODEL, name)
+
+    def framework_regenerate(self, skill_id: str, model: str = "") -> dict[str, Any]:
+        from mnemosyne.frameworks import DEFAULT_MODEL
+
+        return self._skills().regenerate(skill_id, model or DEFAULT_MODEL)
+
+    def skill_ask(self, skill_id: str, question: str, revision: int | None = None) -> dict[str, Any]:
+        return self._skills().ask(skill_id, question, revision)
 
     def framework_status(self, skill_id: str, revision: int | None = None) -> dict[str, Any]:
         return self._skills().status(skill_id, revision)
