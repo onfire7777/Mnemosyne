@@ -8958,6 +8958,14 @@ def cmd_framework_import(args: argparse.Namespace) -> None:
     emit(load_tools(args).framework_import(args.path, model=args.model, name=args.name))
 
 
+def cmd_framework_regenerate(args: argparse.Namespace) -> None:
+    emit(load_tools(args).framework_regenerate(args.skill_id, model=args.model))
+
+
+def cmd_skill_ask(args: argparse.Namespace) -> None:
+    emit(load_tools(args).skill_ask(args.skill_id, args.question, revision=args.revision))
+
+
 def cmd_framework_status(args: argparse.Namespace) -> None:
     emit(load_tools(args).framework_status(args.skill_id, revision=args.revision))
 
@@ -20487,6 +20495,17 @@ def build_parser() -> argparse.ArgumentParser:
     framework_import.add_argument("--model", default="")
     framework_import.add_argument("--name")
     framework_import.set_defaults(func=cmd_framework_import)
+
+    framework_regenerate = sub.add_parser("framework-regenerate")
+    framework_regenerate.add_argument("--skill-id", required=True)
+    framework_regenerate.add_argument("--model", default="")
+    framework_regenerate.set_defaults(func=cmd_framework_regenerate)
+
+    skill_ask = sub.add_parser("skill-ask")
+    skill_ask.add_argument("--skill-id", required=True)
+    skill_ask.add_argument("--question", required=True)
+    skill_ask.add_argument("--revision", type=int)
+    skill_ask.set_defaults(func=cmd_skill_ask)
 
     framework_status = sub.add_parser("framework-status")
     framework_status.add_argument("--skill-id", required=True)
