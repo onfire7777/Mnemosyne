@@ -211,7 +211,7 @@ uv run --locked mneme intention-evaluate --tenant tenant-a \
 > control. `intention-evaluate` requires the `prospective:evaluate` capability; token
 > verification also needs the session secret (`MNEMOSYNE_SESSION_SECRET` /
 > `--session-secret-command`). The public benchmark harness drives this seam
-> end-to-end through a signed-session evaluator in [Mnemetric](https://github.com/onfire7777/Mnemetric) (`eval/public/action_cli.py`)
+> end-to-end through a signed-session evaluator in Mnemetric-harness (`eval/public/action_cli.py`)
 > that mints its own session tokens and calls the production `intention-*`
 > subprocesses.
 
@@ -336,7 +336,7 @@ Full reference lives in the [project wiki](https://github.com/onfire7777/Mnemosy
 - [Data Model](https://github.com/onfire7777/Mnemosyne/wiki/Data-Model) — the 28-table schema, RLS, and bitemporal design
 - [Security, Privacy and Provenance](https://github.com/onfire7777/Mnemosyne/wiki/Security-Privacy-and-Provenance) — trust tiers, capabilities, residency, C2PA
 - [Operations and Production Preflight](https://github.com/onfire7777/Mnemosyne/wiki/Operations-and-Production-Preflight) — `provider-check`, `deployment-soak`, `release-audit`, the `*-ops-check` family
-- [Whole-memory common ABI](https://github.com/onfire7777/Mnemetric/blob/main/eval/public/README.md#whole-memory-common-abi-development-draft) — development-only, non-ranking `wmbs/0.1-draft` schema and reference validator
+- Whole-memory common ABI (Mnemetric-harness, `eval/public/README.md`) — development-only, non-ranking `wmbs/0.1-draft` schema and reference validator
 
 ### MCP tools (illustrative)
 
@@ -374,7 +374,7 @@ Mnemosyne/
 │   └── providers/           # ProviderRegistry + adapter plumbing (adapter classes live in retrieval.py)
 ├── sql/schema.sql           # canonical 28-table PostgreSQL schema
 ├── tests/                   # invariant, parity, contract, and completion suites
-├── eval/                    # §33 harness and Mnemosyne's own white-box benches; the public benchmarks are in Mnemetric
+├── eval/                    # §33 harness and Mnemosyne's own white-box benches; the public benchmarks are in Mnemetric-harness
 ├── infra/                   # Keycloak (OIDC), Vault, C2PA, provider compose stack
 ├── rust/mneme-providers/    # Provider sidecar for compact embed/rerank contracts
 ├── rust/mnemosyne-native/   # Optional PyO3 native retrieval kernels
