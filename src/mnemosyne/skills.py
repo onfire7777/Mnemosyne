@@ -134,10 +134,12 @@ def source_units(texts: list[tuple[str, str]], limit: int = MAX_UNITS) -> list[s
     return ["\n\n".join(parts[i:i + size]) for i in range(0, len(parts), size)]
 
 
-def effects_of(nodes: list[dict[str, Any]], files: list[str]) -> list[str]:
-    text = " ".join(f"{n.get('title', '')} {n.get('content', '')}" for n in nodes).lower()
-    return [k for k, pattern in EFFECT_WORDS.items() if re.search(pattern, text)] + (
-        ["runs scripts"] if runnable(files) else [])
+def effects_of(nodes: list[dict[str, Any]], files: list[str], judged: list[str] | None = None) -> list[str]:
+    """What a skill does to the world: as the model judged it from the steps, else by keyword."""
+    if judged is None:
+        text = " ".join(f"{n.get('title', '')} {n.get('content', '')}" for n in nodes).lower()
+        judged = [k for k, pattern in EFFECT_WORDS.items() if re.search(pattern, text)]
+    return list(judged) + (["runs scripts"] if runnable(files) else [])
 
 
 def _from_v1(payload: dict[str, Any]) -> tuple[list[str], dict[str, Any]]:
@@ -182,6 +184,8 @@ class SkillStore:
         self.path = Path(db_path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.sources = self.path.parent / "skill-sources"
+        #: The server's semantic embedder, handed in by the tools; None ranks by words.
+        self.embedder: Any = None
         with self._sql() as conn:
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS skill_revisions (
@@ -300,7 +304,8 @@ class SkillStore:
                 "meta, state, conversion, units, framework, source_sha, source_dir, model, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (skill_id, revision, name, applicability or str(meta.get("description") or ""), json.dumps(needs),
-                 json.dumps(effects_of(fw["nodes"], attachments) if fw else []), json.dumps(sorted(attachments)),
+                 json.dumps(effects_of(fw["nodes"], attachments, (fw.get("meta") or {}).get("effects")) if fw else []),
+                 json.dumps(sorted(attachments)),
                  json.dumps(meta), state, "completed" if fw else "converting", json.dumps(units),
                  json.dumps(fw) if fw else None, source_sha, str(keep), model, _now()))
 
@@ -380,7 +385,9 @@ class SkillStore:
                 "UPDATE skill_revisions SET framework = ?, conversion = 'completed', progress = 'done', "
                 "applicability = ?, effects = ? WHERE skill_id = ? AND revision = ?",
                 (json.dumps(fw), " ".join(s for s in (row["applicability"], scope) if s).strip(),
-                 json.dumps(effects_of(fw["nodes"], json.loads(row["attachments"]))), skill_id, revision))
+                 json.dumps(effects_of(fw["nodes"], json.loads(row["attachments"]), fw["meta"].get("effects"))),
+                 skill_id, revision))
+        self._embed_now(skill_id, revision)
 
     # ------------------------------------------------------------------ .bs files
 
@@ -529,6 +536,16 @@ class SkillStore:
                     conn.execute("INSERT OR REPLACE INTO skill_vectors VALUES (?, ?, ?)", (shas[i], model, json.dumps(vector)))
         return [known[s] for s in shas]
 
+    def _embed_now(self, skill_id: str, revision: int) -> None:
+        """Embed a converted skill at once, so the first task that could use it does not wait for it."""
+        embedder = self.embedder
+        if embedder is None or getattr(embedder, "name", "") == "local-hashing":
+            return
+        try:
+            self._vectors(embedder, [self._doc(self._skill(skill_id, revision))])
+        except Exception:  # noqa: BLE001 - search embeds it later instead
+            pass
+
     def _doc(self, row: dict[str, Any]) -> str:
         """What a skill is found by: its name, applicability and the titles of its nodes."""
         fw = json.loads(row["framework"]) if row["framework"] else {}
@@ -536,7 +553,7 @@ class SkillStore:
         return f"{row['name']}. {row['applicability']} {titles}"[:4000]
 
     def search(self, query: str, available: list[str] | None = None, include_drafts: bool = False,
-               limit: int = 5, embedder: Any = None, floor: float = 0.5, timeout: float = 2.0) -> dict[str, Any]:
+               limit: int = 5, embedder: Any = None, floor: float = 0.5, timeout: float = 1.0) -> dict[str, Any]:
         """Exact name first; then only skills whose needs are met; then rank by meaning (or words)."""
         states = ("active", "draft") if include_drafts else ("active",)
         latest: dict[str, dict[str, Any]] = {}

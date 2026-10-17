@@ -57,7 +57,8 @@ def fake_chat(system, user, max_tokens=0, task=""):
         return {"edges": [{"from": "2", "to": 3, "type": "warns", "why": "x"}, {"from": 9, "to": 1, "type": "leads_to"}],
                 "logic_issues": [], "logic_warnings": ["minor"], "graph_issues": []}
     if task == "meta":
-        return {"purpose": "Post updates.", "claimed_scope": "Team status posts.", "evidenced_scope": "Weekly posts."}
+        return {"purpose": "Post updates.", "claimed_scope": "Team status posts.", "evidenced_scope": "Weekly posts.",
+                "effects": ["sends", "flies"]}
     if task == "judge":
         return {"warrants_reextract": False, "findings": ["fine"]}
     if task == "ask":
@@ -158,6 +159,26 @@ def test_fields_wait_for_the_kept_pass(monkeypatch):
     fx.build("s", ["a", "b"])
     first = tasks[: tasks.index("extract", 1)]
     assert "fields" not in first and "meta" not in first  # the pass thrown away got no fields
+
+
+def test_a_step_loop_becomes_feeds_back_to():
+    nodes = [{"id": i, "type": "step", "title": f"S{i}", "fields": {"Action": "a", "Done When": "d", "ES": "x",
+              "EC": "x", "CT": "x", "CN": "x"}, "units": [1]} for i in range(3)]
+    nodes.append({**nodes[0], "id": 3, "title": "S3"})
+    # 1 -> 2 -> 0 -> 1 is the loop; 2 -> 3 only hangs off it and must stay leads_to
+    edges = [{"from": 1, "to": 2, "type": "leads_to"}, {"from": 2, "to": 0, "type": "leads_to"},
+             {"from": 0, "to": 1, "type": "leads_to"}, {"from": 2, "to": 3, "type": "leads_to"}]
+    fw = {"nodes": nodes, "edges": edges, "coverage": {"complete": True, "unresolved": []}}
+    audit = fx.mechanical_audit(fw)
+    assert audit["passed"] and [e["type"] for e in edges] == ["leads_to", "feeds_back_to", "leads_to", "leads_to"]
+    assert fx.step_order(fw) == [0, 1, 2, 3]
+
+
+def test_effects_come_from_the_model_when_it_judged_them():
+    nodes = [{"title": "Delete old drafts", "content": "Remove the drafts, then order lunch."}]
+    assert sk.effects_of(nodes, [], None) == ["deletes", "pays"]  # keyword fallback
+    assert sk.effects_of(nodes, ["LICENSE.txt"], ["deletes"]) == ["deletes"]  # the model's judgment
+    assert sk.effects_of(nodes, ["run.py"], []) == ["runs scripts"]
 
 
 def test_front_matter_units_and_coverage():
