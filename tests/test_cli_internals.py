@@ -1,17 +1,13 @@
 """Mnemosyne CLI internals once tested beside the public benchmarks (which now live in Mnemetric)."""
 
 from __future__ import annotations
-import hashlib
 import json
-import sys
 from argparse import Namespace
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
-from dataclasses import replace
 from pathlib import Path
 import pytest
 
-from eval.harness.cli_driver import CLIError, MnemoCLI
+from eval.harness.cli_driver import MnemoCLI
 from mnemosyne.providers.extractive_decomposer import CONTENT_SHA256, SELECTOR
 from mnemosyne.security import TrustTier
 

@@ -1,12 +1,8 @@
 """Dataset loading copied from Mnemetric's eval/public/adapters/longmemeval.py (17 Oct 2026), for Mnemosyne's own recall research."""
 
 from __future__ import annotations
-import json
 import re
-import tempfile
 from collections import Counter
-from dataclasses import replace
-from pathlib import Path
 from typing import Any
 
 

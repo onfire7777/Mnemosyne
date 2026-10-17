@@ -24,28 +24,31 @@ import shutil
 import tempfile
 import time
 from collections import defaultdict
+from contextlib import ExitStack
 from pathlib import Path
+
+from eval.harness.metrics import percentile, resolve_retrieved_doc_ids
 
 
 def hit_cids(hit: dict) -> list[str]:
     metadata = hit.get("metadata") if isinstance(hit.get("metadata"), dict) else {}
+    provenance = hit.get("provenance")
+    sources = metadata.get("source_evidence_cids")
     return [
-        str(cid)
-        for cid in [hit.get("id"), *(hit.get("provenance") or []), *(metadata.get("source_evidence_cids") or [])]
-        if cid
+        cid
+        for cid in [
+            hit.get("id"),
+            *(provenance if isinstance(provenance, (list, tuple)) else []),
+            *(sources if isinstance(sources, (list, tuple)) else []),
+        ]
+        if isinstance(cid, str) and cid
     ]
 
 
 def ranked_evidence(hits: list[dict]) -> list[str]:
-    """Records in hit order: a hit counts as the first CID it names; a working-memory hit also
-    counts the ledger records it cites. Duplicates are dropped."""
-    ranked: list[str] = []
-    for hit in hits:
-        cids = hit_cids(hit)
-        for cid in cids if hit.get("kind") == "working" else cids[:1]:
-            if cid not in ranked:
-                ranked.append(cid)
-    return ranked
+    """Rank records, never expand a working-memory citation list into retrieved hits."""
+    identities = {cid: cid for hit in hits for cid in hit_cids(hit)}
+    return resolve_retrieved_doc_ids(hits, identities)
 
 
 def main() -> None:
@@ -61,19 +64,43 @@ def main() -> None:
     ap.add_argument("--index-first", action="store_true", help="index the copy's passages before asking")
     args = ap.parse_args()
 
+    if args.out.resolve().is_relative_to(args.store.resolve()):
+        ap.error("output must be outside the source store")
+
     questions = json.loads(args.questions.read_text(encoding="utf-8"))
-    with tempfile.TemporaryDirectory(prefix="store-recall-", ignore_cleanup_errors=True) as temp:
+    if not isinstance(questions, list) or not questions:
+        ap.error("questions must be a non-empty JSON array")
+    for question in questions:
+        if not isinstance(question, dict):
+            ap.error("each question must be a JSON object")
+        gold = question.get("gold")
+        if not isinstance(gold, list) or not gold or any(
+            not isinstance(cid, str) or not cid.strip() for cid in gold
+        ):
+            ap.error("each question requires a non-empty gold list of non-blank CID strings")
+        query = question.get("question")
+        if not isinstance(query, str) or not query.strip():
+            ap.error("each question requires non-blank question text")
+        if "id" not in question:
+            ap.error("each question requires an id")
+    with tempfile.TemporaryDirectory(prefix="store-recall-", ignore_cleanup_errors=True) as temp, ExitStack() as cleanup:
         store = Path(temp) / "store"
         shutil.copytree(args.store, store)
         cli_args = cli.build_parser().parse_args(
             ["--backend", "sqlite", "--store", str(store), "search", "--tenant", args.tenant, "--query", "-"]
         )
         tools = cli.load_tools(cli_args)
+        close = getattr(tools.engine, "close", None)
+        if callable(close):
+            cleanup.callback(close)
         index_report = tools.index_passages(args.tenant) if args.index_first else None
         accepts = set(inspect.signature(tools.search).parameters)
         graph = getattr(tools.engine.adapters, "passage_graph", None)
+        query_preparation_seconds = 0.0
         if graph is not None:
+            preparation_started = time.perf_counter()
             graph.prepare([q["question"] for q in questions], tools.engine.adapters.embedding)
+            query_preparation_seconds = time.perf_counter() - preparation_started
         rows_out: list[dict] = []
         latencies: list[float] = []
         per_kind: dict[str, list[float]] = defaultdict(list)
@@ -96,21 +123,21 @@ def main() -> None:
             rows_out.append({
                 "id": q["id"], "kind": q.get("kind"), "recall_at_5": score,
                 "abstained": result.get("abstained"), "top5": [cid[:12] for cid in top5],
+                "top5_evidence_cids": top5,
             })
         seconds = time.perf_counter() - started
-        close = getattr(tools.engine, "close", None)
-        if callable(close):
-            close()
 
     scores = [row["recall_at_5"] for row in rows_out]
-    known = sorted(latencies)
     report = {
         "store": str(args.store), "tenant": args.tenant, "mode": args.mode, "questions": len(scores),
         "passage_graph": graph is not None, "index_report": index_report,
         "recall_at_5": round(sum(scores) / len(scores), 4),
         "by_kind": {kind: round(sum(v) / len(v), 4) for kind, v in sorted(per_kind.items())},
         "abstained": sum(1 for row in rows_out if row["abstained"]),
-        "latency_ms": {"p50": round(known[len(known) // 2], 1), "p95": round(known[int(0.95 * (len(known) - 1))], 1)},
+        "latency_ms": {"p50": round(percentile(latencies, 0.5), 1), "p95": round(percentile(latencies, 0.95), 1)},
+        "latency_scope": "search_calls_excluding_setup_and_query_preparation",
+        "query_vectors_prepared": graph is not None,
+        "query_preparation_seconds": round(query_preparation_seconds, 3),
         "seconds": round(seconds, 1), "rows": rows_out,
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)
