@@ -8955,11 +8955,13 @@ def cmd_procedure_search(args: argparse.Namespace) -> None:
 
 
 def cmd_framework_import(args: argparse.Namespace) -> None:
-    emit(load_tools(args).framework_import(args.path, model=args.model, name=args.name))
+    emit(load_tools(args).framework_import(args.path, model=args.model, name=args.name, tenant_id=args.tenant_id,
+                                           user_id=args.user_id))
 
 
-def cmd_framework_regenerate(args: argparse.Namespace) -> None:
-    emit(load_tools(args).framework_regenerate(args.skill_id, model=args.model))
+def cmd_skill_make_burnskill(args: argparse.Namespace) -> None:
+    emit(load_tools(args).skill_make_burnskill(args.skill_id, model=args.model, tenant_id=args.tenant_id,
+                                               user_id=args.user_id))
 
 
 def cmd_skill_ask(args: argparse.Namespace) -> None:
@@ -8993,6 +8995,10 @@ def cmd_skill_forget(args: argparse.Namespace) -> None:
 
 def cmd_skill_export(args: argparse.Namespace) -> None:
     emit(load_tools(args).skill_export(args.skill_id, args.path, revision=args.revision))
+
+
+def cmd_skill_validate(args: argparse.Namespace) -> None:
+    emit(load_tools(args).skill_validate(args.path))
 
 
 def cmd_skill_outcome(args: argparse.Namespace) -> None:
@@ -20494,12 +20500,16 @@ def build_parser() -> argparse.ArgumentParser:
     framework_import.add_argument("--path", required=True)
     framework_import.add_argument("--model", default="")
     framework_import.add_argument("--name")
+    framework_import.add_argument("--tenant-id")
+    framework_import.add_argument("--user-id")
     framework_import.set_defaults(func=cmd_framework_import)
 
-    framework_regenerate = sub.add_parser("framework-regenerate")
-    framework_regenerate.add_argument("--skill-id", required=True)
-    framework_regenerate.add_argument("--model", default="")
-    framework_regenerate.set_defaults(func=cmd_framework_regenerate)
+    make_burnskill = sub.add_parser("skill-make-burnskill")
+    make_burnskill.add_argument("--skill-id", required=True)
+    make_burnskill.add_argument("--model", default="")
+    make_burnskill.add_argument("--tenant-id")
+    make_burnskill.add_argument("--user-id")
+    make_burnskill.set_defaults(func=cmd_skill_make_burnskill)
 
     skill_ask = sub.add_parser("skill-ask")
     skill_ask.add_argument("--skill-id", required=True)
@@ -20544,6 +20554,10 @@ def build_parser() -> argparse.ArgumentParser:
     skill_export.add_argument("--path", required=True)
     skill_export.add_argument("--revision", type=int)
     skill_export.set_defaults(func=cmd_skill_export)
+
+    skill_validate = sub.add_parser("skill-validate")
+    skill_validate.add_argument("--path", required=True)
+    skill_validate.set_defaults(func=cmd_skill_validate)
 
     skill_outcome = sub.add_parser("skill-outcome")
     skill_outcome.add_argument("--tenant", required=True)

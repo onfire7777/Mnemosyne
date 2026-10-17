@@ -17,6 +17,7 @@ and prospective-memory tools already refuse to act without one.
 from __future__ import annotations
 
 import base64
+import json
 import os
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
@@ -547,14 +548,16 @@ TOOL_SPEC: list[dict[str, Any]] = [
     {
         "name": "framework_import",
         "description": "Import a skill (Agent Skills folder, zip, any Markdown file, or a folder of Markdown "
-                       "files - one skill each) and convert it in the "
-                       "background into a complete Proper Thinking framework; originals are kept and "
-                       "never run. Poll framework_status.",
+                       "files - one skill each): usable at once, as written, with no conversion; a .burnskill "
+                       "file imports as the BurnSkill it is; a book (PDF or EPUB) becomes one BurnSkill, built "
+                       "in the background. Originals are kept and never run.",
         "arguments": ["path"],
     },
     {
-        "name": "framework_regenerate",
-        "description": "Convert a skill's kept files again, as a new draft revision.",
+        "name": "skill_make_burnskill",
+        "description": "Make a skill a BurnSkill: build its complete Proper Thinking framework in the background "
+                       "(about two minutes) as a new revision that replaces the plain one when done; with "
+                       "tenant_id and user_id its nodes also go into that memory. Check framework_status.",
         "arguments": ["skill_id"],
     },
     {
@@ -582,19 +585,27 @@ TOOL_SPEC: list[dict[str, Any]] = [
     },
     {
         "name": "skill_set_state",
-        "description": "Turn a converted skill revision on (active), back to draft, or retire it.",
+        "description": "Turn a skill revision on (active), back to draft, or retire it.",
         "arguments": ["skill_id", "state"],
     },
     {
         "name": "skill_forget",
-        "description": "Erase a skill: every revision, its framework, source units, vectors and kept files.",
+        "description": "Erase a skill: every revision, its framework, source units, vectors, kept files and "
+                       "its entries in memory.",
         "arguments": ["skill_id"],
     },
     {
         "name": "skill_export",
-        "description": "Write a skill revision to a .bs file: its readable document plus the whole framework and "
-                       "original files, so framework_import takes it back with no conversion.",
+        "description": "Write a skill out: a plain one as its SKILL.md folder, a BurnSkill as one .burnskill "
+                       "file (a SKILL.md view plus the whole framework and original files, so framework_import "
+                       "takes it back with no conversion).",
         "arguments": ["skill_id", "path"],
+    },
+    {
+        "name": "skill_validate",
+        "description": "Check a .burnskill file against the BurnSkill standard: valid or not, with the errors "
+                       "and warnings found. Reads the file only; imports nothing.",
+        "arguments": ["path"],
     },
     {
         "name": "skill_outcome",
@@ -2751,17 +2762,51 @@ class MemoryTools:
         adapters = getattr(self.engine, "adapters", None)
         skills.embedder = getattr(getattr(adapters, "passage_graph", None), "embedder", None) or getattr(
             adapters, "embedding", None)
+        self._remember_skills(skills)
         return skills
 
-    def framework_import(self, path: str, model: str = "", name: str | None = None) -> dict[str, Any]:
+    def _remember_skills(self, skills: Any) -> None:
+        """Finished BurnSkills go into memory here, on a tool call (under the server's lock), never on
+        the converting thread. One entry per node, then the older revision's entries are erased."""
+        for row in skills.unremembered():
+            where = json.loads(row["memory"])
+            try:
+                cids = [self.ingest(where["tenant"], where["user"], "tool", "burnskill", content=text,
+                                    source_identity=f"burnskill:{row['skill_id']}@{row['revision']}",
+                                    metadata={"skill_id": row["skill_id"], "revision": row["revision"],
+                                              "skill": row["name"]})["cid"]
+                        for text in skills.memory_texts(row)]
+            except Exception:  # noqa: BLE001 - the next skill call tries again
+                continue
+            for old in skills.remembered(row["skill_id"], row["revision"], {**where, "cids": cids}):
+                self._forget_skill_memory(old)
+
+    def _forget_skill_memory(self, where: dict[str, Any]) -> None:
+        for cid in where.get("cids") or []:
+            try:
+                self.forget(where["tenant"], cid, requested_by="skills")
+            except Exception:  # noqa: BLE001 - already gone
+                pass
+
+    @staticmethod
+    def _skill_memory(tenant_id: str | None, user_id: str | None) -> dict[str, str] | None:
+        return {"tenant": tenant_id, "user": user_id or "owner"} if tenant_id else None
+
+    def framework_import(
+        self, path: str, model: str = "", name: str | None = None,
+        tenant_id: str | None = None, user_id: str | None = None,
+    ) -> dict[str, Any]:
         from mnemosyne.frameworks import DEFAULT_MODEL
 
-        return self._skills().import_skill(path, model or DEFAULT_MODEL, name)
+        return self._skills().import_skill(path, model or DEFAULT_MODEL, name,
+                                           memory=self._skill_memory(tenant_id, user_id))
 
-    def framework_regenerate(self, skill_id: str, model: str = "") -> dict[str, Any]:
+    def skill_make_burnskill(
+        self, skill_id: str, model: str = "", tenant_id: str | None = None, user_id: str | None = None,
+    ) -> dict[str, Any]:
         from mnemosyne.frameworks import DEFAULT_MODEL
 
-        return self._skills().regenerate(skill_id, model or DEFAULT_MODEL)
+        return self._skills().make_burnskill(skill_id, model or DEFAULT_MODEL, self._skill_memory(tenant_id, user_id))
 
     def skill_ask(self, skill_id: str, question: str, revision: int | None = None) -> dict[str, Any]:
         return self._skills().ask(skill_id, question, revision)
@@ -2793,10 +2838,18 @@ class MemoryTools:
         return self._skills().set_state(skill_id, state, revision)
 
     def skill_forget(self, skill_id: str) -> dict[str, Any]:
-        return self._skills().forget(skill_id)
+        result = self._skills().forget(skill_id)
+        for where in result["memory"]:
+            self._forget_skill_memory(where)
+        return result
 
     def skill_export(self, skill_id: str, path: str, revision: int | None = None) -> dict[str, Any]:
         return self._skills().export_skill(skill_id, path, revision)
+
+    def skill_validate(self, path: str) -> dict[str, Any]:
+        from mnemosyne.skills import validate_burnskill
+
+        return validate_burnskill(path)
 
     def skill_outcome(
         self, tenant_id: str, user_id: str, skill_id: str, revision: int, success: bool, evidence: str,

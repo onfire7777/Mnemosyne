@@ -62,6 +62,48 @@ FIELDS: dict[str, str] = {
             '"Tag": "First-hand"|"Second-hand"',
 }
 FIELDS["example"] = FIELDS["case"]
+#: Proper Thinking's exact sentences for a field the source gives no basis for (its "book" is "source" here).
+GAPS = {
+    "Definition Source": "The source does not specify whether this term is author-defined or framework-derived.",
+    "Operational Test": "The source does not specify an operational test by which two readers could agree whether "
+                        "a case meets this definition.",
+    "Action": "The source does not specify an imperative action for this step.",
+    "Done When": "The source does not specify completion criteria for this step.",
+    "Symptoms": "The source does not provide enough detail to list 2-4 observable symptoms for this warning; "
+                "use the error description, consequence, and linked step for recognition.",
+    "Mitigation": "The source does not provide a mitigation for this condition.",
+}
+#: Proper Thinking's per-type field rules (its Definitive System Feedback v2), word for word where they apply.
+RULES = {
+    "definition": (
+        "Include Boundary when the source supports it. Requires is a JSON array of the exact titles of other "
+        "definitions this term logically depends on, [] if none - never sentences or gap wording. Definition "
+        "Source is exactly \"Author-defined\" or \"Framework-derived\" when the source supports either, otherwise "
+        f"exactly: {GAPS['Definition Source']} Operational Test must be checkable from the text, otherwise "
+        f"exactly: {GAPS['Operational Test']}"),
+    "principle": (
+        "Tier is \"Governing\" or \"Operational\". Governs is \"All steps\" when the principle applies broadly, "
+        "otherwise the most specific applicable description. Argument Chain states why it holds, from the source."),
+    "step": (
+        f"Action is imperative (the procedure); if the source supports none, exactly: {GAPS['Action']} Done When "
+        f"states observable completion criteria; if unsupported, exactly: {GAPS['Done When']} Common Mistakes: 2-3 "
+        "concrete anti-patterns when inferable, else []. Watch for and Constrained by: each entry \"<Title> - "
+        "<one-sentence risk or limit>\" from the given warnings and constraints; [] when none are given - never "
+        "claim the source omitted them. Omit In Practice when no case is given; its Outcome names a metric or says "
+        "\"qualitative only\". Omit inapplicable keys; never write \"N/A\"."),
+    "warning": (
+        "Symptoms is mandatory: 2-4 short observable signs of the error, or if the source cannot support them a "
+        f"one-element array with exactly: {GAPS['Symptoms']} Highest risk at is the linked step's title, or \"The "
+        "source does not specify the associated step for this warning.\" Omit Consequence or Tension pair only when "
+        "unsupported."),
+    "constraint": (
+        "If absent says what breaks or fails without the condition, inferred from the condition and the source. "
+        f"Mitigation is mandatory; when the source offers none, exactly: {GAPS['Mitigation']} Affects is the linked "
+        "step's title, otherwise say the associated step is not specified. Omit Tension pair when unsupported."),
+    "case": ("Outcome must name a specific metric or say \"qualitative only\". Tag is \"First-hand\" when the source "
+             "shows the author was involved, otherwise \"Second-hand\"."),
+}
+RULES["example"] = RULES["case"]
 #: Fields a node type may not leave out; the mechanical audit fills a missing one with GAP.
 REQUIRED = {"step": ("Action", "Done When"), "warning": ("Symptoms",), "constraint": ("Mitigation",),
             "definition": ("Operational Test",)}
@@ -240,9 +282,9 @@ def fill_fields(nodes: list[dict[str, Any]], units: list[str]) -> list[Callable[
             "You write the definitive template fields of framework items. Output ONLY valid JSON: "
             '{"items": [{"index": int, "fields": {...}, "epistemic_type": "fact"|"interpretation"|"assumption", '
             '"epistemic_note": one line}]}. Use ONLY each item\'s content and source; never invent concepts. '
-            f'When the source gives no basis for a field, write "{GAP}" - except "Requires", which is only titles '
-            "or []. Fields per type:\n"
-            + "\n".join(f"- {k}: {FIELDS[k]}" for k in kinds)
+            "Where a rule gives an exact sentence for a field the source does not support, use it word for word; "
+            f'for any other unsupported field write "{GAP}". Fields and rules per type:\n'
+            + "\n".join(f"- {k}: {FIELDS[k]}\n  Rules: {RULES[k]}" for k in kinds)
             + ("\nEvery definition, principle, step, warning and constraint also has \"Source Quote\": "
                '{"Quote": at most 60 words from the source, "Core Sentence": its most evidential sentence}, '
                '"ES", "EC", "CT", "CN" and "Tag justifications". ' + TAGS if _TAGGED & set(kinds) else "")
@@ -258,6 +300,31 @@ def fill_fields(nodes: list[dict[str, Any]], units: list[str]) -> list[Callable[
                     nodes[idx]["epistemic_note"] = str(out.get("epistemic_note") or "")[:200]
 
     return [lambda c=items[i:i + FIELD_BATCH]: batch(c) for i in range(0, len(items), FIELD_BATCH)]
+
+
+def repair_fields(nodes: list[dict[str, Any]], units: list[str]) -> list[Callable[[], None]]:
+    """Proper Thinking's tag and quote repair passes, only for the items that need one: a tagged item
+    with missing ES/EC/CT/CN or no Source Quote although it cites source. Empty when nothing failed."""
+    weak = [n for n in nodes if n["type"] in _TAGGED and n["units"] and (
+        not all(n["fields"].get(t) for t in ("ES", "EC", "CT", "CN"))
+        or not (n["fields"].get("Source Quote") or {}).get("Quote"))]
+
+    def batch(chunk: list[dict[str, Any]]) -> None:
+        items = [{"index": n["id"], "type": n["type"], "title": n["title"], "content": n["content"],
+                  "source": " ".join(units[u - 1] for u in n["units"])[:1500]} for n in chunk]
+        system = ("These framework items lack their evidence tags or quote. Output ONLY valid JSON: {\"items\": "
+                  "[{\"index\": int, \"Source Quote\": {\"Quote\": at most 60 words copied from the source, "
+                  "\"Core Sentence\": its most evidential sentence}, \"ES\", \"EC\", \"CT\", \"CN\", "
+                  "\"Tag justifications\"}]}. " + TAGS + " Never use gap wording for tags; pick the closest label.")
+        data = chat_json(system, f"Items:\n{json.dumps(items, ensure_ascii=False)}", 4096, "repair")
+        for out in data.get("items") or []:
+            idx = _int(out.get("index")) if isinstance(out, dict) else None
+            if idx is not None and 0 <= idx < len(nodes):
+                for key in ("Source Quote", "ES", "EC", "CT", "CN", "Tag justifications"):
+                    if out.get(key) and not nodes[idx]["fields"].get(key):
+                        nodes[idx]["fields"][key] = out[key]
+
+    return [lambda c=weak[i:i + FIELD_BATCH]: batch(c) for i in range(0, len(weak), FIELD_BATCH)]
 
 
 EDGES_SYSTEM = (
@@ -281,6 +348,16 @@ def relate(nodes: list[dict[str, Any]], out: dict[str, Any]) -> None:
     out["edges"] = data.get("edges") if isinstance(data.get("edges"), list) else []
     out["logic"] = {k: [str(x) for x in data.get(k) or []] for k in ("graph_issues", "logic_issues", "logic_warnings")}
     out["logic"]["note"] = str(data.get("note") or "")
+    # Proper Thinking's graph repair: the audit's own structural findings are fixed once, then re-audited.
+    if out["logic"]["graph_issues"]:
+        current = "\n".join(f"{e.get('from')} -[{e.get('type')}]-> {e.get('to')}" for e in out["edges"] if isinstance(e, dict))
+        fix = chat_json(EDGES_SYSTEM, f"Framework nodes:\n{_nodes_block(nodes)}\n\nCurrent relations:\n{current}\n\n"
+                        f"Fix these graph issues and return the complete corrected relations and audit:\n"
+                        + "\n".join(out["logic"]["graph_issues"]), 8192, "graph-repair")
+        if isinstance(fix.get("edges"), list) and fix["edges"]:
+            out["edges"] = fix["edges"]
+            out["logic"] = {k: [str(x) for x in fix.get(k) or []] for k in ("graph_issues", "logic_issues", "logic_warnings")}
+            out["logic"]["note"] = str(fix.get("note") or "")
 
 
 META_SYSTEM = (
@@ -298,8 +375,12 @@ META_SYSTEM = (
 EFFECTS = ("sends", "deletes", "pays", "posts", "installs")
 
 
-def describe(name: str, nodes: list[dict[str, Any]], out: dict[str, Any]) -> None:
-    data = chat_json(META_SYSTEM, f"Framework name: {name}\n\n{_nodes_block(nodes, 400)}", 4096, "meta")
+def describe(name: str, nodes: list[dict[str, Any]], out: dict[str, Any], units: list[str] = ()) -> None:
+    # The source itself goes along, as Proper Thinking's scope pass read book excerpts: evidenced scope
+    # must rest on what the source shows, not only on the extracted titles.
+    source = _units_block(list(units))[:16000]
+    data = chat_json(META_SYSTEM, f"Framework name: {name}\n\n{_nodes_block(nodes, 400)}\n\nSOURCE:\n{source}",
+                     4096, "meta")
     keys = ("purpose", "assumptions_limits", "target_audience", "claimed_scope", "evidenced_scope",
             "problem", "core_argument", "method")
     out["meta"] = {k: str(data.get(k) or "Not stated in source").strip()[:1500] for k in keys}
@@ -396,7 +477,7 @@ def mechanical_audit(fw: dict[str, Any]) -> dict[str, Any]:
         f = n["fields"]
         for key in REQUIRED.get(n["type"], ()):
             if not f.get(key):
-                f[key] = [GAP] if key == "Symptoms" else GAP
+                f[key] = [GAPS[key]] if key == "Symptoms" else GAPS[key]
                 repairs.append(f"{n['title']}: {key} was missing, marked as a gap")
         if n["type"] == "definition":
             requires = f.get("Requires") if isinstance(f.get("Requires"), list) else []
@@ -523,7 +604,9 @@ def render(fw: dict[str, Any]) -> str:
         rows = [f"| {by_id[e['from']]['title']} | {e['type']} | {by_id[e['to']]['title']} | {e['why']} |"
                 for e in fw["edges"] if e["type"] in kinds]
         out += [f"### {label}", "", *(["| From | Relation | To | Why |", "|---|---|---|---|", *rows] if rows else ["None."]), ""]
-    gaps = [f"{n['title']}: {k}" for n in nodes for k, v in n["fields"].items() if v == GAP or v == [GAP]]
+    gap_texts = {GAP, *GAPS.values()}
+    gaps = [f"{n['title']}: {k}" for n in nodes for k, v in n["fields"].items()
+            if (v in gap_texts if isinstance(v, str) else isinstance(v, list) and len(v) == 1 and v[0] in gap_texts)]
     gaps += [f"Source unit {u} is not represented by any item." for u in fw["coverage"]["unresolved"]]
     tensions = fw["logic"]["logic_issues"] + fw["logic"]["logic_warnings"]
     out += ["## 9. Scope and Limits", "", "### 9A Scope conditions",
@@ -560,7 +643,7 @@ def build(name: str, units: list[str], progress: Callable[[str], None] = lambda 
             side["fw"]["judgment"] = judge(side["fw"])
 
         def detail(nodes: list[dict[str, Any]] = nodes, side: dict[str, Any] = side) -> list[Callable[[], None]]:
-            return fill_fields(nodes, units) + [lambda: describe(name, nodes, side)]
+            return fill_fields(nodes, units) + [lambda: describe(name, nodes, side, units)]
 
         last = passes == MAX_PASSES
         progress(f"pass {passes}: relations and judgment" + (", fields and overview" if last else ""))
@@ -577,6 +660,10 @@ def build(name: str, units: list[str], progress: Callable[[str], None] = lambda 
             progress(f"pass {passes}: fields and overview")
             _parallel(detail())
         break
+    weak = repair_fields(fw["nodes"], units)
+    if weak:
+        progress("repairing tags and quotes")
+        _parallel(weak)
     fw["meta"] = side["meta"]
     fw["generated"] = datetime.now(UTC).isoformat(timespec="seconds")
     fw["approved"] = not fw["logic"]["logic_issues"]  # Proper Thinking's governor: reported, never blocking

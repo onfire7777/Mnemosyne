@@ -966,6 +966,40 @@ def build_sdk_server(**kwargs: Any) -> Any:
             except Exception as exc:  # noqa: BLE001 - SDK tool calls report failures as tool results.
                 return _sdk_tool_error(types, str(exc))
 
+        # The user's skills over plain MCP: each active skill is a prompt (its SKILL.md, or its
+        # BurnSkill document) and each of its kept files a skill://<skill_id>/<path> resource, so
+        # any MCP client - not only BurnOS - can use them.
+        def skills() -> Any:
+            if not facade._authorized({}):
+                raise ValueError("unauthorized: valid MCP auth token required")
+            return facade.tools._skills()
+
+        @server.list_prompts()
+        async def list_prompts() -> list[Any]:
+            return [types.Prompt(name=s["name"], description=s["applicability"] or None)
+                    for s in skills().search("")["skills"]]
+
+        @server.get_prompt()
+        async def get_prompt(name: str, arguments: dict[str, str] | None) -> Any:
+            # shortcut: the first 20000 characters; a longer document is read on with skill_get.
+            got = skills().get(name, section="document", limit=20000)
+            return types.GetPromptResult(description=f"The skill {got['name']}", messages=[types.PromptMessage(
+                role="user", content=types.TextContent(type="text", text=got["text"]))])
+
+        @server.list_resources()
+        async def list_resources() -> list[Any]:
+            store = skills()
+            return [types.Resource(uri=f"skill://{s['skill_id']}/{f}", name=f"{s['name']}/{f}")
+                    for s in store.search("")["skills"] for f in store.files(s["skill_id"])]
+
+        @server.read_resource()
+        async def read_resource(uri: Any) -> Any:
+            from mcp.server.lowlevel.helper_types import ReadResourceContents
+
+            skill_id, _, path = str(uri).removeprefix("skill://").partition("/")
+            got = skills().get(skill_id, attachment=path, limit=20000)
+            return [ReadResourceContents(content=got["text"], mime_type="text/plain")]
+
         server.mnemosyne_mcp_facade = facade
     except BaseException:
         # Release without masking the construction error.
