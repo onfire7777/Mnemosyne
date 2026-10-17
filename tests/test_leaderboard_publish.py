@@ -91,7 +91,7 @@ def _result(record_id: str) -> dict[str, object]:
 
 
 def _trace(path: Path) -> Path:
-    path.write_text(_TRACE_TEXT, encoding="utf-8")
+    path.write_text(_TRACE_TEXT, encoding="utf-8", newline="\n")
     return path
 
 
@@ -132,7 +132,7 @@ def _corrupt_signature(ledger: Path) -> None:
             for entry in entries
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
 
 def test_publishes_only_active_successes(
@@ -260,7 +260,7 @@ def test_rejects_an_invalid_signature_before_mutating_destination(
     destination = tmp_path / "site"
     destination.mkdir()
     marker = destination / "keep.txt"
-    marker.write_text("unchanged\n", encoding="utf-8")
+    marker.write_text("unchanged\n", encoding="utf-8", newline="\n")
 
     with pytest.raises(PublicationError, match="signature"):
         publish_site(
@@ -288,7 +288,7 @@ def test_rejects_trace_evidence_not_bound_to_the_signed_result(
         result=_result("result-success"),
     )
     trace = _trace(tmp_path / "trace.jsonl")
-    trace.write_text(_TRACE_TEXT.replace("doc-1", "unrelated"), encoding="utf-8")
+    trace.write_text(_TRACE_TEXT.replace("doc-1", "unrelated"), encoding="utf-8", newline="\n")
     destination = tmp_path / "site"
 
     with pytest.raises(PublicationError, match="trace digest mismatch"):
@@ -324,7 +324,7 @@ def test_renders_the_verified_trace_snapshot(
         traces: dict[str, str | Path],
         destination: str | Path,
     ) -> None:
-        trace.write_text(_TRACE_TEXT.replace("doc-1", "unrelated"), encoding="utf-8")
+        trace.write_text(_TRACE_TEXT.replace("doc-1", "unrelated"), encoding="utf-8", newline="\n")
         render_site(results, traces, destination)
 
     monkeypatch.setattr(publication, "render_site", replace_source_then_render)

@@ -307,7 +307,7 @@ def test_version_1_bs_still_imports(store, tmp_path):
     }
     path = tmp_path / "old-skill.bs"
     packed = base64.b64encode(zlib.compress(json.dumps(payload).encode())).decode()
-    path.write_text(f"# old-skill\n\n<!-- burnos-skill v1\n{packed}\n-->\n", encoding="utf-8")
+    path.write_text(f"# old-skill\n\n<!-- burnos-skill v1\n{packed}\n-->\n", encoding="utf-8", newline="\n")
     back = store.import_skill(str(path), "m")
     node = store.get(back["skill_id"], section="steps")["nodes"][0]
     assert node["units"] == [1] and node["fields"] == {"Action": "Do."}
@@ -417,7 +417,7 @@ def test_a_source_too_long_for_one_prompt_is_built_from_picked_passages(store, t
     filler = [" ".join(f"filler{i}x{j}" for j in range(120)) for i in range(400)]
     filler[250] = "Risks failures mistakes warnings dangers pitfalls and what to avoid. " + filler[250]
     page = tmp_path / "long.md"
-    page.write_text("\n\n".join(filler), encoding="utf-8")
+    page.write_text("\n\n".join(filler), encoding="utf-8", newline="\n")
     skill_id = store.import_skill(str(page), "m")["skill_id"]
     revision = store.make_burnskill(skill_id, "m")["revision"]
     assert _done(store, skill_id, revision)["conversion"] == "completed"
@@ -437,14 +437,15 @@ def test_validator_passes_an_export_and_names_what_is_wrong(store, tmp_path):
     text = path.read_text(encoding="utf-8")
     head = text[: text.rfind(sk.BS_HEAD)]
     packed = base64.b64encode(zlib.compress(json.dumps(payload).encode())).decode()
-    path.write_text(f"{head}{sk.BS_HEAD}2\n{packed}\n-->\n", encoding="utf-8")
+    path.write_text(f"{head}{sk.BS_HEAD}2\n{packed}\n-->\n", encoding="utf-8", newline="\n")
     broken = sk.validate_burnskill(str(path))
     assert not broken["valid"] and len(broken["errors"]) == 2
     assert sk.validate_burnskill(str(tmp_path / "nothing.burnskill"))["valid"] is False
 
 
 def test_skills_are_offered_as_mcp_prompts_and_resources(tmp_path, monkeypatch):
-    types = pytest.importorskip("mcp.types")
+    types = pytest.importorskip("mcp_types")
+    from tests.sdk_helper import sdk_handler
     import asyncio
 
     from mnemosyne.mcp_server import build_sdk_server
@@ -454,16 +455,15 @@ def test_skills_are_offered_as_mcp_prompts_and_resources(tmp_path, monkeypatch):
     server = build_sdk_server(store_path=tmp_path / "store.json")
     try:
         skill_id = server.mnemosyne_mcp_facade.tools.framework_import(str(_skill_dir(tmp_path)))["skill_id"]
-        ask = server.request_handlers
 
         async def run():
-            prompts = await ask[types.ListPromptsRequest](types.ListPromptsRequest(method="prompts/list"))
-            got = await ask[types.GetPromptRequest](types.GetPromptRequest(
+            prompts = await sdk_handler(server, types.ListPromptsRequest)(types.ListPromptsRequest(method="prompts/list"))
+            got = await sdk_handler(server, types.GetPromptRequest)(types.GetPromptRequest(
                 method="prompts/get", params=types.GetPromptRequestParams(name="weekly-update")))
-            listed = await ask[types.ListResourcesRequest](types.ListResourcesRequest(method="resources/list"))
-            read = await ask[types.ReadResourceRequest](types.ReadResourceRequest(
+            listed = await sdk_handler(server, types.ListResourcesRequest)(types.ListResourcesRequest(method="resources/list"))
+            read = await sdk_handler(server, types.ReadResourceRequest)(types.ReadResourceRequest(
                 method="resources/read", params=types.ReadResourceRequestParams(uri=f"skill://{skill_id}/scripts/post.py")))
-            return prompts.root, got.root, listed.root, read.root
+            return prompts, got, listed, read
 
         prompts, got, listed, read = asyncio.run(run())
         assert [p.name for p in prompts.prompts] == ["weekly-update"]

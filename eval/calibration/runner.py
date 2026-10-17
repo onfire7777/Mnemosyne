@@ -448,8 +448,8 @@ def run(*, write: bool = True, dump_json: bool = False) -> dict[str, Any]:
     }
 
     if write:
-        (out_dir / "dataset.json").write_text(json.dumps(_json_ready(snapshot), indent=2) + "\n", encoding="utf-8")
-        (out_dir / "report.json").write_text(json.dumps(_json_ready(report), indent=2) + "\n", encoding="utf-8")
+        (out_dir / "dataset.json").write_text(json.dumps(_json_ready(snapshot), indent=2) + "\n", encoding="utf-8", newline="\n")
+        (out_dir / "report.json").write_text(json.dumps(_json_ready(report), indent=2) + "\n", encoding="utf-8", newline="\n")
 
     if dump_json:
         print(json.dumps(_json_ready(report), indent=2))

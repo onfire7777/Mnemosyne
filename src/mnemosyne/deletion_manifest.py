@@ -331,7 +331,7 @@ def write_signed_deletion_manifest(
     if not result["complete"]:
         raise ValueError("refusing to sign semantically incomplete deletion manifest: " + "; ".join(result["errors"]))
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     return sign_evidence_manifest(manifest_path, private_key_path)
 
 

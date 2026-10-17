@@ -154,7 +154,7 @@ def test_context_cannot_override_lineage():
 def test_renderer_exports_empty_index_without_inventing_comparison(tmp_path):
     from leaderboard.render import render_site
     path = tmp_path / 'results.json'
-    path.write_text('[]')
+    path.write_text('[]', newline="\n")
     render_site(path, {}, tmp_path / 'site')
     index = json.loads((tmp_path / 'site/data/comparison-index.json').read_text())
     assert index['groups'] == index['exclusions'] == index['source_record_ids'] == []

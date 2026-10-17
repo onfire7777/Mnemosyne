@@ -1040,11 +1040,11 @@ def write_bundle(
         (temp / "README.md").write_text(
             "# PBPP development bundle\n\nThis development artifact is non-publishable, not headline eligible, and is not an independent external reproduction. Run `./reproduce.sh DEST`.\n",
             encoding="utf-8",
-        )
+         newline="\n")
         (temp / "reproduce.sh").write_text(
             '#!/bin/sh\nset -eu\ntest "$#" -eq 1 || { echo "usage: $0 DEST" >&2; exit 2; }\nuv run --locked mneme eval-public --reproduce-bundle "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)" --out-dir "$1"\n',
             encoding="utf-8",
-        )
+         newline="\n")
         os.chmod(temp / "reproduce.sh", 0o755)
         required = REQUIRED + (("candidate-manifest.json",) if metadata["family"] == "qa" else ())
         _write_json(

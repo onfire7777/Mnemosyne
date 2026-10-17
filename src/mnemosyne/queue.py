@@ -70,7 +70,9 @@ class InProcessQueue:
             if kind and job.kind != kind:
                 continue
             key = (_job_priority(job), job.created_at, job.id)
-            if best_key is None or key[0] > best_key[0] or (key[0] == best_key[0] and key[1:] < best_key[1:]):
+            # Same priority and the same clock tick (Windows' clock is coarse): enqueue order wins,
+            # not the random id - _order is walked in enqueue order and only a strictly earlier job replaces.
+            if best_key is None or key[0] > best_key[0] or (key[0] == best_key[0] and key[1] < best_key[1]):
                 best_id = job_id
                 best_key = key
         if best_id is None:

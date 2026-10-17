@@ -76,7 +76,7 @@ def test_local_engine_loads_export_json_branch_shape(tmp_path) -> None:
         )
     )
     store = tmp_path / "mnemosyne-export.json"
-    store.write_text(engine.to_json(), encoding="utf-8")
+    store.write_text(engine.to_json(), encoding="utf-8", newline="\n")
 
     loaded = LocalMemoryEngine(store)
     loaded.branch("candidate", tenant_id=TENANT)

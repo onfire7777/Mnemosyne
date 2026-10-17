@@ -157,7 +157,7 @@ def test_ops_report_cli_emits_audit_section(tmp_path) -> None:
         "msg = sys.stdin.buffer.read()\n"
         "print('vault:v1:' + hashlib.sha256(b'unit-key' + msg).hexdigest())\n",
         encoding="utf-8",
-    )
+     newline="\n")
     # WORM adapter: reads the chain document on stdin, echoes proven retention.
     worm_script = tmp_path / "worm_adapter.py"
     worm_script.write_text(
@@ -169,7 +169,7 @@ def test_ops_report_cli_emits_audit_section(tmp_path) -> None:
         "  'mode': 'COMPLIANCE', 'retain_until': '2027-07-07T00:00:00Z',\n"
         "  'object_sha256': 'sha256:' + hashlib.sha256(body).hexdigest()}))\n",
         encoding="utf-8",
-    )
+     newline="\n")
 
     result = subprocess.run(
         [
@@ -181,7 +181,7 @@ def test_ops_report_cli_emits_audit_section(tmp_path) -> None:
             "--audit-worm-command", f"{sys.executable} {worm_script}",
         ],
         check=False, text=True, capture_output=True,
-        env={"PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src"), "PATH": __import__("os").environ.get("PATH", "")},
+        env={"PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src"), "PATH": __import__("os").environ.get("PATH", ""), "SYSTEMROOT": __import__("os").environ.get("SYSTEMROOT", "")},
     )
     assert result.returncode == 0, result.stderr
     payload = _json.loads(result.stdout)

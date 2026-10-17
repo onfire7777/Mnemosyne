@@ -759,7 +759,7 @@ def run_provider_bakeoff(
 def write_phase15_s4_provider_receipt(receipt: dict[str, Any], path: Path | None = None) -> Path:
     target = Path(path) if path is not None else PHASE15_S4_PROVIDER_REPORT
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    target.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8", newline="\n")
     return target
 
 
@@ -1133,7 +1133,7 @@ def build_report(
     }
     if output_path:
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+        output_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
     return report
 
 

@@ -114,7 +114,7 @@ def _write_parametric_provider(
             ]
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     return [sys.executable, str(script), str(state), json.dumps(config, sort_keys=True)], state
 
 

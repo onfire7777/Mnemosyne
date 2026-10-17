@@ -652,7 +652,7 @@ def write_report(
     target.write_text(
         json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
         encoding="utf-8",
-    )
+     newline="\n")
     return target
 
 

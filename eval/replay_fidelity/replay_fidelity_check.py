@@ -239,10 +239,10 @@ def main(argv: list[str] | None = None) -> int:
     report = build_report(golden, src_state, bar, require_wired=args.require_wired)
 
     args.json_out.parent.mkdir(parents=True, exist_ok=True)
-    args.json_out.write_text(json.dumps(_strict_json_value(report), indent=2, default=str, allow_nan=False))
+    args.json_out.write_text(json.dumps(_strict_json_value(report), indent=2, default=str, allow_nan=False), newline="\n")
     args.md_out.parent.mkdir(parents=True, exist_ok=True)
     md = render_markdown(report)
-    args.md_out.write_text(md)
+    args.md_out.write_text(md, newline="\n")
 
     if not args.quiet:
         print(md)

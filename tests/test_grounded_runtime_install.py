@@ -30,7 +30,7 @@ def _module():
 
 def _repo(path: Path) -> str:
     (path / "src/mnemosyne").mkdir(parents=True)
-    (path / "src/mnemosyne/__init__.py").write_text("")
+    (path / "src/mnemosyne/__init__.py").write_text("", newline="\n")
     (path / "src/mnemosyne/providers").mkdir()
     for name in (
         "bounded_command.py",
@@ -38,10 +38,10 @@ def _repo(path: Path) -> str:
         "grounded_protocol.py",
         "grounded_reader.py",
     ):
-        (path / "src/mnemosyne/providers" / name).write_text(f"# {name}\n")
+        (path / "src/mnemosyne/providers" / name).write_text(f"# {name}\n", newline="\n")
     (path / "infra/providers").mkdir(parents=True)
     for name in ("role-llm.py", "role-ladder.py"):
-        (path / "infra/providers" / name).write_text("print('ok')\n")
+        (path / "infra/providers" / name).write_text("print('ok')\n", newline="\n")
     subprocess.run(["git", "init", "-q"], cwd=path, check=True)
     subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=path, check=True)
     subprocess.run(["git", "config", "user.name", "Test"], cwd=path, check=True)
@@ -80,7 +80,7 @@ def test_runtime_install_rejects_dirty_tracked_checkout(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     _repo(repo)
-    (repo / "src/mnemosyne/__init__.py").write_text("dirty = True\n")
+    (repo / "src/mnemosyne/__init__.py").write_text("dirty = True\n", newline="\n")
     with pytest.raises(ValueError, match="clean committed"):
         _module().install(repo, tmp_path / "runtime")
 
@@ -89,7 +89,7 @@ def test_runtime_install_rejects_untracked_source_injection(tmp_path: Path) -> N
     repo = tmp_path / "repo"
     repo.mkdir()
     _repo(repo)
-    (repo / "src/mnemosyne/injected.py").write_text("payload = True\n")
+    (repo / "src/mnemosyne/injected.py").write_text("payload = True\n", newline="\n")
     with pytest.raises(ValueError, match="clean committed"):
         _module().install(repo, tmp_path / "runtime")
 
@@ -102,14 +102,14 @@ def test_runtime_verifier_rejects_forged_tree_and_fresh_manifest(tmp_path: Path)
     target = destination / "lib/mnemosyne/providers/grounded_reader.py"
     destination.chmod(0o700)
     target.chmod(0o600)
-    target.write_text("# forged\n")
+    target.write_text("# forged\n", newline="\n")
     manifest_path = destination / "manifest.json"
     manifest_path.chmod(0o600)
     manifest = json.loads(manifest_path.read_text())
     manifest["files"]["lib/mnemosyne/providers/grounded_reader.py"] = hashlib.sha256(
         target.read_bytes()
     ).hexdigest()
-    manifest_path.write_text(json.dumps(manifest))
+    manifest_path.write_text(json.dumps(manifest), newline="\n")
     with pytest.raises(ValueError, match="candidate git custody"):
         grounded_runtime_environment(
             manifest_path,

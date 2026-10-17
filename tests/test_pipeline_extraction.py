@@ -244,7 +244,7 @@ if __name__ == "__main__":
 
     if "--write-goldens" in sys.argv:
         GOLDEN_PATH.parent.mkdir(parents=True, exist_ok=True)
-        GOLDEN_PATH.write_text(json.dumps(build_all_surfaces(), indent=2, sort_keys=True) + "\n")
+        GOLDEN_PATH.write_text(json.dumps(build_all_surfaces(), indent=2, sort_keys=True) + "\n", newline="\n")
         print(f"wrote {GOLDEN_PATH}")
     else:
         print("usage: python tests/test_pipeline_extraction.py --write-goldens")

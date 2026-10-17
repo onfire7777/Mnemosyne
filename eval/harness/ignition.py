@@ -85,5 +85,5 @@ def evaluate_ignition(
     )
     if state_path:
         state_path.parent.mkdir(parents=True, exist_ok=True)
-        state_path.write_text(json.dumps(state.as_dict(), indent=2))
+        state_path.write_text(json.dumps(state.as_dict(), indent=2), newline="\n")
     return state

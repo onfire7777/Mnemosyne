@@ -54,7 +54,7 @@ def test_plan_is_source_bound_and_never_overwrites(tmp_path):
                 "summary": {"rows": 20, "groups": 10},
             }
         )
-    )
+    , newline="\n")
     output = tmp_path / "plan"
     result = plan(grouped, output)
     assert result["rows"] == {"train": 16, "selection": 2, "calibration": 2}

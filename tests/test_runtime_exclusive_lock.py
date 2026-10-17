@@ -45,7 +45,7 @@ def _write_python_lock_probe(tmp_path: Path) -> tuple[Path, Path]:
         "fi\n"
         'exec "$REAL_PYTHON" "$@"\n',
         encoding="utf-8",
-    )
+     newline="\n")
     probe.chmod(0o755)
     return probe, probe_log
 
@@ -66,7 +66,7 @@ def _caller_case(
     )
     if caller == "capture":
         manifest = tmp_path / "production-soak.json"
-        manifest.write_text("{}\n", encoding="utf-8")
+        manifest.write_text("{}\n", encoding="utf-8", newline="\n")
         mutation_root = tmp_path / "capture"
         command = [
             "/bin/bash",
@@ -103,7 +103,7 @@ def _write_blocking_python_probe(tmp_path: Path) -> tuple[Path, Path, Path]:
         'while [ ! -e "$CALLER_RELEASE" ]; do sleep 0.01; done\n'
         "exit 97\n",
         encoding="utf-8",
-    )
+     newline="\n")
     probe.chmod(0o755)
     return probe, state, release
 
@@ -197,7 +197,7 @@ def test_capture_acquires_runtime_lock_before_first_side_effect(
     custody_dir, locks_dir = _custody(tmp_path)
     probe, probe_log = _write_python_lock_probe(tmp_path)
     manifest = tmp_path / "production-soak.json"
-    manifest.write_text("{}\n", encoding="utf-8")
+    manifest.write_text("{}\n", encoding="utf-8", newline="\n")
     environment = _environment(custody_dir)
     environment.update(
         {
@@ -768,7 +768,7 @@ def test_successful_child_releases_runtime_lock(tmp_path: Path) -> None:
 def test_child_launch_failure_releases_runtime_lock(tmp_path: Path) -> None:
     custody_dir, locks_dir = _custody(tmp_path)
     invalid_executable = tmp_path / "invalid-executable"
-    invalid_executable.write_text("not an executable image\n")
+    invalid_executable.write_text("not an executable image\n", newline="\n")
     invalid_executable.chmod(0o700)
 
     completed = _run(custody_dir, str(invalid_executable))
@@ -790,7 +790,7 @@ def test_coordinator_imports_are_isolated_before_lock_acquisition(
         "from pathlib import Path\n"
         f"Path({str(sentinel)!r}).touch()\n"
         "raise RuntimeError('shadow import executed')\n"
-    )
+    , newline="\n")
     environment = _environment(custody_dir)
     environment["PYTHONPATH"] = str(shadow_dir)
 
@@ -1040,7 +1040,7 @@ def test_symlinked_locks_parent_fails_before_child(tmp_path: Path) -> None:
 
 def test_regular_file_in_custody_path_has_fixed_failure_output(tmp_path: Path) -> None:
     regular = tmp_path / "regular"
-    regular.write_text("not a directory")
+    regular.write_text("not a directory", newline="\n")
     custody_dir = regular / "custody"
 
     completed = _run(custody_dir, sys.executable, "-c", "raise SystemExit(0)")
@@ -1785,7 +1785,7 @@ def test_extra_lock_entry_causes_release_failure_without_recursive_cleanup(
     custody_dir, locks_dir = _custody(tmp_path)
     process, _, release = _spawn_owner(custody_dir, tmp_path)
     extra = locks_dir / LOCK_NAME / "foreign-evidence"
-    extra.write_text("preserve")
+    extra.write_text("preserve", newline="\n")
     extra.chmod(0o600)
 
     stdout, stderr = _finish_owner(process, release)

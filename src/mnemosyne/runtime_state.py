@@ -55,7 +55,7 @@ class RuntimeState:
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-        tmp.write_text(json.dumps(self.data, indent=2, sort_keys=True), encoding="utf-8")
+        tmp.write_text(json.dumps(self.data, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
         tmp.replace(self.path)
 
     def load_user_model(self) -> UserModel:

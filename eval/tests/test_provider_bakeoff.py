@@ -46,8 +46,8 @@ def _write_slo_report(path: Path, *, recall: float, passed: bool = True) -> None
         ],
         "mandatory_classes": [{"name": "no_degradation_vs_no_memory", "passed": True}],
     }
-    path.write_text(json.dumps(payload), encoding="utf-8")
-    path.with_suffix(".md").write_text("# SLO report\n", encoding="utf-8")
+    path.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
+    path.with_suffix(".md").write_text("# SLO report\n", encoding="utf-8", newline="\n")
 
 
 def _write_fixture(tmp_path: Path, *, baseline: Path, candidate: Path, promotion_allowed: bool = False) -> Path:
@@ -90,7 +90,7 @@ def _write_fixture(tmp_path: Path, *, baseline: Path, candidate: Path, promotion
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     return fixture
 
 
@@ -100,9 +100,9 @@ def test_provider_bakeoff_blocks_smoke_promotion_with_complete_evidence(tmp_path
     _write_slo_report(baseline, recall=0.82)
     _write_slo_report(candidate, recall=0.83)
     provider_check = tmp_path / "provider-check.json"
-    provider_check.write_text(json.dumps({"ok": True, "checks": {"embedding": {"ok": True}}}), encoding="utf-8")
+    provider_check.write_text(json.dumps({"ok": True, "checks": {"embedding": {"ok": True}}}), encoding="utf-8", newline="\n")
     noise_notes = tmp_path / "noise.md"
-    noise_notes.write_text("rerun noise envelope recorded\n", encoding="utf-8")
+    noise_notes.write_text("rerun noise envelope recorded\n", encoding="utf-8", newline="\n")
 
     report = build_report(
         _write_fixture(tmp_path, baseline=baseline, candidate=candidate),
@@ -128,9 +128,9 @@ def test_provider_bakeoff_flags_candidate_regression(tmp_path: Path) -> None:
     _write_slo_report(baseline, recall=0.82, passed=True)
     _write_slo_report(candidate, recall=0.72, passed=False)
     provider_check = tmp_path / "provider-check.json"
-    provider_check.write_text(json.dumps({"ok": True}), encoding="utf-8")
+    provider_check.write_text(json.dumps({"ok": True}), encoding="utf-8", newline="\n")
     noise_notes = tmp_path / "noise.md"
-    noise_notes.write_text("rerun noise envelope recorded\n", encoding="utf-8")
+    noise_notes.write_text("rerun noise envelope recorded\n", encoding="utf-8", newline="\n")
 
     report = build_report(
         _write_fixture(tmp_path, baseline=baseline, candidate=candidate, promotion_allowed=True),

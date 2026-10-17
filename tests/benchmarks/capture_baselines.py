@@ -62,7 +62,7 @@ def main() -> None:
     missing = set(NAMES.values()) - set(baselines)
     if missing:
         raise SystemExit(f"capture incomplete, missing baselines: {sorted(missing)}")
-    out.write_text(json.dumps(baselines, indent=2, sort_keys=True) + "\n")
+    out.write_text(json.dumps(baselines, indent=2, sort_keys=True) + "\n", newline="\n")
     print(out.read_text())
 
 

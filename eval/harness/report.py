@@ -24,12 +24,12 @@ def write_reports(
     latest_md = out_dir / "slo_report_latest.md"
 
     json_text = json.dumps(result, indent=2, default=str)
-    json_path.write_text(json_text)
-    latest_json.write_text(json_text)
+    json_path.write_text(json_text, newline="\n")
+    latest_json.write_text(json_text, newline="\n")
 
     md = render_markdown(result)
-    md_path.write_text(md)
-    latest_md.write_text(md)
+    md_path.write_text(md, newline="\n")
+    latest_md.write_text(md, newline="\n")
     return {
         "json": json_path,
         "md": md_path,

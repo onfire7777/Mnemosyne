@@ -318,7 +318,7 @@ def test_markdown_git_source_blocks_parse_with_provenance_fields(tmp_path: Path)
         "confidence = 0.9\n"
         "```\n",
         encoding="utf-8",
-    )
+     newline="\n")
 
     blocks = parse_markdown_git_blocks(tmp_path)
 
@@ -338,7 +338,7 @@ def test_markdown_git_source_rejects_unclosed_assertion_block(tmp_path: Path) ->
     (tmp_path / "broken.md").write_text(
         f"```{SOURCE_TRUTH_FENCE}\nsubject = \"user\"\n",
         encoding="utf-8",
-    )
+     newline="\n")
 
     with pytest.raises(ValueError, match="unclosed"):
         parse_markdown_git_blocks(tmp_path)

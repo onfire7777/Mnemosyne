@@ -21,7 +21,7 @@ from mnemosyne.mcp_server import build_sdk_streamable_http_app
 
 def test_burnos_http_conversation_contract(tmp_path) -> None:
     pytest.importorskip("mcp")
-    httpx = pytest.importorskip("httpx")
+    httpx = pytest.importorskip("httpx2")
     secret = "burnos-wire-test-secret"
     now = datetime.now(UTC)
     scope = {

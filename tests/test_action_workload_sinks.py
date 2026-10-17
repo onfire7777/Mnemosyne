@@ -54,8 +54,8 @@ def test_public_workloads_deliver_to_sink_and_keep_failures_incomplete(tmp_path,
         else:
             source = json.loads((output / 'source.json').read_text())
             source['sink_enabled'] = False
-            (output / 'source.json').write_text(json.dumps(source))
-        (output / 'sink.json').write_text(json.dumps(changed))
+            (output / 'source.json').write_text(json.dumps(source), newline="\n")
+        (output / 'sink.json').write_text(json.dumps(changed), newline="\n")
         with pytest.raises(ValueError):
             module.recompute(output)
 

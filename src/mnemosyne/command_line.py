@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import shlex
+import subprocess
+import sys
 
 
 def _split_windows_command_line(command: str) -> list[str]:
@@ -52,5 +54,17 @@ def _split_windows_command_line(command: str) -> list[str]:
 def split_command(command: str) -> list[str]:
     """Split a configured command using the host platform's quoting rules."""
     if os.name == "nt":
-        return _split_windows_command_line(command)
+        return runnable(_split_windows_command_line(command))
     return shlex.split(command)
+
+
+def runnable(argv: list[str]) -> list[str]:
+    """A Python script named as the command: its shebang runs it elsewhere, the interpreter on Windows."""
+    if os.name == "nt" and argv and argv[0].lower().endswith(".py"):
+        return [sys.executable, *argv]
+    return argv
+
+
+def join_command(argv: list[str] | tuple[str, ...]) -> str:
+    """The command line ``split_command`` reads back as ``argv`` on this platform."""
+    return subprocess.list2cmdline([str(a) for a in argv]) if os.name == "nt" else shlex.join(argv)

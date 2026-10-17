@@ -41,7 +41,7 @@ def test_rejects_changed_model_tokenization(artifacts, tmp_path, field, index):
     value = json.loads(metadata.read_text(encoding="utf-8"))
     value["model_info"][field][index] = "changed"
     changed = tmp_path / "show.json"
-    changed.write_text(json.dumps(value), encoding="utf-8")
+    changed.write_text(json.dumps(value), encoding="utf-8", newline="\n")
     with pytest.raises(ValueError, match="differ"):
         audit(changed, tokenizer, prompts)
 
@@ -59,6 +59,6 @@ def test_rejects_non_ascii_scope_expansion(artifacts, tmp_path):
     value = json.loads(prompts.read_text(encoding="utf-8"))
     value["user"] += "café"
     changed = tmp_path / "prompts.json"
-    changed.write_text(json.dumps(value), encoding="utf-8")
+    changed.write_text(json.dumps(value), encoding="utf-8", newline="\n")
     with pytest.raises(ValueError, match="ASCII"):
         audit(metadata, tokenizer, changed)

@@ -24,7 +24,7 @@ def test_cross_environment_native_replay(tmp_path, monkeypatch):
         "qa": [{"question": "What color?", "answer": "violet", "category": 4, "evidence": ["D1:1"]}]}
     context = _prepare_native_replay(sample, caption_policy="exclude-caption")
     store = tmp_path / "synthetic-store"
-    store.write_text("synthetic transport only")
+    store.write_text("synthetic transport only", newline="\n")
     conversation = {"sample_id": "synthetic", "tenant_id": context["tenant"],
                     "cli": MnemoCLI(store=str(store)), "evidence": context["evidence"]}
     reader = {"grounded_reader": {"provider": "synthetic"}}
@@ -48,7 +48,7 @@ def test_cross_environment_native_replay(tmp_path, monkeypatch):
     assert report["source_population_complete"] and not report["complete"]
     assert not report["publication_authorized"] and not report["runtime_custody_verified"]
     saved = tmp_path / "report.json"
-    saved.write_text(json.dumps(report))
+    saved.write_text(json.dumps(report), newline="\n")
     assert verify_report_in_environment(json.loads(saved.read_text(encoding="utf-8")), [sample], [record], **kwargs) == report
     assert report["protocol"]["id"] == "mnemosyne.locomo-native-scoring/v1"
     assert len(report["protocol"]["replay_source_sha256"]) == 11

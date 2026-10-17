@@ -11,7 +11,7 @@ from mnemosyne.mcp_server import _env_or_file_secret
 
 def test_env_or_file_secret_prefers_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     secret = tmp_path / "mcp_bearer_token"
-    secret.write_text("file-token-value\n", encoding="utf-8")
+    secret.write_text("file-token-value\n", encoding="utf-8", newline="\n")
     monkeypatch.setenv("MNEMOSYNE_MCP_TOKEN", "env-token-value")
     monkeypatch.setenv("MNEMOSYNE_MCP_TOKEN_FILE", str(secret))
     assert _env_or_file_secret("MNEMOSYNE_MCP_TOKEN") == "file-token-value"
@@ -25,7 +25,7 @@ def test_env_or_file_secret_falls_back_to_env(monkeypatch: pytest.MonkeyPatch) -
 
 def test_env_or_file_secret_blank_file_is_none(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     secret = tmp_path / "blank"
-    secret.write_text("   \n", encoding="utf-8")
+    secret.write_text("   \n", encoding="utf-8", newline="\n")
     monkeypatch.delenv("MNEMOSYNE_MCP_TOKEN", raising=False)
     monkeypatch.setenv("MNEMOSYNE_MCP_TOKEN_FILE", str(secret))
     assert _env_or_file_secret("MNEMOSYNE_MCP_TOKEN") is None

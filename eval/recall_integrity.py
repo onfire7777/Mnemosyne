@@ -74,7 +74,7 @@ def main() -> None:
     for dataset in ["2wikimultihopqa", "hotpotqa", "musique"]:
         results.append(measure(args.data_root, dataset))
         args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
+        args.output.write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8", newline="\n")
         print(json.dumps(results[-1]), flush=True)
 
 

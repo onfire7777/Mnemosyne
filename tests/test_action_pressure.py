@@ -84,7 +84,7 @@ def test_public_runner_replays_and_retains_every_delivery(tmp_path, monkeypatch)
     assert result['cases'][0]['exact_drain_recovered'] is True
     assert (output/'sink.sqlite3').is_file()
     source = (output/'source.json').read_bytes()
-    (output/'source.json').write_text('{}')
+    (output/'source.json').write_text('{}', newline="\n")
     with pytest.raises(ValueError):
         pressure.recompute(output)
     (output/'source.json').write_bytes(source)
@@ -94,7 +94,7 @@ def test_public_runner_replays_and_retains_every_delivery(tmp_path, monkeypatch)
         pressure.recompute(output)
     (output/'sink.sqlite3').write_bytes(sink)
     lines = (output/'operations.jsonl').read_text().splitlines()
-    (output/'operations.jsonl').write_text('\n'.join(lines[:-1])+'\n')
+    (output/'operations.jsonl').write_text('\n'.join(lines[:-1])+'\n', newline="\n")
     with pytest.raises(ValueError):
         pressure.recompute(output)
 

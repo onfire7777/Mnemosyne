@@ -150,7 +150,7 @@ def test_manifest_rejects_drifted_and_malformed_overwrite(tmp_path, manifest) ->
     with pytest.raises(ManifestDriftError, match="drift"):
         create_manifest(path, drifted)
 
-    path.write_text("not-json", encoding="utf-8")
+    path.write_text("not-json", encoding="utf-8", newline="\n")
     with pytest.raises(ManifestDriftError, match="invalid"):
         create_manifest(path, manifest)
 
@@ -163,7 +163,7 @@ def test_manifest_rejects_duplicate_json_keys(tmp_path, manifest) -> None:
         '"schema": "mnemosyne.compact-answering-custody.v1"',
         1,
     )
-    path.write_text(payload, encoding="utf-8")
+    path.write_text(payload, encoding="utf-8", newline="\n")
 
     with pytest.raises(ManifestValidationError, match="duplicate"):
         load_manifest(path)
@@ -173,7 +173,7 @@ def test_manifest_rejects_duplicate_json_keys(tmp_path, manifest) -> None:
         '"identity": "code:pinned-v1", "identity": "code:other"',
         1,
     )
-    path.write_text(nested, encoding="utf-8")
+    path.write_text(nested, encoding="utf-8", newline="\n")
     with pytest.raises(ManifestValidationError, match="duplicate"):
         load_manifest(path)
 

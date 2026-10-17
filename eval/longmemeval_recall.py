@@ -89,7 +89,7 @@ def main() -> None:
         }
     report = {"summary": summary, "seconds": round(time.perf_counter() - started, 1), "rows": rows}
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps(report, indent=1), encoding="utf-8")
+    args.out.write_text(json.dumps(report, indent=1), encoding="utf-8", newline="\n")
     print(json.dumps({k: v for k, v in report.items() if k != "rows"}))
 
 

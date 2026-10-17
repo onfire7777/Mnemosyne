@@ -32,7 +32,7 @@ def write_log(tmp_path, response):
         rows.append({'stage': 'chat_response', 'raw_base64': base64.b64encode(json.dumps(response).encode()).decode()})
     rows.append({'stage': 'failed'})
     path = tmp_path / 'log.jsonl'
-    path.write_text(''.join(json.dumps(r) + '\n' for r in rows))
+    path.write_text(''.join(json.dumps(r) + '\n' for r in rows), newline="\n")
     return path
 
 

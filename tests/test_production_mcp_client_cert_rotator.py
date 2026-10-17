@@ -410,7 +410,7 @@ def _tls_fixture(
         )
     )
     key_path.chmod(0o600)
-    password_path.write_text("provisioner-canary-must-never-leak\n", encoding="utf-8")
+    password_path.write_text("provisioner-canary-must-never-leak\n", encoding="utf-8", newline="\n")
     password_path.chmod(0o600)
     return TlsFixture(
         secrets,
@@ -813,7 +813,7 @@ shutil.copyfile({str(staged.key)!r}, stage_path / "mcp-client.key")
 (stage_path / "mcp-client.key").chmod(0o600)
 """,
         encoding="utf-8",
-    )
+     newline="\n")
     docker.chmod(0o700)
     return docker, record
 
@@ -910,7 +910,7 @@ sys.stdout.write(responses[index])
 raise SystemExit(returncodes[index])
 """,
         encoding="utf-8",
-    )
+     newline="\n")
     curl.chmod(0o700)
     return curl, record
 
@@ -955,7 +955,7 @@ if arguments[:2] == ["-", "mark-completion-emitted"]:
 os.execv({real_python!r}, [{real_python!r}, *arguments])
 """,
         encoding="utf-8",
-    )
+     newline="\n")
     fake_python.chmod(0o700)
     return fake_bin
 
@@ -993,7 +993,7 @@ if arguments[:1] == ["verify"] and "-attime" in arguments:
 os.execv({real_openssl!r}, [{real_openssl!r}, *arguments])
 """,
         encoding="utf-8",
-    )
+     newline="\n")
     fake_openssl.chmod(0o700)
     return fake_bin
 
@@ -1066,7 +1066,7 @@ def _write_dotenv_residue(fixture: TlsFixture) -> tuple[Path, Path]:
         )
         + "\n",
         encoding="utf-8",
-    )
+     newline="\n")
     receipt.chmod(0o600)
     return dotenv, receipt
 
@@ -1125,7 +1125,7 @@ def _enable_transaction_fixture(
             separators=(",", ":"),
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     marker.chmod(0o600)
     return marker
 
@@ -1987,7 +1987,7 @@ if sys.argv[1:] == ["x509", "-help"]:
 os.execv({real_openssl!r}, [{real_openssl!r}, *sys.argv[1:]])
 """,
         encoding="utf-8",
-    )
+     newline="\n")
     fake_openssl.chmod(0o700)
 
     proc = _run_diagnostic(
@@ -2214,7 +2214,7 @@ def test_preflight_existing_stage_is_never_overwritten(tmp_path: Path) -> None:
     stage = _stage_path(current, "existing-stage")
     stage.mkdir()
     sentinel = stage / "sentinel"
-    sentinel.write_text("owned", encoding="utf-8")
+    sentinel.write_text("owned", encoding="utf-8", newline="\n")
 
     proc = _run_rotator(_rotator_env(current, docker, stage))
 
@@ -2612,22 +2612,22 @@ def test_recovery_rejects_malformed_unsafe_or_digest_mismatched_evidence(
     generation_paths = list(_generation_paths(transaction, journal).values())
     raw_journal = journal_path.read_text(encoding="utf-8").rstrip()
     if corruption == "malformed":
-        journal_path.write_text("{", encoding="utf-8")
+        journal_path.write_text("{", encoding="utf-8", newline="\n")
     elif corruption == "duplicate":
         journal_path.write_text(
             raw_journal[:-1] + ',"phase":"pair_published"}',
             encoding="utf-8",
-        )
+         newline="\n")
     elif corruption == "unknown":
         journal_path.write_text(
             raw_journal[:-1] + ',"unexpected":"value"}',
             encoding="utf-8",
-        )
+         newline="\n")
     elif corruption == "oversized":
         journal_path.write_text(
             raw_journal[:-1] + ',"padding":"' + ("x" * 4096) + '"}',
             encoding="utf-8",
-        )
+         newline="\n")
     elif corruption == "unsafe_mode":
         journal_path.chmod(0o644)
     elif corruption == "symlink":
@@ -2645,7 +2645,7 @@ def test_recovery_rejects_malformed_unsafe_or_digest_mismatched_evidence(
         journal_path.write_text(
             json.dumps({**journal, "phase": "pair_published"}, separators=(",", ":")),
             encoding="utf-8",
-        )
+         newline="\n")
         transaction.current.bundle.write_bytes(transaction.staged.bundle.read_bytes())
     elif corruption in {"activation_started_old_old", "committed_old_old"}:
         journal_path.write_text(
@@ -2654,7 +2654,7 @@ def test_recovery_rejects_malformed_unsafe_or_digest_mismatched_evidence(
                 separators=(",", ":"),
             ),
             encoding="utf-8",
-        )
+         newline="\n")
     elif corruption in {"activation_started_new_old", "committed_new_old"}:
         journal_path.write_text(
             json.dumps(
@@ -2662,7 +2662,7 @@ def test_recovery_rejects_malformed_unsafe_or_digest_mismatched_evidence(
                 separators=(",", ":"),
             ),
             encoding="utf-8",
-        )
+         newline="\n")
         transaction.current.bundle.write_bytes(transaction.staged.bundle.read_bytes())
     elif corruption in {"activation_started_old_new", "committed_old_new"}:
         journal_path.write_text(
@@ -2671,7 +2671,7 @@ def test_recovery_rejects_malformed_unsafe_or_digest_mismatched_evidence(
                 separators=(",", ":"),
             ),
             encoding="utf-8",
-        )
+         newline="\n")
         transaction.current.key.write_bytes(transaction.staged.key.read_bytes())
     elif corruption == "old_pair_restored_old_new":
         journal_path.write_text(
@@ -2679,7 +2679,7 @@ def test_recovery_rejects_malformed_unsafe_or_digest_mismatched_evidence(
                 {**journal, "phase": "old_pair_restored"}, separators=(",", ":")
             ),
             encoding="utf-8",
-        )
+         newline="\n")
         transaction.current.key.write_bytes(transaction.staged.key.read_bytes())
     elif corruption == "rollback_restoring_certificate_old_old":
         journal_path.write_text(
@@ -2688,7 +2688,7 @@ def test_recovery_rejects_malformed_unsafe_or_digest_mismatched_evidence(
                 separators=(",", ":"),
             ),
             encoding="utf-8",
-        )
+         newline="\n")
     elif corruption in {
         "rollback_restoring_key_new_new",
         "rollback_pair_restored_new_new",
@@ -2702,7 +2702,7 @@ def test_recovery_rejects_malformed_unsafe_or_digest_mismatched_evidence(
                 separators=(",", ":"),
             ),
             encoding="utf-8",
-        )
+         newline="\n")
         transaction.current.bundle.write_bytes(transaction.staged.bundle.read_bytes())
         transaction.current.key.write_bytes(transaction.staged.key.read_bytes())
     canonical_cert = transaction.current.bundle.read_bytes()
@@ -3967,7 +3967,7 @@ def test_completion_authorization_rejects_mismatched_receipt_result(
         )
         + "\n",
         encoding="utf-8",
-    )
+     newline="\n")
     pending_receipt.chmod(0o600)
     journal_bytes = journal_path.read_bytes()
     receipt_bytes = pending_receipt.read_bytes()
@@ -4674,7 +4674,7 @@ def test_committed_residue_is_rejected_and_preserved_without_cleanup(
         journal_path.write_text(
             json.dumps(journal, separators=(",", ":")) + "\n",
             encoding="utf-8",
-        )
+         newline="\n")
         journal_path.chmod(0o600)
     journal_bytes = journal_path.read_bytes()
     artifact_bytes = {
@@ -5587,7 +5587,7 @@ def test_rollback_restart_rejects_tampered_compose_identity_marker(
     marker.write_text(
         json.dumps(marker_payload, separators=(",", ":")),
         encoding="utf-8",
-    )
+     newline="\n")
     marker.chmod(0o600)
 
     failed = _run_rotator(transaction.env, TRANSACTION_ACTION)
@@ -6675,7 +6675,7 @@ def test_private_dotenv_recovery_preserves_artifacts_for_invalid_schema_state(
     state_path.write_text(
         json.dumps(state_payload, separators=(",", ":")) + "\n",
         encoding="utf-8",
-    )
+     newline="\n")
     state_path.chmod(0o600)
     state_bytes = state_path.read_bytes()
     artifacts_before = {
@@ -6748,7 +6748,7 @@ def test_private_dotenv_recovery_rejects_compose_state_outside_activation_phase(
     journal.write_text(
         json.dumps(journal_payload, separators=(",", ":")) + "\n",
         encoding="utf-8",
-    )
+     newline="\n")
     journal.chmod(0o600)
     journal_bytes = journal.read_bytes()
     artifacts_before = {
@@ -7066,7 +7066,7 @@ def test_private_dotenv_recovery_rejects_receipt_from_another_transaction(
     receipt.write_text(
         json.dumps(receipt_payload, separators=(",", ":")) + "\n",
         encoding="utf-8",
-    )
+     newline="\n")
     receipt.chmod(0o600)
     artifacts_before = {
         path.name: path.read_bytes() for path in _compose_env_artifact_paths(rotation)

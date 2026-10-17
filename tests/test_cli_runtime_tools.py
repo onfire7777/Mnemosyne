@@ -5,7 +5,6 @@ import base64
 import copy
 import json
 import shutil
-import shlex
 import socket
 import stat
 import subprocess
@@ -54,6 +53,7 @@ from mnemosyne.retrieval import (
 )
 from mnemosyne.runtime_state import RuntimeState
 from mnemosyne.security import SessionAuthError, SessionIdentity, SessionTokenVerifier
+from mnemosyne.command_line import join_command
 
 
 TENANT = "tenant-cli"
@@ -210,10 +210,11 @@ def oidc_payload(**overrides: object) -> dict[str, object]:
 def run_cli(store: Path, *args: str) -> dict:
     result = subprocess.run(
         [sys.executable, "-m", "mnemosyne.cli", "--store", str(store), *args],
-        check=True,
         text=True,
         capture_output=True,
     )
+    # what the command said, so a failure names its cause instead of only its exit status
+    assert result.returncode == 0, f"exit {result.returncode}\n{result.stderr[-3000:]}\n{result.stdout[:20000]}"
     return json.loads(result.stdout)
 
 
@@ -325,7 +326,7 @@ def seed_legacy_evidence(
 
 
 def run_packaged_cli(store: Path, *args: str) -> dict:
-    entrypoint = Path(sys.executable).with_name("mneme")
+    entrypoint = Path(sys.executable).with_name("mneme.exe" if sys.platform == "win32" else "mneme")
     assert entrypoint.exists(), (
         f"missing packaged entrypoint at {entrypoint}; run `python -m pip install -e .`"
     )
@@ -397,9 +398,9 @@ def fake_retrieval_command(tmp_path: Path, *, name: str = "retrieval-provider") 
             ]
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     script.chmod(0o755)
-    return " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(state))), state
+    return join_command((sys.executable, str(script), str(state))), state
 
 
 def start_streamable_http_server(tmp_path: Path) -> tuple[object, threading.Thread, str]:
@@ -439,7 +440,7 @@ def test_cli_session_exchange_validates_oidc_jwks_and_mints_session_token(tmp_pa
     store = tmp_path / "mnemosyne.json"
     jwks, idp_token = make_oidc_token(oidc_payload())
     jwks_file = tmp_path / "jwks.json"
-    jwks_file.write_text(json.dumps(jwks), encoding="utf-8")
+    jwks_file.write_text(json.dumps(jwks), encoding="utf-8", newline="\n")
 
     exchanged = run_cli(
         store,
@@ -533,7 +534,7 @@ def test_cli_idp_jwks_live_check_fails_closed_on_invalid_token(tmp_path: Path) -
     store = tmp_path / "mnemosyne.json"
     jwks, idp_token = make_oidc_token(oidc_payload(aud="wrong-audience"))
     jwks_file = tmp_path / "jwks.json"
-    jwks_file.write_text(json.dumps(jwks), encoding="utf-8")
+    jwks_file.write_text(json.dumps(jwks), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(
         store,
@@ -615,7 +616,7 @@ def test_cli_session_exchange_maps_idp_claims_through_authz_policy(tmp_path: Pat
     payload.pop("mnemosyne_source_trust_tier")
     jwks, idp_token = make_oidc_token(payload)
     jwks_file = tmp_path / "jwks.json"
-    jwks_file.write_text(json.dumps(jwks), encoding="utf-8")
+    jwks_file.write_text(json.dumps(jwks), encoding="utf-8", newline="\n")
     policy_file = tmp_path / "authz-policy.json"
     policy_file.write_text(
         json.dumps(
@@ -636,7 +637,7 @@ def test_cli_session_exchange_maps_idp_claims_through_authz_policy(tmp_path: Pat
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     exchanged = run_cli(
         store,
@@ -668,7 +669,7 @@ def test_cli_session_exchange_authz_policy_miss_fails_closed(tmp_path: Path) -> 
     payload = oidc_payload(groups=["mnemosyne-readers"], scope="openid", azp="cli-client")
     jwks, idp_token = make_oidc_token(payload)
     jwks_file = tmp_path / "jwks.json"
-    jwks_file.write_text(json.dumps(jwks), encoding="utf-8")
+    jwks_file.write_text(json.dumps(jwks), encoding="utf-8", newline="\n")
     policy_file = tmp_path / "authz-policy.json"
     policy_file.write_text(
         json.dumps(
@@ -686,7 +687,7 @@ def test_cli_session_exchange_authz_policy_miss_fails_closed(tmp_path: Path) -> 
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     result = run_raw_cli(
         store,
@@ -729,7 +730,7 @@ def test_cli_idp_authz_policy_check_reports_fingerprint_without_claim_values(tmp
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     report = run_cli(tmp_path / "mnemosyne.json", "idp-authz-policy-check", "--idp-authz-policy-file", str(policy_file))
 
@@ -765,7 +766,7 @@ def test_cli_idp_authz_policy_rollout_requires_fingerprints_and_gates_simulation
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     candidate_policy_file.write_text(
         json.dumps(
             {
@@ -791,7 +792,7 @@ def test_cli_idp_authz_policy_rollout_requires_fingerprints_and_gates_simulation
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     simulation_file.write_text(
         json.dumps(
             [
@@ -811,7 +812,7 @@ def test_cli_idp_authz_policy_rollout_requires_fingerprints_and_gates_simulation
             ]
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     current_fingerprint = run_cli(
         store,
         "idp-authz-policy-check",
@@ -887,7 +888,7 @@ def test_cli_session_exchange_fails_closed_on_invalid_idp_claims(tmp_path: Path)
     store = tmp_path / "mnemosyne.json"
     jwks, idp_token = make_oidc_token(oidc_payload(aud="wrong-audience"))
     jwks_file = tmp_path / "jwks.json"
-    jwks_file.write_text(json.dumps(jwks), encoding="utf-8")
+    jwks_file.write_text(json.dumps(jwks), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(
         store,
@@ -913,7 +914,7 @@ def test_cli_session_exchange_fails_closed_on_oversized_jwks_file(tmp_path: Path
     store = tmp_path / "mnemosyne.json"
     _, idp_token = make_oidc_token(oidc_payload())
     jwks_file = tmp_path / "oversized-jwks.json"
-    jwks_file.write_text(json.dumps({"keys": []}), encoding="utf-8")
+    jwks_file.write_text(json.dumps({"keys": []}), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(
         store,
@@ -942,7 +943,7 @@ def test_cli_session_exchange_uses_session_secret_command(tmp_path: Path) -> Non
     payload = oidc_payload()
     jwks, idp_token = make_oidc_token(payload)
     jwks_file = tmp_path / "jwks.json"
-    jwks_file.write_text(json.dumps(jwks), encoding="utf-8")
+    jwks_file.write_text(json.dumps(jwks), encoding="utf-8", newline="\n")
     command = fake_session_secret_command(
         tmp_path,
         {"keyring": {"cmd-key": "command-session-secret"}, "active_key_id": "cmd-key"},
@@ -985,11 +986,11 @@ def test_cli_session_secret_command_verifies_existing_session(tmp_path: Path) ->
 
 def test_cli_session_secret_command_fails_closed_on_bad_response(tmp_path: Path) -> None:
     script = tmp_path / "bad-session-secret.py"
-    script.write_text("print('not json')\n", encoding="utf-8")
-    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script)))
+    script.write_text("print('not json')\n", encoding="utf-8", newline="\n")
+    command = join_command((sys.executable, str(script)))
     jwks, idp_token = make_oidc_token(oidc_payload())
     jwks_file = tmp_path / "jwks.json"
-    jwks_file.write_text(json.dumps(jwks), encoding="utf-8")
+    jwks_file.write_text(json.dumps(jwks), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(
         tmp_path / "mnemosyne.json",
@@ -1048,14 +1049,14 @@ def fake_kms_command(tmp_path: Path) -> tuple[str, Path]:
             ]
         ),
         encoding="utf-8",
-    )
-    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(state)))
+     newline="\n")
+    command = join_command((sys.executable, str(script), str(state)))
     return command, state
 
 
 def fake_session_secret_command(tmp_path: Path, response: dict[str, object], *, name: str = "fake-session-secret") -> str:
     response_file = tmp_path / f"{name}.json"
-    response_file.write_text(json.dumps(response, sort_keys=True), encoding="utf-8")
+    response_file.write_text(json.dumps(response, sort_keys=True), encoding="utf-8", newline="\n")
     script = tmp_path / f"{name}.py"
     script.write_text(
         "\n".join(
@@ -1073,8 +1074,8 @@ def fake_session_secret_command(tmp_path: Path, response: dict[str, object], *, 
             ]
         ),
         encoding="utf-8",
-    )
-    return " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(response_file)))
+     newline="\n")
+    return join_command((sys.executable, str(script), str(response_file)))
 
 
 def fake_parametric_command(tmp_path: Path) -> tuple[str, Path]:
@@ -1102,8 +1103,8 @@ def fake_parametric_command(tmp_path: Path) -> tuple[str, Path]:
             ]
         ),
         encoding="utf-8",
-    )
-    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(state)))
+     newline="\n")
+    command = join_command((sys.executable, str(script), str(state)))
     return command, state
 
 
@@ -1119,8 +1120,8 @@ def fake_broken_parametric_command(tmp_path: Path, output: str) -> str:
             ]
         ),
         encoding="utf-8",
-    )
-    return " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(tmp_path / "broken-state.json")))
+     newline="\n")
+    return join_command((sys.executable, str(script), str(tmp_path / "broken-state.json")))
 
 
 def test_cli_backend_selection_requires_postgres_dsn(tmp_path: Path, monkeypatch) -> None:
@@ -1189,7 +1190,7 @@ def test_cli_eval_g0_runs_benchmark_report_with_explicit_telemetry(tmp_path: Pat
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     result = run_raw_cli(
         tmp_path / "mnemosyne.json",
@@ -1225,7 +1226,7 @@ def test_packaged_cli_eval_g0_uses_repo_root_harness(tmp_path: Path) -> None:
     telemetry.write_text(
         json.dumps({"controller_avg_watts": 10.0, "controller_cost_usd_per_hour": 0.5}),
         encoding="utf-8",
-    )
+     newline="\n")
 
     report = run_packaged_cli(
         tmp_path / "mnemosyne.json",
@@ -1578,7 +1579,7 @@ def test_cli_idp_authz_policy_check_summarizes_without_sensitive_values(tmp_path
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     report = run_cli(tmp_path / "mnemosyne.json", "idp-authz-policy-check", "--idp-authz-policy-file", str(policy_file))
 
@@ -1625,7 +1626,7 @@ def test_cli_idp_authz_policy_check_fails_closed_on_invalid_policy(tmp_path: Pat
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     result = run_raw_cli(tmp_path / "mnemosyne.json", "idp-authz-policy-check", "--idp-authz-policy-file", str(policy_file))
 
@@ -1669,7 +1670,7 @@ def test_cli_provider_check_exercises_http_and_media_contracts(tmp_path: Path) -
             ]
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     extractor.chmod(0o755)
     embedder = tmp_path / "media_embedder.py"
     embedder.write_text(
@@ -1684,7 +1685,7 @@ def test_cli_provider_check_exercises_http_and_media_contracts(tmp_path: Path) -
             ]
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     embedder.chmod(0o755)
     base = f"http://127.0.0.1:{server.server_port}"
     try:
@@ -1788,9 +1789,9 @@ def test_cli_provider_check_fails_closed_on_bad_command_retrieval_adapter(tmp_pa
             ]
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     script.chmod(0o755)
-    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script)))
+    command = join_command((sys.executable, str(script)))
 
     result = run_raw_cli(
         tmp_path / "mnemosyne.json",
@@ -2304,7 +2305,7 @@ def test_cli_deployment_soak_runs_allowed_manifest_checks_without_leaking_tokens
                 }
             ),
             encoding="utf-8",
-        )
+         newline="\n")
         report = run_cli(
             tmp_path / "mnemosyne.json",
             "deployment-soak",
@@ -2362,7 +2363,7 @@ def test_cli_deployment_soak_runs_streamable_http_check_without_leaking_tokens(t
                 }
             ),
             encoding="utf-8",
-        )
+         newline="\n")
         report = run_cli(
             tmp_path / "mnemosyne.json",
             "deployment-soak",
@@ -2390,7 +2391,7 @@ def test_cli_deployment_soak_fails_closed_on_disallowed_command(tmp_path: Path) 
     manifest_path.write_text(
         json.dumps({"checks": [{"name": "bad", "command": "session-exchange", "args": []}]}),
         encoding="utf-8",
-    )
+     newline="\n")
 
     result = run_raw_cli(
         tmp_path / "mnemosyne.json",
@@ -2435,7 +2436,7 @@ def test_cli_deployment_soak_places_allowed_global_args_before_child_command(tmp
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     report = run_cli(tmp_path / "mnemosyne.json", "deployment-soak", "--soak-manifest", str(manifest_path))
 
@@ -2462,7 +2463,7 @@ def test_cli_deployment_soak_rejects_unallowed_global_args(tmp_path: Path) -> No
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     result = run_raw_cli(tmp_path / "mnemosyne.json", "deployment-soak", "--soak-manifest", str(manifest_path))
     report = json.loads(result.stdout)
@@ -2490,8 +2491,8 @@ def test_cli_deployment_soak_allows_idp_authz_rollout_check(tmp_path: Path) -> N
             }
         ],
     }
-    current_policy_file.write_text(json.dumps(policy), encoding="utf-8")
-    candidate_policy_file.write_text(json.dumps(policy), encoding="utf-8")
+    current_policy_file.write_text(json.dumps(policy), encoding="utf-8", newline="\n")
+    candidate_policy_file.write_text(json.dumps(policy), encoding="utf-8", newline="\n")
     current_fingerprint = run_cli(
         store,
         "idp-authz-policy-check",
@@ -2527,7 +2528,7 @@ def test_cli_deployment_soak_allows_idp_authz_rollout_check(tmp_path: Path) -> N
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     report = run_cli(store, "deployment-soak", "--soak-manifest", str(manifest_path))
 
@@ -2730,7 +2731,7 @@ def tls_lifecycle_ops_bundle(*, weak: bool = False, raw_secret: bool = False) ->
 
 def test_cli_tls_lifecycle_ops_check_validates_production_evidence_bundle(tmp_path: Path) -> None:
     bundle = tmp_path / "tls-lifecycle.json"
-    bundle.write_text(json.dumps(tls_lifecycle_ops_bundle()), encoding="utf-8")
+    bundle.write_text(json.dumps(tls_lifecycle_ops_bundle()), encoding="utf-8", newline="\n")
 
     report = run_cli(tmp_path / "mnemosyne.json", "tls-lifecycle-ops-check", "--bundle", str(bundle))
     acknowledged = run_cli(
@@ -2766,7 +2767,7 @@ def test_cli_tls_lifecycle_ops_check_validates_production_evidence_bundle(tmp_pa
 
 def test_cli_tls_lifecycle_ops_check_fails_closed_on_weak_evidence(tmp_path: Path) -> None:
     bundle = tmp_path / "bad-tls-lifecycle.json"
-    bundle.write_text(json.dumps(tls_lifecycle_ops_bundle(weak=True, raw_secret=True)), encoding="utf-8")
+    bundle.write_text(json.dumps(tls_lifecycle_ops_bundle(weak=True, raw_secret=True)), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(tmp_path / "mnemosyne.json", "tls-lifecycle-ops-check", "--bundle", str(bundle))
     report = json.loads(result.stdout)
@@ -2792,7 +2793,7 @@ def test_cli_tls_lifecycle_ops_check_env_thresholds_cover_short_lived_acme(tmp_p
     payload["renewal"]["current_days_remaining"] = 0.9
     payload["renewal"]["candidate_days_remaining"] = 1.9
     payload["renewal"]["overlap_days"] = 0.85
-    bundle.write_text(json.dumps(payload), encoding="utf-8")
+    bundle.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
 
     rejected = run_raw_cli(tmp_path / "mnemosyne.json", "tls-lifecycle-ops-check", "--bundle", str(bundle))
     rejected_codes = {finding["code"] for finding in json.loads(rejected.stdout)["findings"]}
@@ -2844,7 +2845,7 @@ def test_cli_deployment_soak_allows_tls_rotation_plan_check(tmp_path: Path) -> N
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     report = run_cli(tmp_path / "mnemosyne.json", "deployment-soak", "--soak-manifest", str(manifest_path))
 
@@ -2858,7 +2859,7 @@ def test_cli_deployment_soak_allows_tls_rotation_plan_check(tmp_path: Path) -> N
 
 def test_cli_deployment_soak_allows_tls_lifecycle_ops_check(tmp_path: Path) -> None:
     bundle = tmp_path / "tls-lifecycle.json"
-    bundle.write_text(json.dumps(tls_lifecycle_ops_bundle()), encoding="utf-8")
+    bundle.write_text(json.dumps(tls_lifecycle_ops_bundle()), encoding="utf-8", newline="\n")
     manifest_path = tmp_path / "deployment-soak.json"
     manifest_path.write_text(
         json.dumps(
@@ -2873,7 +2874,7 @@ def test_cli_deployment_soak_allows_tls_lifecycle_ops_check(tmp_path: Path) -> N
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     report = run_cli(tmp_path / "mnemosyne.json", "deployment-soak", "--soak-manifest", str(manifest_path))
 
@@ -2920,7 +2921,7 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
             ]
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     extractor.chmod(0o755)
     embedder = tmp_path / "media_embedder.py"
     embedder.write_text(
@@ -2935,7 +2936,7 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
             ]
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     embedder.chmod(0o755)
     kms_command, kms_state = fake_kms_command(tmp_path)
     parametric_command, parametric_state = fake_parametric_command(tmp_path)
@@ -2951,7 +2952,7 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
             ]
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     summarizer = tmp_path / "summarizer.py"
     summarizer.write_text(
         "\n".join(
@@ -2963,7 +2964,7 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
             ]
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     resolver = tmp_path / "entity-resolver.py"
     resolver.write_text(
         "\n".join(
@@ -2976,7 +2977,7 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
             ]
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     lesson_distiller = tmp_path / "lesson-distiller.py"
     lesson_distiller.write_text(
         "\n".join(
@@ -2995,7 +2996,7 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
             ]
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     skill_inducer = tmp_path / "skill-inducer.py"
     skill_inducer.write_text(
         "\n".join(
@@ -3014,7 +3015,7 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
             ]
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     monkeypatch.setenv("MNEMOSYNE_TEST_EMBED_KEY", "embed-manifest-secret")
     monkeypatch.setenv("MNEMOSYNE_TEST_RERANK_KEY", "rank-manifest-secret")
     base = f"http://127.0.0.1:{server.server_port}"
@@ -3074,29 +3075,29 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
                     },
                     "candidate_extractor": {
                         "provider": "command",
-                        "command": " ".join(shlex.quote(item) for item in (sys.executable, str(candidate_extractor))),
+                        "command": join_command((sys.executable, str(candidate_extractor))),
                     },
                     "summarizer": {
                         "provider": "command",
-                        "command": " ".join(shlex.quote(item) for item in (sys.executable, str(summarizer))),
+                        "command": join_command((sys.executable, str(summarizer))),
                     },
                     "entity_resolver": {
                         "provider": "command",
-                        "command": " ".join(shlex.quote(item) for item in (sys.executable, str(resolver))),
+                        "command": join_command((sys.executable, str(resolver))),
                     },
                     "lesson_distiller": {
                         "provider": "command",
-                        "command": " ".join(shlex.quote(item) for item in (sys.executable, str(lesson_distiller))),
+                        "command": join_command((sys.executable, str(lesson_distiller))),
                     },
                     "skill_inducer": {
                         "provider": "command",
-                        "command": " ".join(shlex.quote(item) for item in (sys.executable, str(skill_inducer))),
+                        "command": join_command((sys.executable, str(skill_inducer))),
                     },
                 },
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     try:
         report = run_cli(tmp_path / "mnemosyne.json", "provider-check", "--provider-manifest", str(manifest))
@@ -3283,7 +3284,7 @@ def test_cli_hosted_llm_check_validates_role_endpoints_without_leaking_auth(
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     try:
         report = run_cli(
@@ -3347,7 +3348,7 @@ def test_cli_hosted_llm_check_rejects_insecure_non_acknowledged_http(tmp_path: P
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     result = run_raw_cli(tmp_path / "mnemosyne.json", "hosted-llm-check", "--hosted-llm-manifest", str(manifest))
     payload = json.loads(result.stdout)
@@ -3376,7 +3377,7 @@ def test_cli_hosted_llm_check_rejects_inline_api_key(tmp_path: Path) -> None:
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     result = run_raw_cli(tmp_path / "mnemosyne.json", "hosted-llm-check", "--hosted-llm-manifest", str(manifest))
     payload = json.loads(result.stdout)
@@ -3416,7 +3417,7 @@ def test_cli_hosted_llm_check_rejects_redirects(tmp_path: Path) -> None:
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     try:
         result = run_raw_cli(
@@ -3609,7 +3610,7 @@ def multimodal_ops_bundle(
 
 def test_cli_multimodal_ops_check_validates_production_bundle(tmp_path: Path) -> None:
     bundle = tmp_path / "multimodal-ops.json"
-    bundle.write_text(json.dumps(multimodal_ops_bundle()), encoding="utf-8")
+    bundle.write_text(json.dumps(multimodal_ops_bundle()), encoding="utf-8", newline="\n")
 
     report = run_cli(tmp_path / "mnemosyne.json", "multimodal-ops-check", "--bundle", str(bundle))
     acknowledged = run_cli(
@@ -3649,7 +3650,7 @@ def test_cli_multimodal_ops_check_validates_production_bundle(tmp_path: Path) ->
 
 def test_cli_deployment_soak_allows_multimodal_ops_check(tmp_path: Path) -> None:
     bundle = tmp_path / "multimodal-ops.json"
-    bundle.write_text(json.dumps(multimodal_ops_bundle()), encoding="utf-8")
+    bundle.write_text(json.dumps(multimodal_ops_bundle()), encoding="utf-8", newline="\n")
     manifest_path = tmp_path / "deployment-soak.json"
     evidence_dir = tmp_path / "evidence"
     manifest_path.write_text(
@@ -3670,7 +3671,7 @@ def test_cli_deployment_soak_allows_multimodal_ops_check(tmp_path: Path) -> None
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     report = run_cli(
         tmp_path / "mnemosyne.json",
@@ -3708,7 +3709,7 @@ def test_cli_multimodal_ops_check_fails_closed_on_bad_bundle(tmp_path: Path) -> 
             )
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     result = run_raw_cli(tmp_path / "mnemosyne.json", "multimodal-ops-check", "--bundle", str(bundle))
     payload = json.loads(result.stdout)
@@ -3743,7 +3744,7 @@ def test_cli_multimodal_ops_check_fails_closed_on_bad_bundle(tmp_path: Path) -> 
 def test_cli_provider_check_validates_oidc_manifest_without_sensitive_values(tmp_path: Path) -> None:
     jwks, _ = make_oidc_token(oidc_payload())
     jwks_file = tmp_path / "jwks.json"
-    jwks_file.write_text(json.dumps(jwks), encoding="utf-8")
+    jwks_file.write_text(json.dumps(jwks), encoding="utf-8", newline="\n")
     policy_file = tmp_path / "authz-policy.json"
     policy_file.write_text(
         json.dumps(
@@ -3761,7 +3762,7 @@ def test_cli_provider_check_validates_oidc_manifest_without_sensitive_values(tmp
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     manifest = tmp_path / "providers.json"
     manifest.write_text(
         json.dumps(
@@ -3779,7 +3780,7 @@ def test_cli_provider_check_validates_oidc_manifest_without_sensitive_values(tmp
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     report = run_cli(tmp_path / "mnemosyne.json", "provider-check", "--provider-manifest", str(manifest))
 
@@ -3866,7 +3867,7 @@ def test_cli_provider_check_rejects_unsafe_oidc_jwks_url(tmp_path: Path) -> None
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     result = run_raw_cli(tmp_path / "mnemosyne.json", "provider-check", "--provider-manifest", str(manifest))
     payload = json.loads(result.stdout)
@@ -3902,7 +3903,7 @@ def test_cli_provider_check_oidc_allows_configured_internal_jwks_host(tmp_path: 
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     rejected = run_raw_cli(tmp_path / "mnemosyne.json", "provider-check", "--provider-manifest", str(manifest))
     rejected_payload = json.loads(rejected.stdout)
@@ -3945,7 +3946,7 @@ def test_cli_provider_check_validates_session_secret_command_without_sensitive_v
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     report = run_cli(tmp_path / "mnemosyne.json", "provider-check", "--provider-manifest", str(manifest))
 
@@ -3979,7 +3980,7 @@ def test_cli_provider_check_required_session_secret_fails_closed_on_bad_rotation
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     result = run_raw_cli(tmp_path / "mnemosyne.json", "provider-check", "--provider-manifest", str(manifest))
     payload = json.loads(result.stdout)
@@ -3994,7 +3995,7 @@ def test_cli_provider_check_required_session_secret_fails_closed_on_bad_rotation
 def test_cli_provider_check_required_oidc_fails_closed_without_issuer(tmp_path: Path) -> None:
     jwks, _ = make_oidc_token(oidc_payload())
     jwks_file = tmp_path / "jwks.json"
-    jwks_file.write_text(json.dumps(jwks), encoding="utf-8")
+    jwks_file.write_text(json.dumps(jwks), encoding="utf-8", newline="\n")
     manifest = tmp_path / "providers.json"
     manifest.write_text(
         json.dumps(
@@ -4005,7 +4006,7 @@ def test_cli_provider_check_required_oidc_fails_closed_without_issuer(tmp_path: 
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     result = run_raw_cli(tmp_path / "mnemosyne.json", "provider-check", "--provider-manifest", str(manifest))
     payload = json.loads(result.stdout)
@@ -4021,7 +4022,7 @@ def test_cli_provider_check_manifest_requires_selected_checks(tmp_path: Path) ->
     manifest.write_text(
         json.dumps({"name": "requires-media-embedding", "required_checks": ["media_embedding"], "providers": {}}),
         encoding="utf-8",
-    )
+     newline="\n")
 
     result = run_raw_cli(tmp_path / "mnemosyne.json", "provider-check", "--provider-manifest", str(manifest))
     payload = json.loads(result.stdout)
@@ -4049,7 +4050,7 @@ def test_cli_provider_check_manifest_can_forbid_local_retrieval(tmp_path: Path) 
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     result = run_raw_cli(tmp_path / "mnemosyne.json", "provider-check", "--provider-manifest", str(manifest))
     payload = json.loads(result.stdout)
@@ -4089,7 +4090,7 @@ def test_cli_provider_check_manifest_configures_command_retrieval_adapters(tmp_p
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     report = run_cli(tmp_path / "mnemosyne.json", "provider-check", "--provider-manifest", str(manifest))
     requests = json.loads(state.read_text(encoding="utf-8"))
@@ -4138,7 +4139,7 @@ def test_cli_ingests_binary_file_with_c2pa_verifier(tmp_path: Path) -> None:
             ]
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     verifier_stub.chmod(0o755)
 
     ingested = run_cli(
@@ -4355,7 +4356,7 @@ def test_cli_ingest_c2pa_trust_policy_quarantines_untrusted_signer(tmp_path: Pat
             ]
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     verifier_stub.chmod(0o755)
     trust_policy = tmp_path / "trust-policy.json"
     trust_policy.write_text(
@@ -4370,7 +4371,7 @@ def test_cli_ingest_c2pa_trust_policy_quarantines_untrusted_signer(tmp_path: Pat
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     ingested = run_cli(
         store,
@@ -4435,7 +4436,7 @@ def test_cli_ingest_c2pa_without_trust_anchor_quarantines(tmp_path: Path) -> Non
             ]
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     verifier_stub.chmod(0o755)
 
     ingested = run_cli(
@@ -4493,10 +4494,10 @@ def test_cli_c2pa_verifier_uses_actual_file_over_manifest_asset_path(tmp_path: P
             ]
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     verifier_stub.chmod(0o755)
     malicious_manifest = tmp_path / "provenance.json"
-    malicious_manifest.write_text(json.dumps({"asset_path": str(decoy)}), encoding="utf-8")
+    malicious_manifest.write_text(json.dumps({"asset_path": str(decoy)}), encoding="utf-8", newline="\n")
 
     ingested = run_cli(
         store,
@@ -4564,7 +4565,7 @@ def test_cli_provenance_trust_check_validates_c2pa_roots(tmp_path: Path) -> None
             ]
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     verifier_stub.chmod(0o755)
     suite = tmp_path / "provenance-suite.json"
     suite.write_text(
@@ -4591,7 +4592,7 @@ def test_cli_provenance_trust_check_validates_c2pa_roots(tmp_path: Path) -> None
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     report = run_cli(store, "provenance-trust-check", "--suite", str(suite))
     acknowledged = run_cli(
@@ -4644,7 +4645,7 @@ def test_cli_provenance_trust_check_rejects_untrusted_root(tmp_path: Path) -> No
             ]
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     verifier_stub.chmod(0o755)
     suite = tmp_path / "provenance-suite.json"
     suite.write_text(
@@ -4668,7 +4669,7 @@ def test_cli_provenance_trust_check_rejects_untrusted_root(tmp_path: Path) -> No
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     result = run_raw_cli(store, "provenance-trust-check", "--suite", str(suite))
     payload_json = json.loads(result.stdout)
@@ -4826,7 +4827,7 @@ def provenance_ops_bundle(
 
 def test_cli_provenance_ops_check_validates_production_bundle(tmp_path: Path) -> None:
     bundle = tmp_path / "provenance-ops.json"
-    bundle.write_text(json.dumps(provenance_ops_bundle()), encoding="utf-8")
+    bundle.write_text(json.dumps(provenance_ops_bundle()), encoding="utf-8", newline="\n")
 
     report = run_cli(tmp_path / "mnemosyne.json", "provenance-ops-check", "--bundle", str(bundle))
     acknowledged = run_cli(
@@ -4881,7 +4882,7 @@ def test_cli_provenance_ops_check_fails_closed_on_bad_bundle(tmp_path: Path) -> 
             )
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     result = run_raw_cli(tmp_path / "mnemosyne.json", "provenance-ops-check", "--bundle", str(bundle))
     payload = json.loads(result.stdout)
@@ -5168,7 +5169,7 @@ def test_cli_provider_manifest_configures_residency_policy(
             sort_keys=True,
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     check = run_cli(
         store,
@@ -5204,7 +5205,7 @@ def test_cli_drains_media_extraction_job_with_command_provider(tmp_path: Path) -
             ]
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     extractor.chmod(0o755)
 
     ingested = run_cli(
@@ -5305,8 +5306,8 @@ def test_cli_ingest_can_run_one_consolidation_worker_cycle(tmp_path: Path) -> No
             ]
         ),
         encoding="utf-8",
-    )
-    resolver_command = " ".join(shlex.quote(item) for item in (sys.executable, str(resolver_script), str(resolver_state)))
+     newline="\n")
+    resolver_command = join_command((sys.executable, str(resolver_script), str(resolver_state)))
     run_cli(
         store,
         "gate-case-add",
@@ -5541,7 +5542,7 @@ def test_cli_consolidation_uses_command_extractor_and_summarizer(tmp_path: Path)
             ]
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     summarizer = tmp_path / "summarizer.py"
     summarizer.write_text(
         "\n".join(
@@ -5553,9 +5554,9 @@ def test_cli_consolidation_uses_command_extractor_and_summarizer(tmp_path: Path)
             ]
         ),
         encoding="utf-8",
-    )
-    extractor_command = " ".join(shlex.quote(item) for item in (sys.executable, str(extractor)))
-    summarizer_command = " ".join(shlex.quote(item) for item in (sys.executable, str(summarizer)))
+     newline="\n")
+    extractor_command = join_command((sys.executable, str(extractor)))
+    summarizer_command = join_command((sys.executable, str(summarizer)))
     run_cli(
         store,
         "gate-case-add",
@@ -5587,6 +5588,7 @@ def test_cli_consolidation_uses_command_extractor_and_summarizer(tmp_path: Path)
         provider_args=provider_args,
     )
     job = consolidated["job"]
+    assert job.get("result"), f"{job.get('status')}: {job.get('last_error')}"  # a failed job says why
     extractor_result = job["result"]["pass_results"][1]
     summarizer_result = next(item for item in job["result"]["pass_results"] if item["name"] == "summarizer")
     role_pipeline = job["result"]["role_pipeline"]
@@ -6282,7 +6284,7 @@ def test_cli_ops_dashboard_check_rejects_metric_incomplete_package(tmp_path: Pat
     snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
     del snapshot["report"]["counts"]["audit_events"]
     del snapshot["report"]["tripwires"]["proxy_true_gap"]
-    snapshot_path.write_text(json.dumps(snapshot, sort_keys=True), encoding="utf-8")
+    snapshot_path.write_text(json.dumps(snapshot, sort_keys=True), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(
         store,
@@ -6351,7 +6353,7 @@ def test_cli_ops_dashboard_check_validates_operations_bundle(tmp_path: Path) -> 
     package_dir = tmp_path / "dashboard-package"
     ops_bundle = tmp_path / "dashboard-ops.json"
     run_cli(store, "ops-report", "--tenant", TENANT, "--dashboard-package-dir", str(package_dir))
-    ops_bundle.write_text(json.dumps(dashboard_operations_bundle()), encoding="utf-8")
+    ops_bundle.write_text(json.dumps(dashboard_operations_bundle()), encoding="utf-8", newline="\n")
 
     report = run_cli(
         store,
@@ -6379,7 +6381,7 @@ def test_cli_ops_dashboard_check_rejects_weak_operations_bundle(tmp_path: Path) 
     package_dir = tmp_path / "dashboard-package"
     ops_bundle = tmp_path / "bad-dashboard-ops.json"
     run_cli(store, "ops-report", "--tenant", TENANT, "--dashboard-package-dir", str(package_dir))
-    ops_bundle.write_text(json.dumps(dashboard_operations_bundle(weak=True, raw_payload=True)), encoding="utf-8")
+    ops_bundle.write_text(json.dumps(dashboard_operations_bundle(weak=True, raw_payload=True)), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(
         store,
@@ -6467,7 +6469,7 @@ def test_cli_deployment_soak_allows_ops_report_dashboard(tmp_path: Path) -> None
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     evidence_dir = tmp_path / "soak-evidence"
     report = run_cli(store, "deployment-soak", "--soak-manifest", str(manifest_path), "--evidence-dir", str(evidence_dir))
@@ -6528,7 +6530,7 @@ def test_cli_deployment_soak_preserves_operator_production_scope(tmp_path: Path)
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     report = run_cli(tmp_path / "mnemosyne.json", "deployment-soak", "--soak-manifest", str(manifest_path))
 
@@ -6567,7 +6569,7 @@ def test_cli_deployment_soak_preserves_false_operator_attestation(tmp_path: Path
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     report = run_cli(
         tmp_path / "mnemosyne.json",
@@ -7552,7 +7554,7 @@ def write_release_report(
     check_files = []
     for check in checks:
         check_path = checks_dir / f"{int(check['index']):03d}-{check['command']}.json"
-        check_path.write_text(json.dumps(check, indent=2, sort_keys=True), encoding="utf-8")
+        check_path.write_text(json.dumps(check, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
         check_files.append(
             {
                 "index": check["index"],
@@ -7565,7 +7567,7 @@ def write_release_report(
                 "sha256": "sha256:" + sha256(check_path.read_bytes()).hexdigest(),
             }
         )
-    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
     manifest_path.write_text(
         json.dumps(
             {
@@ -7585,7 +7587,7 @@ def write_release_report(
             }
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     return report_path, manifest_path
 
 
@@ -7599,16 +7601,16 @@ def rewrite_release_check_stdout(
     report = json.loads(report_path.read_text(encoding="utf-8"))
     check = next(item for item in report["checks"] if item["command"] == command)
     check["stdout_json"] = stdout_json
-    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     checks_dir = manifest_path.parent / manifest["files"]["checks_dir"]
     check_path = checks_dir / f"{int(check['index']):03d}-{check['command']}.json"
-    check_path.write_text(json.dumps(check, indent=2, sort_keys=True), encoding="utf-8")
+    check_path.write_text(json.dumps(check, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
     manifest_check = next(item for item in manifest["checks"] if item["command"] == command)
     manifest_check["sha256"] = "sha256:" + sha256(check_path.read_bytes()).hexdigest()
     manifest["files"]["report_sha256"] = "sha256:" + sha256(report_path.read_bytes()).hexdigest()
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
 
 
 def production_preflight_row_readiness(
@@ -7637,7 +7639,7 @@ def production_preflight_row_readiness(
 
 def write_executable_fixture(path: Path, payload: str = "#!/bin/sh\nexit 0\n") -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(payload, encoding="utf-8")
+    path.write_text(payload, encoding="utf-8", newline="\n")
     path.chmod(0o755)
     return path
 
@@ -7677,10 +7679,10 @@ def update_provider_manifest_snapshot(
     snapshot = Path(str(provider_artifact["snapshot_path"]))
     payload = json.loads(snapshot.read_text(encoding="utf-8"))
     mutate(payload)
-    snapshot.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    snapshot.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
     provider_artifact["files"][0]["size_bytes"] = snapshot.stat().st_size
     provider_artifact["files"][0]["sha256"] = "sha256:" + sha256(snapshot.read_bytes()).hexdigest()
-    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
+    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
     return preflight
 
 
@@ -7716,7 +7718,7 @@ def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
             sort_keys=True,
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     provider_manifest_snapshot = input_root / "0001-provider-manifest.production.json"
     shutil.copy2(provider_manifest_source, provider_manifest_snapshot)
     provider_manifest_lanes = ["B1", "B2", "B4", "B6", "B7", "B9", "B10"]
@@ -7774,9 +7776,9 @@ def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
             sort_keys=True,
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     source_manifest_path = bundle_dir / "source-soak-manifest.json"
-    source_manifest_path.write_text(operator_manifest_path.read_text(encoding="utf-8"), encoding="utf-8")
+    source_manifest_path.write_text(operator_manifest_path.read_text(encoding="utf-8"), encoding="utf-8", newline="\n")
     deployment_soak_path = evidence_dir / "deployment-soak-report.json"
     deployment_soak = json.loads(deployment_soak_path.read_text(encoding="utf-8"))
     deployment_soak["manifest"] = {
@@ -7787,7 +7789,7 @@ def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
     deployment_soak_path.write_text(
         json.dumps(deployment_soak, indent=2, sort_keys=True),
         encoding="utf-8",
-    )
+     newline="\n")
     evidence_manifest_path = evidence_dir / "manifest.json"
     evidence_manifest = json.loads(evidence_manifest_path.read_text(encoding="utf-8"))
     evidence_manifest["source_manifest"] = str(operator_manifest_path)
@@ -7797,7 +7799,7 @@ def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
     evidence_manifest_path.write_text(
         json.dumps(evidence_manifest, indent=2, sort_keys=True),
         encoding="utf-8",
-    )
+     newline="\n")
 
     release_audit = run_cli(
         store,
@@ -7839,7 +7841,7 @@ def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
             sort_keys=True,
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     (bundle_dir / "redaction-scan.json").write_text(
         json.dumps(
             {
@@ -7852,16 +7854,16 @@ def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
             sort_keys=True,
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     (bundle_dir / "deployment-soak.stdout.json").write_text(
         json.dumps(deployment_soak, indent=2, sort_keys=True),
         encoding="utf-8",
-    )
+     newline="\n")
     (bundle_dir / "release-audit.json").write_text(
         json.dumps(release_audit, indent=2, sort_keys=True),
         encoding="utf-8",
-    )
-    (bundle_dir / "store.json").write_text("{}", encoding="utf-8")
+     newline="\n")
+    (bundle_dir / "store.json").write_text("{}", encoding="utf-8", newline="\n")
     rewrite_production_redaction_scan(bundle_dir)
 
     files = []
@@ -7895,7 +7897,7 @@ def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
             sort_keys=True,
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     (bundle_dir / "summary.json").write_text(
         json.dumps(
             {
@@ -7937,7 +7939,7 @@ def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
             sort_keys=True,
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     return bundle_dir, bundle_fingerprint
 
 
@@ -7962,7 +7964,7 @@ def write_production_fingerprint_record(
     }
     if overrides:
         record.update(overrides)
-    path.write_text(json.dumps(record, indent=2, sort_keys=True), encoding="utf-8")
+    path.write_text(json.dumps(record, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
     return path
 
 
@@ -8001,7 +8003,7 @@ def rewrite_production_redaction_scan(bundle_dir: Path) -> None:
             sort_keys=True,
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
 
 def rewrite_production_bundle_manifest(bundle_dir: Path) -> str:
@@ -8036,11 +8038,11 @@ def rewrite_production_bundle_manifest(bundle_dir: Path) -> str:
             sort_keys=True,
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     summary_path = bundle_dir / "summary.json"
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     summary["bundle_fingerprint"] = bundle_fingerprint
-    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
     return bundle_fingerprint
 
 
@@ -8398,7 +8400,7 @@ def test_cli_production_evidence_verify_accepts_summary_fingerprint_record_sourc
     summary_path = bundle_dir / "summary.json"
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     summary["offline_verify"]["expected_bundle_fingerprint_source"] = "out-of-band-fingerprint-record"
-    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
     bundle_fingerprint = rewrite_production_bundle_manifest(bundle_dir)
 
     report = run_cli(
@@ -8580,7 +8582,8 @@ def test_cli_production_evidence_verify_writes_external_report_output(tmp_path: 
     written = json.loads(report_path.read_text(encoding="utf-8"))
 
     assert written == report
-    assert stat.S_IMODE(report_path.stat().st_mode) == 0o600
+    if sys.platform != "win32":  # Windows has no owner-only mode bits to check
+        assert stat.S_IMODE(report_path.stat().st_mode) == 0o600
 
 
 def test_cli_production_evidence_verify_rejects_report_output_inside_bundle(
@@ -8609,7 +8612,7 @@ def test_cli_production_evidence_verify_rejects_existing_report_output(
 ) -> None:
     bundle_dir, bundle_fingerprint = write_production_evidence_bundle(tmp_path)
     report_path = tmp_path / "mnemosyne-production-evidence-verify.json"
-    report_path.write_text("existing report\n", encoding="utf-8")
+    report_path.write_text("existing report\n", encoding="utf-8", newline="\n")
 
     result = run_raw_cli(
         tmp_path / "verify-store.json",
@@ -8650,7 +8653,7 @@ def test_cli_production_evidence_verify_accepts_symlink_parent_source_value(tmp_
     source_root = tmp_path / "external-inputs"
     source_root.mkdir()
     source_artifact = source_root / "cases.json"
-    source_artifact.write_text('{"ok": true}\n', encoding="utf-8")
+    source_artifact.write_text('{"ok": true}\n', encoding="utf-8", newline="\n")
     linked_root = tmp_path / "linked-external-inputs"
     try:
         linked_root.symlink_to(source_root, target_is_directory=True)
@@ -8667,8 +8670,8 @@ def test_cli_production_evidence_verify_accepts_symlink_parent_source_value(tmp_
     source_manifest = json.loads(source_manifest_path.read_text(encoding="utf-8"))
     operator_manifest["checks"][0]["args"] = ["--cases", str(snapshot)]
     source_manifest["checks"][0]["args"] = ["--cases", str(source_value)]
-    operator_manifest_path.write_text(json.dumps(operator_manifest, indent=2, sort_keys=True), encoding="utf-8")
-    source_manifest_path.write_text(json.dumps(source_manifest, indent=2, sort_keys=True), encoding="utf-8")
+    operator_manifest_path.write_text(json.dumps(operator_manifest, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
+    source_manifest_path.write_text(json.dumps(source_manifest, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
 
     preflight_path = bundle_dir / "preflight.json"
     preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
@@ -8696,7 +8699,7 @@ def test_cli_production_evidence_verify_accepts_symlink_parent_source_value(tmp_
         bundle_dir,
         input_artifacts,
     )
-    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
+    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
     rewrite_production_redaction_scan(bundle_dir)
     bundle_fingerprint = rewrite_production_bundle_manifest(bundle_dir)
 
@@ -8847,7 +8850,7 @@ def test_cli_production_evidence_verify_rejects_tampered_offline_verify_command(
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     summary["offline_verify"]["expected_bundle_fingerprint"] = bundle_fingerprint
     summary["offline_verify"]["argv"][-1] = bundle_fingerprint
-    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
     rewrite_production_bundle_manifest(bundle_dir)
 
     result = run_raw_cli(
@@ -8871,7 +8874,7 @@ def test_cli_production_evidence_verify_rejects_tampered_offline_verify_interpre
     summary_path = bundle_dir / "summary.json"
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     summary["offline_verify"]["argv"][0] = "/usr/local/bin/mnemosyne"
-    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
     rewrite_production_bundle_manifest(bundle_dir)
 
     result = run_raw_cli(
@@ -8912,7 +8915,7 @@ def test_cli_production_evidence_verify_rejects_symlinked_required_json_before_r
     bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
     summary_path = bundle_dir / "summary.json"
     external_summary = tmp_path / "external-summary.json"
-    external_summary.write_text("{not json", encoding="utf-8")
+    external_summary.write_text("{not json", encoding="utf-8", newline="\n")
     summary_path.unlink()
     try:
         summary_path.symlink_to(external_summary)
@@ -8945,7 +8948,7 @@ def test_cli_production_evidence_verify_rejects_tampered_operator_manifest(tmp_p
     operator_manifest_path.write_text(
         json.dumps(operator_manifest, indent=2, sort_keys=True),
         encoding="utf-8",
-    )
+     newline="\n")
     rewrite_production_bundle_manifest(bundle_dir)
 
     result = run_raw_cli(
@@ -8975,7 +8978,7 @@ def test_cli_production_evidence_verify_rejects_tampered_source_soak_manifest(tm
     source_manifest_path.write_text(
         json.dumps(source_manifest, indent=2, sort_keys=True),
         encoding="utf-8",
-    )
+     newline="\n")
     rewrite_production_bundle_manifest(bundle_dir)
 
     result = run_raw_cli(
@@ -9006,7 +9009,7 @@ def test_cli_production_evidence_verify_rejects_source_soak_arg_drift(
     source_manifest_path.write_text(
         json.dumps(source_manifest, indent=2, sort_keys=True),
         encoding="utf-8",
-    )
+     newline="\n")
     rewrite_production_bundle_manifest(bundle_dir)
 
     result = run_raw_cli(
@@ -9035,7 +9038,7 @@ def test_cli_production_evidence_verify_rejects_source_soak_top_level_drift(
     source_manifest_path.write_text(
         json.dumps(source_manifest, indent=2, sort_keys=True),
         encoding="utf-8",
-    )
+     newline="\n")
     rewrite_production_bundle_manifest(bundle_dir)
 
     result = run_raw_cli(
@@ -9059,7 +9062,7 @@ def test_cli_production_evidence_verify_rejects_tampered_deployment_soak_manifes
     bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
     wrong_manifest_path = tmp_path / "outside" / "operator-soak-manifest.json"
     wrong_manifest_path.parent.mkdir()
-    wrong_manifest_path.write_text("{}", encoding="utf-8")
+    wrong_manifest_path.write_text("{}", encoding="utf-8", newline="\n")
     deployment_soak_path = bundle_dir / "deployment-soak.stdout.json"
     deployment_soak = json.loads(deployment_soak_path.read_text(encoding="utf-8"))
     deployment_soak["manifest"]["path"] = str(wrong_manifest_path)
@@ -9067,7 +9070,7 @@ def test_cli_production_evidence_verify_rejects_tampered_deployment_soak_manifes
     deployment_soak_path.write_text(
         json.dumps(deployment_soak, indent=2, sort_keys=True),
         encoding="utf-8",
-    )
+     newline="\n")
     rewrite_production_bundle_manifest(bundle_dir)
 
     result = run_raw_cli(
@@ -9095,7 +9098,7 @@ def test_cli_production_evidence_verify_rejects_divergent_deployment_stdout(tmp_
     deployment_soak_path.write_text(
         json.dumps(deployment_soak, indent=2, sort_keys=True),
         encoding="utf-8",
-    )
+     newline="\n")
     rewrite_production_redaction_scan(bundle_dir)
     rewrite_production_bundle_manifest(bundle_dir)
 
@@ -9121,7 +9124,7 @@ def test_cli_production_evidence_verify_rejects_tampered_preflight(tmp_path: Pat
     preflight["ok"] = False
     preflight["copied_manifest"] = str(bundle_dir / "wrong-manifest.json")
     preflight["provided_commands"] = preflight["provided_commands"][:-1]
-    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
+    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
     rewrite_production_bundle_manifest(bundle_dir)
 
     result = run_raw_cli(
@@ -9149,7 +9152,7 @@ def test_cli_production_evidence_verify_rejects_missing_executable_tool_metadata
     preflight_path = bundle_dir / "preflight.json"
     preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
     preflight.pop("executable_tool_references")
-    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
+    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
     rewrite_production_redaction_scan(bundle_dir)
     bundle_fingerprint = rewrite_production_bundle_manifest(bundle_dir)
 
@@ -9178,7 +9181,7 @@ def test_cli_production_evidence_verify_rejects_malformed_executable_tool_digest
     preflight_path = bundle_dir / "preflight.json"
     preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
     preflight["executable_tool_references"][0]["sha256"] = "sha256:not-a-digest"
-    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
+    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
     rewrite_production_redaction_scan(bundle_dir)
     bundle_fingerprint = rewrite_production_bundle_manifest(bundle_dir)
 
@@ -9209,8 +9212,8 @@ def test_cli_production_evidence_verify_rejects_changed_executable_tool_bytes(
     preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
     tool_path = Path(preflight["executable_tool_references"][0]["snapshot_path"])
     tool_path.chmod(0o700)
-    tool_path.write_text("#!/bin/sh\necho changed\n", encoding="utf-8")
-    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
+    tool_path.write_text("#!/bin/sh\necho changed\n", encoding="utf-8", newline="\n")
+    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
     rewrite_production_redaction_scan(bundle_dir)
     bundle_fingerprint = rewrite_production_bundle_manifest(bundle_dir)
 
@@ -9264,7 +9267,7 @@ def test_cli_production_evidence_verify_accepts_provider_command_executable_refe
     (bundle_dir / "preflight.json").write_text(
         json.dumps(preflight, indent=2, sort_keys=True),
         encoding="utf-8",
-    )
+     newline="\n")
     rewrite_production_redaction_scan(bundle_dir)
     bundle_fingerprint = rewrite_production_bundle_manifest(bundle_dir)
     report_path = tmp_path / "provider-command-verify.json"
@@ -9313,7 +9316,7 @@ def test_cli_production_evidence_verify_rejects_provider_command_argument(
     (bundle_dir / "preflight.json").write_text(
         json.dumps(preflight, indent=2, sort_keys=True),
         encoding="utf-8",
-    )
+     newline="\n")
     rewrite_production_redaction_scan(bundle_dir)
     bundle_fingerprint = rewrite_production_bundle_manifest(bundle_dir)
 
@@ -9446,8 +9449,9 @@ def test_cli_production_evidence_verify_rejects_missing_referenced_executable_to
     preflight_path = bundle_dir / "preflight.json"
     preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
     tool = Path(preflight["executable_tool_references"][0]["snapshot_path"])
+    tool.chmod(stat.S_IWRITE)  # the snapshot is read-only, which Windows will not delete
     tool.unlink()
-    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
+    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
     rewrite_production_redaction_scan(bundle_dir)
     bundle_fingerprint = rewrite_production_bundle_manifest(bundle_dir)
 
@@ -9480,15 +9484,15 @@ def test_cli_production_evidence_verify_rejects_external_preflight_paths(
     external_source_manifest = external / "source-soak-manifest.json"
     external_manifest = external / "operator-soak-manifest.json"
     external_redaction = external / "redaction-scan.json"
-    external_source_manifest.write_text("{}", encoding="utf-8")
-    external_manifest.write_text("{}", encoding="utf-8")
-    external_redaction.write_text("{}", encoding="utf-8")
+    external_source_manifest.write_text("{}", encoding="utf-8", newline="\n")
+    external_manifest.write_text("{}", encoding="utf-8", newline="\n")
+    external_redaction.write_text("{}", encoding="utf-8", newline="\n")
     preflight_path = bundle_dir / "preflight.json"
     preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
     preflight["source_manifest_copy"] = str(external_source_manifest)
     preflight["copied_manifest"] = str(external_manifest)
     preflight["redaction_scan"] = str(external_redaction)
-    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
+    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
     rewrite_production_bundle_manifest(bundle_dir)
 
     result = run_raw_cli(
@@ -9519,7 +9523,7 @@ def test_cli_production_evidence_verify_rejects_secret_args_in_retained_manifest
         manifest_path.write_text(
             json.dumps(manifest, indent=2, sort_keys=True),
             encoding="utf-8",
-        )
+         newline="\n")
     rewrite_production_redaction_scan(bundle_dir)
     rewrite_production_bundle_manifest(bundle_dir)
 
@@ -9551,7 +9555,7 @@ def test_cli_production_evidence_verify_rejects_missing_input_artifact_contract(
     preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
     preflight["required_input_artifacts"] = []
     preflight.pop("parity_row_readiness", None)
-    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
+    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
     rewrite_production_redaction_scan(bundle_dir)
     bundle_fingerprint = rewrite_production_bundle_manifest(bundle_dir)
 
@@ -9591,7 +9595,7 @@ def test_cli_production_evidence_verify_rejects_tampered_input_artifact_metadata
     bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
     snapshot = bundle_dir / "input-artifacts" / "0001-cases.json"
     snapshot.parent.mkdir(exist_ok=True)
-    snapshot.write_text('{"ok": true}\n', encoding="utf-8")
+    snapshot.write_text('{"ok": true}\n', encoding="utf-8", newline="\n")
     preflight_path = bundle_dir / "preflight.json"
     preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
     input_artifacts = [
@@ -9617,7 +9621,7 @@ def test_cli_production_evidence_verify_rejects_tampered_input_artifact_metadata
         input_artifacts,
     )
     preflight["required_input_artifacts"][0]["files"][0]["sha256"] = "sha256:" + ("0" * 64)
-    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
+    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
     rewrite_production_bundle_manifest(bundle_dir)
 
     result = run_raw_cli(
@@ -9641,7 +9645,7 @@ def test_cli_production_evidence_verify_rejects_unreferenced_input_artifact_snap
     bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
     snapshot = bundle_dir / "input-artifacts" / "0001-cases.json"
     snapshot.parent.mkdir(exist_ok=True)
-    snapshot.write_text('{"ok": true}\n', encoding="utf-8")
+    snapshot.write_text('{"ok": true}\n', encoding="utf-8", newline="\n")
     preflight_path = bundle_dir / "preflight.json"
     preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
     input_artifacts = [
@@ -9666,7 +9670,7 @@ def test_cli_production_evidence_verify_rejects_unreferenced_input_artifact_snap
         bundle_dir,
         input_artifacts,
     )
-    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
+    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
     rewrite_production_redaction_scan(bundle_dir)
     rewrite_production_bundle_manifest(bundle_dir)
 
@@ -9691,14 +9695,14 @@ def test_cli_production_evidence_verify_rejects_unrecorded_operator_input_artifa
     bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
     snapshot = bundle_dir / "input-artifacts" / "0001-cases.json"
     snapshot.parent.mkdir(exist_ok=True)
-    snapshot.write_text('{"ok": true}\n', encoding="utf-8")
+    snapshot.write_text('{"ok": true}\n', encoding="utf-8", newline="\n")
     operator_manifest_path = bundle_dir / "operator-soak-manifest.json"
     operator_manifest = json.loads(operator_manifest_path.read_text(encoding="utf-8"))
     operator_manifest["checks"][0]["args"] = ["--cases", str(snapshot)]
     operator_manifest_path.write_text(
         json.dumps(operator_manifest, indent=2, sort_keys=True),
         encoding="utf-8",
-    )
+     newline="\n")
     rewrite_production_redaction_scan(bundle_dir)
     rewrite_production_bundle_manifest(bundle_dir)
 
@@ -9755,7 +9759,7 @@ def test_cli_production_evidence_verify_rejects_input_artifact_parent_mismatch(
     snapshot = other_root / "cases.json"
     artifact_root.mkdir(parents=True, exist_ok=True)
     snapshot.parent.mkdir(parents=True, exist_ok=True)
-    snapshot.write_text('{"ok": true}\n', encoding="utf-8")
+    snapshot.write_text('{"ok": true}\n', encoding="utf-8", newline="\n")
     preflight_path = bundle_dir / "preflight.json"
     preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
     input_artifacts = [
@@ -9780,7 +9784,7 @@ def test_cli_production_evidence_verify_rejects_input_artifact_parent_mismatch(
         bundle_dir,
         input_artifacts,
     )
-    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
+    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
     rewrite_production_redaction_scan(bundle_dir)
     rewrite_production_bundle_manifest(bundle_dir)
 
@@ -9804,7 +9808,7 @@ def test_cli_production_evidence_verify_rejects_tampered_bundle(tmp_path: Path) 
     release_audit_path = bundle_dir / "release-audit.json"
     release_audit = json.loads(release_audit_path.read_text(encoding="utf-8"))
     release_audit["ok"] = False
-    release_audit_path.write_text(json.dumps(release_audit, indent=2, sort_keys=True), encoding="utf-8")
+    release_audit_path.write_text(json.dumps(release_audit, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(
         tmp_path / "verify-store.json",
@@ -9828,7 +9832,7 @@ def test_cli_production_evidence_verify_summary_check_requires_full_summary_cont
     summary_path = bundle_dir / "summary.json"
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     summary["deployment_soak_ok"] = False
-    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(
         tmp_path / "verify-store.json",
@@ -9849,7 +9853,7 @@ def test_cli_production_evidence_verify_rejects_summary_row_readiness_drift(tmp_
     summary_path = bundle_dir / "summary.json"
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     summary["parity_row_readiness"] = []
-    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(
         tmp_path / "verify-store.json",
@@ -9883,7 +9887,7 @@ def test_cli_production_evidence_verify_rejects_skeletal_summary_contract(tmp_pa
             sort_keys=True,
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     result = run_raw_cli(
         tmp_path / "verify-store.json",
@@ -9920,7 +9924,7 @@ def test_cli_production_evidence_verify_rejects_skeletal_release_audit(tmp_path:
             sort_keys=True,
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     rewrite_production_redaction_scan(bundle_dir)
     rewrite_production_bundle_manifest(bundle_dir)
 
@@ -9959,7 +9963,7 @@ def test_cli_production_evidence_verify_rejects_skeletal_evidence_manifest(tmp_p
             sort_keys=True,
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     rewrite_production_redaction_scan(bundle_dir)
     rewrite_production_bundle_manifest(bundle_dir)
 
@@ -9985,7 +9989,7 @@ def test_cli_production_evidence_verify_rejects_skeletal_evidence_manifest(tmp_p
 
 def test_cli_production_evidence_verify_rejects_unmanifested_artifacts(tmp_path: Path) -> None:
     bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
-    (bundle_dir / "unmanifested.txt").write_text("not captured by bundle-manifest\n", encoding="utf-8")
+    (bundle_dir / "unmanifested.txt").write_text("not captured by bundle-manifest\n", encoding="utf-8", newline="\n")
 
     result = run_raw_cli(
         tmp_path / "verify-store.json",
@@ -10007,7 +10011,7 @@ def test_cli_production_evidence_verify_rescans_bundle_for_secret_material(tmp_p
     secret_artifact.write_text(
         "jwt=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJvcGVyYXRvciJ9.signature123\n",
         encoding="utf-8",
-    )
+     newline="\n")
     rewrite_production_bundle_manifest(bundle_dir)
 
     result = run_raw_cli(
@@ -10034,7 +10038,7 @@ def test_cli_production_evidence_verify_rescans_retained_metadata_for_secret_mat
     metadata_path = bundle_dir / relative_path
     payload = json.loads(metadata_path.read_text(encoding="utf-8"))
     payload["operator_note"] = "jwt=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJvcGVyYXRvciJ9.signature123"
-    metadata_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    metadata_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(
         tmp_path / "verify-store.json",
@@ -10061,7 +10065,7 @@ def test_cli_production_evidence_verify_rejects_stale_redaction_scan_coverage(
     redaction_scan_path.write_text(
         json.dumps(redaction_scan, indent=2, sort_keys=True),
         encoding="utf-8",
-    )
+     newline="\n")
     rewrite_production_bundle_manifest(bundle_dir)
 
     result = run_raw_cli(
@@ -10090,7 +10094,7 @@ def test_cli_production_evidence_verify_rejects_unscannable_retained_artifact(
     redaction_scan_path.write_text(
         json.dumps(redaction_scan, indent=2, sort_keys=True),
         encoding="utf-8",
-    )
+     newline="\n")
     rewrite_production_bundle_manifest(bundle_dir)
 
     result = run_raw_cli(
@@ -10123,17 +10127,17 @@ def test_cli_release_audit_rejects_placeholder_production_evidence(tmp_path: Pat
     }
     for check in report["checks"]:
         check["stdout_json"] = placeholder_stdout_by_command[check["command"]]
-    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     checks_dir = manifest_path.parent / manifest["files"]["checks_dir"]
     for check in report["checks"]:
         check_path = checks_dir / f"{int(check['index']):03d}-{check['command']}.json"
-        check_path.write_text(json.dumps(check, indent=2, sort_keys=True), encoding="utf-8")
+        check_path.write_text(json.dumps(check, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
         manifest_check = next(item for item in manifest["checks"] if item["command"] == check["command"])
         manifest_check["sha256"] = "sha256:" + sha256(check_path.read_bytes()).hexdigest()
     manifest["files"]["report_sha256"] = "sha256:" + sha256(report_path.read_bytes()).hexdigest()
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(
         tmp_path / "mnemosyne.json",
@@ -10161,16 +10165,16 @@ def test_cli_release_audit_rejects_placeholder_ops_report_evidence(tmp_path: Pat
         "tripwires": {"passed": True},
         "audit": production_ops_report_audit(),
     }
-    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     checks_dir = manifest_path.parent / manifest["files"]["checks_dir"]
     check_path = checks_dir / f"{int(ops_report_check['index']):03d}-{ops_report_check['command']}.json"
-    check_path.write_text(json.dumps(ops_report_check, indent=2, sort_keys=True), encoding="utf-8")
+    check_path.write_text(json.dumps(ops_report_check, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
     manifest_check = next(item for item in manifest["checks"] if item["command"] == "ops-report")
     manifest_check["sha256"] = "sha256:" + sha256(check_path.read_bytes()).hexdigest()
     manifest["files"]["report_sha256"] = "sha256:" + sha256(report_path.read_bytes()).hexdigest()
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(
         tmp_path / "mnemosyne.json",
@@ -10198,16 +10202,16 @@ def test_cli_release_audit_rejects_hollow_ops_report_evidence(tmp_path: Path) ->
         "tripwires": {},
         "audit": production_ops_report_audit(),
     }
-    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     checks_dir = manifest_path.parent / manifest["files"]["checks_dir"]
     check_path = checks_dir / f"{int(ops_report_check['index']):03d}-{ops_report_check['command']}.json"
-    check_path.write_text(json.dumps(ops_report_check, indent=2, sort_keys=True), encoding="utf-8")
+    check_path.write_text(json.dumps(ops_report_check, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
     manifest_check = next(item for item in manifest["checks"] if item["command"] == "ops-report")
     manifest_check["sha256"] = "sha256:" + sha256(check_path.read_bytes()).hexdigest()
     manifest["files"]["report_sha256"] = "sha256:" + sha256(report_path.read_bytes()).hexdigest()
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(
         tmp_path / "mnemosyne.json",
@@ -10372,7 +10376,7 @@ def test_cli_release_audit_requires_manifest_file_digests(tmp_path: Path) -> Non
     _report_path, manifest_path = write_release_report(tmp_path)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["files"].pop("report_sha256")
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(
         tmp_path / "mnemosyne.json",
@@ -10388,7 +10392,7 @@ def test_cli_release_audit_requires_manifest_file_digests(tmp_path: Path) -> Non
     _count_report_path, count_manifest_path = write_release_report(tmp_path / "count")
     manifest = json.loads(count_manifest_path.read_text(encoding="utf-8"))
     manifest["checks"].pop()
-    count_manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    count_manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
 
     count_result = run_raw_cli(
         tmp_path / "count" / "mnemosyne.json",
@@ -10406,7 +10410,7 @@ def test_cli_release_audit_rejects_tampered_manifest_bound_artifacts(tmp_path: P
     report_path, manifest_path = write_release_report(tmp_path / "report")
     report = json.loads(report_path.read_text(encoding="utf-8"))
     report["summary"]["checks"] = 0
-    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
 
     report_result = run_raw_cli(
         tmp_path / "report" / "mnemosyne.json",
@@ -10424,7 +10428,7 @@ def test_cli_release_audit_rejects_tampered_manifest_bound_artifacts(tmp_path: P
     check_path = check_manifest_path.parent / manifest["checks"][0]["path"]
     check_record = json.loads(check_path.read_text(encoding="utf-8"))
     check_record["ok"] = False
-    check_path.write_text(json.dumps(check_record, indent=2, sort_keys=True), encoding="utf-8")
+    check_path.write_text(json.dumps(check_record, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
 
     check_result = run_raw_cli(
         tmp_path / "check" / "mnemosyne.json",
@@ -10444,9 +10448,9 @@ def test_cli_release_audit_rejects_manifest_check_content_mismatch(tmp_path: Pat
     check_path = manifest_path.parent / manifest["checks"][0]["path"]
     check_record = json.loads(check_path.read_text(encoding="utf-8"))
     check_record["stdout_json"] = {"ok": True, "mutated": True}
-    check_path.write_text(json.dumps(check_record, indent=2, sort_keys=True), encoding="utf-8")
+    check_path.write_text(json.dumps(check_record, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
     manifest["checks"][0]["sha256"] = "sha256:" + sha256(check_path.read_bytes()).hexdigest()
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(
         tmp_path / "mnemosyne.json",
@@ -10467,12 +10471,15 @@ def test_cli_release_audit_rejects_manifest_artifact_symlink_escape(tmp_path: Pa
     outside.write_text(
         (manifest_path.parent / manifest["checks"][0]["path"]).read_text(encoding="utf-8"),
         encoding="utf-8",
-    )
+     newline="\n")
     escaped = manifest_path.parent / "checks" / "escaped.json"
-    escaped.symlink_to(outside)
+    try:
+        escaped.symlink_to(outside)
+    except OSError as exc:  # Windows without Developer Mode may not make symlinks
+        pytest.skip(f"symlinks are not permitted here: {exc}")
     manifest["checks"][0]["path"] = "checks/escaped.json"
     manifest["checks"][0]["sha256"] = "sha256:" + sha256(outside.read_bytes()).hexdigest()
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(
         tmp_path / "mnemosyne.json",
@@ -10551,7 +10558,7 @@ def test_cli_release_audit_rejects_unexpected_production_commands(tmp_path: Path
     report["checks"][-1]["index"] = len(report["checks"])
     report["manifest"]["check_count"] = len(report["checks"])
     report["summary"]["checks"] = len(report["checks"])
-    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(
         tmp_path / "mnemosyne.json",
@@ -10574,7 +10581,7 @@ def test_cli_release_audit_rejects_placeholder_required_command_output(tmp_path:
     report = json.loads(report_path.read_text(encoding="utf-8"))
     auth_check = next(check for check in report["checks"] if check["command"] == "auth-ops-check")
     auth_check["stdout_json"] = {"ok": True}
-    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(
         tmp_path / "mnemosyne.json",
@@ -10606,7 +10613,7 @@ def test_cli_release_audit_rejects_hollow_bundle_ops_evidence(tmp_path: Path) ->
         "checks": [],
         "findings": [],
     }
-    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(
         tmp_path / "mnemosyne.json",
@@ -10980,7 +10987,7 @@ def test_cli_release_audit_rejects_empty_worker_runtime_evidence(tmp_path: Path)
         "jobs": [],
         "metrics": {},
     }
-    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(
         tmp_path / "mnemosyne.json",
@@ -11012,7 +11019,7 @@ def test_cli_release_audit_rejects_placeholder_worker_cadence(tmp_path: Path) ->
     worker_check["stdout_json"]["worker"]["idle_exit_after"] = 0
     worker_check["stdout_json"]["worker"]["poll_interval"] = 0
     worker_check["stdout_json"]["worker"]["fail_on_dead"] = False
-    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(
         tmp_path / "mnemosyne.json",
@@ -11050,7 +11057,7 @@ def test_cli_release_audit_rejects_malformed_worker_runtime_counts(tmp_path: Pat
         "jobs": [{"kind": "consolidate_evidence", "status": "complete"}],
         "metrics": {"worker": {"processed_jobs": 1}},
     }
-    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(
         tmp_path / "mnemosyne.json",
@@ -11085,7 +11092,7 @@ def test_cli_release_audit_rejects_placeholder_worker_ops_evidence(tmp_path: Pat
         "checks": [],
         "findings": [],
     }
-    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(
         tmp_path / "mnemosyne.json",
@@ -11116,7 +11123,7 @@ def test_cli_release_audit_requires_production_scope_attestation(tmp_path: Path)
     report = json.loads(report_path.read_text(encoding="utf-8"))
     report["validation_scope"]["target_environment"] = "local"
     report["validation_scope"]["operator_asserted"] = False
-    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(
         tmp_path / "mnemosyne.json",
@@ -11264,7 +11271,7 @@ def auth_ops_bundle(
 
 def test_cli_auth_ops_check_validates_production_evidence_bundle(tmp_path: Path) -> None:
     bundle = tmp_path / "auth-ops.json"
-    bundle.write_text(json.dumps(auth_ops_bundle()), encoding="utf-8")
+    bundle.write_text(json.dumps(auth_ops_bundle()), encoding="utf-8", newline="\n")
 
     report = run_cli(
         tmp_path / "mnemosyne.json",
@@ -11320,7 +11327,7 @@ def test_cli_auth_ops_check_fails_closed_on_weak_auth_bundle(tmp_path: Path) -> 
             )
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     result = run_raw_cli(tmp_path / "mnemosyne.json", "auth-ops-check", "--bundle", str(bundle))
     payload = json.loads(result.stdout)
@@ -11351,7 +11358,7 @@ def test_cli_auth_ops_check_cert_thresholds_env_seams(
     payload["tls"]["certificate"]["days_remaining"] = 0.9
     payload["tls"]["rotation"]["overlap_days"] = 0.6
     bundle = tmp_path / "acme-auth-ops.json"
-    bundle.write_text(json.dumps(payload), encoding="utf-8")
+    bundle.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
 
     monkeypatch.delenv("MNEMOSYNE_AUTH_OPS_MIN_CERT_DAYS", raising=False)
     monkeypatch.delenv("MNEMOSYNE_AUTH_OPS_MIN_CERT_OVERLAP_DAYS", raising=False)
@@ -11439,7 +11446,7 @@ def mcp_ops_bundle(*, bad_transport: bool = False, weak_tls: bool = False, raw_p
 
 def test_cli_mcp_ops_check_validates_hosted_transport_bundle(tmp_path: Path) -> None:
     bundle = tmp_path / "mcp-ops.json"
-    bundle.write_text(json.dumps(mcp_ops_bundle()), encoding="utf-8")
+    bundle.write_text(json.dumps(mcp_ops_bundle()), encoding="utf-8", newline="\n")
 
     report = run_cli(
         tmp_path / "mnemosyne.json",
@@ -11486,7 +11493,7 @@ def test_cli_mcp_ops_check_validates_hosted_transport_bundle(tmp_path: Path) -> 
 
 def test_cli_mcp_ops_check_fails_closed_on_weak_transport_bundle(tmp_path: Path) -> None:
     bundle = tmp_path / "bad-mcp-ops.json"
-    bundle.write_text(json.dumps(mcp_ops_bundle(bad_transport=True, weak_tls=True, raw_payload=True)), encoding="utf-8")
+    bundle.write_text(json.dumps(mcp_ops_bundle(bad_transport=True, weak_tls=True, raw_payload=True)), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(
         tmp_path / "mnemosyne.json",
@@ -11584,7 +11591,7 @@ def worker_ops_bundle(*, weak_supervision: bool = False, raw_payload: bool = Fal
 
 def test_cli_worker_ops_check_validates_production_supervision_bundle(tmp_path: Path) -> None:
     bundle = tmp_path / "worker-ops.json"
-    bundle.write_text(json.dumps(worker_ops_bundle()), encoding="utf-8")
+    bundle.write_text(json.dumps(worker_ops_bundle()), encoding="utf-8", newline="\n")
 
     report = run_cli(tmp_path / "mnemosyne.json", "worker-ops-check", "--bundle", str(bundle))
     acknowledged = run_cli(
@@ -11620,7 +11627,7 @@ def test_cli_worker_ops_check_validates_production_supervision_bundle(tmp_path: 
 
 def test_cli_worker_ops_check_fails_closed_on_weak_supervision_bundle(tmp_path: Path) -> None:
     bundle = tmp_path / "bad-worker-ops.json"
-    bundle.write_text(json.dumps(worker_ops_bundle(weak_supervision=True, raw_payload=True)), encoding="utf-8")
+    bundle.write_text(json.dumps(worker_ops_bundle(weak_supervision=True, raw_payload=True)), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(tmp_path / "mnemosyne.json", "worker-ops-check", "--bundle", str(bundle))
     payload = json.loads(result.stdout)
@@ -11644,7 +11651,7 @@ def test_cli_worker_ops_check_rejects_malformed_job_kind_lists(tmp_path: Path) -
     payload["jobs"]["handled_kinds"] = "calibrate"
     payload["jobs"]["required_kinds"] = {"kind": "calibrate"}
     bundle = tmp_path / "malformed-worker-ops.json"
-    bundle.write_text(json.dumps(payload), encoding="utf-8")
+    bundle.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(tmp_path / "mnemosyne.json", "worker-ops-check", "--bundle", str(bundle))
     report = json.loads(result.stdout)
@@ -11885,7 +11892,7 @@ def consolidation_ops_bundle(
 
 def test_cli_consolidation_ops_check_validates_production_bundle(tmp_path: Path) -> None:
     bundle = tmp_path / "consolidation-ops.json"
-    bundle.write_text(json.dumps(consolidation_ops_bundle()), encoding="utf-8")
+    bundle.write_text(json.dumps(consolidation_ops_bundle()), encoding="utf-8", newline="\n")
 
     report = run_cli(
         tmp_path / "mnemosyne.json",
@@ -11964,7 +11971,7 @@ def test_cli_consolidation_ops_check_fails_closed_on_bad_bundle(tmp_path: Path) 
             )
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     result = run_raw_cli(tmp_path / "mnemosyne.json", "consolidation-ops-check", "--bundle", str(bundle))
     payload = json.loads(result.stdout)
@@ -12006,7 +12013,7 @@ def test_cli_consolidation_ops_check_rejects_invalid_deployment_latency(tmp_path
         else:
             deployment["latency_ms"] = latency
         bundle = tmp_path / f"bad-consolidation-deployment-latency-{name}.json"
-        bundle.write_text(json.dumps(bundle_payload), encoding="utf-8")
+        bundle.write_text(json.dumps(bundle_payload), encoding="utf-8", newline="\n")
 
         result = run_raw_cli(tmp_path / f"mnemosyne-{name}.json", "consolidation-ops-check", "--bundle", str(bundle))
         payload = json.loads(result.stdout)
@@ -12023,7 +12030,7 @@ def test_cli_consolidation_ops_check_requires_alert_delivery_verification(tmp_pa
     deployment.pop("alert_route", None)
     deployment["alert_route_configured"] = True
     bundle = tmp_path / "bad-consolidation-alert-route.json"
-    bundle.write_text(json.dumps(bundle_payload), encoding="utf-8")
+    bundle.write_text(json.dumps(bundle_payload), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(tmp_path / "mnemosyne.json", "consolidation-ops-check", "--bundle", str(bundle))
     payload = json.loads(result.stdout)
@@ -12039,7 +12046,7 @@ def test_cli_consolidation_ops_check_rejects_fractional_deployment_bindings(tmp_
     bundle_payload["deployment"]["bindings"]["worker_processed_jobs"] = 5.9
     bundle_payload["deployment"]["bindings"]["provider_check_count"] = "4.0"
     bundle = tmp_path / "bad-consolidation-fractional-bindings.json"
-    bundle.write_text(json.dumps(bundle_payload), encoding="utf-8")
+    bundle.write_text(json.dumps(bundle_payload), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(tmp_path / "mnemosyne.json", "consolidation-ops-check", "--bundle", str(bundle))
     payload = json.loads(result.stdout)
@@ -12385,7 +12392,7 @@ def production_retrieval_ops_stdout() -> dict:
 
 def test_cli_retrieval_ops_check_validates_production_evidence_bundle(tmp_path: Path) -> None:
     bundle = tmp_path / "retrieval-ops.json"
-    bundle.write_text(json.dumps(retrieval_ops_bundle()), encoding="utf-8")
+    bundle.write_text(json.dumps(retrieval_ops_bundle()), encoding="utf-8", newline="\n")
 
     report = run_cli(
         tmp_path / "mnemosyne.json",
@@ -12443,7 +12450,7 @@ def test_cli_retrieval_ops_check_fails_closed_on_local_and_bad_calibration(tmp_p
             )
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     result = run_raw_cli(tmp_path / "mnemosyne.json", "retrieval-ops-check", "--bundle", str(bundle))
     payload = json.loads(result.stdout)
@@ -12465,7 +12472,7 @@ def test_cli_retrieval_ops_check_fails_closed_on_local_and_bad_calibration(tmp_p
 
 def test_cli_retrieval_ops_check_requires_nonlocal_backend_probes(tmp_path: Path) -> None:
     bundle = tmp_path / "missing-probe-retrieval-ops.json"
-    bundle.write_text(json.dumps(retrieval_ops_bundle(missing_probes=True)), encoding="utf-8")
+    bundle.write_text(json.dumps(retrieval_ops_bundle(missing_probes=True)), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(tmp_path / "mnemosyne.json", "retrieval-ops-check", "--bundle", str(bundle))
     payload = json.loads(result.stdout)
@@ -12481,7 +12488,7 @@ def test_cli_retrieval_ops_check_requires_nonlocal_backend_probes(tmp_path: Path
 
 def test_cli_retrieval_ops_check_requires_specialist_adapter_probes(tmp_path: Path) -> None:
     bundle = tmp_path / "missing-adapter-probes-retrieval-ops.json"
-    bundle.write_text(json.dumps(retrieval_ops_bundle(missing_adapter_probes=True)), encoding="utf-8")
+    bundle.write_text(json.dumps(retrieval_ops_bundle(missing_adapter_probes=True)), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(tmp_path / "mnemosyne.json", "retrieval-ops-check", "--bundle", str(bundle))
     payload = json.loads(result.stdout)
@@ -12497,7 +12504,7 @@ def test_cli_retrieval_ops_check_requires_specialist_adapter_probes(tmp_path: Pa
 
 def test_cli_retrieval_ops_check_rejects_weak_adapter_probe(tmp_path: Path) -> None:
     bundle = tmp_path / "bad-adapter-probe-retrieval-ops.json"
-    bundle.write_text(json.dumps(retrieval_ops_bundle(bad_adapter_probe=True)), encoding="utf-8")
+    bundle.write_text(json.dumps(retrieval_ops_bundle(bad_adapter_probe=True)), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(tmp_path / "mnemosyne.json", "retrieval-ops-check", "--bundle", str(bundle))
     payload = json.loads(result.stdout)
@@ -12533,7 +12540,7 @@ def test_cli_calibration_tune_applies_labeled_dataset(tmp_path: Path) -> None:
             ]
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     report = run_cli(
         store,
@@ -12577,7 +12584,7 @@ def test_cli_calibration_tune_fails_closed_on_high_confidence_errors(tmp_path: P
             ]
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     result = run_raw_cli(
         store,
@@ -12611,7 +12618,7 @@ def test_cli_calibration_tune_fails_closed_on_high_confidence_errors(tmp_path: P
 def test_cli_calibration_tune_rejects_string_boolean_labels(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     dataset = tmp_path / "bad-calibration-labels.json"
-    dataset.write_text(json.dumps([{"confidence": 0.99, "correct": "false"}]), encoding="utf-8")
+    dataset.write_text(json.dumps([{"confidence": 0.99, "correct": "false"}]), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(
         store,
@@ -12736,7 +12743,7 @@ def belief_revision_cases(*, wrong_supersession_expectation: bool = False) -> li
 
 def test_cli_belief_revision_check_validates_revision_suite(tmp_path: Path) -> None:
     cases = tmp_path / "belief-revision.json"
-    cases.write_text(json.dumps(belief_revision_cases()), encoding="utf-8")
+    cases.write_text(json.dumps(belief_revision_cases()), encoding="utf-8", newline="\n")
 
     report = run_cli(
         tmp_path / "mnemosyne.json",
@@ -12773,7 +12780,7 @@ def test_cli_belief_revision_check_validates_revision_suite(tmp_path: Path) -> N
 
 def test_cli_belief_revision_check_fails_closed_on_expectation_mismatch(tmp_path: Path) -> None:
     cases = tmp_path / "bad-belief-revision.json"
-    cases.write_text(json.dumps(belief_revision_cases(wrong_supersession_expectation=True)), encoding="utf-8")
+    cases.write_text(json.dumps(belief_revision_cases(wrong_supersession_expectation=True)), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(tmp_path / "mnemosyne.json", "belief-revision-check", "--cases", str(cases))
     payload = json.loads(result.stdout)
@@ -12843,7 +12850,7 @@ def forgetting_policy_cases(*, wrong_demotion_expectation: bool = False) -> list
 
 def test_cli_forgetting_policy_check_validates_policy_suite(tmp_path: Path) -> None:
     cases = tmp_path / "forgetting-policy.json"
-    cases.write_text(json.dumps(forgetting_policy_cases()), encoding="utf-8")
+    cases.write_text(json.dumps(forgetting_policy_cases()), encoding="utf-8", newline="\n")
 
     report = run_cli(
         tmp_path / "mnemosyne.json",
@@ -12887,7 +12894,7 @@ def test_cli_forgetting_policy_check_fails_closed_on_expectation_mismatch(tmp_pa
     cases.write_text(
         json.dumps(forgetting_policy_cases(wrong_demotion_expectation=True)),
         encoding="utf-8",
-    )
+     newline="\n")
 
     result = run_raw_cli(
         tmp_path / "mnemosyne.json",
@@ -12987,7 +12994,7 @@ def policy_ops_bundle(
 
 def test_cli_policy_ops_check_validates_shadow_bundle(tmp_path: Path) -> None:
     bundle = tmp_path / "policy-ops.json"
-    bundle.write_text(json.dumps(policy_ops_bundle()), encoding="utf-8")
+    bundle.write_text(json.dumps(policy_ops_bundle()), encoding="utf-8", newline="\n")
 
     report = run_cli(
         tmp_path / "mnemosyne.json",
@@ -13029,7 +13036,7 @@ def test_cli_policy_ops_check_fails_closed_on_bad_shadow_bundle(tmp_path: Path) 
             )
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     result = run_raw_cli(tmp_path / "mnemosyne.json", "policy-ops-check", "--bundle", str(bundle))
     payload = json.loads(result.stdout)
@@ -13145,7 +13152,7 @@ def privacy_ops_bundle(
 
 def test_cli_privacy_ops_check_validates_kms_residency_erasure_bundle(tmp_path: Path) -> None:
     bundle = tmp_path / "privacy-ops.json"
-    bundle.write_text(json.dumps(privacy_ops_bundle()), encoding="utf-8")
+    bundle.write_text(json.dumps(privacy_ops_bundle()), encoding="utf-8", newline="\n")
 
     report = run_cli(
         tmp_path / "mnemosyne.json",
@@ -13426,7 +13433,7 @@ def test_cli_vector_backfill_apply_emits_redacted_report(
 
 def test_cli_privacy_ops_check_fails_closed_on_local_kms_and_bad_erasure(tmp_path: Path) -> None:
     bundle = tmp_path / "bad-privacy-ops.json"
-    bundle.write_text(json.dumps(privacy_ops_bundle(local_kms=True, incomplete_erasure=True)), encoding="utf-8")
+    bundle.write_text(json.dumps(privacy_ops_bundle(local_kms=True, incomplete_erasure=True)), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(tmp_path / "mnemosyne.json", "privacy-ops-check", "--bundle", str(bundle))
     payload = json.loads(result.stdout)
@@ -13445,7 +13452,7 @@ def test_cli_privacy_ops_check_rejects_uncorroborated_operator_delete(tmp_path: 
     operator_case["operator_delete"]["corroborating_source_hashes"] = ["cid-sha256:ccc"]
     operator_case["operator_delete"]["refused_if_uncorroborated"] = False
     bundle_path = tmp_path / "uncorroborated-operator-delete.json"
-    bundle_path.write_text(json.dumps(bundle), encoding="utf-8")
+    bundle_path.write_text(json.dumps(bundle), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(tmp_path / "mnemosyne.json", "privacy-ops-check", "--bundle", str(bundle_path))
     payload = json.loads(result.stdout)
@@ -13465,7 +13472,7 @@ def test_cli_privacy_ops_check_rejects_uncorroborated_operator_delete(tmp_path: 
 
 def test_cli_privacy_ops_check_rejects_raw_privacy_material(tmp_path: Path) -> None:
     bundle = tmp_path / "raw-privacy-ops.json"
-    bundle.write_text(json.dumps(privacy_ops_bundle(missing_redaction=True, raw_secret=True)), encoding="utf-8")
+    bundle.write_text(json.dumps(privacy_ops_bundle(missing_redaction=True, raw_secret=True)), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(tmp_path / "mnemosyne.json", "privacy-ops-check", "--bundle", str(bundle))
     payload = json.loads(result.stdout)
@@ -13586,7 +13593,7 @@ def parametric_trainer_bundle(
 
 def test_cli_parametric_trainer_check_validates_deployment_bundle(tmp_path: Path) -> None:
     bundle = tmp_path / "parametric-trainer.json"
-    bundle.write_text(json.dumps(parametric_trainer_bundle()), encoding="utf-8")
+    bundle.write_text(json.dumps(parametric_trainer_bundle()), encoding="utf-8", newline="\n")
 
     report = run_cli(
         tmp_path / "mnemosyne.json",
@@ -13640,7 +13647,7 @@ def test_cli_parametric_trainer_check_report_passes_release_revalidation(tmp_pat
     from mnemosyne.cli import _release_parametric_trainer_evidence_findings
 
     bundle = tmp_path / "parametric-trainer.json"
-    bundle.write_text(json.dumps(parametric_trainer_bundle()), encoding="utf-8")
+    bundle.write_text(json.dumps(parametric_trainer_bundle()), encoding="utf-8", newline="\n")
     report = run_cli(
         tmp_path / "mnemosyne.json",
         "parametric-trainer-check",
@@ -13675,7 +13682,7 @@ def test_cli_parametric_trainer_check_fails_closed_on_bad_bundle(tmp_path: Path)
             )
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     result = run_raw_cli(tmp_path / "mnemosyne.json", "parametric-trainer-check", "--bundle", str(bundle))
     payload = json.loads(result.stdout)
@@ -13707,7 +13714,7 @@ def test_cli_parametric_trainer_check_rejects_synthetic_suite_even_with_override
     payload["protected_suite"]["synthetic_operator_override"] = True
     payload["synthetic_protected_suite_operator_override"] = True
     bundle = tmp_path / "synthetic-parametric-trainer.json"
-    bundle.write_text(json.dumps(payload), encoding="utf-8")
+    bundle.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
 
     result = run_raw_cli(tmp_path / "mnemosyne.json", "parametric-trainer-check", "--bundle", str(bundle))
     report = json.loads(result.stdout)
@@ -13828,7 +13835,7 @@ reviewed_by = "human"
 ```
 """,
         encoding="utf-8",
-    )
+     newline="\n")
     git("add", "memory.md")
     git("commit", "-m", "add source truth")
     head = git("rev-parse", "HEAD")
@@ -14299,8 +14306,8 @@ def test_cli_provider_check_fails_closed_on_bad_command_key_provider(tmp_path: P
             ]
         ),
         encoding="utf-8",
-    )
-    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script)))
+     newline="\n")
+    command = join_command((sys.executable, str(script)))
     result = run_raw_cli(
         store,
         "--object-store",
@@ -14361,8 +14368,8 @@ def test_cli_provider_check_fails_closed_when_command_key_provider_retains_shred
             ]
         ),
         encoding="utf-8",
-    )
-    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(state)))
+     newline="\n")
+    command = join_command((sys.executable, str(script), str(state)))
     result = run_raw_cli(
         store,
         "--object-store",
@@ -14637,8 +14644,8 @@ def test_cli_provider_check_fails_closed_on_bad_entity_resolver(tmp_path: Path) 
             ]
         ),
         encoding="utf-8",
-    )
-    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script)))
+     newline="\n")
+    command = join_command((sys.executable, str(script)))
 
     result = run_raw_cli(
         store,
@@ -14668,8 +14675,8 @@ def test_cli_provider_check_fails_closed_on_bad_candidate_extractor(tmp_path: Pa
             ]
         ),
         encoding="utf-8",
-    )
-    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script)))
+     newline="\n")
+    command = join_command((sys.executable, str(script)))
 
     result = run_raw_cli(
         store,
@@ -14699,8 +14706,8 @@ def test_cli_provider_check_fails_closed_on_bad_summarizer(tmp_path: Path) -> No
             ]
         ),
         encoding="utf-8",
-    )
-    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script)))
+     newline="\n")
+    command = join_command((sys.executable, str(script)))
 
     result = run_raw_cli(
         store,
@@ -14730,8 +14737,8 @@ def test_cli_provider_check_fails_closed_on_bad_lesson_distiller(tmp_path: Path)
             ]
         ),
         encoding="utf-8",
-    )
-    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script)))
+     newline="\n")
+    command = join_command((sys.executable, str(script)))
 
     result = run_raw_cli(
         store,
@@ -14761,8 +14768,8 @@ def test_cli_provider_check_fails_closed_on_bad_skill_inducer(tmp_path: Path) ->
             ]
         ),
         encoding="utf-8",
-    )
-    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script)))
+     newline="\n")
+    command = join_command((sys.executable, str(script)))
 
     result = run_raw_cli(
         store,
@@ -15347,7 +15354,7 @@ def _sqlite_retrieval_bundle() -> dict:
 
 def test_cli_retrieval_ops_check_accepts_sqlite_profile(tmp_path: Path) -> None:
     bundle = tmp_path / "sqlite-retrieval-ops.json"
-    bundle.write_text(json.dumps(_sqlite_retrieval_bundle()), encoding="utf-8")
+    bundle.write_text(json.dumps(_sqlite_retrieval_bundle()), encoding="utf-8", newline="\n")
     report = run_cli(
         tmp_path / "mnemosyne.json",
         "retrieval-ops-check",
@@ -15370,7 +15377,7 @@ def test_cli_retrieval_ops_check_production_bundle_rejects_sqlite_backend(tmp_pa
     payload = retrieval_ops_bundle()
     payload["retrieval"]["backend"] = "sqlite"
     bundle = tmp_path / "prod-retrieval-sqlite.json"
-    bundle.write_text(json.dumps(payload), encoding="utf-8")
+    bundle.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
     result = run_raw_cli(
         tmp_path / "mnemosyne.json",
         "retrieval-ops-check",
@@ -15401,7 +15408,7 @@ def _sqlite_auth_bundle() -> dict:
 
 def test_cli_auth_ops_check_accepts_sqlite_file_per_tenant_profile(tmp_path: Path) -> None:
     bundle = tmp_path / "sqlite-auth-ops.json"
-    bundle.write_text(json.dumps(_sqlite_auth_bundle()), encoding="utf-8")
+    bundle.write_text(json.dumps(_sqlite_auth_bundle()), encoding="utf-8", newline="\n")
     report = run_cli(tmp_path / "mnemosyne.json", "auth-ops-check", "--bundle", str(bundle))
     codes = {finding["code"] for finding in report["findings"]}
     assert "tenant_isolation_control_missing" not in codes
@@ -15415,7 +15422,7 @@ def test_cli_auth_ops_check_production_bundle_rejects_sqlite_isolation(tmp_path:
     payload["tenant_isolation"].pop("postgres_rls_enabled", None)
     payload["tenant_isolation"]["sqlite_file_per_tenant"] = True
     bundle = tmp_path / "prod-auth-sqlite-isolation.json"
-    bundle.write_text(json.dumps(payload), encoding="utf-8")
+    bundle.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
     result = run_raw_cli(tmp_path / "mnemosyne.json", "auth-ops-check", "--bundle", str(bundle))
     report = json.loads(result.stdout)
     codes = {finding["code"] for finding in report["findings"]}
@@ -15433,7 +15440,7 @@ def _sqlite_provenance_bundle() -> dict:
 
 def test_cli_provenance_ops_check_accepts_sqlite_profile(tmp_path: Path) -> None:
     bundle = tmp_path / "sqlite-provenance-ops.json"
-    bundle.write_text(json.dumps(_sqlite_provenance_bundle()), encoding="utf-8")
+    bundle.write_text(json.dumps(_sqlite_provenance_bundle()), encoding="utf-8", newline="\n")
     report = run_cli(tmp_path / "mnemosyne.json", "provenance-ops-check", "--bundle", str(bundle))
     codes = {finding["code"] for finding in report["findings"]}
     assert "ingestion_backend_not_postgres" not in codes
@@ -15446,7 +15453,7 @@ def test_cli_provenance_ops_check_production_bundle_rejects_sqlite_backend(tmp_p
     payload = provenance_ops_bundle()
     payload["ingestion"]["backend"] = "sqlite"
     bundle = tmp_path / "prod-provenance-sqlite.json"
-    bundle.write_text(json.dumps(payload), encoding="utf-8")
+    bundle.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
     result = run_raw_cli(tmp_path / "mnemosyne.json", "provenance-ops-check", "--bundle", str(bundle))
     report = json.loads(result.stdout)
     codes = {finding["code"] for finding in report["findings"]}

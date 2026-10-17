@@ -735,7 +735,8 @@ def test_b14_the_shim_answers_method_not_found_for_an_unknown_method(tmp_path) -
 
 def test_b15_sdk_adapter_accepts_signed_sessions_on_session_identity_tools(tmp_path) -> None:
     pytest.importorskip("mcp")
-    from mcp import types
+    import mcp_types as types
+    from tests.sdk_helper import sdk_handler
 
     secret = "b15-session-secret"
     server = build_sdk_server(store_path=tmp_path / "b15-store.json", session_secret=secret)
@@ -760,7 +761,7 @@ def test_b15_sdk_adapter_accepts_signed_sessions_on_session_identity_tools(tmp_p
     }
 
     async def exercise() -> tuple[object, object]:
-        call_handler = server.request_handlers[types.CallToolRequest]
+        call_handler = sdk_handler(server, types.CallToolRequest)
         # The turn is captured verbatim first; the working item cites that cid.
         captured = await call_handler(
             types.CallToolRequest(
@@ -777,7 +778,7 @@ def test_b15_sdk_adapter_accepts_signed_sessions_on_session_identity_tools(tmp_p
                 }
             )
         )
-        assert captured.root.isError is False, captured.root.content[0].text
+        assert captured.is_error is False, captured.content[0].text
         seeded = await call_handler(
             types.CallToolRequest(
                 params={
@@ -786,7 +787,7 @@ def test_b15_sdk_adapter_accepts_signed_sessions_on_session_identity_tools(tmp_p
                         **scope,
                         "kind": "conversation_turn",
                         "content": "user: hello there",
-                        "evidence_ids": [captured.root.structuredContent["cid"]],
+                        "evidence_ids": [captured.structured_content["cid"]],
                         "ttl_seconds": 600,
                         "created_at": "2026-09-30T18:00:00+00:00",
                     },
@@ -808,11 +809,11 @@ def test_b15_sdk_adapter_accepts_signed_sessions_on_session_identity_tools(tmp_p
     finally:
         server.mnemosyne_mcp_facade.close()
 
-    assert seeded.root.isError is False, seeded.root.content[0].text
-    assert "session_identity" not in (seeded.root.content[0].text if seeded.root.content else "")
-    assert seeded.root.structuredContent["item"]["content"] == "user: hello there"
-    assert queried.root.isError is False, queried.root.content[0].text
-    assert [item["content"] for item in queried.root.structuredContent["items"]] == ["user: hello there"]
+    assert seeded.is_error is False, seeded.content[0].text
+    assert "session_identity" not in (seeded.content[0].text if seeded.content else "")
+    assert seeded.structured_content["item"]["content"] == "user: hello there"
+    assert queried.is_error is False, queried.content[0].text
+    assert [item["content"] for item in queried.structured_content["items"]] == ["user: hello there"]
 
 
 # ---------------------------------------------------------------------------

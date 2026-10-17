@@ -116,7 +116,7 @@ def test_cli_ops_metrics_push_requires_metrics_url(tmp_path) -> None:
         ],
         text=True,
         capture_output=True,
-        env={"PATH": "/usr/bin:/bin"},
+        env={"PATH": "/usr/bin:/bin", "SYSTEMROOT": __import__("os").environ.get("SYSTEMROOT", "")},  # Windows sockets need SYSTEMROOT
     )
     assert result.returncode != 0
     assert "MNEMOSYNE_OPS_METRICS_URL" in result.stderr

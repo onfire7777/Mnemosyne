@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import json
-import shlex
 import subprocess
 import sys
 import threading
@@ -38,6 +37,7 @@ from mnemosyne.postgres_engine import PostgresEngine, _cid_to_bytes, _stable_uui
 from mnemosyne.queue import InProcessQueue, PostgresQueue, QueueWorker
 from mnemosyne.runtime_state import RuntimeState
 from mnemosyne.storage import LocalObjectStore
+from mnemosyne.command_line import join_command
 
 
 pytest.importorskip("psycopg")
@@ -89,9 +89,9 @@ def fake_command_retrieval_provider(tmp_path: Path, *, source_cid: str | None = 
             ]
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     script.chmod(0o755)
-    return " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(state))), state
+    return join_command((sys.executable, str(script), str(state))), state
 
 
 def fake_parametric_command(tmp_path: Path) -> tuple[str, Path]:
@@ -119,8 +119,8 @@ def fake_parametric_command(tmp_path: Path) -> tuple[str, Path]:
             ]
         ),
         encoding="utf-8",
-    )
-    return " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(state))), state
+     newline="\n")
+    return join_command((sys.executable, str(script), str(state))), state
 
 
 def test_postgres_rejects_unknown_access_policy_keys_live() -> None:
@@ -1818,7 +1818,7 @@ def test_postgres_cli_ingests_file_with_c2pa_verifier(tmp_path) -> None:
             ]
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     verifier_stub.chmod(0o755)
 
     ingested = run_postgres_cli(
@@ -2054,7 +2054,7 @@ def test_postgres_cli_ingests_raw_media_embedding_for_vector_retrieval_live(
             ]
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
     ingested = run_postgres_cli(
         "--object-store",
@@ -2228,7 +2228,7 @@ def test_postgres_gated_consolidation_uses_command_providers_live(tmp_path) -> N
             ]
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     summarizer_script = tmp_path / "summarizer.py"
     summarizer_script.write_text(
         "\n".join(
@@ -2240,7 +2240,7 @@ def test_postgres_gated_consolidation_uses_command_providers_live(tmp_path) -> N
             ]
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     resolver_script = tmp_path / "entity_resolver.py"
     resolver_script.write_text(
         "\n".join(
@@ -2254,7 +2254,7 @@ def test_postgres_gated_consolidation_uses_command_providers_live(tmp_path) -> N
             ]
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     queue = InProcessQueue()
     consolidator = ConsolidationWorker(
         engine,

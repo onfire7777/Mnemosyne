@@ -31,7 +31,7 @@ class _FakeCLI:
 
     def capture_batch(self, input_jsonl: Path) -> dict[str, object]:
         rows = _jsonl_rows(input_jsonl)
-        self.store.write_text('{"relations": []}\n', encoding="utf-8")
+        self.store.write_text('{"relations": []}\n', encoding="utf-8", newline="\n")
         return {"results": [{"cid": f"cid-{index}"} for index, _ in enumerate(rows)]}
 
     def eval_query_batch(self, input_jsonl: Path) -> dict[str, object]:
@@ -129,7 +129,7 @@ def test_graph_baseline_cli_retains_artifacts_and_refuses_overwrite(tmp_path: Pa
         },
     }
     artifacts = {
-        str(path.relative_to(output)): path.read_bytes()
+        path.relative_to(output).as_posix(): path.read_bytes()
         for path in output.rglob("*")
         if path.is_file()
     }
@@ -139,7 +139,7 @@ def test_graph_baseline_cli_retains_artifacts_and_refuses_overwrite(tmp_path: Pa
     assert second.returncode != 0
     assert "baseline output must not already exist" in second.stderr
     assert {
-        str(path.relative_to(output)): path.read_bytes()
+        path.relative_to(output).as_posix(): path.read_bytes()
         for path in output.rglob("*")
         if path.is_file()
     } == artifacts

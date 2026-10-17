@@ -77,7 +77,7 @@ def test_load_fixture_rejects_a_tampered_fixture(tmp_path: Path) -> None:
     tampered = _load_committed_fixture()
     tampered["rows"][0]["raw_event"]["content"] = "tampered content"
     tampered_path = tmp_path / "tampered.json"
-    tampered_path.write_text(json.dumps(tampered), encoding="utf-8")
+    tampered_path.write_text(json.dumps(tampered), encoding="utf-8", newline="\n")
     with pytest.raises(wmbs_m01.WmbsM01Error):
         wmbs_m01.load_fixture(tampered_path)
 

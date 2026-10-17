@@ -389,7 +389,7 @@ def _bind_raw_artifacts(receipt: dict[str, Any]) -> None:
 def write_phase15_s4_receipt(receipt: dict[str, Any], path: Path) -> Path:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    target.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8", newline="\n")
     return target
 
 
@@ -1067,12 +1067,12 @@ def write_reports(report: dict[str, Any]) -> tuple[Path, Path]:
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     json_path = REPORTS_DIR / f"latency_bench_{stamp}.json"
-    json_path.write_text(json.dumps(report, indent=2))
-    (REPORTS_DIR / "latency_bench_latest.json").write_text(json.dumps(report, indent=2))
+    json_path.write_text(json.dumps(report, indent=2), newline="\n")
+    (REPORTS_DIR / "latency_bench_latest.json").write_text(json.dumps(report, indent=2), newline="\n")
     md = render_markdown(report)
     md_path = REPORTS_DIR / f"latency_bench_{stamp}.md"
-    md_path.write_text(md)
-    (REPORTS_DIR / "latency_bench_latest.md").write_text(md)
+    md_path.write_text(md, newline="\n")
+    (REPORTS_DIR / "latency_bench_latest.md").write_text(md, newline="\n")
     return json_path, md_path
 
 

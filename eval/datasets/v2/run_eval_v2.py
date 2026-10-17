@@ -151,7 +151,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.out:
         out = Path(args.out)
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
+        out.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8", newline="\n")
         print(f"[v2] wrote {out}", file=sys.stderr)
     if args.print_json:
         print(json.dumps(report, indent=2, default=str))

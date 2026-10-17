@@ -177,7 +177,7 @@ if args == query_call:
 raise SystemExit(97)
 """,
         encoding="utf-8",
-    )
+     newline="\n")
     docker.chmod(docker_mode)
     return docker, audit
 

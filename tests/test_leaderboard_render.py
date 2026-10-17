@@ -51,7 +51,7 @@ def _trace(question_id: str = "question-001") -> dict[str, object]:
 
 
 def _write_json(path: Path, value: object) -> Path:
-    path.write_text(json.dumps(value), encoding="utf-8")
+    path.write_text(json.dumps(value), encoding="utf-8", newline="\n")
     return path
 
 
@@ -62,7 +62,7 @@ def _write_traces(path: Path, traces: list[dict[str, object]]) -> Path:
             for trace in traces
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     return path
 
 
@@ -309,7 +309,7 @@ def test_rejects_malformed_result_json_without_partial_output(
     tmp_path: Path, raw: str, match: str
 ) -> None:
     results = tmp_path / "results.json"
-    results.write_text(raw, encoding="utf-8")
+    results.write_text(raw, encoding="utf-8", newline="\n")
     output = tmp_path / "site"
 
     with pytest.raises(RenderError, match=match):
@@ -370,7 +370,7 @@ def test_rejects_malformed_public_bundle_trace_rows(
 ) -> None:
     results = _write_json(tmp_path / "results.json", _result())
     traces = tmp_path / "traces.jsonl"
-    traces.write_text(raw, encoding="utf-8")
+    traces.write_text(raw, encoding="utf-8", newline="\n")
     output = tmp_path / "site"
 
     with pytest.raises(RenderError, match=match):
@@ -406,7 +406,7 @@ def test_trace_jsonl_allows_literal_unicode_line_separator(tmp_path: Path) -> No
     traces.write_text(
         '{"question_id":"question-001","answer":"line\u2028break"}\n',
         encoding="utf-8",
-    )
+     newline="\n")
     output = tmp_path / "site"
 
     render_site(results, {"result-001": traces}, output)
@@ -422,7 +422,7 @@ def test_failed_render_preserves_the_previous_output_byte_for_byte(
     (output / "index.html").write_bytes(b"previous output\n")
     before = _tree(output)
     invalid = tmp_path / "invalid.json"
-    invalid.write_text("{", encoding="utf-8")
+    invalid.write_text("{", encoding="utf-8", newline="\n")
 
     with pytest.raises(RenderError):
         render_site(invalid, {}, output)
@@ -589,7 +589,7 @@ def test_cli_reports_publication_setup_failure_without_traceback(
     results = _write_json(tmp_path / "results.json", _result())
     traces = _write_traces(tmp_path / "traces.jsonl", [_trace()])
     invalid_parent = tmp_path / "not-a-directory"
-    invalid_parent.write_text("file", encoding="utf-8")
+    invalid_parent.write_text("file", encoding="utf-8", newline="\n")
 
     assert (
         main(
@@ -615,7 +615,7 @@ def test_cli_reports_utf8_publication_failure_without_traceback(
     traces.write_text(
         '{"question_id":"question-001","answer":"\\ud800"}\n',
         encoding="utf-8",
-    )
+     newline="\n")
 
     assert (
         main(
@@ -638,7 +638,7 @@ def test_cli_reports_invalid_input_without_traceback(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     invalid = tmp_path / "invalid.json"
-    invalid.write_text("{", encoding="utf-8")
+    invalid.write_text("{", encoding="utf-8", newline="\n")
 
     assert main([str(invalid), str(tmp_path / "site"), "result-001=missing"]) == 2
 
@@ -828,7 +828,7 @@ def test_v2_render_uses_verified_trace_snapshot(
     def mutate_after_first_read(self: Path) -> bytes:
         payload = original_read_bytes(self)
         if self.name == "traces.jsonl":
-            self.write_text('{"question_id":"MUTATED"}\n', encoding="utf-8")
+            self.write_text('{"question_id":"MUTATED"}\n', encoding="utf-8", newline="\n")
         return payload
 
     monkeypatch.setattr(Path, "read_bytes", mutate_after_first_read)
@@ -908,7 +908,7 @@ def test_catalog_preserves_original_capability_to_module_contract() -> None:
 
     catalog = load_catalog()
     root = Path(__file__).resolve().parents[1]
-    source = (root / catalog['scope_source']).read_text()
+    source = (root / catalog['scope_source']).read_text(encoding="utf-8")
     expected = {}
     for line in source.splitlines():
         if re.match(r'^\| C\d\d \|', line):
@@ -929,7 +929,7 @@ def test_legacy_artifact_downloads_require_exact_bound_bytes(tmp_path: Path, tam
     results = _write_json(tmp_path / "results.json", record)
     output = tmp_path / "site"
     output.mkdir()
-    (output / "existing.txt").write_text("preserve on failure")
+    (output / "existing.txt").write_text("preserve on failure", newline="\n")
     if tampered:
         paths[tampered].write_bytes(paths[tampered].read_bytes() + b" ")
     kwargs = dict(

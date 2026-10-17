@@ -436,7 +436,7 @@ def run(name: str, data_dir: Path | None = None) -> dict[str, Any]:
         for index, step in enumerate(spec["steps"]):
             if "capture" in step:
                 path = work / f"batch-{index}.jsonl"
-                path.write_text("".join(json.dumps(r, sort_keys=True) + "\n" for r in step["capture"]), encoding="utf-8")
+                path.write_text("".join(json.dumps(r, sort_keys=True) + "\n" for r in step["capture"]), encoding="utf-8", newline="\n")
                 try:
                     # The fixtures record the per-candidate gate; capture-batch now batches by default.
                     out = _cli(["--backend", "local", "--store", str(store), "capture-batch", "--input-jsonl", str(path),
@@ -463,7 +463,7 @@ def run(name: str, data_dir: Path | None = None) -> dict[str, Any]:
                                    "--cid", captured[batch][row]]))
         clock.tick()
         queries = work / "queries.jsonl"
-        queries.write_text("".join(json.dumps(q, sort_keys=True) + "\n" for q in spec["queries"]), encoding="utf-8")
+        queries.write_text("".join(json.dumps(q, sort_keys=True) + "\n" for q in spec["queries"]), encoding="utf-8", newline="\n")
         answers = _cli(["--backend", "local", "--store", str(store), "--evaluation-read-only", "eval-query-batch",
                         "--input-jsonl", str(queries)])
         state = {tenant: _main_state(store, tenant) for tenant in spec["tenants"]}
@@ -616,7 +616,7 @@ def main(argv: list[str] | None = None) -> int:
 
     result = run(args.scenario, Path(args.data) if args.data else None)
     result["engine_source"] = str(Path(mnemosyne.__file__).resolve().parent)
-    Path(args.out).write_text(json.dumps(result, sort_keys=True, indent=1) + "\n", encoding="utf-8")
+    Path(args.out).write_text(json.dumps(result, sort_keys=True, indent=1) + "\n", encoding="utf-8", newline="\n")
     print(f"{args.scenario}: {len(json.dumps(result))} bytes from {result['engine_source']}")
     return 0
 

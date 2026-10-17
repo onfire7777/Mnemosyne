@@ -503,7 +503,7 @@ def run_audit(out_path: str | None = None) -> dict[str, Any]:
     report = verifier.run().to_dict()
     if out_path:
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-        Path(out_path).write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+        Path(out_path).write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
     return report
 
 

@@ -85,7 +85,7 @@ def run(
                 for document in by_question[question["question_id"]]
             ]
             capture_path = Path(temp) / f"{index}-capture.jsonl"
-            capture_path.write_text(_jsonl(runtime_rows), encoding="utf-8")
+            capture_path.write_text(_jsonl(runtime_rows), encoding="utf-8", newline="\n")
             captured = question_cli.capture_batch(capture_path).get("results")
             if not isinstance(captured, list) or len(captured) != len(runtime_rows):
                 raise ValueError("LongMemEval QA capture count mismatch")
@@ -108,7 +108,7 @@ def run(
                 "context": {"tenant_id": tenant, "user_id": "longmemeval", "role": "reader"},
             }
             answer_path = Path(temp) / f"{index}-answer.jsonl"
-            answer_path.write_text(_jsonl([answer_input]), encoding="utf-8")
+            answer_path.write_text(_jsonl([answer_input]), encoding="utf-8", newline="\n")
             answer_cli = (
                 replace(question_cli, global_flags=[*question_cli.global_flags, "--evaluation-read-only"])
                 if isinstance(question_cli, MnemoCLI)

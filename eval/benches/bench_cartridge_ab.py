@@ -933,7 +933,7 @@ def write_phase15_s5_cartridge_receipt(
     target = Path(path) if path is not None else PHASE15_S5_CARTRIDGE_REPORT
     payload = receipt if receipt is not None else run_cartridge_ab()
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    target.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8", newline="\n")
     return target
 
 

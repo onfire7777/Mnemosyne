@@ -434,7 +434,7 @@ def write_stub_receipt(path: str | Path, *, platform: Platform) -> Path:
     target.write_text(
         json.dumps(development_stub_receipt(platform=platform), indent=2) + "\n",
         encoding="utf-8",
-    )
+     newline="\n")
     return target
 
 

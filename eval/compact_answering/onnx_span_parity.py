@@ -72,7 +72,7 @@ def main():
                 'model_sha256': hashlib.sha256(raw).hexdigest(), 'onnx_version': onnx.__version__,
                 'onnxruntime_version': ort.__version__, 'numpy_version': np.__version__,
                 'cases': cases, 'variant_hashes': variants, 'learned_quality_verified': False, 'resource_admission_verified': False}
-    (root/'fixture.json').write_text(json.dumps(artifact, sort_keys=True, indent=2)+'\n')
+    (root/'fixture.json').write_text(json.dumps(artifact, sort_keys=True, indent=2)+'\n', newline="\n")
     print(json.dumps({'directory': str(root), 'model_bytes': len(raw), 'cases': len(cases),
                       'model_sha256': artifact['model_sha256']}))
 

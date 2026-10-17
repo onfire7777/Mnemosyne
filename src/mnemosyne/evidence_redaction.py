@@ -306,7 +306,7 @@ def write_redaction_scan(
             indent=2,
         ),
         encoding="utf-8",
-    )
+     newline="\n")
 
 
 def _scan_file(

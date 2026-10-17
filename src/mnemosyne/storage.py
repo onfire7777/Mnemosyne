@@ -222,7 +222,7 @@ class JsonKeyManager:
     def _save(self, data: dict[str, Any]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-        tmp.write_text(json.dumps(data, sort_keys=True, indent=2), encoding="utf-8")
+        tmp.write_text(json.dumps(data, sort_keys=True, indent=2), encoding="utf-8", newline="\n")
         tmp.chmod(0o600)
         tmp.replace(self.path)
 

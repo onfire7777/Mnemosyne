@@ -32,7 +32,7 @@ _counts: Counter = Counter()
 
 def _flush() -> None:
     try:
-        Path(COUNTER_FILE).write_text(json.dumps(dict(_counts)))
+        Path(COUNTER_FILE).write_text(json.dumps(dict(_counts)), newline="\n")
     except OSError:
         pass
 

@@ -68,7 +68,7 @@ def test_strict_env_loader_rejects_unexpected_keys_and_executable_values(
     env_file.write_text(
         'export SAFE_KEY="ok"\nexport EVIL="$(touch /tmp/mnemosyne-pwned)"\n',
         encoding="utf-8",
-    )
+     newline="\n")
     env_file.chmod(0o600)
 
     proc = subprocess.run(
@@ -90,7 +90,7 @@ def test_strict_env_loader_rejects_unexpected_keys_and_executable_values(
 @_posix_only
 def test_strict_env_loader_rejects_unexpected_keys(tmp_path: Path) -> None:
     env_file = tmp_path / "unexpected.env"
-    env_file.write_text('export SAFE_KEY="ok"\nexport EXTRA="nope"\n', encoding="utf-8")
+    env_file.write_text('export SAFE_KEY="ok"\nexport EXTRA="nope"\n', encoding="utf-8", newline="\n")
     env_file.chmod(0o600)
 
     proc = subprocess.run(
@@ -112,7 +112,7 @@ def test_strict_env_loader_rejects_unexpected_keys(tmp_path: Path) -> None:
 @_posix_only
 def test_strict_env_loader_rejects_group_accessible_files(tmp_path: Path) -> None:
     env_file = tmp_path / "group-readable.env"
-    env_file.write_text('export SAFE_KEY="ok"\n', encoding="utf-8")
+    env_file.write_text('export SAFE_KEY="ok"\n', encoding="utf-8", newline="\n")
     env_file.chmod(0o640)
 
     proc = subprocess.run(
@@ -134,7 +134,7 @@ def test_strict_env_loader_rejects_group_accessible_files(tmp_path: Path) -> Non
 @_posix_only
 def test_strict_env_loader_emits_allowlisted_assignments(tmp_path: Path) -> None:
     env_file = tmp_path / "safe.env"
-    env_file.write_text('export SAFE_KEY="ok value"\nexport SECOND="two"\n', encoding="utf-8")
+    env_file.write_text('export SAFE_KEY="ok value"\nexport SECOND="two"\n', encoding="utf-8", newline="\n")
     env_file.chmod(0o600)
 
     proc = subprocess.run(
@@ -158,7 +158,7 @@ def test_strict_env_loader_allow_missing_emits_present_allowed_keys(
     tmp_path: Path,
 ) -> None:
     env_file = tmp_path / "safe-optional.env"
-    env_file.write_text('export SAFE_KEY="ok value"\n', encoding="utf-8")
+    env_file.write_text('export SAFE_KEY="ok value"\n', encoding="utf-8", newline="\n")
     env_file.chmod(0o600)
 
     proc = subprocess.run(
@@ -965,7 +965,7 @@ def test_prepare_production_evidence_custody_refresh_repairs_missing_packet_docs
         check=False,
     )
     preserved_doc = packet_root / "docs" / "PRODUCTION-EVIDENCE.md"
-    preserved_doc.write_text("operator-local note\n", encoding="utf-8")
+    preserved_doc.write_text("operator-local note\n", encoding="utf-8", newline="\n")
     missing_runbook = (
         packet_root / "docs" / "runbooks" / "row-01-production-postgres-retrieval.md"
     )
@@ -1103,7 +1103,7 @@ def test_prepare_production_evidence_custody_refresh_preserves_operator_inputs(
             'export MNEMOSYNE_PROD_TENANT="tenant-prod"',
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     provider_manifest = packet_root / "input-artifacts" / "provider-manifest.production.json"
     provider_before = provider_manifest.read_bytes()
 
@@ -1214,7 +1214,7 @@ def test_prepare_production_evidence_custody_refresh_reports_no_values(
             f'export MNEMOSYNE_PROD_TENANT="{env_sentinel}"',
         ),
         encoding="utf-8",
-    )
+     newline="\n")
     proc_env = {**os.environ, "MNEMOSYNE_EMBEDDING_URL": provider_sentinel}
     proc = subprocess.run(
         [
@@ -1251,7 +1251,7 @@ def test_prepare_production_evidence_custody_runtime_env_file_satisfies_refs_wit
     runtime_env_file.write_text(
         f'export MNEMOSYNE_EMBEDDING_URL="{provider_sentinel}"\n',
         encoding="utf-8",
-    )
+     newline="\n")
     runtime_env_file.chmod(0o600)
 
     proc = subprocess.run(

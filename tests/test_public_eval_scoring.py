@@ -271,14 +271,14 @@ def test_security_calibration_bundle_verify_recomputes_and_rejects_blending(
             json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n"
             for row in tampered
         )
-    )
+    , newline="\n")
     manifest = json.loads((source / "bundle-manifest.json").read_text())
     manifest["files"]["traces.jsonl"] = hashlib.sha256(
         (source / "traces.jsonl").read_bytes()
     ).hexdigest()
     (source / "bundle-manifest.json").write_text(
         json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n"
-    )
+    , newline="\n")
     with pytest.raises(BundleError, match="blended"):
         verify_bundle(source)
 

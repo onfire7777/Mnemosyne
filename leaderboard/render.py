@@ -419,6 +419,11 @@ def _render_pages(
     return pages
 
 
+def _long(path: Path) -> Path:
+    # trace pages nest two sha256 names deep, past Windows' 260-character MAX_PATH
+    return Path("\\\\?\\" + str(path)) if os.name == "nt" and not str(path).startswith("\\\\") else path
+
+
 def _publish(pages: dict[Path, str | bytes], destination: Path) -> None:
     destination = destination.absolute()
     temporary: Path | None = None
@@ -431,15 +436,15 @@ def _publish(pages: dict[Path, str | bytes], destination: Path) -> None:
         destination_mode = (
             stat.S_IMODE(destination.stat().st_mode) if destination.exists() else 0o755
         )
-        temporary = Path(
+        temporary = _long(Path(
             tempfile.mkdtemp(prefix=f".{destination.name}-", dir=destination.parent)
-        )
+        ))
         temporary.chmod(destination_mode)
-        backup = Path(
+        backup = _long(Path(
             tempfile.mkdtemp(
                 prefix=f".{destination.name}-backup-", dir=destination.parent
             )
-        )
+        ))
         backup.rmdir()
         for relative, content in sorted(pages.items(), key=lambda item: str(item[0])):
             target = temporary / relative
@@ -458,7 +463,7 @@ def _publish(pages: dict[Path, str | bytes], destination: Path) -> None:
                     os.replace(backup, destination)
                 except OSError:
                     try:
-                        shutil.copytree(backup, destination)
+                        shutil.copytree(backup, _long(destination))
                     except OSError as restore_error:
                         preserve_backup = True
                         try:

@@ -51,6 +51,10 @@ ALLOWED_RAW_EGRESS = {
         "infra/vault/audit-hmac-adapter.py",
         "urllib.request.urlopen",
     ): "out-of-process audit-chain HMAC adapter (MNEMOSYNE_AUDIT_HMAC_COMMAND), stdlib-only by design (no mnemosyne import), talks only to the in-cluster Vault transit endpoint",
+    (
+        "src/mnemosyne/frameworks.py",
+        "urllib.request.urlopen",
+    ): "skill-framework conversion posts only to the fixed OPENROUTER_URL constant; no caller-supplied URL reaches it",
 }
 
 

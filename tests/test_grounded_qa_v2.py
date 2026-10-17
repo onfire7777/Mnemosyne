@@ -143,7 +143,7 @@ def test_frozen_dataset_requires_canonical_path_and_explicit_one_shot_gate(
     path = tmp_path / "frozen.json"
     value = _dataset()
     value["dataset_id"] = "qa_hard_v2"
-    path.write_text(json.dumps(value))
+    path.write_text(json.dumps(value), newline="\n")
     with pytest.raises(ValueError, match="frozen"):
         load_dataset(path)
     with pytest.raises(ValueError, match="canonical"):
@@ -184,7 +184,7 @@ def test_scale_preflight_dataset_and_receipt_are_exactly_bound(tmp_path: Path) -
         "schema": _PREFLIGHT_SCHEMA,
         "trace_count": 24,
     }
-    receipt.write_text(json.dumps(value))
+    receipt.write_text(json.dumps(value), newline="\n")
     validated, digest = _validated_preflight(
         receipt,
         candidate_digest="a" * 64,
@@ -192,7 +192,7 @@ def test_scale_preflight_dataset_and_receipt_are_exactly_bound(tmp_path: Path) -
     )
     assert validated == value and len(digest) == 64
     value["trace_count"] = 23
-    receipt.write_text(json.dumps(value))
+    receipt.write_text(json.dumps(value), newline="\n")
     with pytest.raises(ValueError, match="exact gate"):
         _validated_preflight(
             receipt,
@@ -431,7 +431,7 @@ def test_frozen_cli_one_shot_requires_execute_ledger_and_preflight(
                 "git_sha": "df438ca34061467ecc227bcf4d45bb1f7e886aee",
             }
         )
-    )
+    , newline="\n")
     # Avoid real clean-checkout / manifest validation side effects.
     monkeypatch.setattr(runner, "validate_candidate_manifest", lambda *a, **k: None)
     monkeypatch.setattr(runner, "require_clean_candidate_checkout", lambda *a, **k: None)
@@ -466,7 +466,7 @@ def test_frozen_cli_one_shot_requires_execute_ledger_and_preflight(
         )
     # Non-canonical dataset may not use --execute-frozen.
     synth = tmp_path / "synth.json"
-    synth.write_text(json.dumps(_dataset()))
+    synth.write_text(json.dumps(_dataset()), newline="\n")
     with pytest.raises(ValueError, match="restricted to canonical qa_hard_v2"):
         runner.main(
             [

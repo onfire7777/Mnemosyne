@@ -122,7 +122,7 @@ def test_native_question_uses_read_only_public_boundary_and_retains_request(tmp_
 
     monkeypatch.setattr(MnemoCLI, "eval_answer_batch", answer)
     store = tmp_path / "synthetic-store"
-    store.write_text("synthetic transport test only")
+    store.write_text("synthetic transport test only", newline="\n")
     conversation = {"sample_id": "one", "tenant_id": "tenant-one", "cli": MnemoCLI(store=str(store)),
                     "evidence": {"cid": {"dialog_id": "D1:1", "capture": {"content": "violet"}}}}
     result = answer_captured_question(conversation, question, source["qa"][0])
@@ -146,7 +146,7 @@ def test_native_question_uses_read_only_public_boundary_and_retains_request(tmp_
 def test_native_question_rejects_wrong_response_identity(tmp_path, monkeypatch, payload):
     source = sample("one")
     store = tmp_path / "store"
-    store.write_text("synthetic transport test only")
+    store.write_text("synthetic transport test only", newline="\n")
     conversation = {"sample_id": "one", "tenant_id": "tenant", "cli": MnemoCLI(store=str(store)), "evidence": {}}
     monkeypatch.setattr(MnemoCLI, "eval_answer_batch", lambda *args, **kwargs: payload)
     with pytest.raises(LoCoMoError, match="result"):
@@ -156,7 +156,7 @@ def test_native_question_rejects_wrong_response_identity(tmp_path, monkeypatch, 
 def test_native_question_does_not_swallow_execution_errors(tmp_path, monkeypatch):
     source = sample("one")
     store = tmp_path / "store"
-    store.write_text("synthetic transport test only")
+    store.write_text("synthetic transport test only", newline="\n")
     conversation = {"sample_id": "one", "tenant_id": "tenant", "cli": MnemoCLI(store=str(store)), "evidence": {}}
 
     def fail(*args, **kwargs):

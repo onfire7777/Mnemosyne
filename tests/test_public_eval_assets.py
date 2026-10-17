@@ -24,7 +24,7 @@ def test_asset_is_loaded_only_from_digest_gated_offline_directory(tmp_path: Path
     raw = b'{"rows":[{"id":"q1"}]}\n'
     (tmp_path / "dataset.json").write_bytes(raw)
     assert load_pinned_json_asset(tmp_path, _spec(raw)) == {"rows": [{"id": "q1"}]}
-    (tmp_path / "dataset.json").write_text("{}\n")
+    (tmp_path / "dataset.json").write_text("{}\n", newline="\n")
     with pytest.raises(AssetError, match="digest"):
         load_pinned_json_asset(tmp_path, _spec(raw))
 
@@ -54,7 +54,7 @@ def test_asset_rejects_links_paths_and_ambiguous_json(tmp_path: Path) -> None:
     with pytest.raises(AssetError, match="filename"):
         load_pinned_json_asset(tmp_path, AssetSpec(**(_spec(raw).__dict__ | {"filename": "../outside-public-asset.json"})))
     (tmp_path / "dataset.json").unlink()
-    (tmp_path / "dataset.json").write_text('{"x":NaN}\n')
+    (tmp_path / "dataset.json").write_text('{"x":NaN}\n', newline="\n")
     bad = _spec((tmp_path / "dataset.json").read_bytes())
     with pytest.raises(AssetError, match="JSON"):
         load_pinned_json_asset(tmp_path, bad)

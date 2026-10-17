@@ -27,6 +27,17 @@ def test_windows_parser_round_trips_list2cmdline(argv: list[str]) -> None:
     assert command_line._split_windows_command_line(subprocess.list2cmdline(argv)) == argv
 
 
+def test_a_python_script_runs_through_the_interpreter_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(command_line, "os", SimpleNamespace(name="nt"))
+    assert command_line.split_command(r"C:\t\tool.py --x") == [command_line.sys.executable, r"C:\t\tool.py", "--x"]
+    assert command_line.split_command("tool.exe") == ["tool.exe"]
+
+
+def test_join_command_is_read_back_by_split_command() -> None:
+    argv = [r"C:\Program Files\py.exe", "a b", 'q"uote', r"C:\x\\"]
+    assert command_line.split_command(command_line.join_command(argv)) == argv
+
+
 def test_split_command_selects_windows_parser(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(command_line, "os", SimpleNamespace(name="nt"))
     assert command_line.split_command('tool "two words"') == ["tool", "two words"]
