@@ -1,5 +1,0 @@
-{
-  "clarification": "When does the delivery event have status 'ready'?",
-  "operations": [
-   																	]
-}

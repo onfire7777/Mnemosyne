@@ -18,7 +18,7 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
-from eval.public.adapters.longmemeval import normalize
+from eval.datasets.longmemeval_loader import normalize
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Evidence
 from mnemosyne.policy import OperatingPolicy

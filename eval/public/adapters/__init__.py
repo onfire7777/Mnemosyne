@@ -1,2 +1,0 @@
-"""Redistributable public benchmark adapters."""
-

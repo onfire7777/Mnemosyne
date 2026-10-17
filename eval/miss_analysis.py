@@ -19,7 +19,7 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from eval.public.adapters.hipporag_multihop import normalize
+from eval.datasets.hipporag_loader import normalize
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Evidence
 from mnemosyne.passages import ChatModel, PassageGraphIndex, PassageIndexStore
