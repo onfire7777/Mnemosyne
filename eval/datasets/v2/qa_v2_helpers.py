@@ -1,15 +1,10 @@
 """Helpers copied from the QA v2 runner (now Mnemetric's) for the white-box graph-PPR baseline."""
 
 from __future__ import annotations
-import argparse
-import hashlib
 import json
 import math
-import os
-import tempfile
-from dataclasses import replace
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 
 _FROZEN_DATASET = Path(__file__).with_name("qa_hard_v2.json").resolve()

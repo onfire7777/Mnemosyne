@@ -1,13 +1,7 @@
 """Dataset loading copied from Mnemetric's eval/public/adapters/hipporag_multihop.py (17 Oct 2026), for Mnemosyne's own recall research."""
 
 from __future__ import annotations
-import hashlib
-import json
-import math
-import tempfile
 from collections.abc import Mapping
-from dataclasses import replace
-from pathlib import Path
 from typing import Any
 
 

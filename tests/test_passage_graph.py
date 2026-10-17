@@ -253,6 +253,25 @@ def test_prepared_query_vectors_are_used_instead_of_the_embedder(tmp_path) -> No
     assert _ranked(engine, question) == expected
 
 
+def test_graph_query_preparation_batch_size_preserves_rankings(tmp_path) -> None:
+    engine, graph, _chat, _cids = _setup(tmp_path)
+    MemoryTools(engine).index_passages(TENANT)
+    questions = [
+        "When did Lothair II's mother pass away?",
+        "Ermengarde of Tours",
+        "When did Lothair II's mother pass away?",
+    ]
+    expected = [_ranked(engine, question) for question in questions]
+    try:
+        for batch_size in (1, 2, 64):
+            graph._query_vectors.clear()
+            graph._cache = None
+            graph.prepare(questions, BagEmbedder(), batch_size=batch_size)
+            assert [_ranked(engine, question) for question in questions] == expected
+    finally:
+        graph.store.close()
+
+
 def test_read_only_index_refuses_to_write(tmp_path) -> None:
     PassageIndexStore(tmp_path / "index.sqlite").close()
     graph = PassageGraphIndex(
