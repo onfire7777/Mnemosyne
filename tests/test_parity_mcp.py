@@ -321,6 +321,15 @@ def test_jsonrpc_initialize_and_method_contract(tmp_path: Path) -> None:
     result = initialized["result"]
     assert result["protocolVersion"] == PROTOCOL_VERSION
     assert result["serverInfo"]["name"] == "mnemosyne-memory"
+
+    def negotiated(version: object) -> object:
+        reply = server.handle({"jsonrpc": "2.0", "id": 9, "method": "initialize", "params": {"protocolVersion": version}})
+        return reply["result"]["protocolVersion"]
+
+    assert negotiated("2024-11-05") == "2024-11-05"
+    assert negotiated("2025-06-18") == "2025-06-18"
+    assert negotiated("2026-07-28") == PROTOCOL_VERSION == "2025-11-25"  # stateless era: not a handshake version
+    assert negotiated("zzz") == PROTOCOL_VERSION
     assert "tools" in result["capabilities"]
 
     # notifications carry no response (JSON-RPC notification semantics).

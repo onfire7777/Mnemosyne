@@ -2770,7 +2770,7 @@ def test_mcp_http_transport_health_lists_and_calls_capture_search(tmp_path: Path
     assert health["auth_token_required"] is False
     assert init_status == 200
     assert initialized is not None
-    assert initialized["result"]["protocolVersion"] == "2024-11-05"  # type: ignore[index]
+    assert initialized["result"]["protocolVersion"] == "2025-11-25"  # type: ignore[index]
     assert list_status == 200
     assert listed is not None
     first_tool = listed["result"]["tools"][0]  # type: ignore[index]
