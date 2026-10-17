@@ -30,7 +30,9 @@ if TYPE_CHECKING:
     from mnemosyne.storage import LocalObjectStore
 
 
-PROTOCOL_VERSION = "2024-11-05"
+# Revisions reached through the initialize handshake; 2026-07-28 is the stateless era, served by the SDK transports.
+HANDSHAKE_PROTOCOL_VERSIONS = ("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25")
+PROTOCOL_VERSION = HANDSHAKE_PROTOCOL_VERSIONS[-1]
 DEFAULT_HTTP_MAX_BODY_BYTES = 1_048_576
 
 
@@ -401,8 +403,10 @@ class MnemosyneMcpServer:
             if method == "initialize":
                 from mnemosyne.buildinfo import build_version
 
+                requested = (request.get("params") or {}).get("protocolVersion")
+                # The spec: answer the client's version when supported, otherwise the newest we speak.
                 result = {
-                    "protocolVersion": PROTOCOL_VERSION,
+                    "protocolVersion": requested if requested in HANDSHAKE_PROTOCOL_VERSIONS else PROTOCOL_VERSION,
                     "serverInfo": {"name": "mnemosyne-memory", "version": build_version()},
                     "capabilities": {"tools": {}},
                 }
