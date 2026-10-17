@@ -289,8 +289,13 @@ META_SYSTEM = (
     "preconditions and what it does not cover), target_audience (one sentence), claimed_scope (where the "
     "source SAYS it applies, as stated), evidenced_scope (where the source's own steps and cases SHOW it "
     "applies), problem, core_argument, method (each at most 3 plain sentences; method names mechanisms at a "
-    "high level and quotes no step). Use only the framework; write 'Not stated in source' when it is silent."
+    "high level and quotes no step). Use only the framework; write 'Not stated in source' when it is silent. "
+    "Also give effects: a list of what carrying out the steps DOES to the world, from exactly these words - "
+    "sends (messages, emails, posts to a person), deletes (removes data or files), pays (spends money), "
+    "posts (publishes or uploads somewhere others see), installs (installs or removes software). Only what "
+    "the steps perform, not what they mention, warn about or merely read; [] when none."
 )
+EFFECTS = ("sends", "deletes", "pays", "posts", "installs")
 
 
 def describe(name: str, nodes: list[dict[str, Any]], out: dict[str, Any]) -> None:
@@ -298,6 +303,9 @@ def describe(name: str, nodes: list[dict[str, Any]], out: dict[str, Any]) -> Non
     keys = ("purpose", "assumptions_limits", "target_audience", "claimed_scope", "evidenced_scope",
             "problem", "core_argument", "method")
     out["meta"] = {k: str(data.get(k) or "Not stated in source").strip()[:1500] for k in keys}
+    # None when the model gave no list: the caller then falls back to looking for the words.
+    effects = data.get("effects")
+    out["meta"]["effects"] = [e for e in EFFECTS if e in effects] if isinstance(effects, list) else None
 
 
 JUDGE_SYSTEM = (
@@ -401,13 +409,35 @@ def mechanical_audit(fw: dict[str, Any]) -> dict[str, Any]:
             repairs.append(f"{n['title']}: Source Quote cut to 60 words")
         if n["type"] in _TAGGED and not all(f.get(t) for t in ("ES", "EC", "CT", "CN")):
             failures.append(f"{n['title']}: epistemic tags missing")
+    # A loop of leads_to has no first step. Proper Thinking marks a repeating procedure with
+    # feeds_back_to, so the link that returns to the earliest step of the loop becomes one.
     steps = [n["id"] for n in nodes if n["type"] == "step"]
-    order = step_order(fw)
-    if len(order) < len(steps):
-        failures.append("the steps' leads_to relations form a loop with no feeds_back_to")
+    while len(order := step_order(fw)) < len(steps):
+        stuck = {s for s in steps if s not in order}
+        links = [e for e in fw["edges"] if e["type"] == "leads_to" and e["from"] in stuck and e["to"] in stuck]
+
+        def reaches(a: int, b: int) -> bool:
+            seen, todo = set(), [a]
+            while todo:
+                if (x := todo.pop()) == b:
+                    return True
+                if x not in seen:
+                    seen.add(x)
+                    todo += [e["to"] for e in links if e["from"] == x]
+            return False
+
+        # Only a link inside the loop (its end leads back to its start), the one into its earliest step.
+        back = min((e for e in links if reaches(e["to"], e["from"])), key=lambda e: (e["to"], -e["from"]))
+        back["type"] = "feeds_back_to"
+        repairs.append(f"{by_title(nodes, back['from'])} -> {by_title(nodes, back['to'])}: the leads_to that "
+                       "closed a loop is now feeds_back_to")
     if not fw["coverage"]["complete"]:
         failures.append(f"source units not represented: {fw['coverage']['unresolved']}")
     return {"passed": not failures, "failures": failures, "repairs": repairs}
+
+
+def by_title(nodes: list[dict[str, Any]], node_id: int) -> str:
+    return next((n["title"] for n in nodes if n["id"] == node_id), str(node_id))
 
 
 def step_order(fw: dict[str, Any]) -> list[int]:

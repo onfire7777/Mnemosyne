@@ -2747,7 +2747,11 @@ class MemoryTools:
             if root is None and store is None:
                 raise ValueError("skills need a store on disk (sqlite or local backend) or MNEMOSYNE_SKILLS_DB")
             path = str(Path(root) / "skills.sqlite" if root is not None else Path(store).parent / "skills.sqlite")
-        return SkillStore.at(path)
+        skills = SkillStore.at(path)
+        adapters = getattr(self.engine, "adapters", None)
+        skills.embedder = getattr(getattr(adapters, "passage_graph", None), "embedder", None) or getattr(
+            adapters, "embedding", None)
+        return skills
 
     def framework_import(self, path: str, model: str = "", name: str | None = None) -> dict[str, Any]:
         from mnemosyne.frameworks import DEFAULT_MODEL
@@ -2768,11 +2772,10 @@ class MemoryTools:
     def skill_search(
         self, query: str, available: list[str] | None = None, include_drafts: bool = False, limit: int = 5
     ) -> dict[str, Any]:
-        adapters = getattr(self.engine, "adapters", None)
-        graph = getattr(adapters, "passage_graph", None)
-        embedder = getattr(graph, "embedder", None) or getattr(adapters, "embedding", None)
+        skills = self._skills()
+        graph = getattr(getattr(self.engine, "adapters", None), "passage_graph", None)
         floor = getattr(graph, "support_floor", 0.5)  # the cosine search itself trusts
-        return self._skills().search(query, available, include_drafts, limit, embedder, floor)
+        return skills.search(query, available, include_drafts, limit, skills.embedder, floor)
 
     def skill_get(
         self,
