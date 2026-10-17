@@ -8954,6 +8954,46 @@ def cmd_procedure_search(args: argparse.Namespace) -> None:
     emit(tools.procedure_search(args.query, tenant_id=args.tenant, status=args.status))
 
 
+def cmd_framework_import(args: argparse.Namespace) -> None:
+    emit(load_tools(args).framework_import(args.path, model=args.model, name=args.name))
+
+
+def cmd_framework_status(args: argparse.Namespace) -> None:
+    emit(load_tools(args).framework_status(args.skill_id, revision=args.revision))
+
+
+def cmd_skill_search(args: argparse.Namespace) -> None:
+    emit(load_tools(args).skill_search(
+        args.query, available=args.available, include_drafts=args.include_drafts, limit=args.limit,
+    ))
+
+
+def cmd_skill_get(args: argparse.Namespace) -> None:
+    emit(load_tools(args).skill_get(
+        args.skill_id, revision=args.revision, section=args.section, node_id=args.node_id,
+        attachment=args.attachment, offset=args.offset, limit=args.limit,
+    ))
+
+
+def cmd_skill_set_state(args: argparse.Namespace) -> None:
+    emit(load_tools(args).skill_set_state(args.skill_id, args.state, revision=args.revision))
+
+
+def cmd_skill_forget(args: argparse.Namespace) -> None:
+    emit(load_tools(args).skill_forget(args.skill_id))
+
+
+def cmd_skill_export(args: argparse.Namespace) -> None:
+    emit(load_tools(args).skill_export(args.skill_id, args.path, revision=args.revision))
+
+
+def cmd_skill_outcome(args: argparse.Namespace) -> None:
+    emit(load_tools(args).skill_outcome(
+        args.tenant, args.user, args.skill_id, args.revision, args.success == "true", args.evidence,
+        task=args.task,
+    ))
+
+
 def cmd_procedure_rollback(args: argparse.Namespace) -> None:
     tools = load_tools(args)
     emit(
@@ -20441,6 +20481,60 @@ def build_parser() -> argparse.ArgumentParser:
     procedure_search.add_argument("--tenant")
     procedure_search.add_argument("--status")
     procedure_search.set_defaults(func=cmd_procedure_search)
+
+    framework_import = sub.add_parser("framework-import")
+    framework_import.add_argument("--path", required=True)
+    framework_import.add_argument("--model", default="")
+    framework_import.add_argument("--name")
+    framework_import.set_defaults(func=cmd_framework_import)
+
+    framework_status = sub.add_parser("framework-status")
+    framework_status.add_argument("--skill-id", required=True)
+    framework_status.add_argument("--revision", type=int)
+    framework_status.set_defaults(func=cmd_framework_status)
+
+    skill_search = sub.add_parser("skill-search")
+    skill_search.add_argument("--query", required=True)
+    skill_search.add_argument("--available", action="append")
+    skill_search.add_argument("--include-drafts", action="store_true")
+    skill_search.add_argument("--limit", type=int, default=5)
+    skill_search.set_defaults(func=cmd_skill_search)
+
+    skill_get = sub.add_parser("skill-get")
+    skill_get.add_argument("--skill-id", required=True)
+    skill_get.add_argument("--revision", type=int)
+    skill_get.add_argument("--section")
+    skill_get.add_argument("--node-id", type=int)
+    skill_get.add_argument("--attachment")
+    skill_get.add_argument("--offset", type=int, default=0)
+    skill_get.add_argument("--limit", type=int, default=6000)
+    skill_get.set_defaults(func=cmd_skill_get)
+
+    skill_set_state = sub.add_parser("skill-set-state")
+    skill_set_state.add_argument("--skill-id", required=True)
+    skill_set_state.add_argument("--state", required=True, choices=["draft", "active", "retired"])
+    skill_set_state.add_argument("--revision", type=int)
+    skill_set_state.set_defaults(func=cmd_skill_set_state)
+
+    skill_forget = sub.add_parser("skill-forget")
+    skill_forget.add_argument("--skill-id", required=True)
+    skill_forget.set_defaults(func=cmd_skill_forget)
+
+    skill_export = sub.add_parser("skill-export")
+    skill_export.add_argument("--skill-id", required=True)
+    skill_export.add_argument("--path", required=True)
+    skill_export.add_argument("--revision", type=int)
+    skill_export.set_defaults(func=cmd_skill_export)
+
+    skill_outcome = sub.add_parser("skill-outcome")
+    skill_outcome.add_argument("--tenant", required=True)
+    skill_outcome.add_argument("--user", required=True)
+    skill_outcome.add_argument("--skill-id", required=True)
+    skill_outcome.add_argument("--revision", type=int, required=True)
+    skill_outcome.add_argument("--success", required=True, choices=["true", "false"])
+    skill_outcome.add_argument("--evidence", required=True)
+    skill_outcome.add_argument("--task", default="")
+    skill_outcome.set_defaults(func=cmd_skill_outcome)
 
     procedure_rollback = sub.add_parser("procedure-rollback")
     procedure_rollback.add_argument("--tenant")

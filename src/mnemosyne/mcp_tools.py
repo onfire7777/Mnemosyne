@@ -17,6 +17,7 @@ and prospective-memory tools already refuse to act without one.
 from __future__ import annotations
 
 import base64
+import os
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from time import perf_counter
@@ -542,6 +543,53 @@ TOOL_SPEC: list[dict[str, Any]] = [
         "name": "parametric_rollback",
         "description": "Roll back a persisted isolated parametric artifact with protected-suite evidence.",
         "arguments": ["artifact_uri", "reason", "role", "source_trust_tier", "protected_case_count"],
+    },
+    {
+        "name": "framework_import",
+        "description": "Import a skill (Agent Skills folder, zip, any Markdown file, or a folder of Markdown "
+                       "files - one skill each) and convert it in the "
+                       "background into a complete Proper Thinking framework; originals are kept and "
+                       "never run. Poll framework_status.",
+        "arguments": ["path"],
+    },
+    {
+        "name": "framework_status",
+        "description": "A skill's conversion: phase, coverage of its source, audit results, needs and effects.",
+        "arguments": ["skill_id"],
+    },
+    {
+        "name": "skill_search",
+        "description": "Skills for a task: exact name first, then only skills whose needs are available, "
+                       "ranked by meaning. Returns names and when to use each.",
+        "arguments": ["query"],
+    },
+    {
+        "name": "skill_get",
+        "description": "A skill's framework: overview, a section (steps, warnings, constraints, "
+                       "definitions, principles, cases, examples, document, source), one node with its "
+                       "edges and sources, or an attachment - paged.",
+        "arguments": ["skill_id"],
+    },
+    {
+        "name": "skill_set_state",
+        "description": "Turn a converted skill revision on (active), back to draft, or retire it.",
+        "arguments": ["skill_id", "state"],
+    },
+    {
+        "name": "skill_forget",
+        "description": "Erase a skill: every revision, its framework, source units, vectors and kept files.",
+        "arguments": ["skill_id"],
+    },
+    {
+        "name": "skill_export",
+        "description": "Write a skill revision to a .bs file: its readable document plus the whole framework and "
+                       "original files, so framework_import takes it back with no conversion.",
+        "arguments": ["skill_id", "path"],
+    },
+    {
+        "name": "skill_outcome",
+        "description": "Record one run of a skill revision with the evidence observed; also logged as a trajectory.",
+        "arguments": ["tenant_id", "user_id", "skill_id", "revision", "success", "evidence"],
     },
 ]
 
@@ -2675,6 +2723,72 @@ class MemoryTools:
         payload = procedure.to_dict()
         payload["security"] = decision
         return payload
+
+    # Skills: complete Proper Thinking frameworks in one file beside the store (frameworks/skills.py).
+    def _skills(self) -> Any:
+        from pathlib import Path
+
+        from mnemosyne.frameworks.skills import SkillStore
+
+        path = os.environ.get("MNEMOSYNE_FRAMEWORKS_DB")
+        if not path:
+            root = getattr(self.engine, "root_dir", None)
+            store = getattr(self.engine, "store_path", None)
+            if root is None and store is None:
+                raise ValueError("skills need a store on disk (sqlite or local backend) or MNEMOSYNE_FRAMEWORKS_DB")
+            path = str(Path(root) / "frameworks.sqlite" if root is not None else Path(store).parent / "frameworks.sqlite")
+        return SkillStore.at(path)
+
+    def framework_import(self, path: str, model: str = "", name: str | None = None) -> dict[str, Any]:
+        from mnemosyne.frameworks.app_config import DEFAULT_OPENAI_MODEL
+
+        return self._skills().import_skill(path, model or DEFAULT_OPENAI_MODEL, name)
+
+    def framework_status(self, skill_id: str, revision: int | None = None) -> dict[str, Any]:
+        return self._skills().status(skill_id, revision)
+
+    def skill_search(
+        self, query: str, available: list[str] | None = None, include_drafts: bool = False, limit: int = 5
+    ) -> dict[str, Any]:
+        adapters = getattr(self.engine, "adapters", None)
+        graph = getattr(adapters, "passage_graph", None)
+        embedder = getattr(graph, "embedder", None) or getattr(adapters, "embedding", None)
+        floor = getattr(graph, "support_floor", 0.5)  # the cosine search itself trusts
+        return self._skills().search(query, available, include_drafts, limit, embedder, floor)
+
+    def skill_get(
+        self,
+        skill_id: str,
+        revision: int | None = None,
+        section: str | None = None,
+        node_id: int | None = None,
+        attachment: str | None = None,
+        offset: int = 0,
+        limit: int = 6000,
+    ) -> dict[str, Any]:
+        return self._skills().get(skill_id, revision, section, node_id, attachment, offset, limit)
+
+    def skill_set_state(self, skill_id: str, state: str, revision: int | None = None) -> dict[str, Any]:
+        return self._skills().set_state(skill_id, state, revision)
+
+    def skill_forget(self, skill_id: str) -> dict[str, Any]:
+        return self._skills().forget(skill_id)
+
+    def skill_export(self, skill_id: str, path: str, revision: int | None = None) -> dict[str, Any]:
+        return self._skills().export_skill(skill_id, path, revision)
+
+    def skill_outcome(
+        self, tenant_id: str, user_id: str, skill_id: str, revision: int, success: bool, evidence: str,
+        task: str = "",
+    ) -> dict[str, Any]:
+        result = self._skills().outcome(skill_id, revision, success, evidence)
+        self.trajectory_log(
+            tenant_id, user_id, "skills", task or result["skill_id"],
+            [{"skill_id": result["skill_id"], "revision": result["revision"], "evidence": evidence[:2000]}],
+            "success" if success else "failure", 1.0 if success else 0.0,
+            f"skill:{result['skill_id']}@{result['revision']}",
+        )
+        return result
 
     def lesson_search(self, signature: str, tenant_id: str | None = None, status: str | None = None) -> dict[str, Any]:
         query = signature.lower()
