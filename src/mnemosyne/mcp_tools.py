@@ -548,15 +548,16 @@ TOOL_SPEC: list[dict[str, Any]] = [
     {
         "name": "framework_import",
         "description": "Import a skill (Agent Skills folder, zip, any Markdown file, or a folder of Markdown "
-                       "files - one skill each): usable at once, as written, with no conversion; a .burnskill "
-                       "file imports as the BurnSkill it is; a book (PDF or EPUB) becomes one BurnSkill, built "
-                       "in the background. Originals are kept and never run.",
+                       "files - one skill each): usable at once, as written, with no conversion. A book (PDF "
+                       "or EPUB) becomes one BurnSkill: the whole book turned into a Proper Thinking framework "
+                       "in the background, and with tenant_id and user_id its nodes go into that memory. A "
+                       ".burnskill file imports as the BurnSkill it is. Originals are kept and never run.",
         "arguments": ["path"],
     },
     {
         "name": "skill_make_burnskill",
-        "description": "Make a skill a BurnSkill: build its complete Proper Thinking framework in the background "
-                       "(about two minutes) as a new revision that replaces the plain one when done; with "
+        "description": "Build a book's BurnSkill again: its complete Proper Thinking framework, in the "
+                       "background, as a new revision that replaces the plain one when done; with "
                        "tenant_id and user_id its nodes also go into that memory. Check framework_status.",
         "arguments": ["skill_id"],
     },
@@ -2774,7 +2775,20 @@ class MemoryTools:
 
     def _remember_skills(self, skills: Any) -> None:
         """Finished BurnSkills go into memory here, on a tool call (under the server's lock), never on
-        the converting thread. One entry per node, then the older revision's entries are erased."""
+        the converting thread. A book's passages go in first, at once, so the whole book can be
+        recalled while its framework is built; then one entry per node, and the older revision's
+        entries are erased."""
+        for row in skills.unread_passages():
+            where = json.loads(row["memory"])
+            try:
+                cids = [self.ingest(where["tenant"], where["user"], "tool", "book-passage", content=text,
+                                    source_identity=f"book:{row['source_sha']}#{i}",
+                                    metadata={"skill_id": row["skill_id"], "revision": row["revision"],
+                                              "skill": row["name"], "unit": i})["cid"]
+                        for i, text in enumerate(skills.passage_texts(row), 1)]
+            except Exception:  # noqa: BLE001 - the next skill call tries again
+                continue
+            skills.passages_read(row["skill_id"], row["revision"], cids)
         for row in skills.unremembered():
             where = json.loads(row["memory"])
             try:
@@ -2789,7 +2803,7 @@ class MemoryTools:
                 self._forget_skill_memory(old)
 
     def _forget_skill_memory(self, where: dict[str, Any]) -> None:
-        for cid in where.get("cids") or []:
+        for cid in [*(where.get("cids") or []), *(where.get("passages") or [])]:
             try:
                 self.forget(where["tenant"], cid, requested_by="skills")
             except Exception:  # noqa: BLE001 - already gone
@@ -2805,8 +2819,10 @@ class MemoryTools:
     ) -> dict[str, Any]:
         from mnemosyne.frameworks import DEFAULT_MODEL
 
-        return self._skills().import_skill(path, model or DEFAULT_MODEL, name,
-                                           memory=self._skill_memory(tenant_id, user_id))
+        skills = self._skills()
+        result = skills.import_skill(path, model or DEFAULT_MODEL, name, memory=self._skill_memory(tenant_id, user_id))
+        self._remember_skills(skills)  # a book's passages are in memory before this call returns
+        return result
 
     def skill_make_burnskill(
         self, skill_id: str, model: str = "", tenant_id: str | None = None, user_id: str | None = None,
