@@ -34,9 +34,9 @@ from mnemosyne import frameworks
 WORKERS = 3
 MAX_UNITS = 60
 MAX_FILES = 200
+#: The model answers kept for resuming and rebuilding; the books built longest ago are dropped first.
+CACHE_MAX_BYTES = 500_000_000
 MAX_BYTES = 5_000_000
-#: A skill's whole text goes to the extractor in one prompt. Books are a later step.
-MAX_TEXT_CHARS = 60_000
 #: BurnOS's own skill file: a SKILL.md view (front matter, the document), then the framework
 #: and the original files packed in a comment below it, so it imports with no conversion.
 BS_SUFFIX = ".burnskill"
@@ -47,20 +47,7 @@ TEXT_SUFFIXES = {".md", ".markdown", ".txt"}
 BOOK_SUFFIXES = {".pdf", ".epub"}
 BOOK_MAX_BYTES = 200_000_000
 CHUNK_WORDS = 500
-#: Proper Thinking's retrieval for a source too long for one prompt: five questions, how many
-#: passages each brings, their neighbours, then at most 58 passages and 68,000 characters.
-BOOK_BUCKETS = (
-    ("Main definitions, rules, principles, step-by-step processes, methods, constraints, and warnings "
-     "described in this book.", 20),
-    ("Risks, failures, mistakes, warnings, constraints, dangers, pitfalls, and what to avoid discussed "
-     "in this book.", 10),
-    ("Why the approach works; theory, arguments, justification, philosophy, assumptions, and debates in "
-     "this book.", 10),
-    ("Ethics, harm, injustice, fairness, responsibility, abuse, misuse, and moral limits in this book.", 8),
-    ("Key examples, case studies, stories, and concrete illustrations of the main ideas in this book.", 10),
-)
-BOOK_MAX_CHUNKS = 58
-BOOK_MAX_CHARS = 68_000
+FRAGMENT_WORDS = 40
 LEGAL = {"license", "licence", "notice", "copying"}
 RUNNABLE_SUFFIXES = {".py", ".sh", ".bash", ".ps1", ".psm1", ".bat", ".cmd", ".js", ".mjs", ".cjs",
                      ".ts", ".rb", ".pl", ".php", ".vbs", ".exe", ".dll", ".jar"}
@@ -192,12 +179,19 @@ def book_pages(path: Path) -> list[tuple[str, str]]:
 
 
 def chunk_pages(pages: list[tuple[str, str]]) -> list[str]:
-    """Passages of at most CHUNK_WORDS words, each led by where it stands in the book."""
-    out = []
+    """Passages of at most CHUNK_WORDS words, each led by where it stands in the book. A scrap shorter
+    than FRAGMENT_WORDS (a page break's tail, a caption) joins the passage before it - or after it,
+    at the start - so it is read in context instead of standing alone as a passage of its own."""
+    out: list[str] = []
     for label, text in pages:
         words = text.split()
         head = f"[{label}] " if label else ""
-        out += [head + " ".join(words[i:i + CHUNK_WORDS]) for i in range(0, len(words), CHUNK_WORDS)]
+        for i in range(0, len(words), CHUNK_WORDS):
+            piece = head + " ".join(words[i:i + CHUNK_WORDS])
+            if out and (len(words[i:i + CHUNK_WORDS]) < FRAGMENT_WORDS or len(out[-1].split()) < FRAGMENT_WORDS):
+                out[-1] += f" {piece}"
+            else:
+                out.append(piece)
     return out
 
 
@@ -337,6 +331,7 @@ class SkillStore:
         self.path = Path(db_path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.sources = self.path.parent / "skill-sources"
+        self.cache = self.path.parent / "framework-cache"  # one folder of model answers per source digest
         #: The server's semantic embedder, handed in by the tools; None ranks by words.
         self.embedder: Any = None
         with self._sql() as conn:
@@ -361,7 +356,7 @@ class SkillStore:
         self._jobs: queue.Queue[tuple[str, int]] = queue.Queue()
         for n in range(WORKERS):
             threading.Thread(target=self._work, name=f"mnemosyne-skills-{n}", daemon=True).start()
-        # shortcut: a conversion cut off by a restart starts over; a skill takes about two minutes.
+        # A conversion cut off by a restart runs again; its answers so far come from the answer cache.
         for row in self._rows("SELECT skill_id, revision FROM skill_revisions WHERE conversion = 'converting'"):
             self._jobs.put((row["skill_id"], row["revision"]))
 
@@ -525,6 +520,10 @@ class SkillStore:
         busy = self._rows("SELECT revision FROM skill_revisions WHERE skill_id = ? AND conversion = 'converting'",
                           (row["skill_id"],))
         if busy:
+            if memory:  # the build already running goes into this memory too
+                with self._sql() as conn:
+                    conn.execute("UPDATE skill_revisions SET memory = ? WHERE skill_id = ? AND revision = ? "
+                                 "AND memory IS NULL", (json.dumps(memory), row["skill_id"], busy[0]["revision"]))
             return {**head, "revision": busy[0]["revision"], "status": "converting"}
         units = json.loads(row["units"])
         revision = self._rows("SELECT max(revision) AS top FROM skill_revisions WHERE skill_id = ?",
@@ -538,11 +537,18 @@ class SkillStore:
     def _import_book(self, src: Path, model: str, name: str | None,
                      memory: dict[str, str] | None) -> dict[str, Any]:
         """A book becomes one BurnSkill, built in the background; the file is kept as it came."""
-        files = [(src.name, src.read_bytes())]
-        source_sha = _sha_of(files)
+        # a book's file name can be very long; kept under skill-sources/<sha>/ it must stay inside Windows' 260
+        files = [(src.stem[:60].strip() + src.suffix.lower(), src.read_bytes())]
+        source_sha = _sha_of([(src.suffix.lower(), files[0][1])])  # the book's contents, whatever the file is called
         title = (name or src.stem).strip()
+        built = self._rows("SELECT skill_id, revision, name FROM skill_revisions WHERE source_sha = ? AND "
+                           "conversion = 'completed' ORDER BY revision DESC LIMIT 1", (source_sha,))
+        if built:  # the same book, whatever its file is called: built once, here at once
+            return {**built[0], "kind": "burnskill", "status": "ready", "unchanged": True}
         nxt = self._next(title, source_sha, False)
         if isinstance(nxt, dict):
+            if self._skill(nxt["skill_id"], nxt["revision"])["conversion"] == "failed":  # built again, from the cache
+                return {**self.make_burnskill(nxt["skill_id"], model, memory), "kind": "burnskill"}
             return nxt
         units = chunk_pages(book_pages(src))
         if not units:
@@ -552,40 +558,6 @@ class SkillStore:
         self._jobs.put(nxt)
         return {"skill_id": nxt[0], "revision": nxt[1], "name": title, "kind": "burnskill",
                 "status": "converting", "passages": len(units)}
-
-    def _select(self, chunks: list[str]) -> list[str]:
-        """Proper Thinking's retrieval for a source too long for one prompt (BOOK_BUCKETS), by meaning
-        when the store has an embedder and by words otherwise. Bucket hits come before their
-        neighbours when the caps bite, rather than whatever stands first in the book."""
-        from mnemosyne.passages import PassageIndex
-
-        embedder = self.embedder
-        vectors = None
-        if embedder is not None and getattr(embedder, "name", "") != "local-hashing":
-            try:
-                # a hosted embedder takes a request of a few dozen texts, not a whole book
-                vectors = [v for i in range(0, len(chunks), 64) for v in self._vectors(embedder, chunks[i:i + 64])]
-            except Exception:  # noqa: BLE001 - by words instead
-                vectors = None
-        words = None if vectors is not None else PassageIndex(tuple(chunks))
-        ranked: list[int] = []
-        for query, k in BOOK_BUCKETS:
-            if vectors is not None:
-                q = self._vectors(embedder, [query])[0]
-                scores = [_cosine(q, v) for v in vectors]
-            else:
-                got = words.scores(" ".join(w for w in re.findall(r"\w+", query.lower()) if w not in STOPWORDS))
-                scores = [got.get(i, 0.0) for i in range(len(chunks))]
-            top = sorted((i for i in range(len(chunks)) if scores[i] > 0), key=lambda i: -scores[i])[:k]
-            ranked += [i for i in top if i not in ranked]
-        ranked += [j for i in list(ranked) for j in (i - 1, i + 1) if 0 <= j < len(chunks) and j not in ranked]
-        kept, total = [], 0
-        for i in dict.fromkeys(ranked):
-            if len(kept) == BOOK_MAX_CHUNKS or total + len(chunks[i]) > BOOK_MAX_CHARS:
-                break
-            kept.append(i)
-            total += len(chunks[i])
-        return [chunks[i] for i in sorted(kept)] or chunks[:BOOK_MAX_CHUNKS]
 
     def _work(self) -> None:
         while True:
@@ -600,6 +572,11 @@ class SkillStore:
     def _convert(self, skill_id: str, revision: int) -> None:
         row = self._skill(skill_id, revision)
         frameworks.MODEL.set(row["model"])  # this worker thread's context only
+        # Every answer is kept under the source's digest: a build cut off by a restart or a usage limit,
+        # a rebuild, or the same book imported again pays only for the requests that changed.
+        frameworks.CACHE.set(str(self.cache / row["source_sha"]))
+        usage: dict[str, float] = {}
+        frameworks.STATS.set(usage)
 
         def progress(text: str) -> None:
             with self._sql() as conn:
@@ -607,14 +584,18 @@ class SkillStore:
                              (text, skill_id, revision))
 
         units = json.loads(row["units"])
-        if sum(len(u) for u in units) > MAX_TEXT_CHARS:
-            # Too long for one prompt (a book): built from the passages Proper Thinking would pick.
-            progress("choosing the passages to build from")
-            units = self._select(units if max(len(u) for u in units) <= 4000 else chunk_pages([("", "\n".join(units))]))
+        if sum(map(len, units)) > frameworks.WINDOW_CHARS and max(map(len, units)) > 4000:
+            # a long text in a few big blocks becomes 500-word passages, so it can be built part by part
+            units = chunk_pages([("", "\n".join(units))])
             with self._sql() as conn:
                 conn.execute("UPDATE skill_revisions SET units = ? WHERE skill_id = ? AND revision = ?",
                              (json.dumps(units), skill_id, revision))
-        fw = frameworks.build(row["name"], units, progress)
+        frameworks.check_credit(units)
+        embedder = self.embedder
+        similar = ((lambda texts: [v for i in range(0, len(texts), 64) for v in self._vectors(embedder, texts[i:i + 64])])
+                   if embedder is not None and getattr(embedder, "name", "") != "local-hashing" else None)
+        fw = frameworks.build(row["name"], units, progress, similar)
+        fw["usage"] = usage
         scope = " ".join(fw["meta"][k] for k in ("claimed_scope", "evidenced_scope") if "Not stated" not in fw["meta"][k])
         with self._sql() as conn:
             conn.execute(
@@ -628,9 +609,36 @@ class SkillStore:
                          (skill_id,))
             conn.execute("UPDATE skill_revisions SET state = 'active' WHERE skill_id = ? AND revision = ?",
                          (skill_id, revision))
+        self._trim_cache()
         self._embed_now(skill_id, revision)
 
+    def _trim_cache(self) -> None:
+        """The answer cache stays under CACHE_MAX_BYTES: the books built longest ago go first."""
+        folders = sorted((p for p in self.cache.glob("*") if p.is_dir()), key=lambda p: p.stat().st_mtime)
+        sizes = {p: sum(f.stat().st_size for f in p.glob("*")) for p in folders}
+        total = sum(sizes.values())
+        for p in folders[:-1]:  # never the one just built
+            if total <= CACHE_MAX_BYTES:
+                break
+            shutil.rmtree(p, ignore_errors=True)
+            total -= sizes[p]
+
     # ------------------------------------------------------------------ memory
+
+    def unread_passages(self) -> list[dict[str, Any]]:
+        """Books whose passages are not in the user's memory yet: they go in at once, before the
+        framework is built, so the whole book can be recalled from the moment it is imported."""
+        return self._rows("SELECT * FROM skill_revisions WHERE memory IS NOT NULL AND json_extract(meta, '$.book') "
+                          "IS NOT NULL AND json_extract(memory, '$.passages') IS NULL")
+
+    @staticmethod
+    def passage_texts(row: dict[str, Any]) -> list[str]:
+        return [f"{row['name']} (book passage {i}): {text}" for i, text in enumerate(json.loads(row["units"]), 1)]
+
+    def passages_read(self, skill_id: str, revision: int, cids: list[str]) -> None:
+        with self._sql() as conn:
+            conn.execute("UPDATE skill_revisions SET memory = json_set(memory, '$.passages', json(?)) "
+                         "WHERE skill_id = ? AND revision = ?", (json.dumps(cids), skill_id, revision))
 
     def unremembered(self) -> list[dict[str, Any]]:
         """Finished BurnSkills whose nodes are not in the user's memory yet."""
@@ -654,7 +662,7 @@ class SkillStore:
                          (skill_id, revision))
             conn.execute("UPDATE skill_revisions SET memory = ? WHERE skill_id = ? AND revision = ?",
                          (json.dumps(memory), skill_id, revision))
-        return [m for m in old if m.get("cids")]
+        return [m for m in old if m.get("cids") or m.get("passages")]
 
     # ------------------------------------------------------------------ .burnskill files
 
@@ -722,6 +730,7 @@ class SkillStore:
             "coverage": {k: fw["coverage"][k] for k in ("complete", "unresolved")} if fw else None,
             "mechanical_audit_passed": (fw.get("mechanical") or {}).get("passed"),
             "judgment_findings": ((fw.get("judgment") or {}).get("findings") or [])[:5],
+            "usage": fw.get("usage"),  # calls, seconds, tokens in / cached / out, cost, answers from the cache
             "applicability": row["applicability"], "needs": json.loads(row["needs"]),
             "effects": json.loads(row["effects"]), "attachments": json.loads(row["attachments"]),
         }
@@ -798,7 +807,27 @@ class SkillStore:
         if row["conversion"] != "completed":
             raise ValueError(f"{row['name']} is not a BurnSkill ({row['conversion']}): read it with skill_get")
         frameworks.MODEL.set(row["model"])
-        answer = frameworks.ask(json.loads(row["framework"]), json.loads(row["units"]), question)
+        fw, units = json.loads(row["framework"]), json.loads(row["units"])
+        numbers = node_ids = None
+        if sum(map(len, units)) + len(fw.get("document") or "") > 80_000:
+            # a whole book is too long for one answer: the passages and nodes the question is about, in full
+            from mnemosyne.passages import PassageIndex
+
+            words = " ".join(w for w in re.findall(r"\w+", question.lower()) if w not in STOPWORDS)
+
+            def best(texts: list[str], budget: int) -> list[int]:
+                scores = PassageIndex(tuple(texts)).scores(words) if words else {}
+                picked, used = [], 0
+                for i in sorted(scores, key=lambda i: -scores[i]):
+                    if used + len(texts[i]) > budget:
+                        break
+                    picked.append(i)
+                    used += len(texts[i])
+                return sorted(picked)
+
+            numbers = [i + 1 for i in best(units, 40_000)]
+            node_ids = best([f"{n['title']} {n['content']} {json.dumps(n['fields'])}" for n in fw["nodes"]], 40_000)
+        answer = frameworks.ask(fw, units, question, numbers, node_ids)
         return {"skill_id": row["skill_id"], "revision": row["revision"], **answer}
 
     # ------------------------------------------------------------------ search
@@ -917,8 +946,9 @@ class SkillStore:
         for sha in {r["source_sha"] for r in rows}:
             if not self._rows("SELECT 1 FROM skill_revisions WHERE source_sha = ?", (sha,)):
                 shutil.rmtree(self.sources / sha, ignore_errors=True)
+                shutil.rmtree(self.cache / sha, ignore_errors=True)
         return {"forgotten": row["skill_id"], "name": row["name"], "revisions": len(rows),
-                "memory": [m for m in memory if m.get("cids")]}
+                "memory": [m for m in memory if m.get("cids") or m.get("passages")]}
 
     def outcome(self, skill_id: str, revision: int, success: bool, evidence: str) -> dict[str, Any]:
         row = self._skill(skill_id, revision)
