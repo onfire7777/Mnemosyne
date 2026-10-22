@@ -1,0 +1,87 @@
+{
+  "schema": "hindsight-cancelled-comparison.v1",
+  "status": "cancelled",
+  "reason": "User cancelled benchmark; no further inference authorized",
+  "cancelled_at": "2026-10-22T23:39:29.761430+00:00",
+  "manifest_sha256": "bd5c598b12e916b4224caaa173b9f9e44426ae8667baa4d761e18f8cc2ebacf3",
+  "selected_question_count": 14,
+  "started_question_ids": [
+    "45dc21b6"
+  ],
+  "terminal_case_count": 0,
+  "completed_case_count": 0,
+  "native_receipt_count": 42,
+  "native_receipt_status_counts": {
+    "completed": 39,
+    "failed": 3
+  },
+  "known_native_usage": {
+    "input_tokens": 861752,
+    "cached_input_tokens": 440832,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 13149,
+    "reasoning_output_tokens": 441
+  },
+  "known_usage_incomplete": true,
+  "error_kinds": {
+    "nonzero_exit": 3
+  },
+  "score": null,
+  "cost_usd": null,
+  "cost_basis": "Existing Codex account quota; monetary cost not measured",
+  "raw_receipt_sha256": {
+    "native-receipts/hindsight/45dc21b6/005b9141386040179c0c80f3b7e1191b.json": "5e89d5f23806930845333214ccff132fec1ad3cb9c38f90369317de452d034c0",
+    "native-receipts/hindsight/45dc21b6/0115cff64cfe4749858496fe1c5110d0.json": "5f45373801699005d317b3542fd1562ff289e0001a09b0126fbc596b71a28210",
+    "native-receipts/hindsight/45dc21b6/06e73c0d22f14163a852de7eedf68a63.json": "59e1c48cc896dcb81f6ec3b250d6e705635a224c4f701364e9e25207075eb184",
+    "native-receipts/hindsight/45dc21b6/124a233abcb4477a93598caed13b92bf.json": "840fd5cf518ae15b0243bf852b3513420bc4b952ff2413a3dbfe68014c74b328",
+    "native-receipts/hindsight/45dc21b6/1369100bcff549a099fe597d8ab46e83.json": "6d1d43f2761adfa63dcf50dd9ed1abbb687616af034d0238d1893c0cb2e9c821",
+    "native-receipts/hindsight/45dc21b6/15e6e053b6a341f6b1b1fd1551becec4.json": "334ca0fe8d9c4a85e99c1e472c2df2d942b8b96afdc95e6e2c3382e69c2a4069",
+    "native-receipts/hindsight/45dc21b6/1844a9084fc24d2c89870822e30200c1.json": "dba6f0a55cb430956c577b0c16137d2611762d86607035c10b5ada3221e11f63",
+    "native-receipts/hindsight/45dc21b6/1b1793f917804c689177cc1fcae43498.json": "067eb392087512e7bfc4345e854c5d29ecf7062ac683a9dc754bc1d83d87b6fa",
+    "native-receipts/hindsight/45dc21b6/1ef7f44707d349d3801228f1eeb8d0ce.json": "ffb547508206993c5d937b81b8902f3618618fa9b10348b11e81e289f528510e",
+    "native-receipts/hindsight/45dc21b6/223bb499d089408aabfb86a3fe626369.json": "0140ee52b3866307c9466e5eea25f3045b509b7103d50fa41d6a660ad133cebd",
+    "native-receipts/hindsight/45dc21b6/35c2e5cd84ef467ba38735f23d526825.json": "27f2c31fb25022597d30cca7137af4f4fb6d4f7122cf2a87640f4e3fd6495998",
+    "native-receipts/hindsight/45dc21b6/368e8e1a919d4d858687cd2214c94b26.json": "424548aabd1f56d6d7fc6dc44d3213227cf50f68107c592c986269fed5943bed",
+    "native-receipts/hindsight/45dc21b6/50915da2603549cabe3d73680d72b0f4.json": "599fec1b392bfc741615e0c64fee60097a951c67fbaa1e663dcc776f06d84f69",
+    "native-receipts/hindsight/45dc21b6/5279fe7b672e4ddd949327201a631345.json": "0d7401dc9dee61542e8f035c44918f639b5ea08da0ffc8b9a598593bc2b6bf4b",
+    "native-receipts/hindsight/45dc21b6/563263d19d424bd6bff00f20f662f63e.json": "4d46a3d775bb88f36d59e34a5a9eab076c9e89b511ec51e1ec88c99ebfbd0791",
+    "native-receipts/hindsight/45dc21b6/5730ea6e809643bba404861988a55cab.json": "227c4c41193b04b9725956535eb224956801cf6ac1ed426f008377d70f9ca39d",
+    "native-receipts/hindsight/45dc21b6/5f442e40b495403cbf9071f05daecbbc.json": "f282ce52a06a335f02d864065ace23fad90ed161efcd0413bcd2f3c931dec836",
+    "native-receipts/hindsight/45dc21b6/606102123a0a4266be97b14399f737bf.json": "c4bdfa51fc2530e343812dbe94ab2427f85a25df58bed94388f654250eb0e874",
+    "native-receipts/hindsight/45dc21b6/637eb91cb7ad449e8cb1037a8d46691a.json": "33e89d6cccb45b50162b79d5527b55f4d6e4893641ab59db1077ebf68b3ebc50",
+    "native-receipts/hindsight/45dc21b6/72767d7c54d74de89df7cec1c15e803f.json": "0da5040e9b8a082f578b5f9cd12b31da89b232d1fd3e791d450e9743c7cd0546",
+    "native-receipts/hindsight/45dc21b6/77548a06ef9d4abe980265781cc04c75.json": "fe7863eb225e7c3ff6132aecdf26c9579d825915140ea79c60dee73fa4ce860c",
+    "native-receipts/hindsight/45dc21b6/7c71840911514e58aa510c42d0efe8c7.json": "9b6651566b255ea427e466d4f97ce243d595014f1fa95851df368277f9b10331",
+    "native-receipts/hindsight/45dc21b6/8072c38ecd094f0fbc264980368f0d73.json": "c982e0755d570c23dab2b5f1658e8d7e3242fbb6a3c9c5b523c01557378b852b",
+    "native-receipts/hindsight/45dc21b6/8211068bb6904522b52cbf2c8446199c.json": "9c49ea145c5d61df706062855d19d4e00bc94143cd3788477efa88a70d2b0ceb",
+    "native-receipts/hindsight/45dc21b6/8b8fd659b5214c4a924ea51b1257972a.json": "1c0357b31040d90dd2b5caf581d2f9491fc13b839c5ed61fd9de197f2e2f13e4",
+    "native-receipts/hindsight/45dc21b6/8ec14a3377874e59be46adf8e8f6fab2.json": "c9a36a94b3a97c0109b8545c68af4238895ea96bd43e92a0d59c31af3e6f89d3",
+    "native-receipts/hindsight/45dc21b6/901f109acfdd4a3083df8b4cc834e4b9.json": "ea3142fc00ef448aff794ac70dcc9feb9bb20ed719fde3ca14bb8c46ccf9c2fd",
+    "native-receipts/hindsight/45dc21b6/921ed4f417f04eb8bfa4b987d7547a02.json": "f8e93c83b35f9163c9abf21a63d6d9c0fe67646c2425a95c42669f52f71933f6",
+    "native-receipts/hindsight/45dc21b6/9494003d852644afa3b6c0ff07dd56dd.json": "795dd5555dfc8c14d91818497baf2e989fe4d653e5a813e8de1b81b5d13f1cf8",
+    "native-receipts/hindsight/45dc21b6/98a8c38fb71547df8752b3f42c05141f.json": "f06985419e4020200f122bc5f02565cf84a003085874b0aec13d0d4d0eb1680a",
+    "native-receipts/hindsight/45dc21b6/9a0af9bfbdb940a6b4d53f7b4b2dd559.json": "1a2a27b16b3e9ff8c4dc21606fbbd693cdfec20ba1449bd1cb8d5b7d7ba234f7",
+    "native-receipts/hindsight/45dc21b6/a1ebf6c1cf354d02b37042c7aaa27ed3.json": "4efbd1f7f8f1540a69751790e8670d88025c75b6c01239a5712b2c7348b69b30",
+    "native-receipts/hindsight/45dc21b6/c588c4bd123948508d99f13c1bd736e7.json": "92c170ff96245a8152b97afaa94101afeea92a73500e846b552da7e066780a48",
+    "native-receipts/hindsight/45dc21b6/c834d1a149e74604af082624738780de.json": "b7445849faf40fb46ab6cead7480b1e69f296bed3381886da791b65d494b5d95",
+    "native-receipts/hindsight/45dc21b6/d26724646e5e4d1a8ec8b09f9b777b50.json": "56a9e85339d83e506a8f607eac43631cb05f9216f8f1e926ef62e613345cf997",
+    "native-receipts/hindsight/45dc21b6/e360e4fd488f412787c6c1cae6f07c6e.json": "93a5d9264819528e98a509f96cb32ed6a1941be0cf3885fe39fc517381434587",
+    "native-receipts/hindsight/45dc21b6/e3a5aa753b8446d99166ede3bd168889.json": "8751d5f0db8d36e03abc72971c5932a309511d62bd69e3b0b5208dd0d5aa84d8",
+    "native-receipts/hindsight/45dc21b6/ef1baacda7fd492e9469b82313a84e12.json": "6371f79f561cf7745045f11c12d312f28f953b25dc508013b6467e0bdc7e0a23",
+    "native-receipts/hindsight/45dc21b6/f1b3bce93c0c4db297d30988cc27af14.json": "f0f693a83ccad9b98cd644011348befc64e986d71e44cd732857bc758887c34f",
+    "native-receipts/hindsight/45dc21b6/f21e54e53c414edb9c24f9f79f41c0f3.json": "1cc0c5a1f2395635038877eae51bee48b86dbccf0591b3a2f6692e27ae216350",
+    "native-receipts/hindsight/45dc21b6/f94e23500224423abaa4ed4f975d95c0.json": "9b7c3af0acea9891fc74b4a0670477cb87ffae099758cfd020a911bcce329b56",
+    "native-receipts/hindsight/45dc21b6/fa2e813f6e74483a8022f193941ddbcb.json": "fa811c2a36af544d908928587c963136dad512563bbb759dc33c3db9ae26d8f1"
+  },
+  "runtime_environment_sha256": "cdb35ee78c422347090645c05b84a95b391883f8f68648daf2bd135f00ddd02e",
+  "cleanup": {
+    "benchmark_process_exit": 130,
+    "container": "mnemosyne-hindsight-controlled",
+    "container_removed": true,
+    "anonymous_volumes_removed": [
+      "4b486bfaff3c1f7edccfad0da4278b42f4ddca56824984acda20476c68148dd6"
+    ],
+    "docker_context": "colima-pentestswarm",
+    "source_and_python_environment_preserved": true
+  }
+}

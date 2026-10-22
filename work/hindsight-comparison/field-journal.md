@@ -58,3 +58,22 @@ is not a legitimate no-answer result, and a retained good answer does not imply 
 refresh. Leases fence publication rather than promising exactly-once inference. Revalidate
 authority after expensive preparation and immediately before final writes; authorization
 callbacks that emit audits must remain outside transactions, with a pure validator inside.
+
+Verify permissions with the actual non-superuser application and worker roles. Foreign-key
+cascades execute with table-owner privileges, so a restrictive DELETE policy can prevent
+an authorized operation even when the caller has permission. Grant only the documented
+derived-record targets and test that evidence and audit deletion remain denied.
+
+Secret filters need narrow structural exceptions for validated content identifiers. A valid
+source CID redacted in one part of a provider request but retained in another can break
+custody replay; preserving every hash-like string would instead expose unrelated secrets.
+
+Comparison receipts must account for native extraction/consolidation separately from the
+common reader and judge. Share the final context budget, keep source dates inside it, retain
+whole histories, and pin the native model files as well as package names. A held-out pilot
+with a configured provider bridge does not reproduce a vendor's published benchmark.
+
+Attempt markers are not process locks. A second evaluator must not interpret active work
+as a crashed attempt, and interruption must cancel queued work while preserving receipts
+from admitted calls. Hold an OS-backed lock through recovery and final publication; never
+delete a lock file while another process might still hold its inode.

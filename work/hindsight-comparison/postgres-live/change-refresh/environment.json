@@ -1,0 +1,49 @@
+{
+  "recorded_at": "2026-10-22T23:40:51.929113+00:00",
+  "python": "3.14.7",
+  "psycopg": "3.3.4",
+  "server": "PostgreSQL 16.15 (Debian 16.15-1.pgdg12+2) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 12.2.0-14+deb12u1) 12.2.0, 64-bit",
+  "test_login": "consolidator_user",
+  "default_transaction_isolation": "read committed",
+  "max_connections": "100",
+  "shared_buffers": "128MB",
+  "extensions": [
+    [
+      "pgcrypto",
+      "1.3"
+    ],
+    [
+      "plpgsql",
+      "1.0"
+    ],
+    [
+      "vector",
+      "0.8.7"
+    ]
+  ],
+  "runtime_roles": [
+    [
+      "app_user",
+      false,
+      false
+    ],
+    [
+      "consolidator_user",
+      false,
+      false
+    ],
+    [
+      "eval_user",
+      false,
+      false
+    ]
+  ],
+  "container": "mnemosyne-change-refresh-pg",
+  "container_id": "e9356f43b36b7fccaaba176d9f394f7bc32feeaedcb7029d24a8d52f1ce80ea3",
+  "docker_context": "colima-pentestswarm",
+  "binding": "127.0.0.1:55432",
+  "image": "pgvector/pgvector@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a",
+  "provider": "deterministic in-process fixtures only; no inference",
+  "lease_time": "controlled UTC clock with real concurrent PostgreSQL sessions",
+  "storage": "disposable tmpfs; no production data"
+}

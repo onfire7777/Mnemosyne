@@ -139,6 +139,12 @@ def test_final_reads_and_model_cas_use_one_source_locked_transaction(backend):
     assert engine._active_mental_model_connection("t") is None
 
 
+def test_invalid_external_evidence_id_is_missing_without_database_access(backend):
+    engine, connections = backend
+    assert engine.get_evidence("t", "external-adapter-hit") is None
+    assert connections == []
+
+
 @pytest.mark.parametrize("operation", ["update", "delete"])
 def test_final_validation_error_rolls_back_write_and_clears_pin(backend, operation):
     engine, connections = backend

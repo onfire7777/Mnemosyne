@@ -40,3 +40,9 @@ graphify-out/
 
 # Local development inference transcripts; aggregate receipts remain versioned.
 work/hindsight-comparison/codex-eval/*.jsonl
+
+# Isolated third-party runtime, model weights and raw native inference receipts.
+work/hindsight-comparison/controlled/runtime/
+work/hindsight-comparison/controlled/raw/
+work/hindsight-comparison/controlled/run-*/contexts/
+work/hindsight-comparison/controlled/run-*/native-receipts/

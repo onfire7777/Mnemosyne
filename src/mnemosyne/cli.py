@@ -1289,7 +1289,7 @@ def cmd_postgres_role_check(args: argparse.Namespace) -> None:
             "app_destructive_writes_denied",
             not app_delete_outside_cascade and not app["truncate_tables"],
             # roles.sql grants the app role DELETE on exactly the ON DELETE CASCADE
-            # foreign-key targets (justifications, contradictions), which PostgreSQL
+            # foreign-key targets (justifications, contradictions, mental_models), which PostgreSQL
             # executes as the table owner (mnemosyne_app); the hard-delete boundary is
             # RLS + the capability layer. DELETE on any other table, and all TRUNCATE,
             # remain forbidden.
@@ -2599,6 +2599,7 @@ def cmd_mental_model_worker(args: argparse.Namespace) -> None:
             tools._mental_model_service(), context, max_batch=args.limit,
             lease_seconds=args.lease_seconds, authorize=authorize,
             validate_authority=validate_authority,
+            check_changes=args.check_changes,
         )
         if threading.current_thread() is threading.main_thread():
             previous_sigterm = signal.getsignal(signal.SIGTERM)
@@ -2661,6 +2662,8 @@ def _add_mental_model_args(parser: argparse.ArgumentParser, operation: str) -> N
         parser.add_argument("--limit", type=int, default=10, help="Models per cycle, 1 to 100")
         parser.add_argument("--lease-seconds", type=int, default=300, help="Claim lease duration, 30 to 3600 seconds")
         parser.add_argument("--poll-interval", type=float, default=5, help="Seconds between cycles, 1 to 300")
+        parser.add_argument("--check-changes", action="store_true",
+                            help="Refresh stale scheduled models before their interval, with a 60-second minimum spacing")
         parser.add_argument("--max-cycles", type=int, default=0, help="Stop after this many cycles; zero runs until stopped")
         parser.add_argument("--once", action="store_true", help="Run one cycle and exit")
 
@@ -19755,12 +19758,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--app-fk-cascade-delete-tables",
         default=os.environ.get(
             "MNEMOSYNE_POSTGRES_APP_FK_CASCADE_DELETE_TABLES",
-            "justifications,contradictions",
+            "justifications,contradictions,mental_models",
         ),
         help=(
             "Comma-separated public tables the app role is permitted to hold DELETE on "
-            "solely because an ON DELETE CASCADE foreign key (assertions -> these tables) "
-            "executes as the table owner (mnemosyne_app). See infra/postgres/roles.sql and "
+            "for documented derived-record deletion and ON DELETE CASCADE targets "
+            "(assertions/branches -> these tables) executed as the table owner (mnemosyne_app). See infra/postgres/roles.sql and "
             "sql/schema.sql. DELETE on any other table, and all TRUNCATE, remain forbidden."
         ),
     )

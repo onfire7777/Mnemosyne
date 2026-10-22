@@ -1,0 +1,53 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+_ test_invalid_external_evidence_id_is_missing_without_database_access[pooled] _
+
+backend = (<mnemosyne.postgres_engine.PostgresEngine object at 0x109ef8c20>, [<test_postgres_mental_model_guard.Connection object at 0x109ef8d70>])
+
+    def test_invalid_external_evidence_id_is_missing_without_database_access(backend):
+        engine, connections = backend
+>       assert engine.get_evidence("t", "external-adapter-hit") is None
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_postgres_mental_model_guard.py:144: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/mnemosyne/postgres_engine.py:2217: in get_evidence
+    (db_tenant_id, branch, _cid_to_bytes(cid)),
+                           ^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cid = 'external-adapter-hit'
+
+    def _cid_to_bytes(cid: str) -> bytes:
+>       return bytes.fromhex(cid.removeprefix("cidv1:"))
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       ValueError: non-hexadecimal number found in fromhex() arg at position 1
+
+src/mnemosyne/postgres_engine.py:6987: ValueError
+_ test_invalid_external_evidence_id_is_missing_without_database_access[fresh] __
+
+backend = (<mnemosyne.postgres_engine.PostgresEngine object at 0x109f35090>, [<test_postgres_mental_model_guard.Connection object at 0x109f35950>])
+
+    def test_invalid_external_evidence_id_is_missing_without_database_access(backend):
+        engine, connections = backend
+>       assert engine.get_evidence("t", "external-adapter-hit") is None
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_postgres_mental_model_guard.py:144: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/mnemosyne/postgres_engine.py:2217: in get_evidence
+    (db_tenant_id, branch, _cid_to_bytes(cid)),
+                           ^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cid = 'external-adapter-hit'
+
+    def _cid_to_bytes(cid: str) -> bytes:
+>       return bytes.fromhex(cid.removeprefix("cidv1:"))
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       ValueError: non-hexadecimal number found in fromhex() arg at position 1
+
+src/mnemosyne/postgres_engine.py:6987: ValueError
+=========================== short test summary info ============================
+FAILED tests/test_postgres_mental_model_guard.py::test_invalid_external_evidence_id_is_missing_without_database_access[pooled]
+FAILED tests/test_postgres_mental_model_guard.py::test_invalid_external_evidence_id_is_missing_without_database_access[fresh]

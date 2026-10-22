@@ -1,0 +1,99 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+_____ test_live_app_role_model_delete_keeps_owner_and_evidence_boundaries ______
+
+live = (<mnemosyne.postgres_engine.PostgresEngine object at 0x10ac070e0>, <mnemosyne.postgres_engine.PostgresEngine object at...idency=None, region=None, lawful_basis=(), break_glass=False, as_of=None), '54249c0c-8dc8-4815-9bd8-c157d955567e', ...)
+
+    def test_live_app_role_model_delete_keeps_owner_and_evidence_boundaries(live):
+        engine, _, _, _, context, mid, _ = live
+        dsn = psycopg.conninfo.make_conninfo(engine.dsn, user="app_user")
+        app = PostgresEngine(dsn, require_safe_role=True)
+        try:
+            service = MentalModelService(app)
+            with pytest.raises(LookupError):
+                service.delete(replace(context, user_id="wrong-owner"), mid)
+            assert app.get_mental_model_record(context.tenant_id, mid) is not None
+>           assert service.delete(context, mid)["deleted"]
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_postgres_mental_model_refresh_live.py:211: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/mnemosyne/mental_models.py:363: in delete
+    deleted = self.engine.delete_mental_model_record(context.tenant_id, model_id, branch=context.branch,
+src/mnemosyne/postgres_engine.py:2185: in delete_mental_model_record
+    cur.execute("DELETE FROM mental_models WHERE tenant_id = %s AND branch = %s AND model_id = %s",
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Cursor [closed] [BAD] at 0x10aa3b050>
+query = 'DELETE FROM mental_models WHERE tenant_id = %s AND branch = %s AND model_id = %s'
+params = ('a9e159b5-bd83-55c4-951e-352e37086070', 'main', '54249c0c-8dc8-4815-9bd8-c157d955567e')
+prepare = None, binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -> Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table mental_models
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege
+______ test_live_branch_discard_with_models_uses_restricted_owner_cascade ______
+
+live = (<mnemosyne.postgres_engine.PostgresEngine object at 0x10bcb1a70>, <mnemosyne.postgres_engine.PostgresEngine object at...idency=None, region=None, lawful_basis=(), break_glass=False, as_of=None), '806ec707-20c1-4ca6-8056-107c6a3ef883', ...)
+
+    def test_live_branch_discard_with_models_uses_restricted_owner_cascade(live):
+        engine, _, service, _, context, _, _ = live
+        engine.branch("scratch", tenant_id=context.tenant_id)
+        branch_context = replace(context, branch="scratch")
+        mid = service.create(branch_context, "Scratch", "What is the plan?")["model_id"]
+>       engine.discard("scratch", tenant_id=context.tenant_id)
+
+tests/test_postgres_mental_model_refresh_live.py:227: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/mnemosyne/postgres_engine.py:5967: in discard
+    cur.execute("DELETE FROM branches WHERE tenant_id = %s AND name = %s", (db_tenant_id, branch))
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=consolidator_user database=mnemosyne) at 0x10aa3ba10>
+query = 'DELETE FROM branches WHERE tenant_id = %s AND name = %s'
+params = ('7769bd2c-e8b1-5fb1-b5b3-ee244cb99cee', 'scratch'), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -> Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table mental_models
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."mental_models" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id" AND $2 OPERATOR(pg_catalog.=) "branch""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege
+=========================== short test summary info ============================
+FAILED tests/test_postgres_mental_model_refresh_live.py::test_live_app_role_model_delete_keeps_owner_and_evidence_boundaries
+FAILED tests/test_postgres_mental_model_refresh_live.py::test_live_branch_discard_with_models_uses_restricted_owner_cascade

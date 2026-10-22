@@ -1,0 +1,7 @@
+ROLE candidate_extractor BRANCH main IDS ['2249b6aa0cb54be1d122dc7621cb5b00cc3f7e30ef340e166dd5509d6c2a1366', '245595a0d8079dcf358d4848be126ef1dda3f2cedf0ce79522d7a1c1d32a2d6d', '[secret-omitted]'] AVAIL [True, True, False]
+Traceback (most recent call last):
+  File "<stdin>", line 11, in <module>
+  File "tests/test_postgres_engine_live.py", line 2294, in test_postgres_gated_consolidation_uses_command_providers_live
+    assert job.status == "complete", job.last_error
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: provider proposal source changed or unavailable

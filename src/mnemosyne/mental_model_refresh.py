@@ -118,11 +118,15 @@ class MentalModelRefreshWorker:
 
     def __init__(self, service: MentalModelService, context: AnswerReadContext, *,
                  max_batch: int = 10, lease_seconds: int = 300,
+                 check_changes: bool = False,
                  authorize: Callable[[], None] | None = None,
                  validate_authority: Callable[[], None] | None = None):
         self.service, self.context = service, context
         self.max_batch = bounded_int(max_batch, "max_batch", 1, 100)
         self.lease_seconds = bounded_int(lease_seconds, "lease_seconds", 30, 3600)
+        if type(check_changes) is not bool:
+            raise ValueError("check_changes must be a boolean")
+        self.check_changes = check_changes
         self._authorize_callback = authorize
         if authorize is not None and validate_authority is None:
             raise ValueError("authorize requires a side-effect-free validate_authority callback")
@@ -144,13 +148,35 @@ class MentalModelRefreshWorker:
         if self._authorize_callback is not None:
             self._authorize_callback()
 
-    def _claim(self, model_id: str) -> tuple[str, int] | None:
+    def _change_candidate(self, record: dict[str, Any], schedule: dict[str, Any], now: datetime) -> bool:
+        """Check scheduling eligibility; source freshness is checked separately.
+
+        Early attempts wait at least 60 seconds after both the start and finish
+        of the preceding attempt. Failed attempts retain their durable backoff.
+        """
+        if (not self.check_changes or not schedule["enabled"]
+                or timestamp(schedule["next_run_at"]) <= now
+                or schedule["consecutive_failures"] or schedule["last_outcome"] == "retry"
+                or not isinstance(record.get("status"), str)
+                or record["status"] not in {"ready", "abstained", "stale"}):
+            return False
+        if schedule["lease"] and timestamp(schedule["lease"]["expires_at"]) > now:
+            return False
+        return all(value is None or now >= timestamp(value) + timedelta(seconds=60)
+                   for value in (schedule["last_started_at"], schedule["last_finished_at"]))
+
+    def _claim(self, model_id: str, *, changed_version: int | None = None) -> tuple[str, int] | None:
         self._authorize()
         with self.service._publication_guard(self.context):
             record = self.service._load(self.context, model_id)
             schedule = parse_schedule(record.get("refresh_schedule"))
             now = utc_now()
-            if not schedule or not schedule["enabled"] or timestamp(schedule["next_run_at"]) > now:
+            if not schedule or not schedule["enabled"]:
+                return None
+            if changed_version is not None and record["version"] != changed_version:
+                return None
+            if timestamp(schedule["next_run_at"]) > now and (
+                    changed_version is None or not self._change_candidate(record, schedule, now)):
                 return None
             if schedule["lease"] and timestamp(schedule["lease"]["expires_at"]) > now:
                 return None
@@ -190,24 +216,46 @@ class MentalModelRefreshWorker:
         self._authorize()
         scope = _scope(self.context)
         report: dict[str, Any] = {key: 0 for key in
-                                 ("processed", "refreshed", "unchanged", "abstained", "retry", "lost", "invalid")}
+                                 ("processed", "refreshed", "unchanged", "abstained", "retry", "lost", "invalid",
+                                  "change_check_failed")}
         report["models"] = []
         due = []
+        change_candidates = []
+        now = utc_now()
         for record in self.service.engine.list_mental_model_records(self.context.tenant_id, self.context.branch):
             if record.get("owner_id") != self.context.user_id or record.get("scope") != scope:
                 continue
             try:
                 schedule = parse_schedule(record.get("refresh_schedule"))
-                if schedule and schedule["enabled"] and timestamp(schedule["next_run_at"]) <= utc_now():
-                    if not schedule["lease"] or timestamp(schedule["lease"]["expires_at"]) <= utc_now():
-                        due.append((timestamp(schedule["next_run_at"]), record["model_id"]))
+                if schedule and schedule["enabled"]:
+                    if timestamp(schedule["next_run_at"]) <= now:
+                        if not schedule["lease"] or timestamp(schedule["lease"]["expires_at"]) <= now:
+                            due.append((0, timestamp(schedule["next_run_at"]), record["model_id"], None))
+                    elif self._change_candidate(record, schedule, now):
+                        change_candidates.append((record, schedule))
             except (ValueError, TypeError, OverflowError):
                 report["invalid"] += 1
-        for _, model_id in sorted(due):
+        if change_candidates:
+            try:
+                # One authorized corpus scan per poll, not per model or append.
+                # This is only a scheduling hint: _refresh independently checks
+                # current sources before any provider call and at publication.
+                with self.service._lock():
+                    snapshot = self.service._snapshot(self.context)
+            except Exception:
+                report["change_check_failed"] += 1
+            else:
+                for record, schedule in change_candidates:
+                    try:
+                        if self.service._view(record, self.context, snapshot)["stale"]:
+                            due.append((1, timestamp(schedule["next_run_at"]), record["model_id"], record["version"]))
+                    except (KeyError, ValueError, TypeError, OverflowError):
+                        report["invalid"] += 1
+        for _, _, model_id, changed_version in sorted(due):
             if report["processed"] >= self.max_batch:
                 break
             try:
-                claim = self._claim(model_id)
+                claim = self._claim(model_id, changed_version=changed_version)
             except (LookupError, ValueError):
                 continue  # A competing worker or edit won the version check.
             if claim is None:

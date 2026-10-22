@@ -227,7 +227,14 @@ The separate [mental-model lifecycle](docs/mental-models.md) persists private
 answers, checks source freshness on reads, and exposes refresh and version history
 through Python, MCP and `mneme mental-model`. An opt-in worker supports persistent
 schedules, crash recovery and bounded retries on SQLite/PostgreSQL. Cached reads
-need no provider call.
+need no provider call. Optional `mental-model-worker --check-changes` polling
+detects stale sources before the normal interval, with a one-minute minimum
+spacing between early attempts and the same ownership, lease and retry checks.
+
+The [controlled comparison protocol](docs/comparison-protocol.md) records a possible
+held-out pilot with native ingestion/recall and a common Codex reader and judge.
+The trial was stopped at the owner's request to prioritize runtime improvements;
+it produced no comparison score or ranking.
 
 - Core capture and retrieval are usable; advanced deployment profiles have separate validation needs.
 - Default deterministic embeddings support offline operation but are not equivalent to a configured semantic model.
@@ -248,6 +255,13 @@ Without a PostgreSQL DSN, live database tests skip. The current
 native parity when a Rust toolchain is available, Windows file-lock checks and PostgreSQL coverage.
 Consult the workflow for the precise jobs and environment. Passing local tests does not replace
 a runtime demonstration or production deployment evidence.
+
+The [22 October PostgreSQL validation](work/hindsight-comparison/postgres-live/REPORT.md)
+completed **239 mixed live/unit tests**, including **20 live concurrency and
+permission tests**, with zero skips or failures; the live role check passed **9/9**.
+It verified publication, lease fencing, source changes, rollback and tenant isolation
+on disposable PostgreSQL 16.15. Publication locks source tables across tenants;
+production throughput under that contention remains unmeasured.
 
 ## Project layout
 

@@ -1,0 +1,77 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+_ test_cancellation_during_prompt_preparation_does_not_admit_provider[reader] __
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10a1edf30>
+stage = 'reader'
+
+    @pytest.mark.parametrize("stage", ["reader", "judge"])
+    def test_cancellation_during_prompt_preparation_does_not_admit_provider(monkeypatch, stage):
+        cancelled = Event()
+        calls = []
+        context = {"question_id": "case", "arm": "mnemosyne", "status": "completed",
+                   "candidate_texts": ["The color is blue."]}
+    
+        def cancel_after(callback):
+            def prepare(*args, **kwargs):
+                value = callback(*args, **kwargs)
+                cancelled.set()
+                return value
+            return prepare
+    
+        def provider(prompt, **kwargs):
+            calls.append(prompt)
+            return response(prompt)
+    
+        preparation = "pack_context" if stage == "reader" else "judge_prompt"
+        monkeypatch.setattr(runner, preparation, cancel_after(getattr(runner, preparation)))
+        monkeypatch.setattr(runner, "read_with_codex", provider)
+        record = runner.answer_one(
+            {"question": "What color?", "question_date": "2026-10-22"},
+            {"question_id": "case", "question": "What color?", "question_type": "single-session-user", "answer": "blue"},
+            context, {"manifest_sha256": "a" * 64}, cancel_event=cancelled,
+        )
+>       assert len(calls) == (0 if stage == "reader" else 1)
+E       assert 1 == 0
+E        +  where 1 = len(["Answer the question using only the retrieved memory excerpts below. Preserve dates, updates, speaker attribution and...'.\n\nRetrieved memories:\n[Memory 1]\nThe color is blue.\n\nCurrent date: 2026-10-22\nQuestion: What color?\nAnswer:"])
+
+tests/test_controlled_comparison_recovery.py:134: AssertionError
+__ test_cancellation_during_prompt_preparation_does_not_admit_provider[judge] __
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10a5763f0>
+stage = 'judge'
+
+    @pytest.mark.parametrize("stage", ["reader", "judge"])
+    def test_cancellation_during_prompt_preparation_does_not_admit_provider(monkeypatch, stage):
+        cancelled = Event()
+        calls = []
+        context = {"question_id": "case", "arm": "mnemosyne", "status": "completed",
+                   "candidate_texts": ["The color is blue."]}
+    
+        def cancel_after(callback):
+            def prepare(*args, **kwargs):
+                value = callback(*args, **kwargs)
+                cancelled.set()
+                return value
+            return prepare
+    
+        def provider(prompt, **kwargs):
+            calls.append(prompt)
+            return response(prompt)
+    
+        preparation = "pack_context" if stage == "reader" else "judge_prompt"
+        monkeypatch.setattr(runner, preparation, cancel_after(getattr(runner, preparation)))
+        monkeypatch.setattr(runner, "read_with_codex", provider)
+        record = runner.answer_one(
+            {"question": "What color?", "question_date": "2026-10-22"},
+            {"question_id": "case", "question": "What color?", "question_type": "single-session-user", "answer": "blue"},
+            context, {"manifest_sha256": "a" * 64}, cancel_event=cancelled,
+        )
+>       assert len(calls) == (0 if stage == "reader" else 1)
+E       assert 2 == 1
+E        +  where 2 = len(["Answer the question using only the retrieved memory excerpts below. Preserve dates, updates, speaker attribution and... What color?\n\nCorrect Answer: blue\n\nModel Response: blue\n\nIs the model response correct? Answer yes or no only.'])
+
+tests/test_controlled_comparison_recovery.py:134: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_controlled_comparison_recovery.py::test_cancellation_during_prompt_preparation_does_not_admit_provider[reader]
+FAILED tests/test_controlled_comparison_recovery.py::test_cancellation_during_prompt_preparation_does_not_admit_provider[judge]

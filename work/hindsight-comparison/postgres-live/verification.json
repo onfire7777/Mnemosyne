@@ -1,0 +1,39 @@
+{
+  "suite": {
+    "name": "pytest",
+    "errors": "0",
+    "failures": "0",
+    "skipped": "0",
+    "tests": "235",
+    "time": "53.296",
+    "timestamp": "2026-10-22T16:35:06.601313-07:00",
+    "hostname": "Admins-MacBook-Pro.local"
+  },
+  "per_module_counts": {
+    "tests.test_postgres_engine_live": 41,
+    "tests.test_postgres_mental_model_guard": 20,
+    "tests.test_postgres_mental_model_refresh_live": 16,
+    "tests.test_postgres_perf_lanes": 47,
+    "tests.test_postgres_prospective_memory": 6,
+    "tests.test_postgres_prospective_memory.TestUpdateAndRecurrence": 6,
+    "tests.test_postgres_prospective_memory.TestExactTime": 2,
+    "tests.test_postgres_prospective_memory.TestTimeWindow": 2,
+    "tests.test_postgres_prospective_memory.TestEvent": 3,
+    "tests.test_postgres_prospective_memory.TestCondition": 3,
+    "tests.test_postgres_prospective_memory.TestDependencyCompletion": 2,
+    "tests.test_postgres_prospective_memory.TestProvenanceFailClosed": 7,
+    "tests.test_postgres_prospective_memory.TestCancel": 9,
+    "tests.test_postgres_prospective_memory.TestTenantIsolation": 4,
+    "tests.test_postgres_prospective_memory.TestIdempotency": 7,
+    "tests.test_postgres_prospective_memory.TestSnapshotLocks": 2,
+    "tests.test_postgres_prospective_memory.TestHostileDependencyId": 1,
+    "tests.test_postgres_prospective_memory.TestInfrastructureGate": 2,
+    "tests.test_postgres_prospective_memory.TestAudit": 3,
+    "tests.test_postgres_prospective_memory.TestForget": 4,
+    "tests.test_postgres_prospective_memory.TestFiringOrder": 1,
+    "tests.test_postgres_prospective_memory.TestNaiveClock": 1,
+    "tests.test_postgres_role_check": 15,
+    "tests.test_postgres_security": 7,
+    "tests.test_postgres_working_memory": 24
+  }
+}

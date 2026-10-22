@@ -3651,7 +3651,7 @@ def _provider_payload_view(
     )
     metadata = payload.get("metadata")
     view: dict[str, Any] = {
-        key: _json_safe_provider_value(value)
+        key: _json_safe_provider_value(value, source_cid_list=key == "source_evidence_cids")
         for key, value in payload.items()
         if key not in {"content", "metadata"}
     }
@@ -3773,7 +3773,16 @@ def _is_control_segment(segment: str) -> bool:
     return bool(_CONTROL_MARKER_RE.search(segment) or _CONTROL_DIRECTIVE_RE.search(segment))
 
 
-def _json_safe_provider_value(value: Any) -> Any:
+def _json_safe_provider_value(value: Any, *, source_cid_list: bool = False) -> Any:
+    if source_cid_list and isinstance(value, list | tuple):
+        # Only the payload's structural source list gets this exception. The
+        # ledger validates its IDs against live evidence before disclosure;
+        # generic strings and nested fields still receive secret redaction.
+        return [
+            child if isinstance(child, str) and _CONTENT_ID_RE.fullmatch(child)
+            else _json_safe_provider_value(child)
+            for child in value[:32]
+        ]
     if isinstance(value, Mapping):
         return {
             str(key): _json_safe_provider_value(child)

@@ -1,0 +1,222 @@
+FFFFF                                                                    [100%]
+=================================== FAILURES ===================================
+____ test_only_structural_payload_source_cids_bypass_secret_redaction[list] ____
+
+sequence_type = <class 'list'>
+
+    @pytest.mark.parametrize("sequence_type", [list, tuple])
+    def test_only_structural_payload_source_cids_bypass_secret_redaction(sequence_type):
+        cid = sha256(b"evidence").hexdigest()
+        other_secret = "abcdef0123456789" * 2
+        payload = {
+            "source_evidence_cids": sequence_type([cid, "sk-thisisnotacontentid", other_secret]),
+            "arbitrary_cids": [cid], "request_id": cid,
+            "nested": {"source_evidence_cids": [cid]},
+            "metadata": {"provider_context": {"request_id": cid}},
+        }
+        safe = _provider_payload_view(payload)
+>       assert safe["source_evidence_cids"] == [cid, "[secret-omitted]", "[secret-omitted]"]
+E       AssertionError: assert ['[secret-omi...ret-omitted]'] == ['ee8250fb76e...ret-omitted]']
+E         
+E         At index 0 diff: '[secret-omitted]' != 'ee8250fb76e094b34b471f13a73dbbe51d1ae142e9df59d7c0d31ec20f0a0a8e'
+E         Use -v to get more diff
+
+tests/test_provider_request_cids.py:30: AssertionError
+___ test_only_structural_payload_source_cids_bypass_secret_redaction[tuple] ____
+
+sequence_type = <class 'tuple'>
+
+    @pytest.mark.parametrize("sequence_type", [list, tuple])
+    def test_only_structural_payload_source_cids_bypass_secret_redaction(sequence_type):
+        cid = sha256(b"evidence").hexdigest()
+        other_secret = "abcdef0123456789" * 2
+        payload = {
+            "source_evidence_cids": sequence_type([cid, "sk-thisisnotacontentid", other_secret]),
+            "arbitrary_cids": [cid], "request_id": cid,
+            "nested": {"source_evidence_cids": [cid]},
+            "metadata": {"provider_context": {"request_id": cid}},
+        }
+        safe = _provider_payload_view(payload)
+>       assert safe["source_evidence_cids"] == [cid, "[secret-omitted]", "[secret-omitted]"]
+E       AssertionError: assert ['[secret-omi...ret-omitted]'] == ['ee8250fb76e...ret-omitted]']
+E         
+E         At index 0 diff: '[secret-omitted]' != 'ee8250fb76e094b34b471f13a73dbbe51d1ae142e9df59d7c0d31ec20f0a0a8e'
+E         Use -v to get more diff
+
+tests/test_provider_request_cids.py:30: AssertionError
+_ test_source_cid_exception_does_not_accept_scalar_or_nested_values_and_keeps_bound _
+
+    def test_source_cid_exception_does_not_accept_scalar_or_nested_values_and_keeps_bound():
+        cid = sha256(b"source").hexdigest()
+        assert _provider_payload_view({"source_evidence_cids": cid})["source_evidence_cids"] == "[secret-omitted]"
+        assert _provider_payload_view({"source_evidence_cids": [[cid], {"cid": cid}]})["source_evidence_cids"] == [
+            ["[secret-omitted]"], {"cid": "[secret-omitted]"},
+        ]
+>       assert _provider_payload_view({"source_evidence_cids": [cid] * 40})["source_evidence_cids"] == [cid] * 32
+E       AssertionError: assert ['[secret-omi...mitted]', ...] == ['41cf6794ba4...e23947d', ...]
+E         
+E         At index 0 diff: '[secret-omitted]' != '41cf6794ba4200b839c53531555f0f3998df4cbb01a4d5cb0b94e3ca5e23947d'
+E         Use -v to get more diff
+
+tests/test_provider_request_cids.py:45: AssertionError
+_ test_command_extractor_preserves_real_cids_through_custody_and_replay[local] _
+
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-636/test_command_extractor_preserv0')
+backend = 'local'
+
+    @pytest.mark.parametrize("backend", ["local", "sqlite"])
+    def test_command_extractor_preserves_real_cids_through_custody_and_replay(tmp_path, backend):
+        engine = LocalMemoryEngine() if backend == "local" else SqliteEngine(tmp_path / "memory.db")
+        tenant = "source-cid-test"
+        try:
+            cid = engine.append_evidence(Evidence(
+                tenant_id=tenant, user_id="user", actor="user", source_type="chat",
+                content="Atlas release status is green.", access_policy={"tenant": tenant},
+            ))
+            source = engine.get_evidence(tenant, cid)
+            assert source is not None
+            provider = tmp_path / "provider.py"
+            received = tmp_path / "received.json"
+            provider.write_text(
+                "import json, pathlib, sys\n"
+                "request = json.load(sys.stdin)\n"
+                "path = pathlib.Path(sys.argv[1])\n"
+                "assert not path.exists(), 'provider must run once before replay'\n"
+                "path.write_text(json.dumps(request))\n"
+                "cids = request['payload']['source_evidence_cids']\n"
+                "assert cids == [row['cid'] for row in request['evidence']]\n"
+                "print(json.dumps({'candidates': [{'signature': 'atlas release green', "
+                "'query': 'Atlas release status', 'candidate_subject': 'Atlas', "
+                "'candidate_predicate': 'release status', 'candidate_object': 'green', "
+                "'source_evidence_cids': cids, 'access_policy': request['evidence'][0]['access_policy']}]}))\n",
+                encoding="utf-8",
+            )
+            extractor = CommandCandidateExtractor([sys.executable, str(provider), str(received)])
+            extractor.proposal_ledger = ProviderProposalLedger(engine)
+            payload = {"source_evidence_cids": [cid], "note": "sk-arbitrarysecretvalue"}
+>           first = extractor.extract(tenant, payload, [source])
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_provider_request_cids.py:78: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/mnemosyne/consolidation.py:4060: in extract
+    parsed = self._role_transport(
+src/mnemosyne/consolidation.py:4028: in _role_transport
+    return _run_json_command(
+src/mnemosyne/consolidation.py:4656: in _run_json_command
+    return _dispatch_role_request(
+src/mnemosyne/consolidation.py:4633: in _dispatch_role_request
+    return proposal_ledger.load_or_run(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <mnemosyne.consolidation.ProviderProposalLedger object at 0x109918590>
+tenant_id = 'source-cid-test', branch = 'main', role = 'candidate_extractor'
+strategy = 'command_candidate_extractor'
+request = {'tenant_id': 'source-cid-test', 'prompt_boundary': {'version': 1, 'role': 'candidate_extractor', 'disclosure_policy':...404dd4d8728edd7916ba1da57738793b4606ef03f12e3c5140', 'actor': 'user', 'source_type': 'chat', 'modality': 'text', ...}]}
+run = <function _run_json_command.<locals>.<lambda> at 0x1098ffd70>
+
+    def load_or_run(
+        self,
+        *,
+        tenant_id: str,
+        branch: str,
+        role: str,
+        strategy: str,
+        request: dict[str, Any],
+        run: Callable[[], dict[str, Any]],
+    ) -> dict[str, Any]:
+        request = deepcopy(request)
+        guard = _SourceCustody(self.engine)
+        input_cids = _provider_request_input_cids(request)
+        with getattr(self.engine, "_lock", nullcontext()):
+            inputs = [self.engine.get_evidence(tenant_id, cid, branch) for cid in input_cids]
+            snapshot = guard.capture(tenant_id, branch, inputs) if input_cids and all(inputs) else None
+            if input_cids and snapshot is None:
+>               raise ValueError("provider proposal source changed or unavailable")
+E               ValueError: provider proposal source changed or unavailable
+
+src/mnemosyne/consolidation.py:3454: ValueError
+_ test_command_extractor_preserves_real_cids_through_custody_and_replay[sqlite] _
+
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-636/test_command_extractor_preserv1')
+backend = 'sqlite'
+
+    @pytest.mark.parametrize("backend", ["local", "sqlite"])
+    def test_command_extractor_preserves_real_cids_through_custody_and_replay(tmp_path, backend):
+        engine = LocalMemoryEngine() if backend == "local" else SqliteEngine(tmp_path / "memory.db")
+        tenant = "source-cid-test"
+        try:
+            cid = engine.append_evidence(Evidence(
+                tenant_id=tenant, user_id="user", actor="user", source_type="chat",
+                content="Atlas release status is green.", access_policy={"tenant": tenant},
+            ))
+            source = engine.get_evidence(tenant, cid)
+            assert source is not None
+            provider = tmp_path / "provider.py"
+            received = tmp_path / "received.json"
+            provider.write_text(
+                "import json, pathlib, sys\n"
+                "request = json.load(sys.stdin)\n"
+                "path = pathlib.Path(sys.argv[1])\n"
+                "assert not path.exists(), 'provider must run once before replay'\n"
+                "path.write_text(json.dumps(request))\n"
+                "cids = request['payload']['source_evidence_cids']\n"
+                "assert cids == [row['cid'] for row in request['evidence']]\n"
+                "print(json.dumps({'candidates': [{'signature': 'atlas release green', "
+                "'query': 'Atlas release status', 'candidate_subject': 'Atlas', "
+                "'candidate_predicate': 'release status', 'candidate_object': 'green', "
+                "'source_evidence_cids': cids, 'access_policy': request['evidence'][0]['access_policy']}]}))\n",
+                encoding="utf-8",
+            )
+            extractor = CommandCandidateExtractor([sys.executable, str(provider), str(received)])
+            extractor.proposal_ledger = ProviderProposalLedger(engine)
+            payload = {"source_evidence_cids": [cid], "note": "sk-arbitrarysecretvalue"}
+>           first = extractor.extract(tenant, payload, [source])
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_provider_request_cids.py:78: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/mnemosyne/consolidation.py:4060: in extract
+    parsed = self._role_transport(
+src/mnemosyne/consolidation.py:4028: in _role_transport
+    return _run_json_command(
+src/mnemosyne/consolidation.py:4656: in _run_json_command
+    return _dispatch_role_request(
+src/mnemosyne/consolidation.py:4633: in _dispatch_role_request
+    return proposal_ledger.load_or_run(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <mnemosyne.consolidation.ProviderProposalLedger object at 0x1095d3250>
+tenant_id = 'source-cid-test', branch = 'main', role = 'candidate_extractor'
+strategy = 'command_candidate_extractor'
+request = {'tenant_id': 'source-cid-test', 'prompt_boundary': {'version': 1, 'role': 'candidate_extractor', 'disclosure_policy':...404dd4d8728edd7916ba1da57738793b4606ef03f12e3c5140', 'actor': 'user', 'source_type': 'chat', 'modality': 'text', ...}]}
+run = <function _run_json_command.<locals>.<lambda> at 0x1098fe610>
+
+    def load_or_run(
+        self,
+        *,
+        tenant_id: str,
+        branch: str,
+        role: str,
+        strategy: str,
+        request: dict[str, Any],
+        run: Callable[[], dict[str, Any]],
+    ) -> dict[str, Any]:
+        request = deepcopy(request)
+        guard = _SourceCustody(self.engine)
+        input_cids = _provider_request_input_cids(request)
+        with getattr(self.engine, "_lock", nullcontext()):
+            inputs = [self.engine.get_evidence(tenant_id, cid, branch) for cid in input_cids]
+            snapshot = guard.capture(tenant_id, branch, inputs) if input_cids and all(inputs) else None
+            if input_cids and snapshot is None:
+>               raise ValueError("provider proposal source changed or unavailable")
+E               ValueError: provider proposal source changed or unavailable
+
+src/mnemosyne/consolidation.py:3454: ValueError
+=========================== short test summary info ============================
+FAILED tests/test_provider_request_cids.py::test_only_structural_payload_source_cids_bypass_secret_redaction[list]
+FAILED tests/test_provider_request_cids.py::test_only_structural_payload_source_cids_bypass_secret_redaction[tuple]
+FAILED tests/test_provider_request_cids.py::test_source_cid_exception_does_not_accept_scalar_or_nested_values_and_keeps_bound
+FAILED tests/test_provider_request_cids.py::test_command_extractor_preserves_real_cids_through_custody_and_replay[local]
+FAILED tests/test_provider_request_cids.py::test_command_extractor_preserves_real_cids_through_custody_and_replay[sqlite]
+5 failed in 0.70s

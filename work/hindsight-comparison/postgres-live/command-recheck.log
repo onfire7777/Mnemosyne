@@ -1,0 +1,112 @@
+.F                                                                       [100%]
+=================================== FAILURES ===================================
+________ test_postgres_gated_consolidation_uses_command_providers_live _________
+
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-631/test_postgres_gated_consolidat0')
+
+    def test_postgres_gated_consolidation_uses_command_providers_live(tmp_path) -> None:
+        engine = PostgresEngine(live_dsn())
+        tenant = f"tenant-command-consolidation-live-{uuid4()}"
+        user = "user-command-consolidation-live"
+        # Capture without auto-queue so we control multi-CID payload for §7 #17 floor.
+        pipeline = IngestionPipeline(engine, queue=None)
+        result = pipeline.ingest(
+            IngestRequest(
+                tenant_id=tenant,
+                user_id=user,
+                actor="user",
+                source_type="chat",
+                content="Meeting note: pg target/local CLI; not a deterministic is-fact sentence.",
+            )
+        )
+        result_b = pipeline.ingest(
+            IngestRequest(
+                tenant_id=tenant,
+                user_id=user,
+                actor="user",
+                source_type="note",
+                content="Second independent note about postgres command target local CLI.",
+            )
+        )
+        extractor_script = tmp_path / "candidate_extractor.py"
+        extractor_script.write_text(
+            "\n".join(
+                [
+                    "#!/usr/bin/env python3",
+                    "import json, sys",
+                    "request = json.load(sys.stdin)",
+                    "evidence = request['evidence'][0]",
+                    "cids = [item.get('cid') for item in request.get('evidence', []) if item.get('cid')]",
+                    "print(json.dumps({'candidates': [{'signature': 'postgres command target local cli', 'query': 'postgres command target', 'candidate_subject': 'Postgres command target', 'candidate_predicate': 'is', 'candidate_object': 'local CLI', 'confidence': 0.93, 'access_policy': evidence['access_policy'], 'source_evidence_cids': cids or [evidence.get('cid')]}], 'metadata': {'source': 'live-test-extractor'}}))",
+                ]
+            ),
+            encoding="utf-8",
+         newline="\n")
+        summarizer_script = tmp_path / "summarizer.py"
+        summarizer_script.write_text(
+            "\n".join(
+                [
+                    "#!/usr/bin/env python3",
+                    "import json, sys",
+                    "json.load(sys.stdin)",
+                    "print(json.dumps({'summary': 'Postgres command provider summary', 'metadata': {'source': 'live-test-summarizer'}}))",
+                ]
+            ),
+            encoding="utf-8",
+         newline="\n")
+        resolver_script = tmp_path / "entity_resolver.py"
+        resolver_script.write_text(
+            "\n".join(
+                [
+                    "#!/usr/bin/env python3",
+                    "import json, sys",
+                    "request = json.load(sys.stdin)",
+                    "candidate = request['candidates'][0]",
+                    "signature = candidate['signature']",
+                    "print(json.dumps({'candidates': [{'signature': signature, 'entity_key': 'live-resolved-postgres-command-target'}], 'entities': [{'key': 'live-resolved-postgres-command-target', 'label': 'Live resolved Postgres command target', 'aliases': [candidate['candidate_subject']], 'candidate_signatures': [signature]}]}))",
+                ]
+            ),
+            encoding="utf-8",
+         newline="\n")
+        queue = InProcessQueue()
+        consolidator = ConsolidationWorker(
+            engine,
+            gate_cases=[
+                RegressionCase(
+                    "postgres-command-provider-smoke",
+                    "postgres command target local cli",
+                    "postgres command target",
+                    "local CLI",
+                    protected=True,
+                )
+            ],
+            candidate_extractor=CommandCandidateExtractor([sys.executable, str(extractor_script)]),
+            entity_resolver=CommandEntityResolver([sys.executable, str(resolver_script)]),
+            summarizer=CommandEvidenceSummarizer([sys.executable, str(summarizer_script)]),
+        )
+        worker = QueueWorker(queue, {CONSOLIDATE_EVIDENCE_JOB: consolidator.run_queue_payload})
+        queue.enqueue(
+            CONSOLIDATE_EVIDENCE_JOB,
+            {
+                "tenant_id": tenant,
+                "user_id": user,
+                "branch": "main",
+                "source_evidence_cids": [result.cid, result_b.cid],
+                "trigger": "test",
+                "passes": list(
+                    __import__("mnemosyne.consolidation", fromlist=["DEFAULT_CONSOLIDATION_PASSES"]).DEFAULT_CONSOLIDATION_PASSES
+                ),
+                "trust_tier": 0,
+            },
+        )
+    
+        job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
+        assert job is not None
+        exported = engine.export_tenant(tenant)
+>       assert job.status == "complete", job.error
+                                         ^^^^^^^^^
+E       AttributeError: 'QueueJob' object has no attribute 'error'
+
+tests/test_postgres_engine_live.py:2294: AttributeError
+=========================== short test summary info ============================
+FAILED tests/test_postgres_engine_live.py::test_postgres_gated_consolidation_uses_command_providers_live

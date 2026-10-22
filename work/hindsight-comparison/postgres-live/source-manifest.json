@@ -1,0 +1,12 @@
+{
+  "src/mnemosyne/postgres_engine.py": "98b0303ebeeae3ca1aeff6757a9297971e80e3e9862b94375bd203776f8a1406",
+  "src/mnemosyne/cli.py": "02503abbcc241c7ce8949816e895213a3c7d43d211c7d7d820e28aaff56a92b5",
+  "src/mnemosyne/consolidation.py": "1709baf233ae84a0478cf2d17e47388da7a74399c0598d442735fc3a0aa5b805",
+  "infra/postgres/roles.sql": "52c416a3cc8025c8b0c321435d1e64adf4e90bd6756158f6f6e2e9087a8c03e1",
+  "tests/test_postgres_mental_model_refresh_live.py": "414f52cfc1bf616cc98e5e286241e0ac610e047a8f1ec067815a8c903f12293c",
+  "tests/test_postgres_mental_model_guard.py": "f9e28cfa300a116b06e8e411bcec36bc03fb89c90c6a1bb82deb078b2f2a6106",
+  "tests/test_postgres_engine_live.py": "58c5fbcd4a36eeb0a55bbc9ba76824dbfcc02083b1f6b4a4e3120f1f42198673",
+  "tests/test_postgres_working_memory.py": "da45336e23ac247519d123857898a8c646d2659b67019221b28f9f064306bb0a",
+  "tests/test_postgres_prospective_memory.py": "0a757af214c0eff531a59d72c679a3e7269cfea8bd2e56875d79b6ccc48c4c0c",
+  "tests/test_postgres_role_check.py": "be600404022b4c59999282dd1b352873b6f980d39d07f149bfc553348559c5cb"
+}

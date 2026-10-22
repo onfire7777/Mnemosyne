@@ -451,7 +451,7 @@ def test_postgres_working_expiry_cannot_cross_subject_scope(selector: str) -> No
         engine,
         tenant_id=tenant,
         session_id=session,
-        user_id=scope_a.user_id,
+        user_id=f"user-b-{uuid4()}" if selector == "user_id" else scope_a.user_id,
         item_id="scope-b",
         created_at=created_at,
         expires_at=expires_at,
@@ -460,7 +460,7 @@ def test_postgres_working_expiry_cannot_cross_subject_scope(selector: str) -> No
     scope_b.metadata["branch"] = "main"
     if selector == "branch":
         scope_b.metadata["branch"] = "branch-b"
-    else:
+    elif selector != "user_id":
         setattr(scope_b, selector, f"{selector}-b-{uuid4()}")
     engine.put_working(scope_a)
     engine.put_working(scope_b)
@@ -514,6 +514,7 @@ def test_postgres_working_memory_duplicate_item_ids_are_session_scoped() -> None
         session_id=session_b,
         user_id=user,
         item_id="same-item-id",
+        marker="source-session-b",
         created_at=created_at,
         expires_at=expires_at,
     )

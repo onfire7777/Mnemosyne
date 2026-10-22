@@ -5,6 +5,11 @@ against a live database, covering all five trigger types, provenance fail-closed
 paths, cancellation ownership, tenant isolation, idempotent firing, and the
 audit/provenance invariants from the frozen contract.
 
+Use a disposable database: randomized tenant rows and append-only audit receipts
+are retained until that database is destroyed. The runtime role deliberately
+cannot perform the cascading tenant purge used by older test finalizers.
+The schema-upgrade test optionally uses MNEMOSYNE_POSTGRES_ADMIN_DSN.
+
 The canonical engine contract validates all five trigger types and is used
 directly by these PostgreSQL parity tests.
 """
@@ -146,13 +151,6 @@ def engine():
     try:
         yield eng
     finally:
-        with eng.connect() as conn:
-            with conn.cursor() as cur:
-                for tenant_id in sorted(eng._prospective_test_tenants):
-                    cur.execute(
-                        "DELETE FROM tenants WHERE id = %s",
-                        (_stable_uuid("tenant", tenant_id),),
-                    )
         eng.close_connections()
 
 
@@ -214,11 +212,10 @@ def test_live_schema_upgrade_preserves_legacy_receipts_and_adds_v2() -> None:
     legacy_tenant = _stable_uuid("tenant", runtime_tenant)
     legacy_event = f"legacy-event-{uuid4().hex}"
     schema_sql = (Path(__file__).parent.parent / "sql" / "schema.sql").read_text()
-    isolated_dsn = psycopg.conninfo.make_conninfo(
-        _DSN, options=f"-csearch_path={schema_name},public"
-    )
+    admin_dsn = os.environ.get("MNEMOSYNE_POSTGRES_ADMIN_DSN", _DSN)
+    isolated_dsn = psycopg.conninfo.make_conninfo(admin_dsn, options=f"-csearch_path={schema_name},public")
     engine = None
-    with psycopg.connect(_DSN, autocommit=True) as admin:
+    with psycopg.connect(admin_dsn, autocommit=True) as admin:
         try:
             with admin.cursor() as cur:
                 cur.execute(

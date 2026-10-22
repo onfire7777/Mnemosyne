@@ -168,7 +168,8 @@ def _stub_worker(monkeypatch, callback):
     monkeypatch.setattr(module, "MentalModelRefreshWorker", Worker)
 
 
-def test_worker_once_forwards_bounds_emits_aggregate_and_closes(worker_runtime, monkeypatch, capsys):
+@pytest.mark.parametrize("check_changes", [False, True])
+def test_worker_once_forwards_bounds_emits_aggregate_and_closes(worker_runtime, monkeypatch, capsys, check_changes):
     engine, closed = worker_runtime
     calls = []
 
@@ -179,10 +180,14 @@ def test_worker_once_forwards_bounds_emits_aggregate_and_closes(worker_runtime, 
         return {"processed": 0, "models": []}
 
     _stub_worker(monkeypatch, run)
-    assert cli.main(_worker_args("--once", "--limit", "3", "--lease-seconds", "90")) == 0
+    options = ["--once", "--limit", "3", "--lease-seconds", "90"]
+    if check_changes:
+        options.append("--check-changes")
+    assert cli.main(_worker_args(*options)) == 0
     assert json.loads(capsys.readouterr().out) == {"processed": 0, "models": []}
     assert len(calls) == 1 and calls[0].service.engine is engine
     assert calls[0].options["max_batch"] == 3 and calls[0].options["lease_seconds"] == 90
+    assert calls[0].options["check_changes"] is check_changes
     assert calls[0].context.tenant_id == "tenant-a" and calls[0].context.user_id == "user-a"
     assert closed == [True]
 

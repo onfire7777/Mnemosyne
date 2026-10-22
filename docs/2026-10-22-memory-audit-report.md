@@ -5,6 +5,8 @@
 This pass compares public Hindsight behavior with Mnemosyne, audits the score displayed by
 Mnemetric, repairs demonstrated correctness/privacy issues, and adds grounded reflection
 and private maintained answers.
+The later PostgreSQL follow-up also validates publication and worker behavior against
+a disposable live database; its results and limits are recorded below.
 It does not establish feature parity, a competitive ranking, or elimination of all defects. No Hindsight code was
 copied and no external service was penetration-tested.
 
@@ -15,10 +17,12 @@ initial generic fallback was narrowed to the actual source-review task. Report f
 
 - [19-feature Hindsight comparison and delivery plan](HINDSIGHT-COMPARISON.md)
 - [Mnemetric score and provenance audit](hindsight-ranking-audit.md)
+- [Live PostgreSQL validation and receipts](../work/hindsight-comparison/postgres-live/REPORT.md)
+- [Controlled comparison protocol](comparison-protocol.md) — no completed comparative result claimed here
 
 ## What the score actually means
 
-Authenticated retrieval of the pinned Mnemetric JSONL confirmed 500 question records and
+The historical pinned Mnemetric JSONL contained 500 question records and
 462 correct answers (92.4%). The development subset is 96/100; the held-out subset is
 366/400 (91.5%). All 500 recorded reader completions have finish reason `stop`.
 
@@ -134,7 +138,7 @@ long sources beyond the old candidate cutoff, final result survival, tenant/poli
 boundaries, erasure, sequential/parallel agreement and excluded routes. This conservative
 change does not solve mixed-memory fusion or add semantic embeddings.
 
-On the same 95 answerable development questions, default Recall@5 rose from **57.44% to
+In the earlier repair-pass experiment on the same 95 answerable development questions, default Recall@5 rose from **57.44% to
 92.32%**: 48 questions improved, zero regressed and 47 were unchanged. Passage-mode recall
 remained 90.91%. The baseline is `local-recall-dev.json`; the final frozen-code receipt
 is `local-recall-dev-runtime-final.json` (32.1 seconds). The matched-data comparison and
@@ -253,7 +257,8 @@ safety cases; these and related engine, consolidation and shared-value tests pas
 in 2.03 seconds. Shared entity/export contracts passed **12 tests**, with six live-Postgres
 cases skipped. Receipts are `work/hindsight-comparison/entity-identity-before.log`,
 `entity-identity-after.{log,xml}` and `entity-shared-contract.{log,xml}`. Targeted Ruff and
-`git diff --check` passed. No live PostgreSQL claim follows from these results.
+`git diff --check` passed. Those historical receipts did not include live PostgreSQL;
+the subsequent live follow-up is recorded below.
 
 ## Repository and data independence
 
@@ -294,7 +299,7 @@ The broader exploratory suite was interrupted around 63% after changes continued
 its execution. It is not a completed validation of this candidate. Its four observed failures
 were a native SDK mismatch, a missing latency README, an obsolete egress allowlist entry, and
 a source-inspection test reading changed CLI lines after import. The final focused suite
-covers these paths on the current source.
+covers these paths on that repair candidate.
 
 The macOS native test used process-local
 `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk` because the host's default
@@ -311,7 +316,7 @@ boundary review identified the issues above that those patterns cannot detect.
 
 ## Subsequent phase: maintained answers
 
-The Hindsight research now informs an implemented `MentalModelService`, seven MCP/Python
+The first maintained-answer phase introduced `MentalModelService`, seven MCP/Python
 operations, and the grouped `mneme mental-model` CLI. A model stores its private question,
 exact read scope, current cited answer, corpus fingerprint and version. Creation is pending;
 refresh explicitly runs the existing grounded reader. Clean get/list operations validate
@@ -332,17 +337,18 @@ retention boundary.
 
 Local, SQLite and PostgreSQL stores implement version compare-and-swap. Local uses an
 instance lock; SQLite protects final source checks, publication and the final read with one
-`BEGIN IMMEDIATE` transaction. Provider work runs outside those guards. PostgreSQL checks
-model versions and rereads sources, but does not yet bind publication to an atomic source
-snapshot; no live PostgreSQL run is claimed.
+`BEGIN IMMEDIATE` transaction. Provider work runs outside those guards. PostgreSQL checked
+model versions and reread sources at this stage, without binding publication to an atomic
+source snapshot. The later background-refresh and live-validation phases below close that gap.
 
 Independent review reproduced and closed publication-time privacy changes, malformed imported
 claim/history extensions, fabricated top-level source IDs, imported answers citing sources
 after `as_of`, and a clock rollover during saving. Integration testing also found and fixed
 the missing schema-registry entry and preserved the previous JSON bytes when no models exist.
-Automatic scheduling, delta refresh, wiki pages and freeform synthesis remain future work.
+Automatic scheduling, delta refresh, wiki pages and freeform synthesis remained future work
+at this stage; the next phase added interval scheduling.
 
-Final verification for this phase: **1,889 passed, 114 optional/live-PostgreSQL skips, zero
+Historical final verification for this phase: **1,889 passed, 114 optional/live-PostgreSQL skips, zero
 failures/errors** across 2,003 cases in 20.19 seconds. The 44-module command is recorded in
 `work/hindsight-comparison/verify-mental-models.sh`; on this Mac it ran with the process-local
 SDK setting described above:
@@ -385,16 +391,17 @@ authorization context.
 
 PostgreSQL now pins scoped exports, source getters and model CAS to one READ COMMITTED
 transaction. SHARE locks on source, tenant and branch tables cover inserts as well as updates
-and deletes, with a five-second lock-acquisition timeout. They briefly block source writers
-across tenants. This closes the implementation gap described in the earlier phase, but live
-PostgreSQL permissions, lock contention and concurrency still require deployment validation.
+and deletes, with a five-second lock-acquisition timeout. They block source writers
+across tenants. This closed the implementation gap described in the earlier phase.
+Its original verification used mocks/contracts; the subsequent live validation below
+exercises permissions, lock contention and concurrency against PostgreSQL 16.15.
 
 This is periodic full refresh after a freshness check. No automatic server startup, cron
 expression parser, consolidation-triggered job, delta synthesis, wiki generation or freeform
-reader was added. No production provider was started or configured, and no new comparative
-answer benchmark was run. The [maintained-answer guide](mental-models.md) gives exact commands.
+reader was added. That phase did not start/configure a production provider or run a new comparative
+answer benchmark. The [maintained-answer guide](mental-models.md) gives exact commands.
 
-Final background-refresh verification: **2,029 passed, 114 optional/live-PostgreSQL skips,
+Historical final background-refresh verification: **2,029 passed, 114 optional/live-PostgreSQL skips,
 zero failures/errors**, across 2,143 cases in 22.47 seconds. The four new test modules add
 136 cases; existing parametrized tool coverage also expanded. The 48-module command is
 `work/hindsight-comparison/verify-background-refresh.sh`, run with the same process-local
@@ -418,6 +425,111 @@ inaccurate with supporting evidence, and GitHub's persisted dismissal was verifi
 [The case note](../work/hindsight-comparison/evidence/E-dependency-alert-6.md) contains
 the source mapping and test receipt. No dependency or package-version change was needed.
 
+## Live PostgreSQL follow-up
+
+The authorized follow-up began at `d59d4e5d3b3736cbf28719b659f766a65ad9559c` and
+used a disposable PostgreSQL **16.15** container bound to `127.0.0.1:55432`, with the
+repository schema and role policy. Runtime tests used the non-superuser,
+non-BYPASSRLS consolidator login. Separate app and readonly logins exercised permission
+boundaries; only the isolated schema-upgrade test used an administrator DSN.
+
+The final eight-module PostgreSQL suite passed **235 mixed live/unit tests**, with
+**zero skips, failures or errors, in 53.296 seconds**. This total includes mocked
+contracts as well as live tests. Its **16 new live tests** cover mental-model source
+insertion, deletion and privacy changes during generation/publication, lease takeover
+and expiry, transaction rollback, pooled tenant isolation, model ownership, readonly
+denial, and actual five-second lock timeout/recovery. The live role check passed
+**9/9 checks with no findings**. Provider replies were deterministic fixtures; lease
+expiry used a controlled UTC clock with real concurrent PostgreSQL sessions.
+
+The run exposed three integration defects:
+
+- **Model deletion privileges:** the table owner lacked DELETE on `mental_models`,
+  preventing authorized app deletion and the branch foreign-key cascade. A narrow
+  grant and matching role-check allowlist repair both. Wrong-owner service deletion
+  is still rejected, and app DELETE on evidence, branches and audit rows remains denied.
+- **Invalid external evidence IDs:** PostgreSQL source revalidation raised on a
+  non-hexadecimal adapter identifier. It now treats that identifier as missing before
+  database access. The live adapter test also verifies replacement of untrusted preview
+  text with the authorized stored text.
+- **Provider request source references:** secret filtering replaced valid source CIDs
+  in the structural request field, making command consolidation fail its custody check.
+  The sanitizer now preserves valid references in that field while retaining secret
+  redaction elsewhere; custody validation remains strict.
+
+Two working-memory fixtures were corrected to supply evidence belonging to the stated
+user/session. Prospective-memory fixtures retain synthetic tenant/audit rows until the
+disposable database is destroyed instead of requiring runtime tenant-purge privileges.
+The updated fixtures preserve the runtime's ownership, RLS and audit-retention rules.
+
+Mental-model publication holds SHARE locks on whole source tables inside its final
+READ COMMITTED transaction. Competing source writes wait until commit or rollback;
+provider work remains outside that transaction. Writers in unrelated tenants can also
+wait, so production throughput and high-load contention still need measurement. This
+validation does not extend atomic publication guarantees to every consolidation path.
+Remote deployments, other PostgreSQL versions and live production grounded-provider
+responses were not tested here.
+
+The [validation report](../work/hindsight-comparison/postgres-live/REPORT.md) links the
+[JUnit receipt](../work/hindsight-comparison/postgres-live/postgres-final.xml),
+[role check](../work/hindsight-comparison/postgres-live/role-check.json), before/after
+evidence, environment details and tested source hashes. Ruff and whitespace checks
+passed. The owned database container and its tmpfs data were removed; unrelated local
+services were preserved, as recorded in the [cleanup receipt](../work/hindsight-comparison/postgres-live/cleanup.json).
+
+The separate [controlled comparison protocol](comparison-protocol.md) defines the
+held-out native-ingestion/recall pilot with a common Codex reader and judge, frozen
+configuration and per-question failure accounting. No completed comparative result or
+ranking claim follows from these PostgreSQL tests.
+
+## Change-aware refresh and evaluation cancellation
+
+The owner stopped the comparison during native Hindsight ingestion and asked for
+continued Mnemosyne improvements instead. The runner and its own Codex subprocesses
+were stopped, partial receipts preserved, and the disposable Hindsight database
+removed. No Hindsight case completed, no common reader/judge phase ran, and no
+comparison score was produced. The
+[cancellation receipt](../work/hindsight-comparison/controlled/run-v1/hindsight-cancellation.json)
+records known partial usage separately from unknown cost. The stopped experiment
+is not work to resume without a new request.
+
+The worker now offers opt-in `check_changes=True` in Python and `--check-changes`
+in the CLI. One shared authorized-corpus snapshot per eligible poll can identify
+stale scheduled answers before the normal interval. Ordinary due work has priority;
+the existing batch limit, exact owner/read scope, lease fencing and durable retry
+backoff remain in force. Early attempts wait at least 60 seconds after both the
+previous start and finish. A failed scan skips early candidates; it does not turn
+every model into a provider job.
+
+The shared snapshot is only a scheduling hint. Each claim compares the listed model
+version, and refresh still checks current source custody and worker authority before
+provider input and final publication. If sources reverted after polling, a fresh
+answer can be reused without loading a provider. This is change-aware polling with
+full refresh when needed, not incremental synthesis or a consolidation-event queue.
+
+The bounded evaluation-code review also repaired concurrent runner admission and
+interruption handling. OS-held locks prevent a second process from misclassifying
+active claims as crashed. Cancellation stops queued work, checks again after prompt
+preparation, and preserves admitted calls' receipts inside their workers. The
+[review and test record](../work/hindsight-comparison/controlled/runner-recovery-lock-review.md)
+documents those fixes without running another benchmark.
+
+Final expanded local regression: **2,192 passed, 114 optional skips, zero
+failures/errors**, across 2,306 cases in 27.614 seconds. The command is
+`work/hindsight-comparison/verify-change-refresh.sh`; its
+[JUnit receipt](../work/hindsight-comparison/change-refresh-final-verification.xml)
+and lint log record the result. The change-aware worker adds 52 focused Local/SQLite
+cases. Independent review covered those and the 65 existing worker cases. The
+separate live PostgreSQL results are linked from its validation report.
+
+The final PostgreSQL follow-up passed **239 mixed live/unit tests**, zero skips,
+failures or errors, in **59.271 seconds**, and repeated the **9/9** role checks.
+Four additional live tests exercised early change-triggered refresh, unchanged
+provider-free checks, retry backoff and a competing version update. Together
+with the original 16 new live cases, this pass adds 20 live tests. The
+[follow-up receipts](../work/hindsight-comparison/postgres-live/change-refresh/REPORT.md)
+preserve the earlier 235-test result as historical evidence.
+
 ## Quality targets still unmet
 
 The local deterministic quick evaluation passed **8 of 11** checks and all five mandatory
@@ -434,17 +546,21 @@ repairs and is not a release certification. The failed targets were not relaxed.
 
 ## Remaining work
 
-- This pass does not test live PostgreSQL, Windows, live production grounded-provider responses or long-running
-  production concurrency. Targeted passes are not whole-repository or production certification.
+- Live PostgreSQL 16.15 publication and permission checks now pass as described above.
+  Windows execution, live production grounded-provider responses, other database versions
+  and long-running production concurrency remain untested here. Targeted passes are not
+  whole-repository or production certification.
 - Incremental/delta mental-model refresh, knowledge pages, contextual entity resolution,
   complete evolving observations and freeform reflection remain roadmap work. Existing Mnemosyne components must be
   reused rather than duplicated without behavioral tests.
-- The controlled quality run needs frozen development/held-out splits, identical reader/judge
-  settings, pinned ingestion and retrieval configurations, budgets and per-question receipts.
+- The [controlled quality protocol](comparison-protocol.md) records frozen held-out selection,
+  identical reader/judge settings, pinned ingestion/retrieval configurations, budgets and
+  per-question receipts. Execution was cancelled at the owner's request; no comparative
+  result is claimed and no continuation is scheduled.
   The archived score is an in-process dense-retrieval experiment, not a measurement of every
   default product configuration.
-- The user authorized the existing Codex account for evaluation. Its inputs, configuration,
-  predictions and scoring receipts remain in Mnemosyne's evaluation area. Development results
+- Earlier evaluation used the existing Codex account. Its inputs, configuration,
+  historical predictions and receipts remain in Mnemosyne's evaluation area. Development results
   must not be presented as a matched Hindsight comparison without matching conditions.
 
 ## Data flow and proposed evaluation loop
@@ -463,5 +579,6 @@ flowchart TD
     Eval --> Report["Accuracy, failures, latency and cost receipts"]
 ```
 
-The grounded-reader boundary is implemented and tested. A matched evaluation of both systems
-remains outstanding; the separate Codex development runner does not establish that comparison.
+The grounded-reader boundary is implemented and tested. The matched evaluation was
+cancelled; the separate Codex development runner and PostgreSQL validation do not
+establish that comparison.
