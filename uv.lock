@@ -316,6 +316,7 @@ version = "1.7.0"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
+    { name = "tzdata", marker = "sys_platform == 'win32'" },
 ]
 
 [package.optional-dependencies]
@@ -353,6 +354,7 @@ requires-dist = [
     { name = "numpy", marker = "extra == 'graph'", specifier = ">=2.1" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.2" },
     { name = "sqlite-vec", marker = "extra == 'sqlitevec'", specifier = ">=0.1.9" },
+    { name = "tzdata", marker = "sys_platform == 'win32'", specifier = ">=2025.2" },
 ]
 provides-extras = ["postgres", "mcp", "native", "sqlitevec", "graph"]
 

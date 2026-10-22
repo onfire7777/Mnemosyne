@@ -1,14 +1,18 @@
 # Mnemosyne §33 Evaluation / SLO Measurement Harness
 
-> The public benchmarks, the WMBS suite and the leaderboard live in Mnemetric-harness, which tests
-> Mnemosyne only through its CLI and MCP server; their results and evidence are in [Mnemetric](https://github.com/onfire7777/Mnemetric). What stays
-> here is Mnemosyne's own engineering: this harness, the G0 gate (`eval/g0`), the white-box benches
-> (`eval/benches`, `eval/perf`, `eval/scale`, `eval/latency`, `eval/latency_warm`, `eval/replay_fidelity`,
-> and the in-process LongMemEval-S runner in `eval/longmemeval_s`),
-> the compact answering tooling and the evidence those read.
+This directory contains Mnemosyne's own engineering evaluations: this harness, the G0 gate
+(`eval/g0`), the white-box benches (`eval/benches`, `eval/perf`, `eval/scale`, `eval/latency`,
+`eval/latency_warm`, `eval/replay_fidelity` and the in-process LongMemEval-S runner in
+`eval/longmemeval_s`), and compact answering tools. External benchmark platforms are separate
+projects, not dependencies of these evaluations or the memory runtime. Supply dataset and
+passage-index paths explicitly; do not share a live data directory with another project.
+
+For answer evaluation through an existing Codex login, see the
+[LongMemEval-S development guide](longmemeval_s/README.md). It records separate
+reader/judge receipts and does not require an OpenRouter key.
 
 This is the **proof harness** the blueprint calls the "single largest gap between
-'looks done' and 'blueprint-complete'" (§E). It drives **only the public CLI**
+'looks done' and 'blueprint-complete'" (§E). Its main `run_eval.py` harness drives **only the public CLI**
 (`python -m mnemosyne.cli ...`) — never internal modules — and turns every Goal /
 SLO from "claimed by construction" into "measured, with confidence intervals."
 

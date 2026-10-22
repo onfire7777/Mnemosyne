@@ -2283,6 +2283,7 @@ def test_shared_engine_contract_abstains_when_only_gist_support_is_retrieved(
     engine_bundle: tuple[Any, str, str],
 ) -> None:
     engine, tenant, user = engine_bundle
+    source = _append_evidence(engine, tenant, user, "Upstream.")
     cid = engine.append_evidence(
         Evidence(
             tenant_id=tenant,
@@ -2294,7 +2295,7 @@ def test_shared_engine_contract_abstains_when_only_gist_support_is_retrieved(
             metadata={
                 "summary": {
                     "kind": "abstractive_gist",
-                    "source_evidence_cids": ["source-cid-for-gist-contract"],
+                    "source_evidence_cids": [source],
                 }
             },
             trust_tier=2,
@@ -2339,10 +2340,8 @@ def test_shared_engine_contract_deep_search_abstains_on_summary_derived_graph_su
     )
     summary = next(item for item in summary_run.pass_results if item["name"] == "summarizer")["details"]
 
-    # Withhold the raw source so only the generated gist summary remains
-    # reachable. The graph relation is source-backed by the withheld evidence and
-    # must now be suppressed by the graph trust boundary, while the gist summary
-    # still forces abstention.
+    # Withholding a source must also withhold its generated prose and graph
+    # projections; an abstention flag alone does not prevent text disclosure.
     engine.update_evidence_metadata(
         tenant, raw_cid, {"quarantine_reason": "source-withheld-for-gist-contract"}
     )
@@ -2355,13 +2354,12 @@ def test_shared_engine_contract_deep_search_abstains_on_summary_derived_graph_su
     )
     relation_hits = [hit for hit in result.hits if hit.kind == "relation"]
 
-    assert result.hits
-    assert any(hit.id == summary["summary_cid"] for hit in result.hits)
+    assert not result.hits
+    assert not any(hit.id == summary["summary_cid"] for hit in result.hits)
     assert relation_hits == []
     assert result.abstained is True
-    assert result.uncertainty_note == "Only gist-tier memory support was retrieved; inspect source evidence before answering."
-    assert result.explain["gist_support"]["applied"] is True
-    assert result.explain["gist_support"]["gist_hit_ids"] == [summary["summary_cid"]]
+    assert result.explain["gist_support"]["applied"] is False
+    assert result.explain["gist_support"]["gist_hit_ids"] == []
 
 
 def test_shared_engine_contract_abstains_on_trace_or_confabulation_risk_support(
@@ -2369,6 +2367,7 @@ def test_shared_engine_contract_abstains_on_trace_or_confabulation_risk_support(
 ) -> None:
     engine, tenant, user = engine_bundle
     risk_tenant = f"{tenant}-risk"
+    risk_source = _append_evidence(engine, risk_tenant, user, "Upstream.")
     trace_cid = engine.append_evidence(
         Evidence(
             tenant_id=tenant,
@@ -2391,7 +2390,8 @@ def test_shared_engine_contract_abstains_on_trace_or_confabulation_risk_support(
             source_type="analysis-summary",
             source_identity="analysis-summary:contract-beta",
             content="Confabulation risk contract beta support requires source inspection.",
-            metadata={"summary": {"kind": "extractive_summary", "confabulation_risk": True}},
+            metadata={"summary": {"kind": "extractive_summary", "confabulation_risk": True,
+                                  "source_evidence_cids": [risk_source]}},
             trust_tier=2,
             capability_tags=["derived-summary"],
             access_policy={"tenant": risk_tenant},

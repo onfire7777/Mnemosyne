@@ -1,0 +1,32 @@
+# Timeline
+
+- Read router policy, public source docs, local implementation and ranking evidence.
+- User approved disclosed local routing/case setup and identified Mnemetric as the comparison site.
+- Initial general route refined to code-audit based on actual source availability; guard passed.
+- WI-ranking: verified the 500-row published answer file; aggregated counts match 462 correct.
+- WI-fixes: reproduced and repaired stale derivative disclosure, score labels, malformed/explicit dates, original-store evaluation writes, and SQLite snapshot hazards.
+- WI-time: added validated caller timezones, daylight-saving boundary tests, relative-clock cache invalidation, and dataset-clock evaluation.
+- WI-reflect: exposed the existing bounded grounded orchestrator as Python/MCP/CLI reflect; 451 focused tests passed and independent review found no blocking boundary issue.
+- WI-codex: implemented isolated account-backed reader/judge calls with manifests and fail-closed receipts; five development smoke questions completed successfully.
+- WI-recall: measured 95 answerable development questions; source-only default fallback ranking lost evidence that passage BM25 retained. A bounded general ranking repair is being verified.
+- WI-research: documented 19 capabilities, partial analogues and remaining gaps.
+- WI-broad: broad pre-fix suite was started; its output is exploratory, not final candidate certification.
+- WI-next: matched benchmark, full parity and comprehensive bug elimination remain unfinished.
+- WI-runtime-priority: user reiterated work on Mnemosyne itself; larger Codex answer run deferred, partial attempts preserved without aggregate scores.
+- WI-history: reproduced ISO as-of crash on Local/SQLite; normalized historical timestamps before graph dispatch and verified equivalent-offset calls.
+- WI-entities: fixed Unicode key collisions and mutable input/output entity-policy aliases; legacy ambiguous rows intentionally retained.
+- WI-summary-write: reproduced stale summary writes after source deletion, correction and policy change; added transitive custody checks before provider input and derived writes.
+- WI-summary-read: found stale existing summaries still readable through ordinary retrieval; shared lineage gating under implementation.
+- WI-broad: exploratory whole-suite run interrupted around63 percent to collect tracebacks. Native SDK incompatibility, missing latency README and stale egress allowlist addressed. Fourth source-inspection failure resulted from CLI source changing after import; current focused check passes. This was not a full-suite pass.
+
+- WI-summary-read: closed recursive derived-text leaks, legacy partial-erasure gaps, stale adapter payloads and time-only permission expiry; independent reviewers confirmed Local/SQLite repros no longer disclose text.
+- WI-proposal: bound cached replay to all input state and current cached-row controls; stale, private, expired or incomplete caches fail closed. Final source erasure purges multi-source proposals.
+- WI-verify: frozen final candidate passed 1672 tests with 114 optional/live-Postgres skips, zero failures/errors in 18.61s; Ruff and diff checks passed. 381 source/test/dependency hashes unchanged during verification.
+- WI-recall-final: same frozen 95-question development comparison confirmed default Recall@5=0.9232 and passages=0.9091; 48 improved, 0 regressed, 47 unchanged; dataset hashes and source hashes matched. 32.1s, no model calls.
+- WI-mental-models: user requested continued runtime work and durable memory of the research. Implemented private saved questions/answers, seven Python/MCP/CLI operations, three-store versioned persistence, source/clock freshness and metadata-only history.
+- WI-mental-model-review: independent repros exposed publication-time privacy races, permissive imported claim/history fields, unvalidated top-level source IDs, historical-cutoff omissions and save-time clock rollover. Fixed and re-reviewed on Local/SQLite.
+- WI-mental-model-integration: first expanded run exposed a missing schema registry entry and changed empty-feature JSON bytes; fixed without weakening regressions. Reused the process-local supported SDK for the native probe.
+- WI-mental-model-final: 1889 passed, 114 optional/live-PostgreSQL skips, zero failures/errors in 20.19s; global Ruff and diff checks passed. 389 source/test/configuration hashes stable. Manual lifecycle delivered; background/delta/wiki features and PostgreSQL atomic source publication remain open.
+- WI-background: user requested scheduled refresh and further improvements, then authorized commit and push to main after completion. Added opt-in durable schedules, expiring leases, capped retry, restart recovery, cancellation and trusted per-worker scope.
+- WI-background-review: corrected permanent cached abstention after provider failures and authority expiry during initial/final source snapshots. Independent Local/SQLite repros pass. Added pinned PostgreSQL transaction/source locks; live deployment validation remains open.
+- WI-background-final: 2029 passed, 114 skipped, zero failures/errors in 22.47s across 48 modules; 395 source hashes stable, Ruff and whitespace clean. Seven-file three-rule SAST scan returned no matches/errors. No new benchmark result claimed.

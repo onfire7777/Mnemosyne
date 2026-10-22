@@ -47,6 +47,8 @@ from mnemosyne.policy import OperatingPolicy
 from mnemosyne.retrieval import (
     GLOBAL_SENSEMAKING_CHANNEL,
     GLOBAL_SENSEMAKING_MODE,
+    HashingEmbeddingProvider,
+    LocalSimilarityReranker,
     QUERY_SUPPORT_THRESHOLD,
     PROSPECTIVE_MEMORY_CHANNEL,
     RetrievalAdapters,
@@ -64,6 +66,7 @@ from mnemosyne.retrieval import (
     window_support_query,
     prospective_memory_hits,
     require_supported_query_mode,
+    resolve_query_timezone,
     schema_fast_path_rerank,
     semantic_entropy,
     strip_workspace_broadcast_filter,
@@ -208,14 +211,19 @@ def _result_cache_key(
 ) -> tuple[Any, ...] | None:
     if retrieval_result_cache_size() <= 0 or deep or workspace_broadcast.get("applied"):
         return None
-    if _working_route_requested(effective_filter) and not any(
+    implicit_clock = not any(
         parse_dt(effective_filter.get(name)) for name in ("as_of", "evaluated_at", "working_evaluated_at")
+    )
+    if implicit_clock and (
+        _working_route_requested(effective_filter)
+        or query_time_window(query, utc_now(), query_timezone=effective_filter.get("query_timezone")) is not None
     ):
         # A session read that names no instant is evaluated at the clock, and
         # an item leaves working memory when its TTL runs out without anything
         # in the store changing. Cached, the answer would keep serving the item
-        # after it expired. A read that names its instant carries it in the
-        # filter, so in the key, and is cached as before.
+        # after it expired. Relative calendar windows likewise change at midnight
+        # without a store mutation. A read that names its instant carries it in
+        # the filter, so in the key, and is cached as before.
         return None
     token = _engine_result_cache_token(
         ops,
@@ -587,6 +595,39 @@ def _cap_fact_hits(hits: list[Hit], *, slots: int) -> list[Hit]:
             facts += 1
         kept.append(hit)
     return kept
+
+
+def _source_only_local_routes(adapters: RetrievalAdapters, routes: list[list[Hit]]) -> bool:
+    """Whether ordinary local search has only raw sources to rank.
+
+    Hash vectors and the local reranker repeat term overlap without corpus IDF.
+    They must not erase BM25's rare-term signal in source-only search. Keep
+    provider-backed, customized, and mixed-memory rankings on their existing path.
+    """
+    from mnemosyne.passages import is_passage
+
+    dense, lexical, graph, prospective, working = routes
+    return (
+        type(adapters.embedding) is HashingEmbeddingProvider
+        and type(adapters.reranker) is LocalSimilarityReranker
+        and type(adapters.reranker.embedding_provider) is HashingEmbeddingProvider
+        and adapters.reranker == LocalSimilarityReranker(embedding_provider=adapters.embedding)
+        and (adapters.lexical_backend, adapters.graph_backend) in {
+            ("local-bm25-lite", "local-ppr"), ("sqlite-fts5", "sqlite-cached-ppr"),
+        }
+        and adapters.lexical_retriever is None
+        and adapters.graph_retriever is None
+        and not (graph or prospective or working)
+        and bool(dense or lexical)
+        and all(
+            is_passage(hit) and hit.metadata.get("source_type") and hit.id in hit.provenance
+            and hit.metadata.get("modality", "text") == "text"
+            and not hit.metadata.get("stored_media_embedding")
+            and not hit.metadata.get("stored_embedding_used")
+            and "confidence" not in hit.metadata
+            for route in (dense, lexical) for hit in route
+        )
+    )
 
 
 def _collapse_session_duplicates(hits: list[Hit]) -> tuple[list[Hit], int]:
@@ -1125,7 +1166,22 @@ def run_retrieval_pipeline(
     workspace_broadcast = workspace_broadcast_from_context(filt)
     effective_filter = strip_workspace_broadcast_filter(filt)
     effective_filter.update({"tenant_id": tenant_id, "branch": branch, "_retrieval_deep": deep})
+    historical_time = effective_filter.get("as_of")
+    if historical_time is not None:
+        if not isinstance(historical_time, (str, datetime)):
+            raise ValueError("as_of must be a datetime or ISO 8601 timestamp")
+        try:
+            historical_time = parse_dt(historical_time)
+        except (ValueError, OverflowError) as exc:
+            raise ValueError("as_of must be a valid ISO 8601 timestamp") from exc
+        # Graph providers consume datetimes. Normalize once so JSON callers and
+        # Python callers use the same historical instant in every search route.
+        effective_filter["as_of"] = (
+            historical_time.astimezone(timezone.utc) if historical_time.tzinfo
+            else historical_time.replace(tzinfo=timezone.utc)
+        )
     query_mode = require_supported_query_mode(query_mode_from_filter(effective_filter))
+    resolve_query_timezone(effective_filter.get("query_timezone"))
     passage_mode = query_mode == "passages"
     retrieval_instant = (
         parse_dt(effective_filter.get("as_of"))
@@ -1206,7 +1262,7 @@ def run_retrieval_pipeline(
     # passages made inside it. Needs the passage route (graph or passage mode); as_of is a
     # different question (what was true then), handled by the deep path.
     window = (
-        query_time_window(query, retrieval_instant)
+        query_time_window(query, retrieval_instant, query_timezone=effective_filter.get("query_timezone"))
         if (passage_graph is not None or passage_mode) and not effective_filter.get("as_of")
         else None
     )
@@ -1353,12 +1409,29 @@ def run_retrieval_pipeline(
             else ([], {})
         )
     ranked_routes = [dense, lexical, graph, prospective, working]
+    source_ranked: list[Hit] | None = None
+    if (
+        query_mode is None and not deep and not effective_filter.get("as_of")
+        and passage_graph is None and _source_only_local_routes(ops.adapters, ranked_routes)
+    ):
+        # Reauthorize the complete source corpus, not only the first channel's top
+        # hits. The passage route builds BM25 solely from readable, redacted text.
+        sources = ops.lexical_search(query, width, {**effective_filter, "query_mode": "passages"})
+        # Explicit confidence switches the legacy conformal set to per-example
+        # probabilities. Do not feed unbounded BM25 siblings into that path,
+        # including sources found beyond the original channels' cutoff.
+        if not any("confidence" in hit.metadata for hit in sources):
+            source_ranked = sources
+            for hit in source_ranked:
+                hit.metadata = {**hit.metadata, "score_scale": "bm25"}
     # An embeddings-only index scores every passage by cosine, one scale for every question:
     # its order is final and its scores are kept; what only the other channels found follows.
     cosine_ranked = (
         semantic and graph_ranked is not None and (passage_graph_explain or {}).get("score_scale") == "cosine"
     )
-    if window is not None or (passage_mode and graph_ranked is not None):
+    if source_ranked is not None:
+        fused = source_ranked
+    elif window is not None or (passage_mode and graph_ranked is not None):
         fused = dense
     elif cosine_ranked:
         found = {(hit.kind, hit.id) for hit in dense}
@@ -1376,7 +1449,7 @@ def run_retrieval_pipeline(
         fused, collapsed_turns = _collapse_session_duplicates(fused)
     # Passage and graph-ranked search keep their relevance order: the local hashing
     # reranker and MMR would re-sort it by surface tokens.
-    relevance_order = passage_mode or semantic or window is not None
+    relevance_order = passage_mode or semantic or window is not None or source_ranked is not None
     reranked = (
         fused if relevance_order and ops.adapters.reranker.name == "local-similarity"
         else ops.adapters.reranker.rerank(query, fused, k=max(k * 2, k))
@@ -1384,7 +1457,7 @@ def run_retrieval_pipeline(
     reranked, schema_fast_path = schema_fast_path_rerank(query, reranked, policy)
     if semantic:
         diversified = _cap_fact_hits(reranked, slots=max(1, k // 4))[:k]
-    elif passage_mode:
+    elif passage_mode or source_ranked is not None:
         diversified = reranked[:k]
     else:
         diversified = ops._mmr(query, reranked, k=max(k, 1))
@@ -1554,6 +1627,11 @@ def run_retrieval_pipeline(
         explain["working_memory"] = working_explain
     if passage_mode:
         explain["query_mode"] = "passages"
+    if source_ranked is not None:
+        explain["source_only_local_fallback"] = {
+            "applied": True, "ranker": "scoped_bm25", "score_scale": "bm25",
+            "candidate_width": width, "candidate_count": len(source_ranked),
+        }
     if relevance_order:
         explain["activation"] = {"applied": False, "reason": "passage_relevance_order"}
         explain["candidate_width"] = width

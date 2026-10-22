@@ -10,7 +10,7 @@ import os
 import threading
 import weakref
 from collections import defaultdict
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from typing import Any, Mapping, Sequence
@@ -68,6 +68,15 @@ from mnemosyne.erasure_ids import (
     redact_erased_cids,
 )
 from mnemosyne.ids import content_cid, evidence_cid, evidence_unscoped_cid
+from mnemosyne.mental_model_storage import (
+    MentalModelConflict,
+    expected_version as validate_model_version,
+    invalidate_record as invalidate_model_record,
+    json_copy as copy_model_json,
+    model_key,
+    prepare_save as prepare_model_save,
+    validate_record as validate_model_record,
+)
 from mnemosyne.models import (
     Assertion,
     Contradiction,
@@ -88,6 +97,11 @@ from mnemosyne.policy import OperatingPolicy
 from mnemosyne.postgres_security import assert_postgres_safe_role, env_flag, postgres_safe_role_required
 from mnemosyne.privacy import ErasureMode
 from mnemosyne.retrieval import (
+    derived_evidence_readable,
+    derived_source_cids,
+    trim_derived_source_cids,
+    filter_derived_adapter_hits,
+    read_evidence_for_context,
     HashingEmbeddingProvider,
     LocalSimilarityReranker,
     QUERY_SUPPORT_THRESHOLD,
@@ -543,6 +557,7 @@ class PostgresEngine:
         self._pool_lock = threading.Lock()
         self._calibration_cache: dict[tuple[str, str], CalibrationSet] = {}
         self._calibration_cache_lock = threading.Lock()
+        self._mental_model_guard_context = threading.local()
 
     def connect(self) -> Any:
         if self._psycopg is None or self._jsonb is None:
@@ -2043,11 +2058,154 @@ class PostgresEngine:
                     and not source_backed_summary(item, records.get, self._classify_budget_evidence)]
         return len(budgeted), sum(len(item.content) for item in budgeted)
 
+    def _active_mental_model_connection(self, tenant_id: str) -> Any:
+        context = getattr(self, "_mental_model_guard_context", None)
+        state = getattr(context, "state", None)
+        if state is None:
+            return None
+        if state[0] != tenant_id:
+            raise ValueError("mental model guard tenant scope mismatch")
+        return state[1]
+
+    @contextmanager
+    def _mental_model_connection(self, tenant_id: str):
+        """Reuse only an explicitly pinned publication transaction."""
+        pinned = self._active_mental_model_connection(tenant_id)
+        if pinned is not None:
+            yield pinned
+        else:
+            with self.connect() as conn:
+                yield conn
+
+    @contextmanager
+    def mental_model_guard(self, tenant_id: str):
+        """Atomically validate sources and publish a saved model.
+
+        SHARE table locks cover inserts as well as corrections, policy changes
+        and deletions, including writes by other processes. They briefly block
+        writers across tenants: keep generation and other source mutations out
+        of this guard. Source locks and the pinned connection live until the
+        outer lease commits or rolls back; nested reads must not end that lease.
+        """
+        model_key(tenant_id, "guard", "main")
+        pinned = self._active_mental_model_connection(tenant_id)
+        if pinned is not None:
+            yield
+            return
+        with self.connect() as conn:
+            # This guard owns the new lease. In the non-pooled path the
+            # safe-role probe may have opened a read transaction already.
+            conn.rollback()
+            with conn.cursor() as cur:
+                # A deployment may default to repeatable read. After waiting
+                # for writers, validation must observe their committed state,
+                # not the snapshot created by the tenant-binding SELECT.
+                cur.execute("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
+                cur.execute("SET LOCAL lock_timeout = '5s'")
+                self._set_tenant(cur, _stable_uuid("tenant", tenant_id))
+                cur.execute(
+                    "LOCK TABLE tenants, branches, evidence, assertions, relations, preferences IN SHARE MODE"
+                )
+            self._mental_model_guard_context.state = (tenant_id, conn)
+            try:
+                yield
+            finally:
+                del self._mental_model_guard_context.state
+
+    def get_mental_model_record(self, tenant_id: str, model_id: str, branch: str = "main") -> dict[str, Any] | None:
+        model_key(tenant_id, model_id, branch)
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self._mental_model_connection(tenant_id) as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                cur.execute("SELECT record FROM mental_models WHERE tenant_id = %s AND branch = %s AND model_id = %s",
+                            (db_tenant_id, branch, model_id))
+                row = cur.fetchone()
+        return copy_model_json(row["record"]) if row is not None else None
+
+    def list_mental_model_records(self, tenant_id: str, branch: str = "main") -> list[dict[str, Any]]:
+        model_key(tenant_id, "list", branch)
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self._mental_model_connection(tenant_id) as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                cur.execute("SELECT record FROM mental_models WHERE tenant_id = %s AND branch = %s ORDER BY model_id",
+                            (db_tenant_id, branch))
+                return [copy_model_json(row["record"]) for row in cur.fetchall()]
+
+    def save_mental_model_record(
+        self, tenant_id: str, model_id: str, record: dict[str, Any], *,
+        branch: str = "main", expected_version: int | None = None,
+    ) -> dict[str, Any]:
+        record = validate_model_record(tenant_id, model_id, record, branch)
+        validate_model_version(expected_version, allow_create=True)
+        if self._active_mental_model_connection(tenant_id) is None:
+            self.ensure_tenant_and_branch(tenant_id)
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self._mental_model_connection(tenant_id) as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                cur.execute("SELECT record FROM mental_models WHERE tenant_id = %s AND branch = %s AND model_id = %s FOR UPDATE",
+                            (db_tenant_id, branch, model_id))
+                row = cur.fetchone()
+                current = row["record"] if row is not None else None
+                saved = prepare_model_save(tenant_id, model_id, record, branch, current, expected_version)
+                if current is None:
+                    cur.execute(
+                        "INSERT INTO mental_models(tenant_id, branch, model_id, version, record) VALUES (%s, %s, %s, %s, %s) "
+                        "ON CONFLICT (tenant_id, branch, model_id) DO NOTHING RETURNING version",
+                        (db_tenant_id, branch, model_id, saved["version"], self._jsonb(saved)),
+                    )
+                else:
+                    cur.execute(
+                        "UPDATE mental_models SET version = %s, record = %s "
+                        "WHERE tenant_id = %s AND branch = %s AND model_id = %s AND version = %s RETURNING version",
+                        (saved["version"], self._jsonb(saved), db_tenant_id, branch, model_id, expected_version),
+                    )
+                if cur.fetchone() is None:
+                    raise MentalModelConflict("mental model version conflict")
+        return copy_model_json(saved)
+
+    def delete_mental_model_record(
+        self, tenant_id: str, model_id: str, *, branch: str = "main", expected_version: int,
+    ) -> bool:
+        model_key(tenant_id, model_id, branch)
+        validate_model_version(expected_version)
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self._mental_model_connection(tenant_id) as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                cur.execute("SELECT version FROM mental_models WHERE tenant_id = %s AND branch = %s AND model_id = %s FOR UPDATE",
+                            (db_tenant_id, branch, model_id))
+                row = cur.fetchone()
+                if row is None:
+                    return False
+                if row["version"] != expected_version:
+                    raise MentalModelConflict("mental model version conflict")
+                cur.execute("DELETE FROM mental_models WHERE tenant_id = %s AND branch = %s AND model_id = %s",
+                            (db_tenant_id, branch, model_id))
+        return True
+
+    def _invalidate_mental_models(self, cur: Any, db_tenant_id: Any, branch: str) -> None:
+        cur.execute("SELECT record FROM mental_models WHERE tenant_id = %s AND branch = %s FOR UPDATE",
+                    (db_tenant_id, branch))
+        for row in cur.fetchall():
+            saved = invalidate_model_record(row["record"])
+            cur.execute("UPDATE mental_models SET version = %s, record = %s WHERE tenant_id = %s AND branch = %s AND model_id = %s",
+                        (saved["version"], self._jsonb(saved), db_tenant_id, branch, saved["model_id"]))
+
+    def get_evidence_for_read(
+        self, tenant_id: str, cid: str, branch: str = "main", *,
+        access_context: Mapping[str, Any] | None = None,
+    ) -> Evidence | None:
+        return read_evidence_for_context(self, tenant_id, cid, branch, access_context=access_context)
+
     def get_evidence(self, tenant_id: str, cid: str, branch: str = "main") -> Evidence | None:
         db_tenant_id = _stable_uuid("tenant", tenant_id)
-        with self.connect() as conn:
+        with self._mental_model_connection(tenant_id) as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
-                self._ensure_entity_registry_schema(cur)
+                if self._active_mental_model_connection(tenant_id) is None:
+                    self._ensure_entity_registry_schema(cur)
                 self._set_tenant(cur, db_tenant_id)
                 cur.execute(
                     """
@@ -3042,6 +3200,7 @@ class PostgresEngine:
                 k=k,
                 adapter_name="lexical",
             )
+            hits = filter_derived_adapter_hits(self, hits, filt)
             return self._mark_retrieved_text_as_data(hits)
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         include_quarantined = bool(filt.get("include_quarantined", False))
@@ -3083,6 +3242,11 @@ class PostgresEngine:
                     cid = _bytes_to_cid(row["cid"])
                     metadata = dict(row["metadata"] or {})
                     if is_retired_summary_metadata(metadata):
+                        continue
+                    if not derived_evidence_readable(
+                        self, {**dict(row), "cid": cid, "tenant_id": tenant_id, "branch": branch},
+                        tenant_id=tenant_id, branch=branch, filt=filt, policy=self.policy,
+                    ):
                         continue
                     decision = may_read_item(
                         item_tenant_id=tenant_id,
@@ -3317,6 +3481,11 @@ class PostgresEngine:
                     metadata = dict(row["metadata"] or {})
                     if is_retired_summary_metadata(metadata):
                         continue
+                    if not derived_evidence_readable(
+                        self, {**dict(row), "cid": cid, "tenant_id": tenant_id, "branch": branch},
+                        tenant_id=tenant_id, branch=branch, filt=filt, policy=self.policy,
+                    ):
+                        continue
                     decision = may_read_item(
                         item_tenant_id=tenant_id,
                         sensitivity=int(row["sensitivity"]),
@@ -3426,6 +3595,11 @@ class PostgresEngine:
                     cid = _bytes_to_cid(row["cid"])
                     metadata = dict(row["metadata"] or {})
                     if is_retired_summary_metadata(metadata):
+                        continue
+                    if not derived_evidence_readable(
+                        self, {**dict(row), "cid": cid, "tenant_id": tenant_id, "branch": branch},
+                        tenant_id=tenant_id, branch=branch, filt=filt, policy=self.policy,
+                    ):
                         continue
                     decision = may_read_item(
                         item_tenant_id=tenant_id,
@@ -4420,6 +4594,17 @@ class PostgresEngine:
                 return None
             if is_retired_summary_metadata(metadata):
                 return None
+            context = dict(access_context or {})
+            tenant_id = str(context.get("tenant_id") or "")
+            branch = str(context.get("branch") or "main")
+            if not derived_evidence_readable(
+                self, {**row, "cid": cid, "tenant_id": tenant_id, "branch": branch},
+                tenant_id=tenant_id, branch=branch,
+                filt={**context, "include_quarantined": include_quarantined,
+                      "max_trust_tier": max_trust, "max_sensitivity": max_sensitivity},
+                policy=self.policy,
+            ):
+                return None
             decision = may_read_item(
                 item_tenant_id=str(access_context.get("tenant_id") if access_context else ""),
                 sensitivity=int(row.get("sensitivity") or 0),
@@ -4949,7 +5134,7 @@ class PostgresEngine:
                         legal_blind=True,
                     )
                 else:
-                    derived_cid_bytes, derived_cids, retained_metadata = _derived_evidence_forget_plan(cid, candidates)
+                    derived_cid_bytes, derived_cids, retained_metadata = _derived_evidence_forget_plan(cid, candidates, source_types={key: str(value.get("source_type") or "") for key, value in cascade_metadata.items()})
                 affected_cids = {cid, *derived_cids}
                 affected_cid_bytes = [cid_bytes, *derived_cid_bytes]
                 propagated["erased_derived_evidence"] = derived_cids
@@ -5051,6 +5236,7 @@ class PostgresEngine:
                         """,
                         (db_tenant_id, branch, affected_cid_bytes),
                     )
+                self._invalidate_mental_models(cur, db_tenant_id, branch)
                 # Erasure hook: cached embedding vectors are derived data keyed
                 # by text hash, so they cannot be invalidated row-precisely once
                 # the source is erased — purge the provider's cache scope
@@ -5244,7 +5430,7 @@ class PostgresEngine:
 
     def export_tenant(self, tenant_id: str) -> dict[str, Any]:
         db_tenant_id = _stable_uuid("tenant", tenant_id)
-        with self.connect() as conn:
+        with self._mental_model_connection(tenant_id) as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
                 cur.execute(
@@ -5378,6 +5564,8 @@ class PostgresEngine:
                     for row in cur.fetchall()
                 ]
                 intentions = [item.to_dict() for item in self.list_intentions(tenant_id)]
+                cur.execute("SELECT record FROM mental_models WHERE tenant_id = %s ORDER BY branch, model_id", (db_tenant_id,))
+                mental_models = [copy_model_json(row["record"]) for row in cur.fetchall()]
         return {
             "tenant_id": tenant_id,
             "evidence": evidence,
@@ -5389,6 +5577,7 @@ class PostgresEngine:
             "justifications": justifications,
             "contradictions": contradictions,
             "intentions": intentions,
+            "mental_models": mental_models,
             "audit_log": audit,
             "deletion_log": deletion,
             "merge_log": merge_log,
@@ -5399,6 +5588,10 @@ class PostgresEngine:
             self.export_tenant(tenant_id),
             {**dict(access_context or {}), "tenant_id": tenant_id},
             policy_max_sensitivity=self.policy.max_sensitivity,
+            evidence_gate=lambda row: derived_evidence_readable(
+                self, row, tenant_id=tenant_id, branch=str(row.get("branch") or "main"),
+                filt={**dict(access_context or {}), "tenant_id": tenant_id}, policy=self.policy,
+            ),
         )
 
     def to_json(self) -> str:
@@ -5458,6 +5651,7 @@ class PostgresEngine:
             "contradictions": [item for exported in tenant_exports for item in exported["contradictions"]],
             "calibrations": [item for exported in tenant_exports for item in exported["calibrations"]],
             "entities": [item for exported in tenant_exports for item in exported["entities"]],
+            "mental_models": [item for exported in tenant_exports for item in exported["mental_models"]],
             "audit_log": [item for exported in tenant_exports for item in exported["audit_log"]],
             "deletion_log": [item for exported in tenant_exports for item in exported["deletion_log"]],
             "merge_log": merge_log,
@@ -5729,6 +5923,7 @@ class PostgresEngine:
             with conn.cursor() as cur:
                 self._set_tenant(cur, db_tenant_id)
                 cur.execute("DELETE FROM relations WHERE tenant_id = %s AND branch = %s", (db_tenant_id, branch))
+                cur.execute("DELETE FROM mental_models WHERE tenant_id = %s AND branch = %s", (db_tenant_id, branch))
                 cur.execute("DELETE FROM assertions WHERE tenant_id = %s AND branch = %s", (db_tenant_id, branch))
                 cur.execute(
                     """
@@ -5808,6 +6003,11 @@ class PostgresEngine:
                         cid = _bytes_to_cid(row["cid"])
                         metadata = dict(row["metadata"] or {})
                         if is_retired_summary_metadata(metadata):
+                            continue
+                        if not derived_evidence_readable(
+                            self, {**dict(row), "cid": cid, "tenant_id": tenant_id, "branch": branch},
+                            tenant_id=tenant_id, branch=branch, filt=filt, policy=self.policy,
+                        ):
                             continue
                         decision = may_read_item(
                             item_tenant_id=tenant_id,
@@ -6344,7 +6544,7 @@ class PostgresEngine:
         """Return detached tenant-only copies in lexicographic intention_id order."""
 
         db_tenant_id = _stable_uuid("tenant", tenant_id)
-        with self.connect() as conn:
+        with self._mental_model_connection(tenant_id) as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
                 cur.execute(
@@ -6889,19 +7089,8 @@ def _graph_ppr_as_of_key(as_of: datetime | None, moment: datetime) -> str:
 
 
 def _metadata_source_cids(metadata: dict[str, Any]) -> set[str]:
-    sources: set[str] = set()
-    single = metadata.get("source_evidence_cid")
-    if single:
-        sources.add(str(single))
-    values = metadata.get("source_evidence_cids")
-    if isinstance(values, list):
-        sources.update(str(item) for item in values if item)
-    summary = metadata.get("summary")
-    if isinstance(summary, dict):
-        summary_values = summary.get("source_evidence_cids")
-        if isinstance(summary_values, list):
-            sources.update(str(item) for item in summary_values if item)
-    return sources
+    sources, _ = derived_source_cids({"metadata": metadata})
+    return set(sources)
 
 
 def _derived_evidence_forget_plan(
@@ -6909,6 +7098,7 @@ def _derived_evidence_forget_plan(
     candidates: list[tuple[bytes, dict[str, Any]]],
     *,
     legal_blind: bool = False,
+    source_types: Mapping[str, str] | None = None,
 ) -> tuple[list[bytes], list[str], dict[bytes, dict[str, Any]]]:
     affected = {cid}
     erased_bytes: list[bytes] = []
@@ -6926,7 +7116,7 @@ def _derived_evidence_forget_plan(
                 continue
             surviving_sources = sources - affected
             if surviving_sources and not legal_blind:
-                retained[candidate_bytes] = _trim_metadata_source_cids(metadata, affected)
+                retained[candidate_bytes] = _trim_metadata_source_cids(metadata, affected, source_type=(source_types or {}).get(candidate_cid, ""))
                 continue
             affected.add(candidate_cid)
             retained.pop(candidate_bytes, None)
@@ -6936,22 +7126,10 @@ def _derived_evidence_forget_plan(
     return erased_bytes, erased_cids, retained
 
 
-def _trim_metadata_source_cids(metadata: dict[str, Any], affected_cids: set[str]) -> dict[str, Any]:
-    trimmed = copy.deepcopy(metadata)
-    if str(trimmed.get("source_evidence_cid") or "") in affected_cids:
-        trimmed.pop("source_evidence_cid", None)
-    values = trimmed.get("source_evidence_cids")
-    if isinstance(values, list):
-        trimmed["source_evidence_cids"] = [str(item) for item in values if str(item) not in affected_cids]
-    summary = trimmed.get("summary")
-    if isinstance(summary, dict):
-        summary_values = summary.get("source_evidence_cids")
-        if isinstance(summary_values, list):
-            kept = [str(item) for item in summary_values if str(item) not in affected_cids]
-            summary["source_evidence_cids"] = kept
-            summary["source_count"] = len(kept)
-            summary.pop("source_fingerprint", None)
-    return trimmed
+def _trim_metadata_source_cids(
+    metadata: dict[str, Any], affected_cids: set[str], *, source_type: str = "",
+) -> dict[str, Any]:
+    return trim_derived_source_cids(metadata, affected_cids, source_type=source_type)
 
 
 def _uuid_or_none(value: str | None) -> str | None:

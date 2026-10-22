@@ -1,0 +1,22 @@
+# Case index
+
+- scope.md — approved local scope
+- route/route-scope.md — code audit selection
+- timeline.md — progress and outstanding work
+- evidence/E-runtime-final.md — final candidate verification and limits
+- evidence/E-validation.md — earlier intermediate verification
+- artifact-hashes.json — evidence fixity
+- references.md — original source links
+- field-journal.md — anonymized technical lessons
+- runtime-source-manifest.json — frozen source, tests and dependency identities
+- runtime-retrieval-comparison.json — final matched development retrieval comparison
+- verify-candidate.sh — exact final test command
+- evidence/E-mental-models.md — subsequent maintained-answer implementation and review
+- mental-models-source-manifest.json — source identity for the maintained-answer phase
+- mental-models-final-verification.xml — 1889 passed, 114 skipped on that source
+- verify-mental-models.sh — expanded 44-module verification command
+- mental-models-artifact-hashes.json — refreshed case artifact fixity after the subsequent phase
+- evidence/E-background-refresh.md — background worker and PostgreSQL transaction review
+- background-refresh-source-manifest.json — source identity for background refresh
+- background-refresh-final-verification.xml — expanded final regression receipt
+- verify-background-refresh.sh — exact background-refresh verification command

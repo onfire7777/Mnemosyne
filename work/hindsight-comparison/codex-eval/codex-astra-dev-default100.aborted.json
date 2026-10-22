@@ -1,0 +1,5 @@
+{
+  "status": "aborted_by_operator",
+  "reason": "Stopped after source review identified a required stored-media guard in the default ranking fallback. Partial receipts are preserved; no aggregate score is valid. Final code will use a new run name.",
+  "superseded_by": "codex-astra-dev-default100-final"
+}

@@ -1,0 +1,11 @@
+# E-validation
+- title: Local regression verification
+- observed_at: 2026-10-22
+- source_type: command
+- source_ref: verification.xml
+- content_hash: 5d071ed4f238ca3481a5ba25bb0f9e2753f24e8f16f0c562655239339f90d0f8
+- artifact_path: verification.xml
+- repro_command: uv run --locked python -m pytest tests/test_passage_graph.py tests/test_retrieval_integrity.py tests/test_parity_retrieval.py tests/test_time_window.py tests/test_store_recall.py tests/test_cli_internals.py tests/test_cli_mcp_parity.py tests/test_mcp_validation_regressions.py
+- raw_excerpt: 608 passed in 4.87s
+- linked_workitem: WI-fixes
+- supersedes: none

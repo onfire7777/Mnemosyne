@@ -331,14 +331,20 @@ class PassageIndexStore:
                     "INSERT OR REPLACE INTO passages (scope, cid, sha) VALUES (?, ?, ?)", (scope, cid, sha)
                 )
 
-    def openie(self, scope: str, model: str, cids: Iterable[str]) -> dict[str, list[list[str]]]:
-        """Triples of the scope's passages, by evidence CID."""
+    def openie(
+        self, scope: str, model: str, cids: Iterable[str], *,
+        expected_text_shas: Mapping[str, str] | None = None,
+    ) -> dict[str, list[list[str]]]:
+        """Triples by CID, optionally bound to the caller's current readable text."""
         rows = self._select(
-            "SELECT p.cid, o.triples FROM passages p JOIN openie o ON o.sha = p.sha "
+            "SELECT p.cid, p.sha, o.triples FROM passages p JOIN openie o ON o.sha = p.sha "
             "WHERE p.scope = ? AND o.model = ? AND p.cid IN ({marks})",
             (scope, model), cids,
         )
-        return {cid: json.loads(triples) for cid, triples in rows}
+        return {
+            cid: json.loads(triples) for cid, sha, triples in rows
+            if expected_text_shas is None or expected_text_shas.get(cid) == sha
+        }
 
     def put_openie(self, sha: str, model: str, triples: list[list[str]]) -> None:
         with self._lock, self._conn:
@@ -347,15 +353,22 @@ class PassageIndexStore:
                 (sha, model, json.dumps(triples, ensure_ascii=False)),
             )
 
-    def vectors(self, scope: str, kind: str, model: str, keys: Iterable[str]) -> dict[str, bytes]:
+    def vectors(
+        self, scope: str, kind: str, model: str, keys: Iterable[str], *,
+        expected_text_shas: Mapping[str, str] | None = None,
+    ) -> dict[str, bytes]:
         """Passage vectors by evidence CID (through the scope's registrations); fact and entity
         vectors by the sha256 of their text."""
         if kind == "passage":
             rows = self._select(
-                "SELECT p.cid, v.vec FROM passages p JOIN vectors v ON v.sha = p.sha "
+                "SELECT p.cid, p.sha, v.vec FROM passages p JOIN vectors v ON v.sha = p.sha "
                 "WHERE p.scope = ? AND v.kind = 'passage' AND v.model = ? AND p.cid IN ({marks})",
                 (scope, model), keys,
             )
+            return {
+                cid: bytes(vec) for cid, sha, vec in rows
+                if expected_text_shas is None or expected_text_shas.get(cid) == sha
+            }
         else:
             rows = self._select(
                 "SELECT sha, vec FROM vectors WHERE kind = ? AND model = ? AND sha IN ({marks})", (kind, model), keys
@@ -843,15 +856,23 @@ class PassageGraphIndex:
     def _graph(self, scope: str, passages: Sequence[Hit], embedder: Any) -> _Graph:
         import numpy as np
 
-        key = (scope, self.openie_model, _embedding_model_key(embedder), tuple(hit.id for hit in passages))
+        # A CID survives role-dependent redaction and disclosure-policy changes. Bind
+        # cached graphs and persisted derivatives to exactly what this caller may see.
+        passage_ids = tuple(hit.id for hit in passages)
+        readable = tuple((hit.id, text_sha(hit.text), self.disclosable(hit)) for hit in passages)
+        key = (scope, self.openie_model, _embedding_model_key(embedder), readable)
         with self._cache_lock:
             if self._cache is not None and self._cache[0] == key:
                 return self._cache[1]
             started = time.perf_counter()
             dims = int(embedder.dims)
             embed_model = _embedding_model_key(embedder)
-            shas = [hit.id if self.disclosable(hit) else "" for hit in passages]
-            triples_by_sha = self.store.openie(scope, self.openie_model, [sha for sha in shas if sha])
+            shas = [cid if allowed else "" for cid, _sha, allowed in readable]
+            expected_text_shas = {cid: sha for cid, sha, allowed in readable if allowed}
+            triples_by_sha = self.store.openie(
+                scope, self.openie_model, expected_text_shas,
+                expected_text_shas=expected_text_shas,
+            )
             entities: dict[str, int] = {}
             facts: dict[tuple[str, str, str], int] = {}
             fact_entities: list[tuple[int, ...]] = []
@@ -878,7 +899,12 @@ class PassageGraphIndex:
             n_passages, n_entities = len(passages), len(entities)
             entity_list = list(entities)
             fact_list = list(facts)
-            passage_vectors = _matrix(np, self.store.vectors(scope, "passage", embed_model, [s for s in shas if s]), shas, dims)
+            passage_vectors = _matrix(
+                np, self.store.vectors(
+                    scope, "passage", embed_model, expected_text_shas,
+                    expected_text_shas=expected_text_shas,
+                ), shas, dims,
+            )
             entity_shas = [text_sha(phrase) for phrase in entity_list]
             entity_vectors = _matrix(np, self.store.vectors(scope, "entity", embed_model, entity_shas), entity_shas, dims)
             fact_shas = [text_sha(fact_text(*fact)) for fact in fact_list]
@@ -923,7 +949,7 @@ class PassageGraphIndex:
             out = np.bincount(src_a, weights=weight_a, minlength=size) if size else np.zeros(0)
             transition = weight_a / out[src_a] if len(src_a) else weight_a
             graph = _Graph(
-                passage_ids=key[3],
+                passage_ids=passage_ids,
                 n_passages=n_passages,
                 fact_entities=fact_entities,
                 facts=fact_list,
@@ -1127,6 +1153,7 @@ class PassageGraphIndex:
         # An embeddings-only index hands back cosines: one scale for every question, so a
         # caller can tell a strong match from the best of a bad lot.
         cosine = self.embeddings_only and bool(ranked)
+        transformed_scale: str | None = None
         if cosine:
             explain["score_scale"] = "cosine"
             explain["top_score"] = round(final[ranked[0]], 4)
@@ -1135,6 +1162,8 @@ class PassageGraphIndex:
             ranked, fused, explain["second_hop"] = self._second_hop(query, graph, passages, ranked, embedder)
             if fused is not None:
                 final = fused
+                cosine = False
+                transformed_scale = "rrf"
         if self.rerank_top > 0 and reranker is not None and ranked:
             head = ranked[: self.rerank_top]
             chosen = self._rerank(query, [passages[i] for i in head])
@@ -1143,6 +1172,8 @@ class PassageGraphIndex:
                 taken = set(first)
                 ranked = first + [i for i in ranked if i not in taken]
                 final = {i: 1.0 / (1 + position) for position, i in enumerate(ranked)}
+                cosine = False
+                transformed_scale = "reciprocal_rank"
             explain["reranked"] = len(chosen)
         unindexed = np.flatnonzero(~graph.indexed).tolist()
         if unindexed:
@@ -1159,8 +1190,16 @@ class PassageGraphIndex:
                     final[i] = final[ranked[min(rank, len(ranked)) - 1]]
             else:
                 final = fused
+                transformed_scale = "rrf"
             ranked = sorted(fused, key=lambda i: -fused[i])
             explain["unindexed_passages"] = len(unindexed)
+        if transformed_scale is not None:
+            # Rank scores are not semantic confidence. Keep the first-pass cosine
+            # diagnostic separate so the pipeline cannot certify a new winner
+            # using the original winner's score.
+            if "top_score" in explain:
+                explain["first_pass_cosine_top_score"] = explain.pop("top_score")
+            explain["score_scale"] = transformed_scale
         explain["seconds"] = round(time.perf_counter() - started, 4)
         hits = [
             replace(passages[i], score=final[i], channel="passage_graph", metadata=dict(passages[i].metadata))

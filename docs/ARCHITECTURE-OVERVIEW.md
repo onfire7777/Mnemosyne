@@ -1,5 +1,13 @@
 # Mnemosyne — Architecture Overview (Visual)
 
+October 22 addition: [grounded reflection](reflect.md) and [maintained answers](mental-models.md)
+reuse the existing bounded answer orchestrator. Maintained answers occupy a separate advisory
+store and never feed generated prose into evidence retrieval. An opt-in scope-bound worker
+checks durable schedules, uses expiring leases, retries failures and revalidates authority
+before publication. SQLite and PostgreSQL publish against transaction-protected source reads;
+PostgreSQL currently uses conservative source-table locks and still needs live concurrency
+validation. The older counts and milestone snapshot below describe their stated July baseline.
+
 > **Mnemosyne** is a **local-first memory compiler for AI agents**. It turns a stream of
 > raw interactions into a **content-addressed evidence ledger** plus **rebuildable typed
 > projections** (entities, relations, assertions, preferences, procedures, lessons),
@@ -685,6 +693,13 @@ adapters); `storage.py` (`CommandKeyManager`, KMS); `provenance.py` (`C2paToolVe
 The fallback embedding is `text.hashing_embedding(text, dims=256)` — **BLAKE2b** per-token, **256-d** by
 default (`retrieval.HashingEmbeddingProvider.dims = 256`). The production schema column is `VECTOR(1024)`;
 the production dimensionality (1024) is supplied by a real embedding provider, **not** the hashing fallback.
+Lexical adapters rank evidence already registered in the requested tenant and branch. Each
+evidence ID must resolve to a current authoritative engine row; unknown or deleted IDs are
+withheld. The engine rechecks access and transitive summary/proposal source custody, and
+rebuilds returned evidence text from the authorized row. Integrations that previously returned
+unregistered evidence must ingest it first. Graph adapters return relation hits whose source
+evidence is checked; non-relation graph hits are withheld.
+
 All command adapters are **shell-free**: JSON on stdin, JSON on stdout, no secret-bearing argv. The registry
 means **the engine runs fully offline by default**; production swaps in real endpoints without touching
 engine code.

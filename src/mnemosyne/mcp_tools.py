@@ -20,11 +20,13 @@ import base64
 import json
 import os
 from collections import defaultdict
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from time import perf_counter
 from typing import Any, Literal, assert_never
 from uuid import NAMESPACE_URL, uuid5
 
+from mnemosyne.answering import AnswerReadContext, GroundedProvider
 from mnemosyne.engine import (
     Intention,
     LocalMemoryEngine,
@@ -324,6 +326,51 @@ TOOL_SPEC: list[dict[str, Any]] = [
         "name": "search",
         "description": "Fast hybrid retrieval with trust filtering, provenance, confidence, and abstention. Trust tiers are numeric and lower is MORE trusted (0 = direct user, 5 = untrusted external). min_trust_tier and max_trust_tier both name the least-trusted tier still admitted, and max_trust_tier is the one applied when both are given, so a contradictory pair (min above max) is refused rather than silently collapsed. session_id (honoured only with a valid signed session_token for that session, refused otherwise) ranks that session's live working memory together with long-term memory in the one list, and a working item and the ledger record it cites come back as one hit. token_budget fits the hits to fewer tokens and is clamped, not refused, above the policy budget of 4096. lean leaves out the explain block and the per-hit diagnostics. Every hit's metadata says its memory_type and created_at.",
         "arguments": ["tenant_id", "query"],
+    },
+    {
+        "name": "reflect",
+        "description": "Answer from authorized long-term memory using bounded multi-hop retrieval and a server-configured grounded reader. Returns exact evidence quotations or supported deterministic calculations, citation spans and derivations; abstains when grounding fails. Does not save generated memories. Requires configured grounded providers. Tenant, user, role and source trust are bound to the signed session when session authentication is enabled.",
+        "arguments": ["tenant_id", "question"],
+    },
+    {
+        "name": "mental_model_create",
+        "description": "Save a private mental-model question without calling a provider. Ownership and read scope are fixed to the current tenant, user and branch.",
+        "arguments": ["tenant_id","user_id","name","question"],
+    },
+    {
+        "name": "mental_model_get",
+        "description": "Read a saved mental model after current source and scope checks. Calls no provider unless refresh_if_stale is explicitly true; stale or denied content is withheld.",
+        "arguments": ["tenant_id","user_id","model_id"],
+    },
+    {
+        "name": "mental_model_list",
+        "description": "List the authenticated user's saved mental models in the exact read scope, with stale content withheld and no provider calls.",
+        "arguments": ["tenant_id","user_id"],
+    },
+    {
+        "name": "mental_model_refresh",
+        "description": "Refresh a private saved mental model using the configured grounded reader and current authorized sources. Unchanged models avoid inference unless force is true.",
+        "arguments": ["tenant_id","user_id","model_id"],
+    },
+    {
+        "name": "mental_model_update",
+        "description": "Update a private mental-model name or question with an optional expected version. Changing its question invalidates the saved answer; does not call a provider.",
+        "arguments": ["tenant_id","user_id","model_id"],
+    },
+    {
+        "name": "mental_model_schedule",
+        "description": "Enable or disable periodic freshness checks for a private mental model. Requires a separately running authorized refresh worker; scheduling does not call a provider. The interval must be 60 to 604800 seconds.",
+        "arguments": ["tenant_id","user_id","model_id"],
+    },
+    {
+        "name": "mental_model_delete",
+        "description": "Delete a private mental model and its saved revisions, with an optional expected version.",
+        "arguments": ["tenant_id","user_id","model_id"],
+    },
+    {
+        "name": "mental_model_history",
+        "description": "Read metadata-only revision history for a private mental model. Historical generated text and source content are not returned.",
+        "arguments": ["tenant_id","user_id","model_id"],
     },
     {
         "name": "deep_search",
@@ -646,6 +693,7 @@ class MemoryTools:
         security: SecurityPolicy | None = None,
         parametric: ParametricTier | None = None,
         metrics: MetricsRegistry | None = None,
+        grounded_provider_factory: Callable[[], GroundedProvider] | None = None,
     ):
         self.engine = engine
         self.ingestion = ingestion or IngestionPipeline(engine)
@@ -658,6 +706,9 @@ class MemoryTools:
             self.learning = runtime_state.load_learning(self.learning)
         self.parametric = parametric or ParametricTier()
         self.metrics = metrics or (runtime_state.load_metrics() if runtime_state else MetricsRegistry())
+        # Resolve lazily and per request: provider disclosure is mutable state,
+        # and unconfigured reflection must not prevent ordinary memory use.
+        self._grounded_provider_factory = grounded_provider_factory
 
     @staticmethod
     def _working_time(value: str | datetime, name: str) -> datetime:
@@ -1382,6 +1433,355 @@ class MemoryTools:
             raise PermissionError(f"{operation} intention denied: {decision.reason}")
         return decision
 
+    def reflect(
+        self,
+        tenant_id: str,
+        question: str,
+        branch: str = "main",
+        role: WriteRole = "reader",
+        user_id: str | None = None,
+        source_trust_tier: int | None = None,
+        max_trust_tier: int | None = None,
+        max_sensitivity: int | None = None,
+        capability_tags: list[str] | None = None,
+        purpose: list[str] | None = None,
+        residency: str | None = None,
+        region: str | None = None,
+        lawful_basis: list[str] | None = None,
+        break_glass: bool = False,
+        as_of: str | None = None,
+    ) -> dict[str, Any]:
+        """Produce an ephemeral, source-grounded answer within the caller's scope."""
+        from mnemosyne.answering import (
+            AnswerLimits,
+            AnswerReadContext,
+            AnswerRequest,
+            GroundedAnswerOrchestrator,
+            public_grounded_answer,
+        )
+        from mnemosyne.providers.grounded_reader import CommandGroundedProvider
+
+        _require_text(tenant_id, field="tenant_id")
+        _require_text(branch, field="branch")
+        _require_text(question, field="question")
+        if user_id is not None:
+            _require_text(user_id, field="user_id")
+        limits = AnswerLimits()
+        if len(question) > limits.max_query_characters:
+            raise ValueError("reflect question exceeds the query limit")
+        if not isinstance(break_glass, bool):
+            raise ValueError("break_glass must be a boolean")
+        context = AnswerReadContext(
+            tenant_id=tenant_id, branch=branch, role=role, user_id=user_id,
+            source_trust_tier=source_trust_tier, max_trust_tier=max_trust_tier,
+            max_sensitivity=max_sensitivity,
+            capability_tags=capability_tags if capability_tags is not None else (),
+            purpose=purpose if purpose is not None else (),
+            residency=residency, region=region,
+            lawful_basis=lawful_basis if lawful_basis is not None else (),
+            break_glass=break_glass, as_of=as_of,
+        )
+        try:
+            factory = self._grounded_provider_factory or CommandGroundedProvider.from_environment
+            provider = factory()
+            if not callable(getattr(provider, "decompose", None)) or not callable(getattr(provider, "read", None)):
+                raise TypeError("grounded provider must support decomposition and reading")
+        except Exception as exc:
+            raise ValueError("reflect grounded provider is not configured or is invalid") from exc
+        result = GroundedAnswerOrchestrator(self.engine, provider, limits=limits).answer(
+            AnswerRequest(question=question, context=context), provider,
+        )
+        try:
+            disclosure = provider.disclosure
+        except Exception:
+            disclosure = {}
+        if not isinstance(disclosure, dict) or set(disclosure) not in (
+            {"query_decomposer"}, {"query_decomposer", "grounded_reader"},
+        ):
+            disclosure = {}
+        return public_grounded_answer(result, disclosure, include_derivation=True)
+
+    def _mental_model_service(self) -> Any:
+        from mnemosyne.mental_models import MentalModelService
+
+        return MentalModelService(self.engine, provider_factory=self._grounded_provider_factory)
+
+    @staticmethod
+    def _mental_model_context(
+        tenant_id: str, user_id: str, branch: str, role: WriteRole,
+        source_trust_tier: int | None, max_trust_tier: int | None,
+        max_sensitivity: int | None, capability_tags: list[str] | None,
+        purpose: list[str] | None, residency: str | None, region: str | None,
+        lawful_basis: list[str] | None, break_glass: bool, as_of: str | None,
+    ) -> AnswerReadContext:
+        for field, value in (("tenant_id", tenant_id), ("user_id", user_id), ("branch", branch)):
+            _require_text(value, field=field)
+        if type(break_glass) is not bool or break_glass:
+            raise ValueError("mental models cannot persist break_glass access")
+        return AnswerReadContext(
+            tenant_id=tenant_id, user_id=user_id, branch=branch, role=role,
+            source_trust_tier=source_trust_tier, max_trust_tier=max_trust_tier,
+            max_sensitivity=max_sensitivity,
+            capability_tags=capability_tags if capability_tags is not None else (),
+            purpose=purpose if purpose is not None else (), residency=residency, region=region,
+            lawful_basis=lawful_basis if lawful_basis is not None else (), break_glass=False, as_of=as_of,
+        )
+
+    def _authorize_mental_model_write(self, operation: str, context: AnswerReadContext) -> None:
+        self._authorize(
+            operation, role=context.role,
+            source_trust_tier=(context.source_trust_tier if context.source_trust_tier is not None
+                               else int(TrustTier.USER_AUTHORED)),
+            target_sink="belief",
+        )
+
+    @staticmethod
+    def _validate_mental_model_version(expected_version: int | None) -> None:
+        if expected_version is not None and (type(expected_version) is not int or expected_version < 0):
+            raise ValueError("expected_version must be a non-negative integer")
+
+    def mental_model_create(
+        self,
+        tenant_id: str,
+        user_id: str,
+        name: str,
+        question: str,
+        branch: str = "main",
+        role: WriteRole = "agent",
+        source_trust_tier: int | None = None,
+        max_trust_tier: int | None = None,
+        max_sensitivity: int | None = None,
+        capability_tags: list[str] | None = None,
+        purpose: list[str] | None = None,
+        residency: str | None = None,
+        region: str | None = None,
+        lawful_basis: list[str] | None = None,
+        break_glass: bool = False,
+        as_of: str | None = None,
+    ) -> dict[str, Any]:
+        _require_text(name, field="name")
+        _require_text(question, field="question")
+        context = self._mental_model_context(
+            tenant_id, user_id, branch, role, source_trust_tier, max_trust_tier,
+            max_sensitivity, capability_tags, purpose, residency, region,
+            lawful_basis, break_glass, as_of,
+        )
+        self._authorize_mental_model_write("mental_model_create", context)
+        return self._mental_model_service().create(context, name=name, question=question)
+
+    def mental_model_get(
+        self,
+        tenant_id: str,
+        user_id: str,
+        model_id: str,
+        refresh_if_stale: bool = False,
+        branch: str = "main",
+        role: WriteRole = "agent",
+        source_trust_tier: int | None = None,
+        max_trust_tier: int | None = None,
+        max_sensitivity: int | None = None,
+        capability_tags: list[str] | None = None,
+        purpose: list[str] | None = None,
+        residency: str | None = None,
+        region: str | None = None,
+        lawful_basis: list[str] | None = None,
+        break_glass: bool = False,
+        as_of: str | None = None,
+    ) -> dict[str, Any]:
+        _require_text(model_id, field="model_id")
+        if type(refresh_if_stale) is not bool:
+            raise ValueError("refresh_if_stale must be a boolean")
+        context = self._mental_model_context(
+            tenant_id, user_id, branch, role, source_trust_tier, max_trust_tier,
+            max_sensitivity, capability_tags, purpose, residency, region,
+            lawful_basis, break_glass, as_of,
+        )
+        if refresh_if_stale:
+            self._authorize_mental_model_write("mental_model_refresh", context)
+        return self._mental_model_service().get(context, model_id, refresh_if_stale=refresh_if_stale)
+
+    def mental_model_list(
+        self,
+        tenant_id: str,
+        user_id: str,
+        branch: str = "main",
+        role: WriteRole = "agent",
+        source_trust_tier: int | None = None,
+        max_trust_tier: int | None = None,
+        max_sensitivity: int | None = None,
+        capability_tags: list[str] | None = None,
+        purpose: list[str] | None = None,
+        residency: str | None = None,
+        region: str | None = None,
+        lawful_basis: list[str] | None = None,
+        break_glass: bool = False,
+        as_of: str | None = None,
+    ) -> list[dict[str, Any]]:
+        context = self._mental_model_context(
+            tenant_id, user_id, branch, role, source_trust_tier, max_trust_tier,
+            max_sensitivity, capability_tags, purpose, residency, region,
+            lawful_basis, break_glass, as_of,
+        )
+        return self._mental_model_service().list(context)
+
+    def mental_model_refresh(
+        self,
+        tenant_id: str,
+        user_id: str,
+        model_id: str,
+        force: bool = False,
+        branch: str = "main",
+        role: WriteRole = "agent",
+        source_trust_tier: int | None = None,
+        max_trust_tier: int | None = None,
+        max_sensitivity: int | None = None,
+        capability_tags: list[str] | None = None,
+        purpose: list[str] | None = None,
+        residency: str | None = None,
+        region: str | None = None,
+        lawful_basis: list[str] | None = None,
+        break_glass: bool = False,
+        as_of: str | None = None,
+    ) -> dict[str, Any]:
+        _require_text(model_id, field="model_id")
+        if type(force) is not bool:
+            raise ValueError("force must be a boolean")
+        context = self._mental_model_context(
+            tenant_id, user_id, branch, role, source_trust_tier, max_trust_tier,
+            max_sensitivity, capability_tags, purpose, residency, region,
+            lawful_basis, break_glass, as_of,
+        )
+        self._authorize_mental_model_write("mental_model_refresh", context)
+        return self._mental_model_service().refresh(context, model_id, force=force)
+
+    def mental_model_update(
+        self,
+        tenant_id: str,
+        user_id: str,
+        model_id: str,
+        name: str | None = None,
+        question: str | None = None,
+        expected_version: int | None = None,
+        branch: str = "main",
+        role: WriteRole = "agent",
+        source_trust_tier: int | None = None,
+        max_trust_tier: int | None = None,
+        max_sensitivity: int | None = None,
+        capability_tags: list[str] | None = None,
+        purpose: list[str] | None = None,
+        residency: str | None = None,
+        region: str | None = None,
+        lawful_basis: list[str] | None = None,
+        break_glass: bool = False,
+        as_of: str | None = None,
+    ) -> dict[str, Any]:
+        _require_text(model_id, field="model_id")
+        if name is not None:
+            _require_text(name, field="name")
+        if question is not None:
+            _require_text(question, field="question")
+        self._validate_mental_model_version(expected_version)
+        context = self._mental_model_context(
+            tenant_id, user_id, branch, role, source_trust_tier, max_trust_tier,
+            max_sensitivity, capability_tags, purpose, residency, region,
+            lawful_basis, break_glass, as_of,
+        )
+        self._authorize_mental_model_write("mental_model_update", context)
+        return self._mental_model_service().update(context, model_id, name=name, question=question, expected_version=expected_version)
+
+    def mental_model_schedule(
+        self,
+        tenant_id: str,
+        user_id: str,
+        model_id: str,
+        interval_seconds: int = 300,
+        enabled: bool = True,
+        expected_version: int | None = None,
+        branch: str = "main",
+        role: WriteRole = "agent",
+        source_trust_tier: int | None = None,
+        max_trust_tier: int | None = None,
+        max_sensitivity: int | None = None,
+        capability_tags: list[str] | None = None,
+        purpose: list[str] | None = None,
+        residency: str | None = None,
+        region: str | None = None,
+        lawful_basis: list[str] | None = None,
+        break_glass: bool = False,
+        as_of: str | None = None,
+    ) -> dict[str, Any]:
+        _require_text(model_id, field="model_id")
+        if type(interval_seconds) is not int or not 60 <= interval_seconds <= 604800:
+            raise ValueError("interval_seconds must be an integer from 60 to 604800")
+        if type(enabled) is not bool:
+            raise ValueError("enabled must be a boolean")
+        self._validate_mental_model_version(expected_version)
+        context = self._mental_model_context(
+            tenant_id, user_id, branch, role, source_trust_tier, max_trust_tier,
+            max_sensitivity, capability_tags, purpose, residency, region,
+            lawful_basis, break_glass, as_of,
+        )
+        self._authorize_mental_model_write("mental_model_schedule", context)
+        return self._mental_model_service().schedule(
+            context, model_id, interval_seconds=interval_seconds,
+            enabled=enabled, expected_version=expected_version,
+        )
+
+    def mental_model_delete(
+        self,
+        tenant_id: str,
+        user_id: str,
+        model_id: str,
+        expected_version: int | None = None,
+        branch: str = "main",
+        role: WriteRole = "agent",
+        source_trust_tier: int | None = None,
+        max_trust_tier: int | None = None,
+        max_sensitivity: int | None = None,
+        capability_tags: list[str] | None = None,
+        purpose: list[str] | None = None,
+        residency: str | None = None,
+        region: str | None = None,
+        lawful_basis: list[str] | None = None,
+        break_glass: bool = False,
+        as_of: str | None = None,
+    ) -> dict[str, Any]:
+        _require_text(model_id, field="model_id")
+        self._validate_mental_model_version(expected_version)
+        context = self._mental_model_context(
+            tenant_id, user_id, branch, role, source_trust_tier, max_trust_tier,
+            max_sensitivity, capability_tags, purpose, residency, region,
+            lawful_basis, break_glass, as_of,
+        )
+        self._authorize_mental_model_write("mental_model_delete", context)
+        return self._mental_model_service().delete(context, model_id, expected_version=expected_version)
+
+    def mental_model_history(
+        self,
+        tenant_id: str,
+        user_id: str,
+        model_id: str,
+        branch: str = "main",
+        role: WriteRole = "agent",
+        source_trust_tier: int | None = None,
+        max_trust_tier: int | None = None,
+        max_sensitivity: int | None = None,
+        capability_tags: list[str] | None = None,
+        purpose: list[str] | None = None,
+        residency: str | None = None,
+        region: str | None = None,
+        lawful_basis: list[str] | None = None,
+        break_glass: bool = False,
+        as_of: str | None = None,
+    ) -> list[dict[str, Any]]:
+        _require_text(model_id, field="model_id")
+        context = self._mental_model_context(
+            tenant_id, user_id, branch, role, source_trust_tier, max_trust_tier,
+            max_sensitivity, capability_tags, purpose, residency, region,
+            lawful_basis, break_glass, as_of,
+        )
+        return self._mental_model_service().history(context, model_id)
+
     def search(
         self,
         tenant_id: str,
@@ -1404,7 +1804,11 @@ class MemoryTools:
         session_identity: SessionIdentity | None = None,
         query_mode: str | None = None,
         evaluated_at: str | None = None,
+        query_timezone: str | None = None,
     ) -> dict[str, Any]:
+        from mnemosyne.retrieval import resolve_query_timezone
+
+        resolve_query_timezone(query_timezone)
         filt = self._read_context(
             tenant_id,
             role=role,
@@ -1430,6 +1834,8 @@ class MemoryTools:
             filt["token_budget"] = token_budget
         if query_mode is not None:
             filt["query_mode"] = query_mode
+        if query_timezone is not None:
+            filt["query_timezone"] = query_timezone
         if evaluated_at is not None:
             # The instant the question is asked at (ISO 8601): "yesterday" is relative to it.
             if parse_dt(evaluated_at) is None:

@@ -8,7 +8,7 @@ import re
 import unicodedata
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Any, Literal, Mapping, Protocol, Sequence
 
 from mnemosyne.engine import MemoryEngine
 from mnemosyne.providers.deterministic_synthesis import DeterministicSynthesizer
@@ -452,6 +452,23 @@ class AnswerSpan:
     slice_sha256: str
 
 
+GroundedFailureKind = Literal[
+    "assembly_error", "reader_error", "replay_error", "replay_drift", "invalid_reader_proposal"
+]
+
+
+class _NoAuthorizedEvidence(LookupError):
+    """An ordinary no-answer outcome, distinct from provider/storage failures."""
+
+
+class _EvidenceReplayDrift(LookupError):
+    """Previously assembled evidence is no longer the same authorized evidence."""
+
+
+class _EvidenceReplayError(RuntimeError):
+    """The evidence replay could not complete."""
+
+
 @dataclass(frozen=True, slots=True)
 class GroundedAnswer:
     answer: str
@@ -461,6 +478,8 @@ class GroundedAnswer:
     trace: AnswerTrace
     abstained: bool
     public_reason: str | None = None
+    # Internal retry classification only; public_grounded_answer never emits it.
+    failure_kind: GroundedFailureKind | None = None
 
 
 class QueryDecomposer(Protocol):
@@ -469,6 +488,55 @@ class QueryDecomposer(Protocol):
 
 class GroundedReader(Protocol):
     def read(self, payload: dict[str, object]) -> object: ...
+
+
+class GroundedProvider(QueryDecomposer, GroundedReader, Protocol):
+    @property
+    def disclosure(self) -> dict[str, object]: ...
+
+
+def public_grounded_answer(
+    result: GroundedAnswer,
+    disclosure: dict[str, object],
+    *,
+    include_derivation: bool = False,
+) -> dict[str, object]:
+    """Serialize validated claims without exposing raw evidence or read context."""
+    return {
+        "answer": result.answer,
+        "claims": [
+            {
+                "text": claim.text,
+                **({"derivation": {
+                    "schema_version": "mnemosyne.claim-derivation/v1",
+                    "kind": "synthesis" if claim.synthesis_operation is not None else "quotation",
+                    "operation": claim.synthesis_operation,
+                }} if include_derivation else {}),
+                "evidence_cids": list(claim.evidence_cids),
+                "spans": [
+                    {
+                        "cid": span.cid,
+                        "start": span.start,
+                        "end": span.end,
+                        "slice_sha256": span.slice_sha256,
+                    }
+                    for span in claim.spans
+                ],
+            }
+            for claim in result.claims
+        ],
+        "abstained": result.abstained,
+        "hops": [
+            {
+                "index": hop.index,
+                "queries": list(hop.queries),
+                "channels": list(hop.channels),
+                "retrieved_cids": list(hop.retrieved_cids),
+            }
+            for hop in result.trace.hops
+        ],
+        "reader": disclosure,
+    }
 
 
 class GroundedAnswerOrchestrator:
@@ -488,11 +556,17 @@ class GroundedAnswerOrchestrator:
     def assemble(self, request: AnswerRequest) -> GroundedAnswer:
         try:
             return self._assemble(request)
+        except _NoAuthorizedEvidence:
+            return self._abstain()
+        except _EvidenceReplayDrift:
+            return self._abstain("replay_drift")
+        except _EvidenceReplayError:
+            return self._abstain("replay_error")
         except Exception:
             # Providers and storage are untrusted at this boundary. Any ordinary
             # failure collapses to the same public abstention; process-control
             # BaseExceptions still propagate.
-            return self._abstain()
+            return self._abstain("assembly_error")
 
     def answer(self, request: AnswerRequest, reader: GroundedReader) -> GroundedAnswer:
         """Validate model-proposed atomic claims against freshly replayed evidence."""
@@ -510,15 +584,17 @@ class GroundedAnswerOrchestrator:
                 }
             )
         except Exception:
-            return self._abstain()
+            return self._abstain("reader_error")
         replayed = self.assemble(request)
+        if replayed.failure_kind is not None:
+            return self._abstain("replay_drift" if replayed.failure_kind == "replay_drift" else "replay_error")
         if replayed.abstained or (
             replayed.trace.evidence_fingerprint
             != assembled.trace.evidence_fingerprint
             or replayed.evidence != assembled.evidence
             or replayed.trace.hops != assembled.trace.hops
         ):
-            return self._abstain()
+            return self._abstain("replay_drift")
         try:
             claims = self._claims(proposal, {row.cid: row.content for row in replayed.evidence})
             if not claims:
@@ -532,14 +608,17 @@ class GroundedAnswerOrchestrator:
                 abstained=False,
             )
         except Exception:
-            return self._reader_abstain(replayed)
+            return self._reader_abstain(replayed, "invalid_reader_proposal")
 
     @staticmethod
-    def _reader_abstain(assembled: GroundedAnswer) -> GroundedAnswer:
+    def _reader_abstain(
+        assembled: GroundedAnswer, failure_kind: GroundedFailureKind | None = None,
+    ) -> GroundedAnswer:
         """Preserve authorized retrieval custody when only the reader abstains."""
         return GroundedAnswer(
             answer="", claims=(), evidence=assembled.evidence,
             episodes=assembled.episodes, trace=assembled.trace, abstained=True,
+            failure_kind=failure_kind,
         )
 
     def _assemble(self, request: AnswerRequest) -> GroundedAnswer:
@@ -604,23 +683,30 @@ class GroundedAnswerOrchestrator:
             if not queries:
                 break
         if not authorized:
-            raise LookupError("no authorized evidence")
+            raise _NoAuthorizedEvidence("no authorized evidence")
         fingerprint = _fingerprint(authorized)
         replayed: dict[str, dict[str, Any]] = {}
-        for hop, original_hop_map in zip(hops, hop_maps, strict=True):
-            replayed_refs: set[str] = set()
-            for query in hop.queries:
-                query_refs, _ = self._retrieve(query, request.context)
-                replayed_refs.update(query_refs)
-            replayed_hop_map = self._authorized_rows(request.context, replayed_refs)
-            if (
-                set(replayed_hop_map) != set(original_hop_map)
-                or _fingerprint(replayed_hop_map) != hop.evidence_fingerprint
-            ):
-                raise LookupError("authorized evidence changed")
-            replayed.update(replayed_hop_map)
-        if set(replayed) != set(authorized) or _fingerprint(replayed) != fingerprint:
-            raise LookupError("authorized evidence changed")
+        try:
+            for hop, original_hop_map in zip(hops, hop_maps, strict=True):
+                replayed_refs: set[str] = set()
+                for query in hop.queries:
+                    query_refs, _ = self._retrieve(query, request.context)
+                    replayed_refs.update(query_refs)
+                replayed_hop_map = self._authorized_rows(request.context, replayed_refs)
+                if (
+                    set(replayed_hop_map) != set(original_hop_map)
+                    or _fingerprint(replayed_hop_map) != hop.evidence_fingerprint
+                ):
+                    raise _EvidenceReplayDrift("authorized evidence changed")
+                replayed.update(replayed_hop_map)
+            if set(replayed) != set(authorized) or _fingerprint(replayed) != fingerprint:
+                raise _EvidenceReplayDrift("authorized evidence changed")
+        except _NoAuthorizedEvidence as exc:
+            raise _EvidenceReplayDrift("authorized evidence changed") from exc
+        except _EvidenceReplayDrift:
+            raise
+        except Exception as exc:
+            raise _EvidenceReplayError("authorized evidence replay failed") from exc
         evidence = tuple(
             self._evidence(cid, row, cid_hop[cid])
             for cid, row in sorted(replayed.items(), key=lambda item: _episode_key(item[1], item[0]))
@@ -707,7 +793,7 @@ class GroundedAnswerOrchestrator:
                 or explain.get("reality_monitoring", {}).get("ungrounded_only")
                 or not explain.get("confidence", {}).get("query_support")
             ):
-                raise LookupError("retrieval abstained")
+                raise _NoAuthorizedEvidence("retrieval abstained")
         referenced: set[str] = set()
         channels: set[str] = set()
         for hit in result.hits:
@@ -838,7 +924,7 @@ class GroundedAnswerOrchestrator:
         )
 
     @staticmethod
-    def _abstain() -> GroundedAnswer:
+    def _abstain(failure_kind: GroundedFailureKind | None = None) -> GroundedAnswer:
         return GroundedAnswer(
             answer="",
             claims=(),
@@ -847,6 +933,7 @@ class GroundedAnswerOrchestrator:
             trace=AnswerTrace((), ""),
             abstained=True,
             public_reason=_PUBLIC_ABSTENTION,
+            failure_kind=failure_kind,
         )
 
 

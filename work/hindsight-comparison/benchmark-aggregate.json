@@ -1,0 +1,57 @@
+{
+  "source": "onfire7777/Mnemetric@1545424460541b74d629344b96e60b735fd2108c:docs/evidence/longmemeval-s-2026-10-08/full-dense-haiku-cap4000.jsonl",
+  "retrieval": "authenticated GitHub connector; parsed raw JSONL, aggregates only",
+  "count": 500,
+  "correct": 462,
+  "by_split": {
+    "dev": {
+      "n": 100,
+      "correct": 96,
+      "complete_evidence_failures": 4
+    },
+    "heldout": {
+      "n": 400,
+      "correct": 366,
+      "complete_evidence_failures": 20
+    }
+  },
+  "by_type": {
+    "single-session-user": {
+      "n": 70,
+      "correct": 68,
+      "complete_evidence_failures": 1
+    },
+    "multi-session": {
+      "n": 133,
+      "correct": 113,
+      "complete_evidence_failures": 13
+    },
+    "single-session-preference": {
+      "n": 30,
+      "correct": 28,
+      "complete_evidence_failures": 2
+    },
+    "temporal-reasoning": {
+      "n": 133,
+      "correct": 126,
+      "complete_evidence_failures": 2
+    },
+    "knowledge-update": {
+      "n": 78,
+      "correct": 71,
+      "complete_evidence_failures": 6
+    },
+    "single-session-assistant": {
+      "n": 56,
+      "correct": 56,
+      "complete_evidence_failures": 0
+    }
+  },
+  "failures": {
+    "missing_evidence": 14,
+    "complete_evidence": 24
+  },
+  "finish_reasons": {
+    "stop": 500
+  }
+}

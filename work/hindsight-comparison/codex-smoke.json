@@ -1,0 +1,5 @@
+{
+  "status": "failed",
+  "kind": "tool_use",
+  "message": "Codex emitted a tool or unsupported item; attempt rejected"
+}

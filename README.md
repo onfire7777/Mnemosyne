@@ -18,8 +18,10 @@ used by [BurnOS](https://github.com/onfire7777/BurnOS).
 | Capability | What it means for an assistant |
 | --- | --- |
 | Persistent evidence | Save context with content identifiers and provenance, then retrieve the supporting source. |
-| Time-aware memory | Correct or supersede beliefs while retaining their history; query earlier states. |
+| Time-aware memory | Correct or supersede beliefs while retaining their history; query earlier states or recall conversations in a caller-specified timezone. |
 | Hybrid retrieval | Combine lexical, vector and graph signals with configurable ranking and confidence. |
+| Grounded reflection | Gather memory across bounded hops and return source-validated citations or abstain, using a configured grounded provider. |
+| Maintained answers | Save a private question and cited answer, detect changed sources, and refresh manually or with an opt-in background worker without turning generated prose into evidence. |
 | Branches | Try memory changes on a branch, then merge or discard them. |
 | Reusable skills | Import Agent Skills, Markdown and portable `.burnskill` files; expose active skills as MCP prompts and their files as resources. |
 | Books to BurnSkills | Turn PDF or EPUB text into a linked framework with source citations, coverage reports and audits. |
@@ -207,14 +209,25 @@ See the [architecture overview](docs/ARCHITECTURE-OVERVIEW.md) and
 ## Evaluation and limitations
 
 Mnemosyne owns the runtime, its contract tests and internal engineering evaluations.
-Public benchmarks, scoring, leaderboard material and their evidence belong to
-[Mnemetric](https://github.com/onfire7777/Mnemetric). See the
-[ownership note](docs/benchmark/MNEMETRIC-REPOSITORY.md) and [internal evaluation guide](eval/README.md).
+It runs independently of external benchmark sites, with no shared database or runtime
+dependency on a leaderboard. See the [internal evaluation guide](eval/README.md).
 
 Historical scores apply only to their recorded revision, dataset, providers, hardware and
 configuration. They are not a current comparative ranking or proof of general answer quality.
 Recall measurement was hardened in October 2026; interpret older receipts in their original context.
 No new benchmark result is claimed by this README update.
+
+The [Hindsight comparison](docs/HINDSIGHT-COMPARISON.md) maps source-verified
+capabilities and remaining gaps. The [memory audit](docs/2026-10-22-memory-audit-report.md)
+records implemented repairs and development evidence. Grounded
+[`reflect`](docs/reflect.md) gathers authorized evidence over bounded hops and
+returns validated quotations or deterministic calculations with citations; it
+requires a configured grounded provider.
+The separate [mental-model lifecycle](docs/mental-models.md) persists private
+answers, checks source freshness on reads, and exposes refresh and version history
+through Python, MCP and `mneme mental-model`. An opt-in worker supports persistent
+schedules, crash recovery and bounded retries on SQLite/PostgreSQL. Cached reads
+need no provider call.
 
 - Core capture and retrieval are usable; advanced deployment profiles have separate validation needs.
 - Default deterministic embeddings support offline operation but are not equivalent to a configured semantic model.
@@ -257,6 +270,9 @@ a runtime demonstration or production deployment evidence.
 
 - [Documentation index](docs/README.md)
 - [Architecture overview](docs/ARCHITECTURE-OVERVIEW.md)
+- [Grounded reflection](docs/reflect.md)
+- [Maintained mental models](docs/mental-models.md)
+- [Codex answer evaluation](eval/longmemeval_s/README.md)
 - [BurnSkill standard](docs/BURNSKILL.md)
 - [CLI reference](https://github.com/onfire7777/Mnemosyne/wiki/CLI-Reference)
 - [MCP reference](https://github.com/onfire7777/Mnemosyne/wiki/MCP-Server-and-Tools)

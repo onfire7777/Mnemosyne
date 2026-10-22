@@ -8,6 +8,8 @@ One-screen map of `docs/`. Lane discipline applies throughout: each document own
 | --- | --- |
 | [ARCHITECTURE-OVERVIEW.md](ARCHITECTURE-OVERVIEW.md) | As-built system map generated from the source tree: components, schema, write/read data flows |
 | [ENGINE-CONTRACT.md](ENGINE-CONTRACT.md) | Normative `MemoryEngine` storage contract; conformance defined by the shared-contract + parity suites |
+| [reflect.md](reflect.md) | Bounded evidence gathering, cited grounded answers, provider setup and current limits |
+| [mental-models.md](mental-models.md) | Private maintained answers, source freshness, explicit refresh, revisions and backend limits |
 | [SELF-HOSTED-PRODUCTION-ARCHITECTURE.md](SELF-HOSTED-PRODUCTION-ARCHITECTURE.md) | Self-hosted-first production architecture (two profiles, one codebase; no gate weakened) |
 | [Mnemosyne-Privacy-and-Access-Control-Policy.md](Mnemosyne-Privacy-and-Access-Control-Policy.md) | Access-control policy statement |
 | [ROADMAP-TO-100.md](ROADMAP-TO-100.md) | Blueprint-parity tracker; defines the additive / default-off / byte-identical-when-inactive wiring contract |
@@ -31,6 +33,8 @@ Division of authority: Plan A builds, Plan B proves and publishes — no externa
 
 ## Research (`research/`)
 
+- [HINDSIGHT-COMPARISON.md](HINDSIGHT-COMPARISON.md) — source-pinned capability comparison and delivery priorities.
+- [2026-10-22-memory-audit-report.md](2026-10-22-memory-audit-report.md) — implemented fixes, development evaluation receipts and remaining gaps.
 - [AI-Memory-Systems-Market-Research-2026.md](research/AI-Memory-Systems-Market-Research-2026.md) / `.pdf` — the competitive + benchmark landscape (systems, SWOTs, benchmark credibility problems). Ground-truth reference for Execution Plan B.
 
 ## Decisions

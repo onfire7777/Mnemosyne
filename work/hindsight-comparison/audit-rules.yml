@@ -1,0 +1,26 @@
+rules:
+  - id: local-shell-execution
+    languages: [python]
+    message: Review whether shell execution can receive untrusted input.
+    severity: WARNING
+    pattern-either:
+      - pattern: subprocess.run(..., shell=True, ...)
+      - pattern: subprocess.Popen(..., shell=True, ...)
+      - pattern: os.system(...)
+  - id: local-dynamic-evaluation
+    languages: [python]
+    message: Review dynamic evaluation of potentially untrusted input.
+    severity: WARNING
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: exec(...)
+      - pattern: pickle.loads(...)
+      - pattern: pickle.load(...)
+  - id: local-disabled-tls-verification
+    languages: [python]
+    message: Review disabled certificate validation.
+    severity: WARNING
+    pattern-either:
+      - pattern: requests.$METHOD(..., verify=False, ...)
+      - pattern: httpx.$METHOD(..., verify=False, ...)
+      - pattern: ssl._create_unverified_context(...)

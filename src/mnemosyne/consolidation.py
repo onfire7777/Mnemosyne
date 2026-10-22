@@ -8,8 +8,11 @@ import re
 import secrets
 import subprocess
 from collections import OrderedDict, defaultdict
+from contextlib import nullcontext
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
+from graphlib import TopologicalSorter
 from hashlib import sha256
 from typing import Any, Callable, Mapping, Protocol, Sequence
 from uuid import NAMESPACE_URL, uuid5
@@ -30,7 +33,7 @@ from mnemosyne.lifecycle import FidelityTier, LifecycleState, apply_rehearsal_sc
 from mnemosyne.models import Assertion, Evidence, Relation, parse_dt, utc_now
 from mnemosyne.policy import OperatingPolicy, validate_cadence_tier
 from mnemosyne.privacy import detect_pii_tags, redact_pii_text
-from mnemosyne.retrieval import HashingEmbeddingProvider, is_retired_summary_metadata
+from mnemosyne.retrieval import HashingEmbeddingProvider, derived_source_cids, is_retired_summary_metadata
 from mnemosyne.security import SecurityPolicy, TrustTier
 from mnemosyne.standing import standing_from_authority_state
 from mnemosyne.text import hashing_embedding
@@ -358,6 +361,116 @@ class PassResult:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(slots=True)
+class _SummarySourceSnapshot:
+    evidence: dict[str, dict[str, Any]]
+    assertions: list[str]
+
+
+class _SourceCustody:
+    """Shared generation-time source snapshot for summaries and proposal replay."""
+
+    def __init__(self, engine: Any):
+        self.engine = engine
+
+    @staticmethod
+    def fingerprint(snapshot: _SummarySourceSnapshot) -> str:
+        return sha256(json.dumps(asdict(snapshot), sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+    @staticmethod
+    def evidence_state(item: Evidence) -> dict[str, Any]:
+        state = item.to_dict()
+        # Embedding maintenance does not change the text or its custody.
+        state.pop("embedding", None)
+        lifecycle = state["metadata"].get("lifecycle")
+        if isinstance(lifecycle, dict):
+            lifecycle.pop("access_count", None)
+            lifecycle.pop("last_accessed", None)
+            lifecycle.pop("salience", None)
+            if not lifecycle:
+                state["metadata"].pop("lifecycle")
+        return state
+
+    def assertion_states(self, tenant_id: str, branch: str, cids: set[str]) -> list[str]:
+        # A correction can supersede an assertion without editing its evidence
+        # row. Bind those support records as well as the immutable source text.
+        rows = self.engine.export_tenant(tenant_id).get("assertions", [])
+        states = []
+        for row in rows:
+            if row.get("branch", "main") != branch or not cids.intersection(row.get("source_evidence_cids", [])):
+                continue
+            state = {key: value for key, value in row.items() if key not in {"last_accessed", "access_count"}}
+            states.append(json.dumps(state, sort_keys=True))
+        return sorted(states)
+
+    def capture(
+        self, tenant_id: str, branch: str, evidence: list[Evidence], *, reject_data_only: bool = False,
+    ) -> _SummarySourceSnapshot | None:
+        try:
+            expected = {item.cid: self.evidence_state(item) for item in evidence if item.cid}
+            if not expected or len(expected) != len(evidence):
+                return None
+            states: dict[str, dict[str, Any]] = {}
+            lineage: dict[str, set[str]] = {}
+            pending = list(expected)
+            while pending:
+                cid = pending.pop()
+                if cid in states:
+                    continue
+                item = self.engine.get_evidence(tenant_id, cid, branch)
+                if item is None or item.tenant_id != tenant_id or item.branch != branch or item.erased:
+                    return None
+                state = self.evidence_state(item)
+                if cid in expected and state != expected[cid]:
+                    return None
+                if (
+                    item.metadata.get("derived_source_custody") == "incomplete"
+                    or is_retired_summary_metadata(item.metadata)
+                    or (reject_data_only and ConsolidationWorker._contains_no_write_data([item], {}))
+                ):
+                    return None
+                states[cid] = state
+                sources, valid = derived_source_cids(item)
+                if not valid or (
+                    not sources and (item.source_type == "consolidation-summary" or isinstance(item.metadata.get("summary"), dict))
+                ):
+                    return None
+                lineage[cid] = set(sources)
+                pending.extend(source for source in sources if source not in states)
+            # Reject cycles instead of letting derived summaries corroborate
+            # themselves through another derived row.
+            for cid in TopologicalSorter(lineage).static_order():
+                state = states[cid]
+                sources = [states[source] for source in lineage[cid]]
+                if sources and (
+                    int(state["sensitivity"]) < max(int(source["sensitivity"]) for source in sources)
+                    or int(state["trust_tier"]) < max(int(source["trust_tier"]) for source in sources)
+                    or merge_access_policies(
+                        [state["access_policy"], *(source["access_policy"] for source in sources)], tenant_id=tenant_id,
+                    ) != merge_access_policies([state["access_policy"]], tenant_id=tenant_id)
+                ):
+                    # An existing child may predate an ancestor's privacy
+                    # tightening. Reject it before disclosing its stale gist.
+                    return None
+            return _SummarySourceSnapshot(states, self.assertion_states(tenant_id, branch, set(states)))
+        except (AttributeError, KeyError, TypeError, ValueError):
+            return None
+
+    def unchanged(
+        self, tenant_id: str, branch: str, snapshot: _SummarySourceSnapshot, evidence: list[Evidence],
+    ) -> bool:
+        try:
+            if any(self.evidence_state(item) != snapshot.evidence.get(item.cid) for item in evidence):
+                return False
+            for cid, expected in snapshot.evidence.items():
+                item = self.engine.get_evidence(tenant_id, cid, branch)
+                if item is None or self.evidence_state(item) != expected:
+                    return False
+            return self.assertion_states(tenant_id, branch, set(snapshot.evidence)) == snapshot.assertions
+        except (AttributeError, KeyError, TypeError, ValueError):
+            return False
 
 
 @dataclass(slots=True)
@@ -835,7 +948,10 @@ class ConsolidationWorker:
             if pass_name == "summarizer":
                 summary = self._run_summarizer_pass(tenant_id, branch, evidence, payload, mutation_budget)
                 if summary:
-                    pass_results.append(PassResult(pass_name, "complete", summary))
+                    status = "complete" if summary.get("materialized", True) else "skipped"
+                    if status == "skipped":
+                        skipped.append(f"summarizer_{summary.get('reason', 'not_materialized')}")
+                    pass_results.append(PassResult(pass_name, status, summary))
                 else:
                     skipped.append("summarizer_no_evidence")
                     pass_results.append(PassResult(pass_name, "skipped", {"reason": "no_evidence"}))
@@ -1892,10 +2008,14 @@ class ConsolidationWorker:
     ) -> dict[str, Any] | None:
         if not evidence:
             return None
+        with getattr(self.engine, "_lock", nullcontext()):
+            source_snapshot = _SourceCustody(self.engine).capture(tenant_id, branch, evidence, reject_data_only=True)
+        if source_snapshot is None:
+            return {"materialized": False, "reason": "source_changed"}
         cluster_size = _positive_int(payload.get("raptor_cluster_size"), default=4)
         max_levels = _positive_int(payload.get("raptor_max_levels"), default=2)
         if max_levels <= 1 or len(evidence) <= cluster_size:
-            summary = self.summarizer.summarize(tenant_id, evidence)
+            summary = self.summarizer.summarize(tenant_id, deepcopy(evidence))
             if not summary:
                 return None
             return self._materialize_summary(
@@ -1903,6 +2023,7 @@ class ConsolidationWorker:
                 branch,
                 summary,
                 evidence,
+                source_snapshot=source_snapshot,
                 raptor_level=1,
                 mutation_budget=mutation_budget,
             )
@@ -1910,6 +2031,7 @@ class ConsolidationWorker:
             tenant_id,
             branch,
             evidence,
+            source_snapshot=source_snapshot,
             cluster_size=cluster_size,
             max_levels=max_levels,
             mutation_budget=mutation_budget,
@@ -1921,13 +2043,14 @@ class ConsolidationWorker:
         branch: str,
         evidence: list[Evidence],
         *,
+        source_snapshot: _SummarySourceSnapshot,
         cluster_size: int,
         max_levels: int,
         mutation_budget: MutationRailBudget | None = None,
     ) -> dict[str, Any] | None:
         get_evidence = getattr(self.engine, "get_evidence", None)
         if not callable(get_evidence):
-            summary = self.summarizer.summarize(tenant_id, evidence)
+            summary = self.summarizer.summarize(tenant_id, deepcopy(evidence))
             if not summary:
                 return None
             return self._materialize_summary(
@@ -1935,6 +2058,7 @@ class ConsolidationWorker:
                 branch,
                 summary,
                 evidence,
+                source_snapshot=source_snapshot,
                 raptor_level=1,
                 mutation_budget=mutation_budget,
             )
@@ -1954,7 +2078,7 @@ class ConsolidationWorker:
             for cluster in clusters:
                 if not cluster:
                     continue
-                summary = self.summarizer.summarize(tenant_id, cluster)
+                summary = self.summarizer.summarize(tenant_id, deepcopy(cluster))
                 if not summary:
                     continue
                 if level > 1:
@@ -1970,15 +2094,19 @@ class ConsolidationWorker:
                     branch,
                     summary,
                     cluster,
+                    source_snapshot=source_snapshot,
                     raptor_level=level,
                     mutation_budget=mutation_budget,
                 )
+                if result.get("reason") == "source_changed":
+                    return result
                 if not result.get("materialized") or not result.get("summary_cid"):
                     continue
                 summary_cid = str(result["summary_cid"])
                 materialized = get_evidence(tenant_id, summary_cid, branch)
                 if materialized is not None:
                     next_level.append(materialized)
+                    source_snapshot.evidence[summary_cid] = _SourceCustody.evidence_state(materialized)
                 level_summary_cids.append(summary_cid)
                 all_relation_ids.extend(str(item) for item in result.get("derived_relation_ids", []))
                 all_results.append(result)
@@ -2043,14 +2171,53 @@ class ConsolidationWorker:
         summary: dict[str, Any],
         evidence: list[Evidence],
         *,
+        source_snapshot: _SummarySourceSnapshot,
+        raptor_level: int = 1,
+        mutation_budget: MutationRailBudget | None = None,
+    ) -> dict[str, Any]:
+        # Providers run outside the engine lock. Recheck source custody after
+        # generation and keep Local/SQLite's shared-instance writers out through
+        # the derived write. This is not a cross-process database transaction.
+        with getattr(self.engine, "_lock", nullcontext()):
+            if not _SourceCustody(self.engine).unchanged(tenant_id, branch, source_snapshot, evidence):
+                return {"materialized": False, "reason": "source_changed"}
+            allowed_sources: set[str] = set()
+            pending = [item.cid for item in evidence if item.cid]
+            while pending:
+                cid = pending.pop()
+                if cid in allowed_sources:
+                    continue
+                allowed_sources.add(cid)
+                sources, valid = derived_source_cids(source_snapshot.evidence[cid])
+                if not valid:
+                    return {"materialized": False, "reason": "source_changed"}
+                pending.extend(sources)
+            for key in ("source_cids", "relation_source_cids", "source_summary_cids"):
+                values = summary.get(key) or []
+                if not isinstance(values, list) or any(
+                    not isinstance(cid, str) or cid not in allowed_sources for cid in values
+                ):
+                    return {"materialized": False, "reason": "source_changed"}
+            return self._write_summary(
+                tenant_id, branch, summary, evidence, raptor_level=raptor_level,
+                mutation_budget=mutation_budget,
+            )
+
+    def _write_summary(
+        self,
+        tenant_id: str,
+        branch: str,
+        summary: dict[str, Any],
+        evidence: list[Evidence],
+        *,
         raptor_level: int = 1,
         mutation_budget: MutationRailBudget | None = None,
     ) -> dict[str, Any]:
         append_evidence = getattr(self.engine, "append_evidence", None)
         add_relation = getattr(self.engine, "add_relation", None)
-        source_cids = [str(cid) for cid in summary.get("source_cids") or [item.cid for item in evidence if item.cid]]
-        relation_source_cids = [str(cid) for cid in summary.get("relation_source_cids") or [item.cid for item in evidence if item.cid]]
-        source_summary_cids = [str(cid) for cid in summary.get("source_summary_cids") or []]
+        source_cids = list(dict.fromkeys(summary.get("source_cids") or [item.cid for item in evidence if item.cid]))
+        relation_source_cids = list(dict.fromkeys(summary.get("relation_source_cids") or [item.cid for item in evidence if item.cid]))
+        source_summary_cids = list(dict.fromkeys(summary.get("source_summary_cids") or []))
         summary_text = str(summary.get("summary") or "").strip()
         if not callable(append_evidence) or not callable(add_relation) or not source_cids or not summary_text:
             return {**summary, "materialized": False}
@@ -3119,7 +3286,18 @@ def _entity_label(subject: str) -> str:
 
 
 def _entity_key(subject: str) -> str:
-    normalized = _entity_label(subject).lower()
+    label = _entity_label(subject)
+    if not label.isascii():
+        import unicodedata
+
+        # Keep Unicode identities out of the legacy ASCII slug namespace:
+        # stripping these characters conflates unrelated names (often into
+        # "unknown-entity"). Normalize equivalent Unicode spellings without
+        # changing ASCII keys or attempting to split existing ambiguous rows.
+        normalized = unicodedata.normalize("NFKC", label).casefold()
+        normalized = re.sub(r"^(the|a|an)\s+", "", normalized)
+        return "unicode:" + sha256(normalized.encode("utf-8")).hexdigest()
+    normalized = label.lower()
     normalized = re.sub(r"^(the|a|an)\s+", "", normalized)
     normalized = re.sub(r"[^a-z0-9]+", "-", normalized).strip("-")
     return normalized or "unknown-entity"
@@ -3266,6 +3444,27 @@ class ProviderProposalLedger:
         request: dict[str, Any],
         run: Callable[[], dict[str, Any]],
     ) -> dict[str, Any]:
+        request = deepcopy(request)
+        guard = _SourceCustody(self.engine)
+        input_cids = _provider_request_input_cids(request)
+        with getattr(self.engine, "_lock", nullcontext()):
+            inputs = [self.engine.get_evidence(tenant_id, cid, branch) for cid in input_cids]
+            snapshot = guard.capture(tenant_id, branch, inputs) if input_cids and all(inputs) else None
+            if input_cids and snapshot is None:
+                raise ValueError("provider proposal source changed or unavailable")
+            if snapshot is not None:
+                # A caller may still hold an old public request after a source
+                # became private. Refuse it before any provider disclosure.
+                current = list(snapshot.evidence.values())
+                requested_policy = _provider_request_access_policy(request, tenant_id=tenant_id)
+                if (
+                    max(int(row["sensitivity"]) for row in current) > _provider_request_max_sensitivity(request)
+                    or merge_access_policies(
+                        [requested_policy, *(row["access_policy"] for row in current)], tenant_id=tenant_id,
+                    ) != requested_policy
+                ):
+                    raise ValueError("provider proposal request has stale source controls")
+            fingerprint = guard.fingerprint(snapshot) if snapshot is not None else None
         identity = _provider_proposal_identity(
             tenant_id=tenant_id,
             branch=branch,
@@ -3273,37 +3472,70 @@ class ProviderProposalLedger:
             strategy=strategy,
             request=request,
         )
-        replayed = self._load(tenant_id, branch, identity)
-        if replayed is not None:
-            response, cid = replayed
+        with getattr(self.engine, "_lock", nullcontext()):
+            replayed = self._load(tenant_id, branch, identity)
+            if replayed is not None:
+                response, cid, recorded_fingerprint = replayed
+                cached = self.engine.get_evidence(tenant_id, cid, branch)
+                cached_snapshot = guard.capture(tenant_id, branch, [cached]) if cached is not None else None
+                requested_policy = _provider_request_access_policy(request, tenant_id=tenant_id)
+                if cached_snapshot is None:
+                    raise ValueError("provider proposal cached record changed or unavailable")
+                cached_sources, _ = derived_source_cids(cached)
+                if (
+                    set(cached_sources) != set(input_cids)
+                    or int(cached.sensitivity) > _provider_request_max_sensitivity(request)
+                    or merge_access_policies(
+                        [requested_policy, cached.access_policy], tenant_id=tenant_id,
+                    ) != requested_policy
+                    or any(
+                        row["metadata"].get("quarantine_reason")
+                        or _access_policy_expired_at(row["access_policy"], utc_now())
+                        or any(
+                            bool(value) for key, value in row["access_policy"].items()
+                            if key in {"restricted", "hold"} or key.startswith("hold:")
+                        )
+                        for row in cached_snapshot.evidence.values()
+                    )
+                ):
+                    raise ValueError("provider proposal cached record controls changed or unavailable")
+                if snapshot is not None and (
+                    recorded_fingerprint != fingerprint
+                    or not guard.unchanged(tenant_id, branch, snapshot, inputs)
+                ):
+                    raise ValueError("provider proposal cached source changed or unavailable")
+                return _provider_response_with_record(
+                    response,
+                    cid=cid,
+                    source_identity=identity,
+                    replayed=True,
+                )
+
+        parsed = run()
+        with getattr(self.engine, "_lock", nullcontext()):
+            if snapshot is not None and not guard.unchanged(tenant_id, branch, snapshot, inputs):
+                raise ValueError("provider proposal source changed during generation")
+            max_sensitivity = _provider_request_max_sensitivity(request)
+            response = _provider_proposal_record_value(parsed, max_sensitivity=max_sensitivity)
+            cid = self._record(
+                tenant_id=tenant_id,
+                branch=branch,
+                role=role,
+                strategy=strategy,
+                source_identity=identity,
+                request=request,
+                response=response,
+                max_sensitivity=max_sensitivity,
+                input_state_sha256=fingerprint,
+            )
             return _provider_response_with_record(
                 response,
                 cid=cid,
                 source_identity=identity,
-                replayed=True,
+                replayed=False,
             )
 
-        parsed = run()
-        max_sensitivity = _provider_request_max_sensitivity(request)
-        response = _provider_proposal_record_value(parsed, max_sensitivity=max_sensitivity)
-        cid = self._record(
-            tenant_id=tenant_id,
-            branch=branch,
-            role=role,
-            strategy=strategy,
-            source_identity=identity,
-            request=request,
-            response=response,
-            max_sensitivity=max_sensitivity,
-        )
-        return _provider_response_with_record(
-            response,
-            cid=cid,
-            source_identity=identity,
-            replayed=False,
-        )
-
-    def _load(self, tenant_id: str, branch: str, source_identity: str) -> tuple[dict[str, Any], str] | None:
+    def _load(self, tenant_id: str, branch: str, source_identity: str) -> tuple[dict[str, Any], str, str | None] | None:
         export_tenant = getattr(self.engine, "export_tenant", None)
         if not callable(export_tenant):
             return None
@@ -3320,11 +3552,13 @@ class ProviderProposalLedger:
                 continue
             if row.get("source_identity") != source_identity:
                 continue
+            if row.get("erased"):
+                continue
             metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
             record = metadata.get("provider_proposal") if isinstance(metadata.get("provider_proposal"), dict) else {}
             response = record.get("response")
             if isinstance(response, dict):
-                return response, str(row.get("cid") or "")
+                return response, str(row.get("cid") or ""), record.get("input_state_sha256")
         return None
 
     def _record(
@@ -3338,6 +3572,7 @@ class ProviderProposalLedger:
         request: dict[str, Any],
         response: dict[str, Any],
         max_sensitivity: int,
+        input_state_sha256: str | None = None,
     ) -> str:
         append_evidence = getattr(self.engine, "append_evidence", None)
         if not callable(append_evidence):
@@ -3351,6 +3586,7 @@ class ProviderProposalLedger:
                 "strategy": strategy,
                 "source_identity": source_identity,
                 "input_cids": input_cids,
+                "input_state_sha256": input_state_sha256,
                 "request": _provider_proposal_request_summary(request),
                 "response": response,
             },
@@ -3364,6 +3600,7 @@ class ProviderProposalLedger:
                 "strategy": strategy,
                 "source_identity": source_identity,
                 "input_cids": input_cids,
+                "input_state_sha256": input_state_sha256,
                 "request": _provider_proposal_request_summary(request),
                 "response": response,
                 "response_sha256": sha256(
@@ -3374,6 +3611,7 @@ class ProviderProposalLedger:
                 "raw_fingerprint_omitted": True,
             },
             "reality_class": "externally_suggested",
+            "source_evidence_cids": input_cids,
         }
         cid = append_evidence(
             Evidence(

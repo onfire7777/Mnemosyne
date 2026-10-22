@@ -1,0 +1,158 @@
+........................................................................ [  3%]
+........................................................................ [  7%]
+........................................................................ [ 10%]
+........................................................................ [ 14%]
+........................................................................ [ 18%]
+........................................................................ [ 21%]
+........................................................................ [ 25%]
+........................................................................ [ 28%]
+........................................................................ [ 32%]
+........................................................................ [ 36%]
+.................F...................................................... [ 39%]
+........................................................................ [ 43%]
+........................................................................ [ 46%]
+......................F................................................. [ 50%]
+.sssss.................................................................. [ 54%]
+........................................................................ [ 57%]
+........................................................................ [ 61%]
+.......................................s..s...ss...s..s......sssss...... [ 64%]
+....s....sss....s..s..s..s.....ssss.....s..s..s..s..s..s..s..s..s..s..s. [ 68%]
+.s..s..s..s..s..s..s..s..s..s..s..s..s..s..s..s..s..s..s..s..s..s..s..s. [ 72%]
+.s.sssssssss.s..s..s..s..s..s..s..s..s..s..s..s..s..s..s..s..s..s..s..s. [ 75%]
+.s..s..s..s..s..s..s..s..s..s..s..s..s..s..s..s..s...................... [ 79%]
+........................................................................ [ 82%]
+....ssss................................................................ [ 86%]
+........................................................................ [ 90%]
+....F................................................................... [ 93%]
+........................................................................ [ 97%]
+.....................................................                    [100%]
+=================================== FAILURES ===================================
+_________________________ test_no_undocumented_stores __________________________
+
+baseline = {'schema_version': 1, 'policy': {'module': 'mnemosyne.policy', 'object': 'OperatingPolicy'}, 'rails': {'required': ['r...rf_k': 60, ...}, 'activation_weights': {'base_level': 0.35, 'semantic': 0.35, 'importance': 0.2, 'recency': 0.1}}, ...}
+
+    def test_no_undocumented_stores(baseline: dict[str, Any]) -> None:
+        declared = set(baseline["schema"]["required_tables"])
+        actual = _schema_tables()
+        undocumented = actual - declared
+>       assert not undocumented, f"sql/schema.sql has stores not mirrored in the baseline: {sorted(undocumented)}"
+E       AssertionError: sql/schema.sql has stores not mirrored in the baseline: ['mental_models']
+E       assert not {'mental_models'}
+
+tests/test_config_drift.py:342: AssertionError
+___________ test_rust_module_unit_tests_pass_without_model_artifacts ___________
+
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-600/test_rust_module_unit_tests_pa0')
+
+    def test_rust_module_unit_tests_pass_without_model_artifacts(tmp_path: Path) -> None:
+        binary = tmp_path / "embed-tests"
+>       subprocess.run(
+            ["rustc", "--edition=2021", "--test", str(RUST_MODULE), "-o", str(binary)],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+tests/test_compact_answering_embedder.py:165: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+input = None, capture_output = True, timeout = None, check = True
+popenargs = (['rustc', '--edition=2021', '--test', '/Users/admin/Desktop/Mnemosyne/services/answering-ort/src/embed.rs', '-o', '/p.../folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-600/test_rust_module_unit_tests_pa0/embed-tests'],)
+kwargs = {'cwd': PosixPath('/Users/admin/Desktop/Mnemosyne'), 'text': True, 'stdout': -1, 'stderr': -1}
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+    
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them,
+        or pass capture_output=True to capture both.
+    
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output & stderr attributes if those streams
+        were captured.
+    
+        If timeout (seconds) is given and the process takes too long,
+         a TimeoutExpired exception will be raised.
+    
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+    
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+    
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+    
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+    
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+>               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['rustc', '--edition=2021', '--test', '/Users/admin/Desktop/Mnemosyne/services/answering-ort/src/embed.rs', '-o', '/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-600/test_rust_module_unit_tests_pa0/embed-tests']' returned non-zero exit status 1.
+
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/subprocess.py:578: CalledProcessError
+____________ test_small_stores_are_written_byte_for_byte_as_before _____________
+
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-600/test_small_stores_are_written_0')
+
+    def test_small_stores_are_written_byte_for_byte_as_before(tmp_path: Path) -> None:
+        store = tmp_path / "store.json"
+        engine = LocalMemoryEngine(store_path=store)
+        _fill(engine, 5)  # lists below the sharing threshold stay inline
+>       assert store.read_text(encoding="utf-8") == _legacy_payload(engine)
+E       assert '{\n  "assert...emory": []\n}' == '{\n  "assert...emory": []\n}'
+E         
+E         Skipping 29272 identical leading characters in diff, use -v to show
+E            [],
+E         +   "mental_models": [],
+E             "merge_log": [],
+E             "policy": {
+E               "abstention_threshold": 0.45,...
+E         
+E         ...Full output truncated (223 lines hidden), use '-vv' to show
+
+tests/test_store_shared_values.py:53: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_config_drift.py::test_no_undocumented_stores - AssertionErr...
+FAILED tests/test_compact_answering_embedder.py::test_rust_module_unit_tests_pass_without_model_artifacts
+FAILED tests/test_store_shared_values.py::test_small_stores_are_written_byte_for_byte_as_before

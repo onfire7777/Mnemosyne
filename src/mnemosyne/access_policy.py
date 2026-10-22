@@ -11,7 +11,7 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 ROLE_SENSITIVITY_CEILINGS: dict[str, int] = {
     "reader": 1,
@@ -434,6 +434,7 @@ def filter_export_for_context(
     context: Mapping[str, Any],
     *,
     policy_max_sensitivity: int,
+    evidence_gate: Callable[[Mapping[str, Any]], bool] | None = None,
 ) -> dict[str, Any]:
     """Return a caller-scoped export with explicit omission/redaction disclosure."""
 
@@ -512,6 +513,9 @@ def filter_export_for_context(
     for item in exported.get("evidence", []):
         if not isinstance(item, Mapping):
             omit("evidence", "invalid_record")
+            continue
+        if evidence_gate is not None and not evidence_gate(item):
+            omit("evidence", "source_custody_denied")
             continue
         decision = decision_for(
             item,

@@ -1,0 +1,315 @@
+FFFFFF                                                                   [100%]
+=================================== FAILURES ===================================
+______ test_external_passage_index_is_copied_before_load_and_index[False] ______
+
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-499/test_external_passage_index_is0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10bb11220>
+wal = False
+
+    @pytest.mark.parametrize("wal", [False, True])
+    def test_external_passage_index_is_copied_before_load_and_index(tmp_path, monkeypatch, wal):
+        from mnemosyne import cli
+    
+        source = tmp_path / "source"
+        source.mkdir()
+        index = tmp_path / "external.sqlite"
+        original = sqlite3.connect(index)
+        if wal:
+            original.execute("PRAGMA journal_mode=WAL")
+        original.execute("CREATE TABLE markers (value TEXT)")
+        original.execute("INSERT INTO markers VALUES ('original')")
+        original.commit()
+        before = index.read_bytes()
+        wal_path = Path(str(index) + "-wal")
+        before_wal = wal_path.read_bytes() if wal else None
+        monkeypatch.setenv("MNEMOSYNE_PASSAGE_INDEX", str(index))
+        questions = tmp_path / "questions.json"
+        questions.write_text(json.dumps([{"id": "q", "question": "one", "gold": ["a"]}]))
+        output = tmp_path / "report.json"
+        seen = []
+    
+        def load_tools(args):
+            seen.append(Path(args.passage_index))
+            conn = sqlite3.connect(args.passage_index)
+            assert conn.execute("SELECT value FROM markers").fetchall() == [("original",)]
+            # Loading a writable sidecar may migrate it before indexing starts.
+            conn.execute("INSERT INTO markers VALUES ('load')")
+            conn.commit()
+    
+            def index_passages(tenant):
+                conn.execute("INSERT INTO markers VALUES ('indexed')")
+                conn.commit()
+                return {"indexed": True}
+    
+            return SimpleNamespace(
+                engine=SimpleNamespace(adapters=SimpleNamespace(passage_graph=None), close=conn.close),
+                index_passages=index_passages,
+                search=lambda **kwargs: {"hits": [{"id": "a"}], "abstained": False},
+            )
+    
+        monkeypatch.setattr(cli, "load_tools", load_tools)
+        monkeypatch.setattr("sys.argv", [
+            "store_recall", "--store", str(source), "--tenant", "synthetic",
+            "--questions", str(questions), "--out", str(output), "--index-first",
+        ])
+        try:
+            store_recall.main()
+>           assert original.execute("SELECT value FROM markers").fetchall() == [("original",)]
+E           AssertionError: assert [('original',... ('indexed',)] == [('original',)]
+E             
+E             Left contains 2 more items, first extra item: ('load',)
+E             Use -v to get more diff
+
+tests/test_store_recall.py:253: AssertionError
+----------------------------- Captured stdout call -----------------------------
+{"store": "/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-499/test_external_passage_index_is0/source", "tenant": "synthetic", "mode": "default", "questions": 1, "passage_graph": false, "index_report": {"indexed": true}, "recall_at_5": 1.0, "by_kind": {"?": 1.0}, "abstained": 0, "latency_ms": {"p50": 0.0, "p95": 0.0}, "latency_scope": "search_calls_excluding_setup_and_query_preparation", "query_vectors_prepared": false, "query_preparation_seconds": 0.0, "seconds": 0.0}
+______ test_external_passage_index_is_copied_before_load_and_index[True] _______
+
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-499/test_external_passage_index_is1')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10bdc3e10>
+wal = True
+
+    @pytest.mark.parametrize("wal", [False, True])
+    def test_external_passage_index_is_copied_before_load_and_index(tmp_path, monkeypatch, wal):
+        from mnemosyne import cli
+    
+        source = tmp_path / "source"
+        source.mkdir()
+        index = tmp_path / "external.sqlite"
+        original = sqlite3.connect(index)
+        if wal:
+            original.execute("PRAGMA journal_mode=WAL")
+        original.execute("CREATE TABLE markers (value TEXT)")
+        original.execute("INSERT INTO markers VALUES ('original')")
+        original.commit()
+        before = index.read_bytes()
+        wal_path = Path(str(index) + "-wal")
+        before_wal = wal_path.read_bytes() if wal else None
+        monkeypatch.setenv("MNEMOSYNE_PASSAGE_INDEX", str(index))
+        questions = tmp_path / "questions.json"
+        questions.write_text(json.dumps([{"id": "q", "question": "one", "gold": ["a"]}]))
+        output = tmp_path / "report.json"
+        seen = []
+    
+        def load_tools(args):
+            seen.append(Path(args.passage_index))
+            conn = sqlite3.connect(args.passage_index)
+            assert conn.execute("SELECT value FROM markers").fetchall() == [("original",)]
+            # Loading a writable sidecar may migrate it before indexing starts.
+            conn.execute("INSERT INTO markers VALUES ('load')")
+            conn.commit()
+    
+            def index_passages(tenant):
+                conn.execute("INSERT INTO markers VALUES ('indexed')")
+                conn.commit()
+                return {"indexed": True}
+    
+            return SimpleNamespace(
+                engine=SimpleNamespace(adapters=SimpleNamespace(passage_graph=None), close=conn.close),
+                index_passages=index_passages,
+                search=lambda **kwargs: {"hits": [{"id": "a"}], "abstained": False},
+            )
+    
+        monkeypatch.setattr(cli, "load_tools", load_tools)
+        monkeypatch.setattr("sys.argv", [
+            "store_recall", "--store", str(source), "--tenant", "synthetic",
+            "--questions", str(questions), "--out", str(output), "--index-first",
+        ])
+        try:
+            store_recall.main()
+>           assert original.execute("SELECT value FROM markers").fetchall() == [("original",)]
+E           AssertionError: assert [('original',... ('indexed',)] == [('original',)]
+E             
+E             Left contains 2 more items, first extra item: ('load',)
+E             Use -v to get more diff
+
+tests/test_store_recall.py:253: AssertionError
+----------------------------- Captured stdout call -----------------------------
+{"store": "/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-499/test_external_passage_index_is1/source", "tenant": "synthetic", "mode": "default", "questions": 1, "passage_graph": false, "index_report": {"indexed": true}, "recall_at_5": 1.0, "by_kind": {"?": 1.0}, "abstained": 0, "latency_ms": {"p50": 0.0, "p95": 0.0}, "latency_scope": "search_calls_excluding_setup_and_query_preparation", "query_vectors_prepared": false, "query_preparation_seconds": 0.0, "seconds": 0.0}
+_____________ test_output_cannot_replace_external_passage_index[] ______________
+
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-499/test_output_cannot_replace_ext0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10bd75c70>
+suffix = ''
+
+    @pytest.mark.parametrize("suffix", ["", "-wal", "-shm", "-journal"])
+    def test_output_cannot_replace_external_passage_index(tmp_path, monkeypatch, suffix):
+        source = tmp_path / "source"
+        source.mkdir()
+        index = tmp_path / "external.sqlite"
+        monkeypatch.setenv("MNEMOSYNE_PASSAGE_INDEX", str(index))
+        monkeypatch.setattr("sys.argv", [
+            "store_recall", "--store", str(source), "--tenant", "synthetic",
+            "--questions", str(tmp_path / "absent.json"), "--out", str(index) + suffix,
+        ])
+        with pytest.raises(SystemExit) as exc:
+>           store_recall.main()
+
+tests/test_store_recall.py:274: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+eval/store_recall.py:70: in main
+    questions = json.loads(args.questions.read_text(encoding="utf-8"))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/pathlib/__init__.py:787: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-499/test_output_cannot_replace_ext0/absent.json')
+mode = 'r', buffering = -1, encoding = 'utf-8', errors = None, newline = None
+
+    def open(self, mode='r', buffering=-1, encoding=None,
+             errors=None, newline=None):
+        """
+        Open the file pointed to by this path and return a file object, as
+        the built-in open() function does.
+        """
+        if "b" not in mode:
+            encoding = io.text_encoding(encoding)
+>       return io.open(self, mode, buffering, encoding, errors, newline)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: '/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-499/test_output_cannot_replace_ext0/absent.json'
+
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/pathlib/__init__.py:771: FileNotFoundError
+___________ test_output_cannot_replace_external_passage_index[-wal] ____________
+
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-499/test_output_cannot_replace_ext1')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10bcbf350>
+suffix = '-wal'
+
+    @pytest.mark.parametrize("suffix", ["", "-wal", "-shm", "-journal"])
+    def test_output_cannot_replace_external_passage_index(tmp_path, monkeypatch, suffix):
+        source = tmp_path / "source"
+        source.mkdir()
+        index = tmp_path / "external.sqlite"
+        monkeypatch.setenv("MNEMOSYNE_PASSAGE_INDEX", str(index))
+        monkeypatch.setattr("sys.argv", [
+            "store_recall", "--store", str(source), "--tenant", "synthetic",
+            "--questions", str(tmp_path / "absent.json"), "--out", str(index) + suffix,
+        ])
+        with pytest.raises(SystemExit) as exc:
+>           store_recall.main()
+
+tests/test_store_recall.py:274: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+eval/store_recall.py:70: in main
+    questions = json.loads(args.questions.read_text(encoding="utf-8"))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/pathlib/__init__.py:787: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-499/test_output_cannot_replace_ext1/absent.json')
+mode = 'r', buffering = -1, encoding = 'utf-8', errors = None, newline = None
+
+    def open(self, mode='r', buffering=-1, encoding=None,
+             errors=None, newline=None):
+        """
+        Open the file pointed to by this path and return a file object, as
+        the built-in open() function does.
+        """
+        if "b" not in mode:
+            encoding = io.text_encoding(encoding)
+>       return io.open(self, mode, buffering, encoding, errors, newline)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: '/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-499/test_output_cannot_replace_ext1/absent.json'
+
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/pathlib/__init__.py:771: FileNotFoundError
+___________ test_output_cannot_replace_external_passage_index[-shm] ____________
+
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-499/test_output_cannot_replace_ext2')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10bd7acf0>
+suffix = '-shm'
+
+    @pytest.mark.parametrize("suffix", ["", "-wal", "-shm", "-journal"])
+    def test_output_cannot_replace_external_passage_index(tmp_path, monkeypatch, suffix):
+        source = tmp_path / "source"
+        source.mkdir()
+        index = tmp_path / "external.sqlite"
+        monkeypatch.setenv("MNEMOSYNE_PASSAGE_INDEX", str(index))
+        monkeypatch.setattr("sys.argv", [
+            "store_recall", "--store", str(source), "--tenant", "synthetic",
+            "--questions", str(tmp_path / "absent.json"), "--out", str(index) + suffix,
+        ])
+        with pytest.raises(SystemExit) as exc:
+>           store_recall.main()
+
+tests/test_store_recall.py:274: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+eval/store_recall.py:70: in main
+    questions = json.loads(args.questions.read_text(encoding="utf-8"))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/pathlib/__init__.py:787: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-499/test_output_cannot_replace_ext2/absent.json')
+mode = 'r', buffering = -1, encoding = 'utf-8', errors = None, newline = None
+
+    def open(self, mode='r', buffering=-1, encoding=None,
+             errors=None, newline=None):
+        """
+        Open the file pointed to by this path and return a file object, as
+        the built-in open() function does.
+        """
+        if "b" not in mode:
+            encoding = io.text_encoding(encoding)
+>       return io.open(self, mode, buffering, encoding, errors, newline)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: '/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-499/test_output_cannot_replace_ext2/absent.json'
+
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/pathlib/__init__.py:771: FileNotFoundError
+_________ test_output_cannot_replace_external_passage_index[-journal] __________
+
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-499/test_output_cannot_replace_ext3')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10bd2e050>
+suffix = '-journal'
+
+    @pytest.mark.parametrize("suffix", ["", "-wal", "-shm", "-journal"])
+    def test_output_cannot_replace_external_passage_index(tmp_path, monkeypatch, suffix):
+        source = tmp_path / "source"
+        source.mkdir()
+        index = tmp_path / "external.sqlite"
+        monkeypatch.setenv("MNEMOSYNE_PASSAGE_INDEX", str(index))
+        monkeypatch.setattr("sys.argv", [
+            "store_recall", "--store", str(source), "--tenant", "synthetic",
+            "--questions", str(tmp_path / "absent.json"), "--out", str(index) + suffix,
+        ])
+        with pytest.raises(SystemExit) as exc:
+>           store_recall.main()
+
+tests/test_store_recall.py:274: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+eval/store_recall.py:70: in main
+    questions = json.loads(args.questions.read_text(encoding="utf-8"))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/pathlib/__init__.py:787: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-499/test_output_cannot_replace_ext3/absent.json')
+mode = 'r', buffering = -1, encoding = 'utf-8', errors = None, newline = None
+
+    def open(self, mode='r', buffering=-1, encoding=None,
+             errors=None, newline=None):
+        """
+        Open the file pointed to by this path and return a file object, as
+        the built-in open() function does.
+        """
+        if "b" not in mode:
+            encoding = io.text_encoding(encoding)
+>       return io.open(self, mode, buffering, encoding, errors, newline)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: '/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-499/test_output_cannot_replace_ext3/absent.json'
+
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/pathlib/__init__.py:771: FileNotFoundError
+=========================== short test summary info ============================
+FAILED tests/test_store_recall.py::test_external_passage_index_is_copied_before_load_and_index[False]
+FAILED tests/test_store_recall.py::test_external_passage_index_is_copied_before_load_and_index[True]
+FAILED tests/test_store_recall.py::test_output_cannot_replace_external_passage_index[]
+FAILED tests/test_store_recall.py::test_output_cannot_replace_external_passage_index[-wal]
+FAILED tests/test_store_recall.py::test_output_cannot_replace_external_passage_index[-shm]
+FAILED tests/test_store_recall.py::test_output_cannot_replace_external_passage_index[-journal]

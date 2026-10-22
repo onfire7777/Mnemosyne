@@ -116,3 +116,150 @@ def test_a_question_without_a_span_searches_all_of_memory() -> None:
     texts = [hit.text for hit in result.hits]
     assert "I asked about the train timetable to Leeds." in texts and "I asked about the train timetable to York." in texts
     assert "time_window" not in result.explain
+
+
+@pytest.mark.parametrize("year", [2024, 2026, 2027])
+def test_explicit_month_year_does_not_silently_select_the_latest_month(year) -> None:
+    window = query_time_window(f"What did I say in August {year}?", NOW)
+    assert window is not None
+    assert (window.start.year, window.start.month, window.end.year, window.end.month) == (year, 8, year, 9)
+    assert window.label == f"august {year}"
+    assert window.rest == "what did i say"
+
+
+@pytest.mark.parametrize(
+    "span",
+    ["999999999999999999999 days ago", "9" * 5000 + " days ago", "in August 0000", "in August 10000"],
+    ids=["timedelta-overflow", "integer-string-limit", "zero-year", "year-overflow"],
+)
+def test_unrepresentable_time_span_does_not_crash_search_or_guess_a_different_date(span) -> None:
+    assert query_time_window(f"What did I say {span}?", NOW) is None
+
+
+def test_search_uses_explicit_year_to_exclude_a_newer_conversation() -> None:
+    engine = LocalMemoryEngine()
+    for year, content in [(2024, "We discussed the original workshop."), (2026, "We discussed the replacement workshop.")]:
+        engine.append_evidence(Evidence(
+            tenant_id=TENANT, user_id="u", actor="user", source_type="conversation", content=content,
+            created_at=TODAY.replace(year=year, month=8, day=12), access_policy={"tenant": TENANT},
+        ))
+    result = _ask(engine, "What did we discuss in August 2024?")
+    assert [hit.text for hit in result.hits] == ["We discussed the original workshop."]
+    assert result.abstained is False
+
+
+@pytest.mark.parametrize("zone,expected_day", [("Asia/Tokyo", 22), ("America/Los_Angeles", 21)])
+def test_search_respects_caller_calendar_zone(zone, expected_day):
+    from mnemosyne.mcp_tools import MemoryTools
+
+    engine = LocalMemoryEngine()
+    for day in (21, 22):
+        engine.append_evidence(Evidence(
+            tenant_id=TENANT, user_id="u", actor="user", source_type="conversation",
+            content=f"We discussed workshop {day}.",
+            created_at=datetime.fromisoformat(f"2026-10-{day}T12:00:00+09:00"),
+            access_policy={"tenant": TENANT},
+        ))
+    result = MemoryTools(engine).search(
+        TENANT, "What did we discuss yesterday?", query_mode="passages",
+        evaluated_at="2026-10-23T00:30:00+09:00", query_timezone=zone,
+    )
+    assert result["explain"]["time_window"]["start"].startswith(f"2026-10-{expected_day}")
+    if zone == "Asia/Tokyo":
+        assert [hit["text"] for hit in result["hits"]] == ["We discussed workshop 22."]
+
+
+@pytest.mark.parametrize("instant,hours", [("2026-03-09T12:00:00Z", 23), ("2026-11-02T12:00:00Z", 25)])
+def test_caller_zone_day_observes_dst(instant, hours):
+    from datetime import UTC
+    from mnemosyne.models import parse_dt
+
+    window = query_time_window("What did I say yesterday?", parse_dt(instant), query_timezone="America/New_York")
+    assert window is not None
+    assert (window.end.astimezone(UTC) - window.start.astimezone(UTC)).total_seconds() == hours * 3600
+
+
+@pytest.mark.parametrize("zone", ["", "Not/A_Zone", "../UTC", 123])
+def test_invalid_caller_zone_fails_clearly(zone):
+    from mnemosyne.mcp_tools import MemoryTools
+
+    with pytest.raises(ValueError, match="query_timezone"):
+        MemoryTools(LocalMemoryEngine()).search(TENANT, "hello", query_timezone=zone)
+    with pytest.raises(ValueError, match="query_timezone"):
+        LocalMemoryEngine().retrieve("hello", tenant_id=TENANT, filt={"query_timezone": zone})
+
+
+def test_cli_query_timezone_parses_validates_and_reaches_search(monkeypatch, capsys):
+    from mnemosyne import cli
+    from types import SimpleNamespace
+
+    parser = cli.build_parser()
+    args = parser.parse_args(["search", "--tenant", TENANT, "--query", "What did I say yesterday?", "--query-timezone", "Asia/Tokyo"])
+    seen = {}
+
+    def search(**kwargs):
+        seen.update(kwargs)
+        return {"hits": []}
+
+    monkeypatch.setattr(cli, "load_tools", lambda args: SimpleNamespace(search=search))
+    cli.cmd_search(args)
+    assert seen["query_timezone"] == "Asia/Tokyo"
+    with pytest.raises(SystemExit) as exc:
+        parser.parse_args(["search", "--tenant", TENANT, "--query", "hello", "--query-timezone", "Not/A_Zone"])
+    assert exc.value.code == 2
+    assert "query_timezone" in capsys.readouterr().err
+
+
+def test_implicit_clock_time_windows_do_not_reuse_yesterdays_cache(monkeypatch):
+    from mnemosyne import pipeline
+
+    monkeypatch.setenv("MNEMOSYNE_RETRIEVAL_RESULT_CACHE_SIZE", "8")
+    engine = LocalMemoryEngine()
+    for day in (21, 22):
+        engine.append_evidence(Evidence(
+            tenant_id=TENANT, user_id="u", actor="user", source_type="conversation",
+            content=f"We discussed workshop {day}.", created_at=TODAY.replace(day=day),
+            access_policy={"tenant": TENANT},
+        ))
+    clock = [TODAY.replace(day=22, hour=12)]
+    monkeypatch.setattr(pipeline, "utc_now", lambda: clock[0])
+    filt = {"query_mode": "passages", "role": "reader"}
+    first = engine.retrieve("What did we discuss yesterday?", tenant_id=TENANT, filt=filt, record_access=False)
+    clock[0] = TODAY.replace(day=23, hour=12)
+    second = engine.retrieve("What did we discuss yesterday?", tenant_id=TENANT, filt=filt, record_access=False)
+    assert [hit.text for hit in first.hits] == ["We discussed workshop 21."]
+    assert [hit.text for hit in second.hits] == ["We discussed workshop 22."]
+
+
+def test_fixed_clock_cache_preserves_hits_and_separates_caller_zones(monkeypatch):
+    monkeypatch.setenv("MNEMOSYNE_RETRIEVAL_RESULT_CACHE_SIZE", "8")
+    engine = LocalMemoryEngine()
+    filt = {
+        "query_mode": "passages", "role": "reader",
+        "evaluated_at": "2026-10-23T00:30:00+09:00", "query_timezone": "Asia/Tokyo",
+    }
+    first = engine.retrieve("What did I say yesterday?", tenant_id=TENANT, filt=filt, record_access=False)
+    second = engine.retrieve("What did I say yesterday?", tenant_id=TENANT, filt=filt, record_access=False)
+    other = engine.retrieve(
+        "What did I say yesterday?", tenant_id=TENANT,
+        filt={**filt, "query_timezone": "America/Los_Angeles"}, record_access=False,
+    )
+    assert first.explain["retrieval_result_cache"]["hit"] is False
+    assert second.explain["retrieval_result_cache"]["hit"] is True
+    assert other.explain["retrieval_result_cache"]["hit"] is False
+    assert first.explain["time_window"]["start"].startswith("2026-10-22")
+    assert other.explain["time_window"]["start"].startswith("2026-10-21")
+
+
+def test_missing_iana_data_has_actionable_validation_error(monkeypatch):
+    from zoneinfo import ZoneInfoNotFoundError
+    from mnemosyne import retrieval
+
+    def missing(_name):
+        raise ZoneInfoNotFoundError("no timezone data installed")
+
+    monkeypatch.setattr(retrieval, "ZoneInfo", missing)
+    with pytest.raises(ValueError, match="query_timezone.*timezone data.*tzdata"):
+        retrieval.resolve_query_timezone("America/New_York")
+    # Existing callers require no IANA data when no explicit zone is supplied.
+    assert retrieval.resolve_query_timezone(None) is None

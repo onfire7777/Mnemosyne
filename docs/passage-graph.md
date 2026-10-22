@@ -19,7 +19,13 @@ It is off unless configured. When it is configured:
 
 If a model is down or slow, search falls back to BM25 (`explain.passage_graph.fallback`) and a
 capture never fails; `/healthz` reports `passage_graph` with the last indexing run and error.
-Without the graph, every path behaves exactly as before.
+Without the graph, ordinary Local/SQLite searches using the built-in hashing embedder and
+local reranker preserve scoped BM25 order when all returned candidates are raw text sources.
+This prevents later hashing/overlap stages from burying rare, relevant terms. The explanation
+reports `source_only_local_fallback` and labels scores as `bm25`, not probabilities.
+Mixed facts, working/prospective hits, custom providers, stored text/media vectors,
+explicit-confidence sources, deep search and historical `as_of` routes retain their existing ranking. See the
+[audit report](2026-10-22-memory-audit-report.md) for development measurements and limits.
 
 ## What it is, and what it is not
 
@@ -33,13 +39,34 @@ Without the graph, every path behaves exactly as before.
 - `forget` purges a passage's triples and vector, and every fact or entity vector no other
   passage of the tenant still derives (`passage_index_purge` in the forget report).
 
+## Recall conversations by local date
+
+Passage searches understand phrases such as "yesterday" and "in August 2024". Supply an
+IANA timezone when the caller's calendar differs from the server's:
+
+```bash
+mneme --backend sqlite --store ./memory search --tenant demo \
+  --query "What did we discuss yesterday?" --query-mode passages \
+  --evaluated-at "2026-10-23T00:30:00+09:00" --query-timezone Asia/Tokyo
+```
+
+The MCP/Python `search` arguments are `evaluated_at` and `query_timezone`. Omitting
+`query_timezone` preserves the host-local calendar. The named zone handles daylight-saving
+transitions; Windows installs include `tzdata`. A minimal Unix image without system timezone
+data also needs `tzdata`. Invalid or unavailable zones produce a validation error.
+
+These windows filter when evidence was created, not when an event mentioned in its text
+occurred. They remain separate from historical belief queries using `as_of`. Searches using
+the live clock bypass the result cache for inferred date windows, so "yesterday" advances
+when the day changes.
+
 ## Configure
 
 Any OpenAI-compatible endpoints work. Our runs use local Ollama, so nothing leaves the
 machine:
 
 ```
-MNEMOSYNE_PASSAGE_INDEX=C:\Users\me\MnemetricData\passage-index.sqlite
+MNEMOSYNE_PASSAGE_INDEX=C:\Users\me\MnemosyneData\passage-index.sqlite
 MNEMOSYNE_PASSAGE_CHAT_URL=http://127.0.0.1:11434/v1/chat/completions
 MNEMOSYNE_PASSAGE_CHAT_MODEL=qwen3:4b-instruct
 MNEMOSYNE_PASSAGE_EMBEDDING_URL=http://127.0.0.1:11434/v1/embeddings

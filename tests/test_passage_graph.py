@@ -767,3 +767,97 @@ def test_passage_graph_from_env_builds_an_embeddings_only_index(tmp_path) -> Non
         "input": "t", "model": "qwen/qwen3-embedding-8b", "provider": {"order": ["A"]},
     }
     index.store.close()
+
+
+@pytest.mark.parametrize("warm_cache", [False, True])
+@pytest.mark.parametrize("restriction", ["redacted_text", "sensitivity", "embedding_partition"])
+def test_passage_derivatives_respect_current_disclosure(tmp_path, warm_cache, restriction):
+    from dataclasses import replace
+
+    engine, graph, chat, cids = _setup(tmp_path)
+    MemoryTools(engine).index_passages(TENANT)
+    original = next(
+        hit for hit in engine.passage_candidates({"tenant_id": TENANT, "role": "reader"})
+        if hit.id == cids["Ermengarde of Tours"]
+    )
+    prompts = []
+    original_json = chat.json
+
+    def record(prompt):
+        prompts.append(prompt)
+        return original_json(prompt)
+
+    chat.json = record
+    graph.recognition_filter = True
+    if warm_cache:
+        graph.rank("Ermengarde of Tours", [original], BagEmbedder(), 5)
+        prompts.clear()
+    if restriction == "redacted_text":
+        current = replace(original, text="Ermengarde of Tours\nDeath date withheld.",
+                          metadata={**original.metadata, "privacy": {"redacted": True}})
+    elif restriction == "sensitivity":
+        current = replace(original, sensitivity=graph.max_disclosed_sensitivity + 1)
+    else:
+        current = replace(original, metadata={**original.metadata, "embedding_partition": "none"})
+
+    hits, explain = graph.rank("Ermengarde of Tours", [current], BagEmbedder(), 5)
+
+    assert explain["graph"]["facts"] == 0
+    assert explain["unindexed_passages"] == 1
+    assert "20 march 851" not in json.dumps(explain).lower()
+    assert not prompts
+    assert [hit.text for hit in hits] == [current.text]
+
+
+@pytest.mark.parametrize("transform", ["rerank", "second_hop", "both"])
+@pytest.mark.parametrize("late_passage", [False, True])
+def test_transformed_dense_scores_are_not_reported_as_cosines(tmp_path, transform, late_passage):
+    engine, index = _dense_setup(
+        tmp_path, MeaningEmbedder(),
+        ["Miso\nMy cat is called Miso.", "Bike\nThe red bike is in the shed."],
+    )
+    MemoryTools(engine).index_passages(TENANT)
+
+    class TransformChat:
+        def json(self, prompt):
+            if prompt.startswith(SECOND_HOP_PROMPT[:40]):
+                return {"query": "bike"}
+            return {"passages": [2]}
+
+    index.rerank_chat = TransformChat()
+    index.rerank_top = 2 if transform in {"rerank", "both"} else 0
+    index.second_hop = transform in {"second_hop", "both"}
+    index.second_hop_weight = 3.0
+    if late_passage:
+        engine.append_evidence(_passage("Feline companion\nA newly added note."))
+    passages = engine.passage_candidates({"tenant_id": TENANT, "role": "reader"})
+    hits, explain = index.rank("feline companion", passages, MeaningEmbedder(), 5)
+
+    expected_scale = "rrf" if late_passage or transform == "second_hop" else "reciprocal_rank"
+    assert explain["score_scale"] == expected_scale
+    assert "top_score" not in explain
+    assert explain["first_pass_cosine_top_score"] == pytest.approx(1.0)
+    if not late_passage:
+        assert hits[0].score == pytest.approx(1.25 if transform == "second_hop" else 1.0)
+    result = _search(engine, "feline companion")
+    # The original winner's cosine cannot certify a subsequently reordered ranking.
+    assert "semantic" not in result.explain["confidence"]["query_support"]
+
+
+def test_declined_dense_transform_preserves_real_cosine_confidence(tmp_path):
+    engine, index = _dense_setup(tmp_path, MeaningEmbedder(), ["Miso\nMy cat is called Miso."])
+    MemoryTools(engine).index_passages(TENANT)
+
+    class DeclineChat:
+        def json(self, prompt):
+            return {"query": "", "passages": []}
+
+    index.rerank_chat = DeclineChat()
+    index.rerank_top = 2
+    index.second_hop = True
+    result = _search(engine, "feline companion")
+    explain = result.explain["passage_graph"]
+    assert explain["score_scale"] == "cosine"
+    assert explain["top_score"] == pytest.approx(1.0)
+    assert "first_pass_cosine_top_score" not in explain
+    assert result.explain["confidence"]["query_support"]["semantic"]["supported"] is True

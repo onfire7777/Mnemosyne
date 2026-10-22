@@ -351,6 +351,17 @@ CREATE TABLE IF NOT EXISTS runtime_jobs (
 CREATE INDEX IF NOT EXISTS runtime_jobs_tenant_status_kind_idx
   ON runtime_jobs(tenant_id, status, kind, created_at);
 
+-- Advisory question/answer views never enter the evidence or assertion plane.
+CREATE TABLE IF NOT EXISTS mental_models (
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  branch TEXT NOT NULL,
+  model_id TEXT NOT NULL,
+  version BIGINT NOT NULL CHECK (version > 0),
+  record JSONB NOT NULL,
+  PRIMARY KEY (tenant_id, branch, model_id),
+  FOREIGN KEY (tenant_id, branch) REFERENCES branches(tenant_id, name) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS runtime_state (
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   key TEXT NOT NULL,
@@ -569,6 +580,13 @@ ALTER TABLE runtime_state ENABLE ROW LEVEL SECURITY;
 ALTER TABLE runtime_state FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS runtime_state_tenant_isolation ON runtime_state;
 CREATE POLICY runtime_state_tenant_isolation ON runtime_state
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
+ALTER TABLE mental_models ENABLE ROW LEVEL SECURITY;
+ALTER TABLE mental_models FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS mental_models_tenant_isolation ON mental_models;
+CREATE POLICY mental_models_tenant_isolation ON mental_models
   USING (tenant_id = mnemosyne_current_tenant())
   WITH CHECK (tenant_id = mnemosyne_current_tenant());
 
