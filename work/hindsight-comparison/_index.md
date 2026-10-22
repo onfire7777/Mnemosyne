@@ -35,3 +35,6 @@
 - change-refresh-final-verification.xml — 2192 passed, 114 optional skips; no benchmark inference
 - verify-change-refresh.sh — final expanded regression command
 - change-refresh-source-manifest.json — source/test identity after final verification
+- reliability-followup/REPORT.md — ingestion, persistence, concurrent privacy, restart and temporal repairs
+- reliability-followup/verify.py — provider-free regression command and source freeze
+- reliability-followup/postgres/REPORT.md — real concurrent-update reproductions and repair receipts

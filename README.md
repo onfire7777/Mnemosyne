@@ -236,6 +236,16 @@ held-out pilot with native ingestion/recall and a common Codex reader and judge.
 The trial was stopped at the owner's request to prioritize runtime improvements;
 it produced no comparison score or ranking.
 
+The [reliability follow-up](work/hindsight-comparison/reliability-followup/REPORT.md)
+adds explicit ingestion acknowledgements, rolls back failed local source writes,
+preserves concurrent PostgreSQL metadata/privacy changes and keeps trust-tier
+priorities stable after restart. It also repairs PostgreSQL entity-alias erasure;
+existing databases need the narrow grant documented in that report.
+Temporal recall handles daylight-saving boundaries
+and preserves requested first/last ordering, including default search without a
+configured passage graph. These are runtime improvements,
+not a new competitive score.
+
 - Core capture and retrieval are usable; advanced deployment profiles have separate validation needs.
 - Default deterministic embeddings support offline operation but are not equivalent to a configured semantic model.
 - Skill audits and coverage reports can identify unresolved content; they do not guarantee correctness.
@@ -262,6 +272,12 @@ permission tests**, with zero skips or failures; the live role check passed **9/
 It verified publication, lease fencing, source changes, rollback and tenant isolation
 on disposable PostgreSQL 16.15. Publication locks source tables across tenants;
 production throughput under that contention remains unmeasured.
+
+The later [reliability verification](work/hindsight-comparison/reliability-followup/REPORT.md)
+passed **1,422 selected regression tests**, including live PostgreSQL checks,
+with six intentionally inapplicable backend cases skipped and no failures.
+It covers the ingestion, persistence, privacy, erasure, restart and temporal fixes
+described above; no benchmark or model inference ran.
 
 ## Project layout
 

@@ -171,7 +171,7 @@ def make_args(**overrides: Any) -> argparse.Namespace:
         "expected_consolidator_group": "mnemosyne_consolidator",
         "readonly_group": "mnemosyne_readonly",
         "audit_table": "audit_log",
-        "app_fk_cascade_delete_tables": "justifications,contradictions,mental_models",
+        "app_fk_cascade_delete_tables": "justifications,contradictions,mental_models,entity_aliases",
         "connect_timeout": 5,
         "allow_localhost": False,
         "expected_fingerprint": None,
@@ -251,7 +251,7 @@ def test_cmd_postgres_role_check_allows_documented_fk_cascade_app_delete(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     # roles.sql grants the app role DELETE on exactly the ON DELETE CASCADE targets
-    # (justifications, contradictions, mental_models), which PostgreSQL executes as their owner
+    # (justifications, contradictions, mental_models, entity_aliases), which PostgreSQL executes as their owner
     # (mnemosyne_app). The check must accept that documented, narrow exception while
     # the hard-delete boundary stays RLS + the capability layer.
     app = role_script(
@@ -260,6 +260,7 @@ def test_cmd_postgres_role_check_allows_documented_fk_cascade_app_delete(
             ("justifications", True, False, True),
             ("contradictions", True, False, True),
             ("mental_models", True, False, True),
+            ("entity_aliases", True, False, True),
             ("memories", False, False, True),
         ]
     )
@@ -277,16 +278,17 @@ def test_cmd_postgres_role_check_allows_documented_fk_cascade_app_delete(
         c for c in report["checks"] if c["name"] == "app_destructive_writes_denied"
     )
     assert destructive["ok"] is True
-    assert destructive["delete_table_count"] == 3
+    assert destructive["delete_table_count"] == 4
     assert destructive["delete_tables_outside_fk_cascade"] == []
     assert destructive["allowed_fk_cascade_delete_tables"] == [
         "contradictions",
+        "entity_aliases",
         "justifications",
         "mental_models",
     ]
 
 
-@pytest.mark.parametrize("table", ["memories", "evidence", "branches", "audit_log"])
+@pytest.mark.parametrize("table", ["memories", "entities", "evidence", "branches", "audit_log"])
 def test_cmd_postgres_role_check_fails_on_app_delete_outside_fk_cascade(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], table: str,
 ) -> None:
@@ -323,7 +325,7 @@ def test_role_check_default_matches_narrow_schema_grants(monkeypatch):
     monkeypatch.delenv("MNEMOSYNE_POSTGRES_APP_FK_CASCADE_DELETE_TABLES", raising=False)
     args = build_parser().parse_args(["postgres-role-check"])
     assert set(args.app_fk_cascade_delete_tables.split(",")) == {
-        "justifications", "contradictions", "mental_models",
+        "justifications", "contradictions", "mental_models", "entity_aliases",
     }
 
 

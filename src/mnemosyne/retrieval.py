@@ -811,6 +811,13 @@ def query_time_window(
     if not _PAST_CUE.search(text):
         return None
     local = now.astimezone(zone)
+    if zone is None:
+        # astimezone() without an explicit zone returns a fixed offset for
+        # this instant, not the machine's historical DST rules. Do calendar
+        # arithmetic in local wall time, then resolve each boundary separately.
+        # fromtimestamp also preserves ``fold`` during a repeated hour, unlike
+        # removing tzinfo from astimezone()'s fixed-offset result.
+        local = datetime.fromtimestamp(now.timestamp())
     today = local.replace(hour=0, minute=0, second=0, microsecond=0)
     day: datetime | None = None
     found: re.Match[str] | None = None
@@ -818,11 +825,16 @@ def query_time_window(
     def rest_without(match: re.Match[str]) -> str:
         return " ".join((text[: match.start()] + " " + text[match.end():]).split())
 
+    def make_window(start: datetime, end: datetime, label: str, rest: str) -> TimeWindow:
+        if zone is None:
+            start, end = start.astimezone(), end.astimezone()
+        return TimeWindow(start, end, label, rest)
+
     if found := re.search(r"\b(?:the )?day before yesterday\b", text):
         day, label = today - timedelta(days=2), "the day before yesterday"
     elif found := re.search(r"\blast night\b", text):
         start = today - timedelta(days=1) + timedelta(hours=18)
-        return TimeWindow(start, today + timedelta(hours=5), "last night", rest_without(found))
+        return make_window(start, today + timedelta(hours=5), "last night", rest_without(found))
     elif found := re.search(r"\byesterday\b", text):
         day, label = today - timedelta(days=1), "yesterday"
     elif found := re.search(r"\b(\d+|" + "|".join(_SMALL_NUMBERS) + r") days? ago\b", text):
@@ -836,9 +848,9 @@ def query_time_window(
         label = found.group(0)
     elif found := re.search(r"\blast week\b", text):
         start = today - timedelta(days=today.weekday() + 7)
-        return TimeWindow(start, start + timedelta(days=7), "last week", rest_without(found))
+        return make_window(start, start + timedelta(days=7), "last week", rest_without(found))
     elif found := re.search(r"\bthis week\b", text):
-        return TimeWindow(today - timedelta(days=today.weekday()), local, "this week", rest_without(found))
+        return make_window(today - timedelta(days=today.weekday()), local, "this week", rest_without(found))
     elif found := re.search(r"\b(?:(last|on|this past) )?(" + "|".join(_WEEKDAYS) + r")\b", text):
         offset = (today.weekday() - _WEEKDAYS.index(found.group(2))) % 7
         if offset == 0 and found.group(1) in {"last", "this past"}:
@@ -854,7 +866,7 @@ def query_time_window(
         except (ValueError, OverflowError):
             return None
         label = f"{found.group(1)} {explicit_year}" if explicit_year else found.group(1)
-        return TimeWindow(start, end, label, rest_without(found))
+        return make_window(start, end, label, rest_without(found))
     elif found := re.search(r"\b(today|this (?:morning|afternoon|evening)|tonight)\b", text):
         day, label = today, found.group(1)
     if day is None or found is None:
@@ -865,8 +877,8 @@ def query_time_window(
         first, last = _DAY_PARTS[part]
         rest = " ".join(re.sub(rf"\b(?:in the |this |that )?{part}\b", " ", rest).split())
         label = label if part in label else f"{label} {part}"
-        return TimeWindow(day + timedelta(hours=first), day + timedelta(hours=last), label, rest)
-    return TimeWindow(day, day + timedelta(days=1), label, rest)
+        return make_window(day + timedelta(hours=first), day + timedelta(hours=last), label, rest)
+    return make_window(day, day + timedelta(days=1), label, rest)
 
 
 def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = ()) -> dict[str, Any]:

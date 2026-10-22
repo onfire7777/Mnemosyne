@@ -202,5 +202,24 @@ class OperatingPolicy:
                 policy.max_trust_tier = value
                 continue
             if hasattr(policy, key):
+                if key in {
+                    "write_priority_max_by_trust_tier",
+                    "write_priority_debias_floor_by_trust_tier",
+                } and isinstance(value, dict):
+                    # JSON object keys are strings, while ingestion looks up
+                    # numeric trust tiers. Keep explicit integer keys dominant
+                    # for mixed in-memory input, without mutating the caller's
+                    # mapping or coercing unrelated keys and configured values.
+                    value = dict(value)
+                    for tier in tuple(value):
+                        if not isinstance(tier, str):
+                            continue
+                        try:
+                            numeric_tier = int(tier)
+                        except ValueError:
+                            continue
+                        if str(numeric_tier) == tier:
+                            configured = value.pop(tier)
+                            value.setdefault(numeric_tier, configured)
                 setattr(policy, key, value)
         return policy

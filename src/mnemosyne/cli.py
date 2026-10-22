@@ -1289,7 +1289,8 @@ def cmd_postgres_role_check(args: argparse.Namespace) -> None:
             "app_destructive_writes_denied",
             not app_delete_outside_cascade and not app["truncate_tables"],
             # roles.sql grants the app role DELETE on exactly the ON DELETE CASCADE
-            # foreign-key targets (justifications, contradictions, mental_models), which PostgreSQL
+            # foreign-key targets (justifications, contradictions, mental_models,
+            # entity_aliases), which PostgreSQL
             # executes as the table owner (mnemosyne_app); the hard-delete boundary is
             # RLS + the capability layer. DELETE on any other table, and all TRUNCATE,
             # remain forbidden.
@@ -19758,12 +19759,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--app-fk-cascade-delete-tables",
         default=os.environ.get(
             "MNEMOSYNE_POSTGRES_APP_FK_CASCADE_DELETE_TABLES",
-            "justifications,contradictions,mental_models",
+            "justifications,contradictions,mental_models,entity_aliases",
         ),
         help=(
             "Comma-separated public tables the app role is permitted to hold DELETE on "
             "for documented derived-record deletion and ON DELETE CASCADE targets "
-            "(assertions/branches -> these tables) executed as the table owner (mnemosyne_app). See infra/postgres/roles.sql and "
+            "(assertions/branches/entities -> these tables) executed as the table owner (mnemosyne_app). See infra/postgres/roles.sql and "
             "sql/schema.sql. DELETE on any other table, and all TRUNCATE, remain forbidden."
         ),
     )

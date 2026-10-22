@@ -3518,6 +3518,32 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 raise
             return True
 
+    @contextmanager
+    def _evidence_mutation_guard(self, key: str):
+        """Roll back one append or metadata assignment if its immediate write fails.
+
+        Call under ``_lock``. These operations replace a row or its metadata,
+        never mutate the previous metadata in place. The evidence epoch remains
+        monotonic so readers invalidate source-derived caches after a rollback.
+        This is not an outer ``defer_persistence`` transaction, and post-commit
+        journal failures must stay outside the guard.
+        """
+        previous = self.evidence.get(key)
+        previous_metadata = previous.metadata if previous is not None else None
+        audit_length = len(self.audit_log)
+        store_version = self._store_version
+        try:
+            yield
+        except BaseException:
+            if previous is None:
+                self.evidence.pop(key, None)
+            else:
+                previous.metadata = previous_metadata
+                self.evidence[key] = previous
+            del self.audit_log[audit_length:]
+            self._store_version = store_version
+            raise
+
     def append_evidence(self, ev: Evidence, branch: str = "main") -> str:
         access_policy = validate_access_policy(ev.access_policy, tenant_id=ev.tenant_id, location="evidence.access_policy")
         with self._lock:
@@ -3561,96 +3587,97 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                         cid = existing.cid
                         break
             key = self._evidence_key(ev.tenant_id, branch, cid)
-            existing = self.evidence.get(key)
-            reality_class = self._classify_evidence_reality(ev)
-            if existing:
-                op = "append_evidence.blocked_erased_replay" if existing.erased else "append_evidence.noop_dedup"
-                self._audit(
-                    ev.tenant_id,
-                    ev.actor,
-                    op,
-                    cid,
-                    {"branch": branch, "source_type": ev.source_type, "source_identity": ev.source_identity},
-                    source=ev.source_type,
-                    trust_tier=ev.trust_tier,
-                    capability_tags=ev.capability_tags,
-                )
-                self._persist()
-                return cid
-            budget_report: dict[str, Any] | None = None
-            if reality_class in {"self_generated", "simulated"} and not source_backed_summary(
-                ev, lambda cid: self.get_evidence(ev.tenant_id, cid, branch),
-                self._classify_evidence_reality, branch=branch,
-            ):
-                current_events, current_bytes = self._self_generation_budget_usage(
-                    tenant_id=ev.tenant_id,
-                    branch=branch,
-                )
-                budget_report = self_generation_budget_report(
-                    current_events=current_events,
-                    incoming_events=1,
-                    current_bytes=current_bytes,
-                    incoming_bytes=len(ev.content),
-                    max_events=self.policy.self_generation_budget_max_events,
-                    window_ticks=self.policy.self_generation_budget_window_ticks,
-                )
-                if not budget_report["allowed"]:
+            with self._evidence_mutation_guard(key):
+                existing = self.evidence.get(key)
+                reality_class = self._classify_evidence_reality(ev)
+                if existing:
+                    op = "append_evidence.blocked_erased_replay" if existing.erased else "append_evidence.noop_dedup"
                     self._audit(
                         ev.tenant_id,
                         ev.actor,
-                        "append_evidence.self_generation_budget_deferred",
+                        op,
                         cid,
-                        {
-                            "branch": branch,
-                            "source_type": ev.source_type,
-                            "source_identity": ev.source_identity,
-                            "reality_class": reality_class,
-                            "self_generation_budget": budget_report,
-                            "stored": False,
-                            "reversible_pointer_preserved": bool(ev.content_pointer),
-                        },
+                        {"branch": branch, "source_type": ev.source_type, "source_identity": ev.source_identity},
                         source=ev.source_type,
                         trust_tier=ev.trust_tier,
                         capability_tags=ev.capability_tags,
                     )
                     self._persist()
                     return cid
-            stored = copy.deepcopy(ev)
-            stored.cid = cid
-            stored.branch = branch
-            stored.access_policy = access_policy
-            if stored.embedding and not may_embed_item(
-                sensitivity=int(stored.sensitivity),
-                access_policy=stored.access_policy,
-            ):
-                stored.embedding = None
-            stored.metadata = dict(stored.metadata)
-            stored.metadata.setdefault("reality_class", reality_class)
-            stored.metadata["embedding_partition"] = vector_partition_for_item(
-                sensitivity=int(stored.sensitivity),
-                access_policy=stored.access_policy,
-            )
-            if budget_report is not None:
-                stored.metadata["self_generation_budget"] = budget_report
-                stored.metadata["self_generation_lifecycle"] = {
-                    "status": "budgeted_low_groundedness",
-                    "demotable": True,
-                    "gc_after_idle_ticks": self.policy.self_generation_gc_after_idle_ticks,
-                    "pointer_preserved": bool(stored.content_pointer or stored.cid),
-                    "critical_path_allowed": False,
-                }
-            self.evidence[key] = stored
-            self._audit(
-                ev.tenant_id,
-                ev.actor,
-                "append_evidence",
-                cid,
-                {"source_type": ev.source_type, "source_identity": ev.source_identity, "branch": branch},
-                source=ev.source_type,
-                trust_tier=ev.trust_tier,
-                capability_tags=ev.capability_tags,
-            )
-            self._persist()
+                budget_report: dict[str, Any] | None = None
+                if reality_class in {"self_generated", "simulated"} and not source_backed_summary(
+                    ev, lambda cid: self.get_evidence(ev.tenant_id, cid, branch),
+                    self._classify_evidence_reality, branch=branch,
+                ):
+                    current_events, current_bytes = self._self_generation_budget_usage(
+                        tenant_id=ev.tenant_id,
+                        branch=branch,
+                    )
+                    budget_report = self_generation_budget_report(
+                        current_events=current_events,
+                        incoming_events=1,
+                        current_bytes=current_bytes,
+                        incoming_bytes=len(ev.content),
+                        max_events=self.policy.self_generation_budget_max_events,
+                        window_ticks=self.policy.self_generation_budget_window_ticks,
+                    )
+                    if not budget_report["allowed"]:
+                        self._audit(
+                            ev.tenant_id,
+                            ev.actor,
+                            "append_evidence.self_generation_budget_deferred",
+                            cid,
+                            {
+                                "branch": branch,
+                                "source_type": ev.source_type,
+                                "source_identity": ev.source_identity,
+                                "reality_class": reality_class,
+                                "self_generation_budget": budget_report,
+                                "stored": False,
+                                "reversible_pointer_preserved": bool(ev.content_pointer),
+                            },
+                            source=ev.source_type,
+                            trust_tier=ev.trust_tier,
+                            capability_tags=ev.capability_tags,
+                        )
+                        self._persist()
+                        return cid
+                stored = copy.deepcopy(ev)
+                stored.cid = cid
+                stored.branch = branch
+                stored.access_policy = access_policy
+                if stored.embedding and not may_embed_item(
+                    sensitivity=int(stored.sensitivity),
+                    access_policy=stored.access_policy,
+                ):
+                    stored.embedding = None
+                stored.metadata = dict(stored.metadata)
+                stored.metadata.setdefault("reality_class", reality_class)
+                stored.metadata["embedding_partition"] = vector_partition_for_item(
+                    sensitivity=int(stored.sensitivity),
+                    access_policy=stored.access_policy,
+                )
+                if budget_report is not None:
+                    stored.metadata["self_generation_budget"] = budget_report
+                    stored.metadata["self_generation_lifecycle"] = {
+                        "status": "budgeted_low_groundedness",
+                        "demotable": True,
+                        "gc_after_idle_ticks": self.policy.self_generation_gc_after_idle_ticks,
+                        "pointer_preserved": bool(stored.content_pointer or stored.cid),
+                        "critical_path_allowed": False,
+                    }
+                self.evidence[key] = stored
+                self._audit(
+                    ev.tenant_id,
+                    ev.actor,
+                    "append_evidence",
+                    cid,
+                    {"source_type": ev.source_type, "source_identity": ev.source_identity, "branch": branch},
+                    source=ev.source_type,
+                    trust_tier=ev.trust_tier,
+                    capability_tags=ev.capability_tags,
+                )
+                self._persist()
             if self._journal_dir is not None:
                 CIDJournal(self._journal_dir / journal_filename(stored.tenant_id)).append(
                     {
@@ -3816,28 +3843,31 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         if "access_policy" in metadata_patch:
             raise ValueError("metadata_patch.access_policy cannot shadow evidence.access_policy")
         with self._lock:
-            ev = self.evidence.get(self._evidence_key(tenant_id, branch, cid))
+            key = self._evidence_key(tenant_id, branch, cid)
+            ev = self.evidence.get(key)
             if ev is None or ev.erased:
                 return False
-            before_keys = sorted(ev.metadata.keys())
-            ev.metadata = {**ev.metadata, **metadata_patch}
-            self._audit(
-                tenant_id,
-                actor,
-                "update_evidence_metadata",
-                cid,
-                {
-                    "branch": branch,
-                    "patch": metadata_patch,
-                    "before_keys": before_keys,
-                    "after_keys": sorted(ev.metadata.keys()),
-                    "source_type": ev.source_type,
-                },
-                source=source,
-                trust_tier=ev.trust_tier,
-                capability_tags=ev.capability_tags,
-            )
-            self._persist()
+            patch = copy.deepcopy(metadata_patch)
+            with self._evidence_mutation_guard(key):
+                before_keys = sorted(ev.metadata.keys())
+                ev.metadata = {**ev.metadata, **patch}
+                self._audit(
+                    tenant_id,
+                    actor,
+                    "update_evidence_metadata",
+                    cid,
+                    {
+                        "branch": branch,
+                        "patch": copy.deepcopy(patch),
+                        "before_keys": before_keys,
+                        "after_keys": sorted(ev.metadata.keys()),
+                        "source_type": ev.source_type,
+                    },
+                    source=source,
+                    trust_tier=ev.trust_tier,
+                    capability_tags=ev.capability_tags,
+                )
+                self._persist()
             return True
 
     def backfill_evidence_privacy(

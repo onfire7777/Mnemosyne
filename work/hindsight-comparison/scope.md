@@ -67,3 +67,11 @@
 
 ## Public-source research boundary
 Hindsight and Mnemetric public/authorized repository material was read as documentation. No external runtime was scanned or attacked. External source review does not grant testing permission. No separate paid-provider API was configured. Codex inference consumes the existing account quota; monetary cost is not measured. Mnemosyne and Mnemetric retain independent code and data; comparison references are permitted.
+
+## Current operating restriction
+The owner subsequently stopped the comparison and requested runtime improvements
+using this Codex session. That instruction supersedes the earlier evaluation
+authorization above: do not resume the benchmark or its provider calls. The
+reliability follow-up uses source review and synthetic local regression tests,
+including a disposable loopback-only PostgreSQL instance. Commit and push of
+verified fixes to main remains authorized.

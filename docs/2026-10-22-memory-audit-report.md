@@ -530,6 +530,28 @@ with the original 16 new live cases, this pass adds 20 live tests. The
 [follow-up receipts](../work/hindsight-comparison/postgres-live/change-refresh/REPORT.md)
 preserve the earlier 235-test result as historical evidence.
 
+## Subsequent evidence reliability repairs
+
+The [reliability follow-up](../work/hindsight-comparison/reliability-followup/REPORT.md)
+records the next source-review pass and its verification receipts. It repairs
+rejected ingestion being treated as creation, failed local writes remaining
+visible in memory, mutable metadata aliases, PostgreSQL metadata/privacy
+lost updates, trust-tier priority settings changing on JSON reload, and temporal
+speaker/DST/ordering errors. The PostgreSQL races were reproduced with real
+concurrent sessions; local disk failures were injected at fsync and rename.
+The expanded restricted-role suite also exposed entity erasure failing on its
+alias cascade. A narrow derived-table grant fixes that failure while preserving
+app restrictions on source and audit deletion.
+Final combined verification passed **1,422 tests**, with six intentionally
+inapplicable backend cases skipped and no failures/errors; 323 source/test/config
+hashes stayed unchanged. The role check passed 9/9 and the disposable database
+was removed without changing the existing local services.
+
+The owner stopped benchmark work before this pass. Verification uses synthetic
+regression fixtures without model inference. First-class growing-document
+versions and atomic retirement remain open; content-addressed source labels
+must not be treated as independently deletable documents.
+
 ## Quality targets still unmet
 
 The local deterministic quick evaluation passed **8 of 11** checks and all five mandatory

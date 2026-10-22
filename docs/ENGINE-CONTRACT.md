@@ -43,6 +43,30 @@ its fixture param (`@pytest.fixture(params=["local", "postgres", "sqlite"])`) an
 parity suites (`tests/test_parity_*.py`) pass against the `LocalMemoryEngine`
 oracle.
 
+## Evidence ingestion acknowledgement
+
+`append_evidence` returns a CID even when an erased-replay guard or the
+self-generation budget prevents storage. A CID alone is not confirmation of
+a live source. `IngestionPipeline.ingest` and the MCP/CLI `ingest` response now
+include:
+
+- `stored`: the returned CID resolved to live evidence after append.
+- `created`: the expected CID was absent before append and live afterward.
+- `idempotent`: the expected CID was live both before and after append.
+
+An erased replay or deferred write has all three flags false. Only `created`
+ingestion applies the tier-0 correction shortcut, queues consolidation/media
+extraction, or requests background indexing. Ordinary duplicate ingestion
+does not repeat these actions.
+
+These flags describe before/after observations, not a transactional queue
+receipt or an exactly-once guarantee for concurrent callers. Raw-object
+externalization and optional media embedding occur before evidence admission;
+`stored: false` does not imply that no object-store or provider work occurred.
+The source identity label is not a document revision key. Replacing a document
+by forgetting evidence with that label is unsafe because legacy evidence CIDs
+can be shared by different source envelopes.
+
 ## Prospective-memory contract
 
 `LocalMemoryEngine`, `PostgresEngine`, and `SqliteEngine` provide the same

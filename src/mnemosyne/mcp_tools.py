@@ -991,7 +991,8 @@ class MemoryTools:
             ),
             branch=branch,
         ).to_dict()
-        self._index_later(tenant_id, branch)
+        if result["created"]:
+            self._index_later(tenant_id, branch)
         return result
 
     def residency_policy(self) -> dict[str, object]:

@@ -1,0 +1,128 @@
+........................................................................ [  5%]
+........................................................................ [ 11%]
+........................................................................ [ 17%]
+........................................................................ [ 23%]
+........................................s.ss.ss.s....................... [ 28%]
+................................F....................................... [ 34%]
+........................................................................ [ 40%]
+........................................................................ [ 46%]
+........................................................................ [ 51%]
+........................................................................ [ 57%]
+........................................................................ [ 63%]
+........................................................................ [ 69%]
+........................................................................ [ 74%]
+........................................................................ [ 80%]
+........................................................................ [ 86%]
+........................................................................ [ 92%]
+.........s.............................................................. [ 97%]
+............................                                             [100%]
+=================================== FAILURES ===================================
+__ test_shared_engine_contract_forget_propagates_projection_erasure[postgres] __
+
+engine_bundle = (<mnemosyne.postgres_engine.PostgresEngine object at 0x10bb78ad0>, 'tenant-shared-postgres-29cd44a4-2aeb-4367-a7c9-a09bf41194ee', 'user-shared-postgres')
+
+    def test_shared_engine_contract_forget_propagates_projection_erasure(engine_bundle: tuple[Any, str, str]) -> None:
+        engine, tenant, user = engine_bundle
+        erased_cid = _append_evidence(engine, tenant, user, "Shared erasure source that must be removed.")
+        surviving_cid = _append_evidence(engine, tenant, user, "Shared erasure source that must survive.")
+        assertion_id = engine.upsert_assertion(
+            Assertion(
+                tenant_id=tenant,
+                user_id=user,
+                subject=f"shared erasure subject {uuid4()}",
+                predicate="keeps",
+                object="surviving source only",
+                confidence=0.9,
+                source_evidence_cids=[erased_cid, surviving_cid],
+                status="active",
+                trust_tier=0,
+                access_policy={"tenant": tenant},
+            )
+        )
+        preference_id = engine.add_preference(
+            Preference(
+                tenant_id=tenant,
+                user_id=user,
+                category="workflow",
+                statement="Forget propagation retracts unbacked preferences.",
+                explicit=True,
+                source_evidence_cids=[erased_cid],
+            )
+        )
+        relation_id = engine.add_relation(
+            Relation(
+                tenant_id=tenant,
+                source="shared erasure source",
+                predicate="supports",
+                target="shared erasure target",
+                source_evidence_cids=[erased_cid],
+                access_policy={"tenant": tenant},
+            )
+        )
+        entity_canonical = f"shared-erasure-entity-{uuid4()}"
+        engine.register_entity(
+            tenant,
+            entity_canonical,
+            alias="Shared Erasure Entity",
+            source_evidence_cids=[erased_cid, surviving_cid],
+            access_policy={"tenant": tenant},
+        )
+    
+        result = engine.forget(tenant, erased_cid, requested_by=user, erasure_mode=ErasureMode.TOMBSTONE_RECOMPUTE)
+        exported = engine.export_tenant(tenant)
+        assertion = next(item for item in exported["assertions"] if item["id"] == assertion_id)
+        preference = next(item for item in exported["preferences"] if item["id"] == preference_id)
+        relation = next(item for item in exported["relations"] if item["id"] == relation_id)
+        entity = next(item for item in exported["entities"] if item["canonical"] == entity_canonical)
+    
+        assert result["erased"] is True
+        assert assertion["source_evidence_cids"] == [surviving_cid]
+        assert assertion_id in result["propagated"]["trimmed_assertions"]
+        assert preference["status"] == "retracted"
+        assert preference["source_evidence_cids"] == []
+        assert preference_id in result["propagated"]["retracted_preferences"]
+        assert relation["valid_to"] is not None
+        assert relation["source_evidence_cids"] == []
+        assert relation_id in result["propagated"]["expired_relations"]
+        assert entity["source_evidence_cids"] == [surviving_cid]
+        assert entity_canonical in result["propagated"]["trimmed_entities"]
+        assert all(item["cid"] != erased_cid for item in exported["evidence"])
+    
+>       removal = engine.forget(tenant, surviving_cid, requested_by=user, erasure_mode=ErasureMode.TOMBSTONE_RECOMPUTE)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_shared_engine_contract.py:4476: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/mnemosyne/postgres_engine.py:5356: in forget
+    cur.execute("DELETE FROM entities WHERE id = %s", (row["id"],))
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x10ecb34d0>
+query = 'DELETE FROM entities WHERE id = %s'
+params = (UUID('be266f5a-f10c-4dde-beb0-09643eef434a'),), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -> Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table entity_aliases
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."entity_aliases" WHERE $1 OPERATOR(pg_catalog.=) "entity_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege
+=========================== short test summary info ============================
+FAILED tests/test_shared_engine_contract.py::test_shared_engine_contract_forget_propagates_projection_erasure[postgres]

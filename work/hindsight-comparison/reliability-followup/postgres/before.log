@@ -1,0 +1,123 @@
+.F.F....                                                                 [100%]
+=================================== FAILURES ===================================
+____ test_concurrent_metadata_patches_preserve_both_updates[pooled-privacy] ____
+
+metadata_engines = (<mnemosyne.postgres_engine.PostgresEngine object at 0x1074b9450>, <mnemosyne.postgres_engine.PostgresEngine object at..., 'metadata-race-07ee45c07a194697beaac2bbe9c2edcf', '449300e277494d44b5f7e511095cdc6da2d7df788cb1081cfd81f9711356aa15')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1090e8180>
+first_operation = 'privacy'
+
+    @pytest.mark.parametrize("first_operation", ["metadata", "privacy"])
+    def test_concurrent_metadata_patches_preserve_both_updates(metadata_engines, monkeypatch, first_operation):
+        first, second, tenant, cid = metadata_engines
+        first_updated = threading.Event()
+        release_first = threading.Event()
+        pids = []
+        real_audit = first._audit
+    
+        def hold_first_transaction(cur, *args, **kwargs):
+            real_audit(cur, *args, **kwargs)
+            cur.execute("SELECT pg_backend_pid()")
+            pids.append(cur.fetchone()["pg_backend_pid"])
+            first_updated.set()
+            if not release_first.wait(10):
+                raise RuntimeError("test timed out waiting to release first metadata writer")
+    
+        monkeypatch.setattr(first, "_audit", hold_first_transaction)
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            if first_operation == "privacy":
+                one = executor.submit(first.backfill_evidence_privacy, tenant, cid, ["email"])
+            else:
+                one = executor.submit(first.update_evidence_metadata, tenant, cid, {"revision": 2})
+            try:
+                assert first_updated.wait(10), "first writer never reached its pending commit"
+                two = executor.submit(second.update_evidence_metadata, tenant, cid, {"indexed": True})
+                # Observe the actual second transaction waiting on the first, rather
+                # than relying on scheduling or a fixed delay. Before the fix it
+                # waits in UPDATE after reading stale metadata; afterward its SELECT
+                # waits and reads the newly committed metadata before merging.
+                deadline = time.monotonic() + 10
+                with first._psycopg.connect(first.dsn) as observer:
+                    while True:
+                        blocked = observer.execute(
+                            "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
+                            "WHERE %s = ANY(pg_blocking_pids(pid)))", (pids[0],),
+                        ).fetchone()[0]
+                        if blocked:
+                            break
+                        assert not two.done(), "second writer finished without the intended lock conflict"
+                        assert time.monotonic() < deadline, "second writer did not wait for the first"
+                        time.sleep(0.01)
+            finally:
+                release_first.set()
+            assert one.result(timeout=10) is True
+            assert two.result(timeout=10) is True
+        metadata = first.get_evidence(tenant, cid).metadata
+        assert metadata["original"] == "retained"
+        if first_operation == "privacy":
+>           assert metadata["privacy"]["pii_tags"] == ["email"]
+                   ^^^^^^^^^^^^^^^^^^^
+E           KeyError: 'privacy'
+
+tests/test_postgres_metadata_live.py:86: KeyError
+____ test_concurrent_metadata_patches_preserve_both_updates[fresh-privacy] _____
+
+metadata_engines = (<mnemosyne.postgres_engine.PostgresEngine object at 0x10901e250>, <mnemosyne.postgres_engine.PostgresEngine object at..., 'metadata-race-bd995833e629497b92e37ebf90566688', '42961f835b1a4340302aa5b9361326b6adb211a9cc0dd2b6c0f46e357f41aef8')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10901e690>
+first_operation = 'privacy'
+
+    @pytest.mark.parametrize("first_operation", ["metadata", "privacy"])
+    def test_concurrent_metadata_patches_preserve_both_updates(metadata_engines, monkeypatch, first_operation):
+        first, second, tenant, cid = metadata_engines
+        first_updated = threading.Event()
+        release_first = threading.Event()
+        pids = []
+        real_audit = first._audit
+    
+        def hold_first_transaction(cur, *args, **kwargs):
+            real_audit(cur, *args, **kwargs)
+            cur.execute("SELECT pg_backend_pid()")
+            pids.append(cur.fetchone()["pg_backend_pid"])
+            first_updated.set()
+            if not release_first.wait(10):
+                raise RuntimeError("test timed out waiting to release first metadata writer")
+    
+        monkeypatch.setattr(first, "_audit", hold_first_transaction)
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            if first_operation == "privacy":
+                one = executor.submit(first.backfill_evidence_privacy, tenant, cid, ["email"])
+            else:
+                one = executor.submit(first.update_evidence_metadata, tenant, cid, {"revision": 2})
+            try:
+                assert first_updated.wait(10), "first writer never reached its pending commit"
+                two = executor.submit(second.update_evidence_metadata, tenant, cid, {"indexed": True})
+                # Observe the actual second transaction waiting on the first, rather
+                # than relying on scheduling or a fixed delay. Before the fix it
+                # waits in UPDATE after reading stale metadata; afterward its SELECT
+                # waits and reads the newly committed metadata before merging.
+                deadline = time.monotonic() + 10
+                with first._psycopg.connect(first.dsn) as observer:
+                    while True:
+                        blocked = observer.execute(
+                            "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
+                            "WHERE %s = ANY(pg_blocking_pids(pid)))", (pids[0],),
+                        ).fetchone()[0]
+                        if blocked:
+                            break
+                        assert not two.done(), "second writer finished without the intended lock conflict"
+                        assert time.monotonic() < deadline, "second writer did not wait for the first"
+                        time.sleep(0.01)
+            finally:
+                release_first.set()
+            assert one.result(timeout=10) is True
+            assert two.result(timeout=10) is True
+        metadata = first.get_evidence(tenant, cid).metadata
+        assert metadata["original"] == "retained"
+        if first_operation == "privacy":
+>           assert metadata["privacy"]["pii_tags"] == ["email"]
+                   ^^^^^^^^^^^^^^^^^^^
+E           KeyError: 'privacy'
+
+tests/test_postgres_metadata_live.py:86: KeyError
+=========================== short test summary info ============================
+FAILED tests/test_postgres_metadata_live.py::test_concurrent_metadata_patches_preserve_both_updates[pooled-privacy]
+FAILED tests/test_postgres_metadata_live.py::test_concurrent_metadata_patches_preserve_both_updates[fresh-privacy]

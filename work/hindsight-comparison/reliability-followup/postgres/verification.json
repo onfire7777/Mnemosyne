@@ -1,0 +1,56 @@
+{
+  "python": "3.14.7",
+  "psycopg": "3.3.4",
+  "server": "PostgreSQL 16.15 (Debian 16.15-1.pgdg12+2) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 12.2.0-14+deb12u1) 12.2.0, 64-bit",
+  "extensions": [
+    [
+      "pgcrypto",
+      "1.3"
+    ],
+    [
+      "plpgsql",
+      "1.0"
+    ],
+    [
+      "vector",
+      "0.8.7"
+    ]
+  ],
+  "roles": [
+    [
+      "app_user",
+      false,
+      false
+    ],
+    [
+      "consolidator_user",
+      false,
+      false
+    ],
+    [
+      "eval_user",
+      false,
+      false
+    ]
+  ],
+  "image": "sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a",
+  "host": "127.0.0.1",
+  "port": 55434,
+  "docker_context": "colima-pentestswarm",
+  "container": "mnemosyne-reliability-pg-1f2e3f3c",
+  "storage": "tmpfs",
+  "results": {
+    "name": "pytest",
+    "errors": "0",
+    "failures": "0",
+    "skipped": "0",
+    "tests": "12",
+    "time": "1.295",
+    "timestamp": "2026-10-22T16:44:23.735020-07:00",
+    "hostname": "Admins-MacBook-Pro.local"
+  },
+  "source_hashes": {
+    "src/mnemosyne/postgres_engine.py": "025a8d6f4288c0b62f56f9c1a03ebf842368e84cf8fd98ccdf4278da9773f571",
+    "tests/test_postgres_metadata_live.py": "a93f45448adf02c8e82f5567f6228e426bc0c68ffd8b6bc829fd883142b62d15"
+  }
+}
