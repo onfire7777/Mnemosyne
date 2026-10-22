@@ -263,3 +263,363 @@ def test_missing_iana_data_has_actionable_validation_error(monkeypatch):
         retrieval.resolve_query_timezone("America/New_York")
     # Existing callers require no IANA data when no explicit zone is supplied.
     assert retrieval.resolve_query_timezone(None) is None
+
+
+@pytest.mark.parametrize(
+    "question,expected",
+    [
+        ("What did you tell me yesterday?", "assistant"),
+        ("What did you say about my project yesterday?", "assistant"),
+        ("Remind me what you suggested yesterday", "assistant"),
+        ("What was the first thing I asked yesterday?", "user"),
+        ("What did I first tell you yesterday?", "user"),
+        ("What did you and I say yesterday?", None),
+        ("What did I say and you reply yesterday?", None),
+        ("What happened to my project yesterday?", None),
+    ],
+)
+def test_speaker_tracks_the_speaking_subject_not_a_recipient_or_possessive(question, expected):
+    from mnemosyne.pipeline import _asked_speaker
+
+    assert _asked_speaker(question) == expected
+
+
+def test_assistant_speaker_priority_does_not_promote_unrelated_tool_records():
+    from datetime import UTC
+    from types import SimpleNamespace
+    from mnemosyne.models import Hit
+    from mnemosyne.pipeline import _time_window_route
+    from mnemosyne.retrieval import RetrievalAdapters
+
+    candidates = [
+        Hit(
+            id=f"{index}-{actor}", kind="evidence", tenant_id=TENANT, branch="main",
+            text="What did you say?", score=0, channel="source", metadata={"actor": actor},
+        )
+        for index, actor in enumerate(("tool", "user", "assistant"))
+    ]
+    ops = SimpleNamespace(
+        passage_candidates=lambda _: candidates,
+        evidence_created_at_many=lambda *args: {
+            hit.id: datetime(2026, 10, 7, 12, tzinfo=UTC) for hit in candidates
+        },
+        adapters=RetrievalAdapters(),
+    )
+    window = query_time_window(
+        "What did you say yesterday?", datetime(2026, 10, 8, 12, tzinfo=UTC), query_timezone="UTC",
+    )
+    assert window is not None
+    hits, _ = _time_window_route(ops, window, {}, tenant_id=TENANT, branch="main", passage_graph=None)
+    assert [hit.metadata["actor"] for hit in hits] == ["assistant", "tool", "user"]
+
+
+@pytest.mark.parametrize(
+    "instant,expected_start,expected_end,hours",
+    [
+        ("2026-03-09T12:00:00Z", "2026-03-08T00:00:00-05:00", "2026-03-09T00:00:00-04:00", 23),
+        ("2026-11-02T12:00:00Z", "2026-11-01T00:00:00-04:00", "2026-11-02T00:00:00-05:00", 25),
+    ],
+)
+def test_implicit_machine_calendar_converts_each_dst_boundary(monkeypatch, instant, expected_start, expected_end, hours):
+    import time
+    from datetime import UTC
+    from mnemosyne.models import parse_dt
+
+    if not hasattr(time, "tzset"):
+        pytest.skip("changing the process local calendar requires time.tzset")
+    with monkeypatch.context() as local:
+        local.setenv("TZ", "America/New_York")
+        time.tzset()
+        try:
+            window = query_time_window("What did I say yesterday?", parse_dt(instant))
+            assert window is not None
+            assert window.start.isoformat() == expected_start
+            assert window.end.isoformat() == expected_end
+            assert (window.end.astimezone(UTC) - window.start.astimezone(UTC)).total_seconds() == hours * 3600
+        finally:
+            # Restore the environment before refreshing libc's timezone state.
+            local.undo()
+            time.tzset()
+
+
+@pytest.mark.parametrize("offset", ["-04:00", "-05:00"])
+def test_implicit_current_week_preserves_evaluation_instant_in_repeated_hour(monkeypatch, offset):
+    import time
+    from datetime import UTC
+
+    if not hasattr(time, "tzset"):
+        pytest.skip("changing the process local calendar requires time.tzset")
+    with monkeypatch.context() as local:
+        local.setenv("TZ", "America/New_York")
+        time.tzset()
+        try:
+            now = datetime.fromisoformat(f"2026-11-01T01:30:00{offset}")
+            window = query_time_window("What did I say this week?", now)
+            assert window is not None
+            assert window.end.astimezone(UTC) == now.astimezone(UTC)
+        finally:
+            local.undo()
+            time.tzset()
+
+
+@pytest.fixture(params=["local", "sqlite"])
+def temporal_engine(request, tmp_path):
+    from mnemosyne.sqlite_engine import SqliteEngine
+
+    engine = LocalMemoryEngine() if request.param == "local" else SqliteEngine(tmp_path / "temporal")
+    yield engine
+    close = getattr(engine, "close", None)
+    if close:
+        close()
+
+
+def _append_fall_back_conversation(engine, *, minute, fold, content):
+    from zoneinfo import ZoneInfo
+
+    return engine.append_evidence(Evidence(
+        tenant_id=TENANT, user_id="u", actor="user", source_type="conversation", content=content,
+        created_at=datetime(2026, 11, 1, 1, minute, tzinfo=ZoneInfo("America/New_York"), fold=fold),
+        access_policy={"tenant": TENANT},
+    ))
+
+
+@pytest.mark.parametrize("position", ["first", "last"])
+def test_first_last_orders_repeated_dst_hour_by_actual_instant(temporal_engine, position):
+    earlier = _append_fall_back_conversation(
+        temporal_engine, minute=50, fold=0, content="I asked the chronologically earlier question.",
+    )
+    later = _append_fall_back_conversation(
+        temporal_engine, minute=10, fold=1, content="I asked the chronologically later question.",
+    )
+    result = temporal_engine.retrieve(
+        f"What was the {position} thing I asked yesterday?", tenant_id=TENANT, record_access=False,
+        filt={"query_mode": "passages", "query_timezone": "America/New_York", "evaluated_at": "2026-11-02T12:00:00Z"},
+    )
+    assert [hit.id for hit in result.hits] == ([earlier, later] if position == "first" else [later, earlier])
+
+
+def test_current_week_excludes_later_occurrence_of_repeated_dst_hour(temporal_engine):
+    earlier = _append_fall_back_conversation(
+        temporal_engine, minute=15, fold=0, content="I said this before the question was asked.",
+    )
+    _append_fall_back_conversation(
+        temporal_engine, minute=15, fold=1, content="I said this after the question was asked.",
+    )
+    result = temporal_engine.retrieve(
+        "What did I say this week?", tenant_id=TENANT, record_access=False,
+        filt={"query_mode": "passages", "query_timezone": "America/New_York", "evaluated_at": "2026-11-01T01:30:00-04:00"},
+    )
+    assert [hit.id for hit in result.hits] == [earlier]
+
+
+@pytest.mark.parametrize("position", ["first", "last"])
+@pytest.mark.parametrize("route", ["passages", "default-with-graph", "default-without-graph"])
+def test_explicit_chronology_bypasses_custom_reranker_before_top_k(temporal_engine, position, route):
+    from dataclasses import replace
+
+    class ReverseReranker:
+        name = "reverse-test-reranker"
+
+        def __init__(self):
+            self.calls = 0
+
+        def rerank(self, query, hits, k):
+            self.calls += 1
+            return list(reversed(hits))[:k]
+
+    class LocalGraph:
+        def rank(self, query, candidates, embedding, k):
+            return list(candidates)[:k], {}
+
+    reranker = ReverseReranker()
+    temporal_engine.adapters = replace(
+        temporal_engine.adapters, reranker=reranker,
+        passage_graph=LocalGraph() if route == "default-with-graph" else None,
+    )
+    temporal_engine.policy = replace(temporal_engine.policy, top_k=1)
+    earlier = _append_fall_back_conversation(
+        temporal_engine, minute=10, fold=0, content="I asked the earlier question.",
+    )
+    later = _append_fall_back_conversation(
+        temporal_engine, minute=50, fold=0, content="I asked the later question.",
+    )
+    filt = {"query_timezone": "America/New_York", "evaluated_at": "2026-11-02T12:00:00Z"}
+    if route == "passages":
+        filt["query_mode"] = "passages"
+    result = temporal_engine.retrieve(
+        f"What was the {position} thing I asked yesterday?", tenant_id=TENANT, record_access=False, filt=filt,
+    )
+    assert [hit.id for hit in result.hits] == ([earlier] if position == "first" else [later])
+    assert reranker.calls == 0
+    assert result.used_tokens <= result.token_budget
+    temporal_engine.retrieve("What did I ask yesterday?", tenant_id=TENANT, record_access=False, filt=filt)
+    assert reranker.calls == 1
+
+
+def test_current_policy_schema_does_not_override_first_conversation(temporal_engine):
+    from dataclasses import replace
+
+    temporal_engine.policy = replace(temporal_engine.policy, top_k=1)
+    earlier = _append_fall_back_conversation(
+        temporal_engine, minute=10, fold=0, content="I said the current policy needs discussion.",
+    )
+    _append_fall_back_conversation(
+        temporal_engine, minute=50, fold=0, content="I said the current policy was updated.",
+    )
+    result = temporal_engine.retrieve(
+        "What was the first thing I said about the current policy yesterday?", tenant_id=TENANT, record_access=False,
+        filt={"query_mode": "passages", "query_timezone": "America/New_York", "evaluated_at": "2026-11-02T12:00:00Z"},
+    )
+    assert [hit.id for hit in result.hits] == [earlier]
+    assert result.explain["schema_fast_path"]["applied"] is False
+
+
+def test_workspace_score_boost_preserves_explicit_chronology(temporal_engine):
+    from dataclasses import replace
+
+    temporal_engine.policy = replace(temporal_engine.policy, workspace_retrieval_advisory_enabled=True)
+    earlier = _append_fall_back_conversation(
+        temporal_engine, minute=10, fold=0, content="I asked the earlier question.",
+    )
+    later = _append_fall_back_conversation(
+        temporal_engine, minute=50, fold=0, content="I asked the later question.",
+    )
+    result = temporal_engine.retrieve(
+        "What was the first thing I asked yesterday?", tenant_id=TENANT, record_access=False,
+        filt={
+            "query_mode": "passages", "query_timezone": "America/New_York", "evaluated_at": "2026-11-02T12:00:00Z",
+            "apply_workspace_retrieval_advisory": True,
+            "workspace_retrieval_advisory": {
+                "version": "workspace-retrieval-advisory.v1", "source": "shadow_workspace_controller",
+                "tenant_id": TENANT, "branch": "main", "shadow_only": True, "critical_path": False,
+                "production_mutation": False, "advisory_only": True, "promotion_gate_required": True,
+                "applied_to_ranking": False, "applied_to_mutation": False,
+                "items": [{"cid": later, "priority": 1.0}],
+            },
+        },
+    )
+    assert [hit.id for hit in result.hits] == [earlier, later]
+    advisory = result.explain["workspace_retrieval_advisory"]
+    assert advisory["status"] == "applied"
+    assert advisory["used_for_ranking"] is False
+    assert advisory["ranking_preserved"] == "explicit_temporal_order"
+
+
+def test_default_without_graph_reads_only_the_requested_window(temporal_engine):
+    from datetime import UTC
+
+    inside = _append_fall_back_conversation(
+        temporal_engine, minute=10, fold=0, content="I asked about the workshop agenda.",
+    )
+    temporal_engine.append_evidence(Evidence(
+        tenant_id=TENANT, user_id="u", actor="user", source_type="conversation",
+        content="I asked about the workshop location.", created_at=datetime(2026, 11, 2, 10, tzinfo=UTC),
+    ))
+    filt = {"query_timezone": "America/New_York", "evaluated_at": "2026-11-02T12:00:00Z"}
+    result = temporal_engine.retrieve(
+        "What did I ask about the workshop yesterday?", tenant_id=TENANT, record_access=False, filt=filt,
+    )
+    assert [hit.id for hit in result.hits] == [inside]
+    assert result.explain["time_window"]["label"] == "yesterday"
+    assert result.explain.get("source_only_local_fallback") is None
+    assert "query_mode" not in filt
+
+
+def test_default_without_graph_abstains_for_empty_window(temporal_engine):
+    _append_fall_back_conversation(
+        temporal_engine, minute=10, fold=0, content="I asked about the workshop agenda.",
+    )
+    result = temporal_engine.retrieve(
+        "What did I ask about the workshop yesterday?", tenant_id=TENANT, record_access=False,
+        filt={"query_timezone": "America/New_York", "evaluated_at": "2026-11-04T12:00:00Z"},
+    )
+    assert result.hits == []
+    assert result.abstained is True
+    assert result.explain["time_window"]["passages"] == 0
+
+
+def test_default_window_needs_no_embedding_channel_or_mmr_provider(temporal_engine, monkeypatch):
+    from dataclasses import replace
+
+    class NoEmbedding:
+        name = "unavailable-test-embedding"
+        dims = 8
+
+        def embed(self, text):
+            pytest.fail("a deterministic conversation window does not require embeddings")
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("a conversation window must not call global channels or MMR")
+
+    inside = _append_fall_back_conversation(
+        temporal_engine, minute=10, fold=0, content="I said the workshop starts at nine.",
+    )
+    temporal_engine.adapters = replace(temporal_engine.adapters, embedding=NoEmbedding())
+    for name in ("vector_search", "lexical_search", "graph_ppr", "_mmr"):
+        monkeypatch.setattr(temporal_engine, name, forbidden)
+    result = temporal_engine.retrieve(
+        "What did I say yesterday?", tenant_id=TENANT, record_access=False,
+        filt={"query_timezone": "America/New_York", "evaluated_at": "2026-11-02T12:00:00Z"},
+    )
+    assert [hit.id for hit in result.hits] == [inside]
+
+
+def test_default_window_preserves_speaker_priority(temporal_engine):
+    from datetime import UTC
+
+    user = _append_fall_back_conversation(
+        temporal_engine, minute=10, fold=0, content="I mentioned the workshop agenda.",
+    )
+    tool = temporal_engine.append_evidence(Evidence(
+        tenant_id=TENANT, user_id="u", actor="tool", source_type="conversation",
+        content="What did I say yesterday? Workshop agenda search results.",
+        created_at=datetime(2026, 11, 1, 5, tzinfo=UTC),
+    ))
+    result = temporal_engine.retrieve(
+        "What did I say about the workshop agenda yesterday?", tenant_id=TENANT, record_access=False,
+        filt={"query_timezone": "America/New_York", "evaluated_at": "2026-11-02T12:00:00Z"},
+    )
+    assert [hit.id for hit in result.hits] == [user, tool]
+    assert result.explain["time_window"]["speaker"] == "user"
+
+
+def test_default_window_only_uses_authorized_passages(temporal_engine):
+    from datetime import UTC
+
+    public = _append_fall_back_conversation(
+        temporal_engine, minute=10, fold=0, content="I said the public workshop starts at nine.",
+    )
+    for tenant, policy, content in [
+        (TENANT, {"allow_roles": ["operator"]}, "I said the private workshop starts at ten."),
+        ("another-tenant", {}, "I said the other tenant's workshop starts at eleven."),
+    ]:
+        temporal_engine.append_evidence(Evidence(
+            tenant_id=tenant, user_id="u", actor="user", source_type="conversation", content=content,
+            access_policy={"tenant": tenant, **policy}, created_at=datetime(2026, 11, 1, 5, tzinfo=UTC),
+        ))
+    result = temporal_engine.retrieve(
+        "What did I say about the workshop yesterday?", tenant_id=TENANT, record_access=False,
+        filt={"role": "reader", "query_timezone": "America/New_York", "evaluated_at": "2026-11-02T12:00:00Z"},
+    )
+    assert [hit.id for hit in result.hits] == [public]
+
+
+@pytest.mark.parametrize("mode", ["deep", "as_of", "global_sensemaking"])
+def test_default_window_does_not_replace_explicit_read_semantics(temporal_engine, mode):
+    _append_fall_back_conversation(
+        temporal_engine, minute=10, fold=0, content="I said the workshop starts at nine.",
+    )
+    filt = {"query_timezone": "America/New_York", "evaluated_at": "2026-11-04T12:00:00Z"}
+    if mode == "as_of":
+        filt["as_of"] = "2026-11-04T12:00:00Z"
+    elif mode == "global_sensemaking":
+        filt["query_mode"] = mode
+    result = temporal_engine.retrieve(
+        "What did I say about the workshop yesterday?", tenant_id=TENANT, record_access=False,
+        filt=filt, deep=mode == "deep",
+    )
+    assert "time_window" not in result.explain
+    if mode == "global_sensemaking":
+        assert result.explain["query_mode"] == mode
+    else:
+        assert result.hits

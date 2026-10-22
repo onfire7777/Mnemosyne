@@ -1,0 +1,3730 @@
+........................................................................ [  5%]
+........................................................................ [ 10%]
+........................................................................ [ 15%]
+........................................................................ [ 20%]
+............................................s.ss.ss.s................... [ 25%]
+........................................................................ [ 30%]
+........................................................................ [ 35%]
+........................................................................ [ 40%]
+........................................................................ [ 45%]
+........................................................................ [ 50%]
+........................................................................ [ 55%]
+........................................................................ [ 60%]
+........................................................................ [ 65%]
+........................................................................ [ 70%]
+........................................................................ [ 75%]
+........................................................................ [ 80%]
+........................................................................ [ 85%]
+........................................................................ [ 90%]
+.................................E.......E.E.E...E...E.............E.E.E [ 95%]
+.E.E.E...E....FEFE...E...E...E.......E.E.E...E.........E.E.E.E.....E.E.. [ 98%]
+...E.E...E...E...E...E                                                   [100%]
+==================================== ERRORS ====================================
+_ ERROR at teardown of test_concurrent_retries_survive_reopening_without_duplicate_audit[postgres] _
+
+request = <SubRequest 'setup' for <Function test_concurrent_retries_survive_reopening_without_duplicate_audit[postgres]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_concurrent_retries_surviv2')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x111b7b110>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('37b3edf2-544b-5ccb-8321-49ff72dfe2ca',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_retry_acknowledges_creation_without_reverting_later_state[postgres-update] _
+
+request = <SubRequest 'setup' for <Function test_retry_acknowledges_creation_without_reverting_later_state[postgres-update]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_retry_acknowledges_creati6')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x111b7b4d0>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('8a75e25e-0cdd-584a-b544-936453e3e8f1',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_retry_acknowledges_creation_without_reverting_later_state[postgres-cancel] _
+
+request = <SubRequest 'setup' for <Function test_retry_acknowledges_creation_without_reverting_later_state[postgres-cancel]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_retry_acknowledges_creati7')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x111b7a8a0>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('f51c86a3-2d96-576a-a5af-a28c6f9fac80',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_retry_acknowledges_creation_without_reverting_later_state[postgres-fire] _
+
+request = <SubRequest 'setup' for <Function test_retry_acknowledges_creation_without_reverting_later_state[postgres-fire]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_retry_acknowledges_creati8')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x11139b6b0>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('e96a1629-fbbe-52f2-b36e-a53277605d5f',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_key_conflict_is_nonmutating_and_session_scope_is_distinct[postgres] _
+
+request = <SubRequest 'setup' for <Function test_key_conflict_is_nonmutating_and_session_scope_is_distinct[postgres]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_key_conflict_is_nonmutati2')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x111e588c0>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('619f0ca7-0369-5d85-991b-b8656b20df1f',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_retry_rechecks_authority_and_cannot_restore_erased_intention[postgres] _
+
+request = <SubRequest 'setup' for <Function test_retry_rechecks_authority_and_cannot_restore_erased_intention[postgres]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_retry_rechecks_authority_2')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x111e596d0>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('27d5ebea-0551-5f62-be39-cb4cf7c657a2',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_invalid_key_does_not_create_an_intention[postgres-] _
+
+request = <SubRequest 'setup' for <Function test_invalid_key_does_not_create_an_intention[postgres-]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_invalid_key_does_not_crea12')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x11139be30>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('b994a23d-86b5-5b73-a647-f423d92d281d',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_invalid_key_does_not_create_an_intention[postgres-space key] _
+
+request = <SubRequest 'setup' for <Function test_invalid_key_does_not_create_an_intention[postgres-space key]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_invalid_key_does_not_crea13')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x10ed4cb90>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('433e5a99-4a06-5d4a-a93a-5425cf091f90',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_invalid_key_does_not_create_an_intention[postgres-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx] _
+
+request = <SubRequest 'setup' for <Function test_invalid_key_does_not_create_an_intention[postgres-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_invalid_key_does_not_crea14')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x11139ac60>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('ff5a54fc-d1aa-5078-b97a-a81c942a680a',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_invalid_key_does_not_create_an_intention[postgres-\xe9] _
+
+request = <SubRequest 'setup' for <Function test_invalid_key_does_not_create_an_intention[postgres-\xe9]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_invalid_key_does_not_crea15')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x111b789b0>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('e25ac339-f282-5e1b-abdd-41e9b0fea1d7',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_invalid_key_does_not_create_an_intention[postgres-123] _
+
+request = <SubRequest 'setup' for <Function test_invalid_key_does_not_create_an_intention[postgres-123]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_invalid_key_does_not_crea16')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x111b7a120>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('fbbd5a70-a349-536b-b855-907217846f9c',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_invalid_key_does_not_create_an_intention[postgres-True] _
+
+request = <SubRequest 'setup' for <Function test_invalid_key_does_not_create_an_intention[postgres-True]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_invalid_key_does_not_crea17')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x111b79d60>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('003fc7d6-959f-57a0-8937-095ffbc55c95',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_no_key_preserves_distinct_creation_behavior[postgres] _
+
+request = <SubRequest 'setup' for <Function test_no_key_preserves_distinct_creation_behavior[postgres]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_no_key_preserves_distinct2')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x111b79f40>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('f16a5449-5207-5abf-9189-080a72d8bd25',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_incomplete_creation_history_fails_closed[postgres-intention] _
+
+request = <SubRequest 'setup' for <Function test_incomplete_creation_history_fails_closed[postgres-intention]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_incomplete_creation_histo4')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x111b7b3e0>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('91ed1488-26d0-5f75-b2c2-4217a1b4f2bc',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_incomplete_creation_history_fails_closed[postgres-receipt] _
+
+request = <SubRequest 'setup' for <Function test_incomplete_creation_history_fails_closed[postgres-receipt]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_incomplete_creation_histo5')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x111b7a7b0>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('818492ba-27e5-55cc-bd70-ce5c5f9e896c',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_recurring_creation_retry_does_not_rewind_occurrence[postgres] _
+
+request = <SubRequest 'setup' for <Function test_recurring_creation_retry_does_not_rewind_occurrence[postgres]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_recurring_creation_retry_2')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x11139a8a0>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('673f54b6-ffad-5b68-8f52-993823224c42',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_concurrent_update_retries_are_durable_and_audit_only_digests[postgres] _
+
+request = <SubRequest 'setup' for <Function test_concurrent_update_retries_are_durable_and_audit_only_digests[postgres]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_concurrent_update_retries2')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x111e58230>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('cbb99d4f-c4e6-5ab4-a89a-4d1e8ba6d305',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_concurrent_different_updates_cannot_both_use_stale_revision[postgres] _
+
+request = <SubRequest 'setup' for <Function test_concurrent_different_updates_cannot_both_use_stale_revision[postgres]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_concurrent_different_upda2')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x111b7bb60>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('959bcb8a-2cbe-5086-abbf-7a218164e68d',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_old_update_retry_returns_current_state_without_reapplying[postgres-update] _
+
+request = <SubRequest 'setup' for <Function test_old_update_retry_returns_current_state_without_reapplying[postgres-update]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_old_update_retry_returns_6')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x11139b200>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('806186df-5187-5d6c-94d6-75ee8075f513',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_old_update_retry_returns_current_state_without_reapplying[postgres-cancel] _
+
+request = <SubRequest 'setup' for <Function test_old_update_retry_returns_current_state_without_reapplying[postgres-cancel]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_old_update_retry_returns_7')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x111b79d60>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('997e06e3-66e0-5dd6-b882-a0ae874eba84',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_old_update_retry_returns_current_state_without_reapplying[postgres-fire] _
+
+request = <SubRequest 'setup' for <Function test_old_update_retry_returns_current_state_without_reapplying[postgres-fire]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_old_update_retry_returns_8')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x111b79040>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('9be36aa4-4f91-54ac-b0fb-2c9b91d859c7',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_keyed_noop_gets_durable_receipt_and_rejects_repurposed_key[postgres] _
+
+request = <SubRequest 'setup' for <Function test_keyed_noop_gets_durable_receipt_and_rejects_repurposed_key[postgres]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_keyed_noop_gets_durable_r2')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x111e58050>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('92e4dde4-c6ed-509b-8820-758e682e5992',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_update_retry_requires_both_valid_key_and_revision[postgres-overrides0] _
+
+request = <SubRequest 'setup' for <Function test_update_retry_requires_both_valid_key_and_revision[postgres-overrides0]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_update_retry_requires_bot8')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x111e5a990>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('307adc6f-32d3-5c98-bed8-bac1f67ca3ea',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_update_retry_requires_both_valid_key_and_revision[postgres-overrides1] _
+
+request = <SubRequest 'setup' for <Function test_update_retry_requires_both_valid_key_and_revision[postgres-overrides1]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_update_retry_requires_bot9')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x11139ac60>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('2cbf51fa-6def-546a-82e7-f0e057d17ab1',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_update_retry_requires_both_valid_key_and_revision[postgres-overrides2] _
+
+request = <SubRequest 'setup' for <Function test_update_retry_requires_both_valid_key_and_revision[postgres-overrides2]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_update_retry_requires_bot10')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x111b799a0>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('a454184a-8401-514c-809e-25191b6ab56b',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_update_retry_requires_both_valid_key_and_revision[postgres-overrides3] _
+
+request = <SubRequest 'setup' for <Function test_update_retry_requires_both_valid_key_and_revision[postgres-overrides3]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_update_retry_requires_bot11')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x111b78320>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('d93c9bb8-7b98-5052-a1dc-59df10db18f5',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_failed_mutation_rolls_back_state_and_receipt_then_allows_retry[postgres-update] _
+
+request = <SubRequest 'setup' for <Function test_failed_mutation_rolls_back_state_and_receipt_then_allows_retry[postgres-update]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_failed_mutation_rolls_bac4')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x111b7ad50>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('2ceea60a-d9a0-5380-95eb-9d7e8f87bc9e',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_failed_mutation_rolls_back_state_and_receipt_then_allows_retry[postgres-cancel] _
+
+request = <SubRequest 'setup' for <Function test_failed_mutation_rolls_back_state_and_receipt_then_allows_retry[postgres-cancel]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_failed_mutation_rolls_bac5')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x111e5a210>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('613f33a1-73f2-5c13-baae-d3b543b61675',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_mutation_retry_rechecks_erased_provenance[postgres-update] _
+
+request = <SubRequest 'setup' for <Function test_mutation_retry_rechecks_erased_provenance[postgres-update]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_mutation_retry_rechecks_e4')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x111e586e0>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('829cf7ba-4cd6-55d6-8e6a-ecdab75ef253',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_mutation_retry_rechecks_erased_provenance[postgres-cancel] _
+
+request = <SubRequest 'setup' for <Function test_mutation_retry_rechecks_erased_provenance[postgres-cancel]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_mutation_retry_rechecks_e5')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x111b78c80>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('0ac48d28-396d-5c7c-98d6-f6e51764e2cd',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_concurrent_cancel_retries_survive_reopening_and_reject_changed_precondition[postgres] _
+
+request = <SubRequest 'setup' for <Function test_concurrent_cancel_retries_survive_reopening_and_reject_changed_precondition[postgres]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_concurrent_cancel_retries2')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x111b7ac60>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('6e89330f-9e33-5b66-b107-bd6663d3ac90',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_cancel_and_update_cannot_both_accept_the_same_prior_state[postgres] _
+
+request = <SubRequest 'setup' for <Function test_cancel_and_update_cannot_both_accept_the_same_prior_state[postgres]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_cancel_and_update_cannot_2')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x111b78500>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('adf72561-1b1b-57ca-b348-28a8dc6c747f',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_cancel_and_fire_have_one_winning_transition[postgres] _
+
+request = <SubRequest 'setup' for <Function test_cancel_and_fire_have_one_winning_transition[postgres]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_cancel_and_fire_have_one_2')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x111e58410>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('04a05f6a-24a2-57ac-b847-1f55d9f3b109',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+_ ERROR at teardown of test_new_key_for_already_cancelled_state_is_an_audited_noop[postgres] _
+
+request = <SubRequest 'setup' for <Function test_new_key_for_already_cancelled_state_is_an_audited_noop[postgres]>>
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-684/test_new_key_for_already_cance2')
+
+    @pytest.fixture(params=["local", "sqlite", "postgres"])
+    def setup(request, tmp_path):
+        tenant = f"retry-{uuid4().hex}"
+        if request.param == "postgres":
+            dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+            from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+    
+            factory = partial(PostgresEngine, dsn, require_safe_role=False)
+            close = PostgresEngine.close_connections
+        elif request.param == "sqlite":
+            factory = partial(SqliteEngine, tmp_path / "db")
+            close = SqliteEngine.close
+        else:
+            factory = partial(LocalMemoryEngine, tmp_path / "store.json")
+            close = LocalMemoryEngine.close
+        engine = factory()
+        identity = SessionIdentity(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            role="agent",
+            source_trust_tier=1,
+            session_id="session",
+        )
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="owner",
+                actor="user",
+                source_type="episode",
+                content="Call the customer",
+                trust_tier=1,
+                access_policy={"tenant": tenant},
+            )
+        )
+        due = "2026-10-04T12:00:00+00:00"
+        arguments = dict(
+            tenant_id=tenant,
+            user_id="owner",
+            agent_id="agent",
+            trigger_type="exact_time",
+            trigger_expression={"at": due},
+            action={"kind": "notify", "message": "Call"},
+            due_at=due,
+            evidence_ids=[cid],
+            session_identity=identity,
+            idempotency_key="creation-1",
+        )
+        state = dict(
+            engine=engine, arguments=arguments, factory=factory, close=close, tenant=tenant
+        )
+        try:
+            yield state
+        finally:
+            engine = state["engine"]
+            if request.param == "postgres":
+                with engine.connect() as conn:
+>                   conn.execute(
+                        "DELETE FROM tenants WHERE id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+
+tests/test_prospective_idempotency.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <psycopg.Connection [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x111e58050>
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('16db75d1-ad8c-5846-b477-b7b267da6190',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege
+=================================== FAILURES ===================================
+______ test_incomplete_creation_history_fails_closed[postgres-intention] _______
+
+setup = {'engine': <mnemosyne.postgres_engine.PostgresEngine object at 0x111f39630>, 'arguments': {'tenant_id': 'retry-3f0ed38...1:55434/mnemosyne', require_safe_role=False), 'close': <function PostgresEngine.close_connections at 0x10c5b90c0>, ...}
+missing = 'intention'
+
+    @pytest.mark.parametrize("missing", ["intention", "receipt"])
+    def test_incomplete_creation_history_fails_closed(setup, missing):
+        original = _schedule(setup)
+        engine, tenant = setup["engine"], setup["tenant"]
+        retry = partial(_schedule, setup)
+        if isinstance(engine, LocalMemoryEngine):
+            if missing == "intention":
+                del engine.intentions[(tenant, original["intention_id"])]
+            else:
+                engine.audit_log = [
+                    row for row in engine.audit_log if row["op"] != "schedule_intention"
+                ]
+            engine._persist()
+        elif isinstance(engine, SqliteEngine):
+            conn = engine._connect(tenant)
+            if missing == "intention":
+                conn.execute("DELETE FROM intentions WHERE tenant_id = ?", (tenant,))
+            else:
+                conn.execute("DELETE FROM audit_log WHERE tenant_id = ?", (tenant,))
+            conn.commit()
+        else:
+            from mnemosyne.postgres_engine import _stable_uuid
+    
+            with engine.connect() as conn:
+                if missing == "intention":
+                    conn.execute(
+                        "DELETE FROM intentions WHERE tenant_id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+                else:
+                    # Audit rows are append-only. Model an orphaned import without
+                    # disabling that production protection or deleting history.
+                    orphan = Intention.from_dict(original)
+                    orphan.intention_id = str(uuid4())
+                    conn.execute(
+                        "UPDATE intentions SET intention_id = %s WHERE tenant_id = %s",
+                        (orphan.intention_id, _stable_uuid("tenant", tenant)),
+                    )
+                    retry = partial(engine.schedule_intention, orphan, idempotent=True)
+        before = engine.export_tenant(tenant)
+>       with pytest.raises(ValueError, match="removed intention|missing creation receipt"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ValueError
+
+tests/test_prospective_idempotency.py:240: Failed
+_______ test_incomplete_creation_history_fails_closed[postgres-receipt] ________
+
+setup = {'engine': <mnemosyne.postgres_engine.PostgresEngine object at 0x111f39390>, 'arguments': {'tenant_id': 'retry-b252ca5...1:55434/mnemosyne', require_safe_role=False), 'close': <function PostgresEngine.close_connections at 0x10c5b90c0>, ...}
+missing = 'receipt'
+
+    @pytest.mark.parametrize("missing", ["intention", "receipt"])
+    def test_incomplete_creation_history_fails_closed(setup, missing):
+        original = _schedule(setup)
+        engine, tenant = setup["engine"], setup["tenant"]
+        retry = partial(_schedule, setup)
+        if isinstance(engine, LocalMemoryEngine):
+            if missing == "intention":
+                del engine.intentions[(tenant, original["intention_id"])]
+            else:
+                engine.audit_log = [
+                    row for row in engine.audit_log if row["op"] != "schedule_intention"
+                ]
+            engine._persist()
+        elif isinstance(engine, SqliteEngine):
+            conn = engine._connect(tenant)
+            if missing == "intention":
+                conn.execute("DELETE FROM intentions WHERE tenant_id = ?", (tenant,))
+            else:
+                conn.execute("DELETE FROM audit_log WHERE tenant_id = ?", (tenant,))
+            conn.commit()
+        else:
+            from mnemosyne.postgres_engine import _stable_uuid
+    
+            with engine.connect() as conn:
+                if missing == "intention":
+                    conn.execute(
+                        "DELETE FROM intentions WHERE tenant_id = %s",
+                        (_stable_uuid("tenant", tenant),),
+                    )
+                else:
+                    # Audit rows are append-only. Model an orphaned import without
+                    # disabling that production protection or deleting history.
+                    orphan = Intention.from_dict(original)
+                    orphan.intention_id = str(uuid4())
+                    conn.execute(
+                        "UPDATE intentions SET intention_id = %s WHERE tenant_id = %s",
+                        (orphan.intention_id, _stable_uuid("tenant", tenant)),
+                    )
+                    retry = partial(engine.schedule_intention, orphan, idempotent=True)
+        before = engine.export_tenant(tenant)
+>       with pytest.raises(ValueError, match="removed intention|missing creation receipt"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ValueError
+
+tests/test_prospective_idempotency.py:240: Failed
+=========================== short test summary info ============================
+FAILED tests/test_prospective_idempotency.py::test_incomplete_creation_history_fails_closed[postgres-intention]
+FAILED tests/test_prospective_idempotency.py::test_incomplete_creation_history_fails_closed[postgres-receipt]
+ERROR tests/test_prospective_idempotency.py::test_concurrent_retries_survive_reopening_without_duplicate_audit[postgres]
+ERROR tests/test_prospective_idempotency.py::test_retry_acknowledges_creation_without_reverting_later_state[postgres-update]
+ERROR tests/test_prospective_idempotency.py::test_retry_acknowledges_creation_without_reverting_later_state[postgres-cancel]
+ERROR tests/test_prospective_idempotency.py::test_retry_acknowledges_creation_without_reverting_later_state[postgres-fire]
+ERROR tests/test_prospective_idempotency.py::test_key_conflict_is_nonmutating_and_session_scope_is_distinct[postgres]
+ERROR tests/test_prospective_idempotency.py::test_retry_rechecks_authority_and_cannot_restore_erased_intention[postgres]
+ERROR tests/test_prospective_idempotency.py::test_invalid_key_does_not_create_an_intention[postgres-]
+ERROR tests/test_prospective_idempotency.py::test_invalid_key_does_not_create_an_intention[postgres-space key]
+ERROR tests/test_prospective_idempotency.py::test_invalid_key_does_not_create_an_intention[postgres-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx]
+ERROR tests/test_prospective_idempotency.py::test_invalid_key_does_not_create_an_intention[postgres-\xe9]
+ERROR tests/test_prospective_idempotency.py::test_invalid_key_does_not_create_an_intention[postgres-123]
+ERROR tests/test_prospective_idempotency.py::test_invalid_key_does_not_create_an_intention[postgres-True]
+ERROR tests/test_prospective_idempotency.py::test_no_key_preserves_distinct_creation_behavior[postgres]
+ERROR tests/test_prospective_idempotency.py::test_incomplete_creation_history_fails_closed[postgres-intention]
+ERROR tests/test_prospective_idempotency.py::test_incomplete_creation_history_fails_closed[postgres-receipt]
+ERROR tests/test_prospective_idempotency.py::test_recurring_creation_retry_does_not_rewind_occurrence[postgres]
+ERROR tests/test_prospective_idempotency.py::test_concurrent_update_retries_are_durable_and_audit_only_digests[postgres]
+ERROR tests/test_prospective_idempotency.py::test_concurrent_different_updates_cannot_both_use_stale_revision[postgres]
+ERROR tests/test_prospective_idempotency.py::test_old_update_retry_returns_current_state_without_reapplying[postgres-update]
+ERROR tests/test_prospective_idempotency.py::test_old_update_retry_returns_current_state_without_reapplying[postgres-cancel]
+ERROR tests/test_prospective_idempotency.py::test_old_update_retry_returns_current_state_without_reapplying[postgres-fire]
+ERROR tests/test_prospective_idempotency.py::test_keyed_noop_gets_durable_receipt_and_rejects_repurposed_key[postgres]
+ERROR tests/test_prospective_idempotency.py::test_update_retry_requires_both_valid_key_and_revision[postgres-overrides0]
+ERROR tests/test_prospective_idempotency.py::test_update_retry_requires_both_valid_key_and_revision[postgres-overrides1]
+ERROR tests/test_prospective_idempotency.py::test_update_retry_requires_both_valid_key_and_revision[postgres-overrides2]
+ERROR tests/test_prospective_idempotency.py::test_update_retry_requires_both_valid_key_and_revision[postgres-overrides3]
+ERROR tests/test_prospective_idempotency.py::test_failed_mutation_rolls_back_state_and_receipt_then_allows_retry[postgres-update]
+ERROR tests/test_prospective_idempotency.py::test_failed_mutation_rolls_back_state_and_receipt_then_allows_retry[postgres-cancel]
+ERROR tests/test_prospective_idempotency.py::test_mutation_retry_rechecks_erased_provenance[postgres-update]
+ERROR tests/test_prospective_idempotency.py::test_mutation_retry_rechecks_erased_provenance[postgres-cancel]
+ERROR tests/test_prospective_idempotency.py::test_concurrent_cancel_retries_survive_reopening_and_reject_changed_precondition[postgres]
+ERROR tests/test_prospective_idempotency.py::test_cancel_and_update_cannot_both_accept_the_same_prior_state[postgres]
+ERROR tests/test_prospective_idempotency.py::test_cancel_and_fire_have_one_winning_transition[postgres]
+ERROR tests/test_prospective_idempotency.py::test_new_key_for_already_cancelled_state_is_an_audited_noop[postgres]

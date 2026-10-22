@@ -85,6 +85,26 @@ tables, so writers in other tenants can wait until publication ends; production 
 unmeasured. These results validate tested runtime behavior, not answer quality or a
 Hindsight benchmark advantage.
 
+## Reliability follow-up
+
+The [subsequent repair pass](../work/hindsight-comparison/reliability-followup/REPORT.md)
+closes demonstrated ingestion, local persistence, PostgreSQL concurrent-update,
+policy-restart and temporal-ordering defects. Ingestion now distinguishes live
+storage from a returned but rejected CID; corrections and follow-up jobs require
+accepted evidence. PostgreSQL metadata and privacy backfill lock the same source
+row before merging, preserving concurrent updates and sensitivity. Calendar
+boundaries use the appropriate local offset, repeated hours are ordered by UTC,
+and requested first/last chronology survives later ranking stages.
+Supported past-conversation queries now use the authorized lexical passage route
+in default search even without a configured graph; explicit historical reads keep
+their prior semantics.
+
+Document replacement remains a separate feature. Legacy source identity labels
+do not isolate content-addressed evidence, and permanent erasure cannot serve as
+revision retirement. The next implementation needs owner-scoped document versions
+and atomic segment publication, reusing existing text-hash extraction caches.
+No benchmark was restarted for this follow-up.
+
 ## Prioritized delivery plan
 
 1. **P0 — Establish a reproducible baseline and fix demonstrated failures.** Freeze corpus IDs, splits, configurations and versions. Record baseline answer accuracy, abstention, citation correctness, latency and cost. Run existing regression suites; repair failures with before/after evidence. Cover malformed dates, provider outputs and cross-engine behavior. Completion means reproducible artifacts, not a passing hand-selected example.

@@ -519,12 +519,22 @@ _SPEAKER_VERBS_ASSISTANT = frozenset({"say", "said", "tell", "told", "answer", "
 
 def _asked_speaker(question: str) -> str | None:
     """'user' for "what did I ask / say", 'assistant' for "what did you say", else None."""
-    words = set(re.findall(r"[a-z']+", question.lower()))
-    if words & {"i", "me", "my"} and words & _SPEAKER_VERBS_USER:
-        return "user"
-    if "you" in words and words & _SPEAKER_VERBS_ASSISTANT:
-        return "assistant"
-    return None
+    text = question.lower()
+    # Recipients and possessives do not identify a speaker: "you told me"
+    # and "you said about my project" are both about the assistant. Ambiguous
+    # joint subjects or two speaking subjects keep the existing ranking.
+    if re.search(r"\b(?:you\s+and\s+i|i\s+and\s+you)\b", text):
+        return None
+    modifiers = r"(?:(?:first|last|just|previously|originally|recently|already|ever|actually|initially|have|had|did)\s+)*"
+    speakers = [
+        speaker
+        for pronoun, speaker, verbs in (
+            ("i", "user", _SPEAKER_VERBS_USER),
+            ("you", "assistant", _SPEAKER_VERBS_ASSISTANT),
+        )
+        if re.search(rf"\b{pronoun}\s+{modifiers}(?:{'|'.join(sorted(verbs))})\b", text)
+    ]
+    return speakers[0] if len(speakers) == 1 else None
 
 
 def _time_window_route(
@@ -561,22 +571,28 @@ def _time_window_route(
     ranked = list(ranked) + [replace(hit, metadata=dict(hit.metadata)) for hit in candidates if hit.id not in seen]
     times = ops.evidence_created_at_many(tenant_id, [hit.id for hit in ranked], branch)
     inside: list[tuple[datetime, Hit]] = []
+    start, end = window.start.astimezone(timezone.utc), window.end.astimezone(timezone.utc)
     for hit in ranked:
         moment = times.get(hit.id)
         if moment is None:
             continue
         if moment.tzinfo is None:
             moment = moment.replace(tzinfo=timezone.utc)
-        if window.start <= moment < window.end:
+        # Python compares wall times when datetimes share a ZoneInfo instance;
+        # converting to UTC keeps both occurrences of a DST hour distinct.
+        moment = moment.astimezone(timezone.utc)
+        if start <= moment < end:
             inside.append((moment, hit))
     if re.search(r"\b(first|earliest)\b", question):
         inside.sort(key=lambda item: item[0])
+        explain["order"] = "earliest_first"
     elif re.search(r"\b(last|latest|most recent|recently)\b", question):
         inside.sort(key=lambda item: item[0], reverse=True)
+        explain["order"] = "latest_first"
     hits = [hit for _moment, hit in inside]
     speaker = _asked_speaker(question)
     if speaker is not None:
-        said = [hit for hit in hits if (hit.metadata.get("actor") == "user") == (speaker == "user")]
+        said = [hit for hit in hits if hit.metadata.get("actor") == speaker]
         hits = said + [hit for hit in hits if hit not in said]
         explain["speaker"] = speaker
     explain["passages"] = len(hits)
@@ -1259,11 +1275,14 @@ def run_retrieval_pipeline(
     graph_fallback: str | None = None
     width = max(100, policy.rerank_width, k * 4)
     # "What did I ask you yesterday?": a question that names a time span is answered from the
-    # passages made inside it. Needs the passage route (graph or passage mode); as_of is a
-    # different question (what was true then), handled by the deep path.
+    # authorized passages made inside it. Ordinary default search can use the
+    # local lexical passage route without a graph/provider. Explicit deep/as_of
+    # reads retain their historical semantics; existing passage/graph routes
+    # continue to support their time-window questions.
     window = (
         query_time_window(query, retrieval_instant, query_timezone=effective_filter.get("query_timezone"))
-        if (passage_graph is not None or passage_mode) and not effective_filter.get("as_of")
+        if (passage_graph is not None or passage_mode or (query_mode is None and not deep))
+        and not effective_filter.get("as_of")
         else None
     )
     window_explain: dict[str, Any] | None = None
@@ -1411,7 +1430,7 @@ def run_retrieval_pipeline(
     ranked_routes = [dense, lexical, graph, prospective, working]
     source_ranked: list[Hit] | None = None
     if (
-        query_mode is None and not deep and not effective_filter.get("as_of")
+        window is None and query_mode is None and not deep and not effective_filter.get("as_of")
         and passage_graph is None and _source_only_local_routes(ops.adapters, ranked_routes)
     ):
         # Reauthorize the complete source corpus, not only the first channel's top
@@ -1450,14 +1469,20 @@ def run_retrieval_pipeline(
     # Passage and graph-ranked search keep their relevance order: the local hashing
     # reranker and MMR would re-sort it by surface tokens.
     relevance_order = passage_mode or semantic or window is not None or source_ranked is not None
+    chronological_window = bool(window_explain and window_explain.get("order"))
     reranked = (
-        fused if relevance_order and ops.adapters.reranker.name == "local-similarity"
+        fused if chronological_window or (relevance_order and ops.adapters.reranker.name == "local-similarity")
         else ops.adapters.reranker.rerank(query, fused, k=max(k * 2, k))
     )
-    reranked, schema_fast_path = schema_fast_path_rerank(query, reranked, policy)
+    if chronological_window:
+        # "First/last said" is an ordering constraint on source timestamps,
+        # not a relevance hint that a learned or schema reranker may replace.
+        schema_fast_path = {"applied": False, "reason": "explicit_temporal_order", "boosted_hit_ids": []}
+    else:
+        reranked, schema_fast_path = schema_fast_path_rerank(query, reranked, policy)
     if semantic:
         diversified = _cap_fact_hits(reranked, slots=max(1, k // 4))[:k]
-    elif passage_mode or source_ranked is not None:
+    elif window is not None or passage_mode or source_ranked is not None:
         diversified = reranked[:k]
     else:
         diversified = ops._mmr(query, reranked, k=max(k, 1))
@@ -1469,8 +1494,12 @@ def run_retrieval_pipeline(
     # Retrieval exposes a relevance ranking. U-curve layout is a presentation
     # decision for a reader prompt and must not move rank 2 to the last slot.
     ordered = activated
-    ordered, schema_fast_path_final = schema_fast_path_rerank(query, ordered, policy)
+    if chronological_window:
+        schema_fast_path_final = dict(schema_fast_path)
+    else:
+        ordered, schema_fast_path_final = schema_fast_path_rerank(query, ordered, policy)
     schema_fast_path = ops._merge_schema_fast_path_reports(schema_fast_path, schema_fast_path_final)
+    temporal_positions = {(hit.kind, hit.id): index for index, hit in enumerate(ordered)} if chronological_window else {}
     ordered, workspace_retrieval_advisory = apply_workspace_retrieval_advisory(
         ordered,
         filt,
@@ -1478,6 +1507,11 @@ def run_retrieval_pipeline(
         branch=branch,
         policy=policy,
     )
+    if chronological_window:
+        ordered.sort(key=lambda hit: temporal_positions[(hit.kind, hit.id)])
+        if workspace_retrieval_advisory.get("status") == "applied":
+            workspace_retrieval_advisory["used_for_ranking"] = False
+            workspace_retrieval_advisory["ranking_preserved"] = "explicit_temporal_order"
     budgeted, used = ops._fit_budget(ordered, token_budget)
     budgeted = ops._mark_retrieved_text_as_data(budgeted)
     _stamp_hit_origin(ops, budgeted, tenant_id=tenant_id, branch=branch)

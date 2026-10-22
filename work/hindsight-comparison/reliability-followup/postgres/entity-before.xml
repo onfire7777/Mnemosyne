@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="3" skipped="0" tests="4" time="0.670" timestamp="2026-10-22T16:47:46.771237-07:00" hostname="Admins-MacBook-Pro.local"><testcase classname="tests.test_postgres_entity_erasure_live" name="test_entity_erasure_cascades_aliases_with_restricted_consolidator[tombstone_recompute]" time="0.130"><failure message="psycopg.errors.InsufficientPrivilege: permission denied for table entity_aliases&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;entity_aliases&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;entity_id&quot;&quot;">entity_engine = &lt;mnemosyne.postgres_engine.PostgresEngine object at 0x10cf08c20&gt;
+mode = 'tombstone_recompute'
+
+    @pytest.mark.parametrize("mode", ["tombstone_recompute", "hard_delete_legal"])
+    def test_entity_erasure_cascades_aliases_with_restricted_consolidator(entity_engine, mode):
+        engine = entity_engine
+        tenant, cid, canonical = seed_entity(engine)
+        assert alias_count(engine, tenant) == 2  # canonical name and explicit alias
+&gt;       result = engine.forget(tenant, cid, requested_by="legal", erasure_mode=mode)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_postgres_entity_erasure_live.py:55: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/mnemosyne/postgres_engine.py:5356: in forget
+    cur.execute("DELETE FROM entities WHERE id = %s", (row["id"],))
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x10ce4df10&gt;
+query = 'DELETE FROM entities WHERE id = %s'
+params = (UUID('e3bd1be6-866c-4f8c-859c-2fdca9c05032'),), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table entity_aliases
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."entity_aliases" WHERE $1 OPERATOR(pg_catalog.=) "entity_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</failure></testcase><testcase classname="tests.test_postgres_entity_erasure_live" name="test_entity_erasure_cascades_aliases_with_restricted_consolidator[hard_delete_legal]" time="0.065"><failure message="psycopg.errors.InsufficientPrivilege: permission denied for table entity_aliases&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;entity_aliases&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;entity_id&quot;&quot;">entity_engine = &lt;mnemosyne.postgres_engine.PostgresEngine object at 0x10cf80cd0&gt;
+mode = 'hard_delete_legal'
+
+    @pytest.mark.parametrize("mode", ["tombstone_recompute", "hard_delete_legal"])
+    def test_entity_erasure_cascades_aliases_with_restricted_consolidator(entity_engine, mode):
+        engine = entity_engine
+        tenant, cid, canonical = seed_entity(engine)
+        assert alias_count(engine, tenant) == 2  # canonical name and explicit alias
+&gt;       result = engine.forget(tenant, cid, requested_by="legal", erasure_mode=mode)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_postgres_entity_erasure_live.py:55: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/mnemosyne/postgres_engine.py:5356: in forget
+    cur.execute("DELETE FROM entities WHERE id = %s", (row["id"],))
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55434 user=consolidator_user database=mnemosyne) at 0x10ce4eb10&gt;
+query = 'DELETE FROM entities WHERE id = %s'
+params = (UUID('4b05264d-d586-444d-b54d-ae593545fd9a'),), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table entity_aliases
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."entity_aliases" WHERE $1 OPERATOR(pg_catalog.=) "entity_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</failure></testcase><testcase classname="tests.test_postgres_entity_erasure_live" name="test_alias_owner_grant_stays_tenant_scoped_and_preserves_protected_tables" time="0.094"><failure message="psycopg.errors.InsufficientPrivilege: permission denied for table entity_aliases">entity_engine = &lt;mnemosyne.postgres_engine.PostgresEngine object at 0x10b92cb90&gt;
+
+    def test_alias_owner_grant_stays_tenant_scoped_and_preserves_protected_tables(entity_engine):
+        engine = entity_engine
+        app_dsn = os.environ.get("MNEMOSYNE_POSTGRES_APP_DSN")
+        if not app_dsn:
+            pytest.skip("MNEMOSYNE_POSTGRES_APP_DSN is not set")
+        tenant, _, _ = seed_entity(engine)
+        other_tenant, _, _ = seed_entity(engine)
+        with engine._psycopg.connect(app_dsn) as conn:
+            conn.execute("SELECT set_config('mnemosyne.tenant_id', %s, true)",
+                         (str(_stable_uuid("tenant", tenant)),))
+            assert conn.execute("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user").fetchone() == (False, False)
+&gt;           assert conn.execute("DELETE FROM entity_aliases WHERE tenant_id = %s",
+                                (_stable_uuid("tenant", other_tenant),)).rowcount == 0
+
+tests/test_postgres_entity_erasure_live.py:74: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Connection [BAD] at 0x10cff1810&gt;
+query = 'DELETE FROM entity_aliases WHERE tenant_id = %s'
+params = ('0a82ec7b-1cb4-5f06-852e-a3374ea4bd88',), prepare = None
+binary = False
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -&gt; Cursor[Row]:
+        """Execute a query and return a cursor to read its results."""
+        try:
+            cur = self.cursor()
+            if binary:
+                cur.format = BINARY
+    
+            if isinstance(query, Template):
+                if params is not None:
+                    raise TypeError(
+                        "'execute()' with string template query doesn't support parameters"
+                    )
+                return cur.execute(query, prepare=prepare)
+            else:
+                return cur.execute(query, params, prepare=prepare)
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table entity_aliases
+
+.venv/lib/python3.14/site-packages/psycopg/connection.py:300: InsufficientPrivilege</failure></testcase><testcase classname="tests.test_postgres_entity_erasure_live" name="test_readonly_role_cannot_delete_aliases" time="0.070" /></testsuite></testsuites>

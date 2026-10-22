@@ -77,3 +77,26 @@ Attempt markers are not process locks. A second evaluator must not interpret act
 as a crashed attempt, and interruption must cancel queued work while preserving receipts
 from admitted calls. Hold an OS-backed lock through recovery and final publication; never
 delete a lock file while another process might still hold its inode.
+
+An evidence CID can identify a rejected write. Verify a live post-write source before
+launching dependent correction, extraction or indexing work, and distinguish that
+observation from a transactional exactly-once receipt. A failed immediate disk commit
+must restore the in-memory source and audit state; keep cache epochs monotonic and do
+not roll back a committed store merely because a later journal append fails.
+
+Protect PostgreSQL read/merge/write operations with a row lock at the read. An unrelated
+DDL lock can accidentally serialize one pair of writers while leaving privacy backfill
+races open. Run tests with the restricted runtime roles: superuser fixtures hide both
+missing cascade grants and missing RLS tenant context. Retain unique test tenants until
+the disposable database is removed rather than granting destructive cleanup rights.
+
+Fixed-offset local datetimes do not carry historical daylight-saving rules. Resolve each
+calendar boundary and compare source timestamps as UTC instants; protect explicit
+chronology from later relevance-ranking stages. Test the basic graph-free configuration,
+not only an optional advanced retrieval path. Normalize JSON mapping keys where runtime
+policy lookups use integer trust tiers so a restart preserves effective behavior.
+
+Source identity labels are not document ownership. Legacy content-addressed evidence can
+be shared by distinct source envelopes, and erasure is permanent. Growing-document
+replacement therefore needs a scoped version registry and distinct revision retirement,
+not a source-label scan followed by deletion.

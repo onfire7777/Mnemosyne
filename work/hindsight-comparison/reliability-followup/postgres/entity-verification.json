@@ -1,0 +1,18 @@
+{
+  "results": {
+    "name": "pytest",
+    "errors": "0",
+    "failures": "0",
+    "skipped": "0",
+    "tests": "21",
+    "time": "1.130",
+    "timestamp": "2026-10-22T16:47:49.576595-07:00",
+    "hostname": "Admins-MacBook-Pro.local"
+  },
+  "source_hashes": {
+    "infra/postgres/roles.sql": "aae2cb5c585ecf5ed8860195415b13751d4983d6899337d30f477245a69862d3",
+    "src/mnemosyne/cli.py": "f445dd2125abc59fbbab06654cb51db24b7b56506a48120ab8194c91058dcc6a",
+    "tests/test_postgres_role_check.py": "4c4850cdef9e28ca544de2f1f25cae05757869ee3c4d031fb8a12386730fb756",
+    "tests/test_postgres_entity_erasure_live.py": "2d03a6ba88ce21adfe4719cbeb4a69d894b0dc4db0db51d38affcd2cceb48523"
+  }
+}

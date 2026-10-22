@@ -2409,12 +2409,16 @@ class PostgresEngine:
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
-                self._ensure_preference_access_policy_schema(cur)
+                # Serialize the read/merge/write with other evidence mutations.
+                # In READ COMMITTED, locking this read also refreshes a row that
+                # changed while waiting, so a concurrent privacy backfill is
+                # retained rather than overwritten by the caller's small patch.
                 cur.execute(
                     """
                     SELECT metadata, source_type, trust_tier, capability_tags
                     FROM evidence
                     WHERE tenant_id = %s AND branch = %s AND cid = %s AND erased = false
+                    FOR UPDATE
                     """,
                     (db_tenant_id, branch, _cid_to_bytes(cid)),
                 )
@@ -2476,6 +2480,7 @@ class PostgresEngine:
                            sensitivity, access_policy, embedding_partition
                     FROM evidence
                     WHERE tenant_id = %s AND branch = %s AND cid = %s AND erased = false
+                    FOR UPDATE
                     """,
                     (db_tenant_id, branch, _cid_to_bytes(cid)),
                 )

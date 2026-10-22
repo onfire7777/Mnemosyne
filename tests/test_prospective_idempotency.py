@@ -30,7 +30,7 @@ def setup(request, tmp_path):
         dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
         if not dsn:
             pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
-        from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
+        from mnemosyne.postgres_engine import PostgresEngine
 
         factory = partial(PostgresEngine, dsn, require_safe_role=False)
         close = PostgresEngine.close_connections
@@ -80,12 +80,9 @@ def setup(request, tmp_path):
         yield state
     finally:
         engine = state["engine"]
-        if request.param == "postgres":
-            with engine.connect() as conn:
-                conn.execute(
-                    "DELETE FROM tenants WHERE id = %s",
-                    (_stable_uuid("tenant", tenant),),
-                )
+        # Each case has a unique tenant in a disposable test database. Retain
+        # its rows for diagnostics: runtime credentials deliberately cannot
+        # perform the privileged cascades needed to delete an entire tenant.
         close(engine)
 
 
@@ -221,21 +218,24 @@ def test_incomplete_creation_history_fails_closed(setup, missing):
         from mnemosyne.postgres_engine import _stable_uuid
 
         with engine.connect() as conn:
+            with conn.cursor() as cur:
+                engine._set_tenant(cur, _stable_uuid("tenant", tenant))
             if missing == "intention":
-                conn.execute(
+                changed = conn.execute(
                     "DELETE FROM intentions WHERE tenant_id = %s",
                     (_stable_uuid("tenant", tenant),),
-                )
+                ).rowcount
             else:
                 # Audit rows are append-only. Model an orphaned import without
                 # disabling that production protection or deleting history.
                 orphan = Intention.from_dict(original)
                 orphan.intention_id = str(uuid4())
-                conn.execute(
+                changed = conn.execute(
                     "UPDATE intentions SET intention_id = %s WHERE tenant_id = %s",
                     (orphan.intention_id, _stable_uuid("tenant", tenant)),
-                )
+                ).rowcount
                 retry = partial(engine.schedule_intention, orphan, idempotent=True)
+            assert changed == 1, "corruption fixture must mutate its one authorized intention"
     before = engine.export_tenant(tenant)
     with pytest.raises(ValueError, match="removed intention|missing creation receipt"):
         retry()

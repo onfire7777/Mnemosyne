@@ -113,6 +113,9 @@ class IngestResult:
     queued_jobs: list[dict[str, Any]] = field(default_factory=list)
     correction_applied: bool = False
     correction_assertion_id: str | None = None
+    stored: bool = False
+    created: bool = False
+    idempotent: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -312,13 +315,19 @@ class IngestionPipeline:
             ),
             branch=branch,
         )
+        # A returned CID is not a receipt of storage: erased replays and
+        # self-generation budget deferrals deliberately return a CID without
+        # a live row. Never derive a correction or queue work from that alone.
+        stored = self._evidence_exists(request.tenant_id, cid, branch)
+        created = stored and not already_present and cid == predicted_cid
+        idempotent = stored and already_present and cid == predicted_cid
         # Tier-0 user-correction fast path (blueprint §20.7 / §30.2): the
         # highest-trust signal is applied immediately as an active supersession
         # in the same turn, bypassing the gated consolidation warm loop. Only
         # derived/inferred memory takes the candidate -> gate path.
         correction_applied = False
         correction_assertion_id: str | None = None
-        if not already_present and is_tier0_user_correction(request, trust_tier):
+        if created and is_tier0_user_correction(request, trust_tier):
             correction_assertion_id = self._apply_tier0_correction(
                 request=request,
                 cid=cid,
@@ -330,7 +339,7 @@ class IngestionPipeline:
             correction_applied = correction_assertion_id is not None
 
         queued_jobs: list[dict[str, Any]] = []
-        if self.queue and not already_present:
+        if self.queue and created:
             if should_externalize and request.modality != "text" and not derived_sources:
                 queued_jobs.append(
                     self._enqueue_media_extraction(
@@ -367,6 +376,9 @@ class IngestionPipeline:
             queued_jobs=queued_jobs,
             correction_applied=correction_applied,
             correction_assertion_id=correction_assertion_id,
+            stored=stored,
+            created=created,
+            idempotent=idempotent,
         )
 
     def _apply_tier0_correction(

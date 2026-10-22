@@ -1,0 +1,20 @@
+[
+  {
+    "ID": "d837309f5fdc",
+    "Names": "mnemosyne-reliability-pg-1f2e3f3c",
+    "State": "running",
+    "Ports": "127.0.0.1:55434->5432/tcp"
+  },
+  {
+    "ID": "c4be243bc1f2",
+    "Names": "pentestswarm-redis-1",
+    "State": "running",
+    "Ports": "127.0.0.1:6379->6379/tcp"
+  },
+  {
+    "ID": "c7424db61529",
+    "Names": "pentestswarm-postgres-1",
+    "State": "running",
+    "Ports": "127.0.0.1:5432->5432/tcp"
+  }
+]
