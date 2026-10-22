@@ -20,3 +20,18 @@
 - background-refresh-source-manifest.json — source identity for background refresh
 - background-refresh-final-verification.xml — expanded final regression receipt
 - verify-background-refresh.sh — exact background-refresh verification command
+- postgres-live/REPORT.md — completed live PostgreSQL validation, repairs and cleanup
+- postgres-live/verification.json — 235 mixed live/unit tests, no skips or failures
+- postgres-live/role-check.json — nine live role checks, no findings
+- postgres-comparison-final-verification.xml — 2116 passed and 114 optional skips before the controlled pilot
+- verify-postgres-comparison.sh — exact expanded verification command
+- controlled/run-v1/manifest.json — frozen 14-question held-out comparison identity
+- controlled/run-v1/configuration.json — source, model and runtime configuration
+- controlled/hindsight-environment.json — pinned native runtime and model fingerprints
+- controlled/export-run-receipts.py — text-free projections and native/reader resource accounting
+- controlled/run-v1/hindsight-cancellation.json — cancelled experiment, partial usage and cleanup; no score
+- controlled/runner-recovery-lock-review.md — repaired runner concurrency and cancellation defects
+- evidence/E-change-refresh.md — opt-in early refresh implementation and verification
+- change-refresh-final-verification.xml — 2192 passed, 114 optional skips; no benchmark inference
+- verify-change-refresh.sh — final expanded regression command
+- change-refresh-source-manifest.json — source/test identity after final verification

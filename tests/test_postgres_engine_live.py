@@ -84,7 +84,7 @@ def fake_command_retrieval_provider(tmp_path: Path, *, source_cid: str | None = 
                 "if role == 'graph_ppr':",
                 "    hit = {'id': 'graph-hit-live', 'kind': 'relation', 'text': 'command graph retrieval reached Apache AGE wrapper', 'score': 0.93, 'channel': 'command_graph_ppr', 'provenance': source_cids, 'metadata': {'source': 'Command graph', 'predicate': 'uses', 'target': 'Apache AGE', 'source_evidence_cids': source_cids}}",
                 "else:",
-                "    hit = {'id': 'lexical-hit-live', 'kind': 'evidence', 'text': 'command lexical retrieval reached ParadeDB BM25 wrapper', 'score': 0.91, 'channel': 'command_lexical', 'metadata': {'source_type': 'command-lexical'}}",
+                "    hit = {'id': source_cids[0], 'kind': 'evidence', 'text': 'untrusted adapter preview', 'score': 0.91, 'channel': 'command_lexical', 'metadata': {'source_type': 'command-lexical'}}",
                 "print(json.dumps({'hits': [hit]}))",
             ]
         ),
@@ -1657,7 +1657,8 @@ def test_postgres_cli_uses_command_retrieval_adapters_live(tmp_path: Path) -> No
     deep = run_postgres_cli(*provider_args, "deep-search", "--tenant", tenant, "--query", "command graph retrieval")
     requests = json.loads(state.read_text(encoding="utf-8"))
 
-    assert any(hit["id"] == "lexical-hit-live" for hit in search["hits"])
+    assert any(hit["id"] == source["cid"] and hit["text"] == "Command graph retrieval reached Apache AGE wrapper." for hit in search["hits"])
+    assert "untrusted adapter preview" not in json.dumps(search)
     assert any(hit["metadata"]["backend"] == "paradedb-bm25" for hit in search["hits"])
     assert any(hit["id"] == "graph-hit-live" for hit in deep["hits"])
     assert any(hit["metadata"]["backend"] == "apache-age" for hit in deep["hits"])
@@ -2290,6 +2291,7 @@ def test_postgres_gated_consolidation_uses_command_providers_live(tmp_path) -> N
     job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
     assert job is not None
     exported = engine.export_tenant(tenant)
+    assert job.status == "complete", job.last_error
     extractor_result = job.result["pass_results"][1]
     resolver_result = next(item for item in job.result["pass_results"] if item["name"] == "resolver")
     summarizer_result = next(item for item in job.result["pass_results"] if item["name"] == "summarizer")

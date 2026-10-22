@@ -4,4 +4,6 @@
 # Preserve generated evidence bytes, including traceback whitespace.
 work/hindsight-comparison/*.log -whitespace linguist-generated=true
 work/hindsight-comparison/*.xml -whitespace linguist-generated=true
+work/hindsight-comparison/**/*.log -whitespace linguist-generated=true
+work/hindsight-comparison/**/*.xml -whitespace linguist-generated=true
 work/hindsight-comparison/local-eval*/slo_report*.md -whitespace linguist-generated=true

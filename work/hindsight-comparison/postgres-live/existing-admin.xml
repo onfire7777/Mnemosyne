@@ -1,0 +1,3561 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="58" failures="7" skipped="1" tests="177" time="35.363" timestamp="2026-10-22T16:33:02.609022-07:00" hostname="Admins-MacBook-Pro.local"><testcase classname="tests.test_postgres_engine_live" name="test_postgres_rejects_unknown_access_policy_keys_live" time="0.001" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_assertion_reinforcement_narrows_access_policy_live" time="1.670" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_assertion_structured_field_masking_live" time="0.063" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_queue_lifecycle_and_tenant_isolation_live" time="0.124" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_queue_leases_debiased_effective_write_priority_live" time="0.063" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_queue_worker_persists_retry_and_dead_failures_live" time="0.178" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_runtime_helper_public_paths_live" time="2.515" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_queue_cli_enqueue_and_drain_live" time="1.181" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_queue_worker_drains_maintenance_handlers_live" time="0.377" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_lists_only_live_raptor_summaries_in_requested_branch" time="0.130" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_engine_live_contract_smoke" time="0.388" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_graph_ppr_cache_refresh_materializes_live" time="0.135" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_projection_reality_monitoring_abstains_live" time="0.268" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_legacy_evidence_reality_classification_abstains_live" time="0.086" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_legacy_projection_reality_monitoring_abstains_live" time="0.083" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_evidence_vector_search_uses_stored_pgvector_live" time="0.046" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_vector_schema_reconciles_sensitive_legacy_public_embeddings_live" time="0.055" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_evidence_vector_search_keeps_null_embedding_fallback_live" time="0.049" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_mcp_runtime_state_persists_profile_learning_and_command_parametric_live" time="0.987" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_local_rank_fallback_uses_policy_sensitivity_live" time="0.067" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_ingestion_enforces_residency_transfer_policy_live" time="0.150" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_engine_live_shared_contract_parity" time="0.376" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_cli_backend_live_smoke" time="5.531" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_cli_uses_http_retrieval_providers_live" time="2.353" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_cli_uses_command_retrieval_adapters_live" time="0.928"><failure message="subprocess.CalledProcessError: Command '['/Users/admin/Desktop/Mnemosyne/.venv/bin/python', '-m', 'mnemosyne.cli', '--backend', 'postgres', '--postgres-dsn', 'postgresql://postgres:mnemosyne-local-audit-only@127.0.0.1:55432/mnemosyne', '--lexical-provider', 'command', '--lexical-command', '/Users/admin/Desktop/Mnemosyne/.venv/bin/python /private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-628/test_postgres_cli_uses_command0/command-retrieval-provider.py /private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-628/test_postgres_cli_uses_command0/command-retrieval-requests.json', '--lexical-backend', 'paradedb-bm25', '--graph-provider', 'command', '--graph-command', '/Users/admin/Desktop/Mnemosyne/.venv/bin/python /private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-628/test_postgres_cli_uses_command0/command-retrieval-provider.py /private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-628/test_postgres_cli_uses_command0/command-retrieval-requests.json', '--graph-backend', 'apache-age', 'search', '--tenant', 'tenant-command-retrieval-live-691cf969-548e-4e6a-9df6-1c7303c89495', '--query', 'command lexical retrieval']' returned non-zero exit status 1.">tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-628/test_postgres_cli_uses_command0')
+
+    def test_postgres_cli_uses_command_retrieval_adapters_live(tmp_path: Path) -&gt; None:
+        tenant = f"tenant-command-retrieval-live-{uuid4()}"
+        source = run_postgres_cli(
+            "capture",
+            "--tenant",
+            tenant,
+            "--user",
+            "user-command-retrieval-live",
+            "--source-type",
+            "live-test",
+            "--content",
+            "Command graph retrieval reached Apache AGE wrapper.",
+            "--trust-tier",
+            "0",
+        )
+        command, state = fake_command_retrieval_provider(tmp_path, source_cid=source["cid"])
+        provider_args = (
+            "--lexical-provider",
+            "command",
+            "--lexical-command",
+            command,
+            "--lexical-backend",
+            "paradedb-bm25",
+            "--graph-provider",
+            "command",
+            "--graph-command",
+            command,
+            "--graph-backend",
+            "apache-age",
+        )
+    
+&gt;       search = run_postgres_cli(*provider_args, "search", "--tenant", tenant, "--query", "command lexical retrieval")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_postgres_engine_live.py:1656: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_postgres_engine_live.py:64: in run_postgres_cli
+    result.check_returncode()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = CompletedProcess(args=['/Users/admin/Desktop/Mnemosyne/.venv/bin/python', '-m', 'mnemosyne.cli', '--backend', 'postgre... ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nValueError: non-hexadecimal number found in fromhex() arg at position 0\n')
+
+    def check_returncode(self):
+        """Raise CalledProcessError if the exit code is non-zero."""
+        if self.returncode:
+&gt;           raise CalledProcessError(self.returncode, self.args, self.stdout,
+                                     self.stderr)
+E           subprocess.CalledProcessError: Command '['/Users/admin/Desktop/Mnemosyne/.venv/bin/python', '-m', 'mnemosyne.cli', '--backend', 'postgres', '--postgres-dsn', 'postgresql://postgres:mnemosyne-local-audit-only@127.0.0.1:55432/mnemosyne', '--lexical-provider', 'command', '--lexical-command', '/Users/admin/Desktop/Mnemosyne/.venv/bin/python /private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-628/test_postgres_cli_uses_command0/command-retrieval-provider.py /private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-628/test_postgres_cli_uses_command0/command-retrieval-requests.json', '--lexical-backend', 'paradedb-bm25', '--graph-provider', 'command', '--graph-command', '/Users/admin/Desktop/Mnemosyne/.venv/bin/python /private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-628/test_postgres_cli_uses_command0/command-retrieval-provider.py /private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-628/test_postgres_cli_uses_command0/command-retrieval-requests.json', '--graph-backend', 'apache-age', 'search', '--tenant', 'tenant-command-retrieval-live-691cf969-548e-4e6a-9df6-1c7303c89495', '--query', 'command lexical retrieval']' returned non-zero exit status 1.
+
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/subprocess.py:509: CalledProcessError</failure></testcase><testcase classname="tests.test_postgres_engine_live" name="test_postgres_cli_http_embedding_provider_fails_closed_live" time="0.883" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_mcp_backend_live_smoke" time="0.241" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_mcp_stateless_uses_tenant_scoped_durable_queue_live" time="0.250" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_cli_ingests_file_with_c2pa_verifier" time="1.846" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_media_extract_job_appends_searchable_derived_evidence_live[image-image/png-\x89PNG postgres-image-bytes-camera-Image OCR says quarterly planning moved.]" time="0.251" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_media_extract_job_appends_searchable_derived_evidence_live[audio-audio/wav-RIFF postgres-audio-bytes-microphone-Audio transcript says quarterly planning moved.]" time="0.234" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_media_extract_job_appends_searchable_derived_evidence_live[video-video/mp4-\x00\x00\x00 ftyp postgres-video-bytes-screen-recording-Video caption says quarterly planning moved.]" time="0.222" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_cli_ingests_raw_media_embedding_for_vector_retrieval_live[image-image/png-\x89PNG opaque raw media vector bytes-frame.png-camera-raw visual memory beacon]" time="0.966" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_cli_ingests_raw_media_embedding_for_vector_retrieval_live[audio-audio/wav-RIFF opaque raw media vector bytes-sample.wav-microphone-raw audio memory beacon]" time="0.953" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_cli_ingests_raw_media_embedding_for_vector_retrieval_live[video-video/mp4-\x00\x00\x00 ftyp opaque raw media vector bytes-clip.mp4-screen-recording-raw video memory beacon]" time="0.980" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_gated_consolidation_promotes_direct_user_fact_live" time="0.879" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_gated_consolidation_uses_command_providers_live" time="0.205"><failure message="TypeError: 'NoneType' object is not subscriptable">tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-628/test_postgres_gated_consolidat0')
+
+    def test_postgres_gated_consolidation_uses_command_providers_live(tmp_path) -&gt; None:
+        engine = PostgresEngine(live_dsn())
+        tenant = f"tenant-command-consolidation-live-{uuid4()}"
+        user = "user-command-consolidation-live"
+        # Capture without auto-queue so we control multi-CID payload for §7 #17 floor.
+        pipeline = IngestionPipeline(engine, queue=None)
+        result = pipeline.ingest(
+            IngestRequest(
+                tenant_id=tenant,
+                user_id=user,
+                actor="user",
+                source_type="chat",
+                content="Meeting note: pg target/local CLI; not a deterministic is-fact sentence.",
+            )
+        )
+        result_b = pipeline.ingest(
+            IngestRequest(
+                tenant_id=tenant,
+                user_id=user,
+                actor="user",
+                source_type="note",
+                content="Second independent note about postgres command target local CLI.",
+            )
+        )
+        extractor_script = tmp_path / "candidate_extractor.py"
+        extractor_script.write_text(
+            "\n".join(
+                [
+                    "#!/usr/bin/env python3",
+                    "import json, sys",
+                    "request = json.load(sys.stdin)",
+                    "evidence = request['evidence'][0]",
+                    "cids = [item.get('cid') for item in request.get('evidence', []) if item.get('cid')]",
+                    "print(json.dumps({'candidates': [{'signature': 'postgres command target local cli', 'query': 'postgres command target', 'candidate_subject': 'Postgres command target', 'candidate_predicate': 'is', 'candidate_object': 'local CLI', 'confidence': 0.93, 'access_policy': evidence['access_policy'], 'source_evidence_cids': cids or [evidence.get('cid')]}], 'metadata': {'source': 'live-test-extractor'}}))",
+                ]
+            ),
+            encoding="utf-8",
+         newline="\n")
+        summarizer_script = tmp_path / "summarizer.py"
+        summarizer_script.write_text(
+            "\n".join(
+                [
+                    "#!/usr/bin/env python3",
+                    "import json, sys",
+                    "json.load(sys.stdin)",
+                    "print(json.dumps({'summary': 'Postgres command provider summary', 'metadata': {'source': 'live-test-summarizer'}}))",
+                ]
+            ),
+            encoding="utf-8",
+         newline="\n")
+        resolver_script = tmp_path / "entity_resolver.py"
+        resolver_script.write_text(
+            "\n".join(
+                [
+                    "#!/usr/bin/env python3",
+                    "import json, sys",
+                    "request = json.load(sys.stdin)",
+                    "candidate = request['candidates'][0]",
+                    "signature = candidate['signature']",
+                    "print(json.dumps({'candidates': [{'signature': signature, 'entity_key': 'live-resolved-postgres-command-target'}], 'entities': [{'key': 'live-resolved-postgres-command-target', 'label': 'Live resolved Postgres command target', 'aliases': [candidate['candidate_subject']], 'candidate_signatures': [signature]}]}))",
+                ]
+            ),
+            encoding="utf-8",
+         newline="\n")
+        queue = InProcessQueue()
+        consolidator = ConsolidationWorker(
+            engine,
+            gate_cases=[
+                RegressionCase(
+                    "postgres-command-provider-smoke",
+                    "postgres command target local cli",
+                    "postgres command target",
+                    "local CLI",
+                    protected=True,
+                )
+            ],
+            candidate_extractor=CommandCandidateExtractor([sys.executable, str(extractor_script)]),
+            entity_resolver=CommandEntityResolver([sys.executable, str(resolver_script)]),
+            summarizer=CommandEvidenceSummarizer([sys.executable, str(summarizer_script)]),
+        )
+        worker = QueueWorker(queue, {CONSOLIDATE_EVIDENCE_JOB: consolidator.run_queue_payload})
+        queue.enqueue(
+            CONSOLIDATE_EVIDENCE_JOB,
+            {
+                "tenant_id": tenant,
+                "user_id": user,
+                "branch": "main",
+                "source_evidence_cids": [result.cid, result_b.cid],
+                "trigger": "test",
+                "passes": list(
+                    __import__("mnemosyne.consolidation", fromlist=["DEFAULT_CONSOLIDATION_PASSES"]).DEFAULT_CONSOLIDATION_PASSES
+                ),
+                "trust_tier": 0,
+            },
+        )
+    
+        job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
+        assert job is not None
+        exported = engine.export_tenant(tenant)
+&gt;       extractor_result = job.result["pass_results"][1]
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: 'NoneType' object is not subscriptable
+
+tests/test_postgres_engine_live.py:2293: TypeError</failure></testcase><testcase classname="tests.test_postgres_engine_live" name="test_schema_sql_persists_every_field_of_core_models" time="0.002" /><testcase classname="tests.test_postgres_engine_live" name="test_native_retrieval_probe_emits_live_lexical_and_graph_hits" time="0.079" /><testcase classname="tests.test_postgres_engine_live" name="test_provider_check_native_backend_reports_probes" time="0.366" /><testcase classname="tests.test_postgres_engine_live" name="test_postgres_merge_assertion_id_map_source_differs_from_destination_live" time="0.161" /><testcase classname="tests.test_postgres_working_memory" name="test_working_payload_canonicalizes_utc_and_preserves_security_fields" time="0.000" /><testcase classname="tests.test_postgres_working_memory" name="test_working_payload_rejects_unsafe_ttl_boundaries[overrides0]" time="0.000" /><testcase classname="tests.test_postgres_working_memory" name="test_working_payload_rejects_unsafe_ttl_boundaries[overrides1]" time="0.000" /><testcase classname="tests.test_postgres_working_memory" name="test_working_reads_require_matching_user_context" time="0.000" /><testcase classname="tests.test_postgres_working_memory" name="test_working_reads_redact_metadata_fields_for_lower_roles" time="0.000" /><testcase classname="tests.test_postgres_working_memory" name="test_working_reads_without_context_match_the_engine_contract" time="0.000" /><testcase classname="tests.test_postgres_working_memory" name="test_working_provenance_enforces_trust_ceiling_and_preserves_taint" time="0.000" /><testcase classname="tests.test_postgres_working_memory" name="test_working_audit_diff_keeps_evidence_references_erasure_safe" time="0.000" /><testcase classname="tests.test_postgres_working_memory" name="test_schema_declares_working_memory_identity_indexes_rls_and_audit_idempotency" time="0.000" /><testcase classname="tests.test_postgres_working_memory" name="test_postgres_unavailable_does_not_fall_back_to_local" time="0.000" /><testcase classname="tests.test_postgres_working_memory" name="test_postgres_unavailable_operations_fail_closed_without_local_fallback[get]" time="0.001" /><testcase classname="tests.test_postgres_working_memory" name="test_postgres_unavailable_operations_fail_closed_without_local_fallback[list]" time="0.000" /><testcase classname="tests.test_postgres_working_memory" name="test_postgres_unavailable_operations_fail_closed_without_local_fallback[expire]" time="0.000" /><testcase classname="tests.test_postgres_working_memory" name="test_postgres_put_rolls_back_working_mutation_when_audit_fails" time="0.001" /><testcase classname="tests.test_postgres_working_memory" name="test_postgres_working_memory_live_round_trip_boundaries_isolation_and_ordering" time="0.108" /><testcase classname="tests.test_postgres_working_memory" name="test_postgres_working_expiry_cannot_cross_subject_scope[user_id]" time="0.079"><failure message="ValueError: working item user must match originating evidence">selector = 'user_id'
+
+    @pytest.mark.parametrize("selector", ["user_id", "agent_id", "task_id", "branch"])
+    def test_postgres_working_expiry_cannot_cross_subject_scope(selector: str) -&gt; None:
+        engine = _live_engine()
+        tenant = f"working-subject-{uuid4()}"
+        session = f"session-{uuid4()}"
+        now = datetime.now(UTC)
+        created_at = now - timedelta(minutes=2)
+        expires_at = now + timedelta(minutes=10)
+        scope_a = _live_item(
+            engine,
+            tenant_id=tenant,
+            session_id=session,
+            user_id=f"user-a-{uuid4()}",
+            item_id="scope-a",
+            created_at=created_at,
+            expires_at=expires_at,
+        )
+        scope_b = _live_item(
+            engine,
+            tenant_id=tenant,
+            session_id=session,
+            user_id=scope_a.user_id,
+            item_id="scope-b",
+            created_at=created_at,
+            expires_at=expires_at,
+        )
+        scope_a.metadata["branch"] = "main"
+        scope_b.metadata["branch"] = "main"
+        if selector == "branch":
+            scope_b.metadata["branch"] = "branch-b"
+        else:
+            setattr(scope_b, selector, f"{selector}-b-{uuid4()}")
+        engine.put_working(scope_a)
+&gt;       engine.put_working(scope_b)
+
+tests/test_postgres_working_memory.py:466: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/mnemosyne/postgres_engine.py:1548: in put_working
+    trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(cur, values)
+                                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;mnemosyne.postgres_engine.PostgresEngine object at 0x10e8a3290&gt;
+cur = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e8a1850&gt;
+values = {'item_id': 'scope-b', 'tenant_id': 'working-subject-072a04d1-b6b9-46ca-a035-0f7d06110f2e', 'session_id': 'session-b7ae690d-b982-4047-8055-79741294201e', 'user_id': 'user_id-b-b0a817f2-5f69-4381-b974-5955baa056e3', ...}
+
+    def _working_provenance(
+        self, cur: Any, values: dict[str, Any]
+    ) -&gt; tuple[int, list[str], int, dict[str, Any]]:
+        """Validate source ownership and derive the effective security envelope."""
+    
+        trust_tiers = [values["trust_tier"]]
+        capability_tags = {tag.strip().lower() for tag in values["capability_tags"]}
+        if values["trust_tier"] &gt; self.policy.max_trust_tier:
+            raise PermissionError("working item exceeds the working write trust ceiling")
+        sensitivities = [values["sensitivity"]]
+        access_policies = [
+            validate_access_policy(
+                values["access_policy"],
+                tenant_id=values["tenant_id"],
+                location="working_memory.access_policy",
+            )
+        ]
+        db_tenant_id = _stable_uuid("tenant", values["tenant_id"])
+        db_user_id = _stable_uuid("user", values["user_id"])
+        db_session_id = _stable_uuid("session", values["session_id"])
+        for cid in values["evidence_ids"]:
+            try:
+                cid_bytes = _cid_to_bytes(cid)
+            except ValueError as exc:
+                raise ValueError(f"evidence {cid!r} is missing or outside the working tenant") from exc
+            cur.execute(
+                """
+                SELECT user_id, session_id, erased, trust_tier, capability_tags,
+                       sensitivity, access_policy
+                FROM evidence
+                WHERE tenant_id = %s AND branch = 'main' AND cid = %s
+                """,
+                (db_tenant_id, cid_bytes),
+            )
+            row = cur.fetchone()
+            if row is None:
+                raise ValueError(f"evidence {cid!r} is missing or outside the working tenant")
+            if bool(row["erased"]):
+                raise ValueError(f"evidence {cid!r} is erased")
+            if str(row["user_id"]) != db_user_id:
+&gt;               raise ValueError("working item user must match originating evidence")
+E               ValueError: working item user must match originating evidence
+
+src/mnemosyne/postgres_engine.py:1441: ValueError</failure></testcase><testcase classname="tests.test_postgres_working_memory" name="test_postgres_working_expiry_cannot_cross_subject_scope[agent_id]" time="0.085" /><testcase classname="tests.test_postgres_working_memory" name="test_postgres_working_expiry_cannot_cross_subject_scope[task_id]" time="0.091" /><testcase classname="tests.test_postgres_working_memory" name="test_postgres_working_expiry_cannot_cross_subject_scope[branch]" time="0.099" /><testcase classname="tests.test_postgres_working_memory" name="test_postgres_working_memory_duplicate_item_ids_are_session_scoped" time="0.078"><failure message="ValueError: working item session must match originating evidence">def test_postgres_working_memory_duplicate_item_ids_are_session_scoped() -&gt; None:
+        engine = _live_engine()
+        tenant = f"working-identity-{uuid4()}"
+        user = f"user-{uuid4()}"
+        session_a = f"session-a-{uuid4()}"
+        session_b = f"session-b-{uuid4()}"
+        now = datetime.now(UTC)
+        created_at = now - timedelta(minutes=1)
+        expires_at = now + timedelta(minutes=10)
+        item_a = _live_item(
+            engine,
+            tenant_id=tenant,
+            session_id=session_a,
+            user_id=user,
+            item_id="same-item-id",
+            created_at=created_at,
+            expires_at=expires_at,
+        )
+        item_b = _live_item(
+            engine,
+            tenant_id=tenant,
+            session_id=session_b,
+            user_id=user,
+            item_id="same-item-id",
+            created_at=created_at,
+            expires_at=expires_at,
+        )
+        engine.put_working(item_a)
+&gt;       engine.put_working(item_b)
+
+tests/test_postgres_working_memory.py:521: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/mnemosyne/postgres_engine.py:1548: in put_working
+    trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(cur, values)
+                                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;mnemosyne.postgres_engine.PostgresEngine object at 0x10e8a19d0&gt;
+cur = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e8a22d0&gt;
+values = {'item_id': 'same-item-id', 'tenant_id': 'working-identity-cc686653-6475-49c6-9fb7-9eeda3554410', 'session_id': 'session-b-9cd8af97-d5d4-4ed2-aa5d-0691b76a88c6', 'user_id': 'user-ea20020f-a45d-4495-86fe-74de1a8d0858', ...}
+
+    def _working_provenance(
+        self, cur: Any, values: dict[str, Any]
+    ) -&gt; tuple[int, list[str], int, dict[str, Any]]:
+        """Validate source ownership and derive the effective security envelope."""
+    
+        trust_tiers = [values["trust_tier"]]
+        capability_tags = {tag.strip().lower() for tag in values["capability_tags"]}
+        if values["trust_tier"] &gt; self.policy.max_trust_tier:
+            raise PermissionError("working item exceeds the working write trust ceiling")
+        sensitivities = [values["sensitivity"]]
+        access_policies = [
+            validate_access_policy(
+                values["access_policy"],
+                tenant_id=values["tenant_id"],
+                location="working_memory.access_policy",
+            )
+        ]
+        db_tenant_id = _stable_uuid("tenant", values["tenant_id"])
+        db_user_id = _stable_uuid("user", values["user_id"])
+        db_session_id = _stable_uuid("session", values["session_id"])
+        for cid in values["evidence_ids"]:
+            try:
+                cid_bytes = _cid_to_bytes(cid)
+            except ValueError as exc:
+                raise ValueError(f"evidence {cid!r} is missing or outside the working tenant") from exc
+            cur.execute(
+                """
+                SELECT user_id, session_id, erased, trust_tier, capability_tags,
+                       sensitivity, access_policy
+                FROM evidence
+                WHERE tenant_id = %s AND branch = 'main' AND cid = %s
+                """,
+                (db_tenant_id, cid_bytes),
+            )
+            row = cur.fetchone()
+            if row is None:
+                raise ValueError(f"evidence {cid!r} is missing or outside the working tenant")
+            if bool(row["erased"]):
+                raise ValueError(f"evidence {cid!r} is erased")
+            if str(row["user_id"]) != db_user_id:
+                raise ValueError("working item user must match originating evidence")
+            if row["session_id"] is None or str(row["session_id"]) != db_session_id:
+&gt;               raise ValueError("working item session must match originating evidence")
+E               ValueError: working item session must match originating evidence
+
+src/mnemosyne/postgres_engine.py:1443: ValueError</failure></testcase><testcase classname="tests.test_postgres_working_memory" name="test_postgres_working_memory_rls_blocks_direct_cross_tenant_dml" time="0.050"><failure message="assert (1,) == (0,)&#10;  &#10;  At index 0 diff: 1 != 0&#10;  Use -v to get more diff">def test_postgres_working_memory_rls_blocks_direct_cross_tenant_dml() -&gt; None:
+        engine = _live_engine()
+        tenant_a = f"working-rls-a-{uuid4()}"
+        tenant_b = f"working-rls-b-{uuid4()}"
+        user = f"user-{uuid4()}"
+        session = f"session-{uuid4()}"
+        now = datetime.now(UTC)
+        item = _live_item(
+            engine,
+            tenant_id=tenant_a,
+            session_id=session,
+            user_id=user,
+            item_id="rls-direct-dml",
+            created_at=now - timedelta(minutes=1),
+            expires_at=now + timedelta(minutes=10),
+        )
+        engine.put_working(item)
+        db_tenant_a = _stable_uuid("tenant", tenant_a)
+        db_tenant_b = _stable_uuid("tenant", tenant_b)
+        db_session = _stable_uuid("session", session)
+        db_user = _stable_uuid("user", user)
+    
+        with engine.connect() as conn:
+            with conn.cursor() as cur:
+                engine._set_tenant(cur, db_tenant_b)
+                cur.execute(
+                    "SELECT count(*) FROM working_memory WHERE tenant_id = %s AND item_id = %s",
+                    (db_tenant_a, item.item_id),
+                )
+&gt;               assert cur.fetchone() == (0,)
+E               assert (1,) == (0,)
+E                 
+E                 At index 0 diff: 1 != 0
+E                 Use -v to get more diff
+
+tests/test_postgres_working_memory.py:577: AssertionError</failure></testcase><testcase classname="tests.test_postgres_working_memory" name="test_postgres_working_memory_put_and_expiry_roll_back_with_audit" time="0.077"><failure message="AssertionError: assert ('active', 2) == ('active', 1)&#10;  &#10;  At index 1 diff: 2 != 1&#10;  Use -v to get more diff">monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x10e90f850&gt;
+
+    def test_postgres_working_memory_put_and_expiry_roll_back_with_audit(
+        monkeypatch: pytest.MonkeyPatch,
+    ) -&gt; None:
+        engine = _live_engine()
+        tenant = f"working-rollback-{uuid4()}"
+        user = f"user-{uuid4()}"
+        session = f"session-{uuid4()}"
+        now = datetime.now(UTC)
+        source_created_at = now - timedelta(minutes=10)
+        source_id = _live_evidence(
+            engine,
+            tenant_id=tenant,
+            session_id=session,
+            user_id=user,
+            marker="rollback-source",
+            created_at=source_created_at,
+        )
+        put_item = _item(
+            item_id="rollback-put",
+            tenant_id=tenant,
+            session_id=session,
+            user_id=user,
+            created_at=now - timedelta(minutes=1),
+            expires_at=now + timedelta(minutes=10),
+            evidence_ids=[source_id],
+        )
+    
+        def fail_audit(*_args: object, **_kwargs: object) -&gt; None:
+            raise RuntimeError("audit write failed")
+    
+        monkeypatch.setattr(engine, "_audit", fail_audit)
+        with pytest.raises(RuntimeError, match="audit write failed"):
+            engine.put_working(put_item)
+        assert engine.get_working(tenant, session, put_item.item_id, as_of=now) is None
+    
+        expired = _live_item(
+            engine,
+            tenant_id=tenant,
+            session_id=session,
+            user_id=user,
+            item_id="rollback-expiry",
+            created_at=source_created_at,
+            expires_at=now - timedelta(minutes=5),
+            evidence_id=source_id,
+        )
+        monkeypatch.undo()
+        engine.put_working(expired)
+        monkeypatch.setattr(engine, "_audit", fail_audit)
+        with pytest.raises(RuntimeError, match="audit write failed"):
+            engine.expire_working(tenant, expired_at=now)
+    
+        still_active = engine.get_working(
+            tenant,
+            session,
+            expired.item_id,
+            as_of=expired.expires_at - timedelta(microseconds=1),
+        )
+        assert still_active is not None
+        with engine.connect() as conn:
+            with conn.cursor() as cur:
+                engine._set_tenant(cur, _stable_uuid("tenant", tenant))
+                cur.execute(
+                    "SELECT status, count(*) FROM working_memory WHERE item_id = %s GROUP BY status",
+                    (expired.item_id,),
+                )
+&gt;               assert cur.fetchone() == ("active", 1)
+E               AssertionError: assert ('active', 2) == ('active', 1)
+E                 
+E                 At index 1 diff: 2 != 1
+E                 Use -v to get more diff
+
+tests/test_postgres_working_memory.py:680: AssertionError</failure></testcase><testcase classname="tests.test_postgres_working_memory" name="test_postgres_working_memory_expiry_is_exactly_once_under_concurrency" time="0.253"><failure message="assert (18,) == (6,)&#10;  &#10;  At index 0 diff: 18 != 6&#10;  Use -v to get more diff">def test_postgres_working_memory_expiry_is_exactly_once_under_concurrency() -&gt; None:
+        engine = _live_engine()
+        dsn = os.environ["MNEMOSYNE_POSTGRES_DSN"]
+        tenant = f"working-expiry-race-{uuid4()}"
+        user = f"user-{uuid4()}"
+        now = datetime.now(UTC)
+        expired_at = now - timedelta(minutes=5)
+        items = [
+            _live_item(
+                engine,
+                tenant_id=tenant,
+                session_id=f"session-{index}",
+                user_id=user,
+                item_id=f"expiry-{index}",
+                created_at=now - timedelta(minutes=10),
+                expires_at=expired_at,
+            )
+            for index in range(6)
+        ]
+        for item in items:
+            engine.put_working(item)
+    
+        def sweep() -&gt; list[WorkingMemoryItem]:
+            return PostgresEngine(dsn).expire_working(
+                tenant, expired_at=now
+            )
+    
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            results = list(executor.map(lambda _index: sweep(), range(4)))
+        expired_items = [item for result in results for item in result]
+        expected_ids = {item.item_id for item in items}
+        observed_ids = [item.item_id for item in expired_items]
+        assert set(observed_ids) == expected_ids
+        assert len(observed_ids) == len(set(observed_ids)) == len(expected_ids)
+    
+        with engine.connect() as conn:
+            with conn.cursor() as cur:
+                engine._set_tenant(cur, _stable_uuid("tenant", tenant))
+                cur.execute("SELECT count(*) FROM working_memory WHERE status = 'expired'")
+&gt;               assert cur.fetchone() == (len(expected_ids),)
+E               assert (18,) == (6,)
+E                 
+E                 At index 0 diff: 18 != 6
+E                 Use -v to get more diff
+
+tests/test_postgres_working_memory.py:722: AssertionError</failure></testcase><testcase classname="tests.test_postgres_working_memory" name="test_postgres_pool_clears_tenant_after_aborted_expiry" time="0.051" /><testcase classname="tests.test_postgres_prospective_memory" name="test_postgres_schema_migration_is_additive_and_occurrence_aware" time="0.000" /><testcase classname="tests.test_postgres_prospective_memory" name="test_live_schema_upgrade_preserves_legacy_receipts_and_adds_v2" time="0.160" /><testcase classname="tests.test_postgres_prospective_memory" name="test_backwards_evaluation_raises_even_after_recurrence_advance" time="0.063"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e8a2990&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('6abd3f29-5901-5ea6-8173-be83cc7cbc3a',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory" name="test_cancel_accepts_owner_external_id_on_pre_backfill_rows" time="0.067"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e8a1cd0&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('b8d4e8bb-ea1f-584c-9331-89a1b98596e0',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory" name="test_update_accepts_owner_external_id_on_pre_backfill_rows" time="0.073"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e1be210&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('5597e2d2-6394-5144-8bb7-316d167f01e7',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory" name="test_tools_cancel_agent_principal_accepts_owner_on_pre_backfill_rows" time="0.073"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e8a2090&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('74b1abee-5238-5edd-821a-ba168f60299f',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestUpdateAndRecurrence" name="test_update_rewrites_trigger_persists_and_replay_is_zero_mutation[exact_time]" time="0.075"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e8a3110&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('4cec5187-0fb3-588f-ad74-1fe0c0dde41a',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestUpdateAndRecurrence" name="test_update_rewrites_trigger_persists_and_replay_is_zero_mutation[time_window]" time="0.085"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e1bfad0&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('b6ea13a5-8f24-5721-9c1e-f7ab045dc987',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestUpdateAndRecurrence" name="test_recurrence_has_per_occurrence_receipts_and_terminal_max" time="0.079"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10dbca750&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('1f8c61c7-78ee-58a7-a739-f3e61f40af76',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestUpdateAndRecurrence" name="test_event_watermark_survives_fresh_engine_reload" time="0.078"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e8a3ad0&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('b9d5f68d-5f9e-5b9a-b8a8-05e8e84a4cd1',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestUpdateAndRecurrence" name="test_legacy_sessionless_update_binds_survives_reload_and_rejects_rebinding" time="0.121"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e8a2150&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('1035e286-8315-561d-bc11-0702265bbda3',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestUpdateAndRecurrence" name="test_update_audit_failure_rolls_back_state_history_and_retries" time="0.174"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e8a3890&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('b7190560-7650-5064-b258-8b059a090c1f',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestExactTime" name="test_due_exact_time_fires_once_with_audit" time="0.076"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e8a3f50&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('5bbabd62-2986-5c65-be1a-b3ba94aa456a',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestExactTime" name="test_future_exact_time_does_not_fire" time="0.068"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10ba92ed0&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('33d2b35f-31c8-534e-898e-db9811c5a072',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestTimeWindow" name="test_time_window_fires_within_window" time="0.067"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e1be210&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('1d2996cc-afcf-500a-90ca-4f803d3cb2c4',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestTimeWindow" name="test_time_window_does_not_fire_at_or_after_end" time="0.064"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e8a3ad0&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('67e94b06-91fd-5025-b4d0-83541eb5f0d2',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestEvent" name="test_event_fires_on_matching_event" time="0.066"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e8a25d0&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('1aef5ef1-3e38-5d20-a89d-17ab3e9350a6',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestEvent" name="test_event_does_not_fire_on_non_matching_payload" time="0.066"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e8a1cd0&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('61659471-fddf-5e0d-8499-9c85856008d3',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestEvent" name="test_event_low_confidence_does_not_fire" time="0.061"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e6a59d0&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('329e282a-446e-5966-acf1-33fed443dacc',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestCondition" name="test_condition_eq_fires" time="0.067"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e1bd490&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('7751c1f5-d47b-56d7-b81f-1d31f6897d66',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestCondition" name="test_condition_lt_does_not_fire_when_false" time="0.056"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10ba90710&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('e123e4cf-538c-5175-b8bd-9342a26b46d9',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestCondition" name="test_condition_in_operator_fires" time="0.063"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e8a3890&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('fce09961-0561-5628-a851-79f119afdc44',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestDependencyCompletion" name="test_dependency_completion_fires_when_all_deps_fired" time="0.088"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e8a34d0&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('63003d97-ae9b-5157-acca-bd7c8b5dfcac',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestDependencyCompletion" name="test_dependency_completion_does_not_fire_when_dep_not_fired" time="0.098"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e6a4b90&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('ecfc8870-ca92-510e-876f-b75553d87b48',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestProvenanceFailClosed" name="test_schedule_rejects_missing_evidence" time="0.028" /><testcase classname="tests.test_postgres_prospective_memory.TestProvenanceFailClosed" name="test_schedule_rejects_foreign_tenant_evidence" time="0.056"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e6a5610&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('37b2f707-6f91-544c-b7c4-f11c7e11fb99',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestProvenanceFailClosed" name="test_schedule_rejects_wrong_user_evidence" time="0.053"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10dbcb290&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('0089aab7-226c-58a7-97a0-e5bf23bace64',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestProvenanceFailClosed" name="test_schedule_rejects_tainted_evidence" time="0.049"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e8a3e90&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('280431eb-353d-57c2-96e6-3c6699afe2c3',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestProvenanceFailClosed" name="test_schedule_rejects_over_ceiling_trust" time="0.067"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e8a3890&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('09d6d97c-cfd3-5a02-bfbc-ca5c5b13374a',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestProvenanceFailClosed" name="test_evaluate_fails_closed_if_provenance_erased" time="0.071"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e6a5790&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('d42490e7-b97a-58e0-938d-4d40d67834ea',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestProvenanceFailClosed" name="test_unsatisfied_trigger_does_not_validate_erased_provenance" time="0.101"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e6a5550&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('672e236a-1689-5fdb-ae83-4fa056a18bf4',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestCancel" name="test_legacy_sessionless_cancel_binds_survives_reload_and_rejects_rebinding" time="0.123"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e6a5d90&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('60c3a37e-cd94-58c6-be68-ac94faf17ac7',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestCancel" name="test_cancel_by_owner_user" time="0.068"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e1be810&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('466a12b6-2532-5f0b-96f0-c8aadd568f0d',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestCancel" name="test_cancel_by_owner_agent" time="0.071"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e8a1f10&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('187bd502-9200-5537-9487-febe3c15aacf',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestCancel" name="test_cancel_by_non_owner_raises" time="0.057"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e8a2750&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('67876111-cd08-5e0f-b02b-a139a1c2bddf',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestCancel" name="test_cancel_missing_raises_keyerror" time="0.018" /><testcase classname="tests.test_postgres_prospective_memory.TestCancel" name="test_cancel_fired_raises_valueerror" time="0.069"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e6a4050&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('4d060ad6-1a1a-54fd-bd0b-43d843d3e9a5',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestCancel" name="test_cancel_already_cancelled_is_noop" time="0.096"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e6a6750&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('5e630cc1-5df3-5db4-aed3-de27abf8bd30',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestCancel" name="test_two_connections_cancel_once" time="0.117"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e6a4dd0&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('213422d0-2c98-5dbf-b8b5-84ee51280188',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestCancel" name="test_two_connections_cancel_and_fire_have_one_winner" time="0.108"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10b7377d0&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('7c37aedb-8b5e-59de-bb37-61a2ed9767ad',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestTenantIsolation" name="test_list_is_tenant_scoped" time="0.060"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e8a3e90&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('35dd77fa-3a1c-530a-9041-9a27295243e5',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestTenantIsolation" name="test_evaluate_is_tenant_scoped" time="0.060"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e1bd490&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('d4cd7750-cc1d-5bbc-a0f9-eca5526832b8',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestTenantIsolation" name="test_cancel_cross_tenant_raises_keyerror" time="0.061"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e6a44d0&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('bef9f108-cf4c-5a19-8556-f60c075a1cbe',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestTenantIsolation" name="test_rls_and_owner_ids_are_isolated" time="0.021"><skipped type="pytest.skip" message="PostgreSQL RLS test role 'mnemosyne_pm_app' is unavailable">/Users/admin/Desktop/Mnemosyne/tests/test_postgres_prospective_memory.py:167: PostgreSQL RLS test role 'mnemosyne_pm_app' is unavailable</skipped></testcase><testcase classname="tests.test_postgres_prospective_memory.TestIdempotency" name="test_update_races_terminal_transition_without_stale_overwrite[fire]" time="0.113"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e6a6510&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('31bf164c-595a-58d7-b8de-8ed9f53a23f4',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestIdempotency" name="test_update_races_terminal_transition_without_stale_overwrite[cancel]" time="0.113"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e6a5550&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('f8928181-7dbe-5235-a600-ce9579cd9c24',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestIdempotency" name="test_two_connections_race_to_one_durable_firing" time="0.113"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10ba90590&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('93158eff-a77b-5072-b456-ada7c7605be8',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestIdempotency" name="test_replay_evaluation_returns_empty" time="0.078"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e8a3e90&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('c2e3ac7d-be26-5ba9-8058-1fe70a1f82e4',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestIdempotency" name="test_audit_failure_rolls_back_receipt_and_state" time="0.062"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e6a4050&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('8d4a7f2a-b8d8-5ad1-a5eb-56906c6e818c',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestIdempotency" name="test_duplicate_schedule_raises" time="0.063"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e6a7b90&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('043d59a4-56ca-58d5-b138-f06b9dc5c9bd',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestIdempotency" name="test_concurrent_duplicate_schedule_raises_value_error" time="0.067"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e6a6f90&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('50aea5ad-e1b2-5567-8580-a2d0f3191c99',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestSnapshotLocks" name="test_schedule_holds_dependency_and_evidence_snapshots" time="0.293"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e6a5190&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('92a5b0d1-7945-5174-80d1-52bc8c55d279',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestSnapshotLocks" name="test_evaluation_holds_dependency_snapshot_until_fire_commits" time="0.204"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e6a7d10&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('6a1c4f40-c1ef-52c6-8751-5b6209dcacf3',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestHostileDependencyId" name="test_dependency_id_is_bound_data_not_sql" time="0.090"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e8a25d0&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('5655b8f5-209d-5fd9-8bbe-e8b2a17b1fa6',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestInfrastructureGate" name="test_empty_tenant_raises_value_error" time="0.019" /><testcase classname="tests.test_postgres_prospective_memory.TestInfrastructureGate" name="test_infra_unavailable_raises_runtimeerror" time="0.059"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e6a7290&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('5b3cdf51-2ce5-5369-b4ca-c97c56cea776',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestAudit" name="test_fire_audit_has_prospective_memory_source" time="0.087"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e6a6f90&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('d355f357-99c9-5b8c-9ca1-d46f9bc306ab',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestAudit" name="test_fire_audit_canonical_event_id_is_unique" time="0.066"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e6a7f50&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('08157b09-7740-5ffe-ada8-40240ab2cb77',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestAudit" name="test_schedule_audit_has_provenance" time="0.079"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e6a5e50&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('a50ac0bf-5166-5e5f-bff9-f42fefd5d9b3',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestForget" name="test_forget_removes_intentions_derived_from_erased_evidence" time="0.076"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e8a3ad0&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('bc727ea8-e289-511d-ab43-1ff3a1fa22d9',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestForget" name="test_forget_removes_multi_source_intention_instead_of_trimming" time="0.092"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e8a1f10&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('52836845-938c-5b70-bf35-c946be79e207',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestForget" name="test_fired_receipt_and_audit_survive_intention_forget" time="0.130"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e6a4890&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('01f0b9a9-d3ed-54eb-af89-8fa9770ad766',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestForget" name="test_firing_receipts_reject_update_and_delete" time="0.071"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e6a6510&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('60b1ea21-d433-5422-979a-66cfa6a7cd2a',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestFiringOrder" name="test_firing_order_is_due_at_then_intention_id" time="0.096"><error message="failed on teardown with &quot;psycopg.errors.InsufficientPrivilege: permission denied for table branches&#10;CONTEXT:  SQL statement &quot;DELETE FROM ONLY &quot;public&quot;.&quot;branches&quot; WHERE $1 OPERATOR(pg_catalog.=) &quot;tenant_id&quot;&quot;&quot;">@pytest.fixture
+    def engine():
+        if not _DSN:
+            pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+        eng = PostgresEngine(_DSN, require_safe_role=False)
+        eng._prospective_test_tenants = set()
+        try:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+        except psycopg.OperationalError as exc:
+            eng.close_connections()
+            pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
+        try:
+            yield eng
+        finally:
+            with eng.connect() as conn:
+                with conn.cursor() as cur:
+                    for tenant_id in sorted(eng._prospective_test_tenants):
+&gt;                       cur.execute(
+                            "DELETE FROM tenants WHERE id = %s",
+                            (_stable_uuid("tenant", tenant_id),),
+                        )
+
+tests/test_postgres_prospective_memory.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;psycopg.Cursor [closed] [IDLE] (host=127.0.0.1 port=55432 user=postgres database=mnemosyne) at 0x10e6a4590&gt;
+query = 'DELETE FROM tenants WHERE id = %s'
+params = ('958b8432-55f8-5bad-9e56-3facf808bfd2',), prepare = None
+binary = None
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -&gt; Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+&gt;           raise ex.with_traceback(None)
+E           psycopg.errors.InsufficientPrivilege: permission denied for table branches
+E           CONTEXT:  SQL statement "DELETE FROM ONLY "public"."branches" WHERE $1 OPERATOR(pg_catalog.=) "tenant_id""
+
+.venv/lib/python3.14/site-packages/psycopg/cursor.py:117: InsufficientPrivilege</error></testcase><testcase classname="tests.test_postgres_prospective_memory.TestNaiveClock" name="test_naive_evaluated_at_raises" time="0.014" /><testcase classname="tests.test_postgres_perf_lanes" name="test_connection_reused_across_acquires" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_kill_switch_restores_fresh_connection_per_connect" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_health_check_replaces_broken_connection" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_closed_connection_replaced_without_probe" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_tenant_clear_precedes_caller_statements_on_every_acquire" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_cross_tenant_reuse_cannot_leak_previous_tenant" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_lease_commits_on_clean_exit_and_rolls_back_on_error" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_pool_bounds_idle_connections" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_pool_is_thread_safe_under_concurrent_acquires" time="0.001" /><testcase classname="tests.test_postgres_perf_lanes" name="test_engine_collection_closes_idle_connections_without_cyclic_gc" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_new_env_vars_registered_in_config_drift_checks" time="0.001" /><testcase classname="tests.test_postgres_perf_lanes" name="test_mmr_default_space_is_hashing_byte_identical" time="0.001" /><testcase classname="tests.test_postgres_perf_lanes" name="test_mmr_stored_space_uses_stored_vectors" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_mmr_stored_space_missing_vectors_fall_back_to_guards" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_postgres_null_embedding_fallback_is_capped_and_observable" time="0.002" /><testcase classname="tests.test_postgres_perf_lanes" name="test_postgres_vector_hygiene_snapshot_counts_null_vector_backlog" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_postgres_vector_backfill_plan_samples_redacted_backlog" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_postgres_upsert_assertion_embeds_private_partition" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_postgres_vector_backfill_apply_updates_assertions_with_redacted_report" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_postgres_vector_search_sets_hnsw_query_knobs_before_vector_queries" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_postgres_hot_retrieval_selects_force_psycopg_prepare" time="0.001" /><testcase classname="tests.test_postgres_perf_lanes" name="test_postgres_hot_query_prepare_kill_switch" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_pgvector_hnsw_ef_search_uses_fast_default_and_deep_route" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_postgres_calibration_positive_lookup_is_cached" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_postgres_calibration_misses_are_not_cached" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_postgres_set_calibration_updates_lookup_cache" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_stored_hit_vectors_gate_redacted_private_hits_to_hashing_space" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_vector_from_literal_parses_and_rejects" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_lexeme_schema_present_issues_no_ddl" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_lexeme_schema_absent_with_ddl_allowed_creates_column_and_index" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_lexeme_index_absent_insufficient_privilege_warns_and_continues" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_lexeme_column_absent_insufficient_privilege_raises_precise_error" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_lexeme_non_privilege_error_propagates_unchanged" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_vector_schema_fully_present_issues_no_ddl_but_runs_backfills" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_vector_schema_required_column_absent_insufficient_privilege_raises" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_vector_schema_missing_index_privilege_denied_warns_only" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_vector_schema_creates_btree_none_and_null_fallback_indexes" time="0.002" /><testcase classname="tests.test_postgres_perf_lanes" name="test_live_cross_tenant_isolation_across_reused_connection" time="0.089" /><testcase classname="tests.test_postgres_perf_lanes" name="test_live_connection_actually_reused" time="0.018" /><testcase classname="tests.test_postgres_perf_lanes" name="test_live_kill_switch_opens_fresh_backends" time="0.020" /><testcase classname="tests.test_postgres_perf_lanes" name="test_live_evidence_lexeme_column_byte_identical" time="0.067" /><testcase classname="tests.test_postgres_perf_lanes" name="test_live_mmr_stored_space_returns_stored_vectors" time="0.122" /><testcase classname="tests.test_postgres_perf_lanes" name="test_scale_harness_reuses_existing_postgres_backfill_controls" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_scale_harness_index_identity_matches_vector_schema_indexes" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_scale_harness_fallback_cap_is_the_shared_postgres_control" time="0.000" /><testcase classname="tests.test_postgres_perf_lanes" name="test_production_vector_backfill_remains_operator_gated" time="0.003" /><testcase classname="tests.test_postgres_perf_lanes" name="test_vector_backfill_apply_is_noop_when_backlog_empty" time="0.000" /></testsuite></testsuites>

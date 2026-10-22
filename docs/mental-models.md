@@ -104,11 +104,14 @@ mneme --backend sqlite --store ./memory-db mental-model schedule \
 | `--limit` | `10` | At most 1–100 due models processed per cycle |
 | `--lease-seconds` | `300` | Claim duration, 30–3600 seconds |
 | `--poll-interval` | `5` | Seconds between cycles, 1–300 |
+| `--check-changes` | Off | Check for source/clock changes before the next scheduled interval; early refreshes are spaced at least 60 seconds apart |
 | `--max-cycles` | `0` | Stop after this many cycles; zero runs until stopped |
 | `--once` | Off | Run one cycle and exit, overriding `--max-cycles` |
 
 Each cycle emits counts and per-model outcomes, including `refreshed`,
-`unchanged`, `abstained`, `retry`, and `lost`. Model reads expose
+`unchanged`, `abstained`, `retry`, and `lost`. `change_check_failed` counts failed
+shared freshness scans; early refresh candidates are skipped for that cycle.
+Model reads expose
 `refresh_schedule`, including the next due time, failure count, last outcome,
 and whether an unexpired claim exists; claim tokens are not exposed.
 
@@ -118,6 +121,21 @@ errors and remain retryable. Retries use the interval as their initial delay,
 capped at 3600 seconds, then double up to that same cap. Successful checks reset
 the failure count and schedule the next check one interval after completion.
 Due times, claims, and retry state survive worker restarts.
+
+Enable `--check-changes` when saved answers should react sooner to new facts,
+corrections, deletion, or access-policy changes. The worker takes one shared
+authorized-corpus snapshot per eligible polling cycle and compares it with the
+saved answers. It processes normally due work first and can then refresh stale
+models before their interval expires. The existing batch limit still applies.
+Early attempts require at least 60 seconds since that model's last start and finish;
+active leases and retry backoff are respected. Unchanged models never load a
+provider. This is opt-in polling, not an event subscription or incremental
+synthesis, and the snapshot cost grows with the readable corpus.
+
+```sh
+mneme --backend sqlite --store ./memory-db mental-model-worker \
+  --tenant my-tenant --user my-user --check-changes --poll-interval 5
+```
 
 Versioned, expiring claims prevent competing workers from publishing the same
 claim. A worker that loses or outlives its claim cannot publish or complete it.
@@ -162,10 +180,12 @@ providers retain their normal network, runtime, and cost requirements.
 `mental_model_schedule` accepts `model_id`, `interval_seconds` (default `300`),
 `enabled` (default `true`), and optional `expected_version`, alongside the common
 scope arguments. It only changes the schedule. Embedded applications can run
-`MentalModelRefreshWorker(service, context, max_batch=10, lease_seconds=300)`
+`MentalModelRefreshWorker(service, context, max_batch=10, lease_seconds=300, check_changes=True)`
 from `mnemosyne.mental_model_refresh` and call `run_once()`. Supply a trusted
-`AnswerReadContext` and an `authorize` callback when external credentials need
-revalidation. A Local engine supports only an in-process worker sharing that
+`AnswerReadContext`; when external credentials need revalidation, supply both
+an `authorize` callback and a side-effect-free `validate_authority` callback.
+The latter also runs inside publication transactions. Omit `check_changes` for
+interval-only behavior. A Local engine supports only an in-process worker sharing that
 same engine instance; the standalone worker rejects Local JSON storage.
 
 ## Scope, freshness, and retention
@@ -216,14 +236,27 @@ transaction uses `READ COMMITTED` and `SHARE` locks on `tenants`, `branches`,
 `evidence`, `assertions`, `relations`, and `preferences`, with a five-second lock
 timeout. These table locks also block relevant source writes across other
 tenants while publication completes; this is a correctness-versus-throughput
-tradeoff. The PostgreSQL guard is implemented, but live database behavior has
-not been validated for this feature; its checks currently use contracts and
-mocks.
-Existing PostgreSQL deployments need the updated [schema](../sql/schema.sql).
+tradeoff. Live PostgreSQL 16.15 tests now cover competing source insertion,
+deletion and privacy changes, lease takeover/expiry, rollback, owner and tenant
+isolation, readonly denial, and actual five-second lock timeout/recovery.
+The [validation report](../work/hindsight-comparison/postgres-live/REPORT.md)
+records **239 mixed live/unit tests passed**, including **20 live tests**,
+with zero skips/failures and **9/9 live role checks**. Providers were deterministic
+fixtures; lease expiry used a controlled clock with real database sessions.
+Production load, remote deployments and other PostgreSQL versions were not tested.
+
+Existing PostgreSQL deployments need the updated [schema](../sql/schema.sql)
+and the narrow `mental_models` DELETE grant in [roles.sql](../infra/postgres/roles.sql).
+That grant fixes owner-authorized model deletion and the branch foreign-key
+cascade. Model service ownership checks still apply; app DELETE on evidence,
+branches and audit rows remains denied. Apply the equivalent grant through the
+deployment's migration process rather than rerunning role creation.
 
 Refresh uses reflection's bounded orchestrator and exact quotations or supported
 deterministic calculations. Citation validity does not guarantee that a chosen
 quotation answers the question well. Interval workers perform the same full
 freshness checks and bounded regeneration as explicit refresh. Incremental
 delta synthesis, wiki generation, and freeform model synthesis are not
-implemented. This feature makes no comparative ranking claim.
+implemented. This feature makes no comparative ranking claim; the separate
+[controlled comparison protocol](comparison-protocol.md) requires completed
+run receipts before reporting benchmark results.

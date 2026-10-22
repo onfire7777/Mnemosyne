@@ -2201,6 +2201,9 @@ class PostgresEngine:
         return read_evidence_for_context(self, tenant_id, cid, branch, access_context=access_context)
 
     def get_evidence(self, tenant_id: str, cid: str, branch: str = "main") -> Evidence | None:
+        cid_bytes = _cid_bytes_or_none(cid)
+        if cid_bytes is None:
+            return None
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self._mental_model_connection(tenant_id) as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
@@ -2214,7 +2217,7 @@ class PostgresEngine:
                     JOIN tenants t ON t.id = e.tenant_id
                     WHERE e.tenant_id = %s AND e.branch = %s AND e.cid = %s AND e.erased = false
                     """,
-                    (db_tenant_id, branch, _cid_to_bytes(cid)),
+                    (db_tenant_id, branch, cid_bytes),
                 )
                 row = cur.fetchone()
         return _row_to_evidence(row, cid) if row else None

@@ -1,0 +1,10 @@
+{
+  "tests": 239,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "seconds": 59.271,
+  "timestamp": "2026-10-22T16:40:56.829521-07:00",
+  "source_files": 98,
+  "source_changed_during_verification": []
+}

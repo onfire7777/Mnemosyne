@@ -6,7 +6,8 @@
 --   SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user;
 -- and FAIL if either is true.
 
--- Edge/API role: read + non-destructive writes, NOSUPERUSER, NOBYPASSRLS, no DELETE/TRUNCATE.
+-- Edge/API role: read + non-destructive writes, NOSUPERUSER, NOBYPASSRLS.
+-- Narrow DELETE exceptions for derived records/cascade targets are listed below.
 CREATE ROLE mnemosyne_app NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
 
 -- Consolidator: the SOLE write/destructive authority (R7 consolidator-only writes).
@@ -63,8 +64,13 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO mnemosyne
 -- execute as the TABLE OWNER (mnemosyne_app), whose DELETE was just revoked, so
 -- the owner needs a narrow DELETE re-grant on exactly those two cascade targets.
 -- The hard-delete boundary stays RLS + the capability layer; app DELETE remains
--- revoked everywhere else.
+-- revoked elsewhere except the advisory model table below.
 GRANT DELETE ON justifications, contradictions TO mnemosyne_app;
+-- Advisory models support owner-authorized deletion through the service, and
+-- their branch FK cascade executes as this table owner. This narrow grant
+-- also lets a consolidator discard a branch after removing its model records.
+-- Evidence and audit deletion remain forbidden to the app group.
+GRANT DELETE ON mental_models TO mnemosyne_app;
 -- Audit rows are append-only even for write-capable runtime roles; schema.sql
 -- installs the BEFORE UPDATE/DELETE trigger that enforces this at execution.
 REVOKE UPDATE, DELETE, TRUNCATE ON audit_log FROM mnemosyne_app, mnemosyne_consolidator;

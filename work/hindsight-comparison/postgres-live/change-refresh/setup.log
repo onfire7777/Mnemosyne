@@ -1,0 +1,278 @@
+CREATE EXTENSION
+CREATE EXTENSION
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE TABLE
+NOTICE:  column "source_evidence_cids" of relation "entities" already exists, skipping
+ALTER TABLE
+NOTICE:  column "updated_at" of relation "entities" already exists, skipping
+ALTER TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+ALTER TABLE
+NOTICE:  column "event_id" of relation "audit_log" already exists, skipping
+CREATE INDEX
+CREATE FUNCTION
+NOTICE:  trigger "audit_log_append_only" for relation "audit_log" does not exist, skipping
+DROP TRIGGER
+CREATE TRIGGER
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE FUNCTION
+ALTER TABLE
+ALTER TABLE
+DROP POLICY
+NOTICE:  policy "branches_tenant_isolation" for relation "branches" does not exist, skipping
+CREATE POLICY
+ALTER TABLE
+ALTER TABLE
+NOTICE:  policy "evidence_tenant_isolation" for relation "evidence" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+ALTER TABLE
+ALTER TABLE
+NOTICE:  policy "assertions_tenant_isolation" for relation "assertions" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+ALTER TABLE
+ALTER TABLE
+NOTICE:  policy "justifications_tenant_isolation" for relation "justifications" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+ALTER TABLE
+ALTER TABLE
+NOTICE:  policy "entities_tenant_isolation" for relation "entities" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+ALTER TABLE
+ALTER TABLE
+NOTICE:  policy "entity_aliases_tenant_isolation" for relation "entity_aliases" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+ALTER TABLE
+ALTER TABLE
+NOTICE:  policy "relations_tenant_isolation" for relation "relations" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+ALTER TABLE
+ALTER TABLE
+DROP POLICY
+NOTICE:  policy "graph_ppr_cache_tenant_isolation" for relation "graph_ppr_cache" does not exist, skipping
+CREATE POLICY
+ALTER TABLE
+ALTER TABLE
+NOTICE:  policy "contradictions_tenant_isolation" for relation "contradictions" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+ALTER TABLE
+ALTER TABLE
+NOTICE:  policy "procedures_tenant_isolation" for relation "procedures" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+ALTER TABLE
+ALTER TABLE
+NOTICE:  policy "lessons_tenant_isolation" for relation "lessons" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+ALTER TABLE
+ALTER TABLE
+DROP POLICY
+NOTICE:  policy "preferences_tenant_isolation" for relation "preferences" does not exist, skipping
+CREATE POLICY
+ALTER TABLE
+ALTER TABLE
+NOTICE:  policy "user_latent_tenant_isolation" for relation "user_latent" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+ALTER TABLE
+ALTER TABLE
+NOTICE:  policy "trajectories_tenant_isolation" for relation "trajectories" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+ALTER TABLE
+ALTER TABLE
+DROP POLICY
+NOTICE:  policy "self_model_tenant_isolation" for relation "self_model" does not exist, skipping
+CREATE POLICY
+ALTER TABLE
+ALTER TABLE
+NOTICE:  policy "eval_cases_tenant_isolation" for relation "eval_cases" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+ALTER TABLE
+ALTER TABLE
+NOTICE:  policy "resources_tenant_isolation" for relation "resources" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+ALTER TABLE
+ALTER TABLE
+NOTICE:  policy "merges_tenant_isolation" for relation "merges" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+ALTER TABLE
+ALTER TABLE
+NOTICE:  policy "deletion_log_tenant_isolation" for relation "deletion_log" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+ALTER TABLE
+ALTER TABLE
+NOTICE:  policy "conformal_calibration_tenant_isolation" for relation "conformal_calibration" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+ALTER TABLE
+ALTER TABLE
+NOTICE:  policy "audit_log_tenant_isolation" for relation "audit_log" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+ALTER TABLE
+ALTER TABLE
+NOTICE:  policy "runtime_jobs_tenant_isolation" for relation "runtime_jobs" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+ALTER TABLE
+ALTER TABLE
+NOTICE:  policy "runtime_state_tenant_isolation" for relation "runtime_state" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+ALTER TABLE
+ALTER TABLE
+DROP POLICY
+NOTICE:  policy "mental_models_tenant_isolation" for relation "mental_models" does not exist, skipping
+CREATE POLICY
+CREATE TABLE
+NOTICE:  index "intentions_fired_unique" does not exist, skipping
+DROP INDEX
+CREATE INDEX
+ALTER TABLE
+ALTER TABLE
+NOTICE:  policy "intentions_tenant_isolation" for relation "intentions" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+CREATE TABLE
+ALTER TABLE
+NOTICE:  constraint "intention_firing_receipts_tenant_id_intention_id_fkey" of relation "intention_firing_receipts" does not exist, skipping
+CREATE INDEX
+CREATE FUNCTION
+DROP TRIGGER
+NOTICE:  trigger "intention_firing_receipts_append_only" for relation "intention_firing_receipts" does not exist, skipping
+CREATE TRIGGER
+ALTER TABLE
+ALTER TABLE
+NOTICE:  policy "intention_firing_receipts_tenant_isolation" for relation "intention_firing_receipts" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+CREATE TABLE
+CREATE INDEX
+CREATE FUNCTION
+NOTICE:  trigger "intention_firing_receipts_v2_append_only" for relation "intention_firing_receipts_v2" does not exist, skipping
+DROP TRIGGER
+CREATE TRIGGER
+ALTER TABLE
+ALTER TABLE
+NOTICE:  policy "intention_firing_receipts_v2_tenant_isolation" for relation "intention_firing_receipts_v2" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+ALTER TABLE
+ALTER TABLE
+NOTICE:  policy "working_memory_tenant_isolation" for relation "working_memory" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+NOTICE:  column "salience" of relation "assertions" already exists, skipping
+ALTER TABLE
+NOTICE:  column "calibrated_confidence" of relation "assertions" already exists, skipping
+ALTER TABLE
+ALTER TABLE
+NOTICE:  column "recorded_time" of relation "assertions" already exists, skipping
+NOTICE:  column "weight" of relation "relations" already exists, skipping
+NOTICE:  column "recorded_at" of relation "relations" already exists, skipping
+ALTER TABLE
+ALTER TABLE
+NOTICE:  column "expired_at" of relation "relations" already exists, skipping
+ALTER TABLE
+NOTICE:  column "justification_id" of relation "relations" already exists, skipping
+ALTER TABLE
+NOTICE:  column "status" of relation "relations" already exists, skipping
+ALTER TABLE
+NOTICE:  relation "graph_ppr_cache" already exists, skipping
+NOTICE:  column "superseded_by" of relation "preferences" already exists, skipping
+CREATE TABLE
+ALTER TABLE
+ALTER TABLE
+NOTICE:  column "external_user_id" of relation "intentions" already exists, skipping
+NOTICE:  column "session_id" of relation "intentions" already exists, skipping
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+NOTICE:  column "recurrence_policy" of relation "intentions" already exists, skipping
+NOTICE:  column "recurrence_state" of relation "intentions" already exists, skipping
+UPDATE 0
+ALTER TABLE
+NOTICE:  column "lexeme" of relation "evidence" already exists, skipping
+ALTER TABLE
+NOTICE:  relation "evidence_lexeme_gin" already exists, skipping
+CREATE INDEX
+CREATE ROLE
+CREATE ROLE
+CREATE ROLE
+CREATE ROLE
+CREATE ROLE
+CREATE ROLE
+REVOKE
+GRANT
+GRANT
+GRANT
+GRANT
+GRANT
+GRANT
+GRANT
+GRANT ROLE
+DO
+REVOKE
+GRANT
+GRANT
+GRANT
+REVOKE
+GRANT
+GRANT ROLE
+ALTER DEFAULT PRIVILEGES
+ALTER DEFAULT PRIVILEGES
+ALTER DEFAULT PRIVILEGES
+ALTER DEFAULT PRIVILEGES
+ALTER DEFAULT PRIVILEGES
+ALTER DEFAULT PRIVILEGES
+ALTER ROLE
+ALTER ROLE
+ALTER ROLE
