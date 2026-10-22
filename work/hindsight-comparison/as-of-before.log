@@ -1,0 +1,757 @@
+FFFFFFFFFFFFFFFFFF                                                       [100%]
+=================================== FAILURES ===================================
+_ test_iso_historical_retrieval_matches_datetime[local-2025-01-01T00:00:00Z-0] _
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x1080cc050>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x107fae8b0>
+parallel = '0', timestamp = '2025-01-01T00:00:00Z'
+
+    @pytest.mark.parametrize("parallel", ["0", "1"])
+    @pytest.mark.parametrize("timestamp", ["2025-01-01T00:00:00Z", "2025-01-01T09:00:00+09:00"])
+    def test_iso_historical_retrieval_matches_datetime(engine, monkeypatch, parallel, timestamp):
+        monkeypatch.setenv("MNEMOSYNE_PARALLEL_CHANNELS", parallel)
+        args = {"query": "observatory Cedar Valley", "tenant_id": "t", "record_access": False}
+        original = {"as_of": timestamp}
+>       actual = engine.retrieve(**args, filt=original)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_retrieval_as_of.py:31: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/mnemosyne/engine.py:4585: in retrieve
+    result = run_retrieval_pipeline(
+src/mnemosyne/pipeline.py:1369: in run_retrieval_pipeline
+    ops.graph_ppr(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <mnemosyne.engine.LocalMemoryEngine object at 0x1080cc050>
+seeds = ['observatory', 'cedar', 'valley'], k = 32
+as_of = '2025-01-01T00:00:00Z', tenant_id = 't', branch = 'main'
+use_cache = True
+filt = {'as_of': '2025-01-01T00:00:00Z', 'tenant_id': 't', 'branch': 'main', '_retrieval_deep': False}
+
+    def graph_ppr(
+        self,
+        seeds: list[str],
+        k: int,
+        as_of: datetime | None = None,
+        tenant_id: str | None = None,
+        branch: str | None = None,
+        use_cache: bool = False,
+        filt: dict[str, Any] | None = None,
+    ) -> list[Hit]:
+        seed_set = {seed.lower() for seed in seeds}
+        if not seed_set:
+            return []
+        moment = as_of or utc_now()
+>       moment = moment.astimezone(UTC) if moment.tzinfo else moment.replace(tzinfo=UTC)
+                                           ^^^^^^^^^^^^^
+E       AttributeError: 'str' object has no attribute 'tzinfo'
+
+src/mnemosyne/engine.py:4363: AttributeError
+_ test_iso_historical_retrieval_matches_datetime[local-2025-01-01T00:00:00Z-1] _
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x1080cc6e0>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x107fae650>
+parallel = '1', timestamp = '2025-01-01T00:00:00Z'
+
+    @pytest.mark.parametrize("parallel", ["0", "1"])
+    @pytest.mark.parametrize("timestamp", ["2025-01-01T00:00:00Z", "2025-01-01T09:00:00+09:00"])
+    def test_iso_historical_retrieval_matches_datetime(engine, monkeypatch, parallel, timestamp):
+        monkeypatch.setenv("MNEMOSYNE_PARALLEL_CHANNELS", parallel)
+        args = {"query": "observatory Cedar Valley", "tenant_id": "t", "record_access": False}
+        original = {"as_of": timestamp}
+>       actual = engine.retrieve(**args, filt=original)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_retrieval_as_of.py:31: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/mnemosyne/engine.py:4585: in retrieve
+    result = run_retrieval_pipeline(
+src/mnemosyne/pipeline.py:1362: in run_retrieval_pipeline
+    graph = _fast_graph_hits(graph_future.result(), deep=deep)
+                             ^^^^^^^^^^^^^^^^^^^^^
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/concurrent/futures/_base.py:447: in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/concurrent/futures/_base.py:396: in __get_result
+    raise self._exception
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/concurrent/futures/thread.py:86: in run
+    result = ctx.run(self.task)
+             ^^^^^^^^^^^^^^^^^^
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/concurrent/futures/thread.py:73: in run
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <mnemosyne.engine.LocalMemoryEngine object at 0x1080cc6e0>
+seeds = ['observatory', 'cedar', 'valley'], k = 32
+as_of = '2025-01-01T00:00:00Z', tenant_id = 't', branch = 'main'
+use_cache = True
+filt = {'as_of': '2025-01-01T00:00:00Z', 'tenant_id': 't', 'branch': 'main', '_retrieval_deep': False}
+
+    def graph_ppr(
+        self,
+        seeds: list[str],
+        k: int,
+        as_of: datetime | None = None,
+        tenant_id: str | None = None,
+        branch: str | None = None,
+        use_cache: bool = False,
+        filt: dict[str, Any] | None = None,
+    ) -> list[Hit]:
+        seed_set = {seed.lower() for seed in seeds}
+        if not seed_set:
+            return []
+        moment = as_of or utc_now()
+>       moment = moment.astimezone(UTC) if moment.tzinfo else moment.replace(tzinfo=UTC)
+                                           ^^^^^^^^^^^^^
+E       AttributeError: 'str' object has no attribute 'tzinfo'
+
+src/mnemosyne/engine.py:4363: AttributeError
+_ test_iso_historical_retrieval_matches_datetime[local-2025-01-01T09:00:00+09:00-0] _
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x1080cd2b0>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10803fad0>
+parallel = '0', timestamp = '2025-01-01T09:00:00+09:00'
+
+    @pytest.mark.parametrize("parallel", ["0", "1"])
+    @pytest.mark.parametrize("timestamp", ["2025-01-01T00:00:00Z", "2025-01-01T09:00:00+09:00"])
+    def test_iso_historical_retrieval_matches_datetime(engine, monkeypatch, parallel, timestamp):
+        monkeypatch.setenv("MNEMOSYNE_PARALLEL_CHANNELS", parallel)
+        args = {"query": "observatory Cedar Valley", "tenant_id": "t", "record_access": False}
+        original = {"as_of": timestamp}
+>       actual = engine.retrieve(**args, filt=original)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_retrieval_as_of.py:31: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/mnemosyne/engine.py:4585: in retrieve
+    result = run_retrieval_pipeline(
+src/mnemosyne/pipeline.py:1369: in run_retrieval_pipeline
+    ops.graph_ppr(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <mnemosyne.engine.LocalMemoryEngine object at 0x1080cd2b0>
+seeds = ['observatory', 'cedar', 'valley'], k = 32
+as_of = '2025-01-01T09:00:00+09:00', tenant_id = 't', branch = 'main'
+use_cache = True
+filt = {'as_of': '2025-01-01T09:00:00+09:00', 'tenant_id': 't', 'branch': 'main', '_retrieval_deep': False}
+
+    def graph_ppr(
+        self,
+        seeds: list[str],
+        k: int,
+        as_of: datetime | None = None,
+        tenant_id: str | None = None,
+        branch: str | None = None,
+        use_cache: bool = False,
+        filt: dict[str, Any] | None = None,
+    ) -> list[Hit]:
+        seed_set = {seed.lower() for seed in seeds}
+        if not seed_set:
+            return []
+        moment = as_of or utc_now()
+>       moment = moment.astimezone(UTC) if moment.tzinfo else moment.replace(tzinfo=UTC)
+                                           ^^^^^^^^^^^^^
+E       AttributeError: 'str' object has no attribute 'tzinfo'
+
+src/mnemosyne/engine.py:4363: AttributeError
+_ test_iso_historical_retrieval_matches_datetime[local-2025-01-01T09:00:00+09:00-1] _
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x1080cd6a0>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x107fb3350>
+parallel = '1', timestamp = '2025-01-01T09:00:00+09:00'
+
+    @pytest.mark.parametrize("parallel", ["0", "1"])
+    @pytest.mark.parametrize("timestamp", ["2025-01-01T00:00:00Z", "2025-01-01T09:00:00+09:00"])
+    def test_iso_historical_retrieval_matches_datetime(engine, monkeypatch, parallel, timestamp):
+        monkeypatch.setenv("MNEMOSYNE_PARALLEL_CHANNELS", parallel)
+        args = {"query": "observatory Cedar Valley", "tenant_id": "t", "record_access": False}
+        original = {"as_of": timestamp}
+>       actual = engine.retrieve(**args, filt=original)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_retrieval_as_of.py:31: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/mnemosyne/engine.py:4585: in retrieve
+    result = run_retrieval_pipeline(
+src/mnemosyne/pipeline.py:1362: in run_retrieval_pipeline
+    graph = _fast_graph_hits(graph_future.result(), deep=deep)
+                             ^^^^^^^^^^^^^^^^^^^^^
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/concurrent/futures/_base.py:447: in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/concurrent/futures/_base.py:396: in __get_result
+    raise self._exception
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/concurrent/futures/thread.py:86: in run
+    result = ctx.run(self.task)
+             ^^^^^^^^^^^^^^^^^^
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/concurrent/futures/thread.py:73: in run
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <mnemosyne.engine.LocalMemoryEngine object at 0x1080cd6a0>
+seeds = ['observatory', 'cedar', 'valley'], k = 32
+as_of = '2025-01-01T09:00:00+09:00', tenant_id = 't', branch = 'main'
+use_cache = True
+filt = {'as_of': '2025-01-01T09:00:00+09:00', 'tenant_id': 't', 'branch': 'main', '_retrieval_deep': False}
+
+    def graph_ppr(
+        self,
+        seeds: list[str],
+        k: int,
+        as_of: datetime | None = None,
+        tenant_id: str | None = None,
+        branch: str | None = None,
+        use_cache: bool = False,
+        filt: dict[str, Any] | None = None,
+    ) -> list[Hit]:
+        seed_set = {seed.lower() for seed in seeds}
+        if not seed_set:
+            return []
+        moment = as_of or utc_now()
+>       moment = moment.astimezone(UTC) if moment.tzinfo else moment.replace(tzinfo=UTC)
+                                           ^^^^^^^^^^^^^
+E       AttributeError: 'str' object has no attribute 'tzinfo'
+
+src/mnemosyne/engine.py:4363: AttributeError
+_ test_iso_historical_retrieval_matches_datetime[sqlite-2025-01-01T00:00:00Z-0] _
+
+engine = <mnemosyne.sqlite_engine.SqliteEngine object at 0x1080cd7f0>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x107fb3020>
+parallel = '0', timestamp = '2025-01-01T00:00:00Z'
+
+    @pytest.mark.parametrize("parallel", ["0", "1"])
+    @pytest.mark.parametrize("timestamp", ["2025-01-01T00:00:00Z", "2025-01-01T09:00:00+09:00"])
+    def test_iso_historical_retrieval_matches_datetime(engine, monkeypatch, parallel, timestamp):
+        monkeypatch.setenv("MNEMOSYNE_PARALLEL_CHANNELS", parallel)
+        args = {"query": "observatory Cedar Valley", "tenant_id": "t", "record_access": False}
+        original = {"as_of": timestamp}
+>       actual = engine.retrieve(**args, filt=original)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_retrieval_as_of.py:31: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/mnemosyne/sqlite_engine.py:3873: in retrieve
+    return run_retrieval_pipeline(
+src/mnemosyne/pipeline.py:1369: in run_retrieval_pipeline
+    ops.graph_ppr(
+src/mnemosyne/sqlite_engine.py:2387: in graph_ppr
+    return self._compute_graph_ppr(seeds, k, as_of=as_of, tenant_id=tenant_id, branch=branch, filt=filt)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/mnemosyne/sqlite_engine.py:2403: in _compute_graph_ppr
+    return oracle.graph_ppr(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <mnemosyne.engine.LocalMemoryEngine object at 0x1080ccd70>
+seeds = ['observatory', 'cedar', 'valley'], k = 32
+as_of = '2025-01-01T00:00:00Z', tenant_id = 't', branch = 'main'
+use_cache = False
+filt = {'as_of': '2025-01-01T00:00:00Z', 'tenant_id': 't', 'branch': 'main', '_retrieval_deep': False}
+
+    def graph_ppr(
+        self,
+        seeds: list[str],
+        k: int,
+        as_of: datetime | None = None,
+        tenant_id: str | None = None,
+        branch: str | None = None,
+        use_cache: bool = False,
+        filt: dict[str, Any] | None = None,
+    ) -> list[Hit]:
+        seed_set = {seed.lower() for seed in seeds}
+        if not seed_set:
+            return []
+        moment = as_of or utc_now()
+>       moment = moment.astimezone(UTC) if moment.tzinfo else moment.replace(tzinfo=UTC)
+                                           ^^^^^^^^^^^^^
+E       AttributeError: 'str' object has no attribute 'tzinfo'
+
+src/mnemosyne/engine.py:4363: AttributeError
+_ test_iso_historical_retrieval_matches_datetime[sqlite-2025-01-01T00:00:00Z-1] _
+
+engine = <mnemosyne.sqlite_engine.SqliteEngine object at 0x1080d11d0>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x107b2c550>
+parallel = '1', timestamp = '2025-01-01T00:00:00Z'
+
+    @pytest.mark.parametrize("parallel", ["0", "1"])
+    @pytest.mark.parametrize("timestamp", ["2025-01-01T00:00:00Z", "2025-01-01T09:00:00+09:00"])
+    def test_iso_historical_retrieval_matches_datetime(engine, monkeypatch, parallel, timestamp):
+        monkeypatch.setenv("MNEMOSYNE_PARALLEL_CHANNELS", parallel)
+        args = {"query": "observatory Cedar Valley", "tenant_id": "t", "record_access": False}
+        original = {"as_of": timestamp}
+>       actual = engine.retrieve(**args, filt=original)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_retrieval_as_of.py:31: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/mnemosyne/sqlite_engine.py:3873: in retrieve
+    return run_retrieval_pipeline(
+src/mnemosyne/pipeline.py:1362: in run_retrieval_pipeline
+    graph = _fast_graph_hits(graph_future.result(), deep=deep)
+                             ^^^^^^^^^^^^^^^^^^^^^
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/concurrent/futures/_base.py:454: in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/concurrent/futures/_base.py:396: in __get_result
+    raise self._exception
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/concurrent/futures/thread.py:86: in run
+    result = ctx.run(self.task)
+             ^^^^^^^^^^^^^^^^^^
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/concurrent/futures/thread.py:73: in run
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+src/mnemosyne/sqlite_engine.py:2387: in graph_ppr
+    return self._compute_graph_ppr(seeds, k, as_of=as_of, tenant_id=tenant_id, branch=branch, filt=filt)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/mnemosyne/sqlite_engine.py:2403: in _compute_graph_ppr
+    return oracle.graph_ppr(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <mnemosyne.engine.LocalMemoryEngine object at 0x1080cc050>
+seeds = ['observatory', 'cedar', 'valley'], k = 32
+as_of = '2025-01-01T00:00:00Z', tenant_id = 't', branch = 'main'
+use_cache = False
+filt = {'as_of': '2025-01-01T00:00:00Z', 'tenant_id': 't', 'branch': 'main', '_retrieval_deep': False}
+
+    def graph_ppr(
+        self,
+        seeds: list[str],
+        k: int,
+        as_of: datetime | None = None,
+        tenant_id: str | None = None,
+        branch: str | None = None,
+        use_cache: bool = False,
+        filt: dict[str, Any] | None = None,
+    ) -> list[Hit]:
+        seed_set = {seed.lower() for seed in seeds}
+        if not seed_set:
+            return []
+        moment = as_of or utc_now()
+>       moment = moment.astimezone(UTC) if moment.tzinfo else moment.replace(tzinfo=UTC)
+                                           ^^^^^^^^^^^^^
+E       AttributeError: 'str' object has no attribute 'tzinfo'
+
+src/mnemosyne/engine.py:4363: AttributeError
+_ test_iso_historical_retrieval_matches_datetime[sqlite-2025-01-01T09:00:00+09:00-0] _
+
+engine = <mnemosyne.sqlite_engine.SqliteEngine object at 0x1080d3610>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x108105a50>
+parallel = '0', timestamp = '2025-01-01T09:00:00+09:00'
+
+    @pytest.mark.parametrize("parallel", ["0", "1"])
+    @pytest.mark.parametrize("timestamp", ["2025-01-01T00:00:00Z", "2025-01-01T09:00:00+09:00"])
+    def test_iso_historical_retrieval_matches_datetime(engine, monkeypatch, parallel, timestamp):
+        monkeypatch.setenv("MNEMOSYNE_PARALLEL_CHANNELS", parallel)
+        args = {"query": "observatory Cedar Valley", "tenant_id": "t", "record_access": False}
+        original = {"as_of": timestamp}
+>       actual = engine.retrieve(**args, filt=original)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_retrieval_as_of.py:31: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/mnemosyne/sqlite_engine.py:3873: in retrieve
+    return run_retrieval_pipeline(
+src/mnemosyne/pipeline.py:1369: in run_retrieval_pipeline
+    ops.graph_ppr(
+src/mnemosyne/sqlite_engine.py:2387: in graph_ppr
+    return self._compute_graph_ppr(seeds, k, as_of=as_of, tenant_id=tenant_id, branch=branch, filt=filt)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/mnemosyne/sqlite_engine.py:2403: in _compute_graph_ppr
+    return oracle.graph_ppr(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <mnemosyne.engine.LocalMemoryEngine object at 0x1080cd010>
+seeds = ['observatory', 'cedar', 'valley'], k = 32
+as_of = '2025-01-01T09:00:00+09:00', tenant_id = 't', branch = 'main'
+use_cache = False
+filt = {'as_of': '2025-01-01T09:00:00+09:00', 'tenant_id': 't', 'branch': 'main', '_retrieval_deep': False}
+
+    def graph_ppr(
+        self,
+        seeds: list[str],
+        k: int,
+        as_of: datetime | None = None,
+        tenant_id: str | None = None,
+        branch: str | None = None,
+        use_cache: bool = False,
+        filt: dict[str, Any] | None = None,
+    ) -> list[Hit]:
+        seed_set = {seed.lower() for seed in seeds}
+        if not seed_set:
+            return []
+        moment = as_of or utc_now()
+>       moment = moment.astimezone(UTC) if moment.tzinfo else moment.replace(tzinfo=UTC)
+                                           ^^^^^^^^^^^^^
+E       AttributeError: 'str' object has no attribute 'tzinfo'
+
+src/mnemosyne/engine.py:4363: AttributeError
+_ test_iso_historical_retrieval_matches_datetime[sqlite-2025-01-01T09:00:00+09:00-1] _
+
+engine = <mnemosyne.sqlite_engine.SqliteEngine object at 0x1081dc640>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1081f0d70>
+parallel = '1', timestamp = '2025-01-01T09:00:00+09:00'
+
+    @pytest.mark.parametrize("parallel", ["0", "1"])
+    @pytest.mark.parametrize("timestamp", ["2025-01-01T00:00:00Z", "2025-01-01T09:00:00+09:00"])
+    def test_iso_historical_retrieval_matches_datetime(engine, monkeypatch, parallel, timestamp):
+        monkeypatch.setenv("MNEMOSYNE_PARALLEL_CHANNELS", parallel)
+        args = {"query": "observatory Cedar Valley", "tenant_id": "t", "record_access": False}
+        original = {"as_of": timestamp}
+>       actual = engine.retrieve(**args, filt=original)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_retrieval_as_of.py:31: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/mnemosyne/sqlite_engine.py:3873: in retrieve
+    return run_retrieval_pipeline(
+src/mnemosyne/pipeline.py:1362: in run_retrieval_pipeline
+    graph = _fast_graph_hits(graph_future.result(), deep=deep)
+                             ^^^^^^^^^^^^^^^^^^^^^
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/concurrent/futures/_base.py:454: in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/concurrent/futures/_base.py:396: in __get_result
+    raise self._exception
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/concurrent/futures/thread.py:86: in run
+    result = ctx.run(self.task)
+             ^^^^^^^^^^^^^^^^^^
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/concurrent/futures/thread.py:73: in run
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+src/mnemosyne/sqlite_engine.py:2387: in graph_ppr
+    return self._compute_graph_ppr(seeds, k, as_of=as_of, tenant_id=tenant_id, branch=branch, filt=filt)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/mnemosyne/sqlite_engine.py:2403: in _compute_graph_ppr
+    return oracle.graph_ppr(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <mnemosyne.engine.LocalMemoryEngine object at 0x1080cc6e0>
+seeds = ['observatory', 'cedar', 'valley'], k = 32
+as_of = '2025-01-01T09:00:00+09:00', tenant_id = 't', branch = 'main'
+use_cache = False
+filt = {'as_of': '2025-01-01T09:00:00+09:00', 'tenant_id': 't', 'branch': 'main', '_retrieval_deep': False}
+
+    def graph_ppr(
+        self,
+        seeds: list[str],
+        k: int,
+        as_of: datetime | None = None,
+        tenant_id: str | None = None,
+        branch: str | None = None,
+        use_cache: bool = False,
+        filt: dict[str, Any] | None = None,
+    ) -> list[Hit]:
+        seed_set = {seed.lower() for seed in seeds}
+        if not seed_set:
+            return []
+        moment = as_of or utc_now()
+>       moment = moment.astimezone(UTC) if moment.tzinfo else moment.replace(tzinfo=UTC)
+                                           ^^^^^^^^^^^^^
+E       AttributeError: 'str' object has no attribute 'tzinfo'
+
+src/mnemosyne/engine.py:4363: AttributeError
+_______ test_invalid_historical_time_fails_before_retrieval[local-True] ________
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x1080cd160>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1081008c0>
+value = True
+
+    @pytest.mark.parametrize("value", [True, 42, {}, "", "not-a-date"])
+    def test_invalid_historical_time_fails_before_retrieval(engine, monkeypatch, value):
+        def forbidden(*args, **kwargs):
+            pytest.fail("invalid historical time reached a retrieval provider")
+        monkeypatch.setattr(engine, "vector_search", forbidden)
+        monkeypatch.setattr(engine, "lexical_search", forbidden)
+        monkeypatch.setattr(engine, "graph_ppr", forbidden)
+        with pytest.raises(ValueError, match="as_of"):
+>           engine.retrieve("observatory", tenant_id="t", filt={"as_of": value})
+
+tests/test_retrieval_as_of.py:45: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/mnemosyne/engine.py:4585: in retrieve
+    result = run_retrieval_pipeline(
+src/mnemosyne/pipeline.py:1173: in run_retrieval_pipeline
+    parse_dt(effective_filter.get("as_of"))
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+value = True
+
+    def parse_dt(value: str | datetime | None) -> datetime | None:
+        if value is None or isinstance(value, datetime):
+            return value
+>       normalized = value.replace("Z", "+00:00")
+                     ^^^^^^^^^^^^^
+E       AttributeError: 'bool' object has no attribute 'replace'
+
+src/mnemosyne/models.py:31: AttributeError
+________ test_invalid_historical_time_fails_before_retrieval[local-42] _________
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x1080cd550>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1081e3770>
+value = 42
+
+    @pytest.mark.parametrize("value", [True, 42, {}, "", "not-a-date"])
+    def test_invalid_historical_time_fails_before_retrieval(engine, monkeypatch, value):
+        def forbidden(*args, **kwargs):
+            pytest.fail("invalid historical time reached a retrieval provider")
+        monkeypatch.setattr(engine, "vector_search", forbidden)
+        monkeypatch.setattr(engine, "lexical_search", forbidden)
+        monkeypatch.setattr(engine, "graph_ppr", forbidden)
+        with pytest.raises(ValueError, match="as_of"):
+>           engine.retrieve("observatory", tenant_id="t", filt={"as_of": value})
+
+tests/test_retrieval_as_of.py:45: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/mnemosyne/engine.py:4585: in retrieve
+    result = run_retrieval_pipeline(
+src/mnemosyne/pipeline.py:1173: in run_retrieval_pipeline
+    parse_dt(effective_filter.get("as_of"))
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+value = 42
+
+    def parse_dt(value: str | datetime | None) -> datetime | None:
+        if value is None or isinstance(value, datetime):
+            return value
+>       normalized = value.replace("Z", "+00:00")
+                     ^^^^^^^^^^^^^
+E       AttributeError: 'int' object has no attribute 'replace'
+
+src/mnemosyne/models.py:31: AttributeError
+______ test_invalid_historical_time_fails_before_retrieval[local-value2] _______
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x1080cd940>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1080bf3f0>
+value = {}
+
+    @pytest.mark.parametrize("value", [True, 42, {}, "", "not-a-date"])
+    def test_invalid_historical_time_fails_before_retrieval(engine, monkeypatch, value):
+        def forbidden(*args, **kwargs):
+            pytest.fail("invalid historical time reached a retrieval provider")
+        monkeypatch.setattr(engine, "vector_search", forbidden)
+        monkeypatch.setattr(engine, "lexical_search", forbidden)
+        monkeypatch.setattr(engine, "graph_ppr", forbidden)
+        with pytest.raises(ValueError, match="as_of"):
+>           engine.retrieve("observatory", tenant_id="t", filt={"as_of": value})
+
+tests/test_retrieval_as_of.py:45: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/mnemosyne/engine.py:4585: in retrieve
+    result = run_retrieval_pipeline(
+src/mnemosyne/pipeline.py:1173: in run_retrieval_pipeline
+    parse_dt(effective_filter.get("as_of"))
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+value = {}
+
+    def parse_dt(value: str | datetime | None) -> datetime | None:
+        if value is None or isinstance(value, datetime):
+            return value
+>       normalized = value.replace("Z", "+00:00")
+                     ^^^^^^^^^^^^^
+E       AttributeError: 'dict' object has no attribute 'replace'
+
+src/mnemosyne/models.py:31: AttributeError
+_________ test_invalid_historical_time_fails_before_retrieval[local-] __________
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x1080cda90>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x109cc6ea0>
+value = ''
+
+    @pytest.mark.parametrize("value", [True, 42, {}, "", "not-a-date"])
+    def test_invalid_historical_time_fails_before_retrieval(engine, monkeypatch, value):
+        def forbidden(*args, **kwargs):
+            pytest.fail("invalid historical time reached a retrieval provider")
+        monkeypatch.setattr(engine, "vector_search", forbidden)
+        monkeypatch.setattr(engine, "lexical_search", forbidden)
+        monkeypatch.setattr(engine, "graph_ppr", forbidden)
+>       with pytest.raises(ValueError, match="as_of"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: Regex pattern did not match.
+E         Expected regex: 'as_of'
+E         Actual message: "Invalid isoformat string: ''"
+
+tests/test_retrieval_as_of.py:44: AssertionError
+____ test_invalid_historical_time_fails_before_retrieval[local-not-a-date] _____
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x1080cc050>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x108051610>
+value = 'not-a-date'
+
+    @pytest.mark.parametrize("value", [True, 42, {}, "", "not-a-date"])
+    def test_invalid_historical_time_fails_before_retrieval(engine, monkeypatch, value):
+        def forbidden(*args, **kwargs):
+            pytest.fail("invalid historical time reached a retrieval provider")
+        monkeypatch.setattr(engine, "vector_search", forbidden)
+        monkeypatch.setattr(engine, "lexical_search", forbidden)
+        monkeypatch.setattr(engine, "graph_ppr", forbidden)
+>       with pytest.raises(ValueError, match="as_of"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: Regex pattern did not match.
+E         Expected regex: 'as_of'
+E         Actual message: "Invalid isoformat string: 'not-a-date'"
+
+tests/test_retrieval_as_of.py:44: AssertionError
+_______ test_invalid_historical_time_fails_before_retrieval[sqlite-True] _______
+
+engine = <mnemosyne.sqlite_engine.SqliteEngine object at 0x1081dcfc0>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x108052990>
+value = True
+
+    @pytest.mark.parametrize("value", [True, 42, {}, "", "not-a-date"])
+    def test_invalid_historical_time_fails_before_retrieval(engine, monkeypatch, value):
+        def forbidden(*args, **kwargs):
+            pytest.fail("invalid historical time reached a retrieval provider")
+        monkeypatch.setattr(engine, "vector_search", forbidden)
+        monkeypatch.setattr(engine, "lexical_search", forbidden)
+        monkeypatch.setattr(engine, "graph_ppr", forbidden)
+        with pytest.raises(ValueError, match="as_of"):
+>           engine.retrieve("observatory", tenant_id="t", filt={"as_of": value})
+
+tests/test_retrieval_as_of.py:45: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/mnemosyne/sqlite_engine.py:3873: in retrieve
+    return run_retrieval_pipeline(
+src/mnemosyne/pipeline.py:1173: in run_retrieval_pipeline
+    parse_dt(effective_filter.get("as_of"))
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+value = True
+
+    def parse_dt(value: str | datetime | None) -> datetime | None:
+        if value is None or isinstance(value, datetime):
+            return value
+>       normalized = value.replace("Z", "+00:00")
+                     ^^^^^^^^^^^^^
+E       AttributeError: 'bool' object has no attribute 'replace'
+
+src/mnemosyne/models.py:31: AttributeError
+________ test_invalid_historical_time_fails_before_retrieval[sqlite-42] ________
+
+engine = <mnemosyne.sqlite_engine.SqliteEngine object at 0x10803e9f0>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x108194b50>
+value = 42
+
+    @pytest.mark.parametrize("value", [True, 42, {}, "", "not-a-date"])
+    def test_invalid_historical_time_fails_before_retrieval(engine, monkeypatch, value):
+        def forbidden(*args, **kwargs):
+            pytest.fail("invalid historical time reached a retrieval provider")
+        monkeypatch.setattr(engine, "vector_search", forbidden)
+        monkeypatch.setattr(engine, "lexical_search", forbidden)
+        monkeypatch.setattr(engine, "graph_ppr", forbidden)
+        with pytest.raises(ValueError, match="as_of"):
+>           engine.retrieve("observatory", tenant_id="t", filt={"as_of": value})
+
+tests/test_retrieval_as_of.py:45: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/mnemosyne/sqlite_engine.py:3873: in retrieve
+    return run_retrieval_pipeline(
+src/mnemosyne/pipeline.py:1173: in run_retrieval_pipeline
+    parse_dt(effective_filter.get("as_of"))
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+value = 42
+
+    def parse_dt(value: str | datetime | None) -> datetime | None:
+        if value is None or isinstance(value, datetime):
+            return value
+>       normalized = value.replace("Z", "+00:00")
+                     ^^^^^^^^^^^^^
+E       AttributeError: 'int' object has no attribute 'replace'
+
+src/mnemosyne/models.py:31: AttributeError
+______ test_invalid_historical_time_fails_before_retrieval[sqlite-value2] ______
+
+engine = <mnemosyne.sqlite_engine.SqliteEngine object at 0x1081d4e20>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x108196af0>
+value = {}
+
+    @pytest.mark.parametrize("value", [True, 42, {}, "", "not-a-date"])
+    def test_invalid_historical_time_fails_before_retrieval(engine, monkeypatch, value):
+        def forbidden(*args, **kwargs):
+            pytest.fail("invalid historical time reached a retrieval provider")
+        monkeypatch.setattr(engine, "vector_search", forbidden)
+        monkeypatch.setattr(engine, "lexical_search", forbidden)
+        monkeypatch.setattr(engine, "graph_ppr", forbidden)
+        with pytest.raises(ValueError, match="as_of"):
+>           engine.retrieve("observatory", tenant_id="t", filt={"as_of": value})
+
+tests/test_retrieval_as_of.py:45: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/mnemosyne/sqlite_engine.py:3873: in retrieve
+    return run_retrieval_pipeline(
+src/mnemosyne/pipeline.py:1173: in run_retrieval_pipeline
+    parse_dt(effective_filter.get("as_of"))
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+value = {}
+
+    def parse_dt(value: str | datetime | None) -> datetime | None:
+        if value is None or isinstance(value, datetime):
+            return value
+>       normalized = value.replace("Z", "+00:00")
+                     ^^^^^^^^^^^^^
+E       AttributeError: 'dict' object has no attribute 'replace'
+
+src/mnemosyne/models.py:31: AttributeError
+_________ test_invalid_historical_time_fails_before_retrieval[sqlite-] _________
+
+engine = <mnemosyne.sqlite_engine.SqliteEngine object at 0x1081d49e0>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1081eb110>
+value = ''
+
+    @pytest.mark.parametrize("value", [True, 42, {}, "", "not-a-date"])
+    def test_invalid_historical_time_fails_before_retrieval(engine, monkeypatch, value):
+        def forbidden(*args, **kwargs):
+            pytest.fail("invalid historical time reached a retrieval provider")
+        monkeypatch.setattr(engine, "vector_search", forbidden)
+        monkeypatch.setattr(engine, "lexical_search", forbidden)
+        monkeypatch.setattr(engine, "graph_ppr", forbidden)
+>       with pytest.raises(ValueError, match="as_of"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: Regex pattern did not match.
+E         Expected regex: 'as_of'
+E         Actual message: "Invalid isoformat string: ''"
+
+tests/test_retrieval_as_of.py:44: AssertionError
+____ test_invalid_historical_time_fails_before_retrieval[sqlite-not-a-date] ____
+
+engine = <mnemosyne.sqlite_engine.SqliteEngine object at 0x108107450>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1081ebbb0>
+value = 'not-a-date'
+
+    @pytest.mark.parametrize("value", [True, 42, {}, "", "not-a-date"])
+    def test_invalid_historical_time_fails_before_retrieval(engine, monkeypatch, value):
+        def forbidden(*args, **kwargs):
+            pytest.fail("invalid historical time reached a retrieval provider")
+        monkeypatch.setattr(engine, "vector_search", forbidden)
+        monkeypatch.setattr(engine, "lexical_search", forbidden)
+        monkeypatch.setattr(engine, "graph_ppr", forbidden)
+>       with pytest.raises(ValueError, match="as_of"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: Regex pattern did not match.
+E         Expected regex: 'as_of'
+E         Actual message: "Invalid isoformat string: 'not-a-date'"
+
+tests/test_retrieval_as_of.py:44: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_retrieval_as_of.py::test_iso_historical_retrieval_matches_datetime[local-2025-01-01T00:00:00Z-0]
+FAILED tests/test_retrieval_as_of.py::test_iso_historical_retrieval_matches_datetime[local-2025-01-01T00:00:00Z-1]
+FAILED tests/test_retrieval_as_of.py::test_iso_historical_retrieval_matches_datetime[local-2025-01-01T09:00:00+09:00-0]
+FAILED tests/test_retrieval_as_of.py::test_iso_historical_retrieval_matches_datetime[local-2025-01-01T09:00:00+09:00-1]
+FAILED tests/test_retrieval_as_of.py::test_iso_historical_retrieval_matches_datetime[sqlite-2025-01-01T00:00:00Z-0]
+FAILED tests/test_retrieval_as_of.py::test_iso_historical_retrieval_matches_datetime[sqlite-2025-01-01T00:00:00Z-1]
+FAILED tests/test_retrieval_as_of.py::test_iso_historical_retrieval_matches_datetime[sqlite-2025-01-01T09:00:00+09:00-0]
+FAILED tests/test_retrieval_as_of.py::test_iso_historical_retrieval_matches_datetime[sqlite-2025-01-01T09:00:00+09:00-1]
+FAILED tests/test_retrieval_as_of.py::test_invalid_historical_time_fails_before_retrieval[local-True]
+FAILED tests/test_retrieval_as_of.py::test_invalid_historical_time_fails_before_retrieval[local-42]
+FAILED tests/test_retrieval_as_of.py::test_invalid_historical_time_fails_before_retrieval[local-value2]
+FAILED tests/test_retrieval_as_of.py::test_invalid_historical_time_fails_before_retrieval[local-]
+FAILED tests/test_retrieval_as_of.py::test_invalid_historical_time_fails_before_retrieval[local-not-a-date]
+FAILED tests/test_retrieval_as_of.py::test_invalid_historical_time_fails_before_retrieval[sqlite-True]
+FAILED tests/test_retrieval_as_of.py::test_invalid_historical_time_fails_before_retrieval[sqlite-42]
+FAILED tests/test_retrieval_as_of.py::test_invalid_historical_time_fails_before_retrieval[sqlite-value2]
+FAILED tests/test_retrieval_as_of.py::test_invalid_historical_time_fails_before_retrieval[sqlite-]
+FAILED tests/test_retrieval_as_of.py::test_invalid_historical_time_fails_before_retrieval[sqlite-not-a-date]

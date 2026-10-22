@@ -1,0 +1,15 @@
+{
+  "ignition_n": 40,
+  "suite_size": 25,
+  "mode": "SHADOW",
+  "updated_at": "2026-10-22T23:10:41.039269+00:00",
+  "history": [
+    {
+      "at": "2026-10-22T23:10:41.039269+00:00",
+      "suite_size": 25,
+      "ignition_n": 40,
+      "mode": "SHADOW",
+      "note": "backend=local quick=True"
+    }
+  ]
+}

@@ -1,0 +1,233 @@
+ssssssssssss..................................s......................... [  1%]
+........................................................................ [  2%]
+........................................................................ [  4%]
+........................................................................ [  5%]
+......................................................sss............... [  6%]
+........................................................................ [  8%]
+...............................................ssss..................... [  9%]
+........................................................................ [ 11%]
+........................................................................ [ 12%]
+........................................................................ [ 13%]
+........................................................................ [ 15%]
+........................................................................ [ 16%]
+........................................................................ [ 18%]
+........................................................................ [ 19%]
+........................................................................ [ 20%]
+........................................................................ [ 22%]
+........................................................................ [ 23%]
+........................................................................ [ 25%]
+......F................................................................. [ 26%]
+........................................................................ [ 27%]
+........................................................................ [ 29%]
+........................................................................ [ 30%]
+........................................................................ [ 31%]
+........................................................s............... [ 33%]
+........................................................................ [ 34%]
+........................................................................ [ 36%]
+........................................................................ [ 37%]
+.....................................................F.................. [ 38%]
+........................................................................ [ 40%]
+........................................................................ [ 41%]
+........................................................................ [ 43%]
+........................................................................ [ 44%]
+.......................F................................s............... [ 45%]
+........................................................................ [ 47%]
+........................................................................ [ 48%]
+........................................................................ [ 50%]
+........................................................................ [ 51%]
+........................................................................ [ 52%]
+..................sssss...F.................................ssssssssss.. [ 54%]
+........................................................................ [ 55%]
+........................................................................ [ 57%]
+........................................................................ [ 58%]
+........................................................................ [ 59%]
+........................................................................ [ 61%]
+........................................................................ [ 62%]
+........................................................................ [ 63%]
+............................................
+=================================== FAILURES ===================================
+___________ test_rust_module_unit_tests_pass_without_model_artifacts ___________
+
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-498/test_rust_module_unit_tests_pa0')
+
+    def test_rust_module_unit_tests_pass_without_model_artifacts(tmp_path: Path) -> None:
+        binary = tmp_path / "embed-tests"
+>       subprocess.run(
+            ["rustc", "--edition=2021", "--test", str(RUST_MODULE), "-o", str(binary)],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+tests/test_compact_answering_embedder.py:165: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+input = None, capture_output = True, timeout = None, check = True
+popenargs = (['rustc', '--edition=2021', '--test', '/Users/admin/Desktop/Mnemosyne/services/answering-ort/src/embed.rs', '-o', '/p.../folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-498/test_rust_module_unit_tests_pa0/embed-tests'],)
+kwargs = {'cwd': PosixPath('/Users/admin/Desktop/Mnemosyne'), 'text': True, 'stdout': -1, 'stderr': -1}
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+    
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them,
+        or pass capture_output=True to capture both.
+    
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output & stderr attributes if those streams
+        were captured.
+    
+        If timeout (seconds) is given and the process takes too long,
+         a TimeoutExpired exception will be raised.
+    
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+    
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+    
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+    
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+    
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+>               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['rustc', '--edition=2021', '--test', '/Users/admin/Desktop/Mnemosyne/services/answering-ort/src/embed.rs', '-o', '/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-498/test_rust_module_unit_tests_pa0/embed-tests']' returned non-zero exit status 1.
+
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/subprocess.py:578: CalledProcessError
+_____ test_living_latency_docs_do_not_claim_local_adapter_seam_is_missing ______
+
+    def test_living_latency_docs_do_not_claim_local_adapter_seam_is_missing() -> None:
+        living_docs = [
+            REPO / "eval" / "latency" / "README.md",
+            REPO / "eval" / "latency" / "bench.py",
+        ]
+        stale_claims = [
+            "ignores the HTTP retrieval adapters today",
+            "ignores HTTP adapters today",
+            "passes no `adapters=`",
+            "has no embedding seam",
+            "hardwire `hashing_embedding`",
+            "hardwires\n``hashing_embedding``",
+        ]
+    
+        for path in living_docs:
+>           text = path.read_text(encoding="utf-8")
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_latency_docs_consistency.py:24: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/pathlib/__init__.py:787: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = PosixPath('/Users/admin/Desktop/Mnemosyne/eval/latency/README.md')
+mode = 'r', buffering = -1, encoding = 'utf-8', errors = None, newline = None
+
+    def open(self, mode='r', buffering=-1, encoding=None,
+             errors=None, newline=None):
+        """
+        Open the file pointed to by this path and return a file object, as
+        the built-in open() function does.
+        """
+        if "b" not in mode:
+            encoding = io.text_encoding(encoding)
+>       return io.open(self, mode, buffering, encoding, errors, newline)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: '/Users/admin/Desktop/Mnemosyne/eval/latency/README.md'
+
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/pathlib/__init__.py:771: FileNotFoundError
+________________ test_raw_outbound_http_calls_are_policy_gated _________________
+
+    def test_raw_outbound_http_calls_are_policy_gated() -> None:
+        observed: set[tuple[str, str]] = set()
+        for root_name in RAW_EGRESS_SCAN_ROOTS:
+            for path in (ROOT / root_name).rglob("*"):
+                if not path.is_file() or not _is_scanned_source(path):
+                    continue
+                rel = path.relative_to(ROOT).as_posix()
+                if rel == "src/mnemosyne/network_safety.py":
+                    continue
+                text = path.read_text(encoding="utf-8")
+                for name, pattern in RAW_EGRESS_PATTERNS.items():
+                    if pattern.search(text):
+                        observed.add((rel, name))
+    
+>       assert observed == set(ALLOWED_RAW_EGRESS), "\n".join(
+            [
+                "raw outbound HTTP clients must route through mnemosyne.network_safety.safe_urlopen",
+                "or be listed in ALLOWED_RAW_EGRESS with a boundary-specific reason.",
+                f"unexpected={sorted(observed - set(ALLOWED_RAW_EGRESS))}",
+                f"stale_allowlist={sorted(set(ALLOWED_RAW_EGRESS) - observed)}",
+            ]
+        )
+E       AssertionError: raw outbound HTTP clients must route through mnemosyne.network_safety.safe_urlopen
+E         or be listed in ALLOWED_RAW_EGRESS with a boundary-specific reason.
+E         unexpected=[]
+E         stale_allowlist=[('src/mnemosyne/frameworks.py', 'urllib.request.urlopen')]
+E       assert {('infra/scri...AsyncClient')} == {('infra/scri...Client'), ...}
+E         
+E         Extra items in the right set:
+E         ('src/mnemosyne/frameworks.py', 'urllib.request.urlopen')
+E         Use -v to get more diff
+
+tests/test_network_egress_policy.py:159: AssertionError
+____________ test_production_vector_backfill_remains_operator_gated ____________
+
+    def test_production_vector_backfill_remains_operator_gated() -> None:
+        source = inspect.getsource(cli.cmd_vector_backfill_apply)
+>       assert "confirm_apply" in source
+E       assert 'confirm_apply' in '        "after": after,\n'
+
+tests/test_postgres_perf_lanes.py:1622: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_compact_answering_embedder.py::test_rust_module_unit_tests_pass_without_model_artifacts
+FAILED tests/test_latency_docs_consistency.py::test_living_latency_docs_do_not_claim_local_adapter_seam_is_missing
+FAILED tests/test_network_egress_policy.py::test_raw_outbound_http_calls_are_policy_gated
+FAILED tests/test_postgres_perf_lanes.py::test_production_vector_backfill_remains_operator_gated
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! KeyboardInterrupt !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+/Users/admin/.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/selectors.py:398: KeyboardInterrupt
+(to show a full traceback on KeyboardInterrupt use --full-trace)

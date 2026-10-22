@@ -1,0 +1,45 @@
+1/5 accuracy 1.000 Codex account quota; cost not measured 10s
+2/5 accuracy 1.000 Codex account quota; cost not measured 11s
+3/5 accuracy 1.000 Codex account quota; cost not measured 21s
+4/5 accuracy 1.000 Codex account quota; cost not measured 22s
+5/5 accuracy 1.000 Codex account quota; cost not measured 33s
+{
+ "questions": 5,
+ "accuracy": 1.0,
+ "accuracy_ci95": [
+  1.0,
+  1.0
+ ],
+ "task_averaged_accuracy": 1.0,
+ "by_type": {
+  "single-session-user": {
+   "accuracy": 1.0,
+   "n": 5
+  }
+ },
+ "abstention": null,
+ "evidence_recall_at_k": 1.0,
+ "evidence_turn_coverage": 1.0,
+ "avg_prompt_tokens_est": 28339.8,
+ "cost_usd": null,
+ "cost_basis": "Codex account quota; monetary cost not measured",
+ "answers_cut_off": 0,
+ "answers_empty": 0,
+ "reader_tokens": null,
+ "reader_tokens_enforced": false,
+ "judge_tokens": null,
+ "judge_tokens_enforced": false,
+ "reader": "gpt-6-astra",
+ "judge": "gpt-6-astra",
+ "inference_provider": "codex",
+ "model_names_are_requested": true,
+ "mode": "passages",
+ "embedding": null,
+ "context": "sessions",
+ "top_k": 10,
+ "budget": null,
+ "cot": true,
+ "split": "dev",
+ "manifest_sha256": "6a7eae9db4607e4a0595a4be81571708580f96ad02a5c85b75aa36f1df0f37d4",
+ "complete": true
+}

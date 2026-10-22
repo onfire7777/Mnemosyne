@@ -1,0 +1,302 @@
+F.FF..FFF...F.FFFFFF.......                                              [100%]
+=================================== FAILURES ===================================
+__________ test_register_entity_does_not_retain_caller_policy[local] ___________
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x107145fd0>
+
+    def test_register_entity_does_not_retain_caller_policy(engine):
+        _, policy = _private_entity(engine)
+        assert not _visible(engine, "bob")
+        policy["allow_principals"].append("bob")
+>       assert not _visible(engine, "bob"), "mutating an input must not grant access"
+E       AssertionError: mutating an input must not grant access
+E       assert not [{'id': '303a0e27-49ce-4ac9-a55a-e0199e7f0964', 'tenant_id': 'tenant-a', 'canonical': 'alex', 'type': 'unknown', ...}]
+E        +  where [{'id': '303a0e27-49ce-4ac9-a55a-e0199e7f0964', 'tenant_id': 'tenant-a', 'canonical': 'alex', 'type': 'unknown', ...}] = _visible(<mnemosyne.engine.LocalMemoryEngine object at 0x107145fd0>, 'bob')
+
+tests/test_entity_identity_safety.py:53: AssertionError
+____ test_register_entity_returns_detached_policy_and_aliases[local-False] _____
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x1077c3620>
+repeat = False
+
+    @pytest.mark.parametrize("repeat", [False, True])
+    def test_register_entity_returns_detached_policy_and_aliases(engine, repeat):
+        row, _ = _private_entity(engine)
+        if repeat:
+            row = engine.register_entity("tenant-a", "alex", alias="A. Example")
+        expected = copy.deepcopy(engine.export_tenant("tenant-a")["entities"])
+        row["access_policy"]["allow_principals"].append("bob")
+        row["aliases"].append("Impostor")
+>       assert not _visible(engine, "bob")
+E       AssertionError: assert not [{'id': '0ad0322d-8083-4fb0-99f2-42894031efc3', 'tenant_id': 'tenant-a', 'canonical': 'alex', 'type': 'unknown', ...}]
+E        +  where [{'id': '0ad0322d-8083-4fb0-99f2-42894031efc3', 'tenant_id': 'tenant-a', 'canonical': 'alex', 'type': 'unknown', ...}] = _visible(<mnemosyne.engine.LocalMemoryEngine object at 0x1077c3620>, 'bob')
+
+tests/test_entity_identity_safety.py:67: AssertionError
+_____ test_register_entity_returns_detached_policy_and_aliases[local-True] _____
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x1077c3e00>
+repeat = True
+
+    @pytest.mark.parametrize("repeat", [False, True])
+    def test_register_entity_returns_detached_policy_and_aliases(engine, repeat):
+        row, _ = _private_entity(engine)
+        if repeat:
+            row = engine.register_entity("tenant-a", "alex", alias="A. Example")
+        expected = copy.deepcopy(engine.export_tenant("tenant-a")["entities"])
+        row["access_policy"]["allow_principals"].append("bob")
+        row["aliases"].append("Impostor")
+>       assert not _visible(engine, "bob")
+E       AssertionError: assert not [{'id': '9c4d0cbe-c13c-4037-b676-d39b1c3b2ced', 'tenant_id': 'tenant-a', 'canonical': 'alex', 'type': 'unknown', ...}]
+E        +  where [{'id': '9c4d0cbe-c13c-4037-b676-d39b1c3b2ced', 'tenant_id': 'tenant-a', 'canonical': 'alex', 'type': 'unknown', ...}] = _visible(<mnemosyne.engine.LocalMemoryEngine object at 0x1077c3e00>, 'bob')
+
+tests/test_entity_identity_safety.py:67: AssertionError
+_____ test_entity_export_does_not_expose_nested_store_values[local-tenant] _____
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x107888050>
+surface = 'tenant'
+
+    @pytest.mark.parametrize("surface", ["tenant", "filtered", "all"])
+    def test_entity_export_does_not_expose_nested_store_values(engine, surface):
+        _private_entity(engine)
+        # Legacy/imported records may carry nested extension fields. The export
+        # boundary must detach these too, rather than enumerating today's schema.
+        extensions = {
+            "external_ids": {"crm": ["contact-42"]},
+            "summaries": {"history": [{"text": "Original private summary"}]},
+        }
+        if isinstance(engine, LocalMemoryEngine):
+            engine.entities[("tenant-a", "alex")].update(extensions)
+        else:
+            conn = engine._connect("tenant-a")
+            row = json.loads(conn.execute(
+                "SELECT record FROM entities WHERE tenant_id = ? AND canonical = ?",
+                ("tenant-a", "alex"),
+            ).fetchone()["record"])
+            row.update(extensions)
+            with conn:
+                conn.execute(
+                    "UPDATE entities SET record = ? WHERE tenant_id = ? AND canonical = ?",
+                    (json.dumps(row), "tenant-a", "alex"),
+                )
+        expected = copy.deepcopy(engine.export_tenant("tenant-a")["entities"])
+        if surface == "tenant":
+            exported = engine.export_tenant("tenant-a")["entities"][0]
+        elif surface == "all":
+            exported = engine.export_all()["entities"][0]
+        else:
+            exported = _visible(engine, "alice")[0]
+        exported["aliases"].append("Impostor")
+        exported["external_ids"]["crm"].append("attacker")
+        exported["summaries"]["history"][0]["text"] = "Forged summary"
+        if "access_policy" in exported:
+            exported["access_policy"]["allow_principals"].append("bob")
+>       assert engine.export_tenant("tenant-a")["entities"] == expected
+E       AssertionError: assert [{'id': '1e3e...nknown', ...}] == [{'id': '1e3e...nknown', ...}]
+E         
+E         At index 0 diff: {'id': '1e3e3390-af63-4277-8710-6747a14e7f57', 'tenant_id': 'tenant-a', 'canonical': 'alex', 'type': 'unknown', 'summary': 'Private launch date', 'salience': 0.5, 'aliases': ['Alex', 'alex', 'Impostor'], 'source_evidence_cids': ['5679eb99987230ab412affa7ebf9b1c86936a52640899e8d9ed5862b4fa06649'], 'access_policy': {'tenant': 'tenant-a', 'allow_principals': ['alice', 'bob']}, 'updated_at': '2026-10-22T23:12:42.811724+00:00', 'external_ids': {'crm': ['contact-42', 'attacker']}, 'summaries': {'history': [{'text': 'Forged summary'}]}} != {'id': '1e3e3390-af6...
+E         
+E         ...Full output truncated (2 lines hidden), use '-vv' to show
+
+tests/test_entity_identity_safety.py:106: AssertionError
+____ test_entity_export_does_not_expose_nested_store_values[local-filtered] ____
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x1078882f0>
+surface = 'filtered'
+
+    @pytest.mark.parametrize("surface", ["tenant", "filtered", "all"])
+    def test_entity_export_does_not_expose_nested_store_values(engine, surface):
+        _private_entity(engine)
+        # Legacy/imported records may carry nested extension fields. The export
+        # boundary must detach these too, rather than enumerating today's schema.
+        extensions = {
+            "external_ids": {"crm": ["contact-42"]},
+            "summaries": {"history": [{"text": "Original private summary"}]},
+        }
+        if isinstance(engine, LocalMemoryEngine):
+            engine.entities[("tenant-a", "alex")].update(extensions)
+        else:
+            conn = engine._connect("tenant-a")
+            row = json.loads(conn.execute(
+                "SELECT record FROM entities WHERE tenant_id = ? AND canonical = ?",
+                ("tenant-a", "alex"),
+            ).fetchone()["record"])
+            row.update(extensions)
+            with conn:
+                conn.execute(
+                    "UPDATE entities SET record = ? WHERE tenant_id = ? AND canonical = ?",
+                    (json.dumps(row), "tenant-a", "alex"),
+                )
+        expected = copy.deepcopy(engine.export_tenant("tenant-a")["entities"])
+        if surface == "tenant":
+            exported = engine.export_tenant("tenant-a")["entities"][0]
+        elif surface == "all":
+            exported = engine.export_all()["entities"][0]
+        else:
+            exported = _visible(engine, "alice")[0]
+        exported["aliases"].append("Impostor")
+        exported["external_ids"]["crm"].append("attacker")
+        exported["summaries"]["history"][0]["text"] = "Forged summary"
+        if "access_policy" in exported:
+            exported["access_policy"]["allow_principals"].append("bob")
+>       assert engine.export_tenant("tenant-a")["entities"] == expected
+E       AssertionError: assert [{'id': 'ec67...nknown', ...}] == [{'id': 'ec67...nknown', ...}]
+E         
+E         At index 0 diff: {'id': 'ec67e22f-fdb2-4ed4-9a97-1278a31b64a6', 'tenant_id': 'tenant-a', 'canonical': 'alex', 'type': 'unknown', 'summary': 'Private launch date', 'salience': 0.5, 'aliases': ['Alex', 'alex', 'Impostor'], 'source_evidence_cids': ['5679eb99987230ab412affa7ebf9b1c86936a52640899e8d9ed5862b4fa06649'], 'access_policy': {'tenant': 'tenant-a', 'allow_principals': ['alice']}, 'updated_at': '2026-10-22T23:12:42.818163+00:00', 'external_ids': {'crm': ['contact-42', 'attacker']}, 'summaries': {'history': [{'text': 'Forged summary'}]}} != {'id': 'ec67e22f-fdb2-4ed4-...
+E         
+E         ...Full output truncated (2 lines hidden), use '-vv' to show
+
+tests/test_entity_identity_safety.py:106: AssertionError
+______ test_entity_export_does_not_expose_nested_store_values[local-all] _______
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x107888590>
+surface = 'all'
+
+    @pytest.mark.parametrize("surface", ["tenant", "filtered", "all"])
+    def test_entity_export_does_not_expose_nested_store_values(engine, surface):
+        _private_entity(engine)
+        # Legacy/imported records may carry nested extension fields. The export
+        # boundary must detach these too, rather than enumerating today's schema.
+        extensions = {
+            "external_ids": {"crm": ["contact-42"]},
+            "summaries": {"history": [{"text": "Original private summary"}]},
+        }
+        if isinstance(engine, LocalMemoryEngine):
+            engine.entities[("tenant-a", "alex")].update(extensions)
+        else:
+            conn = engine._connect("tenant-a")
+            row = json.loads(conn.execute(
+                "SELECT record FROM entities WHERE tenant_id = ? AND canonical = ?",
+                ("tenant-a", "alex"),
+            ).fetchone()["record"])
+            row.update(extensions)
+            with conn:
+                conn.execute(
+                    "UPDATE entities SET record = ? WHERE tenant_id = ? AND canonical = ?",
+                    (json.dumps(row), "tenant-a", "alex"),
+                )
+        expected = copy.deepcopy(engine.export_tenant("tenant-a")["entities"])
+        if surface == "tenant":
+            exported = engine.export_tenant("tenant-a")["entities"][0]
+        elif surface == "all":
+            exported = engine.export_all()["entities"][0]
+        else:
+            exported = _visible(engine, "alice")[0]
+        exported["aliases"].append("Impostor")
+        exported["external_ids"]["crm"].append("attacker")
+        exported["summaries"]["history"][0]["text"] = "Forged summary"
+        if "access_policy" in exported:
+            exported["access_policy"]["allow_principals"].append("bob")
+>       assert engine.export_tenant("tenant-a")["entities"] == expected
+E       AssertionError: assert [{'id': '587f...nknown', ...}] == [{'id': '587f...nknown', ...}]
+E         
+E         At index 0 diff: {'id': '587f95d7-c3ca-4b80-85e3-6d1d380c3fa8', 'tenant_id': 'tenant-a', 'canonical': 'alex', 'type': 'unknown', 'summary': 'Private launch date', 'salience': 0.5, 'aliases': ['Alex', 'alex', 'Impostor'], 'source_evidence_cids': ['5679eb99987230ab412affa7ebf9b1c86936a52640899e8d9ed5862b4fa06649'], 'access_policy': {'tenant': 'tenant-a', 'allow_principals': ['alice', 'bob']}, 'updated_at': '2026-10-22T23:12:42.824596+00:00', 'external_ids': {'crm': ['contact-42', 'attacker']}, 'summaries': {'history': [{'text': 'Forged summary'}]}} != {'id': '587f95d7-c3c...
+E         
+E         ...Full output truncated (2 lines hidden), use '-vv' to show
+
+tests/test_entity_identity_safety.py:106: AssertionError
+________ test_entity_audit_payload_does_not_alias_current_entity[local] ________
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x1077c3e00>
+
+    def test_entity_audit_payload_does_not_alias_current_entity(engine):
+        _private_entity(engine)
+        exported = engine.export_tenant("tenant-a")
+        event = next(item for item in exported["audit_log"] if item["op"] == "register_entity")
+        event["diff"]["aliases"].append("Impostor")
+>       assert "Impostor" not in engine.export_tenant("tenant-a")["entities"][0]["aliases"]
+E       AssertionError: assert 'Impostor' not in ['Alex', 'alex', 'Impostor']
+
+tests/test_entity_identity_safety.py:115: AssertionError
+_ test_unicode_resolution_registers_distinct_entities_without_reusing_legacy_aliases[local] _
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x1077c3cb0>
+
+    def test_unicode_resolution_registers_distinct_entities_without_reusing_legacy_aliases(engine):
+        legacy = engine.register_entity("tenant-a", "unknown-entity", alias="李雷")
+        engine.register_entity("tenant-a", "unknown-entity", alias="王伟")
+        legacy = engine.export_tenant("tenant-a")["entities"][0]
+        result = _resolve_and_register(engine, ["李雷", "王伟", "José", "Josè"])
+>       assert len(result["details"]["resolved_entities"]) == 4
+E       AssertionError: assert 2 == 4
+E        +  where 2 = len([{'key': 'unknown-entity', 'label': '李雷', 'aliases': ['李雷', '王伟'], 'candidate_signatures': ['0', '1']}, {'key': 'jos', 'label': 'José', 'aliases': ['José', 'Josè'], 'candidate_signatures': ['2', '3']}])
+
+tests/test_entity_identity_safety.py:135: AssertionError
+_ test_unicode_resolution_registers_distinct_entities_without_reusing_legacy_aliases[sqlite] _
+
+engine = <mnemosyne.sqlite_engine.SqliteEngine object at 0x1078cc160>
+
+    def test_unicode_resolution_registers_distinct_entities_without_reusing_legacy_aliases(engine):
+        legacy = engine.register_entity("tenant-a", "unknown-entity", alias="李雷")
+        engine.register_entity("tenant-a", "unknown-entity", alias="王伟")
+        legacy = engine.export_tenant("tenant-a")["entities"][0]
+        result = _resolve_and_register(engine, ["李雷", "王伟", "José", "Josè"])
+>       assert len(result["details"]["resolved_entities"]) == 4
+E       AssertionError: assert 2 == 4
+E        +  where 2 = len([{'key': 'unknown-entity', 'label': '李雷', 'aliases': ['李雷', '王伟'], 'candidate_signatures': ['0', '1']}, {'key': 'jos', 'label': 'José', 'aliases': ['José', 'Josè'], 'candidate_signatures': ['2', '3']}])
+
+tests/test_entity_identity_safety.py:135: AssertionError
+________ test_unicode_normalization_is_stable_and_tenant_scoped[local] _________
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x1077c3620>
+
+    def test_unicode_normalization_is_stable_and_tenant_scoped(engine):
+        result = _resolve_and_register(engine, ["José", "JOSE\u0301", "  José  "])
+>       assert len(result["details"]["resolved_entities"]) == 1
+E       AssertionError: assert 2 == 1
+E        +  where 2 = len([{'key': 'jos', 'label': 'José', 'aliases': ['José', '  José  '], 'candidate_signatures': ['0', '2']}, {'key': 'jose', 'label': 'JOSÉ', 'aliases': ['JOSÉ'], 'candidate_signatures': ['1']}])
+
+tests/test_entity_identity_safety.py:148: AssertionError
+________ test_unicode_normalization_is_stable_and_tenant_scoped[sqlite] ________
+
+engine = <mnemosyne.sqlite_engine.SqliteEngine object at 0x1078ad850>
+
+    def test_unicode_normalization_is_stable_and_tenant_scoped(engine):
+        result = _resolve_and_register(engine, ["José", "JOSE\u0301", "  José  "])
+>       assert len(result["details"]["resolved_entities"]) == 1
+E       AssertionError: assert 2 == 1
+E        +  where 2 = len([{'key': 'jos', 'label': 'José', 'aliases': ['José', '  José  '], 'candidate_signatures': ['0', '2']}, {'key': 'jose', 'label': 'JOSÉ', 'aliases': ['JOSÉ'], 'candidate_signatures': ['1']}])
+
+tests/test_entity_identity_safety.py:148: AssertionError
+______ test_unicode_keys_do_not_collide_with_ascii_slug_namespace[local] _______
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x1077c34d0>
+
+    def test_unicode_keys_do_not_collide_with_ascii_slug_namespace(engine):
+        key = _entity_key("李雷")
+        # Even an ASCII name spelling the generated key goes through the legacy
+        # slugger, whose alphabet cannot produce the reserved colon separator.
+        _resolve_and_register(engine, ["李雷", key, "Alice", "Ａｌｉｃｅ"])
+>       assert len(engine.export_tenant("tenant-a")["entities"]) == 4
+E       AssertionError: assert 2 == 4
+E        +  where 2 = len([{'id': '42544ecf-b475-4a73-ba3e-b6cb0c1a98df', 'tenant_id': 'tenant-a', 'canonical': 'unknown-entity', 'type': 'unkno... {'id': '38d76403-f1f9-462b-b8b9-a2616993caf3', 'tenant_id': 'tenant-a', 'canonical': 'alice', 'type': 'unknown', ...}])
+
+tests/test_entity_identity_safety.py:162: AssertionError
+______ test_unicode_keys_do_not_collide_with_ascii_slug_namespace[sqlite] ______
+
+engine = <mnemosyne.sqlite_engine.SqliteEngine object at 0x1078ae450>
+
+    def test_unicode_keys_do_not_collide_with_ascii_slug_namespace(engine):
+        key = _entity_key("李雷")
+        # Even an ASCII name spelling the generated key goes through the legacy
+        # slugger, whose alphabet cannot produce the reserved colon separator.
+        _resolve_and_register(engine, ["李雷", key, "Alice", "Ａｌｉｃｅ"])
+>       assert len(engine.export_tenant("tenant-a")["entities"]) == 4
+E       AssertionError: assert 2 == 4
+E        +  where 2 = len([{'access_policy': {'tenant': 'tenant-a'}, 'aliases': ['unknown-entity', '李雷', 'Ａｌｉｃｅ'], 'canonical': 'unknown-entity'...: 'tenant-a'}, 'aliases': ['Alice', 'alice'], 'canonical': 'alice', 'id': '77e41ee9-6a19-4704-80d8-b95e23618312', ...}])
+
+tests/test_entity_identity_safety.py:162: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_entity_identity_safety.py::test_register_entity_does_not_retain_caller_policy[local]
+FAILED tests/test_entity_identity_safety.py::test_register_entity_returns_detached_policy_and_aliases[local-False]
+FAILED tests/test_entity_identity_safety.py::test_register_entity_returns_detached_policy_and_aliases[local-True]
+FAILED tests/test_entity_identity_safety.py::test_entity_export_does_not_expose_nested_store_values[local-tenant]
+FAILED tests/test_entity_identity_safety.py::test_entity_export_does_not_expose_nested_store_values[local-filtered]
+FAILED tests/test_entity_identity_safety.py::test_entity_export_does_not_expose_nested_store_values[local-all]
+FAILED tests/test_entity_identity_safety.py::test_entity_audit_payload_does_not_alias_current_entity[local]
+FAILED tests/test_entity_identity_safety.py::test_unicode_resolution_registers_distinct_entities_without_reusing_legacy_aliases[local]
+FAILED tests/test_entity_identity_safety.py::test_unicode_resolution_registers_distinct_entities_without_reusing_legacy_aliases[sqlite]
+FAILED tests/test_entity_identity_safety.py::test_unicode_normalization_is_stable_and_tenant_scoped[local]
+FAILED tests/test_entity_identity_safety.py::test_unicode_normalization_is_stable_and_tenant_scoped[sqlite]
+FAILED tests/test_entity_identity_safety.py::test_unicode_keys_do_not_collide_with_ascii_slug_namespace[local]
+FAILED tests/test_entity_identity_safety.py::test_unicode_keys_do_not_collide_with_ascii_slug_namespace[sqlite]
+13 failed, 14 passed in 0.44s

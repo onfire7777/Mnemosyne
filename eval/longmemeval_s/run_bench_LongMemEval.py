@@ -1,8 +1,11 @@
-"""LongMemEval-S answer accuracy for Mnemosyne, graded the way the published numbers are graded.
+"""LongMemEval-S development answer evaluation for Mnemosyne.
 
 For each of the 500 questions: load that question's own chat sessions into a fresh in-memory
 Mnemosyne, retrieve the best sessions for the question, let a READER model answer from them, then
-let a JUDGE model mark the answer right or wrong. Both models are reached through OpenRouter.
+let a JUDGE model mark the answer right or wrong. Use OpenRouter or isolated Codex CLI calls.
+Codex runs consume account quota; monetary cost and generation token caps are not measured.
+Codex uses the benchmark's grading prompts with a different judge backend; its results are
+development evidence, not directly comparable to published scores with other model settings.
 
 The reader prompt (sessions sorted by date, JSON turns, step by step) and the judge prompts are
 copied verbatim from the official repo, github.com/xiaowu0162/LongMemEval:
@@ -13,6 +16,8 @@ max 10 tokens, gpt-4o-mini = gpt-4o-mini-2024-07-18).
 of each whole session, hands the reader the best-ranked rounds that fit --budget tokens, grouped by
 session and sorted by date, in the same official prompt. With --dry-run, --budget takes a comma list
 and every budget is scored from one retrieval.
+Dense retrieval does not support --dry-run because missing cached vectors require a model call.
+Use default or passages mode for a run that never calls models or opens an embedding cache.
 
     set OPENROUTER_API_KEY=sk-or-...
     Mnemosyne\\Repository\\.venv\\Scripts\\python.exe run_bench_LongMemEval.py --limit 5     (smoke test)
@@ -28,9 +33,9 @@ be fed unchanged to the official evaluate_qa.py.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
-import random
 import sys
 import time
 import urllib.error
@@ -40,11 +45,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE / "Mnemosyne" / "Repository"
+REPO = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(REPO), str(REPO / "src")]
 
-from eval.longmemeval_recall import split_of  # noqa: E402  fixed 100 dev / 400 held-out split by sha256(id)
-from lme_embeddings import CachedProvider, open_cache, query_text  # noqa: E402
+from eval.codex_reader import read_with_codex  # noqa: E402
+from eval.harness.metrics import wilson_interval  # noqa: E402
+from eval.longmemeval_recall import benchmark_timestamp, split_of  # noqa: E402
+from eval.longmemeval_s.lme_embeddings import CachedProvider, open_cache, query_text  # noqa: E402
 from mnemosyne.engine import LocalMemoryEngine  # noqa: E402
 from mnemosyne.models import Evidence  # noqa: E402
 from mnemosyne.policy import OperatingPolicy  # noqa: E402
@@ -145,8 +152,11 @@ def openrouter(model: str, prompt: str, max_tokens: int, key: str) -> tuple[str,
     raise RuntimeError(f"OpenRouter kept failing for {model}: {error}")
 
 
-def _filter(mode: str) -> dict:
-    return {"role": "reader"} | ({"query_mode": "passages"} if mode == "passages" else {})
+def _filter(mode: str, row: dict) -> dict:
+    return {
+        "role": "reader", "query_timezone": "UTC",
+        "evaluated_at": benchmark_timestamp(row["question_date"], "question_date").isoformat(),
+    } | ({"query_mode": "passages"} if mode == "passages" else {})
 
 
 def retrieve(row: dict, top_k: int, mode: str) -> list[int]:
@@ -167,12 +177,13 @@ def retrieve(row: dict, top_k: int, mode: str) -> list[int]:
             tenant_id=tenant, user_id="longmemeval", actor="user",
             source_type=f"longmemeval:{session_id}", source_identity=session_id,
             content=text, access_policy={"tenant": tenant},
+            created_at=benchmark_timestamp(row["haystack_dates"][index], f"haystack_dates[{index}]"),
         ))
         position_of.setdefault(cid, index)
     if mode == "dense":
         hits = engine.vector_search(row["question"], top_k * 3, {"tenant_id": tenant, "branch": "main", "role": "reader"})
     else:
-        hits = engine.retrieve(row["question"], tenant_id=tenant, filt=_filter(mode), record_access=False).hits
+        hits = engine.retrieve(row["question"], tenant_id=tenant, filt=_filter(mode, row), record_access=False).hits
     return list(dict.fromkeys(position_of[hit.id] for hit in hits if hit.id in position_of))[:top_k]
 
 
@@ -201,9 +212,10 @@ def retrieve_rounds(row: dict, mode: str) -> list[tuple[int, list[int]]]:
                 tenant_id=tenant, user_id="longmemeval", actor="user",
                 source_type=f"longmemeval:{session_id}", source_identity=f"{session_id}#round-{number}",
                 content=text, access_policy={"tenant": tenant},
+                created_at=benchmark_timestamp(row["haystack_dates"][index], f"haystack_dates[{index}]"),
             ))
             unit_of.setdefault(cid, (index, turns))
-    result = engine.retrieve(row["question"], tenant_id=tenant, filt=_filter(mode), record_access=False)
+    result = engine.retrieve(row["question"], tenant_id=tenant, filt=_filter(mode, row), record_access=False)
     ranked, seen = [], set()
     for hit in result.hits:
         if hit.id in unit_of and hit.id not in seen:
@@ -265,6 +277,44 @@ def coverage(row: dict, chunks: dict[int, list[int]], evidence: set[tuple[str, i
     }
 
 
+def _codex_answer(row: dict, prompt: str, record: dict, args: argparse.Namespace) -> dict:
+    """Retain both independent attempts; invalid grades are failures, not negative labels."""
+    receipts: dict[str, dict] = {}
+    result = record | {
+        "inference_provider": "codex", "inference_receipts": receipts,
+        "cost_usd": None, "cost_basis": "Codex account quota; monetary cost not measured",
+        "reader_tokens": None, "reader_tokens_enforced": False,
+        "judge_tokens": None, "judge_tokens_enforced": False, "finish_reason": None,
+    }
+    try:
+        reader = read_with_codex(
+            prompt, model=args.codex_model, reasoning_effort=args.codex_reasoning_effort,
+        )
+        receipts["reader"] = reader | {"prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest()}
+        hypothesis = reader["answer"]
+        result["hypothesis"] = hypothesis
+        result["reader"] = reader.get("resolved_model")
+        grading_prompt = judge_prompt(row, hypothesis)
+        judge = read_with_codex(
+            grading_prompt, model=args.codex_model, reasoning_effort=args.codex_reasoning_effort,
+        )
+        receipts["judge"] = judge | {"prompt_sha256": hashlib.sha256(grading_prompt.encode()).hexdigest()}
+        verdict = judge["answer"].strip().lower()
+        result["judge_reply"] = judge["answer"]
+        if verdict not in {"yes", "no"}:
+            raise ValueError("Codex judge must return exactly yes or no")
+        result["autoeval_label"] = {
+            "model": judge.get("resolved_model"), "requested_model": args.codex_model, "label": verdict == "yes",
+        }
+        result["status"] = "completed"
+    except Exception as exc:
+        result.update({
+            "status": "failed", "error_type": type(exc).__name__,
+            "error_kind": getattr(exc, "kind", None), "error": str(exc),
+        })
+    return result
+
+
 def run_one(row: dict, split: str, args: argparse.Namespace, key: str) -> dict:
     started = time.perf_counter()
     record = {
@@ -306,6 +356,8 @@ def run_one(row: dict, split: str, args: argparse.Namespace, key: str) -> dict:
     record["prompt_tokens_est"] = len(prompt) // 4
     if args.dry_run:
         return record | {"reader_prompt_chars": len(prompt), "seconds": round(time.perf_counter() - started, 2)}
+    if args.inference_provider == "codex":
+        return _codex_answer(row, prompt, record, args) | {"seconds": round(time.perf_counter() - started, 2)}
     hypothesis, reader_cost, finish = openrouter(args.reader, prompt, args.reader_tokens, key)
     verdict, judge_cost, _ = openrouter(args.judge, judge_prompt(row, hypothesis), 10, key)
     return record | {
@@ -342,8 +394,9 @@ def _mean(values: list) -> float | None:
 
 def summarize(rows: list[dict], args: argparse.Namespace) -> dict:
     labels = [1 if row["autoeval_label"]["label"] else 0 for row in rows]
-    rng = random.Random(0)
-    boots = sorted(sum(rng.choices(labels, k=len(labels))) / len(labels) for _ in range(2000))
+    if not labels:
+        raise ValueError("Cannot summarize an empty answer evaluation")
+    interval = wilson_interval(sum(labels), len(labels))
     by_type: dict[str, list[int]] = defaultdict(list)
     for row, label in zip(rows, labels):
         by_type[row["question_type"]].append(label)
@@ -351,19 +404,26 @@ def summarize(rows: list[dict], args: argparse.Namespace) -> dict:
     return {
         "questions": len(rows),
         "accuracy": round(sum(labels) / len(labels), 4),
-        "accuracy_ci95": [round(boots[int(0.025 * len(boots))], 4), round(boots[int(0.975 * len(boots)) - 1], 4)],
+        "accuracy_ci95": [round(interval.low, 4), round(interval.high, 4)],
+        "accuracy_ci_method": interval.method,
         "task_averaged_accuracy": round(sum(sum(v) / len(v) for v in by_type.values()) / len(by_type), 4),
         "by_type": {t: {"accuracy": round(sum(v) / len(v), 4), "n": len(v)} for t, v in sorted(by_type.items())},
         "abstention": {"accuracy": round(sum(abstention) / len(abstention), 4), "n": len(abstention)} if abstention else None,
         "evidence_recall_at_k": _mean([row.get("evidence_recall") for row in rows]),
         "evidence_turn_coverage": _mean([row.get("evidence_turn_coverage") for row in rows]),
         "avg_prompt_tokens_est": _mean([row.get("prompt_tokens_est") for row in rows]),
-        "cost_usd": round(sum(row.get("cost_usd", 0) for row in rows), 4),
+        "cost_usd": None if args.inference_provider == "codex" else round(sum(row.get("cost_usd", 0) for row in rows), 4),
+        "cost_basis": "Codex account quota; monetary cost not measured" if args.inference_provider == "codex" else "provider-reported USD",
         "answers_cut_off": sum(1 for row in rows if row.get("finish_reason") == "length"),
         "answers_empty": sum(1 for row in rows if not (row.get("hypothesis") or "").strip()),
-        "reader_tokens": args.reader_tokens,
-        "reader": args.reader,
-        "judge": args.judge,
+        "reader_tokens": None if args.inference_provider == "codex" else args.reader_tokens,
+        "reader_tokens_enforced": args.inference_provider != "codex",
+        "judge_tokens": None if args.inference_provider == "codex" else 10,
+        "judge_tokens_enforced": args.inference_provider != "codex",
+        "reader": args.codex_model if args.inference_provider == "codex" else args.reader,
+        "judge": args.codex_model if args.inference_provider == "codex" else args.judge,
+        "inference_provider": args.inference_provider,
+        "model_names_are_requested": args.inference_provider == "codex",
         "mode": args.mode,
         "embedding": f"{args.embed}:{args.embed_model}" if args.mode == "dense" else None,
         "context": args.context,
@@ -374,12 +434,84 @@ def summarize(rows: list[dict], args: argparse.Namespace) -> dict:
     }
 
 
+def _codex_manifest(args: argparse.Namespace, selected: list[dict], hashes: dict[str, str]) -> dict:
+    sources = [
+        Path(__file__), REPO / "eval/codex_reader.py", REPO / "eval/longmemeval_recall.py",
+        REPO / "eval/harness/metrics.py", REPO / "pyproject.toml", REPO / "uv.lock",
+    ]
+    sources.extend(sorted((REPO / "src/mnemosyne").rglob("*.py")))
+    return {
+        "schema": "mnemosyne.longmemeval.codex-run.v1",
+        "runtime": {"python": sys.version, "platform": sys.platform},
+        "dataset": {
+            "reference_source": "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned",
+            "input_directory": str(args.data.parent.resolve()), "sha256": hashes,
+        },
+        "source_sha256": {str(path.relative_to(REPO)): hashlib.sha256(path.read_bytes()).hexdigest() for path in sources},
+        "configuration": {
+            "inference_provider": "codex", "model": args.codex_model,
+            "reasoning_effort": args.codex_reasoning_effort, "timeout_seconds": 180,
+            "mode": args.mode, "context": args.context, "top_k": args.top_k,
+            "budgets": args.budgets, "cot": not args.no_cot, "split": args.split,
+            "limit": args.limit, "workers": args.workers, "only_wrong_from": args.only_wrong_from,
+            "timestamp_timezone": "UTC", "reader_tokens": None, "judge_tokens": None,
+            "generation_token_caps_enforced": False, "temperature": None,
+            "cost_usd": None, "cost_basis": "Codex account quota; monetary cost not measured",
+            "judge_rule": "exact yes/no after trimming whitespace and ignoring case",
+        },
+        "selected_question_ids": [row["question_id"] for row in selected],
+    }
+
+
+def _bind_codex_manifest(out: Path, manifest: dict) -> str:
+    path = out.with_suffix(".manifest.json")
+    if path.exists():
+        if json.loads(path.read_text(encoding="utf-8")) != manifest:
+            raise ValueError("Codex resume manifest differs from data, code or settings; use a new --run")
+    else:
+        if any(out.with_suffix(suffix).exists() for suffix in (".jsonl", ".summary.json", ".failures.jsonl")):
+            raise ValueError("Codex refuses to resume existing results without a matching manifest; use a new --run")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("x", encoding="utf-8") as handle:
+            json.dump(manifest, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+    return hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _validate_codex_resume(rows: list[dict], selected: list[dict], manifest_hash: str) -> None:
+    allowed = {row["question_id"] for row in selected}
+    seen = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError("Codex result must be an object")
+        qid = row.get("question_id")
+        receipts = row.get("inference_receipts", {})
+        if not isinstance(receipts, dict) or not isinstance(receipts.get("judge"), dict):
+            raise ValueError("Codex result lacks verified inference receipts")
+        verdict = receipts["judge"].get("answer")
+        grading = row.get("autoeval_label", {})
+        label = grading.get("label") if isinstance(grading, dict) else None
+        if (
+            not isinstance(qid, str) or qid not in allowed or qid in seen or row.get("manifest_sha256") != manifest_hash
+            or row.get("inference_provider") != "codex" or row.get("status") != "completed"
+            or not isinstance(receipts.get("reader"), dict)
+            or not isinstance(verdict, str) or verdict.strip().lower() not in {"yes", "no"}
+            or type(label) is not bool or label != (verdict.strip().lower() == "yes")
+        ):
+            raise ValueError("Codex result is unverified, duplicated, or outside its manifest; use a new --run")
+        seen.add(qid)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data", type=Path,
                     default=HERE / "Mnemosyne" / "_scratch" / "benchmark-data" / "longmemeval_s_cleaned.json")
     ap.add_argument("--reader", default=GPT_4O_MINI, help="OpenRouter model that writes the answers")
     ap.add_argument("--judge", default=GPT_4O_MINI, help="OpenRouter model that grades them (official: gpt-4o-mini)")
+    ap.add_argument("--inference-provider", choices=("openrouter", "codex"), default="openrouter")
+    ap.add_argument("--codex-model", default=None, help="Codex model for independent reader and judge calls")
+    ap.add_argument("--codex-reasoning-effort", choices=("none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"))
+    ap.add_argument("--out-dir", type=Path, default=None, help="local directory for results, receipts and run manifest")
     ap.add_argument("--top-k", type=int, default=10, help="sessions handed to the reader (default 10)")
     ap.add_argument("--mode", choices=("default", "passages", "dense"), default="default",
                     help="Mnemosyne retrieval: default search, BM25 passages, or the dense channel with --embed")
@@ -392,32 +524,47 @@ def main() -> None:
                     help="reader context in tokens for --context rounds (a comma list with --dry-run)")
     ap.add_argument("--no-cot", action="store_true", help="plain reader prompt instead of step by step")
     ap.add_argument("--reader-tokens", type=int, default=4000,
-                    help="max answer length; 800 cut a thinking reader (Haiku 5.5) off mid-answer")
+                    help="OpenRouter maximum answer length; Codex generation caps are not enforced")
     ap.add_argument("--only-wrong-from", default="",
                     help="only the questions an earlier run (its --run name) got wrong")
     ap.add_argument("--split", choices=("all", "dev", "heldout"), default="all")
     ap.add_argument("--limit", type=int, default=0, help="only the first N questions (smoke test)")
     ap.add_argument("--workers", type=int, default=4, help="questions in flight at once")
     ap.add_argument("--run", default="", help="run name; give the same one to resume")
-    ap.add_argument("--dry-run", action="store_true", help="retrieve and build prompts only, call no model")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="retrieve and build prompts only, call no model (default/passages modes only)")
     args = ap.parse_args()
+    if args.dry_run and args.mode == "dense":
+        raise SystemExit(
+            "--mode dense does not support --dry-run: missing vectors require model calls. "
+            "Use --mode default or --mode passages for a dry run."
+        )
+    if args.inference_provider == "codex" and args.mode == "dense":
+        raise SystemExit("Codex inference supports --mode default or passages; dense embeddings require a separate provider")
+    if args.limit < 0 or args.top_k < 1 or args.workers < 1:
+        ap.error("--limit must be non-negative; --top-k and --workers must be positive")
     args.budgets = [int(value) for value in str(args.budget).split(",") if value.strip()]
     if not args.budgets or min(args.budgets) < 1:
         raise SystemExit("--budget must be positive token counts")
     if len(args.budgets) > 1 and not args.dry_run:
         raise SystemExit("several budgets only work with --dry-run")
 
-    key = os.environ.get("OPENROUTER_API_KEY", "")
-    if not key and not args.dry_run:
+    key = os.environ.get("OPENROUTER_API_KEY", "") if args.inference_provider == "openrouter" else ""
+    if args.inference_provider == "openrouter" and not key and not args.dry_run:
         raise SystemExit("Set OPENROUTER_API_KEY first (or use --dry-run).")
-    rows = json.loads(args.data.read_text(encoding="utf-8"))
-    oracle = evidence_turns(json.loads((args.data.parent / "longmemeval_oracle.json").read_text(encoding="utf-8")))
+    data_bytes = args.data.read_bytes()
+    oracle_bytes = (args.data.parent / "longmemeval_oracle.json").read_bytes()
+    hashes = {args.data.name: hashlib.sha256(data_bytes).hexdigest(),
+              "longmemeval_oracle.json": hashlib.sha256(oracle_bytes).hexdigest()}
+    rows = json.loads(data_bytes)
+    oracle = evidence_turns(json.loads(oracle_bytes))
     for row in rows:
         row["_evidence_turns"] = oracle.get(row["question_id"], set())
     splits = split_of([row["question_id"] for row in rows])
     todo = [row for row in rows if args.split == "all" or splits[row["question_id"]] == args.split]
+    out_dir = args.out_dir if args.out_dir is not None else HERE / "LongMemEval-results"
     if args.only_wrong_from:
-        earlier = HERE / "LongMemEval-results" / f"{args.only_wrong_from}.jsonl"
+        earlier = out_dir / f"{args.only_wrong_from}.jsonl"
         wrong = {
             record["question_id"]
             for record in (json.loads(line) for line in earlier.read_text(encoding="utf-8").splitlines() if line.strip())
@@ -426,13 +573,34 @@ def main() -> None:
         todo = [row for row in todo if row["question_id"] in wrong]
     if args.limit:
         todo = todo[: args.limit]
+    if not todo:
+        raise SystemExit("No questions selected")
+    for row in todo:
+        benchmark_timestamp(row["question_date"], "question_date")
+        if len(row["haystack_dates"]) != len(row["haystack_sessions"]) or len(row["haystack_session_ids"]) != len(row["haystack_sessions"]):
+            raise ValueError("haystack_dates, haystack_session_ids and haystack_sessions must align")
+        for date in row["haystack_dates"]:
+            benchmark_timestamp(date, "haystack_dates")
 
     shape = f"top{args.top_k}" if args.context == "sessions" else f"rounds{args.budgets[0]}"
-    run = args.run or f"{args.mode}-{shape}-{args.reader.split('/')[-1]}-{args.split}"
-    out = HERE / "LongMemEval-results" / f"{run}.jsonl"
+    model_name = (args.codex_model or "codex-default") if args.inference_provider == "codex" else args.reader
+    run = args.run or f"{args.mode}-{shape}-{model_name.split('/')[-1]}-{args.split}"
+    if Path(run).name != run or run in {".", ".."}:
+        ap.error("--run must be a filename, not a path")
+    out = out_dir / f"{run}.jsonl"
+    manifest_hash = None
+    if args.inference_provider != "codex" and not args.dry_run and out.with_suffix(".manifest.json").exists():
+        raise ValueError("This run has a Codex manifest; use a new --run for a different inference provider")
+    if args.inference_provider == "codex" and not args.dry_run:
+        manifest_hash = _bind_codex_manifest(out, _codex_manifest(args, todo, hashes))
+        failures_path = out.with_suffix(".failures.jsonl")
+        if failures_path.exists() and failures_path.stat().st_size:
+            raise ValueError("Codex run contains failed attempts; retained receipts require a new --run")
     done: list[dict] = []
     if not args.dry_run and out.exists():
         done = [json.loads(line) for line in out.read_text(encoding="utf-8").splitlines() if line.strip()]
+        if args.inference_provider == "codex":
+            _validate_codex_resume(done, todo, manifest_hash)
         finished = {row["question_id"] for row in done}
         todo = [row for row in todo if row["question_id"] not in finished]
         print(f"resuming {run}: {len(done)} done, {len(todo)} to go", flush=True)
@@ -442,7 +610,7 @@ def main() -> None:
         if args.context != "sessions":
             raise SystemExit("--mode dense ranks whole sessions; use it with --context sessions")
         global EMBEDDER
-        cache = open_cache(args.embed, HERE / "LongMemEval-results", key)
+        cache = open_cache(args.embed, out_dir, key)
         texts = [query_text(row["question"]) for row in todo] + [
             "\n".join(f"{turn['role']}: {turn['content']}" for turn in session)
             for row in todo for session in row["haystack_sessions"]
@@ -456,22 +624,34 @@ def main() -> None:
         EMBEDDER = CachedProvider(cache)
         args.embed_model = cache.model
 
-    started, new = time.perf_counter(), []
+    started, new, failures = time.perf_counter(), [], []
     with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
         futures = [pool.submit(run_one, row, splits[row["question_id"]], args, key) for row in todo]
         for count, future in enumerate(as_completed(futures), 1):
             record = future.result()
-            new.append(record)
             if args.dry_run:
+                new.append(record)
                 if count % 50 == 0 or count == len(todo):
                     print(f"{count}/{len(todo)} {time.perf_counter() - started:.0f}s", flush=True)
                 continue
+            if manifest_hash is not None:
+                record["manifest_sha256"] = manifest_hash
+            if record.get("status") == "failed":
+                failures.append(record)
+                with out.with_suffix(".failures.jsonl").open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+                print(f"{record['question_id']}: failed ({record['error_type']}); receipts retained", flush=True)
+                continue
+            new.append(record)
             with out.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(record, ensure_ascii=False) + "\n")
             scored = done + new
             right = sum(1 for row in scored if row["autoeval_label"]["label"])
+            cost = "Codex account quota; cost not measured" if args.inference_provider == "codex" else (
+                f"spent ${sum(row.get('cost_usd', 0) for row in scored):.3f}"
+            )
             print(f"{len(scored)}/{len(done) + len(todo)} accuracy {right / len(scored):.3f} "
-                  f"spent ${sum(row.get('cost_usd', 0) for row in scored):.3f} "
+                  f"{cost} "
                   f"{time.perf_counter() - started:.0f}s", flush=True)
 
     if args.dry_run:
@@ -505,7 +685,12 @@ def main() -> None:
             out.with_suffix(".dryrun.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
         print(json.dumps(report, indent=1))
         return
+    if failures:
+        raise SystemExit(f"{len(failures)} Codex attempts failed; no aggregate score published; inspect {out.with_suffix('.failures.jsonl')}")
     summary = summarize(done + new, args)
+    if manifest_hash is not None:
+        summary["manifest_sha256"] = manifest_hash
+        summary["complete"] = True
     out.with_suffix(".summary.json").write_text(json.dumps(summary, indent=1), encoding="utf-8")
     print(json.dumps(summary, indent=1))
 

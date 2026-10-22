@@ -1,0 +1,286 @@
+FFFFF                                                                    [100%]
+=================================== FAILURES ===================================
+________ test_main_store_snapshots_each_live_database_without_sidecars _________
+
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-508/test_main_store_snapshots_each0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x109759480>
+
+    def test_main_store_snapshots_each_live_database_without_sidecars(tmp_path, monkeypatch):
+        from mnemosyne import cli
+    
+        monkeypatch.delenv("MNEMOSYNE_PASSAGE_INDEX", raising=False)
+        source = tmp_path / "source"
+        source.mkdir()
+        assets = source / "tenant.proj"
+        assets.mkdir()
+        (assets / "notes.txt").write_bytes(b"preserve projection assets")
+        # This is an ordinary asset despite its suffix, not a SQLite sidecar.
+        (assets / "notes.txt-wal").write_bytes(b"also preserve this asset")
+        originals = []
+        snapshots = []
+        for relative in ("tenant.db", "another.db", "tenant.proj/cache.sqlite"):
+            database = source / relative
+            conn = sqlite3.connect(database)
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("CREATE TABLE records (value TEXT)")
+            conn.execute("INSERT INTO records VALUES ('committed')")
+            conn.commit()
+            # This is still absent from the main file, so byte-copying only it loses data.
+            conn.execute("INSERT INTO records VALUES ('uncommitted')")
+            originals.append(conn)
+            snapshots.append((database, database.read_bytes(), Path(str(database) + "-wal").read_bytes()))
+        questions = tmp_path / "questions.json"
+        questions.write_text(json.dumps([{"id": "q", "question": "one", "gold": ["a"]}]))
+        output = tmp_path / "report.json"
+    
+        def load_tools(args):
+            copy = Path(args.store)
+            assert (copy / "tenant.proj/notes.txt").read_bytes() == b"preserve projection assets"
+            assert (copy / "tenant.proj/notes.txt-wal").read_bytes() == b"also preserve this asset"
+            for database, _, _ in snapshots:
+                copied = copy / database.relative_to(source)
+                for suffix in ("-wal", "-shm", "-journal"):
+                    assert not Path(str(copied) + suffix).exists(), "backup must be a standalone database"
+                # immutable ignores all sidecars and reads the standalone snapshot itself.
+                conn = sqlite3.connect(f"{copied.as_uri()}?immutable=1", uri=True)
+                try:
+                    assert conn.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+                    assert conn.execute("SELECT value FROM records").fetchall() == [("committed",)]
+                finally:
+                    conn.close()
+            return SimpleNamespace(
+                engine=SimpleNamespace(adapters=SimpleNamespace(passage_graph=None)),
+                search=lambda **kwargs: {"hits": [], "abstained": True},
+            )
+    
+        monkeypatch.setattr(cli, "load_tools", load_tools)
+        monkeypatch.setattr("sys.argv", [
+            "store_recall", "--store", str(source), "--tenant", "synthetic",
+            "--questions", str(questions), "--out", str(output),
+        ])
+        try:
+>           store_recall.main()
+
+tests/test_store_recall.py:383: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+eval/store_recall.py:116: in main
+    tools = cli.load_tools(cli_args)
+            ^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = Namespace(backend='sqlite', store='/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/store-recall-bvkmhhpg/store', eval...ose=None, lawful_basis=None, residency=None, region=None, break_glass=False, func=<function cmd_search at 0x109a74b40>)
+
+    def load_tools(args):
+        copy = Path(args.store)
+        assert (copy / "tenant.proj/notes.txt").read_bytes() == b"preserve projection assets"
+        assert (copy / "tenant.proj/notes.txt-wal").read_bytes() == b"also preserve this asset"
+        for database, _, _ in snapshots:
+            copied = copy / database.relative_to(source)
+            for suffix in ("-wal", "-shm", "-journal"):
+>               assert not Path(str(copied) + suffix).exists(), "backup must be a standalone database"
+E               AssertionError: backup must be a standalone database
+E               assert not True
+E                +  where True = exists()
+E                +    where exists = PosixPath('/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/store-recall-bvkmhhpg/store/tenant.db-wal').exists
+E                +      where PosixPath('/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/store-recall-bvkmhhpg/store/tenant.db-wal') = Path(('/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/store-recall-bvkmhhpg/store/tenant.db' + '-wal'))
+E                +        where '/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/store-recall-bvkmhhpg/store/tenant.db' = str(PosixPath('/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/store-recall-bvkmhhpg/store/tenant.db'))
+
+tests/test_store_recall.py:364: AssertionError
+_______ test_output_hardlink_to_source_store_file_is_rejected[tenant.db] _______
+
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-508/test_output_hardlink_to_source0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x109af2190>
+relative = 'tenant.db'
+
+    @pytest.mark.parametrize("relative", ["tenant.db", "tenant.db-wal", "tenant.db-shm", "nested/asset.txt"])
+    def test_output_hardlink_to_source_store_file_is_rejected(tmp_path, monkeypatch, relative):
+        monkeypatch.delenv("MNEMOSYNE_PASSAGE_INDEX", raising=False)
+        source = tmp_path / "source"
+        original = source / relative
+        original.parent.mkdir(parents=True)
+        original.write_bytes(b"source content")
+        output = tmp_path / "report.json"
+        output.hardlink_to(original)
+        monkeypatch.setattr("sys.argv", [
+            "store_recall", "--store", str(source), "--tenant", "synthetic",
+            "--questions", str(tmp_path / "absent.json"), "--out", str(output),
+        ])
+        with pytest.raises(SystemExit) as exc:
+>           store_recall.main()
+
+tests/test_store_recall.py:408: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+eval/store_recall.py:90: in main
+    questions = json.loads(args.questions.read_text(encoding="utf-8"))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/pathlib/__init__.py:787: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-508/test_output_hardlink_to_source0/absent.json')
+mode = 'r', buffering = -1, encoding = 'utf-8', errors = None, newline = None
+
+    def open(self, mode='r', buffering=-1, encoding=None,
+             errors=None, newline=None):
+        """
+        Open the file pointed to by this path and return a file object, as
+        the built-in open() function does.
+        """
+        if "b" not in mode:
+            encoding = io.text_encoding(encoding)
+>       return io.open(self, mode, buffering, encoding, errors, newline)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: '/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-508/test_output_hardlink_to_source0/absent.json'
+
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/pathlib/__init__.py:771: FileNotFoundError
+_____ test_output_hardlink_to_source_store_file_is_rejected[tenant.db-wal] _____
+
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-508/test_output_hardlink_to_source1')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x109a1eb10>
+relative = 'tenant.db-wal'
+
+    @pytest.mark.parametrize("relative", ["tenant.db", "tenant.db-wal", "tenant.db-shm", "nested/asset.txt"])
+    def test_output_hardlink_to_source_store_file_is_rejected(tmp_path, monkeypatch, relative):
+        monkeypatch.delenv("MNEMOSYNE_PASSAGE_INDEX", raising=False)
+        source = tmp_path / "source"
+        original = source / relative
+        original.parent.mkdir(parents=True)
+        original.write_bytes(b"source content")
+        output = tmp_path / "report.json"
+        output.hardlink_to(original)
+        monkeypatch.setattr("sys.argv", [
+            "store_recall", "--store", str(source), "--tenant", "synthetic",
+            "--questions", str(tmp_path / "absent.json"), "--out", str(output),
+        ])
+        with pytest.raises(SystemExit) as exc:
+>           store_recall.main()
+
+tests/test_store_recall.py:408: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+eval/store_recall.py:90: in main
+    questions = json.loads(args.questions.read_text(encoding="utf-8"))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/pathlib/__init__.py:787: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-508/test_output_hardlink_to_source1/absent.json')
+mode = 'r', buffering = -1, encoding = 'utf-8', errors = None, newline = None
+
+    def open(self, mode='r', buffering=-1, encoding=None,
+             errors=None, newline=None):
+        """
+        Open the file pointed to by this path and return a file object, as
+        the built-in open() function does.
+        """
+        if "b" not in mode:
+            encoding = io.text_encoding(encoding)
+>       return io.open(self, mode, buffering, encoding, errors, newline)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: '/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-508/test_output_hardlink_to_source1/absent.json'
+
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/pathlib/__init__.py:771: FileNotFoundError
+_____ test_output_hardlink_to_source_store_file_is_rejected[tenant.db-shm] _____
+
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-508/test_output_hardlink_to_source2')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10985b8a0>
+relative = 'tenant.db-shm'
+
+    @pytest.mark.parametrize("relative", ["tenant.db", "tenant.db-wal", "tenant.db-shm", "nested/asset.txt"])
+    def test_output_hardlink_to_source_store_file_is_rejected(tmp_path, monkeypatch, relative):
+        monkeypatch.delenv("MNEMOSYNE_PASSAGE_INDEX", raising=False)
+        source = tmp_path / "source"
+        original = source / relative
+        original.parent.mkdir(parents=True)
+        original.write_bytes(b"source content")
+        output = tmp_path / "report.json"
+        output.hardlink_to(original)
+        monkeypatch.setattr("sys.argv", [
+            "store_recall", "--store", str(source), "--tenant", "synthetic",
+            "--questions", str(tmp_path / "absent.json"), "--out", str(output),
+        ])
+        with pytest.raises(SystemExit) as exc:
+>           store_recall.main()
+
+tests/test_store_recall.py:408: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+eval/store_recall.py:90: in main
+    questions = json.loads(args.questions.read_text(encoding="utf-8"))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/pathlib/__init__.py:787: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-508/test_output_hardlink_to_source2/absent.json')
+mode = 'r', buffering = -1, encoding = 'utf-8', errors = None, newline = None
+
+    def open(self, mode='r', buffering=-1, encoding=None,
+             errors=None, newline=None):
+        """
+        Open the file pointed to by this path and return a file object, as
+        the built-in open() function does.
+        """
+        if "b" not in mode:
+            encoding = io.text_encoding(encoding)
+>       return io.open(self, mode, buffering, encoding, errors, newline)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: '/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-508/test_output_hardlink_to_source2/absent.json'
+
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/pathlib/__init__.py:771: FileNotFoundError
+___ test_output_hardlink_to_source_store_file_is_rejected[nested/asset.txt] ____
+
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-508/test_output_hardlink_to_source3')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1097497b0>
+relative = 'nested/asset.txt'
+
+    @pytest.mark.parametrize("relative", ["tenant.db", "tenant.db-wal", "tenant.db-shm", "nested/asset.txt"])
+    def test_output_hardlink_to_source_store_file_is_rejected(tmp_path, monkeypatch, relative):
+        monkeypatch.delenv("MNEMOSYNE_PASSAGE_INDEX", raising=False)
+        source = tmp_path / "source"
+        original = source / relative
+        original.parent.mkdir(parents=True)
+        original.write_bytes(b"source content")
+        output = tmp_path / "report.json"
+        output.hardlink_to(original)
+        monkeypatch.setattr("sys.argv", [
+            "store_recall", "--store", str(source), "--tenant", "synthetic",
+            "--questions", str(tmp_path / "absent.json"), "--out", str(output),
+        ])
+        with pytest.raises(SystemExit) as exc:
+>           store_recall.main()
+
+tests/test_store_recall.py:408: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+eval/store_recall.py:90: in main
+    questions = json.loads(args.questions.read_text(encoding="utf-8"))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/pathlib/__init__.py:787: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-508/test_output_hardlink_to_source3/absent.json')
+mode = 'r', buffering = -1, encoding = 'utf-8', errors = None, newline = None
+
+    def open(self, mode='r', buffering=-1, encoding=None,
+             errors=None, newline=None):
+        """
+        Open the file pointed to by this path and return a file object, as
+        the built-in open() function does.
+        """
+        if "b" not in mode:
+            encoding = io.text_encoding(encoding)
+>       return io.open(self, mode, buffering, encoding, errors, newline)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: '/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-508/test_output_hardlink_to_source3/absent.json'
+
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/pathlib/__init__.py:771: FileNotFoundError
+=========================== short test summary info ============================
+FAILED tests/test_store_recall.py::test_main_store_snapshots_each_live_database_without_sidecars
+FAILED tests/test_store_recall.py::test_output_hardlink_to_source_store_file_is_rejected[tenant.db]
+FAILED tests/test_store_recall.py::test_output_hardlink_to_source_store_file_is_rejected[tenant.db-wal]
+FAILED tests/test_store_recall.py::test_output_hardlink_to_source_store_file_is_rejected[tenant.db-shm]
+FAILED tests/test_store_recall.py::test_output_hardlink_to_source_store_file_is_rejected[nested/asset.txt]

@@ -1,4 +1,18 @@
-# Mnemetric repository ownership
+# Independent projects and historical benchmark extraction
+
+## Current separation boundary
+
+Mnemosyne and Mnemetric have independent code and data. Mnemosyne's runtime and internal
+evaluations do not import Mnemetric, require its checkout, or use its live databases.
+Research commands take explicit dataset/index paths. There is no automatic code, configuration
+or data synchronization between the projects. Published comparisons may cite either project
+without creating a runtime dependency.
+
+The notes below preserve the original extraction history and evidence provenance. Revisions,
+deployment ownership and dependency descriptions in those notes are historical, not instructions
+to reconnect the projects or claims about their current remote state.
+
+## Historical extraction record
 
 The website and benchmark program now have a dedicated repository:
 https://github.com/onfire7777/Mnemetric

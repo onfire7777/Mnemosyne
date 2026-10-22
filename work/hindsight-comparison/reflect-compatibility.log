@@ -1,0 +1,99 @@
+........................................................................ [ 16%]
+........................................................................ [ 32%]
+...............................................F........................ [ 48%]
+...............................................F........................ [ 64%]
+...............................................F........................ [ 80%]
+...............................................F........................ [ 96%]
+.................                                                        [100%]
+=================================== FAILURES ===================================
+_______ test_every_mcp_tool_is_a_cli_command_under_its_own_name[reflect] _______
+
+tool = 'reflect'
+
+    @pytest.mark.parametrize("tool", TOOL_NAMES)
+    def test_every_mcp_tool_is_a_cli_command_under_its_own_name(tool: str) -> None:
+>       assert _command(tool) in _handler_by_command(), f"no `mneme {_command(tool)}` command for MCP tool {tool}"
+E       AssertionError: no `mneme reflect` command for MCP tool reflect
+E       assert 'reflect' in {'session-exchange': 'cmd_session_exchange', 'idp-jwks-live-check': 'cmd_idp_jwks_live_check', 'postgres-role-check': 'cmd_postgres_role_check', 'idp-authz-policy-check': 'cmd_idp_authz_policy_check', ...}
+E        +  where 'reflect' = _command('reflect')
+E        +  and   {'session-exchange': 'cmd_session_exchange', 'idp-jwks-live-check': 'cmd_idp_jwks_live_check', 'postgres-role-check': 'cmd_postgres_role_check', 'idp-authz-policy-check': 'cmd_idp_authz_policy_check', ...} = _handler_by_command()
+
+tests/test_cli_mcp_parity.py:118: AssertionError
+_________________ test_the_command_runs_its_own_tool[reflect] __________________
+
+tool = 'reflect'
+
+    @pytest.mark.parametrize("tool", TOOL_NAMES)
+    def test_the_command_runs_its_own_tool(tool: str) -> None:
+>       handler = _handler_by_command()[_command(tool)]
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'reflect'
+
+tests/test_cli_mcp_parity.py:123: KeyError
+_______ test_every_tool_argument_is_reachable_from_the_command[reflect] ________
+
+tool = 'reflect'
+
+    @pytest.mark.parametrize("tool", TOOL_NAMES)
+    def test_every_tool_argument_is_reachable_from_the_command(tool: str) -> None:
+>       missing = [name for name in _parameters(tool) if name not in _passed(tool)]
+                                                                     ^^^^^^^^^^^^^
+
+tests/test_cli_mcp_parity.py:129: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_cli_mcp_parity.py:102: in _passed
+    for call in _tool_calls(tool):
+                ^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+tool = 'reflect'
+
+    def _tool_calls(tool: str) -> list[ast.Call]:
+        """The calls of ``tools.<tool>`` inside the handler bound to the tool's command."""
+    
+>       handler = _cli_functions()[_handler_by_command()[_command(tool)]]
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'reflect'
+
+tests/test_cli_mcp_parity.py:75: KeyError
+___________ test_tool_arguments_come_from_the_command_line[reflect] ____________
+
+tool = 'reflect'
+
+    @pytest.mark.parametrize("tool", TOOL_NAMES)
+    def test_tool_arguments_come_from_the_command_line(tool: str) -> None:
+        """A handler that passes a constant has an argument in name only."""
+    
+        fixed = [
+            f"{name}={expression}"
+>           for name, expression in _passed(tool).items()
+                                    ^^^^^^^^^^^^^
+            if name not in NOT_ARGUMENTS
+            and expression is not None
+            and "args" not in expression
+            and (tool, name) not in BUILT_FROM_FLAGS
+        ]
+
+tests/test_cli_mcp_parity.py:139: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_cli_mcp_parity.py:102: in _passed
+    for call in _tool_calls(tool):
+                ^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+tool = 'reflect'
+
+    def _tool_calls(tool: str) -> list[ast.Call]:
+        """The calls of ``tools.<tool>`` inside the handler bound to the tool's command."""
+    
+>       handler = _cli_functions()[_handler_by_command()[_command(tool)]]
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'reflect'
+
+tests/test_cli_mcp_parity.py:75: KeyError
+=========================== short test summary info ============================
+FAILED tests/test_cli_mcp_parity.py::test_every_mcp_tool_is_a_cli_command_under_its_own_name[reflect]
+FAILED tests/test_cli_mcp_parity.py::test_the_command_runs_its_own_tool[reflect]
+FAILED tests/test_cli_mcp_parity.py::test_every_tool_argument_is_reachable_from_the_command[reflect]
+FAILED tests/test_cli_mcp_parity.py::test_tool_arguments_come_from_the_command_line[reflect]
+4 failed, 445 passed in 2.27s

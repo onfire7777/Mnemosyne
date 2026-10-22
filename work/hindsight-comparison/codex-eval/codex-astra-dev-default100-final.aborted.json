@@ -1,0 +1,4 @@
+{
+  "status": "aborted_by_operator",
+  "reason": "Stopped for a demonstrated mixed-confidence score-scale edge case in default fallback. Partial receipts retained; no valid aggregate. A new run name will bind the repaired source."
+}

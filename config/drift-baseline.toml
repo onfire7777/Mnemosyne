@@ -135,6 +135,7 @@ required_tables = [
   "user_latent",
   "trajectories",
   "self_model",
+  "mental_models",
   "eval_cases",
   "resources",
   "merges",

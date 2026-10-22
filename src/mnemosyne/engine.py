@@ -56,6 +56,15 @@ from mnemosyne.cid_lists import (
 )
 from mnemosyne.ids import content_cid, evidence_cid, evidence_unscoped_cid, new_id
 from mnemosyne.journal import CIDJournal, journal_filename
+from mnemosyne.mental_model_storage import (
+    MentalModelConflict,
+    expected_version as validate_model_version,
+    invalidate_record as invalidate_model_record,
+    json_copy as copy_model_json,
+    model_key,
+    prepare_save as prepare_model_save,
+    validate_record as validate_model_record,
+)
 from mnemosyne.models import (
     Assertion,
     Contradiction,
@@ -74,6 +83,12 @@ from mnemosyne.pipeline import run_retrieval_pipeline
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.privacy import ErasureMode
 from mnemosyne.retrieval import (
+    derived_evidence_readable,
+    derived_source_cids,
+    trim_derived_source_cids,
+    filter_derived_adapter_hits,
+    is_derived_evidence,
+    read_evidence_for_context,
     GLOBAL_SENSEMAKING_MODE,
     MEMORY_CHANNELS,
     HashingEmbeddingProvider,
@@ -2288,6 +2303,23 @@ class MemoryEngine(Protocol):
     def export_tenant(self, tenant_id: str) -> dict[str, Any]:
         raise NotImplementedError
 
+    def get_mental_model_record(self, tenant_id: str, model_id: str, branch: str = "main") -> dict[str, Any] | None:
+        raise NotImplementedError
+
+    def list_mental_model_records(self, tenant_id: str, branch: str = "main") -> list[dict[str, Any]]:
+        raise NotImplementedError
+
+    def save_mental_model_record(
+        self, tenant_id: str, model_id: str, record: dict[str, Any], *,
+        branch: str = "main", expected_version: int | None = None,
+    ) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def delete_mental_model_record(
+        self, tenant_id: str, model_id: str, *, branch: str = "main", expected_version: int,
+    ) -> bool:
+        raise NotImplementedError
+
     def export_tenant_filtered(self, tenant_id: str, access_context: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError
 
@@ -2509,6 +2541,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         self.calibrations: dict[tuple[str, str], CalibrationSet] = {}
         self.entities: dict[tuple[str, str], dict[str, Any]] = {}
         self.intentions: dict[tuple[str, str], Intention] = {}
+        self.mental_models: dict[tuple[str, str, str], dict[str, Any]] = {}
         self.working_memory: dict[tuple[str, str, str], WorkingMemoryItem] = {}
         self.audit_log: list[dict[str, Any]] = []
         self.deletion_log: list[dict[str, Any]] = []
@@ -2571,7 +2604,24 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             branch,
             self._store_version,
             effective_filter.get("_retrieval_deep", False),
+            self._retrieval_policy_deadline_token(tenant_id, branch),
         )
+
+    def _retrieval_policy_deadline_token(self, tenant_id: str, branch: str) -> str | None:
+        """Invalidate result caches when a source ACL expires without a write.
+
+        Reuse the earliest deadline until a mutation, scope change, or expiry;
+        repeated cache hits do not rescan the evidence collection.
+        """
+        now = utc_now()
+        key = (tenant_id, branch, self._store_version)
+        memo = getattr(self, "_result_policy_deadline", None)
+        if memo is not None and memo[0] == key and (memo[1] is None or now < memo[1]):
+            deadline = memo[1]
+        else:
+            deadline = self._candidate_memo_deadline(tenant_id, branch, now)
+            self._result_policy_deadline = (key, deadline)
+        return deadline.isoformat() if deadline is not None else None
 
     @staticmethod
     def _evidence_key(tenant_id: str, branch: str, cid: str) -> str:
@@ -3279,6 +3329,9 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             "deletion_log": encoder.encode(self.deletion_log),
             "merge_log": encoder.encode(self.merge_log),
         }
+        if self.mental_models:
+            # Preserve the legacy store bytes when this optional feature is unused.
+            data["mental_models"] = list(self.mental_models.values())
         if encoder.lists or encoder.maps:
             # Large shared source lists and per-source maps are written once (see
             # _SharedValueEncoder); a store without any keeps the exact former layout.
@@ -3320,6 +3373,9 @@ class LocalMemoryEngine(CanaryOverlayMixin):
     def _load(self) -> None:
         data = json.loads(self.store_path.read_text(encoding="utf-8"))
         shared = data.pop(_SHARED_VALUES_KEY, None) if isinstance(data, dict) else None
+        # Advisory records are plain JSON, never shared-value encoded. Keep
+        # arbitrary scope/answer keys out of the core ledger's marker decoder.
+        mental_models = data.pop("mental_models", [])
         # Always decoded, even with no shared table: a store with no large shared value can
         # still carry an escaped user dict that merely looks like a reference (see encode).
         data = _decode_shared_values(data, shared if isinstance(shared, dict) else {})
@@ -3376,6 +3432,11 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 Intention.from_dict(row) for row in data.get("intentions", [])
             )
         }
+        self.mental_models = {}
+        for row in mental_models:
+            item = validate_model_record(row["tenant_id"], row["model_id"], row, row["branch"])
+            validate_model_version(item.get("version"))
+            self.mental_models[model_key(item["tenant_id"], item["model_id"], item["branch"])] = item
         self.working_memory = {
             self._working_key(item.tenant_id, item.session_id, item.item_id): item
             for item in (
@@ -3386,6 +3447,76 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         self.audit_log = list(data.get("audit_log", []))
         self.deletion_log = list(data.get("deletion_log", []))
         self.merge_log = list(data.get("merge_log", []))
+
+    @contextmanager
+    def mental_model_guard(self, tenant_id: str):
+        """Hold the local source/model lock for final snapshot and publication.
+
+        This guard excludes writes through this engine instance; it is not a
+        transaction or an inter-process lock. Do not run providers under it.
+        """
+        model_key(tenant_id, "guard", "main")
+        with self._lock:
+            yield
+
+    def get_mental_model_record(self, tenant_id: str, model_id: str, branch: str = "main") -> dict[str, Any] | None:
+        key = model_key(tenant_id, model_id, branch)
+        with self._lock:
+            row = self.mental_models.get(key)
+            return copy_model_json(row) if row is not None else None
+
+    def list_mental_model_records(self, tenant_id: str, branch: str = "main") -> list[dict[str, Any]]:
+        model_key(tenant_id, "list", branch)
+        with self._lock:
+            return [copy_model_json(row) for key, row in sorted(self.mental_models.items())
+                    if key[:2] == (tenant_id, branch)]
+
+    def save_mental_model_record(
+        self, tenant_id: str, model_id: str, record: dict[str, Any], *,
+        branch: str = "main", expected_version: int | None = None,
+    ) -> dict[str, Any]:
+        key = model_key(tenant_id, model_id, branch)
+        with self._lock:
+            if self._read_only:
+                raise PermissionError("mental model storage is read-only")
+            self._require_branch(branch)
+            current = self.mental_models.get(key)
+            saved = prepare_model_save(tenant_id, model_id, record, branch, current, expected_version)
+            before_version = self._store_version
+            self.mental_models[key] = saved
+            try:
+                self._persist()
+            except BaseException:
+                if current is None:
+                    self.mental_models.pop(key, None)
+                else:
+                    self.mental_models[key] = current
+                self._store_version = before_version
+                raise
+            return copy_model_json(saved)
+
+    def delete_mental_model_record(
+        self, tenant_id: str, model_id: str, *, branch: str = "main", expected_version: int,
+    ) -> bool:
+        key = model_key(tenant_id, model_id, branch)
+        validate_model_version(expected_version)
+        with self._lock:
+            if self._read_only:
+                raise PermissionError("mental model storage is read-only")
+            current = self.mental_models.get(key)
+            if current is None:
+                return False
+            if current["version"] != expected_version:
+                raise MentalModelConflict("mental model version conflict")
+            before_version = self._store_version
+            del self.mental_models[key]
+            try:
+                self._persist()
+            except BaseException:
+                self.mental_models[key] = current
+                self._store_version = before_version
+                raise
+            return True
 
     def append_evidence(self, ev: Evidence, branch: str = "main") -> str:
         access_policy = validate_access_policy(ev.access_policy, tenant_id=ev.tenant_id, location="evidence.access_policy")
@@ -3560,6 +3691,13 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 clone.branch = branch
                 return clone
             return None
+
+    def get_evidence_for_read(
+        self, tenant_id: str, cid: str, branch: str = "main", *,
+        access_context: Mapping[str, Any] | None = None,
+    ) -> Evidence | None:
+        with self._lock:
+            return read_evidence_for_context(self, tenant_id, cid, branch, access_context=access_context)
 
     def evidence_created_at(self, tenant_id: str, cid: str, branch: str = "main") -> datetime | None:
         """The row's own time, without the access-policy snapshot ``get_evidence`` returns.
@@ -4316,6 +4454,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 k=k,
                 adapter_name="lexical",
             )
+            hits = filter_derived_adapter_hits(self, hits, filt)
             return self._mark_retrieved_text_as_data(hits)
         hits: list[Hit] = []
         if text_kernels.NATIVE is not None:
@@ -4681,10 +4820,12 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         access_policy: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         canonical = canonical.strip() or "unknown-entity"
-        incoming_access_policy = validate_access_policy(
-            access_policy if access_policy is not None else {"tenant": tenant_id},
-            tenant_id=tenant_id,
-            location="entity.access_policy",
+        incoming_access_policy = copy.deepcopy(
+            validate_access_policy(
+                access_policy if access_policy is not None else {"tenant": tenant_id},
+                tenant_id=tenant_id,
+                location="entity.access_policy",
+            )
         )
         # A shared list is used as it is: it is read-only, and merging it is memoised.
         source_cids = (
@@ -4703,7 +4844,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     "tenant_id": tenant_id,
                     "canonical": canonical,
                     "type": entity_type,
-                    "summary": summary,
+                    "summary": copy.deepcopy(summary),
                     "salience": 0.5,
                     "aliases": [],
                     "source_evidence_cids": [],
@@ -4724,7 +4865,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 )
             row["type"] = row.get("type") or entity_type
             if summary:
-                row["summary"] = summary
+                row["summary"] = copy.deepcopy(summary)
             row["access_policy"] = effective_access_policy
             row["aliases"] = sorted(set(row.get("aliases", [])) | aliases)
             # sorted(set(existing) | set(incoming)) as one shared read-only list: an entity named
@@ -4732,9 +4873,11 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             row["source_evidence_cids"] = _union_sorted_sources(row.get("source_evidence_cids", []), source_cids)
             row["updated_at"] = utc_now().isoformat()
             self.entities[key] = row
-            self._audit(tenant_id, "engine", "register_entity", canonical, {"aliases": row["aliases"]})
+            self._audit(tenant_id, "engine", "register_entity", canonical, {"aliases": list(row["aliases"])})
             self._persist()
-            return dict(row)
+            # Returned ACLs and extension fields must not offer a write path
+            # into the stored entity. Immutable shared CID lists stay shared.
+            return copy.deepcopy(row)
 
     def _calibration_for(self, tenant_id: str, memory_type: str) -> CalibrationSet | None:
         return self.calibrations.get((tenant_id, memory_type))
@@ -5114,7 +5257,15 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         access_context: dict[str, Any] | None,
     ) -> _RowSecurity:
         facts = _RowSecurity()
-        facts.expires = _policy_expires(ev.access_policy)
+        # Ancestor policies may expire independently. Do not memoize derived
+        # security facts beyond this operation without their entire closure.
+        facts.expires = _policy_expires(ev.access_policy) or is_derived_evidence(ev)
+        if not derived_evidence_readable(
+            self, ev, tenant_id=tenant_id, branch=ev.branch,
+            filt={**dict(access_context or {}), "tenant_id": tenant_id,
+                  "include_quarantined": include_quarantined}, policy=self.policy,
+        ):
+            return facts
         if (
             ev.erased
             or (not include_quarantined and ev.metadata.get("quarantine_reason"))
@@ -5204,6 +5355,12 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 return None, True
             if is_retired_summary_metadata(ev.metadata):
                 return None, True
+            if not derived_evidence_readable(
+                self, ev, tenant_id=relation.tenant_id, branch=branch,
+                filt={**dict(access_context or {}), "tenant_id": relation.tenant_id,
+                      "include_quarantined": include_quarantined}, policy=self.policy,
+            ):
+                return None, False
             decision = may_read_item(
                 item_tenant_id=ev.tenant_id,
                 sensitivity=int(ev.sensitivity),
@@ -5220,7 +5377,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             elif not decision.allowed:
                 return None, all(not _policy_expires(row.access_policy) for row in source_rows)
             source_rows.append(ev)
-        cacheable = all(not _policy_expires(row.access_policy) for row in source_rows)
+        cacheable = all(not _policy_expires(row.access_policy) and not is_derived_evidence(row) for row in source_rows)
 
         trust_tier = max(int(ev.trust_tier) for ev in source_rows)
         sensitivity = max(int(ev.sensitivity) for ev in source_rows)
@@ -5661,6 +5818,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 copy.deepcopy(self.preferences),
                 copy.deepcopy(self.entities),
                 copy.deepcopy(self.intentions),
+                copy.deepcopy(self.mental_models),
                 copy.deepcopy(self.working_memory),
                 copy.deepcopy(self.audit_log),
                 copy.deepcopy(self.deletion_log),
@@ -5683,6 +5841,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     self.preferences,
                     self.entities,
                     self.intentions,
+                    self.mental_models,
                     self.working_memory,
                     self.audit_log,
                     self.deletion_log,
@@ -5791,6 +5950,9 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 retained = self.evidence.get(self._evidence_key(tenant_id, branch, retained_cid))
                 if retained:
                     retained.metadata = metadata
+            for model_key_value, model in list(self.mental_models.items()):
+                if model_key_value[:2] == (tenant_id, branch):
+                    self.mental_models[model_key_value] = invalidate_model_record(model)
             retained_cascade_metadata = {
                 retained_cid: {
                     **dict(metadata),
@@ -6022,7 +6184,8 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             ],
             "preferences": [item.to_dict() for item in self.preferences.values() if item.tenant_id == tenant_id],
             "calibrations": [item.to_dict() for item in self.calibrations.values() if item.tenant_id == tenant_id],
-            "entities": [dict(item) for item in self.entities.values() if item.get("tenant_id") == tenant_id],
+            "entities": [copy.deepcopy(item) for item in self.entities.values() if item.get("tenant_id") == tenant_id],
+            "mental_models": [copy_model_json(item) for item in self.mental_models.values() if item["tenant_id"] == tenant_id],
             "justifications": [item.to_dict() for item in self.justifications.values() if item.tenant_id == tenant_id],
             "contradictions": [item.to_dict() for item in self.contradictions.values() if item.tenant_id == tenant_id],
             "working_memory": [
@@ -6040,6 +6203,10 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             self.export_tenant(tenant_id),
             {**dict(access_context or {}), "tenant_id": tenant_id},
             policy_max_sensitivity=self.policy.max_sensitivity,
+            evidence_gate=lambda row: derived_evidence_readable(
+                self, row, tenant_id=tenant_id, branch=str(row.get("branch") or "main"),
+                filt={**dict(access_context or {}), "tenant_id": tenant_id}, policy=self.policy,
+            ),
         )
 
     def branch(self, name: str, frm: str = "main", kind: str = "scratch", tenant_id: str | None = None) -> None:
@@ -6168,7 +6335,12 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         if branch == "main":
             raise ValueError("main branch cannot be discarded")
         if self._overlays and branch in self._overlays:
-            return self._discard_overlay(branch, tenant_id)
+            with self._lock:
+                self._discard_overlay(branch, tenant_id)
+                self.mental_models = {key: row for key, row in self.mental_models.items()
+                                      if key[1] != branch or (tenant_id is not None and key[0] != tenant_id)}
+                self._persist()
+            return None
         with self._lock:
             self._require_branch(branch)
             discarded_assertion_ids = {
@@ -6176,6 +6348,8 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 for item in self.assertions.branch_view(tenant_id, branch).values()
                 if item.branch == branch and (tenant_id is None or item.tenant_id == tenant_id)
             }
+            self.mental_models = {key: row for key, row in self.mental_models.items()
+                                  if key[1] != branch or (tenant_id is not None and key[0] != tenant_id)}
             # Removing the branch's keys leaves every other item in its place - the same
             # contents and order as rebuilding the dicts without them.
             for store in (self.evidence, self.assertions, self.relations):
@@ -6211,7 +6385,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 }
             branch_rows_remain = any(
                 store.in_any_branch(branch) for store in (self.evidence, self.assertions, self.relations)
-            )
+            ) or any(key[1] == branch for key in self.mental_models)
             if tenant_id is not None and branch_rows_remain:
                 branch_meta = self.branches.get(branch)
                 if branch_meta:
@@ -6367,6 +6541,10 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             if not include_quarantined and ev.metadata.get("quarantine_reason"):
                 continue
             if is_retired_summary_metadata(ev.metadata):
+                continue
+            if not derived_evidence_readable(
+                self, ev, tenant_id=tenant_id, branch=branch, filt=filt, policy=self.policy,
+            ):
                 continue
             text, privacy_metadata = apply_text_redactions(
                 ev.content or ev.content_pointer or f"{ev.modality} evidence",
@@ -6644,19 +6822,8 @@ class LocalMemoryEngine(CanaryOverlayMixin):
 
     @staticmethod
     def _metadata_source_cids(metadata: dict[str, Any]) -> set[str]:
-        sources: set[str] = set()
-        single = metadata.get("source_evidence_cid")
-        if single:
-            sources.add(str(single))
-        values = metadata.get("source_evidence_cids")
-        if isinstance(values, list):
-            sources.update(str(item) for item in values if item)
-        summary = metadata.get("summary")
-        if isinstance(summary, dict):
-            summary_values = summary.get("source_evidence_cids")
-            if isinstance(summary_values, list):
-                sources.update(str(item) for item in summary_values if item)
-        return sources
+        sources, _ = derived_source_cids({"metadata": metadata})
+        return set(sources)
 
     def _derived_evidence_cids_forget(self, tenant_id: str, branch: str, cid: str) -> list[str]:
         affected = {cid}
@@ -6707,7 +6874,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     continue
                 surviving_sources = sources - affected
                 if surviving_sources:
-                    retained[item_cid] = self._trim_metadata_source_cids(item.metadata, affected)
+                    retained[item_cid] = self._trim_metadata_source_cids(item.metadata, affected, source_type=item.source_type)
                     continue
                 affected.add(item_cid)
                 retained.pop(item_cid, None)
@@ -6716,22 +6883,10 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         return erased, retained
 
     @staticmethod
-    def _trim_metadata_source_cids(metadata: dict[str, Any], affected_cids: set[str]) -> dict[str, Any]:
-        trimmed = copy.deepcopy(metadata)
-        if str(trimmed.get("source_evidence_cid") or "") in affected_cids:
-            trimmed.pop("source_evidence_cid", None)
-        values = trimmed.get("source_evidence_cids")
-        if isinstance(values, list):
-            trimmed["source_evidence_cids"] = [str(item) for item in values if str(item) not in affected_cids]
-        summary = trimmed.get("summary")
-        if isinstance(summary, dict):
-            summary_values = summary.get("source_evidence_cids")
-            if isinstance(summary_values, list):
-                kept = [str(item) for item in summary_values if str(item) not in affected_cids]
-                summary["source_evidence_cids"] = kept
-                summary["source_count"] = len(kept)
-                summary.pop("source_fingerprint", None)
-        return trimmed
+    def _trim_metadata_source_cids(
+        metadata: dict[str, Any], affected_cids: set[str], *, source_type: str = "",
+    ) -> dict[str, Any]:
+        return trim_derived_source_cids(metadata, affected_cids, source_type=source_type)
 
     @staticmethod
     def _valid_at(valid_from: datetime, valid_to: datetime | None, moment: datetime) -> bool:
@@ -6758,6 +6913,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 if item.branch == name
             }
             tenants.update(meta.get("tenants") or [])
+            tenants.update(row["tenant_id"] for row in self.mental_models.values() if row["branch"] == name)
             if not tenants:
                 tenants = {None}
             for tenant in sorted(tenants, key=lambda item: item or ""):
@@ -6792,6 +6948,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             tenant_id = item.get("tenant_id")
             if tenant_id and tenant_id != "*":
                 tenant_ids.add(tenant_id)
+        tenant_ids.update(item["tenant_id"] for item in self.mental_models.values())
         for item in (*self.audit_log, *self.deletion_log, *self.merge_log):
             tenant_id = item.get("tenant_id") if isinstance(item, dict) else None
             if tenant_id and tenant_id != "*":
@@ -6812,6 +6969,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             "contradictions": [item for exported in tenant_exports for item in exported["contradictions"]],
             "calibrations": [item for exported in tenant_exports for item in exported["calibrations"]],
             "entities": [item for exported in tenant_exports for item in exported["entities"]],
+            "mental_models": [item for exported in tenant_exports for item in exported["mental_models"]],
             "audit_log": [item for exported in tenant_exports for item in exported["audit_log"]],
             "deletion_log": [item for exported in tenant_exports for item in exported["deletion_log"]],
             "merge_log": self.merge_log,

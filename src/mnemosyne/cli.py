@@ -2150,41 +2150,9 @@ def _parse_answer_context_json(raw: str) -> Any:
 
 
 def _public_answer(result: Any, disclosure: dict[str, object], *, include_derivation: bool = False) -> dict[str, object]:
-    return {
-        "answer": result.answer,
-        "claims": [
-            {
-                "text": claim.text,
-                **({"derivation": {
-                    "schema_version": "mnemosyne.claim-derivation/v1",
-                    "kind": "synthesis" if claim.synthesis_operation is not None else "quotation",
-                    "operation": claim.synthesis_operation,
-                }} if include_derivation else {}),
-                "evidence_cids": list(claim.evidence_cids),
-                "spans": [
-                    {
-                        "cid": span.cid,
-                        "start": span.start,
-                        "end": span.end,
-                        "slice_sha256": span.slice_sha256,
-                    }
-                    for span in claim.spans
-                ],
-            }
-            for claim in result.claims
-        ],
-        "abstained": result.abstained,
-        "hops": [
-            {
-                "index": hop.index,
-                "queries": list(hop.queries),
-                "channels": list(hop.channels),
-                "retrieved_cids": list(hop.retrieved_cids),
-            }
-            for hop in result.trace.hops
-        ],
-        "reader": disclosure,
-    }
+    from mnemosyne.answering import public_grounded_answer
+
+    return public_grounded_answer(result, disclosure, include_derivation=include_derivation)
 
 
 def _answer_one(tools: Any, question: str, context: Any, provider: Any, *, include_derivation: bool = False) -> dict[str, object]:
@@ -2440,6 +2408,263 @@ def cmd_preference(args: argparse.Namespace) -> None:
     )
 
 
+def _query_timezone_arg(value: str) -> str:
+    from mnemosyne.retrieval import resolve_query_timezone
+
+    try:
+        resolve_query_timezone(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+    return value
+
+
+def cmd_reflect(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(
+        tools.reflect(
+            tenant_id=args.tenant,
+            question=args.question,
+            branch=args.branch,
+            role=args.role,
+            user_id=args.user,
+            source_trust_tier=args.source_trust_tier,
+            max_trust_tier=args.max_trust_tier,
+            max_sensitivity=args.max_sensitivity,
+            capability_tags=args.capability_tag,
+            purpose=args.purpose,
+            residency=args.residency,
+            region=args.region,
+            lawful_basis=args.lawful_basis,
+            break_glass=args.break_glass,
+            as_of=args.as_of,
+        )
+    )
+
+
+def _mental_model_scope_args(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "tenant_id": args.tenant,
+        "user_id": args.user,
+        "branch": args.branch,
+        "role": args.role,
+        "source_trust_tier": args.source_trust_tier,
+        "max_trust_tier": args.max_trust_tier,
+        "max_sensitivity": args.max_sensitivity,
+        "capability_tags": args.capability_tag,
+        "purpose": args.purpose,
+        "residency": args.residency,
+        "region": args.region,
+        "lawful_basis": args.lawful_basis,
+        "break_glass": args.break_glass,
+        "as_of": args.as_of,
+    }
+
+
+def cmd_mental_model(args: argparse.Namespace) -> None:
+    raise SystemExit("mental-model requires a subcommand")
+
+
+def cmd_mental_model_create(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.mental_model_create(
+        **_mental_model_scope_args(args),
+        name=args.name,
+        question=args.question,
+    ))
+
+
+def cmd_mental_model_get(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.mental_model_get(
+        **_mental_model_scope_args(args),
+        model_id=args.model_id,
+        refresh_if_stale=args.refresh_if_stale,
+    ))
+
+
+def cmd_mental_model_list(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.mental_model_list(
+        **_mental_model_scope_args(args),
+    ))
+
+
+def cmd_mental_model_refresh(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.mental_model_refresh(
+        **_mental_model_scope_args(args),
+        model_id=args.model_id,
+        force=args.force,
+    ))
+
+
+def cmd_mental_model_update(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.mental_model_update(
+        **_mental_model_scope_args(args),
+        model_id=args.model_id,
+        name=args.name,
+        question=args.question,
+        expected_version=args.expected_version,
+    ))
+
+
+def cmd_mental_model_delete(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.mental_model_delete(
+        **_mental_model_scope_args(args),
+        model_id=args.model_id,
+        expected_version=args.expected_version,
+    ))
+
+
+def cmd_mental_model_history(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.mental_model_history(
+        **_mental_model_scope_args(args),
+        model_id=args.model_id,
+    ))
+
+
+def cmd_mental_model_schedule(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.mental_model_schedule(
+        **_mental_model_scope_args(args),
+        model_id=args.model_id,
+        interval_seconds=args.interval_seconds,
+        enabled=not args.disable,
+        expected_version=args.expected_version,
+    ))
+
+
+def cmd_mental_model_worker(args: argparse.Namespace) -> None:
+    import signal
+    import threading
+
+    from mnemosyne.mcp_tools import MemoryTools
+    from mnemosyne.mental_model_refresh import MentalModelRefreshWorker
+    from mnemosyne.mental_models import _scope
+    from mnemosyne.postgres_engine import PostgresEngine
+    from mnemosyne.security import TrustTier
+    from mnemosyne.sqlite_engine import SqliteEngine
+
+    for name, low, high in (("limit", 1, 100), ("lease_seconds", 30, 3600)):
+        value = getattr(args, name)
+        if type(value) is not int or not low <= value <= high:
+            raise SystemExit(f"--{name.replace('_', '-')} must be an integer from {low} to {high}.")
+    if not math.isfinite(args.poll_interval) or not 1 <= args.poll_interval <= 300:
+        raise SystemExit("--poll-interval must be from 1 to 300 seconds.")
+    if type(args.max_cycles) is not int or args.max_cycles < 0:
+        raise SystemExit("--max-cycles must be zero or a positive integer.")
+    if args.backend not in {"sqlite", "postgres"}:
+        raise SystemExit("mental-model-worker requires --backend sqlite or postgres; a shared local JSON store is unsafe.")
+
+    engine = load_engine(args)
+    stopped = threading.Event()
+    previous_sigterm = None
+    try:
+        if not isinstance(engine, (SqliteEngine, PostgresEngine)):
+            raise SystemExit("mental-model-worker requires a SQLite or Postgres engine.")
+        tools = MemoryTools(engine)
+        context = tools._mental_model_context(**_mental_model_scope_args(args))
+        initial_scope = _scope(context)
+
+        def bound_context() -> Any:
+            if stopped.is_set():
+                raise InterruptedError("mental-model worker is stopping")
+            apply_session_identity(args)
+            rebound = tools._mental_model_context(**_mental_model_scope_args(args))
+            if _scope(rebound) != initial_scope:
+                raise PermissionError("mental-model worker authorization scope changed")
+            return rebound
+
+        def validate_authority() -> None:
+            # Called inside publication transactions: do not use the facade's
+            # audited authorization helper, which writes to the same store.
+            rebound = bound_context()
+            decision = tools.security.authorize_write(
+                operation="mental_model_refresh", role=rebound.role,
+                source_trust_tier=(rebound.source_trust_tier if rebound.source_trust_tier is not None
+                                   else int(TrustTier.USER_AUTHORED)),
+                target_sink="belief",
+            )
+            if not decision.allowed:
+                raise PermissionError(f"mental_model_refresh denied: {decision.reason}")
+
+        def authorize() -> None:
+            tools._authorize_mental_model_write("mental_model_refresh", bound_context())
+
+        authorize()
+        worker = MentalModelRefreshWorker(
+            tools._mental_model_service(), context, max_batch=args.limit,
+            lease_seconds=args.lease_seconds, authorize=authorize,
+            validate_authority=validate_authority,
+        )
+        if threading.current_thread() is threading.main_thread():
+            previous_sigterm = signal.getsignal(signal.SIGTERM)
+            signal.signal(signal.SIGTERM, lambda _signum, _frame: stopped.set())
+        max_cycles = 1 if args.once else args.max_cycles
+        cycle = 0
+        while not stopped.is_set() and (max_cycles == 0 or cycle < max_cycles):
+            authorize()
+            emit(worker.run_once())
+            sys.stdout.flush()
+            cycle += 1
+            if max_cycles and cycle >= max_cycles:
+                break
+            if stopped.wait(args.poll_interval):
+                break
+    except KeyboardInterrupt:
+        stopped.set()
+    except InterruptedError:
+        if not stopped.is_set():
+            raise
+    finally:
+        stopped.set()
+        if previous_sigterm is not None:
+            signal.signal(signal.SIGTERM, previous_sigterm)
+        closer = getattr(engine, "close", None) or getattr(engine, "close_connections", None)
+        if callable(closer):
+            closer()
+
+
+def _add_mental_model_args(parser: argparse.ArgumentParser, operation: str) -> None:
+    parser.add_argument("--tenant", required=True)
+    parser.add_argument("--user", required=True)
+    parser.add_argument("--branch", default="main")
+    parser.add_argument("--role", default="agent", choices=["reader", "agent", "consolidator", "operator"])
+    parser.add_argument("--source-trust-tier", type=int)
+    parser.add_argument("--max-trust-tier", type=int)
+    parser.add_argument("--max-sensitivity", type=int)
+    parser.add_argument("--capability-tag", action="append", default=[])
+    parser.add_argument("--purpose", action="append", default=[])
+    parser.add_argument("--lawful-basis", action="append", default=[])
+    parser.add_argument("--residency")
+    parser.add_argument("--region")
+    parser.add_argument("--break-glass", action="store_true", help="Rejected for persistent mental models")
+    parser.add_argument("--as-of")
+    if operation not in {"create", "list", "worker"}:
+        parser.add_argument("--model-id", required=True)
+    if operation in {"create", "update"}:
+        parser.add_argument("--name", required=operation == "create")
+        parser.add_argument("--question", required=operation == "create")
+    if operation == "get":
+        parser.add_argument("--refresh-if-stale", action="store_true")
+    if operation == "refresh":
+        parser.add_argument("--force", action="store_true")
+    if operation in {"update", "delete", "schedule"}:
+        parser.add_argument("--expected-version", type=int)
+    if operation == "schedule":
+        parser.add_argument("--interval-seconds", type=int, default=300, help="Freshness check interval, 60 to 604800 seconds")
+        parser.add_argument("--disable", action="store_true", help="Disable scheduled freshness checks")
+    if operation == "worker":
+        parser.add_argument("--limit", type=int, default=10, help="Models per cycle, 1 to 100")
+        parser.add_argument("--lease-seconds", type=int, default=300, help="Claim lease duration, 30 to 3600 seconds")
+        parser.add_argument("--poll-interval", type=float, default=5, help="Seconds between cycles, 1 to 300")
+        parser.add_argument("--max-cycles", type=int, default=0, help="Stop after this many cycles; zero runs until stopped")
+        parser.add_argument("--once", action="store_true", help="Run one cycle and exit")
+
+
 def cmd_search(args: argparse.Namespace) -> None:
     tools = load_tools(args)
     emit(
@@ -2454,6 +2679,7 @@ def cmd_search(args: argparse.Namespace) -> None:
             lean=args.lean,
             query_mode=args.query_mode,
             evaluated_at=args.evaluated_at,
+            query_timezone=getattr(args, "query_timezone", None),
             session_identity=getattr(args, "session_identity", None),
             **_read_context_kwargs(args),
         )
@@ -19794,6 +20020,49 @@ def build_parser() -> argparse.ArgumentParser:
     preference.add_argument("--access-policy", help="JSON object stored as the preference's access policy")
     preference.set_defaults(func=cmd_preference)
 
+    reflect = sub.add_parser("reflect", help="Answer from authorized memory with grounded citations")
+    reflect.add_argument("--tenant", required=True)
+    reflect.add_argument("--question", required=True)
+    reflect.add_argument("--branch", default="main")
+    reflect.add_argument("--role", default="reader", choices=["reader", "agent", "consolidator", "operator"])
+    reflect.add_argument("--user")
+    reflect.add_argument("--source-trust-tier", type=int)
+    reflect.add_argument("--max-trust-tier", type=int)
+    reflect.add_argument("--max-sensitivity", type=int)
+    reflect.add_argument("--capability-tag", action="append", default=[])
+    reflect.add_argument("--purpose", action="append", default=[])
+    reflect.add_argument("--lawful-basis", action="append", default=[])
+    reflect.add_argument("--residency")
+    reflect.add_argument("--region")
+    reflect.add_argument("--break-glass", action="store_true")
+    reflect.add_argument("--as-of", help="Only use evidence visible at this timezone-aware ISO 8601 instant")
+    reflect.set_defaults(func=cmd_reflect)
+
+    mental_model = sub.add_parser("mental-model", help="Manage private saved grounded answers")
+    mental_model.set_defaults(func=cmd_mental_model)
+    mental_sub = mental_model.add_subparsers(dest="mental_model_command", required=True)
+    for operation, handler in (
+        ("create", cmd_mental_model_create),
+        ("get", cmd_mental_model_get),
+        ("list", cmd_mental_model_list),
+        ("refresh", cmd_mental_model_refresh),
+        ("update", cmd_mental_model_update),
+        ("schedule", cmd_mental_model_schedule),
+        ("delete", cmd_mental_model_delete),
+        ("history", cmd_mental_model_history),
+    ):
+        command = mental_sub.add_parser(operation)
+        _add_mental_model_args(command, operation)
+        command.set_defaults(func=handler)
+        # Keep the canonical MCP-name route alongside the grouped CLI.
+        alias = sub.add_parser(f"mental-model-{operation}", help=argparse.SUPPRESS)
+        _add_mental_model_args(alias, operation)
+        alias.set_defaults(func=handler)
+
+    mental_worker = sub.add_parser("mental-model-worker", help="Run opt-in scheduled mental-model freshness checks")
+    _add_mental_model_args(mental_worker, "worker")
+    mental_worker.set_defaults(func=cmd_mental_model_worker)
+
     search = sub.add_parser("search")
     search.add_argument("--tenant", required=True)
     search.add_argument("--query", required=True)
@@ -19805,6 +20074,10 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--lean", action="store_true", help="Return the compact payload without diagnostics")
     search.add_argument("--query-mode", help="Retrieval mode, for example passages")
     search.add_argument("--evaluated-at", help="ISO 8601 instant the question is asked at")
+    search.add_argument(
+        "--query-timezone", type=_query_timezone_arg,
+        help="IANA timezone for relative dates, e.g. America/New_York (default: host local zone)",
+    )
     _add_read_context_args(search)
     search.set_defaults(func=cmd_search)
 

@@ -1,0 +1,470 @@
+.FFFFFF                                                                  [100%]
+=================================== FAILURES ===================================
+______ test_optional_question_timezone_is_forwarded_when_supported[True] _______
+
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-512/test_optional_question_timezon1')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x109965480>
+accepts_timezone = True
+
+    @pytest.mark.parametrize("accepts_timezone", [False, True])
+    def test_optional_question_timezone_is_forwarded_when_supported(tmp_path, monkeypatch, accepts_timezone):
+        from mnemosyne import cli
+    
+        monkeypatch.delenv("MNEMOSYNE_PASSAGE_INDEX", raising=False)
+        source = tmp_path / "source"
+        source.mkdir()
+        questions = tmp_path / "questions.json"
+        questions.write_text(json.dumps([{
+            "id": "q", "question": "yesterday", "gold": ["a"],
+            "now": "2026-10-22T02:00:00Z", "query_timezone": "America/Los_Angeles",
+        }]))
+        seen = []
+    
+        def modern_search(*, tenant_id, query, lean, evaluated_at=None, query_timezone=None):
+            seen.append((evaluated_at, query_timezone))
+            return {"hits": [], "abstained": True}
+    
+        def legacy_search(*, tenant_id, query, lean, evaluated_at=None):
+            seen.append((evaluated_at, None))
+            return {"hits": [], "abstained": True}
+    
+        monkeypatch.setattr(cli, "load_tools", lambda args: SimpleNamespace(
+            engine=SimpleNamespace(adapters=SimpleNamespace(passage_graph=None)),
+            search=modern_search if accepts_timezone else legacy_search,
+        ))
+        monkeypatch.setattr("sys.argv", [
+            "store_recall", "--store", str(source), "--tenant", "synthetic",
+            "--questions", str(questions), "--out", str(tmp_path / "report.json"),
+        ])
+        store_recall.main()
+>       assert seen == [("2026-10-22T02:00:00Z", "America/Los_Angeles" if accepts_timezone else None)]
+E       AssertionError: assert [('2026-10-22...0:00Z', None)] == [('2026-10-22...Los_Angeles')]
+E         
+E         At index 0 diff: ('2026-10-22T02:00:00Z', None) != ('2026-10-22T02:00:00Z', 'America/Los_Angeles')
+E         Use -v to get more diff
+
+tests/test_store_recall.py:484: AssertionError
+----------------------------- Captured stdout call -----------------------------
+{"store": "/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-512/test_optional_question_timezon1/source", "tenant": "synthetic", "mode": "default", "questions": 1, "passage_graph": false, "index_report": null, "recall_at_5": 0.0, "by_kind": {"?": 0.0}, "abstained": 1, "latency_ms": {"p50": 0.0, "p95": 0.0}, "latency_scope": "search_calls_excluding_setup_and_query_preparation", "query_vectors_prepared": false, "query_preparation_seconds": 0.0, "seconds": 0.0}
+_________ test_invalid_question_timezone_rejected_before_loading[None] _________
+
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-512/test_invalid_question_timezone0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x109b9a450>
+timezone = None
+
+    @pytest.mark.parametrize("timezone", [None, "", " ", 123, "not/a/timezone"])
+    def test_invalid_question_timezone_rejected_before_loading(tmp_path, monkeypatch, timezone):
+        from mnemosyne import cli
+    
+        questions = tmp_path / "questions.json"
+        questions.write_text(json.dumps([{
+            "id": "q", "question": "yesterday", "gold": ["a"], "query_timezone": timezone,
+        }]))
+        monkeypatch.setattr(cli, "load_tools", lambda args: pytest.fail("must validate first"))
+        monkeypatch.setattr("sys.argv", [
+            "store_recall", "--store", str(tmp_path / "absent-store"), "--tenant", "synthetic",
+            "--questions", str(questions), "--out", str(tmp_path / "report.json"),
+        ])
+        with pytest.raises(SystemExit) as exc:
+>           store_recall.main()
+
+tests/test_store_recall.py:501: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+eval/store_recall.py:182: in main
+    snapshot_store(args.store, store)
+eval/store_recall.py:132: in snapshot_store
+    shutil.copytree(source, target, copy_function=copy_file, ignore=ignore_journals)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+src = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-512/test_invalid_question_timezone0/absent-store')
+dst = PosixPath('/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/store-recall-1h3sf8yr/store')
+symlinks = False
+ignore = <function snapshot_store.<locals>.ignore_journals at 0x109da3a00>
+copy_function = <function snapshot_store.<locals>.copy_file at 0x109da3b60>
+ignore_dangling_symlinks = False, dirs_exist_ok = False
+
+    def copytree(src, dst, symlinks=False, ignore=None, copy_function=copy2,
+                 ignore_dangling_symlinks=False, dirs_exist_ok=False):
+        """Recursively copy a directory tree and return the destination directory.
+    
+        If exception(s) occur, an Error is raised with a list of reasons.
+    
+        If the optional symlinks flag is true, symbolic links in the
+        source tree result in symbolic links in the destination tree; if
+        it is false, the contents of the files pointed to by symbolic
+        links are copied. If the file pointed to by the symlink doesn't
+        exist, an exception will be added in the list of errors raised in
+        an Error exception at the end of the copy process.
+    
+        You can set the optional ignore_dangling_symlinks flag to true if you
+        want to silence this exception. Notice that this has no effect on
+        platforms that don't support os.symlink.
+    
+        The optional ignore argument is a callable. If given, it
+        is called with the `src` parameter, which is the directory
+        being visited by copytree(), and `names` which is the list of
+        `src` contents, as returned by os.listdir():
+    
+            callable(src, names) -> ignored_names
+    
+        Since copytree() is called recursively, the callable will be
+        called once for each directory that is copied. It returns a
+        list of names relative to the `src` directory that should
+        not be copied.
+    
+        The optional copy_function argument is a callable that will be used
+        to copy each file. It will be called with the source path and the
+        destination path as arguments. By default, copy2() is used, but any
+        function that supports the same signature (like copy()) can be used.
+    
+        If dirs_exist_ok is false (the default) and `dst` already exists, a
+        `FileExistsError` is raised. If `dirs_exist_ok` is true, the copying
+        operation will continue if it encounters existing directories, and files
+        within the `dst` tree will be overwritten by corresponding files from the
+        `src` tree.
+        """
+        sys.audit("shutil.copytree", src, dst)
+>       with os.scandir(src) as itr:
+             ^^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: '/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-512/test_invalid_question_timezone0/absent-store'
+
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/shutil.py:652: FileNotFoundError
+___________ test_invalid_question_timezone_rejected_before_loading[] ___________
+
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-512/test_invalid_question_timezone1')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x109bb3680>
+timezone = ''
+
+    @pytest.mark.parametrize("timezone", [None, "", " ", 123, "not/a/timezone"])
+    def test_invalid_question_timezone_rejected_before_loading(tmp_path, monkeypatch, timezone):
+        from mnemosyne import cli
+    
+        questions = tmp_path / "questions.json"
+        questions.write_text(json.dumps([{
+            "id": "q", "question": "yesterday", "gold": ["a"], "query_timezone": timezone,
+        }]))
+        monkeypatch.setattr(cli, "load_tools", lambda args: pytest.fail("must validate first"))
+        monkeypatch.setattr("sys.argv", [
+            "store_recall", "--store", str(tmp_path / "absent-store"), "--tenant", "synthetic",
+            "--questions", str(questions), "--out", str(tmp_path / "report.json"),
+        ])
+        with pytest.raises(SystemExit) as exc:
+>           store_recall.main()
+
+tests/test_store_recall.py:501: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+eval/store_recall.py:182: in main
+    snapshot_store(args.store, store)
+eval/store_recall.py:132: in snapshot_store
+    shutil.copytree(source, target, copy_function=copy_file, ignore=ignore_journals)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+src = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-512/test_invalid_question_timezone1/absent-store')
+dst = PosixPath('/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/store-recall-ihv8khv7/store')
+symlinks = False
+ignore = <function snapshot_store.<locals>.ignore_journals at 0x109f7c720>
+copy_function = <function snapshot_store.<locals>.copy_file at 0x109f7c880>
+ignore_dangling_symlinks = False, dirs_exist_ok = False
+
+    def copytree(src, dst, symlinks=False, ignore=None, copy_function=copy2,
+                 ignore_dangling_symlinks=False, dirs_exist_ok=False):
+        """Recursively copy a directory tree and return the destination directory.
+    
+        If exception(s) occur, an Error is raised with a list of reasons.
+    
+        If the optional symlinks flag is true, symbolic links in the
+        source tree result in symbolic links in the destination tree; if
+        it is false, the contents of the files pointed to by symbolic
+        links are copied. If the file pointed to by the symlink doesn't
+        exist, an exception will be added in the list of errors raised in
+        an Error exception at the end of the copy process.
+    
+        You can set the optional ignore_dangling_symlinks flag to true if you
+        want to silence this exception. Notice that this has no effect on
+        platforms that don't support os.symlink.
+    
+        The optional ignore argument is a callable. If given, it
+        is called with the `src` parameter, which is the directory
+        being visited by copytree(), and `names` which is the list of
+        `src` contents, as returned by os.listdir():
+    
+            callable(src, names) -> ignored_names
+    
+        Since copytree() is called recursively, the callable will be
+        called once for each directory that is copied. It returns a
+        list of names relative to the `src` directory that should
+        not be copied.
+    
+        The optional copy_function argument is a callable that will be used
+        to copy each file. It will be called with the source path and the
+        destination path as arguments. By default, copy2() is used, but any
+        function that supports the same signature (like copy()) can be used.
+    
+        If dirs_exist_ok is false (the default) and `dst` already exists, a
+        `FileExistsError` is raised. If `dirs_exist_ok` is true, the copying
+        operation will continue if it encounters existing directories, and files
+        within the `dst` tree will be overwritten by corresponding files from the
+        `src` tree.
+        """
+        sys.audit("shutil.copytree", src, dst)
+>       with os.scandir(src) as itr:
+             ^^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: '/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-512/test_invalid_question_timezone1/absent-store'
+
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/shutil.py:652: FileNotFoundError
+__________ test_invalid_question_timezone_rejected_before_loading[ ] ___________
+
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-512/test_invalid_question_timezone2')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x109c24380>
+timezone = ' '
+
+    @pytest.mark.parametrize("timezone", [None, "", " ", 123, "not/a/timezone"])
+    def test_invalid_question_timezone_rejected_before_loading(tmp_path, monkeypatch, timezone):
+        from mnemosyne import cli
+    
+        questions = tmp_path / "questions.json"
+        questions.write_text(json.dumps([{
+            "id": "q", "question": "yesterday", "gold": ["a"], "query_timezone": timezone,
+        }]))
+        monkeypatch.setattr(cli, "load_tools", lambda args: pytest.fail("must validate first"))
+        monkeypatch.setattr("sys.argv", [
+            "store_recall", "--store", str(tmp_path / "absent-store"), "--tenant", "synthetic",
+            "--questions", str(questions), "--out", str(tmp_path / "report.json"),
+        ])
+        with pytest.raises(SystemExit) as exc:
+>           store_recall.main()
+
+tests/test_store_recall.py:501: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+eval/store_recall.py:182: in main
+    snapshot_store(args.store, store)
+eval/store_recall.py:132: in snapshot_store
+    shutil.copytree(source, target, copy_function=copy_file, ignore=ignore_journals)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+src = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-512/test_invalid_question_timezone2/absent-store')
+dst = PosixPath('/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/store-recall-jaod6ug0/store')
+symlinks = False
+ignore = <function snapshot_store.<locals>.ignore_journals at 0x109da2c40>
+copy_function = <function snapshot_store.<locals>.copy_file at 0x109da2980>
+ignore_dangling_symlinks = False, dirs_exist_ok = False
+
+    def copytree(src, dst, symlinks=False, ignore=None, copy_function=copy2,
+                 ignore_dangling_symlinks=False, dirs_exist_ok=False):
+        """Recursively copy a directory tree and return the destination directory.
+    
+        If exception(s) occur, an Error is raised with a list of reasons.
+    
+        If the optional symlinks flag is true, symbolic links in the
+        source tree result in symbolic links in the destination tree; if
+        it is false, the contents of the files pointed to by symbolic
+        links are copied. If the file pointed to by the symlink doesn't
+        exist, an exception will be added in the list of errors raised in
+        an Error exception at the end of the copy process.
+    
+        You can set the optional ignore_dangling_symlinks flag to true if you
+        want to silence this exception. Notice that this has no effect on
+        platforms that don't support os.symlink.
+    
+        The optional ignore argument is a callable. If given, it
+        is called with the `src` parameter, which is the directory
+        being visited by copytree(), and `names` which is the list of
+        `src` contents, as returned by os.listdir():
+    
+            callable(src, names) -> ignored_names
+    
+        Since copytree() is called recursively, the callable will be
+        called once for each directory that is copied. It returns a
+        list of names relative to the `src` directory that should
+        not be copied.
+    
+        The optional copy_function argument is a callable that will be used
+        to copy each file. It will be called with the source path and the
+        destination path as arguments. By default, copy2() is used, but any
+        function that supports the same signature (like copy()) can be used.
+    
+        If dirs_exist_ok is false (the default) and `dst` already exists, a
+        `FileExistsError` is raised. If `dirs_exist_ok` is true, the copying
+        operation will continue if it encounters existing directories, and files
+        within the `dst` tree will be overwritten by corresponding files from the
+        `src` tree.
+        """
+        sys.audit("shutil.copytree", src, dst)
+>       with os.scandir(src) as itr:
+             ^^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: '/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-512/test_invalid_question_timezone2/absent-store'
+
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/shutil.py:652: FileNotFoundError
+_________ test_invalid_question_timezone_rejected_before_loading[123] __________
+
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-512/test_invalid_question_timezone3')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x109c93b50>
+timezone = 123
+
+    @pytest.mark.parametrize("timezone", [None, "", " ", 123, "not/a/timezone"])
+    def test_invalid_question_timezone_rejected_before_loading(tmp_path, monkeypatch, timezone):
+        from mnemosyne import cli
+    
+        questions = tmp_path / "questions.json"
+        questions.write_text(json.dumps([{
+            "id": "q", "question": "yesterday", "gold": ["a"], "query_timezone": timezone,
+        }]))
+        monkeypatch.setattr(cli, "load_tools", lambda args: pytest.fail("must validate first"))
+        monkeypatch.setattr("sys.argv", [
+            "store_recall", "--store", str(tmp_path / "absent-store"), "--tenant", "synthetic",
+            "--questions", str(questions), "--out", str(tmp_path / "report.json"),
+        ])
+        with pytest.raises(SystemExit) as exc:
+>           store_recall.main()
+
+tests/test_store_recall.py:501: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+eval/store_recall.py:182: in main
+    snapshot_store(args.store, store)
+eval/store_recall.py:132: in snapshot_store
+    shutil.copytree(source, target, copy_function=copy_file, ignore=ignore_journals)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+src = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-512/test_invalid_question_timezone3/absent-store')
+dst = PosixPath('/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/store-recall-o3tj9kef/store')
+symlinks = False
+ignore = <function snapshot_store.<locals>.ignore_journals at 0x109da1e80>
+copy_function = <function snapshot_store.<locals>.copy_file at 0x109da1dd0>
+ignore_dangling_symlinks = False, dirs_exist_ok = False
+
+    def copytree(src, dst, symlinks=False, ignore=None, copy_function=copy2,
+                 ignore_dangling_symlinks=False, dirs_exist_ok=False):
+        """Recursively copy a directory tree and return the destination directory.
+    
+        If exception(s) occur, an Error is raised with a list of reasons.
+    
+        If the optional symlinks flag is true, symbolic links in the
+        source tree result in symbolic links in the destination tree; if
+        it is false, the contents of the files pointed to by symbolic
+        links are copied. If the file pointed to by the symlink doesn't
+        exist, an exception will be added in the list of errors raised in
+        an Error exception at the end of the copy process.
+    
+        You can set the optional ignore_dangling_symlinks flag to true if you
+        want to silence this exception. Notice that this has no effect on
+        platforms that don't support os.symlink.
+    
+        The optional ignore argument is a callable. If given, it
+        is called with the `src` parameter, which is the directory
+        being visited by copytree(), and `names` which is the list of
+        `src` contents, as returned by os.listdir():
+    
+            callable(src, names) -> ignored_names
+    
+        Since copytree() is called recursively, the callable will be
+        called once for each directory that is copied. It returns a
+        list of names relative to the `src` directory that should
+        not be copied.
+    
+        The optional copy_function argument is a callable that will be used
+        to copy each file. It will be called with the source path and the
+        destination path as arguments. By default, copy2() is used, but any
+        function that supports the same signature (like copy()) can be used.
+    
+        If dirs_exist_ok is false (the default) and `dst` already exists, a
+        `FileExistsError` is raised. If `dirs_exist_ok` is true, the copying
+        operation will continue if it encounters existing directories, and files
+        within the `dst` tree will be overwritten by corresponding files from the
+        `src` tree.
+        """
+        sys.audit("shutil.copytree", src, dst)
+>       with os.scandir(src) as itr:
+             ^^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: '/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-512/test_invalid_question_timezone3/absent-store'
+
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/shutil.py:652: FileNotFoundError
+____ test_invalid_question_timezone_rejected_before_loading[not/a/timezone] ____
+
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-512/test_invalid_question_timezone4')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x109dd4450>
+timezone = 'not/a/timezone'
+
+    @pytest.mark.parametrize("timezone", [None, "", " ", 123, "not/a/timezone"])
+    def test_invalid_question_timezone_rejected_before_loading(tmp_path, monkeypatch, timezone):
+        from mnemosyne import cli
+    
+        questions = tmp_path / "questions.json"
+        questions.write_text(json.dumps([{
+            "id": "q", "question": "yesterday", "gold": ["a"], "query_timezone": timezone,
+        }]))
+        monkeypatch.setattr(cli, "load_tools", lambda args: pytest.fail("must validate first"))
+        monkeypatch.setattr("sys.argv", [
+            "store_recall", "--store", str(tmp_path / "absent-store"), "--tenant", "synthetic",
+            "--questions", str(questions), "--out", str(tmp_path / "report.json"),
+        ])
+        with pytest.raises(SystemExit) as exc:
+>           store_recall.main()
+
+tests/test_store_recall.py:501: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+eval/store_recall.py:182: in main
+    snapshot_store(args.store, store)
+eval/store_recall.py:132: in snapshot_store
+    shutil.copytree(source, target, copy_function=copy_file, ignore=ignore_journals)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+src = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-512/test_invalid_question_timezone4/absent-store')
+dst = PosixPath('/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/store-recall-3u0yt93_/store')
+symlinks = False
+ignore = <function snapshot_store.<locals>.ignore_journals at 0x109da0f60>
+copy_function = <function snapshot_store.<locals>.copy_file at 0x109da0e00>
+ignore_dangling_symlinks = False, dirs_exist_ok = False
+
+    def copytree(src, dst, symlinks=False, ignore=None, copy_function=copy2,
+                 ignore_dangling_symlinks=False, dirs_exist_ok=False):
+        """Recursively copy a directory tree and return the destination directory.
+    
+        If exception(s) occur, an Error is raised with a list of reasons.
+    
+        If the optional symlinks flag is true, symbolic links in the
+        source tree result in symbolic links in the destination tree; if
+        it is false, the contents of the files pointed to by symbolic
+        links are copied. If the file pointed to by the symlink doesn't
+        exist, an exception will be added in the list of errors raised in
+        an Error exception at the end of the copy process.
+    
+        You can set the optional ignore_dangling_symlinks flag to true if you
+        want to silence this exception. Notice that this has no effect on
+        platforms that don't support os.symlink.
+    
+        The optional ignore argument is a callable. If given, it
+        is called with the `src` parameter, which is the directory
+        being visited by copytree(), and `names` which is the list of
+        `src` contents, as returned by os.listdir():
+    
+            callable(src, names) -> ignored_names
+    
+        Since copytree() is called recursively, the callable will be
+        called once for each directory that is copied. It returns a
+        list of names relative to the `src` directory that should
+        not be copied.
+    
+        The optional copy_function argument is a callable that will be used
+        to copy each file. It will be called with the source path and the
+        destination path as arguments. By default, copy2() is used, but any
+        function that supports the same signature (like copy()) can be used.
+    
+        If dirs_exist_ok is false (the default) and `dst` already exists, a
+        `FileExistsError` is raised. If `dirs_exist_ok` is true, the copying
+        operation will continue if it encounters existing directories, and files
+        within the `dst` tree will be overwritten by corresponding files from the
+        `src` tree.
+        """
+        sys.audit("shutil.copytree", src, dst)
+>       with os.scandir(src) as itr:
+             ^^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: '/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-512/test_invalid_question_timezone4/absent-store'
+
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/shutil.py:652: FileNotFoundError
+=========================== short test summary info ============================
+FAILED tests/test_store_recall.py::test_optional_question_timezone_is_forwarded_when_supported[True]
+FAILED tests/test_store_recall.py::test_invalid_question_timezone_rejected_before_loading[None]
+FAILED tests/test_store_recall.py::test_invalid_question_timezone_rejected_before_loading[]
+FAILED tests/test_store_recall.py::test_invalid_question_timezone_rejected_before_loading[ ]
+FAILED tests/test_store_recall.py::test_invalid_question_timezone_rejected_before_loading[123]
+FAILED tests/test_store_recall.py::test_invalid_question_timezone_rejected_before_loading[not/a/timezone]

@@ -61,9 +61,10 @@ import sqlite3
 import threading
 import time
 from collections import OrderedDict
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from mnemosyne import text as text_kernels
 from mnemosyne.access_policy import (
@@ -114,6 +115,14 @@ from mnemosyne.erasure_ids import (
 )
 from mnemosyne.ids import content_cid, evidence_cid, evidence_unscoped_cid, new_id
 from mnemosyne.journal import CIDJournal, journal_filename, safe_tenant_filename
+from mnemosyne.mental_model_storage import (
+    MentalModelConflict,
+    expected_version as validate_model_version,
+    invalidate_record as invalidate_model_record,
+    json_copy as copy_model_json,
+    model_key,
+    prepare_save as prepare_model_save,
+)
 from mnemosyne.models import (
     Assertion,
     Contradiction,
@@ -134,6 +143,9 @@ from mnemosyne.policy import OperatingPolicy
 from mnemosyne.privacy import ErasureMode
 from mnemosyne.projections import ProjectionRegistry, ProjectionSpec
 from mnemosyne.retrieval import (
+    derived_evidence_readable,
+    filter_derived_adapter_hits,
+    read_evidence_for_context,
     HashingEmbeddingProvider,
     LocalSimilarityReranker,
     RetrievalAdapters,
@@ -722,6 +734,7 @@ class SqliteEngine:
         self.adapters = adapters
         self._lock = threading.RLock()
         self._connections: dict[str, sqlite3.Connection] = {}
+        self._mental_model_guard_state: tuple[str, sqlite3.Connection] | None = None
         self._integrity_checked: set[str] = set()
         self._retrieval_result_cache_nonce = secrets.token_hex(16)
         # Task 8: tenant-granular embedding-cache hit/miss telemetry (never
@@ -767,6 +780,8 @@ class SqliteEngine:
                 conn.total_changes,
                 data_version,
                 effective_filter.get("_retrieval_deep", False),
+                self._scan_oracle({**effective_filter, "tenant_id": tenant_id, "branch": branch})
+                ._retrieval_policy_deadline_token(tenant_id, branch),
             )
 
     def _tenant_db_path(self, tenant_id: str) -> Path:
@@ -1595,6 +1610,136 @@ class SqliteEngine:
                 )
             return True
 
+    @contextmanager
+    def mental_model_guard(self, tenant_id: str):
+        """Protect final source reads and model publication in one transaction.
+
+        All tenant reads reuse this engine's connection. BEGIN IMMEDIATE also
+        excludes source writes from other connections until publication commits.
+        Only model save/delete may write inside this narrowly scoped guard; do
+        not run providers or unrelated mutators, which manage their own commits.
+        """
+        model_key(tenant_id, "guard", "main")
+        with self._lock:
+            conn = self._connect(tenant_id)
+            if self._mental_model_guard_state is not None:
+                if self._mental_model_guard_state != (tenant_id, conn) or not conn.in_transaction:
+                    raise RuntimeError("mental model guard transaction scope mismatch")
+                yield
+                return
+            if conn.in_transaction:
+                raise RuntimeError("mental model guard cannot adopt an existing transaction")
+            conn.execute("BEGIN IMMEDIATE")
+            self._mental_model_guard_state = (tenant_id, conn)
+            try:
+                yield
+                if not conn.in_transaction:
+                    raise RuntimeError("mental model guard transaction ended unexpectedly")
+                conn.commit()
+            except BaseException:
+                conn.rollback()
+                raise
+            finally:
+                self._mental_model_guard_state = None
+
+    def get_mental_model_record(self, tenant_id: str, model_id: str, branch: str = "main") -> dict[str, Any] | None:
+        model_key(tenant_id, model_id, branch)
+        with self._lock:
+            row = self._connect(tenant_id).execute(
+                "SELECT record FROM mental_models WHERE tenant_id = ? AND branch = ? AND model_id = ?",
+                (tenant_id, branch, model_id),
+            ).fetchone()
+        return json.loads(row["record"]) if row is not None else None
+
+    def list_mental_model_records(self, tenant_id: str, branch: str = "main") -> list[dict[str, Any]]:
+        model_key(tenant_id, "list", branch)
+        with self._lock:
+            return [json.loads(row["record"]) for row in self._connect(tenant_id).execute(
+                "SELECT record FROM mental_models WHERE tenant_id = ? AND branch = ? ORDER BY model_id",
+                (tenant_id, branch),
+            )]
+
+    def save_mental_model_record(
+        self, tenant_id: str, model_id: str, record: dict[str, Any], *,
+        branch: str = "main", expected_version: int | None = None,
+    ) -> dict[str, Any]:
+        model_key(tenant_id, model_id, branch)
+        validate_model_version(expected_version, allow_create=True)
+        with self._lock:
+            conn = self._connect(tenant_id)
+            guarded = self._mental_model_guard_state == (tenant_id, conn)
+            if guarded:
+                if not conn.in_transaction:
+                    raise RuntimeError("mental model guard transaction ended unexpectedly")
+            else:
+                conn.execute("BEGIN IMMEDIATE")
+            try:
+                self._require_branch(conn, tenant_id, branch)
+                row = conn.execute(
+                    "SELECT record FROM mental_models WHERE tenant_id = ? AND branch = ? AND model_id = ?",
+                    (tenant_id, branch, model_id),
+                ).fetchone()
+                current = json.loads(row["record"]) if row is not None else None
+                saved = prepare_model_save(tenant_id, model_id, record, branch, current, expected_version)
+                conn.execute(
+                    "INSERT INTO mental_models(tenant_id, branch, model_id, version, record) VALUES (?, ?, ?, ?, ?) "
+                    "ON CONFLICT(tenant_id, branch, model_id) DO UPDATE SET version = excluded.version, record = excluded.record",
+                    (tenant_id, branch, model_id, saved["version"], json_text(saved)),
+                )
+                if not guarded:
+                    conn.commit()
+            except BaseException:
+                if not guarded:
+                    conn.rollback()
+                raise
+        return copy_model_json(saved)
+
+    def delete_mental_model_record(
+        self, tenant_id: str, model_id: str, *, branch: str = "main", expected_version: int,
+    ) -> bool:
+        model_key(tenant_id, model_id, branch)
+        validate_model_version(expected_version)
+        with self._lock:
+            conn = self._connect(tenant_id)
+            guarded = self._mental_model_guard_state == (tenant_id, conn)
+            if guarded:
+                if not conn.in_transaction:
+                    raise RuntimeError("mental model guard transaction ended unexpectedly")
+            else:
+                conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = conn.execute(
+                    "SELECT version FROM mental_models WHERE tenant_id = ? AND branch = ? AND model_id = ?",
+                    (tenant_id, branch, model_id),
+                ).fetchone()
+                if row is not None and row["version"] != expected_version:
+                    raise MentalModelConflict("mental model version conflict")
+                conn.execute("DELETE FROM mental_models WHERE tenant_id = ? AND branch = ? AND model_id = ?",
+                             (tenant_id, branch, model_id))
+                if not guarded:
+                    conn.commit()
+            except BaseException:
+                if not guarded:
+                    conn.rollback()
+                raise
+        return row is not None
+
+    @staticmethod
+    def _invalidate_mental_models(conn: sqlite3.Connection, tenant_id: str, branch: str) -> None:
+        rows = conn.execute("SELECT record FROM mental_models WHERE tenant_id = ? AND branch = ?",
+                            (tenant_id, branch)).fetchall()
+        for row in rows:
+            saved = invalidate_model_record(json.loads(row["record"]))
+            conn.execute("UPDATE mental_models SET version = ?, record = ? WHERE tenant_id = ? AND branch = ? AND model_id = ?",
+                         (saved["version"], json_text(saved), tenant_id, branch, saved["model_id"]))
+
+    def get_evidence_for_read(
+        self, tenant_id: str, cid: str, branch: str = "main", *,
+        access_context: Mapping[str, Any] | None = None,
+    ) -> Evidence | None:
+        with self._lock:
+            return read_evidence_for_context(self, tenant_id, cid, branch, access_context=access_context)
+
     def get_evidence(self, tenant_id: str, cid: str, branch: str = "main") -> Evidence | None:
         with self._lock:
             ev = self._fetch_evidence(tenant_id, cid, branch)
@@ -1809,6 +1954,7 @@ class SqliteEngine:
             preferences = self._records(conn, "preferences", tenant_id)
             calibrations = self._records(conn, "calibrations", tenant_id)
             entities = self._records(conn, "entities", tenant_id)
+            mental_models = self._records(conn, "mental_models", tenant_id)
             justifications = self._records(conn, "justifications", tenant_id)
             contradictions = self._records(conn, "contradictions", tenant_id)
             working_memory = [
@@ -1853,6 +1999,7 @@ class SqliteEngine:
             "preferences": preferences,
             "calibrations": calibrations,
             "entities": entities,
+            "mental_models": mental_models,
             "justifications": justifications,
             "contradictions": contradictions,
             "working_memory": working_memory,
@@ -1867,6 +2014,10 @@ class SqliteEngine:
             self.export_tenant(tenant_id),
             {**dict(access_context or {}), "tenant_id": tenant_id},
             policy_max_sensitivity=self.policy.max_sensitivity,
+            evidence_gate=lambda row: derived_evidence_readable(
+                self, row, tenant_id=tenant_id, branch=str(row.get("branch") or "main"),
+                filt={**dict(access_context or {}), "tenant_id": tenant_id}, policy=self.policy,
+            ),
         )
 
     @staticmethod
@@ -1905,6 +2056,7 @@ class SqliteEngine:
             "contradictions",
             "calibrations",
             "entities",
+            "mental_models",
             "working_memory",
             "audit_log",
             "deletion_log",
@@ -1978,6 +2130,7 @@ class SqliteEngine:
             "contradictions": [item for exported in tenant_exports for item in exported["contradictions"]],
             "calibrations": [item for exported in tenant_exports for item in exported["calibrations"]],
             "entities": [item for exported in tenant_exports for item in exported["entities"]],
+            "mental_models": [item for exported in tenant_exports for item in exported["mental_models"]],
             "audit_log": [item for exported in tenant_exports for item in exported["audit_log"]],
             "deletion_log": [item for exported in tenant_exports for item in exported["deletion_log"]],
             "merge_log": merge_log,
@@ -2309,6 +2462,7 @@ class SqliteEngine:
             hits = validate_adapter_hit_scope(
                 hits, tenant_id=tenant_id, branch=branch, k=k, adapter_name="lexical"
             )
+            hits = filter_derived_adapter_hits(self, hits, filt)
             return LocalMemoryEngine._mark_retrieved_text_as_data(hits)
         if filt.get("query_mode") == "passages":
             from mnemosyne.passages import rank_passages
@@ -3659,6 +3813,7 @@ class SqliteEngine:
                     )
                 }
                 conn.execute("DELETE FROM relations WHERE tenant_id = ? AND branch = ?", (tenant_id, branch))
+                conn.execute("DELETE FROM mental_models WHERE tenant_id = ? AND branch = ?", (tenant_id, branch))
                 conn.execute("DELETE FROM assertions WHERE tenant_id = ? AND branch = ?", (tenant_id, branch))
                 conn.execute("DELETE FROM evidence WHERE tenant_id = ? AND branch = ?", (tenant_id, branch))
                 if discarded_ids:
@@ -4000,10 +4155,10 @@ class SqliteEngine:
                 legal_blind = mode is ErasureMode.HARD_DELETE_LEGAL and requested_by == "legal"
                 if legal_blind:
                     _derived_bytes, derived_cids, retained_metadata = _derived_evidence_forget_plan(
-                        cid, candidates, legal_blind=True
+                        cid, candidates, legal_blind=True, source_types={key: str(value.get("source_type") or "") for key, value in cascade_metadata.items()}
                     )
                 else:
-                    _derived_bytes, derived_cids, retained_metadata = _derived_evidence_forget_plan(cid, candidates)
+                    _derived_bytes, derived_cids, retained_metadata = _derived_evidence_forget_plan(cid, candidates, source_types={key: str(value.get("source_type") or "") for key, value in cascade_metadata.items()})
                 affected_cids = {cid, *derived_cids}
                 propagated["erased_derived_evidence"] = derived_cids
                 if mode is ErasureMode.HARD_DELETE_LEGAL and requested_by != "legal":
@@ -4102,6 +4257,7 @@ class SqliteEngine:
                         (json_text(metadata), tenant_id, branch, _bytes_to_cid(retained_bytes)),
                     )
                 # Assertions (branch-scoped): trim surviving sources or retract.
+                self._invalidate_mental_models(conn, tenant_id, branch)
                 for row in conn.execute(
                     "SELECT id, source_evidence_cids FROM assertions "
                     "WHERE tenant_id = ? AND branch = ? ORDER BY rowid",

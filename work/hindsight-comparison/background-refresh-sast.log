@@ -1,0 +1,19 @@
+               
+               
+┌─────────────┐
+│ Scan Status │
+└─────────────┘
+  Scanning 7 files tracked by git with 3 Code rules:
+  Scanning 7 files with 3 python rules.
+                
+                
+┌──────────────┐
+│ Scan Summary │
+└──────────────┘
+✅ Scan completed successfully.
+ • Findings: 0 (0 blocking)
+ • Rules run: 3
+ • Targets scanned: 7
+ • Parsed lines: ~100.0%
+ • No ignore information available
+Ran 3 rules on 7 files: 0 findings.

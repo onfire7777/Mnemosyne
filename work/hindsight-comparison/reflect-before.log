@@ -1,0 +1,364 @@
+FFFFFFFFFFFFFFFFFFF                                                      [100%]
+=================================== FAILURES ===================================
+_____ test_reflect_follows_evidence_and_returns_citations_without_writing ______
+
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-527/test_reflect_follows_evidence_0')
+
+    def test_reflect_follows_evidence_and_returns_citations_without_writing(tmp_path):
+        path = tmp_path / "memory.json"
+        engine = seeded_engine(path)
+        before = copy.deepcopy(engine.export_all())
+        before_bytes = path.read_bytes()
+        provider = FixtureProvider()
+>       tools = MemoryTools(engine, grounded_provider_factory=lambda: provider)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: MemoryTools.__init__() got an unexpected keyword argument 'grounded_provider_factory'
+
+tests/test_reflect.py:66: TypeError
+__________ test_reflect_preserves_deterministic_synthesis_provenance ___________
+
+    def test_reflect_preserves_deterministic_synthesis_provenance():
+        engine = LocalMemoryEngine()
+        cid = seed(engine, "Invoice Zephyr charges are 1.20 and 2.80.")
+        provider = FixtureProvider({
+            "claims": [{"synthesis": {"operation": "add", "spans": [
+                {"cid": cid, "quote": "1.20"}, {"cid": cid, "quote": "2.80"},
+            ]}}], "unresolved": False,
+        })
+>       result = MemoryTools(engine, grounded_provider_factory=lambda: provider).reflect(
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            "tenant-a", "What are Invoice Zephyr charges?", user_id="user-a",
+        )
+E       TypeError: MemoryTools.__init__() got an unexpected keyword argument 'grounded_provider_factory'
+
+tests/test_reflect.py:95: TypeError
+_____ test_reflect_fails_closed_on_ungrounded_or_failed_reader[response0] ______
+
+response = {'claims': [{'spans': [{'cid': 'forged', 'quote': 'Friday'}]}], 'unresolved': False}
+
+    @pytest.mark.parametrize("response", [
+        {"claims": [{"spans": [{"cid": "forged", "quote": "Friday"}]}], "unresolved": False},
+        {"claims": [{"text": "Invented advice", "evidence_cids": []}], "unresolved": False},
+        RuntimeError("private provider diagnostic"),
+    ])
+    def test_reflect_fails_closed_on_ungrounded_or_failed_reader(response):
+        provider = FixtureProvider(response)
+>       result = MemoryTools(seeded_engine(), grounded_provider_factory=lambda: provider).reflect(
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            "tenant-a", "When does Ada's project launch?", user_id="user-a",
+        )
+E       TypeError: MemoryTools.__init__() got an unexpected keyword argument 'grounded_provider_factory'
+
+tests/test_reflect.py:113: TypeError
+_____ test_reflect_fails_closed_on_ungrounded_or_failed_reader[response1] ______
+
+response = {'claims': [{'text': 'Invented advice', 'evidence_cids': []}], 'unresolved': False}
+
+    @pytest.mark.parametrize("response", [
+        {"claims": [{"spans": [{"cid": "forged", "quote": "Friday"}]}], "unresolved": False},
+        {"claims": [{"text": "Invented advice", "evidence_cids": []}], "unresolved": False},
+        RuntimeError("private provider diagnostic"),
+    ])
+    def test_reflect_fails_closed_on_ungrounded_or_failed_reader(response):
+        provider = FixtureProvider(response)
+>       result = MemoryTools(seeded_engine(), grounded_provider_factory=lambda: provider).reflect(
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            "tenant-a", "When does Ada's project launch?", user_id="user-a",
+        )
+E       TypeError: MemoryTools.__init__() got an unexpected keyword argument 'grounded_provider_factory'
+
+tests/test_reflect.py:113: TypeError
+_____ test_reflect_fails_closed_on_ungrounded_or_failed_reader[response2] ______
+
+response = RuntimeError('private provider diagnostic')
+
+    @pytest.mark.parametrize("response", [
+        {"claims": [{"spans": [{"cid": "forged", "quote": "Friday"}]}], "unresolved": False},
+        {"claims": [{"text": "Invented advice", "evidence_cids": []}], "unresolved": False},
+        RuntimeError("private provider diagnostic"),
+    ])
+    def test_reflect_fails_closed_on_ungrounded_or_failed_reader(response):
+        provider = FixtureProvider(response)
+>       result = MemoryTools(seeded_engine(), grounded_provider_factory=lambda: provider).reflect(
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            "tenant-a", "When does Ada's project launch?", user_id="user-a",
+        )
+E       TypeError: MemoryTools.__init__() got an unexpected keyword argument 'grounded_provider_factory'
+
+tests/test_reflect.py:113: TypeError
+_________ test_reflect_does_not_call_reader_when_scope_has_no_evidence _________
+
+    def test_reflect_does_not_call_reader_when_scope_has_no_evidence():
+        provider = FixtureProvider()
+>       result = MemoryTools(seeded_engine(), grounded_provider_factory=lambda: provider).reflect(
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            "tenant-absent", "When does Ada's project launch?", user_id="user-a",
+        )
+E       TypeError: MemoryTools.__init__() got an unexpected keyword argument 'grounded_provider_factory'
+
+tests/test_reflect.py:124: TypeError
+________ test_default_provider_is_loaded_lazily_and_fresh_for_each_call ________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10bab6b10>
+
+    def test_default_provider_is_loaded_lazily_and_fresh_for_each_call(monkeypatch):
+        created = []
+    
+        def factory(cls):
+            provider = FixtureProvider()
+            created.append(provider)
+            return provider
+    
+        monkeypatch.setattr(CommandGroundedProvider, "from_environment", classmethod(factory))
+        tools = MemoryTools(seeded_engine())
+        assert created == []
+        for _ in range(2):
+>           assert tools.reflect("tenant-a", "When does Ada's project launch?", user_id="user-a")["answer"] == "Friday"
+                   ^^^^^^^^^^^^^
+E           AttributeError: 'MemoryTools' object has no attribute 'reflect'
+
+tests/test_reflect.py:144: AttributeError
+__________ test_missing_provider_configuration_is_an_actionable_error __________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10bab6ea0>
+
+    def test_missing_provider_configuration_is_an_actionable_error(monkeypatch):
+        for key in ("MNEMOSYNE_QUERY_DECOMPOSER_COMMAND", "MNEMOSYNE_GROUNDED_READER_COMMAND",
+                    "MNEMOSYNE_GROUNDED_READER_PROVIDER"):
+            monkeypatch.delenv(key, raising=False)
+        with pytest.raises(ValueError, match="reflect.*provider.*configur"):
+>           MemoryTools(seeded_engine()).reflect("tenant-a", "Ada", user_id="user-a")
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           AttributeError: 'MemoryTools' object has no attribute 'reflect'
+
+tests/test_reflect.py:154: AttributeError
+__ test_reflect_validates_scope_and_budget_before_loading_provider[changes0] ___
+
+changes = {'question': ' '}
+
+    @pytest.mark.parametrize("changes", [
+        {"question": " "}, {"question": "x" * 2001}, {"tenant_id": " "},
+        {"branch": " "}, {"role": "administrator"}, {"max_trust_tier": 6},
+        {"source_trust_tier": True}, {"as_of": "2026-10-22"}, {"break_glass": "yes"},
+    ])
+    def test_reflect_validates_scope_and_budget_before_loading_provider(changes):
+        def forbidden():
+            pytest.fail("invalid request must not load a provider")
+    
+        arguments = {"tenant_id": "tenant-a", "question": "Ada", **changes}
+        with pytest.raises(ValueError):
+>           MemoryTools(seeded_engine(), grounded_provider_factory=forbidden).reflect(**arguments)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           TypeError: MemoryTools.__init__() got an unexpected keyword argument 'grounded_provider_factory'
+
+tests/test_reflect.py:168: TypeError
+__ test_reflect_validates_scope_and_budget_before_loading_provider[changes1] ___
+
+changes = {'question': 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'}
+
+    @pytest.mark.parametrize("changes", [
+        {"question": " "}, {"question": "x" * 2001}, {"tenant_id": " "},
+        {"branch": " "}, {"role": "administrator"}, {"max_trust_tier": 6},
+        {"source_trust_tier": True}, {"as_of": "2026-10-22"}, {"break_glass": "yes"},
+    ])
+    def test_reflect_validates_scope_and_budget_before_loading_provider(changes):
+        def forbidden():
+            pytest.fail("invalid request must not load a provider")
+    
+        arguments = {"tenant_id": "tenant-a", "question": "Ada", **changes}
+        with pytest.raises(ValueError):
+>           MemoryTools(seeded_engine(), grounded_provider_factory=forbidden).reflect(**arguments)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           TypeError: MemoryTools.__init__() got an unexpected keyword argument 'grounded_provider_factory'
+
+tests/test_reflect.py:168: TypeError
+__ test_reflect_validates_scope_and_budget_before_loading_provider[changes2] ___
+
+changes = {'tenant_id': ' '}
+
+    @pytest.mark.parametrize("changes", [
+        {"question": " "}, {"question": "x" * 2001}, {"tenant_id": " "},
+        {"branch": " "}, {"role": "administrator"}, {"max_trust_tier": 6},
+        {"source_trust_tier": True}, {"as_of": "2026-10-22"}, {"break_glass": "yes"},
+    ])
+    def test_reflect_validates_scope_and_budget_before_loading_provider(changes):
+        def forbidden():
+            pytest.fail("invalid request must not load a provider")
+    
+        arguments = {"tenant_id": "tenant-a", "question": "Ada", **changes}
+        with pytest.raises(ValueError):
+>           MemoryTools(seeded_engine(), grounded_provider_factory=forbidden).reflect(**arguments)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           TypeError: MemoryTools.__init__() got an unexpected keyword argument 'grounded_provider_factory'
+
+tests/test_reflect.py:168: TypeError
+__ test_reflect_validates_scope_and_budget_before_loading_provider[changes3] ___
+
+changes = {'branch': ' '}
+
+    @pytest.mark.parametrize("changes", [
+        {"question": " "}, {"question": "x" * 2001}, {"tenant_id": " "},
+        {"branch": " "}, {"role": "administrator"}, {"max_trust_tier": 6},
+        {"source_trust_tier": True}, {"as_of": "2026-10-22"}, {"break_glass": "yes"},
+    ])
+    def test_reflect_validates_scope_and_budget_before_loading_provider(changes):
+        def forbidden():
+            pytest.fail("invalid request must not load a provider")
+    
+        arguments = {"tenant_id": "tenant-a", "question": "Ada", **changes}
+        with pytest.raises(ValueError):
+>           MemoryTools(seeded_engine(), grounded_provider_factory=forbidden).reflect(**arguments)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           TypeError: MemoryTools.__init__() got an unexpected keyword argument 'grounded_provider_factory'
+
+tests/test_reflect.py:168: TypeError
+__ test_reflect_validates_scope_and_budget_before_loading_provider[changes4] ___
+
+changes = {'role': 'administrator'}
+
+    @pytest.mark.parametrize("changes", [
+        {"question": " "}, {"question": "x" * 2001}, {"tenant_id": " "},
+        {"branch": " "}, {"role": "administrator"}, {"max_trust_tier": 6},
+        {"source_trust_tier": True}, {"as_of": "2026-10-22"}, {"break_glass": "yes"},
+    ])
+    def test_reflect_validates_scope_and_budget_before_loading_provider(changes):
+        def forbidden():
+            pytest.fail("invalid request must not load a provider")
+    
+        arguments = {"tenant_id": "tenant-a", "question": "Ada", **changes}
+        with pytest.raises(ValueError):
+>           MemoryTools(seeded_engine(), grounded_provider_factory=forbidden).reflect(**arguments)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           TypeError: MemoryTools.__init__() got an unexpected keyword argument 'grounded_provider_factory'
+
+tests/test_reflect.py:168: TypeError
+__ test_reflect_validates_scope_and_budget_before_loading_provider[changes5] ___
+
+changes = {'max_trust_tier': 6}
+
+    @pytest.mark.parametrize("changes", [
+        {"question": " "}, {"question": "x" * 2001}, {"tenant_id": " "},
+        {"branch": " "}, {"role": "administrator"}, {"max_trust_tier": 6},
+        {"source_trust_tier": True}, {"as_of": "2026-10-22"}, {"break_glass": "yes"},
+    ])
+    def test_reflect_validates_scope_and_budget_before_loading_provider(changes):
+        def forbidden():
+            pytest.fail("invalid request must not load a provider")
+    
+        arguments = {"tenant_id": "tenant-a", "question": "Ada", **changes}
+        with pytest.raises(ValueError):
+>           MemoryTools(seeded_engine(), grounded_provider_factory=forbidden).reflect(**arguments)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           TypeError: MemoryTools.__init__() got an unexpected keyword argument 'grounded_provider_factory'
+
+tests/test_reflect.py:168: TypeError
+__ test_reflect_validates_scope_and_budget_before_loading_provider[changes6] ___
+
+changes = {'source_trust_tier': True}
+
+    @pytest.mark.parametrize("changes", [
+        {"question": " "}, {"question": "x" * 2001}, {"tenant_id": " "},
+        {"branch": " "}, {"role": "administrator"}, {"max_trust_tier": 6},
+        {"source_trust_tier": True}, {"as_of": "2026-10-22"}, {"break_glass": "yes"},
+    ])
+    def test_reflect_validates_scope_and_budget_before_loading_provider(changes):
+        def forbidden():
+            pytest.fail("invalid request must not load a provider")
+    
+        arguments = {"tenant_id": "tenant-a", "question": "Ada", **changes}
+        with pytest.raises(ValueError):
+>           MemoryTools(seeded_engine(), grounded_provider_factory=forbidden).reflect(**arguments)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           TypeError: MemoryTools.__init__() got an unexpected keyword argument 'grounded_provider_factory'
+
+tests/test_reflect.py:168: TypeError
+__ test_reflect_validates_scope_and_budget_before_loading_provider[changes7] ___
+
+changes = {'as_of': '2026-10-22'}
+
+    @pytest.mark.parametrize("changes", [
+        {"question": " "}, {"question": "x" * 2001}, {"tenant_id": " "},
+        {"branch": " "}, {"role": "administrator"}, {"max_trust_tier": 6},
+        {"source_trust_tier": True}, {"as_of": "2026-10-22"}, {"break_glass": "yes"},
+    ])
+    def test_reflect_validates_scope_and_budget_before_loading_provider(changes):
+        def forbidden():
+            pytest.fail("invalid request must not load a provider")
+    
+        arguments = {"tenant_id": "tenant-a", "question": "Ada", **changes}
+        with pytest.raises(ValueError):
+>           MemoryTools(seeded_engine(), grounded_provider_factory=forbidden).reflect(**arguments)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           TypeError: MemoryTools.__init__() got an unexpected keyword argument 'grounded_provider_factory'
+
+tests/test_reflect.py:168: TypeError
+__ test_reflect_validates_scope_and_budget_before_loading_provider[changes8] ___
+
+changes = {'break_glass': 'yes'}
+
+    @pytest.mark.parametrize("changes", [
+        {"question": " "}, {"question": "x" * 2001}, {"tenant_id": " "},
+        {"branch": " "}, {"role": "administrator"}, {"max_trust_tier": 6},
+        {"source_trust_tier": True}, {"as_of": "2026-10-22"}, {"break_glass": "yes"},
+    ])
+    def test_reflect_validates_scope_and_budget_before_loading_provider(changes):
+        def forbidden():
+            pytest.fail("invalid request must not load a provider")
+    
+        arguments = {"tenant_id": "tenant-a", "question": "Ada", **changes}
+        with pytest.raises(ValueError):
+>           MemoryTools(seeded_engine(), grounded_provider_factory=forbidden).reflect(**arguments)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           TypeError: MemoryTools.__init__() got an unexpected keyword argument 'grounded_provider_factory'
+
+tests/test_reflect.py:168: TypeError
+_____ test_reflect_tool_schema_keeps_configuration_and_limits_server_side ______
+
+    def test_reflect_tool_schema_keeps_configuration_and_limits_server_side():
+>       schema = _to_mcp_tool_spec(next(item for item in TOOL_SPEC if item["name"] == "reflect"))["inputSchema"]
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       StopIteration
+
+tests/test_reflect.py:172: StopIteration
+_____ test_signed_mcp_reflect_binds_scope_role_and_trust_before_every_hop ______
+
+tmp_path = PosixPath('/private/var/folders/99/09v38g5d4l304418fbh7pr700000gn/T/pytest-of-admin/pytest-527/test_signed_mcp_reflect_binds_0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10bb16330>
+
+    def test_signed_mcp_reflect_binds_scope_role_and_trust_before_every_hop(tmp_path, monkeypatch):
+        secret = "reflect-test-session-key"
+        server = MnemosyneMcpServer(store_path=tmp_path / "store.json", session_secret=secret,
+                                   require_session=True, object_store=str(tmp_path / "objects"))
+        try:
+            seed(server.engine, "Ada owns project Zephyr.")
+            seed(server.engine, "Project Zephyr launches Friday.")
+            seed(server.engine, "Ada's SECRET launches Monday.", tenant="tenant-b")
+            seed(server.engine, "Ada's PRIVATE launches Tuesday.", user="user-b")
+            seed(server.engine, "Ada's UNTRUSTED launches Wednesday.", trust=5)
+            provider = FixtureProvider()
+>           server.tools = MemoryTools(server.engine, grounded_provider_factory=lambda: provider)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           TypeError: MemoryTools.__init__() got an unexpected keyword argument 'grounded_provider_factory'
+
+tests/test_reflect.py:196: TypeError
+=========================== short test summary info ============================
+FAILED tests/test_reflect.py::test_reflect_follows_evidence_and_returns_citations_without_writing
+FAILED tests/test_reflect.py::test_reflect_preserves_deterministic_synthesis_provenance
+FAILED tests/test_reflect.py::test_reflect_fails_closed_on_ungrounded_or_failed_reader[response0]
+FAILED tests/test_reflect.py::test_reflect_fails_closed_on_ungrounded_or_failed_reader[response1]
+FAILED tests/test_reflect.py::test_reflect_fails_closed_on_ungrounded_or_failed_reader[response2]
+FAILED tests/test_reflect.py::test_reflect_does_not_call_reader_when_scope_has_no_evidence
+FAILED tests/test_reflect.py::test_default_provider_is_loaded_lazily_and_fresh_for_each_call
+FAILED tests/test_reflect.py::test_missing_provider_configuration_is_an_actionable_error
+FAILED tests/test_reflect.py::test_reflect_validates_scope_and_budget_before_loading_provider[changes0]
+FAILED tests/test_reflect.py::test_reflect_validates_scope_and_budget_before_loading_provider[changes1]
+FAILED tests/test_reflect.py::test_reflect_validates_scope_and_budget_before_loading_provider[changes2]
+FAILED tests/test_reflect.py::test_reflect_validates_scope_and_budget_before_loading_provider[changes3]
+FAILED tests/test_reflect.py::test_reflect_validates_scope_and_budget_before_loading_provider[changes4]
+FAILED tests/test_reflect.py::test_reflect_validates_scope_and_budget_before_loading_provider[changes5]
+FAILED tests/test_reflect.py::test_reflect_validates_scope_and_budget_before_loading_provider[changes6]
+FAILED tests/test_reflect.py::test_reflect_validates_scope_and_budget_before_loading_provider[changes7]
+FAILED tests/test_reflect.py::test_reflect_validates_scope_and_budget_before_loading_provider[changes8]
+FAILED tests/test_reflect.py::test_reflect_tool_schema_keeps_configuration_and_limits_server_side
+FAILED tests/test_reflect.py::test_signed_mcp_reflect_binds_scope_role_and_trust_before_every_hop
+19 failed in 0.53s

@@ -200,6 +200,18 @@ ENSURE_STATEMENTS: list[str] = [
         PRIMARY KEY (tenant_id, canonical)
     )
     """,
+    # Advisory models are deliberately separate from evidence/projections.
+    """
+    CREATE TABLE IF NOT EXISTS mental_models (
+        tenant_id TEXT NOT NULL,
+        branch TEXT NOT NULL,
+        model_id TEXT NOT NULL,
+        version INTEGER NOT NULL CHECK (version > 0),
+        record TEXT NOT NULL,
+        PRIMARY KEY (tenant_id, branch, model_id),
+        FOREIGN KEY (tenant_id, branch) REFERENCES branches(tenant_id, name)
+    )
+    """,
     # intentions — PK(tenant_id, intention_id); the record column holds the
     # full Intention.to_dict() JSON so rows rehydrate through Intention.from_dict
     # exactly (same pattern as preferences/justifications/contradictions). The

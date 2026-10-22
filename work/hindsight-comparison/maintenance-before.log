@@ -1,0 +1,84 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+_____ test_living_latency_docs_do_not_claim_local_adapter_seam_is_missing ______
+
+    def test_living_latency_docs_do_not_claim_local_adapter_seam_is_missing() -> None:
+        living_docs = [
+            REPO / "eval" / "latency" / "README.md",
+            REPO / "eval" / "latency" / "bench.py",
+        ]
+        stale_claims = [
+            "ignores the HTTP retrieval adapters today",
+            "ignores HTTP adapters today",
+            "passes no `adapters=`",
+            "has no embedding seam",
+            "hardwire `hashing_embedding`",
+            "hardwires\n``hashing_embedding``",
+        ]
+    
+        for path in living_docs:
+>           text = path.read_text(encoding="utf-8")
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_latency_docs_consistency.py:24: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/pathlib/__init__.py:787: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = PosixPath('/Users/admin/Desktop/Mnemosyne/eval/latency/README.md')
+mode = 'r', buffering = -1, encoding = 'utf-8', errors = None, newline = None
+
+    def open(self, mode='r', buffering=-1, encoding=None,
+             errors=None, newline=None):
+        """
+        Open the file pointed to by this path and return a file object, as
+        the built-in open() function does.
+        """
+        if "b" not in mode:
+            encoding = io.text_encoding(encoding)
+>       return io.open(self, mode, buffering, encoding, errors, newline)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: '/Users/admin/Desktop/Mnemosyne/eval/latency/README.md'
+
+../../.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/pathlib/__init__.py:771: FileNotFoundError
+________________ test_raw_outbound_http_calls_are_policy_gated _________________
+
+    def test_raw_outbound_http_calls_are_policy_gated() -> None:
+        observed: set[tuple[str, str]] = set()
+        for root_name in RAW_EGRESS_SCAN_ROOTS:
+            for path in (ROOT / root_name).rglob("*"):
+                if not path.is_file() or not _is_scanned_source(path):
+                    continue
+                rel = path.relative_to(ROOT).as_posix()
+                if rel == "src/mnemosyne/network_safety.py":
+                    continue
+                text = path.read_text(encoding="utf-8")
+                for name, pattern in RAW_EGRESS_PATTERNS.items():
+                    if pattern.search(text):
+                        observed.add((rel, name))
+    
+>       assert observed == set(ALLOWED_RAW_EGRESS), "\n".join(
+            [
+                "raw outbound HTTP clients must route through mnemosyne.network_safety.safe_urlopen",
+                "or be listed in ALLOWED_RAW_EGRESS with a boundary-specific reason.",
+                f"unexpected={sorted(observed - set(ALLOWED_RAW_EGRESS))}",
+                f"stale_allowlist={sorted(set(ALLOWED_RAW_EGRESS) - observed)}",
+            ]
+        )
+E       AssertionError: raw outbound HTTP clients must route through mnemosyne.network_safety.safe_urlopen
+E         or be listed in ALLOWED_RAW_EGRESS with a boundary-specific reason.
+E         unexpected=[]
+E         stale_allowlist=[('src/mnemosyne/frameworks.py', 'urllib.request.urlopen')]
+E       assert {('infra/scri...AsyncClient')} == {('infra/scri...Client'), ...}
+E         
+E         Extra items in the right set:
+E         ('src/mnemosyne/frameworks.py', 'urllib.request.urlopen')
+E         Use -v to get more diff
+
+tests/test_network_egress_policy.py:159: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_latency_docs_consistency.py::test_living_latency_docs_do_not_claim_local_adapter_seam_is_missing
+FAILED tests/test_network_egress_policy.py::test_raw_outbound_http_calls_are_policy_gated
+2 failed in 0.53s

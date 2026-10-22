@@ -128,6 +128,7 @@ def _adapter_parity_stack() -> tuple[RetrievalAdapters, _AdapterParityEmbedding,
 class _AdapterParityLexicalRetriever:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
+        self.evidence_cid = ""
 
     def search(
         self,
@@ -149,7 +150,7 @@ class _AdapterParityLexicalRetriever:
         )
         return [
             Hit(
-                id="adapter-lexical-hit",
+                id=self.evidence_cid,
                 kind="evidence",
                 tenant_id=tenant_id,
                 branch=branch,
@@ -856,6 +857,9 @@ def test_parity_retrieve_with_configured_lexical_graph_adapters_enabled() -> Non
             _evidence(tenant, user, "Adapter graph relation is backed by visible source evidence.")
         )
         graph.source_evidence_cids = [adapter_source_cid]
+        lexical.evidence_cid = engine.append_evidence(
+            _evidence(tenant, user, "Configured lexical adapter returns the jade beacon memory.")
+        )
         engine.append_evidence(_evidence(tenant, user, "Native fallback evidence should not hide adapter retrieval."))
 
         direct_lexical = engine.lexical_search(

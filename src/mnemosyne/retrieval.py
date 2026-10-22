@@ -19,6 +19,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from threading import RLock
 from typing import Any, Callable, Mapping, Protocol, Sequence
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from mnemosyne.access_policy import apply_text_redactions, effective_max_sensitivity, may_read_item
 from mnemosyne.cid_lists import shared_or_copy
@@ -774,22 +775,42 @@ def window_support_query(window: TimeWindow) -> str:
     return " ".join(_RECALL_FRAMING.sub(" ", window.rest).split())
 
 
-def query_time_window(query: str, now: datetime) -> TimeWindow | None:
+def resolve_query_timezone(value: str | None) -> ZoneInfo | None:
+    """Validate an optional caller calendar zone without silently falling back."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("query_timezone must be a non-empty IANA timezone name")
+    try:
+        return ZoneInfo(value)
+    except (ValueError, ZoneInfoNotFoundError) as exc:
+        raise ValueError(
+            f"query_timezone {value!r} is unknown or its IANA timezone data is unavailable; "
+            "use a valid name such as America/New_York and ensure system timezone data "
+            "or the tzdata package is installed"
+        ) from exc
+
+
+def query_time_window(
+    query: str, now: datetime, *, query_timezone: str | None = None,
+) -> TimeWindow | None:
     """The time span a question names, in the asker's local time, or None.
 
     Deterministic, no model: today, yesterday, the day before yesterday, this morning /
     afternoon / evening, tonight, last night, (on / last) <weekday> with an optional part of
     the day, this week, last week, N days ago, and in <month>. ``now`` is the instant the
-    question is asked at; local time is this machine's time zone.
+    question is asked at. An explicit IANA ``query_timezone`` supplies the caller's
+    calendar (including DST); otherwise the machine's local timezone is preserved.
     """
     from datetime import timedelta
 
+    zone = resolve_query_timezone(query_timezone)
     text = " ".join(re.findall(r"[a-z0-9']+", query.lower()))
     # Only a question about what was said or done then: "I'm tired today" or "what's the
     # weather tonight" must still search all of memory.
     if not _PAST_CUE.search(text):
         return None
-    local = now.astimezone()
+    local = now.astimezone(zone)
     today = local.replace(hour=0, minute=0, second=0, microsecond=0)
     day: datetime | None = None
     found: re.Match[str] | None = None
@@ -806,7 +827,12 @@ def query_time_window(query: str, now: datetime) -> TimeWindow | None:
         day, label = today - timedelta(days=1), "yesterday"
     elif found := re.search(r"\b(\d+|" + "|".join(_SMALL_NUMBERS) + r") days? ago\b", text):
         count = found.group(1)
-        day = today - timedelta(days=int(count) if count.isdigit() else _SMALL_NUMBERS[count])
+        # User text can exceed both Python's integer conversion limit and the
+        # datetime range. Unsupported dates must not crash ordinary retrieval.
+        try:
+            day = today - timedelta(days=int(count) if count.isdigit() else _SMALL_NUMBERS[count])
+        except (ValueError, OverflowError):
+            return None
         label = found.group(0)
     elif found := re.search(r"\blast week\b", text):
         start = today - timedelta(days=today.weekday() + 7)
@@ -818,12 +844,17 @@ def query_time_window(query: str, now: datetime) -> TimeWindow | None:
         if offset == 0 and found.group(1) in {"last", "this past"}:
             offset = 7
         day, label = today - timedelta(days=offset), found.group(2)
-    elif found := re.search(r"\b(?:in|during|back in) (" + "|".join(_MONTHS) + r")\b", text):
+    elif found := re.search(r"\b(?:in|during|back in) (" + "|".join(_MONTHS) + r")(?: (\d+))?\b", text):
         month = _MONTHS.index(found.group(1)) + 1
-        year = local.year if month <= local.month else local.year - 1
-        start = today.replace(year=year, month=month, day=1)
-        end = start.replace(year=year + 1, month=1) if month == 12 else start.replace(month=month + 1)
-        return TimeWindow(start, end, found.group(1), rest_without(found))
+        explicit_year = found.group(2)
+        try:
+            year = int(explicit_year) if explicit_year else (local.year if month <= local.month else local.year - 1)
+            start = today.replace(year=year, month=month, day=1)
+            end = start.replace(year=year + 1, month=1) if month == 12 else start.replace(month=month + 1)
+        except (ValueError, OverflowError):
+            return None
+        label = f"{found.group(1)} {explicit_year}" if explicit_year else found.group(1)
+        return TimeWindow(start, end, label, rest_without(found))
     elif found := re.search(r"\b(today|this (?:morning|afternoon|evening)|tonight)\b", text):
         day, label = today, found.group(1)
     if day is None or found is None:
@@ -2311,6 +2342,203 @@ def classify_raptor_node(
     )
 
 
+def is_derived_evidence(item: Any) -> bool:
+    """Rows whose prose depends on source custody, including legacy proposals."""
+    metadata = _item_field(item, "metadata")
+    return str(_item_field(item, "source_type") or (metadata.get("source_type") if isinstance(metadata, Mapping) else "") or "") in {
+        "consolidation-summary", "provider-proposal",
+    } or (isinstance(metadata, Mapping) and any(
+        key in metadata for key in ("summary", "provider_proposal")
+    ))
+
+
+def derived_source_cids(item: Any) -> tuple[list[str], bool]:
+    """Extract every declared input without silently dropping malformed lineage.
+
+    The validity flag distinguishes a legitimate input-free proposal/raw source
+    from corrupt lineage. Summaries additionally require inputs at the read gate.
+    """
+    metadata = _item_field(item, "metadata")
+    if metadata is None:
+        return [], True
+    if not isinstance(metadata, Mapping):
+        return [], False
+    cids: list[str] = []
+    seen: set[str] = set()
+    containers = [metadata]
+    for key in ("summary", "provider_proposal"):
+        if key in metadata:
+            if not isinstance(metadata[key], Mapping):
+                return [], False
+            containers.append(metadata[key])
+    for container in containers:
+        for key in ("source_evidence_cid", "source_evidence_cids", "source_summary_cids", "child_summary_cids"):
+            if key not in container:
+                continue
+            values = [container[key]] if key == "source_evidence_cid" else container[key]
+            if not isinstance(values, (list, tuple)):
+                return [], False
+            for cid in values:
+                if not isinstance(cid, str) or not cid.strip() or cid != cid.strip():
+                    return [], False
+                if cid not in seen:
+                    seen.add(cid)
+                    cids.append(cid)
+    proposal = metadata.get("provider_proposal")
+    if isinstance(proposal, Mapping) and "input_cids" in proposal:
+        values = proposal["input_cids"]
+        if not isinstance(values, (list, tuple)):
+            return [], False
+        for cid in values:
+            if not isinstance(cid, str) or not cid.strip() or cid != cid.strip():
+                return [], False
+            if cid not in seen:
+                seen.add(cid)
+                cids.append(cid)
+    return cids, True
+
+
+def derived_evidence_readable(
+    ops: Any, item: Any, *, tenant_id: str, branch: str,
+    filt: Mapping[str, Any], policy: OperatingPolicy,
+) -> bool:
+    """Require full current read access to every transitive input of derived prose.
+
+    Raw ``get_evidence`` is intentional: calling an authorized read recursively
+    would hide cycles. The iterative walk accepts DAGs and fails closed on
+    missing, malformed, foreign, erased, retired, or partially redacted sources.
+    No results are cached across requests or policy/metadata mutations.
+    """
+    if not is_derived_evidence(item):
+        return True
+    lookup = getattr(ops, "get_evidence", None)
+    if not callable(lookup):
+        return False
+    active: set[str] = set()
+    complete: set[str] = set()
+    root = str(_item_field(item, "cid") or "__root__")
+    stack: list[tuple[str, Any, bool]] = [(root, item, False)]
+    while stack:
+        cid, row, leaving = stack.pop()
+        if leaving:
+            active.remove(cid)
+            complete.add(cid)
+            continue
+        if cid in complete:
+            continue
+        if cid in active or len(active) + len(complete) >= 10000:
+            return False
+        if row is None:
+            row = lookup(tenant_id, cid, branch)
+        if row is None or str(_item_field(row, "cid") or "") != cid:
+            return False
+        allowed, _ = classify_scoped_evidence(row, tenant_id=tenant_id, branch=branch, filt=filt, policy=policy)
+        if not allowed:
+            return False
+        decision = may_read_item(
+            item_tenant_id=tenant_id,
+            sensitivity=int(_item_field(row, "sensitivity") or 0),
+            access_policy=_item_field(row, "access_policy") or {},
+            context=filt, policy_max_sensitivity=policy.max_sensitivity,
+            status="active", erased=bool(_item_field(row, "erased")),
+        )
+        if not decision.allowed or decision.redacted:
+            return False
+        sources, valid = derived_source_cids(row)
+        if not valid:
+            return False
+        metadata = _item_field(row, "metadata") or {}
+        if metadata.get("derived_source_custody") == "incomplete":
+            return False
+        summary = str(_item_field(row, "source_type") or "") == "consolidation-summary" or "summary" in metadata
+        if (summary and not sources) or len(stack) + len(sources) > 20000:
+            return False
+        active.add(cid)
+        stack.append((cid, row, True))
+        stack.extend((source, None, False) for source in reversed(sources))
+    return True
+
+
+def trim_derived_source_cids(
+    metadata: Mapping[str, Any], affected_cids: set[str], *, source_type: str = "",
+) -> dict[str, Any]:
+    """Trim every lineage spelling, retaining a denial marker for unchanged prose."""
+    trimmed = copy.deepcopy(dict(metadata))
+    if is_derived_evidence({"source_type": source_type, "metadata": metadata}):
+        trimmed["derived_source_custody"] = "incomplete"
+    containers = [trimmed]
+    containers.extend(trimmed[key] for key in ("summary", "provider_proposal") if isinstance(trimmed.get(key), dict))
+    for container in containers:
+        if str(container.get("source_evidence_cid") or "") in affected_cids:
+            container.pop("source_evidence_cid", None)
+        for key in ("source_evidence_cids", "source_summary_cids", "child_summary_cids", "input_cids"):
+            if isinstance(container.get(key), (list, tuple)):
+                container[key] = [cid for cid in container[key] if cid not in affected_cids]
+    summary = trimmed.get("summary")
+    if isinstance(summary, dict) and isinstance(summary.get("source_evidence_cids"), list):
+        summary["source_count"] = len(summary["source_evidence_cids"])
+        summary.pop("source_fingerprint", None)
+    return trimmed
+
+
+def read_evidence_for_context(
+    ops: Any, tenant_id: str, cid: str, branch: str = "main",
+    *, access_context: Mapping[str, Any] | None = None,
+) -> Any:
+    """Return a detached, fully authorized row or None; raw reads stay internal.
+
+    Partial redaction cannot safely expose the rest of a raw Evidence object
+    (pointers, embeddings, metadata), so this full-row API requires full access.
+    """
+    context = dict(access_context or {})
+    if context.get("tenant_id", tenant_id) != tenant_id or context.get("branch", branch) != branch:
+        return None
+    context.update(tenant_id=tenant_id, branch=branch)
+    row = ops.get_evidence(tenant_id, cid, branch)
+    if row is None:
+        return None
+    allowed, _ = classify_scoped_evidence(row, tenant_id=tenant_id, branch=branch, filt=context, policy=ops.policy)
+    if not allowed or not derived_evidence_readable(ops, row, tenant_id=tenant_id, branch=branch, filt=context, policy=ops.policy):
+        return None
+    decision = may_read_item(
+        item_tenant_id=tenant_id, sensitivity=int(_item_field(row, "sensitivity") or 0),
+        access_policy=_item_field(row, "access_policy") or {}, context=context,
+        policy_max_sensitivity=ops.policy.max_sensitivity, status="active",
+    )
+    return None if not decision.allowed or decision.redacted else copy.deepcopy(row)
+
+
+def filter_derived_adapter_hits(ops: Any, hits: Sequence[Hit], filt: Mapping[str, Any]) -> list[Hit]:
+    """Adapters rank evidence IDs; only authoritative current rows supply content."""
+    result: list[Hit] = []
+    tenant_id = str(filt.get("tenant_id") or "")
+    branch = str(filt.get("branch") or "main")
+    for hit in hits:
+        if hit.kind != "evidence":
+            result.append(hit)
+            continue
+        row = read_evidence_for_context(ops, tenant_id, hit.id, branch, access_context=filt)
+        if row is None:
+            continue
+        metadata = copy.deepcopy(_item_field(row, "metadata") or {})
+        # Keep rank diagnostics only; provider-supplied text, privacy, confidence,
+        # provenance and reality classifications cannot override the ledger.
+        for key in ("backend", "score_scale", "score_family", "rank", "command_retrieval"):
+            if key in hit.metadata:
+                metadata[key] = copy.deepcopy(hit.metadata[key])
+        metadata.update(
+            source_type=row.source_type, actor=row.actor, modality=row.modality,
+            content_pointer=row.content_pointer,
+        )
+        result.append(Hit(
+            id=row.cid, kind="evidence", tenant_id=row.tenant_id, branch=row.branch,
+            text=row.content or row.content_pointer or f"{row.modality} evidence",
+            score=hit.score, channel=hit.channel, provenance=[row.cid],
+            trust_tier=row.trust_tier, sensitivity=row.sensitivity, metadata=metadata,
+        ))
+    return result
+
+
 def classify_scoped_evidence(
     item: Any,
     *,
@@ -2520,6 +2748,9 @@ def _raptor_node_hit(
         metadata = {}
     level = raptor_level_of(metadata)
     if not cid or level is None:
+        return None
+    if not derived_evidence_readable(ops, item, tenant_id=tenant_id, branch=branch, filt=filt, policy=policy):
+        denied_cids.add(cid)
         return None
     access_policy = _item_field(item, "access_policy") or {}
     if not isinstance(access_policy, Mapping):

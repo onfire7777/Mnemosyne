@@ -1,0 +1,89 @@
+........................................................................ [  7%]
+........................................................................ [ 14%]
+........................................................................ [ 22%]
+........................................................................ [ 29%]
+........................................................................ [ 36%]
+........................................................................ [ 44%]
+........................................................................ [ 51%]
+........................................................................ [ 58%]
+........................................................................ [ 66%]
+....FFF.F............................................................... [ 73%]
+........................................................................ [ 80%]
+........................................................................ [ 88%]
+........................................................................ [ 95%]
+...................................sssss.....                            [100%]
+=================================== FAILURES ===================================
+________ test_retrieval_result_cache_reuses_sanitized_defensive_copies _________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x108aa5940>
+
+    def test_retrieval_result_cache_reuses_sanitized_defensive_copies(monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MNEMOSYNE_RETRIEVAL_RESULT_CACHE_SIZE", "4")
+        engine = _ResultCacheProbeEngine()
+    
+        first = engine.retrieve("cacheable helios probe", TENANT)
+        second = engine.retrieve("cacheable helios probe", TENANT)
+    
+>       assert engine.channel_calls == 3
+E       assert 4 == 3
+E        +  where 4 = <test_engine_perf_lanes._ResultCacheProbeEngine object at 0x112ab9400>.channel_calls
+
+tests/test_engine_perf_lanes.py:555: AssertionError
+____________ test_retrieval_result_cache_misses_on_branch_boundary _____________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x112da7000>
+
+    def test_retrieval_result_cache_misses_on_branch_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MNEMOSYNE_RETRIEVAL_RESULT_CACHE_SIZE", "4")
+        engine = _ResultCacheProbeEngine()
+        query = "cacheable helios branch telemetry"
+    
+        first = engine.retrieve(query, TENANT, branch="main")
+        second = engine.retrieve(query, TENANT, branch="experiment")
+        third = engine.retrieve(query, TENANT, branch="main")
+    
+>       assert engine.channel_calls == 6
+E       assert 8 == 6
+E        +  where 8 = <test_engine_perf_lanes._ResultCacheProbeEngine object at 0x112d48cd0>.channel_calls
+
+tests/test_engine_perf_lanes.py:591: AssertionError
+___________ test_retrieval_result_cache_invalidates_on_store_version ___________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x112a73e70>
+
+    def test_retrieval_result_cache_invalidates_on_store_version(monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MNEMOSYNE_RETRIEVAL_RESULT_CACHE_SIZE", "4")
+        engine = _ResultCacheProbeEngine()
+    
+        engine.retrieve("cacheable helios probe", TENANT)
+        engine._store_version += 1  # noqa: SLF001 - regression-pins mutation-token invalidation.
+        engine.retrieve("cacheable helios probe", TENANT)
+    
+>       assert engine.channel_calls == 6
+E       assert 8 == 6
+E        +  where 8 = <test_engine_perf_lanes._ResultCacheProbeEngine object at 0x112d49090>.channel_calls
+
+tests/test_engine_perf_lanes.py:605: AssertionError
+_____ test_retrieval_result_cache_skips_store_when_read_mark_mutates_token _____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x112da73f0>
+
+    def test_retrieval_result_cache_skips_store_when_read_mark_mutates_token(
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("MNEMOSYNE_RETRIEVAL_RESULT_CACHE_SIZE", "4")
+        engine = _ReadMarkMutatingResultCacheProbeEngine()
+    
+        engine.retrieve("cacheable helios probe with read mark mutation", TENANT)
+        engine.retrieve("cacheable helios probe with read mark mutation", TENANT)
+    
+>       assert engine.channel_calls == 6
+E       assert 8 == 6
+E        +  where 8 = <test_engine_perf_lanes._ReadMarkMutatingResultCacheProbeEngine object at 0x112bb1be0>.channel_calls
+
+tests/test_engine_perf_lanes.py:642: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_engine_perf_lanes.py::test_retrieval_result_cache_reuses_sanitized_defensive_copies
+FAILED tests/test_engine_perf_lanes.py::test_retrieval_result_cache_misses_on_branch_boundary
+FAILED tests/test_engine_perf_lanes.py::test_retrieval_result_cache_invalidates_on_store_version
+FAILED tests/test_engine_perf_lanes.py::test_retrieval_result_cache_skips_store_when_read_mark_mutates_token

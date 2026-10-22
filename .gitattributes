@@ -1,2 +1,7 @@
 # LF everywhere, on every platform: hashed fixtures and frozen evidence must be the bytes git stores.
 * text=auto eol=lf
+
+# Preserve generated evidence bytes, including traceback whitespace.
+work/hindsight-comparison/*.log -whitespace linguist-generated=true
+work/hindsight-comparison/*.xml -whitespace linguist-generated=true
+work/hindsight-comparison/local-eval*/slo_report*.md -whitespace linguist-generated=true

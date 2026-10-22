@@ -5,7 +5,7 @@ question it records the 1-based position of each gold passage in the passage-gra
 (top 100) and, with --rerank N, after the chat model reorders the top N. A gold passage
 outside the top 100 is a retrieval miss; one inside it but below 5 is a ranking miss.
 
-    python -m eval.miss_analysis <dataset dir> --out report.json [--rerank 10]
+    python -m eval.miss_analysis <dataset dir> --index <passage-index.sqlite> --out report.json [--rerank 10]
 
 The dataset dir holds <name>.json and <name>_corpus.json in the HippoRAG layout. Evidence is
 appended exactly as the public adapter captures it, so the CIDs match a warm passage index.
@@ -49,7 +49,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("dataset_dir", type=Path)
     ap.add_argument("--out", type=Path, required=True)
-    ap.add_argument("--index", default=r"C:\Users\Onfire\MnemetricData\passage-index.sqlite")
+    ap.add_argument("--index", type=Path, required=True, help="Explicit Mnemosyne passage index for this research run")
     ap.add_argument("--chat", default="qwen3:4b-instruct")
     ap.add_argument("--chat-url", default="http://127.0.0.1:11434/v1/chat/completions")
     ap.add_argument("--embed", default="qwen3-embedding:8b")
