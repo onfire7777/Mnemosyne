@@ -406,6 +406,18 @@ The three-rule offline Semgrep scan was repeated on seven changed runtime files 
 matches and zero scan errors (`background-refresh-sast.json`). This remains a narrow pattern
 scan, supplemented by the independent race and authorization reviews described above.
 
+## Push follow-up: dependency advisory applicability
+
+The push exposed Dependabot alert #6 for `mnemosyne-memory`. Review confirmed a
+package-name collision: our lockfile references this local editable project, whereas
+[GHSA-xcw4-53cc-hv32](https://github.com/advisories/GHSA-xcw4-53cc-hv32) concerns the separate
+`mnemosyne-oss/mnemosyne` sync server. That module and its affected endpoints are absent
+here. The existing authentication suite passed **41 tests**, with one optional live-provider
+skip; algorithm rejection and signature-tampering checks passed. The alert was dismissed as
+inaccurate with supporting evidence, and GitHub's persisted dismissal was verified.
+[The case note](../work/hindsight-comparison/evidence/E-dependency-alert-6.md) contains
+the source mapping and test receipt. No dependency or package-version change was needed.
+
 ## Quality targets still unmet
 
 The local deterministic quick evaluation passed **8 of 11** checks and all five mandatory
