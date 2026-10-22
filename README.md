@@ -1,453 +1,277 @@
 # Mnemosyne
 
-### Building the world's best AI memory — open source, local first, evidence driven.
+### Persistent memory and reusable skills for AI agents
 
-Give AI agents a memory they can search, inspect, correct, and carry between sessions.
-Mnemosyne combines a content-addressed evidence ledger with hybrid retrieval,
-time-aware beliefs, provenance, and the Model Context Protocol (MCP).
-Run it locally with SQLite or use PostgreSQL for a server-backed deployment.
+Mnemosyne gives an assistant context it can carry into the next conversation: searchable evidence,
+time-aware beliefs, reusable procedures, and skills grounded in their original sources.
+It runs locally, exposes a Model Context Protocol (MCP) server, and supplies the memory runtime
+used by [BurnOS](https://github.com/onfire7777/BurnOS).
 
-**Our ambition is to build the best AI memory in the world.** This is a mission,
-not a verified comparative ranking. Judge the implementation by its code,
-reproducible evaluations, and documented limitations—not a leaderboard claim.
+**Version 1.7.0 · Python 3.12+ · Apache 2.0 · Local, SQLite and PostgreSQL backends**
 
-[Get started](#quick-start) · [Documentation](https://github.com/onfire7777/Mnemosyne/blob/main/docs/README.md) · [Evaluations](https://github.com/onfire7777/Mnemosyne/blob/main/eval/README.md) · [Report an issue](https://github.com/onfire7777/Mnemosyne/issues) · [Apache 2.0 license](https://github.com/onfire7777/Mnemosyne/blob/main/LICENSE)
+[Quick start](#quick-start) · [For Amazon hackathon judges](#for-amazon-hackathon-judges) ·
+[BurnSkills](#skills-and-books) · [Documentation](#documentation) ·
+[Evaluations](#evaluation-and-limitations) · [License](LICENSE)
 
-![Python](https://img.shields.io/badge/python-3.12%2B-blue)
-![License](https://img.shields.io/badge/license-Apache--2.0-green)
-![Status](https://img.shields.io/badge/status-active%20development-orange)
-![Backend](https://img.shields.io/badge/backends-local%20%7C%20sqlite%20%7C%20postgres-informational)
-![Protocol](https://img.shields.io/badge/MCP-stdio%20%7C%20HTTP%20%7C%20SDK-blueviolet)
+## What it does
 
-Mnemosyne (`mnemosyne-memory`, v1.7.0) develops the **Mnemosyne v2 build blueprint**:
-agent memory as a compiler, not just a vector store. Evidence is the source of
-truth; typed projections make it useful for retrieval and reasoning.
+| Capability | What it means for an assistant |
+| --- | --- |
+| Persistent evidence | Save context with content identifiers and provenance, then retrieve the supporting source. |
+| Time-aware memory | Correct or supersede beliefs while retaining their history; query earlier states. |
+| Hybrid retrieval | Combine lexical, vector and graph signals with configurable ranking and confidence. |
+| Branches | Try memory changes on a branch, then merge or discard them. |
+| Reusable skills | Import Agent Skills, Markdown and portable `.burnskill` files; expose active skills as MCP prompts and their files as resources. |
+| Books to BurnSkills | Turn PDF or EPUB text into a linked framework with source citations, coverage reports and audits. |
+| Working and prospective memory | Stage temporary context and evaluate scheduled intentions through authenticated interfaces. |
+| Controlled writes | Apply trust tiers, capabilities, sensitivity limits and regression gates to memory changes. |
 
-> **Development status:** core local capture and retrieval are usable, but not
-> every advanced capability or deployment profile is production-ready. Evaluation
-> results apply to their recorded commit, configuration, dataset, and hardware.
-> Windows has known platform-specific validation gaps. Do not store secrets or
-> sensitive production data without reviewing your deployment's access controls.
-> Removing evidence is not the same as deleting backups or unlearning trained
-> weights; parametric/provider erasure and complete source lineage remain open work.
+The core runtime starts without a model service. Model-based skill conversion, remote embeddings
+and other provider-backed features require their own configuration and may incur provider charges.
 
----
+## For Amazon hackathon judges
 
-## Source Blueprint
+This repository is the **memory and skill runtime** behind BurnOS. The complete Windows
+voice-assistant experience, its video, development history, feedback and setup instructions live
+in the [BurnOS submission guide](https://github.com/onfire7777/BurnOS/tree/main/docs/hackathon).
+Mnemosyne can also be run and inspected independently using the instructions below.
+Neither project is an official Amazon product or a verified deployment to an Alexa device.
 
-The implementation target is the Mnemosyne v2 blueprint. The repo keeps a
-self-contained documentation mirror under [`docs/blueprint/`](docs/blueprint/)
-so GitHub, CI, and future agents can audit implementation claims without
-depending on a local desktop path. That in-repo mirror is the authoritative
-source for this repository and depends on no external local path.
+The [Amazon Developer Hackathon rules](https://amazonappdev2026.devpost.com/rules) distinguish
+the Alexa+ self-hosted MCP route from the simulated-experience alternative. For the MCP route,
+use **Streamable HTTP with protocol 2025-11-25 or later**, not the legacy JSON-RPC HTTP or stdio
+transport. The [organizer FAQ](https://amazonappdev2026.devpost.com/details/faqs) explains the
+available demonstration paths. This README documents the server; it does not establish that a
+particular demo or Devpost entry satisfies every submission requirement.
 
----
+### Inspect the runtime
 
-## Why Mnemosyne
+1. Follow the quick start to capture fictional context and retrieve it from a fresh process.
+2. Start the SDK Streamable HTTP server below and connect an MCP client to `/mcp`.
+3. Initialize the connection, list tools and call `capture` and `search`. Tool schemas returned
+   by the server are the authority for arguments. Inspect prompts and resources for active skills.
+4. For the end-user workflow and its demonstrated scope, follow the BurnOS submission guide.
 
-- **Evidence is immutable; projections are rebuildable.** Beliefs are *compiled* from content-addressed evidence, so retraction, erasure, and re-derivation are first-class — not bolt-ons.
-- **Bitemporal by construction.** Supersession, contradiction handling, and `as-of` time travel are native; you can ask what the agent believed *at any point in the past*.
-- **Hybrid retrieval, not just cosine.** Postgres FTS + pgvector (HNSW, 1024-dim) + recursive graph/PPR, fused and reranked — with shell-free command adapters to swap in ParadeDB/BM25 or Apache AGE without touching engine code.
-- **Calibrated abstention.** Retrieval exposes confidence and can abstain when support is insufficient. Calibration results are evaluation-specific, not a guarantee against hallucination.
-- **Hard invariant rails.** Seven §31 rails (bounded supersession, corroborated deletion, bounded pruning, monotonic trust, external-only reward, retrieved-text-is-data, bounded cadence) are enforced and regression-tested.
-- **Capability-mediated, fail-closed writes.** Trust tiers, sensitivity ceilings, signed CLI/MCP sessions, OIDC→role mapping, and prompt-injection sanitization on every retrieved span.
-- **Branchable memory.** Fork a tenant's memory, experiment, then `merge` or `discard` — like git for beliefs.
-- **Working- and prospective-memory planes.** Beyond the retrospective projection store, an authenticated **working-memory plane** holds TTL-bounded seeds that promote into beliefs through the same regression gate or expire, and a **prospective-memory plane** schedules session-bound, recurring *intentions* that fire when evaluated.
-- **Auditable deletion primitives.** Signed deletion manifests and semantic verification support custody checks. End-to-end coverage depends on the configured surfaces; public forgetting does not yet establish parametric/provider unlearning.
-- **Three backends.** An in-memory engine, PostgreSQL, and per-tenant SQLite share contract and parity tests. Historical deployment evidence is documented in `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`; it is not blanket certification of every current configuration.
-- **Local-first.** Single core dependency (`cryptography`). No network, no Postgres, and no model server required to start.
+The local memory example needs no paid service or credentials. Live model conversion and
+conversation are separate features with provider requirements; access to the full submitted
+experience must be arranged in the submission's judge instructions.
 
----
+### Changes during the hackathon window
 
-## Architecture at a glance
+Mnemosyne predates the event. These dated commits document subsequent work, rather than
+presenting the entire repository as newly created:
 
-```mermaid
-flowchart TD
-    subgraph Clients
-      CLI["mneme CLI<br/>(119 subcommands)"]
-      MCP["mneme-mcp<br/>(60 MCP tools)"]
-    end
-    CLI --> SEC
-    MCP --> SEC
-    SEC["Security gate<br/>trust tiers · capabilities · sessions · sanitize"] --> ING["Ingestion<br/>content-addressed · signed provenance · media extract"]
-    ING --> EV[("Evidence ledger<br/>append-only · CID-keyed")]
-    EV --> CONS["Consolidation worker<br/>11-role ordered pipeline → promotion gate"]
-    CONS --> PROJ[("Typed projections<br/>assertions · entities · relations<br/>preferences · procedures · lessons")]
-    Q["Job queue<br/>queued→running→{complete|retry|dead}"] -.drives.-> CONS
-    PROJ --> RET["Hybrid retrieval<br/>FTS + pgvector + graph/PPR → rerank → calibrate"]
-    EV --> RET
-    RET --> ANS["Answer + confidence<br/>or calibrated abstention"]
-    SEC --> WORK[("Working-memory plane<br/>authenticated TTL seeds → promote | expire")]
-    SEC --> PROSP[("Prospective-memory plane<br/>schedule · evaluate · recur intentions")]
-    ENGINE{{"MemoryEngine contract"}} -.backs.-> EV
-    ENGINE -.implemented by.-> LOCAL["LocalMemoryEngine<br/>in-memory"]
-    ENGINE -.implemented by.-> PG["PostgresEngine<br/>RLS · HNSW · recursive PPR · as-of"]
-    ENGINE -.implemented by.-> SQLITE["SqliteEngine<br/>per-tenant WAL file · FTS5 · parity oracle"]
-```
+| Date | Update | Source |
+| --- | --- | --- |
+| October 16, 2026 | Framework-building refactor and audited skill effects | [v1.4.0](https://github.com/onfire7777/Mnemosyne/commit/2ae2a3aa), [v1.4.1](https://github.com/onfire7777/Mnemosyne/commit/edddea3e) |
+| October 17, 2026 | Immediate skill use, optional BurnSkill conversion, book imports, MCP prompts/resources and validation | [v1.5.0](https://github.com/onfire7777/Mnemosyne/commit/d81ae5a0) |
+| October 17, 2026 | MCP SDK 2.3 integration and protocol negotiation fixes | [v1.6.0](https://github.com/onfire7777/Mnemosyne/commit/111c0858), [v1.6.1](https://github.com/onfire7777/Mnemosyne/commit/a01528e4) |
+| October 17, 2026 | Public benchmark separation and recall-measurement validation fixes | [Repository split](https://github.com/onfire7777/Mnemosyne/commit/28f99b9a), [recall fixes](https://github.com/onfire7777/Mnemosyne/commit/a1953d89) |
+| October 18, 2026 | Whole-book mapping, parallel chapter builds, cached/resumable conversion and Codex model support | [v1.7.0](https://github.com/onfire7777/Mnemosyne/commit/ef0e51ca) |
 
----
+An Open Source mini-challenge entry must separately identify its contribution URL, repository,
+GitHub username and contribution explanation. Being public alone does not constitute that entry.
 
-## Quick Start
+## Quick start
 
-Install this project from its cloned repository. The public PyPI name
-`mnemosyne-memory` currently identifies a different project; see the
-[distribution identity note](docs/coordination/2026-10-04-distribution-name-collision.md).
+Install from this repository. The PyPI name `mnemosyne-memory` identifies another project;
+see the [distribution identity note](docs/coordination/2026-10-04-distribution-name-collision.md).
+
+Prerequisites: Python 3.12+, Git and [uv](https://docs.astral.sh/uv/getting-started/installation/).
 
 ```bash
-# Get the source
 git clone https://github.com/onfire7777/Mnemosyne.git
 cd Mnemosyne
-
-# 1. Environment
-python3 -m pip install --user pip==26.1.2 uv==0.11.16
-
-# 2. Sync the locked editable environment. Extras: mcp = MCP server,
-# postgres = PG backend.
 uv sync --locked --extra mcp --group dev
-# uv sync --locked --extra mcp --extra postgres --group dev
 
-# 3. Run the local test suite (no Postgres DSN → live-DB tests skip)
-uv run --locked python -m pytest
+# Use an explicit file so both processes share the same memory.
+uv run --locked mneme --store .mnemosyne/demo.json capture \
+  --tenant demo --user demo-user --source-type chat \
+  --content "Aurora is a beginner workshop lasting 90 minutes." --trust-tier 0
 
-# 4. Capture a memory and search it (in-memory backend, no services needed)
-uv run --locked mneme capture --tenant tenant-a --user user-a --source-type chat \
-  --content "The preferred database is Postgres." --trust-tier 0
-uv run --locked mneme search --tenant tenant-a --query "preferred database"
+uv run --locked mneme --store .mnemosyne/demo.json search \
+  --tenant demo --query "How long is the Aurora workshop?"
 ```
 
-After `uv sync`, the two console-script entry points are available through
-`uv run`:
+The search output should include the saved workshop context. This demonstrates persistent
+retrieval, not generated answer quality. Trust tier `0` denotes direct user/operator input;
+higher numbers mean less trusted input. Use fictional data for the demo.
 
-| Command    | Entry point                  | Purpose                |
-| ---------- | ---------------------------- | ---------------------- |
-| `mneme`    | `mnemosyne.cli:main`         | Memory CLI (119 subcommands) |
-| `mneme-mcp`| `mnemosyne.mcp_server:main`  | MCP server (60 tools)  |
-
-> The module form `uv run --locked python -m mnemosyne.cli …` is equivalent to `uv run --locked mneme …`.
-
-### PostgreSQL backend
-
-Requires the `postgres` extra (`uv sync --locked --extra mcp --extra postgres --group dev`). The Postgres engine adds tenant **row-level security**, SQL **FTS**, **pgvector** assertion/evidence search, recursive **graph/PPR**, `as-of` time travel, and durable queue leasing.
+For complete command arguments:
 
 ```bash
-docker compose up -d postgres
-export MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:mnemosyne-local-dev@127.0.0.1:54329/mnemosyne
-
-uv run --locked mneme --backend postgres search --tenant tenant-a --query "preferred database"
-
-# Durable queue + bounded consolidation worker
-mneme --backend postgres --queue-backend postgres \
-  --postgres-dsn "$MNEMOSYNE_POSTGRES_DSN" --queue-tenant tenant-a \
-  worker-run --max-cycles 20 --idle-exit-after 2 --fail-on-dead
-```
-
-> `--trust-tier 0` means **most trusted** (direct user / operator). Trust tiers are a monotonic 0–5 ladder with **0 = most trusted** and **5 = least trusted**; the default for new agent writes is `3` (`NORMAL`) — see [Core concepts](#core-concepts).
-
-### SQLite backend
-
-The SQLite backend is the local-first third engine: one WAL-backed database file
-per tenant, SQL-backed ledger/projection scans, durable branch/merge/discard
-copies, queue leases, and the shared retrieval pipeline with SQL predicate
-pushdown. It is a development/local backend only; production profiles remain
-Postgres-only.
-
-```bash
-uv run --locked mneme --backend sqlite --store .mnemosyne/sqlite search \
-  --tenant tenant-a --query "preferred database"
+uv run --locked mneme --help
+uv run --locked mneme-mcp --help
 ```
 
 ### MCP server
 
-```bash
-# Default: deterministic stdio JSON-RPC shim (no SDK dependency)
-mneme-mcp --store .mnemosyne/mcp-store.json
-
-# Official Python MCP SDK over stdio, or SDK StreamableHTTP at /mcp (+ /healthz)
-mneme-mcp --store .mnemosyne/mcp-store.json --sdk
-mneme-mcp --store .mnemosyne/mcp-store.json --sdk-streamable-http --http-host 127.0.0.1 --http-port 8765
-
-# Hosted HTTP JSON-RPC at /mcp (+ /healthz, + POST /session/exchange), TLS + bearer + signed session
-mneme-mcp --http --http-host 127.0.0.1 --http-port 8765 \
-  --auth-token "$MNEMOSYNE_MCP_TOKEN" --require-session
-```
-
-### Authenticated memory planes
-
-The **working-memory** and **prospective-memory** planes fail closed: every
-`working-*` and `intention-*` subcommand exits with `requires --session-token`
-unless a signed Mnemosyne session is supplied (`--session-token` /
-`MNEMOSYNE_SESSION_TOKEN`), minted from a verified OIDC/JWT token by
-`session-exchange`.
+Recommended for Streamable HTTP clients and evaluation of the Alexa+ MCP route:
 
 ```bash
-# Mint a bounded signed session from a JWKS-validated IdP token
-export MNEMOSYNE_SESSION_TOKEN=$(uv run --locked mneme session-exchange \
-  --idp-token "$IDP_JWT" --idp-jwks-file jwks.json \
-  --idp-issuer https://idp.example --idp-audience mnemosyne)
-
-# Working memory: an authenticated, TTL-bounded seed that can later promote or expire
-uv run --locked mneme working-seed --tenant tenant-a --session-id sess-1 \
-  --user user-a --agent-id agent-a --task-id task-1 --branch main \
-  --kind scratch --content "draft: ship the release notes" \
-  --evidence-cid "$CID" --ttl-seconds 3600 \
-  --created-at 2026-07-20T12:00:00Z --source-trust-tier 0
-
-# Prospective memory: schedule a session-bound intention (optionally recurring)
-uv run --locked mneme intention-schedule --tenant tenant-a \
-  --user user-a --agent agent-a --trigger-type exact_time \
-  --trigger-expression '{"at": "2026-07-21T09:00:00Z"}' \
-  --action '{"ref": "release-reminder"}' --due-at 2026-07-21T09:00:00Z \
-  --evidence-cid "$CID" \
-  --recurrence-policy '{"type": "interval", "interval_seconds": 600, "max_occurrences": 4}'
-
-# Fire due intentions from an authenticated scheduler context
-uv run --locked mneme intention-evaluate --tenant tenant-a \
-  --evaluated-at 2026-07-21T09:00:00Z --trigger-context '{}' --operating-point '{}'
+uv run --locked mneme-mcp --store .mnemosyne/mcp-store.json \
+  --sdk-streamable-http --http-host 127.0.0.1 --http-port 8765
 ```
 
-> `working-seed` seeds must stay within the write trust ceiling
-> (`max_trust_tier`, default `4`); under a signed session the effective tier is
-> taken from the session identity, so `--source-trust-tier` is not the operative
-> control. `intention-evaluate` requires the `prospective:evaluate` capability; token
-> verification also needs the session secret (`MNEMOSYNE_SESSION_SECRET` /
-> `--session-secret-command`). The public benchmark harness drives this seam
-> end-to-end through a signed-session evaluator in Mnemetric-harness (`eval/public/action_cli.py`)
-> that mints its own session tokens and calls the production `intention-*`
-> subprocesses.
+Connect the client to `http://127.0.0.1:8765/mcp`; health is at `/healthz`.
+Use protocol `2025-11-25` in the client's initialize request for the hackathon MCP route.
+The SDK transport is distinct from the legacy `--http` JSON-RPC endpoint.
 
----
+For a local stdio client:
 
-## Core concepts
+```bash
+uv run --locked mneme-mcp --store .mnemosyne/mcp-store.json --sdk
+```
 
-| Concept | What it is |
+A deterministic stdio shim is also available without `--sdk`. Authentication, signed sessions,
+TLS and mTLS options are described by server help and the
+[MCP reference](https://github.com/onfire7777/Mnemosyne/wiki/MCP-Server-and-Tools).
+The loopback command above is a local demo configuration; configure access controls before
+exposing a server to other machines.
+
+### Storage choices
+
+| Backend | Use |
 | --- | --- |
-| **Evidence** | Append-only, content-addressed (`content_cid` = SHA-256 over canonical JSON) record of everything ingested. Immutable; the single source of truth. |
-| **Assertion / projection** | Typed beliefs (`subject–predicate–object`) *derived* from evidence and rebuildable from it. Projections also cover entities, relations, preferences, procedures, and lessons. |
-| **Bitemporal** | Every belief carries valid-time (`valid_from`/`valid_to`) and transaction-time, enabling supersession and `as-of` queries. |
-| **Hybrid retrieval** | Lexical (FTS/BM25) + dense (pgvector HNSW, 1024-dim in production; a BLAKE2b hashing embedder, dims=256, is the offline fallback) + graph (recursive PPR / Apache AGE), fused and reranked. |
-| **Calibrated abstention** | Conformal calibration per tenant/memory-type yields a confidence the system can *abstain* on rather than answer (measured ECE 0.0063). |
-| **Trust tiers** | `TrustTier` (IntEnum), a monotonic **0–5 ladder, lower = more trusted**: `0` = direct-user / user-authored / operator, `1` verified, `2` authenticated, `3` normal (default), `4` low, `5` untrusted-external. A write may never raise its own trust (§31 Rail 4); belief and branch writes require ≥ `3` (`NORMAL`). |
-| **Sensitivity** | Per-row `SMALLINT` (default `0`); the read path enforces role ceilings first (`reader` S1, `agent` S2, `consolidator` S3, `operator` raw S2+ only with break-glass), then applies `policy.max_sensitivity` / request ceilings as further narrowing. |
-| **Fidelity tiers** | Lifecycle demotion order: `VERBATIM` → `EXTRACTIVE_SUMMARY` → `ABSTRACTIVE_GIST` → `STATISTICAL_TRACE`. Demotion is gated by a gist-risk abstention hook. |
-| **Consolidation** | Warm-loop worker that runs an ordered 11-role pass pipeline through the promotion gate (see below). |
-| **Promotion gate** | Protected regression cases must pass before any candidate belief is promoted; failures roll back on a branch. |
-| **Branchable memory** | Fork (`branch`), experiment, then `merge` or `discard` — bitemporal, tenant-isolated. |
-| **Working memory** | An authenticated, TTL-bounded staging plane (`working-seed` / `working-query` / `working-promote` / `working-expire`). Seeds require a signed session and must stay within the write trust ceiling (`max_trust_tier`, default `4`); promotion runs through the regression gate, and unpromoted seeds expire. |
-| **Prospective memory** | Session-bound *intentions* (`intention-schedule` / `-update` / `-cancel` / `-evaluate` / `-list`) that fire when due. Trigger types include `exact_time`, `time_window`, `event`, `condition`, and `dependency_completion`; an optional `recurrence_policy` reschedules future firings under a monotonic watermark. All intention writes require a signed session. |
+| Local | File-backed CLI/MCP state and an in-memory engine; simple development and demonstrations. |
+| SQLite | Per-tenant WAL databases, shared retrieval pipeline and durable local operations. |
+| PostgreSQL | Server deployments with row-level security, full-text search, pgvector and durable queues. |
 
-### Roles (OIDC → Mnemosyne)
+```bash
+# Local SQLite
+uv run --locked mneme --backend sqlite --store .mnemosyne/sqlite search \
+  --tenant demo --query "workshop"
 
-`session-exchange` validates an external OIDC/JWT token against a configured JWKS and mints a bounded signed session. An authz policy maps verified IdP claims to exactly one of the four write roles; unknown roles (e.g. `writer`) are rejected and the verifier never falls back to raw IdP claims.
-
-| Role | Capability |
-| --- | --- |
-| `reader` | Read-only retrieval within its sensitivity ceiling. |
-| `agent` | Capture + read; standard agent write authority. |
-| `consolidator` | Run consolidation / promotion-gate writes. |
-| `operator` | Operator-grade authority (e.g. parametric trainer, hard-delete corroboration). |
-
-### Consolidation pipeline (`DEFAULT_CONSOLIDATION_PASSES`)
-
-Eleven roles run **in this order**, bounded by the mutation-rail budget and the §31 cadence rail:
-
-`replayer` → `extractor` → `resolver` → `belief_reviser` → `skill_inducer` → `lesson_distiller` → `summarizer` → `forgetter` → `embedder` → `promotion_gate` → `user_model_updater`
-
-`extractor` and `resolver` run **once** over the prioritized evidence set to produce candidates; `belief_reviser` then gates **each candidate individually** through `run_job()` and the promotion gate. Default role providers: `replayer` = deterministic priority replay, `belief_reviser` = promotion gate, `forgetter` = fidelity lifecycle policy, `embedder` = deterministic hashing embedding, `promotion_gate` = protected regression gate, `user_model_updater` = latent user-model updater. The `extractor`, `resolver`, `summarizer`, `lesson_distiller`, and `skill_inducer` roles use pluggable strategy providers (deterministic by default, or shell-free command/HTTP adapters).
-
-> Tenant-scoped one-shot: `mneme --queue-tenant tenant-a consolidate-once` (the `consolidate-once` subcommand takes no arguments; pass the tenant via the global `--queue-tenant`).
-
-The evaluation-only `capture-batch --consolidate` option is available on the
-atomic local backend and defaults off. It consolidates every captured CID before
-publishing the staged store, requires at least one regression gate case, and
-leaves the original store unchanged if capture, consolidation, or promotion
-fails. The evaluation driver installs a corpus-derived protected smoke case
-without reading benchmark labels; direct CLI callers must install their own:
-
-```sh
-uv run --locked mneme --store /tmp/mneme-eval.json gate-case-add \
-  --signature "evaluation consolidation smoke" \
-  --query "Mara owns Helios" --expected-substring "Mara owns Helios" \
-  --origin curated --protected
-uv run --locked mneme --store /tmp/mneme-eval.json capture-batch \
-  --input-jsonl /tmp/corpus.jsonl --consolidate
+# PostgreSQL development service
+uv sync --locked --extra mcp --extra postgres --group dev
+docker compose up -d postgres
+export MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:mnemosyne-local-dev@127.0.0.1:54329/mnemosyne
+uv run --locked mneme --backend postgres search --tenant demo --query "workshop"
 ```
 
-### Invariant rails (§31)
+Each example selects its own storage backend; data is not automatically copied between them.
+The PostgreSQL credentials above belong to the development compose configuration.
 
-All seven are enforced and regression-tested:
+## Skills and books
 
-| Rail | Invariant |
-| --- | --- |
-| R1 | `max_supersession_rate` ≤ 0.05 per pass |
-| R2 | ≥ 2 corroborations required to delete (`min_corroboration_for_delete`) |
-| R3 | `max_prune_fraction_per_pass` ≤ 0.02 |
-| R4 | Monotonic trust tiers (a write may not raise its own trust) |
-| R5 | Reward is external-only |
-| R6 | Retrieved text is **data, not instructions** (`security.sanitize_retrieved_text`) |
-| R7 | Consolidation cadence bounded to `[5 steps, 24h]` |
+Import an Agent Skills folder, Markdown source or `.burnskill` file through `framework-import`.
+Ordinary skills can be used immediately; framework conversion is an explicit operation.
+PDF and EPUB imports create a BurnSkill in the background. Scanned PDFs need extractable text
+or OCR before import.
 
-### Background job kinds
-
-The runtime queue moves jobs through a non-linear lifecycle — `queued → running → {complete | retry | dead}`, where `retry` re-enters the queue until `max_attempts` is reached (then `dead`). Seven job kinds run on it:
-
-`consolidate_evidence` · `calibrate` · `lifecycle_sweep` · `eval_suite` · `observability_snapshot` · `projection_recompute` · `media_extract`
-
-### Providers (shell-free command adapters)
-
-All command adapters are shell-free: JSON on stdin, JSON on stdout, **no secret-bearing argv**. Core provider boundaries keep deterministic local defaults so nothing external is required to start; model-backed providers are explicit configuration choices, not silent runtime fallbacks.
-
-| Boundary | Default / fallback | Pluggable adapter |
-| --- | --- | --- |
-| Embedding | `HashingEmbeddingProvider` (BLAKE2b, dims=256) | `HttpEmbeddingProvider`, `CommandMediaEmbeddingProvider` |
-| Reranker | `LocalSimilarityReranker` | `HttpReranker` |
-| Lexical | native Postgres FTS | `CommandLexicalRetriever` (e.g. ParadeDB/BM25) |
-| Graph | native recursive PPR | `CommandGraphRetriever` (e.g. Apache AGE) |
-| Object key / KMS | local AES-GCM keystore | `CommandKeyManager` → Vault transit |
-| Provenance | `SignedProvenanceVerifier` | `C2paToolVerifier` (C2PA) |
-
-`rust/mneme-providers/` is the local provider sidecar for the compact
-`/embed`, `/rerank`, and `/health` HTTP contracts. Consolidation proposal roles
-can use shell-free command adapters with prompt boundaries, disclosure-axis
-gates, replayable low-trust `provider-proposal` records, and deterministic
-fallbacks when explicitly configured.
-
-### MCP transports
-
-| Transport | Flag | Endpoint(s) | Notes |
-| --- | --- | --- | --- |
-| Deterministic stdio JSON-RPC shim | *(default)* | stdio | No SDK dependency |
-| Official SDK stdio | `--sdk` | stdio | Official Python MCP SDK |
-| Official SDK StreamableHTTP | `--sdk-streamable-http` | `/mcp` + `/healthz` | Stateless unless `--sdk-streamable-stateful` |
-| Hosted HTTP JSON-RPC | `--http` | `/mcp` + `/healthz` + `POST /session/exchange` | Reuses stdio's tool schema + enforcement |
-| Legacy SSE | *(validated via `mcp-sse-soak`)* | SSE stream + `endpoint` event | Legacy compatibility |
-
-Auth: static bearer (`Authorization` header / `--auth-token` / `MNEMOSYNE_MCP_TOKEN`) and/or a signed Mnemosyne session (`X-Mnemosyne-Session-Token`). `--require-session` enforces signed sessions; TLS via `--tls-cert-file`/`--tls-key-file`, with optional mTLS via `--tls-client-ca-file --tls-require-client-cert`.
-
----
-
-## Documentation
-
-Full reference lives in the [project wiki](https://github.com/onfire7777/Mnemosyne/wiki):
-
-- [Architecture Overview](https://github.com/onfire7777/Mnemosyne/wiki/Architecture-Overview) — component layers, write/read flows, deployment topology
-- [Getting Started](https://github.com/onfire7777/Mnemosyne/wiki/Getting-Started) — install, first capture, Postgres setup
-- [CLI Reference](https://github.com/onfire7777/Mnemosyne/wiki/CLI-Reference) — all 119 subcommands incl. the memory-plane and operations/preflight suites
-- [MCP Server and Tools](https://github.com/onfire7777/Mnemosyne/wiki/MCP-Server-and-Tools) — transports, auth, all 60 tools
-- [Data Model](https://github.com/onfire7777/Mnemosyne/wiki/Data-Model) — the 28-table schema, RLS, and bitemporal design
-- [Security, Privacy and Provenance](https://github.com/onfire7777/Mnemosyne/wiki/Security-Privacy-and-Provenance) — trust tiers, capabilities, residency, C2PA
-- [Operations and Production Preflight](https://github.com/onfire7777/Mnemosyne/wiki/Operations-and-Production-Preflight) — `provider-check`, `deployment-soak`, `release-audit`, the `*-ops-check` family
-- Whole-memory common ABI (Mnemetric-harness, `eval/public/README.md`) — development-only, non-ranking `wmbs/0.1-draft` schema and reference validator
-
-### MCP tools (illustrative)
-
-`mcp_tools.py` exposes **60** tools. A representative slice: `capture`, `ingest`, `assert_fact`, `search`, `deep_search`, `get`, `explain`, `correct`, `supersede`, `forget`, `export`, `branch` / `merge` / `discard`, `graph_neighbors` / `graph_as_of`, `trajectory_record`, `lesson_induce` / `procedure_promote`, `outcome_evaluate`, `parametric_propose`, the `profile_*` user-model tools, the working-memory tools (`working_seed` / `working_query` / `working_promote` / `working_expire`), and the prospective-memory tools (`schedule_intention` / `update_intention` / `cancel_intention` / `evaluate_intentions` / `list_intentions`).
-
-### Data model (28 tables)
-
-`sql/schema.sql` defines the canonical Postgres schema (extensions `pgcrypto` + `vector`). Vectors are `VECTOR(1024)` with HNSW indexes (`vector_cosine_ops`) on `evidence.embedding` and `assertions.embedding`; every tenant-scoped table enforces RLS via `mnemosyne_current_tenant()`. The table set is pinned against drift by `config/drift-baseline.toml` (`[schema].required_tables`) and `tests/test_config_drift.py`.
-
-`tenants` · `branches` · `evidence` · `assertions` · `justifications` · `entities` · `entity_aliases` · `relations` · `graph_ppr_cache` · `contradictions` · `procedures` · `lessons` · `preferences` · `user_latent` · `trajectories` · `self_model` · `eval_cases` · `resources` · `merges` · `deletion_log` · `conformal_calibration` · `audit_log` · `runtime_jobs` · `runtime_state` · `working_memory` · `intentions` · `intention_firing_receipts` · `intention_firing_receipts_v2`
-
----
-
-## Project layout
-
-```
-Mnemosyne/
-├── src/mnemosyne/
-│   ├── engine.py            # MemoryEngine contract + LocalMemoryEngine; route() + RoutePlan
-│   ├── postgres_engine.py   # PostgresEngine: RLS, FTS, pgvector, recursive PPR, as-of
-│   ├── sqlite_engine.py     # SqliteEngine: per-tenant WAL file, shared retrieval pipeline
-│   ├── mcp_tools.py         # 60 MCP tool definitions (the TOOL_SPEC facade)
-│   ├── mcp_server.py        # stdio shim · SDK stdio · SDK StreamableHTTP · hosted HTTP
-│   ├── cli.py               # 119-subcommand CLI (mneme)
-│   ├── ingestion.py         # content-addressed ingest, signed provenance, media extract
-│   ├── retrieval.py         # embedding/reranker/lexical/graph adapter classes + fallbacks
-│   ├── consolidation.py     # 11-role warm-loop pipeline → promotion gate
-│   ├── gate.py              # promotion gate: protected regression cases, branch rollback
-│   ├── guard.py             # §25 anti-degradation guard (no_degradation_guard)
-│   ├── lifecycle.py         # fidelity tiers + gist-risk abstention
-│   ├── security.py          # trust tiers, capabilities, signed sessions, sanitization
-│   ├── deletion.py / deletion_manifest.py  # resumable erasure ledger + fail-closed signed deletion manifest
-│   ├── self_optimization.py # shadow-first policy variants under §31 rails
-│   ├── queue.py / jobs.py / media.py   # durable queue + 7 job kinds
-│   └── providers/           # ProviderRegistry + adapter plumbing (adapter classes live in retrieval.py)
-├── sql/schema.sql           # canonical 28-table PostgreSQL schema
-├── tests/                   # invariant, parity, contract, and completion suites
-├── eval/                    # §33 harness and Mnemosyne's own white-box benches; the public benchmarks are in Mnemetric-harness
-├── infra/                   # Keycloak (OIDC), Vault, C2PA, provider compose stack
-├── rust/mneme-providers/    # Provider sidecar for compact embed/rerank contracts
-├── rust/mnemosyne-native/   # Optional PyO3 native retrieval kernels
-├── services/embedding/      # standalone embedding provider service
-├── services/answering-ort/  # Rust ONNX (ort) compact-answering sidecar (W5); bounded local-only skeleton, fails closed with runtime_unavailable
-├── docs/ROADMAP-TO-100.md   # sequenced path to 1:1 blueprint parity
-└── .github/workflows/       # required CI plus bounded public regression
+```bash
+uv run --locked mneme framework-import --help
+uv run --locked mneme skill-make-burnskill --help
+uv run --locked mneme skill-get --help
+uv run --locked mneme skill-validate --path ./example.burnskill
 ```
 
----
+In v1.7.0, long books are mapped as a whole and their content chapters are processed in parallel.
+Shared names connect definitions and steps across chapters. Reference matter is retained;
+coverage records represented, duplicate, reference and unresolved passages. Auditors check each
+completed chapter pass and the combined framework receives logic and mechanical checks.
+Model answers are cached for retries and resumable work. When a memory destination is configured,
+book passages become available to the memory integration before conversion finishes.
 
-## Status
+Conversion supports OpenRouter and `codex:<model>` through an installed, authenticated Codex CLI.
+Provider access, subscription limits and costs still apply. Original files remain packed with the
+skill; importing a file does not execute its scripts. Read the
+[BurnSkill v2 format and behavior](docs/BURNSKILL.md) for details.
 
-Exact 1:1 blueprint parity's Tier-B production-evidence rows are now CLOSED (2026-07-07): a genuine operator-run production capture yields a fully green 29-command `deployment-soak`, `release-audit` `ok:true`, and offline `production-evidence-verify` `ok:true` (bundle fingerprint `sha256:6dc117d6bb95e7a683915d432b2d2b21997133e9bfbd53624427a7317eeb2271`), flipping all 10 strict-parity audit rows Partial→Done. The headline guarantees remain proven: as of 2026-06-25, **all six headline §16 SLOs PASS** on the real retrieval/calibration paths:
+## How memory fits together
 
-| SLO | Measured | Target | Result |
-| --- | --- | --- | --- |
-| recall@k | 0.977 | ≥ 0.80 | ✅ |
-| nDCG@k | 0.983 | ≥ 0.80 | ✅ |
-| G2 token-efficiency lift | +0.208 @ 7% tokens | ≥ +0.15 | ✅ |
-| Poison-block rate | 1.0 | ≥ 0.95 | ✅ |
-| Calibration error (ECE) | 0.0063 | ≤ 0.05 | ✅ |
-| Fast-path P95 (warm + serial) | 149.5 ms | ≤ 300–400 ms | ✅ |
+```mermaid
+flowchart LR
+    Client["Assistant / CLI / MCP client"] --> Gate["Identity, capabilities and trust"]
+    Gate --> Evidence["Evidence ledger"]
+    Evidence --> Compile["Consolidation and promotion gate"]
+    Compile --> Beliefs["Beliefs, procedures and lessons"]
+    Evidence --> Search["Hybrid retrieval"]
+    Beliefs --> Search
+    Search --> Client
+    Books["Skills and books"] --> Framework["Source-linked BurnSkills"]
+    Framework --> Client
+    Framework --> Evidence
+```
 
-> SLO evidence is the Wave-5 definitive run summarized in [`docs/ROADMAP-TO-100.md`](docs/ROADMAP-TO-100.md) and `eval/calibration/report.json` (`ece.policy_threshold.meets_target: true`). Hard-QA multi-hop answer-synthesis (recall/nDCG 0.625/0.594) is a known, non-headline gap, tracked separately.
+Evidence is content-addressed. Derived projections carry provenance and can be corrected,
+superseded or rebuilt. Consolidation uses an ordered pipeline with regression gates before
+promotion. Branches isolate experiments; temporal queries distinguish when information was valid
+from when it entered the system.
 
-The local implementation surface has moved past the original two-engine
-posture: the native retrieval kernels, per-tenant SQLite engine, provider
-sidecar, and proposal-role consolidation ladder are locally gate-proven on the
-active Phase 3 branch. The full suite passes on the Phase 3 exit branch —
-native, with `MNEMOSYNE_PURE=1`, and DSN-armed parity plus `postgres_live` —
-with the exact pass/skip counts produced by CI, alongside clean Rust/ruff/diff
-checks. These are local engineering gates, not production sign-off.
+Working-memory seeds and prospective intentions require signed sessions. Scheduling an intention
+does not itself run an external action: an authenticated evaluator processes due intentions.
+See the [architecture overview](docs/ARCHITECTURE-OVERVIEW.md) and
+[blueprint](docs/blueprint/README.md) for the detailed contracts and implementation targets.
 
-Future Tier-B recaptures must use the same operator-owned production evidence
-path: real IdP/Keycloak, Vault/KMS, ParadeDB/Apache AGE, hosted
-embedding/reranker/trainer endpoints, C2PA trust roots, and hosted
-MCP/dashboard surfaces captured via `deployment-soak`, `release-audit`, and
-offline `production-evidence-verify`. Local code, tests, or regenerated docs
-must not replace that custody path.
+## Evaluation and limitations
 
-Controlling artifacts: [`docs/ROADMAP-TO-100.md`](docs/ROADMAP-TO-100.md) (blended figure + sequenced path), `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` (status), and `infra/PRODUCTION-EVIDENCE.md` (capture/offline-custody handoff).
+Mnemosyne owns the runtime, its contract tests and internal engineering evaluations.
+Public benchmarks, scoring, leaderboard material and their evidence belong to
+[Mnemetric](https://github.com/onfire7777/Mnemetric). See the
+[ownership note](docs/benchmark/MNEMETRIC-REPOSITORY.md) and [internal evaluation guide](eval/README.md).
 
----
+Historical scores apply only to their recorded revision, dataset, providers, hardware and
+configuration. They are not a current comparative ranking or proof of general answer quality.
+Recall measurement was hardened in October 2026; interpret older receipts in their original context.
+No new benchmark result is claimed by this README update.
 
-## Testing & CI
+- Core capture and retrieval are usable; advanced deployment profiles have separate validation needs.
+- Default deterministic embeddings support offline operation but are not equivalent to a configured semantic model.
+- Skill audits and coverage reports can identify unresolved content; they do not guarantee correctness.
+- Windows-specific tests exist, but they do not certify every provider, installation or deployment path.
+- Deletion primitives do not establish removal from external backups or unlearning from trained models.
 
-- `.github/workflows/ci.yml` installs the committed `uv.lock` environment and runs **ruff** lint, the full **pytest** suite (configuration / invariant-rail drift checks included), and a **Postgres integration** job on pushes to `main` and pull requests.
-- `.github/workflows/public-regression.yml` runs the fixed public LongMemEval, HippoRAG, MemoryAgentBench, and BEAM contract-test allowlist every Monday at 07:23 UTC and on manual dispatch from `main`. It is a bounded development regression only: it does not execute official or held-out evaluation, produce evidence or leaderboard receipts, or authorize publication.
-- With `MNEMOSYNE_POSTGRES_DSN` **unset**, the suite runs the local deterministic tests and skips live-DB integration tests — this no-DSN run is one required CI gate and must stay green.
-- With Docker-compose Postgres running and the DSN set, the local full suite additionally runs live coverage in `tests/test_postgres_engine_live.py` and `tests/test_shared_engine_contract.py`, covering tenant RLS, FTS, pgvector search, recursive graph/PPR, bitemporal supersession, branch/merge/discard, tombstone + hard-delete forget modes, command-backed KMS, and **local↔Postgres parity** of the engine contract. CI runs the dedicated `tests/test_postgres_engine_live.py` Postgres job as the always-on live-DB gate.
+## Development and verification
 
 ```bash
 uv sync --locked --extra mcp --group dev
-uv run --locked python -m pytest          # local gate (live-DB tests skip without a DSN)
+uv run --locked ruff check .
+uv run --locked python -m pytest
 ```
 
----
+Without a PostgreSQL DSN, live database tests skip. The current
+[CI workflow](.github/workflows/ci.yml) includes lint, local tests, drift checks,
+native parity when a Rust toolchain is available, Windows file-lock checks and PostgreSQL coverage.
+Consult the workflow for the precise jobs and environment. Passing local tests does not replace
+a runtime demonstration or production deployment evidence.
 
-## Security
+## Project layout
 
-- **Capability-mediated, fail-closed writes** gated by trust tiers and sensitivity ceilings.
-- **Signed sessions** for CLI (`--session-token`) and MCP (`X-Mnemosyne-Session-Token`), minted from OIDC tokens via `session-exchange`; secret custody through shell-free `--session-secret-command` adapters.
-- **Retrieved text is data, not instructions** — every retrieved span is sanitized (§31 Rail 6) to defend against prompt injection. The poison corpus under `tests/completion/security/` is fixture data, never executable.
-- **Tenant isolation** via Postgres RLS keyed on `mnemosyne_current_tenant()` on every tenant-scoped table.
-- **Crypto-shred erasure**: encrypted object storage and KMS/Vault-backed key-custody adapters support legal hard-delete once production custody is configured and evidenced.
-- **Signed deletion manifest**: hard-delete and erasure run through a resumable, receipted ledger (`deletion.py`) and a fail-closed semantic verifier (`deletion_manifest.py`, schema `mnemosyne.deletion_manifest.v1`) that signs the manifest and refuses to report completion unless every declared custody surface is verified swept.
-- **Provenance**: C2PA verification with scoped trust roots; manifests that match no trust rule are quarantined, not trusted.
+| Path | Responsibility |
+| --- | --- |
+| `src/mnemosyne/engine.py` | Memory engine contract and local implementation |
+| `src/mnemosyne/sqlite_engine.py`, `postgres_engine.py` | Durable backend implementations |
+| `src/mnemosyne/cli.py` | `mneme` command-line interface |
+| `src/mnemosyne/mcp_server.py`, `mcp_tools.py` | MCP transports and tool surface |
+| `src/mnemosyne/skills.py`, `frameworks.py` | Skills, book import, framework construction and audits |
+| `src/mnemosyne/passages.py` | Passage retrieval support |
+| `src/mnemosyne/consolidation.py`, `gate.py` | Memory consolidation and promotion controls |
+| `sql/` | PostgreSQL schema |
+| `tests/` | Runtime tests and regression coverage |
+| `eval/` | Internal evaluations and white-box research |
+| `rust/`, `services/`, `infra/` | Optional native components, providers and deployment support |
+| `docs/blueprint/` | In-repository design and contract references |
 
-Please report vulnerabilities privately to the maintainers rather than opening a public issue.
+## Documentation
 
----
+- [Documentation index](docs/README.md)
+- [Architecture overview](docs/ARCHITECTURE-OVERVIEW.md)
+- [BurnSkill standard](docs/BURNSKILL.md)
+- [CLI reference](https://github.com/onfire7777/Mnemosyne/wiki/CLI-Reference)
+- [MCP reference](https://github.com/onfire7777/Mnemosyne/wiki/MCP-Server-and-Tools)
+- [Security, privacy and provenance](https://github.com/onfire7777/Mnemosyne/wiki/Security-Privacy-and-Provenance)
+- [Production evidence requirements](infra/PRODUCTION-EVIDENCE.md)
+- [Roadmap and historical evidence](docs/ROADMAP-TO-100.md)
+- [Report an issue](https://github.com/onfire7777/Mnemosyne/issues)
 
-## License
+## Security and license
 
-Licensed under the [Apache License 2.0](LICENSE).
+Trust tiers, capability checks, sensitivity ceilings, signed sessions and PostgreSQL row-level
+security provide configurable access boundaries. Treat retrieved text and imported sources as
+untrusted data. Configure provider credentials and external-service permissions for your deployment;
+do not commit them or include them in public demonstration data.
+
+Report vulnerabilities privately to the maintainers rather than posting exploit details publicly.
+Mnemosyne is licensed under [Apache 2.0](LICENSE). Dependencies and imported material retain their
+own licenses; use books, skills and demonstration assets you have permission to use.

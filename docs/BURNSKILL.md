@@ -57,7 +57,7 @@ description: "Post the weekly status update to the team channel."
   `mnemosyne.frameworks.EDGE_TYPES`. Each type is drawn in one direction, the one its name reads,
   so a warning `warns` the step it guards.
 - `coverage`: shows, for each unit, whether a node represents it, whether it repeats an earlier
-  unit, or whether it is unresolved.
+  unit, whether it is retained reference matter, or whether it is unresolved.
 - `meta`:
   - `purpose`, `claimed_scope` and `evidenced_scope`.
   - `effects`: what running it does to the world. The values are `sends`, `deletes`, `pays`,
@@ -77,14 +77,40 @@ description: "Post the weekly status update to the team channel."
 
 ## Books
 
-A book (PDF or EPUB) becomes one BurnSkill, the same way Proper Thinking makes a framework of
-one:
+A book (PDF or EPUB) becomes one BurnSkill. In Mnemosyne v1.7.0:
 
-1. The book is cut into passages of at most 500 words. Each passage carries its page, such as
-   `[p.12]`, or its chapter, such as `[ch.3]`.
-2. Five questions pick the passages to build from: the core method, the risks, the reasoning,
-   the ethics and the examples. The neighbours of each pick are added.
-3. At most 58 passages and 68,000 characters are kept. Those passages are the `units`.
-4. The book file itself is kept in `files`.
+1. The book is cut into passages of at most 500 words, labeled by page (`[p.12]`) or
+   chapter (`[ch.3]`). All passages are retained as numbered `units`; the old
+   58-passage and 68,000-character selection limits no longer apply.
+2. A source that fits one processing window is built directly. For longer sources,
+   one reading of the whole book maps its chapters, canonical terms, main procedure,
+   relationships and overview.
+3. Content chapters are built in parallel using the shared map and their own passages.
+   Oversized chapters are split into parts. Each part receives nodes, relations,
+   definitive fields, logic checks and a mechanical audit before the judgment auditor
+   reads the completed pass. Missing coverage or judgment findings can trigger a second
+   pass to repair affected items, or rebuild the part when required.
+4. Chapter frameworks are joined by canonical names, including relationships across
+   chapters and the main procedure. The combined framework receives another logic and
+   mechanical audit and retains the chapter judgments.
+5. Reference matter, such as a bibliography or index, stays in the source and is marked
+   `reference` in coverage instead of becoming framework nodes. Chapters teaching ideas,
+   arguments, methods or cases remain content. Coverage can also report unresolved
+   passages: retaining a passage does not guarantee successful representation.
+6. The original book is kept in `files`.
 
-The same applies to any source too long for one prompt.
+Conversion runs in the background and reports progress or failure. Model answers are
+cached by source digest, so interrupted conversions and retries can reuse completed
+requests. An already completed book is reused even if its filename changes. The cache
+has a 500 MB target; older source caches are removed first, retaining the latest build.
+
+When a memory destination is configured, the book's passages are made available to the
+memory integration before framework conversion finishes. Scanned PDFs without
+extractable text need OCR before import.
+
+Conversion supports OpenRouter models and `codex:<model>` names. Codex models use an
+installed Codex CLI with the user's ChatGPT login. The persistent app-server path is
+opt-in through `MNEMOSYNE_CODEX_SERVER=1`; otherwise conversion uses `codex exec`.
+
+The same framework-building approach applies to other sources too long for one
+processing window.
