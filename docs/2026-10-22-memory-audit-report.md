@@ -552,6 +552,23 @@ regression fixtures without model inference. First-class growing-document
 versions and atomic retirement remain open; content-addressed source labels
 must not be treated as independently deletable documents.
 
+## Source integrity follow-up
+
+The later [source integrity follow-up](../work/hindsight-comparison/source-integrity/REPORT.md)
+repairs a further projection-custody leak: an assertion could remain readable
+after its only usable support had been erased, through a retained but incomplete
+summary. Native and external-adapter projection reads now validate current
+source custody, and thin-canary caches account for source changes and expiry.
+The same pass adds owner-scoped optional segment identities, atomic source
+operation groups and journal erasure repairs. These are prerequisites for safe
+document revisions, not a completed document synchronization feature or a new
+comparison score.
+
+Final verification passed **2,167 selected tests**, with eight explained skips,
+zero failures/errors and 328 unchanged source/test/configuration hashes. Live
+PostgreSQL checks ran under restricted roles; the role probe passed 9/9. The
+disposable database was removed and the pre-existing services were preserved.
+
 ## Quality targets still unmet
 
 The local deterministic quick evaluation passed **8 of 11** checks and all five mandatory

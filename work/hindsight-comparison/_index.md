@@ -38,3 +38,7 @@
 - reliability-followup/REPORT.md — ingestion, persistence, concurrent privacy, restart and temporal repairs
 - reliability-followup/verify.py — provider-free regression command and source freeze
 - reliability-followup/postgres/REPORT.md — real concurrent-update reproductions and repair receipts
+- source-integrity/REPORT.md — projection custody, atomic source groups, segment identity and journal repair
+- source-integrity/verify.py — selected regression modules and source identity checks
+- source-integrity/projection-custody.xml — focused native/adapter/canary custody verification
+- source-integrity/postgres-source-transaction.xml — live transaction and identity verification

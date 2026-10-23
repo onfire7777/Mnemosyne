@@ -85,6 +85,7 @@ from mnemosyne.privacy import ErasureMode
 from mnemosyne.retrieval import (
     derived_evidence_readable,
     derived_source_cids,
+    projection_sources_readable,
     trim_derived_source_cids,
     filter_derived_adapter_hits,
     is_derived_evidence,
@@ -116,6 +117,7 @@ from mnemosyne.security import (
 from mnemosyne.erasure_ids import (
     build_erasure_placeholder_map,
     erasure_deletion_record_id,
+    erasure_tombstone_hash,
     redact_erased_cids,
 )
 from mnemosyne.standing import (
@@ -1703,6 +1705,8 @@ def _store_row(item: Any, times: tuple[str, ...]) -> dict[str, Any]:
     if names is None:
         names = _FIELD_NAMES[cls] = tuple(field.name for field in dataclass_fields(cls))
     row = {name: getattr(item, name) for name in names}
+    if isinstance(item, Evidence) and item.document_segment_id is None:
+        row.pop("document_segment_id")
     for name in times:
         row[name] = dt_to_json(row[name])
     return row
@@ -2509,6 +2513,8 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         self._persistence_defer_depth = 0
         self._persistence_deferred_dirty = False
         self._persistence_aborted = False
+        self._source_transaction_state: dict[str, Any] | None = None
+        self._mental_model_guard_depth = 0
         self.policy = policy or OperatingPolicy()
         if adapters is None:
             embedding = HashingEmbeddingProvider()
@@ -3282,6 +3288,10 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         self._store_version += 1
 
     def _persist(self) -> None:
+        state = self._source_transaction_state
+        if state is not None and not state["operation_depth"]:
+            state["failed"] = True
+            raise RuntimeError("only source operations are allowed in source_transaction")
         # Every mutator funnels through here; bump BEFORE the store_path early
         # return so in-memory engines invalidate the candidate memo too.
         self._store_version += 1
@@ -3347,12 +3357,19 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         except Exception:
             tmp.unlink(missing_ok=True)
             raise
-        tmp.chmod(0o600)
-        tmp.replace(self.store_path)
+        try:
+            tmp.chmod(0o600)
+            tmp.replace(self.store_path)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
 
     @contextmanager
     def defer_persistence(self):
         """Flush many in-process mutations once, or discard the deferred flush."""
+        if self._source_transaction_state is not None:
+            self._source_transaction_state["failed"] = True
+            raise RuntimeError("defer_persistence cannot nest inside source_transaction")
         self._persistence_defer_depth += 1
         try:
             yield
@@ -3449,15 +3466,163 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         self.merge_log = list(data.get("merge_log", []))
 
     @contextmanager
+    def source_transaction(self, tenant_id: str, branch: str = "main"):
+        """Atomically group source append/read/metadata/forget operations.
+
+        This deliberately excludes ingestion queues, providers and other engine
+        mutators. A caught nested failure still aborts the whole group. The ledger
+        commits once; journal writes follow that commit and remain recoverable
+        from the authoritative ledger if the journal itself fails.
+        """
+        with self._lock:
+            current = self._source_transaction_state
+            if current is not None:
+                try:
+                    if (tenant_id, branch) != current["scope"]:
+                        raise ValueError("source_transaction scope mismatch")
+                    if current["failed"]:
+                        raise RuntimeError("source_transaction was aborted by a nested failure")
+                    yield
+                except BaseException:
+                    current["failed"] = True
+                    raise
+                return
+            if not isinstance(tenant_id, str) or not tenant_id.strip():
+                raise ValueError("tenant_id must be a nonempty string")
+            self._require_branch(branch)
+            if self._read_only:
+                raise RuntimeError("source_transaction requires a writable engine")
+            if self._persistence_defer_depth or self._persistence_aborted:
+                raise RuntimeError("source_transaction cannot nest with defer_persistence")
+            if self._mental_model_guard_depth:
+                raise RuntimeError("source_transaction cannot nest with mental_model_guard")
+            self._overlay_settle(reset=True)
+            names = (
+                "evidence", "assertions", "relations", "preferences", "entities",
+                "intentions", "mental_models", "working_memory", "audit_log",
+                "deletion_log", "merge_log", "branches", "justifications",
+                "contradictions", "calibrations", "_store_version",
+                "policy", "overlay_stats",
+            )
+            before = copy.deepcopy({name: getattr(self, name) for name in names})
+            persistence = (
+                self._persistence_defer_depth, self._persistence_deferred_dirty,
+                self._persistence_aborted,
+            )
+            state: dict[str, Any] = {
+                "scope": (tenant_id, branch), "failed": False,
+                "operation_depth": 0, "journal": [],
+            }
+            self._source_transaction_state = state
+            self._persistence_defer_depth = 1
+            try:
+                yield
+                if state["failed"]:
+                    raise RuntimeError("source_transaction was aborted by a nested failure")
+                dirty = self._persistence_deferred_dirty
+                self._source_transaction_state = None
+                (
+                    self._persistence_defer_depth, self._persistence_deferred_dirty,
+                    self._persistence_aborted,
+                ) = persistence
+                if dirty:
+                    self._persist()
+            except BaseException:
+                self._overlay_init()
+                for name, value in before.items():
+                    setattr(self, name, value)
+                (
+                    self._persistence_defer_depth, self._persistence_deferred_dirty,
+                    self._persistence_aborted,
+                ) = persistence
+                self._passage_bm25_index = None
+                self._candidate_memo.clear()
+                self._relation_security_memo.clear()
+                self._relation_verdict_memo.clear()
+                self._security_row_memo.clear()
+                self._corroboration_memo.clear()
+                self._projection_memo.clear()
+                self._retrieval_result_cache_nonce = secrets.token_hex(16)
+                raise
+            finally:
+                self._source_transaction_state = None
+            journal_error: Exception | None = None
+            for action, record in state["journal"]:
+                try:
+                    self._write_source_journal(action, record)
+                except Exception as error:
+                    # A failed append must not skip a later privacy erasure.
+                    if journal_error is None:
+                        journal_error = error
+            if journal_error is not None:
+                raise journal_error
+
+    @contextmanager
+    def _source_operation(self, tenant_id: str, branch: str):
+        with self._lock:
+            state = self._source_transaction_state
+            if state is None:
+                yield
+                return
+            try:
+                if state["scope"] != (tenant_id, branch):
+                    raise ValueError("source_transaction scope mismatch")
+                if state["failed"]:
+                    raise RuntimeError("source_transaction was aborted by a nested failure")
+                state["operation_depth"] += 1
+                try:
+                    yield
+                finally:
+                    state["operation_depth"] -= 1
+            except BaseException:
+                state["failed"] = True
+                raise
+
+    def _append_source_journal(self, record: dict[str, Any]) -> None:
+        self._write_source_journal("append", record)
+
+    def _write_source_journal(self, action: str, record: dict[str, Any]) -> None:
+        if self._journal_dir is None:
+            return
+        state = self._source_transaction_state
+        if state is not None:
+            if action != "append":
+                # Never write plaintext for a source created and erased in the
+                # same transaction, even temporarily in the post-commit journal.
+                state["journal"][:] = [
+                    (op, item) for op, item in state["journal"]
+                    if not (op == "append" and item["cid"] == record["cid"])
+                ]
+            state["journal"].append((action, record))
+        else:
+            journal = CIDJournal(self._journal_dir / journal_filename(record["tenant_id"]))
+            if action == "append":
+                journal.append(record)
+            elif action == "purge":
+                journal.purge(record["cid"])
+            else:
+                journal.tombstone(
+                    record["cid"], salted_hash=record["salted_hash"],
+                    erased_at=record["erased_at"],
+                )
+
+    @contextmanager
     def mental_model_guard(self, tenant_id: str):
         """Hold the local source/model lock for final snapshot and publication.
 
         This guard excludes writes through this engine instance; it is not a
         transaction or an inter-process lock. Do not run providers under it.
         """
-        model_key(tenant_id, "guard", "main")
         with self._lock:
-            yield
+            if self._source_transaction_state is not None:
+                self._source_transaction_state["failed"] = True
+                raise RuntimeError("mental_model_guard cannot nest with source_transaction")
+            model_key(tenant_id, "guard", "main")
+            self._mental_model_guard_depth += 1
+            try:
+                yield
+            finally:
+                self._mental_model_guard_depth -= 1
 
     def get_mental_model_record(self, tenant_id: str, model_id: str, branch: str = "main") -> dict[str, Any] | None:
         key = model_key(tenant_id, model_id, branch)
@@ -3545,6 +3710,10 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             raise
 
     def append_evidence(self, ev: Evidence, branch: str = "main") -> str:
+        with self._source_operation(ev.tenant_id, branch):
+            return self._append_source_evidence(ev, branch)
+
+    def _append_source_evidence(self, ev: Evidence, branch: str = "main") -> str:
         access_policy = validate_access_policy(ev.access_policy, tenant_id=ev.tenant_id, location="evidence.access_policy")
         with self._lock:
             self._require_branch(branch)
@@ -3556,6 +3725,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 content_pointer=ev.content_pointer,
                 modality=ev.modality,
                 sensitivity=int(ev.sensitivity),
+                document_segment_id=ev.document_segment_id,
             )
             unscoped_cid = evidence_unscoped_cid(
                 ev.content,
@@ -3573,6 +3743,10 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     and existing.content_pointer == ev.content_pointer
                     and existing.modality == ev.modality
                     and existing.cid
+                    and (existing.document_segment_id is None or (
+                        existing.document_segment_id == ev.document_segment_id
+                        and existing.user_id == ev.user_id
+                    ))
                 ):
                     replay_cid = evidence_cid(
                         ev.content,
@@ -3582,6 +3756,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                         content_pointer=ev.content_pointer,
                         modality=ev.modality,
                         sensitivity=int(existing.sensitivity),
+                        document_segment_id=existing.document_segment_id,
                     )
                     if replay_cid == existing.cid or unscoped_cid == existing.cid:
                         cid = existing.cid
@@ -3679,7 +3854,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 )
                 self._persist()
             if self._journal_dir is not None:
-                CIDJournal(self._journal_dir / journal_filename(stored.tenant_id)).append(
+                self._append_source_journal(
                     {
                         "cid": stored.cid,
                         "tenant_id": stored.tenant_id,
@@ -3709,7 +3884,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         return events, byte_count
 
     def get_evidence(self, tenant_id: str, cid: str, branch: str = "main") -> Evidence | None:
-        with self._lock:
+        with self._source_operation(tenant_id, branch):
             # A deep copy, so reading the row directly is safe; a thin canary's row is its
             # parent's, and the copy a full branch would hand out carries the canary's name.
             ev = self._evidence_row(tenant_id, branch, cid)
@@ -3839,6 +4014,15 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         *,
         actor: str = "consolidation",
         source: str = "metadata_update",
+    ) -> bool:
+        with self._source_operation(tenant_id, branch):
+            return self._update_source_metadata(
+                tenant_id, cid, metadata_patch, branch, actor=actor, source=source,
+            )
+
+    def _update_source_metadata(
+        self, tenant_id: str, cid: str, metadata_patch: dict[str, Any],
+        branch: str = "main", *, actor: str = "consolidation", source: str = "metadata_update",
     ) -> bool:
         if "access_policy" in metadata_patch:
             raise ValueError("metadata_patch.access_policy cannot shadow evidence.access_policy")
@@ -4459,6 +4643,18 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         templates = self._candidate_templates(scoped)
         candidates = self._candidate_hits(scoped) if hasattr(templates, "finish") else templates
         return [hit for hit in candidates if is_passage(hit)]
+
+    def _get_projection_for_adapter(
+        self, tenant_id: str, branch: str, kind: str, item_id: str,
+    ) -> Assertion | Preference | None:
+        with self._lock:
+            if kind == "assertion":
+                row = self.assertions.get(self._branch_key(tenant_id, branch, item_id))
+            elif kind == "preference":
+                row = self.preferences.get(item_id)
+            else:
+                return None
+            return copy.deepcopy(row) if row is not None and row.tenant_id == tenant_id else None
 
     def lexical_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
         tenant_id = str(filt.get("tenant_id") or "")
@@ -5840,7 +6036,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         requested_by: str = "user",
         erasure_mode: ErasureMode | str = ErasureMode.TOMBSTONE_RECOMPUTE,
     ) -> dict[str, Any]:
-        with self._lock:
+        with self._source_operation(tenant_id, branch):
             before = (
                 copy.deepcopy(self.evidence),
                 copy.deepcopy(self.assertions),
@@ -5856,7 +6052,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 self._store_version,
             )
             try:
-                return self._forget_impl(
+                result = self._forget_impl(
                     tenant_id,
                     cid,
                     branch=branch,
@@ -5879,6 +6075,32 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     self._store_version,
                 ) = before
                 raise
+            if result.get("erased") and self._journal_dir is not None:
+                action = "purge" if ErasureMode(erasure_mode) is ErasureMode.HARD_DELETE_LEGAL else "tombstone"
+                erased_at = utc_now().isoformat()
+                journal_error: Exception | None = None
+                for affected_cid in [cid, *result["propagated"]["erased_derived_evidence"]]:
+                    # The journal is per tenant, not per branch. Its plaintext
+                    # remains legitimate while a different branch has this CID.
+                    if any(row.tenant_id == tenant_id and row.cid == affected_cid and not row.erased
+                           for row in self.evidence.values()):
+                        continue
+                    original = before[0].get(self._evidence_key(tenant_id, branch, affected_cid))
+                    try:
+                        self._write_source_journal(action, {
+                            "tenant_id": tenant_id, "cid": affected_cid,
+                            "salted_hash": erasure_tombstone_hash(
+                                original.content if original else "", tenant_id,
+                                original.user_id if original else "",
+                            ),
+                            "erased_at": erased_at,
+                        })
+                    except Exception as error:
+                        if journal_error is None:
+                            journal_error = error
+                if journal_error is not None:
+                    raise journal_error
+            return result
 
     @staticmethod
     def _redact_working_digests(
@@ -6539,6 +6761,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         evidence_items: Any = None,
         assertion_items: Any = None,
         include_preferences: bool = True,
+        source_custody: dict[tuple[Any, str, int], tuple[Any, bool]] | None = None,
     ) -> list[Hit]:
         """Project the branch's readable rows into candidate hits.
 
@@ -6624,6 +6847,24 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             from mnemosyne.passages import is_passage
 
             return [hit for hit in hits if is_passage(hit)]
+        # Consolidation interns a batch's source list across many projections.
+        # Validate each actual list once per scan, retaining it to avoid id reuse.
+        # This cache never survives a scan, so ACL expiry and writes still use
+        # the candidate memo's existing invalidation and expiry deadlines.
+        if source_custody is None:
+            source_custody = {}
+
+        def readable_sources(cids: Any) -> bool:
+            key = (tenant_id, branch, id(cids))
+            cached = source_custody.get(key)
+            if cached is not None and cached[0] is cids:
+                return cached[1]
+            allowed = projection_sources_readable(
+                self, cids, tenant_id=tenant_id, branch=branch, filt=filt, policy=self.policy,
+            )
+            source_custody[key] = (cids, allowed)
+            return allowed
+
         for assertion in (
             self.assertions.in_branch(tenant_id, branch).values() if assertion_items is None else assertion_items
         ):
@@ -6632,6 +6873,8 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             if assertion.status not in {"active", "contested"}:
                 continue
             if assertion.trust_tier > max_trust or assertion.sensitivity > max_sensitivity:
+                continue
+            if not readable_sources(assertion.source_evidence_cids):
                 continue
             decision = may_read_item(
                 item_tenant_id=assertion.tenant_id,
@@ -6680,6 +6923,8 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             )
         for pref in self.preferences.values() if include_preferences else ():
             if pref.tenant_id != tenant_id or pref.status != "active":
+                continue
+            if not readable_sources(pref.source_evidence_cids):
                 continue
             decision = may_read_item(
                 item_tenant_id=pref.tenant_id,

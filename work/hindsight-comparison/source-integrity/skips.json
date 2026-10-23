@@ -1,0 +1,34 @@
+[
+  {
+    "test": "tests.test_shared_engine_contract::test_shared_engine_contract_postgres_cached_ppr_is_default_off_and_equivalent[local]",
+    "reason": "cached PPR is a Postgres materialization path"
+  },
+  {
+    "test": "tests.test_shared_engine_contract::test_shared_engine_contract_postgres_cached_ppr_is_default_off_and_equivalent[sqlite]",
+    "reason": "cached PPR is a Postgres materialization path"
+  },
+  {
+    "test": "tests.test_shared_engine_contract::test_shared_engine_contract_postgres_cached_ppr_invalidates_source_custody_change[local]",
+    "reason": "cached PPR is a Postgres materialization path"
+  },
+  {
+    "test": "tests.test_shared_engine_contract::test_shared_engine_contract_postgres_cached_ppr_invalidates_source_custody_change[sqlite]",
+    "reason": "cached PPR is a Postgres materialization path"
+  },
+  {
+    "test": "tests.test_shared_engine_contract::test_shared_engine_contract_postgres_cached_ppr_requires_sufficient_depth[local]",
+    "reason": "cached PPR is a Postgres materialization path"
+  },
+  {
+    "test": "tests.test_shared_engine_contract::test_shared_engine_contract_postgres_cached_ppr_requires_sufficient_depth[sqlite]",
+    "reason": "cached PPR is a Postgres materialization path"
+  },
+  {
+    "test": "tests.test_sqlite_cache_projections::test_vec0_projection_registered_and_buildable_when_available",
+    "reason": "sqlite-vec extra not installed"
+  },
+  {
+    "test": "tests.test_sqlite_scans::test_sqlite_vec_detector_is_bool_and_default_scan_unaffected",
+    "reason": "sqlitevec extra absent \u2014 vec0 paths skipped; default scan below"
+  }
+]

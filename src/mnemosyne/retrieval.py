@@ -21,12 +21,12 @@ from threading import RLock
 from typing import Any, Callable, Mapping, Protocol, Sequence
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from mnemosyne.access_policy import apply_text_redactions, effective_max_sensitivity, may_read_item
+from mnemosyne.access_policy import apply_statement_redactions, apply_text_redactions, effective_max_sensitivity, may_read_item
 from mnemosyne.cid_lists import shared_or_copy
 from mnemosyne.command_line import split_command
 from mnemosyne.evidence_redaction import redaction_findings
 from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES, enforce_byte_limit, validate_byte_limit
-from mnemosyne.models import Hit, parse_dt, utc_now
+from mnemosyne.models import Hit, iso_utc, parse_dt, utc_now
 from mnemosyne.network_safety import safe_urlopen, validate_fetch_url
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.security import TrustTier, sanitize_retrieved_text, trust_weight
@@ -2423,13 +2423,45 @@ def derived_evidence_readable(
     """
     if not is_derived_evidence(item):
         return True
+    root = str(_item_field(item, "cid") or "__root__")
+    return _evidence_sources_readable(
+        ops, [(root, item, False)], tenant_id=tenant_id, branch=branch, filt=filt, policy=policy,
+    )
+
+
+def projection_sources_readable(
+    ops: Any, source_cids: Any, *, tenant_id: str, branch: str,
+    filt: Mapping[str, Any], policy: OperatingPolicy,
+) -> bool:
+    """Require current, unredacted custody for a projection's remaining sources.
+
+    Source-free assertions and explicit preferences retain their own access rules.
+    Once a projection cites evidence, every declared input must remain readable:
+    an old assertion cannot reveal prose withheld from its source summary. Erasure
+    already trims independent sources, so a surviving source still supports the
+    projection without treating a missing or denied source as corroboration.
+    """
+    if not isinstance(source_cids, (list, tuple)) or any(
+        not isinstance(cid, str) or not cid.strip() or cid != cid.strip() for cid in source_cids
+    ):
+        return False
+    if not source_cids:
+        return True
+    return _evidence_sources_readable(
+        ops, [(cid, None, False) for cid in reversed(source_cids)],
+        tenant_id=tenant_id, branch=branch, filt=filt, policy=policy,
+    )
+
+
+def _evidence_sources_readable(
+    ops: Any, stack: list[tuple[str, Any, bool]], *, tenant_id: str, branch: str,
+    filt: Mapping[str, Any], policy: OperatingPolicy,
+) -> bool:
     lookup = getattr(ops, "get_evidence", None)
     if not callable(lookup):
         return False
     active: set[str] = set()
     complete: set[str] = set()
-    root = str(_item_field(item, "cid") or "__root__")
-    stack: list[tuple[str, Any, bool]] = [(root, item, False)]
     while stack:
         cid, row, leaving = stack.pop()
         if leaving:
@@ -2520,12 +2552,72 @@ def read_evidence_for_context(
     return None if not decision.allowed or decision.redacted else copy.deepcopy(row)
 
 
+def _projection_adapter_hit(ops: Any, hit: Hit, filt: Mapping[str, Any]) -> Hit | None:
+    """Treat adapter projection IDs as candidates, never as source authority."""
+    lookup = getattr(ops, "_get_projection_for_adapter", None)
+    if not callable(lookup):
+        return None
+    tenant_id = str(filt.get("tenant_id") or "")
+    branch = str(filt.get("branch") or "main")
+    row = lookup(tenant_id, branch, hit.kind, hit.id)
+    if row is None or row.id != hit.id or row.tenant_id != tenant_id:
+        return None
+    if hit.kind == "assertion" and row.branch != branch:
+        return None
+    if row.status not in ({"active", "contested"} if hit.kind == "assertion" else {"active"}):
+        return None
+    tier = row.trust_tier if hit.kind == "assertion" else (0 if row.explicit else 3)
+    sensitivity = row.sensitivity if hit.kind == "assertion" else 0
+    allowed, _ = classify_scoped_evidence(
+        {"tenant_id": tenant_id, "branch": branch, "trust_tier": tier,
+         "sensitivity": sensitivity, "access_policy": row.access_policy},
+        tenant_id=tenant_id, branch=branch, filt=filt, policy=ops.policy,
+    )
+    if not allowed or not projection_sources_readable(
+        ops, row.source_evidence_cids, tenant_id=tenant_id, branch=branch, filt=filt, policy=ops.policy,
+    ):
+        return None
+    decision = may_read_item(
+        item_tenant_id=tenant_id, sensitivity=sensitivity, access_policy=row.access_policy,
+        context=filt, policy_max_sensitivity=ops.policy.max_sensitivity, status=row.status,
+    )
+    if not decision.allowed:
+        return None
+    metadata = {"status": row.status, "confidence": row.confidence}
+    if hit.kind == "assertion":
+        text, privacy = apply_statement_redactions(
+            subject=row.subject, predicate=row.predicate, object_value=row.object,
+            access_policy=row.access_policy, decision=decision,
+        )
+        metadata["created_at"] = iso_utc(row.transaction_time)
+        for key in ("reality_class", "reality_monitoring"):
+            if key in row.calibration:
+                metadata[key] = copy.deepcopy(row.calibration[key])
+    else:
+        text, privacy = apply_text_redactions(row.statement, row.access_policy, decision)
+        metadata.update(created_at=iso_utc(row.valid_from), category=row.category, explicit=row.explicit)
+    metadata["privacy"] = privacy
+    for key in ("backend", "score_scale", "score_family", "rank", "command_retrieval"):
+        if key in hit.metadata:
+            metadata[key] = copy.deepcopy(hit.metadata[key])
+    return Hit(
+        id=row.id, kind=hit.kind, tenant_id=tenant_id, branch=branch, text=text,
+        score=hit.score, channel=hit.channel, provenance=list(row.source_evidence_cids),
+        trust_tier=tier, sensitivity=sensitivity, metadata=metadata,
+    )
+
+
 def filter_derived_adapter_hits(ops: Any, hits: Sequence[Hit], filt: Mapping[str, Any]) -> list[Hit]:
-    """Adapters rank evidence IDs; only authoritative current rows supply content."""
+    """Adapters rank IDs; authoritative current rows supply evidence and facts."""
     result: list[Hit] = []
     tenant_id = str(filt.get("tenant_id") or "")
     branch = str(filt.get("branch") or "main")
     for hit in hits:
+        if hit.kind in {"assertion", "preference"}:
+            projected = _projection_adapter_hit(ops, hit, filt)
+            if projected is not None:
+                result.append(projected)
+            continue
         if hit.kind != "evidence":
             result.append(hit)
             continue

@@ -100,3 +100,24 @@ Source identity labels are not document ownership. Legacy content-addressed evid
 be shared by distinct source envelopes, and erasure is permanent. Growing-document
 replacement therefore needs a scoped version registry and distinct revision retirement,
 not a source-label scan followed by deletion.
+
+## Source integrity continuation
+
+Review of document replacement found a separate live retrieval defect: after
+erasure, an active assertion could retain only an incomplete summary as support
+and still disclose its text. Validate current source custody for projections,
+including adapter-returned IDs and cached canary views. Preserve independent
+support; do not treat provenance validation as semantic proof of a claim.
+
+Atomic source groups require different implementation from existing deferred
+flushes. Local groups snapshot state, SQLite owns one immediate transaction,
+and PostgreSQL borrows one pinned connection. Nested failures must poison the
+outer transaction; a nested context must not silently commit it. Provider work
+belongs before publication. Preserve unchanged legacy hashes when adding an
+optional segment identity, and keep legacy tombstone replay checks.
+
+The ledger commits before the journal. Attempt all queued erasure effects even
+when an earlier journal operation fails, and report the error without undoing
+committed ledger state. A tenant journal cannot erase a shared CID while a live
+copy remains in another branch. A source created and erased within one group
+must not emit plaintext during post-commit journal processing.

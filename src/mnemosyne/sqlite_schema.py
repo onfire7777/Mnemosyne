@@ -83,6 +83,7 @@ ENSURE_STATEMENTS: list[str] = [
         source_type TEXT NOT NULL,
         content TEXT NOT NULL,
         source_identity TEXT,
+        document_segment_id TEXT,
         session_id TEXT,
         metadata TEXT NOT NULL DEFAULT '{}',
         content_pointer TEXT,

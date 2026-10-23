@@ -297,6 +297,12 @@ legacy tombstone cannot be bypassed by replaying its content. This compatibility
 is limited to erased-replay detection: a live legacy unscoped row does not
 deduplicate or replace a new subject-scoped write for a different user.
 
+Optional `Evidence.document_segment_id` adds an owner-scoped segment-generation
+identity while preserving the legacy payload when absent. Native engines also
+expose a narrow `source_transaction` context for atomic append/read/metadata/
+erasure groups. See [source transaction semantics and limitations](source-transactions.md).
+These primitives do not yet implement document revision synchronization.
+
 ## Phase 0 substrate implementation mapping
 
 This historical substrate mapping records the Local/Postgres scope verified at

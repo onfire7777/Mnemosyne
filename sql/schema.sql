@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS evidence (
   actor TEXT NOT NULL CHECK (actor IN ('user', 'assistant', 'tool', 'system', 'external')),
   source_type TEXT NOT NULL,
   source_identity TEXT,
+  document_segment_id TEXT,
   content TEXT,
   content_pointer TEXT,
   modality TEXT NOT NULL DEFAULT 'text',
@@ -46,6 +47,9 @@ CREATE TABLE IF NOT EXISTS evidence (
   PRIMARY KEY (tenant_id, branch, cid),
   FOREIGN KEY (tenant_id, branch) REFERENCES branches(tenant_id, name)
 );
+
+-- Additive migration: legacy evidence keeps its original content identity.
+ALTER TABLE evidence ADD COLUMN IF NOT EXISTS document_segment_id TEXT;
 
 CREATE INDEX IF NOT EXISTS evidence_embedding_public_hnsw ON evidence USING hnsw (embedding vector_cosine_ops) WHERE embedding_partition = 'public';
 CREATE INDEX IF NOT EXISTS evidence_embedding_private_hnsw ON evidence USING hnsw (embedding vector_cosine_ops) WHERE embedding_partition = 'private';

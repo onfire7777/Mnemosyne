@@ -246,6 +246,12 @@ and preserves requested first/last ordering, including default search without a
 configured passage graph. These are runtime improvements,
 not a new competitive score.
 
+The [source integrity follow-up](work/hindsight-comparison/source-integrity/REPORT.md)
+blocks derived facts whose remaining source support is unreadable, adds
+[atomic source groups and optional segment identities](docs/source-transactions.md)
+to the native engines, and removes erased plaintext from the local journal.
+Document revision synchronization remains under development.
+
 - Core capture and retrieval are usable; advanced deployment profiles have separate validation needs.
 - Default deterministic embeddings support offline operation but are not equivalent to a configured semantic model.
 - Skill audits and coverage reports can identify unresolved content; they do not guarantee correctness.
@@ -279,6 +285,11 @@ with six intentionally inapplicable backend cases skipped and no failures.
 It covers the ingestion, persistence, privacy, erasure, restart and temporal fixes
 described above; no benchmark or model inference ran.
 
+The latest [source integrity verification](work/hindsight-comparison/source-integrity/REPORT.md)
+passed **2,167 selected tests**, with eight explained skips and no failures,
+including live PostgreSQL transaction and retrieval-custody checks. It used
+synthetic fixtures and made no benchmark or model-provider calls.
+
 ## Project layout
 
 | Path | Responsibility |
@@ -302,6 +313,7 @@ described above; no benchmark or model inference ran.
 - [Architecture overview](docs/ARCHITECTURE-OVERVIEW.md)
 - [Grounded reflection](docs/reflect.md)
 - [Maintained mental models](docs/mental-models.md)
+- [Source identity and atomic updates](docs/source-transactions.md)
 - [Codex answer evaluation](eval/longmemeval_s/README.md)
 - [BurnSkill standard](docs/BURNSKILL.md)
 - [CLI reference](https://github.com/onfire7777/Mnemosyne/wiki/CLI-Reference)

@@ -105,6 +105,14 @@ revision retirement. The next implementation needs owner-scoped document version
 and atomic segment publication, reusing existing text-hash extraction caches.
 No benchmark was restarted for this follow-up.
 
+The [source integrity follow-up](../work/hindsight-comparison/source-integrity/REPORT.md)
+adds optional owner-scoped segment identities and atomic source operation groups
+on all three native engines. It also blocks assertions and preferences whose
+remaining support is unreadable and repairs local journal erasure. These close
+specific correctness gaps; the document registry, revision retirement, durable
+publication receipts and delta extraction remain unfinished. See the
+[exact storage contract](source-transactions.md). No comparative score is claimed.
+
 ## Prioritized delivery plan
 
 1. **P0 — Establish a reproducible baseline and fix demonstrated failures.** Freeze corpus IDs, splits, configurations and versions. Record baseline answer accuracy, abstention, citation correctness, latency and cost. Run existing regression suites; repair failures with before/after evidence. Cover malformed dates, provider outputs and cross-engine behavior. Completion means reproducible artifacts, not a passing hand-selected example.

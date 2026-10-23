@@ -43,6 +43,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from mnemosyne.cid_lists import evidence_epoch
+
 THIN_CANARIES_ENV = "MNEMOSYNE_THIN_CANARIES"
 _ACTIVE = ("active", "contested")
 
@@ -598,7 +600,10 @@ class CanaryOverlayMixin:
             return None
         parent_filt = dict(filt)
         parent_filt["branch"] = overlay.parent
-        context = (repr(sorted(parent_filt.items())), int(self.policy.max_trust_tier), int(self.policy.max_sensitivity))
+        with self._overlay_context():
+            source_deadline = self._retrieval_policy_deadline_token(tenant, overlay.parent)
+        context = (repr(sorted(parent_filt.items())), int(self.policy.max_trust_tier),
+                   int(self.policy.max_sensitivity), evidence_epoch(), source_deadline)
         cached = self._overlay_projection.get(context)
         if cached is None:
             cached = ({}, {})
@@ -609,6 +614,7 @@ class CanaryOverlayMixin:
             self._overlay_projection.move_to_end(context)
         evidence_cache, assertion_cache = cached
         out = _CandidateTemplates(branch_override=branch, engine=self, tenant_id=tenant)
+        source_custody: dict[tuple[Any, str, int], tuple[Any, bool]] = {}
         with self._overlay_context():
             for key, ev in self._evidence_items.in_branch(tenant, overlay.parent).items():
                 entry = evidence_cache.get(key)
@@ -626,14 +632,16 @@ class CanaryOverlayMixin:
                 copied = own.pop(item.id, None)
                 if copied is not None:
                     hits = self._candidate_hits_uncached(
-                        filt, evidence_items=(), assertion_items=(copied,), include_preferences=False
+                        filt, evidence_items=(), assertion_items=(copied,), include_preferences=False,
+                        source_custody=source_custody,
                     )
                     out.extend(hits)
                     continue
                 entry = assertion_cache.get(key)
                 if entry is None or entry[0] is not item:
                     hits = self._candidate_hits_uncached(
-                        parent_filt, evidence_items=(), assertion_items=(item,), include_preferences=False
+                        parent_filt, evidence_items=(), assertion_items=(item,), include_preferences=False,
+                        source_custody=source_custody,
                     )
                     entry = (item, hits[0] if hits else None)
                     if not _expires(item.access_policy):
@@ -643,9 +651,12 @@ class CanaryOverlayMixin:
                     out.inherited.add(id(entry[1]))
             if own:
                 out.extend(self._candidate_hits_uncached(
-                    filt, evidence_items=(), assertion_items=tuple(own.values()), include_preferences=False
+                    filt, evidence_items=(), assertion_items=tuple(own.values()), include_preferences=False,
+                    source_custody=source_custody,
                 ))
-            out.extend(self._candidate_hits_uncached(filt, evidence_items=(), assertion_items=(), include_preferences=True))
+            out.extend(self._candidate_hits_uncached(
+                filt, evidence_items=(), assertion_items=(), include_preferences=True, source_custody=source_custody,
+            ))
         return out
 
     def _overlay_patch_access(self, hit: Any, tenant_id: str) -> None:
