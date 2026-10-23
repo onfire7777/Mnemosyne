@@ -301,7 +301,8 @@ Optional `Evidence.document_segment_id` adds an owner-scoped segment-generation
 identity while preserving the legacy payload when absent. Native engines also
 expose a narrow `source_transaction` context for atomic append/read/metadata/
 erasure groups. See [source transaction semantics and limitations](source-transactions.md).
-These primitives do not yet implement document revision synchronization.
+Atomic document revisions built on these primitives are described in
+[document revisions](document-revisions.md).
 
 ## Phase 0 substrate implementation mapping
 

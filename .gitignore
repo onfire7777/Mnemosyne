@@ -46,3 +46,7 @@ work/hindsight-comparison/controlled/runtime/
 work/hindsight-comparison/controlled/raw/
 work/hindsight-comparison/controlled/run-*/contexts/
 work/hindsight-comparison/controlled/run-*/native-receipts/
+
+# Teamwork agent metadata and dispatch prompt
+.agents/
+ORIGINAL_REQUEST.md

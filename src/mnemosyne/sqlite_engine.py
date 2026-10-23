@@ -64,6 +64,7 @@ from collections import OrderedDict
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Mapping, Sequence
 
 from mnemosyne import text as text_kernels
@@ -114,6 +115,15 @@ from mnemosyne.erasure_ids import (
     redact_erased_cids,
 )
 from mnemosyne.ids import content_cid, evidence_cid, evidence_unscoped_cid, new_id
+from mnemosyne.document_storage import (
+    DocumentConflict,
+    document_key,
+    document_records_equivalent,
+    prepare_document_save,
+    scrub_document_record,
+    validate_document_record,
+    validate_document_sources,
+)
 from mnemosyne.journal import CIDJournal, journal_filename, safe_tenant_filename
 from mnemosyne.mental_model_storage import (
     MentalModelConflict,
@@ -301,8 +311,8 @@ INSERT INTO evidence (
     tenant_id, branch, cid, user_id, actor, source_type, content,
     source_identity, session_id, metadata, content_pointer, modality,
     embedding, signed_provenance, trust_tier, capability_tags, sensitivity,
-    access_policy, created_at, erased, document_segment_id
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    access_policy, created_at, erased, document_segment_id, retired_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 # Branch row-copy variant: evidence keeps its cid, so an INSERT OR IGNORE on the
@@ -413,6 +423,7 @@ def _evidence_insert_values(ev: Evidence) -> tuple[Any, ...]:
         dt_to_json(ev.created_at),
         int(bool(ev.erased)),
         ev.document_segment_id,
+        dt_to_json(ev.retired_at),
     )
 
 
@@ -444,6 +455,7 @@ def _evidence_from_row(row: sqlite3.Row) -> Evidence:
             "content": row["content"],
             "source_identity": row["source_identity"],
             "document_segment_id": row["document_segment_id"] if "document_segment_id" in row.keys() else None,
+            "retired_at": row["retired_at"] if "retired_at" in row.keys() else None,
             "session_id": row["session_id"],
             "metadata": json.loads(row["metadata"]),
             "content_pointer": row["content_pointer"],
@@ -899,6 +911,8 @@ class SqliteEngine:
             evidence_columns = {row[1] for row in conn.execute("PRAGMA table_info(evidence)")}
             if "document_segment_id" not in evidence_columns:
                 conn.execute("ALTER TABLE evidence ADD COLUMN document_segment_id TEXT")
+            if "retired_at" not in evidence_columns:
+                conn.execute("ALTER TABLE evidence ADD COLUMN retired_at TEXT")
             working_columns = {
                 row[1] for row in conn.execute("PRAGMA table_info(working_memory)")
             }
@@ -1140,6 +1154,8 @@ class SqliteEngine:
             evidence = _evidence_from_row(row)
             if evidence.erased:
                 raise ValueError(f"evidence {cid!r} is erased")
+            if evidence.retired_at is not None:
+                raise ValueError(f"evidence {cid!r} is retired")
             if evidence.user_id != values["user_id"]:
                 raise ValueError("working item user must match originating evidence")
             if evidence.session_id != values["session_id"]:
@@ -1444,7 +1460,8 @@ class SqliteEngine:
         conn = self._connect(tenant_id)
         with self._lock:
             rows = conn.execute(
-                "SELECT * FROM evidence WHERE tenant_id = ? AND branch = 'main' AND erased = 0 ORDER BY rowid",
+                "SELECT * FROM evidence WHERE tenant_id = ? AND branch = 'main' "
+                "AND erased = 0 AND retired_at IS NULL ORDER BY rowid",
                 (tenant_id,),
             ).fetchall()
         return [_evidence_from_row(row) for row in rows]
@@ -1561,6 +1578,8 @@ class SqliteEngine:
 
     def append_evidence(self, ev: Evidence, branch: str = "main") -> str:
         with self._source_operation(ev.tenant_id, branch):
+            if ev.retired_at is not None:
+                raise ValueError("append_evidence cannot set retired_at")
             return self._append_evidence_impl(ev, branch)
 
     def _append_evidence_impl(self, ev: Evidence, branch: str = "main") -> str:
@@ -1843,6 +1862,84 @@ class SqliteEngine:
                 raise
             finally:
                 self._mental_model_guard_state = None
+
+    def get_document_record(
+        self, tenant_id: str, owner_id: str, document_id: str, branch: str = "main",
+    ) -> dict[str, Any] | None:
+        with self._source_operation(tenant_id, branch, writable=False):
+            document_key(tenant_id, owner_id, document_id, branch)
+            conn = self._connect(tenant_id)
+            row = conn.execute(
+                "SELECT record FROM documents WHERE tenant_id = ? AND branch = ? "
+                "AND owner_id = ? AND document_id = ?",
+                (tenant_id, branch, owner_id, document_id),
+            ).fetchone()
+            return json.loads(row["record"]) if row else None
+
+    def list_document_records(self, tenant_id: str, branch: str = "main") -> list[dict[str, Any]]:
+        with self._source_operation(tenant_id, branch, writable=False):
+            document_key(tenant_id, "document-list", "document-list", branch)
+            conn = self._connect(tenant_id)
+            return [json.loads(row["record"]) for row in conn.execute(
+                "SELECT record FROM documents WHERE tenant_id = ? AND branch = ? "
+                "ORDER BY owner_id, document_id", (tenant_id, branch),
+            ).fetchall()]
+
+    def save_document_record(
+        self, tenant_id: str, owner_id: str, document_id: str, record: dict[str, Any],
+        branch: str = "main", *, expected_revision: int | None,
+    ) -> dict[str, Any]:
+        """Publish a manifest and retire removed sources in the caller's transaction."""
+        with self._source_operation(tenant_id, branch):
+            if self._source_transaction_state is None:
+                raise RuntimeError("document save requires an active source transaction")
+            document_key(tenant_id, owner_id, document_id, branch)
+            conn = self._connect(tenant_id)
+            current = self.get_document_record(tenant_id, owner_id, document_id, branch)
+            saved = prepare_document_save(
+                tenant_id, owner_id, document_id, record, branch, current, expected_revision,
+            )
+            removed = validate_document_sources(
+                self, saved, current, self.list_document_records(tenant_id, branch),
+            )
+            retired_at = dt_to_json(parse_dt(saved["updated_at"]))
+            for cid in removed:
+                changed = conn.execute(
+                    "UPDATE evidence SET retired_at = ? WHERE tenant_id = ? AND branch = ? "
+                    "AND cid = ? AND erased = 0 AND retired_at IS NULL",
+                    (retired_at, tenant_id, branch, cid),
+                ).rowcount
+                if changed != 1:
+                    raise DocumentConflict("document source changed during retirement")
+            conn.execute(
+                "INSERT INTO documents(tenant_id, branch, owner_id, document_id, revision, record) "
+                "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(tenant_id, branch, owner_id, document_id) "
+                "DO UPDATE SET revision = excluded.revision, record = excluded.record",
+                (tenant_id, branch, owner_id, document_id, saved["revision"], json_text(saved)),
+            )
+            self._invalidate_mental_models(conn, tenant_id, branch)
+            conn.execute("DELETE FROM graph_ppr_cache WHERE tenant_id = ? AND branch = ?", (tenant_id, branch))
+            self._scan_oracle_memo.clear()
+            self._registries.clear()
+            self._passage_bm25_index = None
+            self._retrieval_result_cache_nonce = secrets.token_hex(16)
+            return copy.deepcopy(saved)
+
+    @staticmethod
+    def _scrub_document_records(
+        conn: sqlite3.Connection, tenant_id: str, branch: str, erased_cids: set[str],
+    ) -> None:
+        for row in conn.execute(
+            "SELECT record FROM documents WHERE tenant_id = ? AND branch = ?", (tenant_id, branch),
+        ).fetchall():
+            saved = scrub_document_record(json.loads(row["record"]), erased_cids)
+            if saved is not None:
+                conn.execute(
+                    "UPDATE documents SET revision = ?, record = ? WHERE tenant_id = ? "
+                    "AND branch = ? AND owner_id = ? AND document_id = ?",
+                    (saved["revision"], json_text(saved), tenant_id, branch,
+                     saved["owner_id"], saved["document_id"]),
+                )
 
     def get_mental_model_record(self, tenant_id: str, model_id: str, branch: str = "main") -> dict[str, Any] | None:
         model_key(tenant_id, model_id, branch)
@@ -2166,6 +2263,7 @@ class SqliteEngine:
             calibrations = self._records(conn, "calibrations", tenant_id)
             entities = self._records(conn, "entities", tenant_id)
             mental_models = self._records(conn, "mental_models", tenant_id)
+            documents = self._records(conn, "documents", tenant_id)
             justifications = self._records(conn, "justifications", tenant_id)
             contradictions = self._records(conn, "contradictions", tenant_id)
             working_memory = [
@@ -2211,6 +2309,7 @@ class SqliteEngine:
             "calibrations": calibrations,
             "entities": entities,
             "mental_models": mental_models,
+            "documents": documents,
             "justifications": justifications,
             "contradictions": contradictions,
             "working_memory": working_memory,
@@ -2268,6 +2367,7 @@ class SqliteEngine:
             "calibrations",
             "entities",
             "mental_models",
+            "documents",
             "working_memory",
             "audit_log",
             "deletion_log",
@@ -2342,6 +2442,7 @@ class SqliteEngine:
             "calibrations": [item for exported in tenant_exports for item in exported["calibrations"]],
             "entities": [item for exported in tenant_exports for item in exported["entities"]],
             "mental_models": [item for exported in tenant_exports for item in exported["mental_models"]],
+            "documents": [item for exported in tenant_exports for item in exported["documents"]],
             "audit_log": [item for exported in tenant_exports for item in exported["audit_log"]],
             "deletion_log": [item for exported in tenant_exports for item in exported["deletion_log"]],
             "merge_log": merge_log,
@@ -2975,7 +3076,8 @@ class SqliteEngine:
                 ordered = sorted(wanted)
                 placeholders = ",".join("?" for _ in ordered)
                 ev_rows = conn.execute(
-                    "SELECT cid, trust_tier, sensitivity, metadata, erased, source_type, actor, access_policy "
+                    "SELECT cid, trust_tier, sensitivity, metadata, erased, retired_at, "
+                    "user_id, document_segment_id, source_type, actor, access_policy "
                     f"FROM evidence WHERE tenant_id = ? AND branch = ? AND cid IN ({placeholders})",
                     (tenant_id, branch_key, *ordered),
                 ).fetchall()
@@ -2999,6 +3101,9 @@ class SqliteEngine:
                         "sensitivity": int(custody[cid]["sensitivity"]) if cid in custody else None,
                         "metadata": json.loads(custody[cid]["metadata"] or "{}") if cid in custody else None,
                         "erased": bool(custody[cid]["erased"]) if cid in custody else None,
+                        "retired_at": custody[cid]["retired_at"] if cid in custody else None,
+                        "user_id": custody[cid]["user_id"] if cid in custody else None,
+                        "document_segment_id": custody[cid]["document_segment_id"] if cid in custody else None,
                         "source_type": str(custody[cid]["source_type"]) if cid in custody else None,
                         "actor": str(custody[cid]["actor"]) if cid in custody else None,
                         "access_policy": json.loads(custody[cid]["access_policy"] or "{}") if cid in custody else None,
@@ -3871,6 +3976,18 @@ class SqliteEngine:
                     ev.branch = name
                     conn.execute(_EVIDENCE_INSERT_OR_IGNORE, _evidence_insert_values(ev))
                 for row in conn.execute(
+                    "SELECT record FROM documents WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
+                    (tenant_id, frm),
+                ).fetchall():
+                    record = validate_document_record(json.loads(row["record"]))
+                    record["branch"] = name
+                    conn.execute(
+                        "INSERT INTO documents(tenant_id, branch, owner_id, document_id, revision, record) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        (tenant_id, name, record["owner_id"], record["document_id"],
+                         record["revision"], json_text(record)),
+                    )
+                for row in conn.execute(
                     "SELECT * FROM assertions WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
                     (tenant_id, frm),
                 ).fetchall():
@@ -3910,12 +4027,58 @@ class SqliteEngine:
             conn = self._connect(tenant_id)
             self._require_branch(conn, tenant_id, frm)
             self._require_branch(conn, tenant_id, into)
-            report = MergeReport(frm, into, 0, 0, 0, 0, [])
-            ev_rows = conn.execute(
-                "SELECT * FROM evidence WHERE tenant_id = ? AND branch = ? AND erased = 0 ORDER BY rowid",
-                (tenant_id, frm),
-            ).fetchall()
             with conn:
+                conn.execute("BEGIN IMMEDIATE")
+                # Check all document conflicts before copying even unrelated rows.
+                # This intentionally rejects divergent histories; merge does not
+                # guess which document revision should be current.
+                documents_to_copy: list[dict[str, Any]] = []
+                target_documents = [json.loads(row["record"]) for row in conn.execute(
+                    "SELECT record FROM documents WHERE tenant_id = ? AND branch = ?",
+                    (tenant_id, into),
+                ).fetchall()]
+
+                def merged_evidence(tenant: str, cid: str, branch: str) -> Evidence | None:
+                    # Existing destination custody wins, including a tombstone.
+                    item = self._fetch_evidence(tenant, cid, branch)
+                    if item is None:
+                        item = self._fetch_evidence(tenant, cid, frm)
+                        if item is not None:
+                            item.branch = branch
+                    return item
+
+                for row in conn.execute(
+                    "SELECT record FROM documents WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
+                    (tenant_id, frm),
+                ).fetchall():
+                    record = validate_document_record(json.loads(row["record"]))
+                    record["branch"] = into
+                    target = conn.execute(
+                        "SELECT record FROM documents WHERE tenant_id = ? AND branch = ? "
+                        "AND owner_id = ? AND document_id = ?",
+                        (tenant_id, into, record["owner_id"], record["document_id"]),
+                    ).fetchone()
+                    if target is not None:
+                        if not document_records_equivalent(json.loads(target["record"]), record):
+                            raise DocumentConflict("document merge conflict: divergent revisions")
+                    else:
+                        documents_to_copy.append(record)
+                    for segment in record["segments"]:
+                        source = self._fetch_evidence(tenant_id, segment["cid"], frm)
+                        if source is None or source.erased or source.retired_at is not None:
+                            raise DocumentConflict("document merge conflict: source segment is unavailable")
+                        destination = self._fetch_evidence(tenant_id, segment["cid"], into)
+                        if destination is not None and (destination.erased or destination.retired_at is not None):
+                            raise DocumentConflict("document merge conflict: destination segment is unavailable")
+                    validate_document_sources(
+                        SimpleNamespace(get_evidence=merged_evidence), record, None,
+                        target_documents + documents_to_copy,
+                    )
+                report = MergeReport(frm, into, 0, 0, 0, 0, [])
+                ev_rows = conn.execute(
+                    "SELECT * FROM evidence WHERE tenant_id = ? AND branch = ? AND erased = 0 ORDER BY rowid",
+                    (tenant_id, frm),
+                ).fetchall()
                 for row in ev_rows:
                     ev = _evidence_from_row(row)
                     if not ev.cid:
@@ -3928,6 +4091,13 @@ class SqliteEngine:
                         ev.branch = into
                         self._insert_evidence_row(conn, ev)
                         report.evidence_added += 1
+                for record in documents_to_copy:
+                    conn.execute(
+                        "INSERT INTO documents(tenant_id, branch, owner_id, document_id, revision, record) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        (tenant_id, into, record["owner_id"], record["document_id"],
+                         record["revision"], json_text(record)),
+                    )
             # Replay-upsert OUTSIDE any open transaction — upsert_assertion opens
             # (and commits) its own per-call transaction on the same connection.
             a_rows = conn.execute(
@@ -4044,6 +4214,7 @@ class SqliteEngine:
                 }
                 conn.execute("DELETE FROM relations WHERE tenant_id = ? AND branch = ?", (tenant_id, branch))
                 conn.execute("DELETE FROM mental_models WHERE tenant_id = ? AND branch = ?", (tenant_id, branch))
+                conn.execute("DELETE FROM documents WHERE tenant_id = ? AND branch = ?", (tenant_id, branch))
                 conn.execute("DELETE FROM assertions WHERE tenant_id = ? AND branch = ?", (tenant_id, branch))
                 conn.execute("DELETE FROM evidence WHERE tenant_id = ? AND branch = ?", (tenant_id, branch))
                 if discarded_ids:
@@ -4495,6 +4666,7 @@ class SqliteEngine:
                     )
                 # Assertions (branch-scoped): trim surviving sources or retract.
                 self._invalidate_mental_models(conn, tenant_id, branch)
+                self._scrub_document_records(conn, tenant_id, branch, affected_cids)
                 for row in conn.execute(
                     "SELECT id, source_evidence_cids FROM assertions "
                     "WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
@@ -4761,7 +4933,7 @@ class SqliteEngine:
                 "WHERE tenant_id = ? AND branch = 'main' AND cid = ?",
                 (intention.tenant_id, cid),
             ).fetchone()
-            if row is None or row["erased"]:
+            if row is None or row["erased"] or row["retired_at"] is not None:
                 raise ValueError(
                     f"evidence {cid!r} is missing or outside the intention tenant"
                 )

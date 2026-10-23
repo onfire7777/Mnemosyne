@@ -420,7 +420,8 @@ class _SourceCustody:
                 if cid in states:
                     continue
                 item = self.engine.get_evidence(tenant_id, cid, branch)
-                if item is None or item.tenant_id != tenant_id or item.branch != branch or item.erased:
+                if (item is None or item.tenant_id != tenant_id or item.branch != branch
+                        or item.erased or item.retired_at is not None):
                     return None
                 state = self.evidence_state(item)
                 if cid in expected and state != expected[cid]:
@@ -1339,7 +1340,7 @@ class ConsolidationWorker:
         missing: list[str] = []
         for cid in source_evidence_cids:
             item = get_evidence(tenant_id, cid, branch)
-            if item is None:
+            if item is None or item.retired_at is not None:
                 missing.append(cid)
             else:
                 evidence.append(item)
@@ -1470,6 +1471,7 @@ class ConsolidationWorker:
             if isinstance(row, dict)
             and row.get("branch", "main") == branch
             and row.get("cid")
+            and row.get("retired_at") is None
             and not is_retired_summary_metadata(row.get("metadata") if isinstance(row.get("metadata"), dict) else {})
         }
         return MutationRailBudget(

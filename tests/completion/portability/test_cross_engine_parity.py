@@ -75,7 +75,9 @@ def _harness(name: str) -> ParityHarness:
 
 
 def _portable_explain_keys(explain: dict[str, Any]) -> list[str]:
-    return sorted(key for key in explain if key != "adapters")
+    return sorted(
+        key for key in explain if key not in {"adapters", "source_only_local_fallback", "candidate_width"}
+    )
 
 
 class _AdapterParityEmbedding:

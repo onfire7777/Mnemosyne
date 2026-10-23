@@ -85,6 +85,7 @@ class Evidence:
     created_at: datetime = field(default_factory=utc_now)
     erased: bool = False
     document_segment_id: str | None = None
+    retired_at: datetime | None = None
 
     def __post_init__(self) -> None:
         validate_document_segment_id(self.document_segment_id)
@@ -100,12 +101,17 @@ class Evidence:
         data["created_at"] = dt_to_json(self.created_at)
         if self.document_segment_id is None:
             data.pop("document_segment_id")
+        if self.retired_at is None:
+            data.pop("retired_at")
+        else:
+            data["retired_at"] = dt_to_json(self.retired_at)
         return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Evidence":
         copy = dict(data)
         copy["created_at"] = parse_dt(copy.get("created_at")) or utc_now()
+        copy["retired_at"] = parse_dt(copy.get("retired_at"))
         return cls(**copy)
 
 

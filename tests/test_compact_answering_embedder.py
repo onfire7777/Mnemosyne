@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import sys
 from copy import deepcopy
 from pathlib import Path
 
@@ -162,14 +164,20 @@ def test_native_and_padded_spaces_have_cosine_and_ranking_parity() -> None:
 
 def test_rust_module_unit_tests_pass_without_model_artifacts(tmp_path: Path) -> None:
     binary = tmp_path / "embed-tests"
+    env = dict(os.environ)
+    if sys.platform == "darwin" and "SDKROOT" not in env:
+        candidate_sdk = Path("/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk")
+        if candidate_sdk.exists():
+            env["SDKROOT"] = str(candidate_sdk)
     subprocess.run(
         ["rustc", "--edition=2021", "--test", str(RUST_MODULE), "-o", str(binary)],
         cwd=ROOT,
+        env=env,
         check=True,
         capture_output=True,
         text=True,
     )
-    subprocess.run([str(binary)], cwd=ROOT, check=True, capture_output=True, text=True)
+    subprocess.run([str(binary)], cwd=ROOT, env=env, check=True, capture_output=True, text=True)
 
 
 def _selection_fixture() -> dict[str, object]:

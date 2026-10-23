@@ -71,6 +71,9 @@ GRANT DELETE ON justifications, contradictions TO mnemosyne_app;
 -- also lets a consolidator discard a branch after removing its model records.
 -- Evidence and audit deletion remain forbidden to the app group.
 GRANT DELETE ON mental_models TO mnemosyne_app;
+-- Branch cascade cleanup of mutable source manifests executes as table owner.
+-- Source content and append-only audit permissions remain unchanged.
+GRANT DELETE ON documents TO mnemosyne_app;
 -- Removing an entity whose last source was erased cascades to its aliases.
 -- The FK action runs as this table owner, so it needs the same narrow grant.
 -- This does not permit the app role to delete entities or evidence directly.

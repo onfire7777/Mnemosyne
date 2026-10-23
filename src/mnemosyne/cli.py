@@ -9065,7 +9065,7 @@ def cmd_graph_timeline(args: argparse.Namespace) -> None:
 
 def cmd_graph_as_of(args: argparse.Namespace) -> None:
     tools = load_tools(args)
-    emit(tools.graph_as_of(args.tenant, args.subject, args.predicate, args.time, branch=args.branch))
+    emit(tools.graph_as_of(args.tenant, args.subject, args.predicate, args.time, branch=args.branch, **_read_context_kwargs(args)))
 
 
 def cmd_prefetch(args: argparse.Namespace) -> None:
@@ -20625,6 +20625,7 @@ def build_parser() -> argparse.ArgumentParser:
     graph_as_of.add_argument("--predicate", required=True)
     graph_as_of.add_argument("--time", required=True)
     graph_as_of.add_argument("--branch", default="main")
+    _add_read_context_args(graph_as_of)
     graph_as_of.set_defaults(func=cmd_graph_as_of)
 
     prefetch = sub.add_parser("prefetch")

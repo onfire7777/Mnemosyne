@@ -504,7 +504,7 @@ TOOL_SPEC: list[dict[str, Any]] = [
     },
     {
         "name": "graph_as_of",
-        "description": "Return bitemporal assertions for a subject/predicate at a timestamp.",
+        "description": "Return bitemporal assertions for a subject/predicate at a timestamp, subject to current source access and retirement. Historical time never bypasses present privacy or document retirement.",
         "arguments": ["tenant_id", "subject", "predicate", "time"],
     },
     {
@@ -3010,10 +3010,26 @@ class MemoryTools:
         events.sort(key=lambda item: str(item.get("at") or ""))
         return {"entity": entity, "branch": branch, "events": events}
 
-    def graph_as_of(self, tenant_id: str, subject: str, predicate: str, time: str, branch: str = "main") -> dict[str, Any]:
+    def graph_as_of(
+        self, tenant_id: str, subject: str, predicate: str, time: str, branch: str = "main",
+        role: WriteRole = "reader", user_id: str | None = None,
+        max_sensitivity: int | None = None, capability_tags: list[str] | None = None,
+        purpose: str | list[str] | None = None, residency: str | None = None,
+        region: str | None = None, break_glass: bool = False,
+        lawful_basis: str | list[str] | None = None,
+    ) -> dict[str, Any]:
+        from mnemosyne.access_policy import may_read_item
+        from mnemosyne.retrieval import projection_sources_readable
+
         moment = parse_dt(time)
         if moment is None:
             raise ValueError("graph_as_of requires an ISO timestamp")
+        context = self._read_context(
+            tenant_id, role=role, user_id=user_id, max_sensitivity=max_sensitivity,
+            capability_tags=capability_tags, purpose=purpose, residency=residency,
+            region=region, break_glass=break_glass, lawful_basis=lawful_basis,
+        )
+        context["branch"] = branch
         assertions = self.engine.as_of(subject, predicate, moment, tenant_id=tenant_id, branch=branch)
         latest_by_scope: dict[str, datetime] = {}
         for item in assertions:
@@ -3024,7 +3040,24 @@ class MemoryTools:
             for item in assertions
             if item.valid_from == latest_by_scope[canonical_json(item.scope)]
         ]
-        return {"subject": subject, "predicate": predicate, "time": time, "assertions": [item.to_dict() for item in assertions]}
+        readable = []
+        for item in assertions:
+            # The engine already selected the historical validity window. Apply
+            # CURRENT custody without treating supersession as erasure or
+            # letting an older, readable value replace an unreadable latest one.
+            decision = may_read_item(
+                item_tenant_id=item.tenant_id, sensitivity=item.sensitivity,
+                access_policy=item.access_policy, context=context,
+                policy_max_sensitivity=self.engine.policy.max_sensitivity,
+            )
+            if decision.allowed and not decision.redacted and projection_sources_readable(
+                self.engine, item.source_evidence_cids, tenant_id=tenant_id,
+                branch=branch, filt=context, policy=self.engine.policy,
+            ):
+                record = item.to_dict()
+                record.pop("access_policy", None)
+                readable.append(record)
+        return {"subject": subject, "predicate": predicate, "time": time, "assertions": readable}
 
     def trajectory_log(
         self,

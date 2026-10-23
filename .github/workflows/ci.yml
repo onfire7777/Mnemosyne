@@ -236,6 +236,8 @@ jobs:
           tests/test_postgres_metadata_live.py
           tests/test_postgres_source_transaction_live.py
           tests/test_document_segment_identity.py
+          tests/test_documents.py
+          tests/test_postgres_documents.py
           tests/test_projection_source_custody.py
           tests/test_postgres_entity_erasure_live.py
           tests/test_ingestion_acknowledgement.py -q

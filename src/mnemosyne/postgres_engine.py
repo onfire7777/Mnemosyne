@@ -68,6 +68,14 @@ from mnemosyne.erasure_ids import (
     redact_erased_cids,
 )
 from mnemosyne.ids import content_cid, evidence_cid, evidence_unscoped_cid
+from mnemosyne.document_storage import (
+    DocumentConflict,
+    document_key,
+    document_records_equivalent,
+    prepare_document_save,
+    scrub_document_record,
+    validate_document_sources,
+)
 from mnemosyne.mental_model_storage import (
     MentalModelConflict,
     expected_version as validate_model_version,
@@ -566,8 +574,7 @@ class PostgresEngine:
         if state is not None:
             state["failed"] = True
             raise RuntimeError(
-                "source_transaction supports only append_evidence, get_evidence, "
-                "update_evidence_metadata, and forget"
+                "source_transaction supports only source operations and document records"
             )
         if self._psycopg is None or self._jsonb is None:
             self._psycopg, self._jsonb = _require_psycopg()
@@ -657,7 +664,7 @@ class PostgresEngine:
 
     @contextmanager
     def source_transaction(self, tenant_id: str, branch: str = "main"):
-        """Atomically compose the four source operations in one tenant/branch.
+        """Atomically compose source operations and document records in one scope.
 
         Nested same-scope contexts join the transaction. Any nested operation
         failure aborts the outer transaction, even if its exception is caught.
@@ -672,7 +679,7 @@ class PostgresEngine:
             if self._active_mental_model_connection(tenant_id) is not None:
                 raise RuntimeError("source transaction cannot join a mental model guard")
             state = {"tenant_id": tenant_id, "branch": branch, "failed": False,
-                     "invalidate_passages": False}
+                     "invalidate_passages": False, "after_commit": []}
             with self.connect() as conn:
                 # A safe-role probe may have begun a transaction on a fresh
                 # non-pooled lease. This context owns that lease exclusively.
@@ -697,6 +704,22 @@ class PostgresEngine:
                     del self._source_transaction_context.state
             if state["invalidate_passages"]:
                 self._passage_bm25_index = None
+            first_error: BaseException | None = None
+            for callback in state["after_commit"]:
+                try:
+                    callback()
+                except BaseException as error:
+                    if first_error is None:
+                        first_error = error
+            if first_error is not None:
+                raise first_error
+
+    def _after_source_commit(self, callback: Any) -> None:
+        state = self._source_transaction_state()
+        if state is None:
+            callback()
+        else:
+            state["after_commit"].append(callback)
 
     @staticmethod
     def _set_pgvector_hnsw_query_settings(cur: Any, filt: dict[str, Any]) -> None:
@@ -727,7 +750,7 @@ class PostgresEngine:
                     WITH evidence_hygiene AS (
                       SELECT
                         COUNT(*) FILTER (
-                          WHERE erased = false
+                          WHERE erased = false AND retired_at IS NULL
                             AND embedding IS NULL
                             AND embedding_partition <> 'none'
                         ) AS embeddable_null_embeddings,
@@ -736,7 +759,7 @@ class PostgresEngine:
                             AND embedding IS NOT NULL
                         ) AS none_partition_vectors,
                         COUNT(*) FILTER (
-                          WHERE erased = false
+                          WHERE erased = false AND retired_at IS NULL
                             AND embedding IS NOT NULL
                             AND embedding_partition IN ('public', 'private')
                         ) AS stored_vectors,
@@ -744,7 +767,7 @@ class PostgresEngine:
                           WHERE embedding_partition = 'none'
                         ) AS none_partition_rows,
                         COUNT(*) FILTER (
-                          WHERE erased = false
+                          WHERE erased = false AND retired_at IS NULL
                         ) AS live_rows
                       FROM evidence
                       WHERE tenant_id = %s AND branch = %s
@@ -841,7 +864,7 @@ class PostgresEngine:
                         FROM evidence
                         WHERE tenant_id = %s
                           AND branch = %s
-                          AND erased = false
+                          AND erased = false AND retired_at IS NULL
                           AND embedding IS NULL
                           AND embedding_partition <> 'none'
                         ORDER BY transaction_time ASC, cid ASC
@@ -943,7 +966,7 @@ class PostgresEngine:
                     FROM evidence
                     WHERE tenant_id = %s
                       AND branch = %s
-                      AND erased = false
+                      AND erased = false AND retired_at IS NULL
                       AND embedding IS NULL
                       AND embedding_partition <> 'none'
                     ORDER BY transaction_time ASC, cid ASC
@@ -1510,7 +1533,7 @@ class PostgresEngine:
                 raise ValueError(f"evidence {cid!r} is missing or outside the working tenant") from exc
             cur.execute(
                 """
-                SELECT user_id, session_id, erased, trust_tier, capability_tags,
+                SELECT user_id, session_id, erased, retired_at, trust_tier, capability_tags,
                        sensitivity, access_policy
                 FROM evidence
                 WHERE tenant_id = %s AND branch = 'main' AND cid = %s
@@ -1520,8 +1543,8 @@ class PostgresEngine:
             row = cur.fetchone()
             if row is None:
                 raise ValueError(f"evidence {cid!r} is missing or outside the working tenant")
-            if bool(row["erased"]):
-                raise ValueError(f"evidence {cid!r} is erased")
+            if bool(row["erased"]) or row.get("retired_at") is not None:
+                raise ValueError(f"evidence {cid!r} is erased or retired")
             if str(row["user_id"]) != db_user_id:
                 raise ValueError("working item user must match originating evidence")
             if row["session_id"] is None or str(row["session_id"]) != db_session_id:
@@ -1906,12 +1929,162 @@ class PostgresEngine:
             cur, table="evidence", column="document_segment_id",
             ddl="ALTER TABLE evidence ADD COLUMN IF NOT EXISTS document_segment_id TEXT",
         )
+        cls._ensure_required_column(
+            cur, table="evidence", column="retired_at",
+            ddl="ALTER TABLE evidence ADD COLUMN IF NOT EXISTS retired_at TIMESTAMPTZ",
+        )
+
+    def get_document_record(
+        self, tenant_id: str, owner_id: str, document_id: str, branch: str = "main",
+    ) -> dict[str, Any] | None:
+        with self._source_operation_scope(tenant_id, branch):
+            document_key(tenant_id, owner_id, document_id, branch)
+            with self._source_connection(tenant_id, branch, read=True) as conn:
+                with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                    self._set_tenant(cur, _stable_uuid("tenant", tenant_id))
+                    cur.execute(
+                        "SELECT record FROM documents WHERE tenant_id = %s AND branch = %s "
+                        "AND owner_id = %s AND document_id = %s",
+                        (_stable_uuid("tenant", tenant_id), branch, owner_id, document_id),
+                    )
+                    row = cur.fetchone()
+            return copy.deepcopy(row["record"]) if row else None
+
+    def list_document_records(self, tenant_id: str, branch: str = "main") -> list[dict[str, Any]]:
+        with self._source_operation_scope(tenant_id, branch):
+            document_key(tenant_id, "internal", "list", branch)
+            with self._source_connection(tenant_id, branch, read=True) as conn:
+                with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                    self._set_tenant(cur, _stable_uuid("tenant", tenant_id))
+                    return self._document_records(cur, _stable_uuid("tenant", tenant_id), branch)
+
+    @staticmethod
+    def _document_records(cur: Any, db_tenant_id: Any, branch: str) -> list[dict[str, Any]]:
+        cur.execute(
+            "SELECT record FROM documents WHERE tenant_id = %s AND branch = %s "
+            "ORDER BY owner_id, document_id",
+            (db_tenant_id, branch),
+        )
+        return [copy.deepcopy(row["record"] if isinstance(row, dict) else row[0]) for row in cur.fetchall()]
+
+    def save_document_record(
+        self, tenant_id: str, owner_id: str, document_id: str, record: dict[str, Any],
+        branch: str = "main", *, expected_revision: int | None = None,
+    ) -> dict[str, Any]:
+        with self._source_operation_scope(tenant_id, branch):
+            document_key(tenant_id, owner_id, document_id, branch)
+            state = self._source_transaction_state()
+            if state is None:
+                raise RuntimeError("document saves require source_transaction")
+            db_tenant_id = _stable_uuid("tenant", tenant_id)
+            with self._source_connection(tenant_id, branch) as conn:
+                with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                    self._ensure_evidence_document_schema(cur)
+                    cur.execute(
+                        "SELECT record FROM documents WHERE tenant_id = %s AND branch = %s "
+                        "AND owner_id = %s AND document_id = %s FOR UPDATE",
+                        (db_tenant_id, branch, owner_id, document_id),
+                    )
+                    row = cur.fetchone()
+                    current = copy.deepcopy(row["record"]) if row else None
+                    saved = prepare_document_save(
+                        tenant_id, owner_id, document_id, record, branch, current, expected_revision,
+                    )
+                    removed = validate_document_sources(
+                        self, saved, current, self._document_records(cur, db_tenant_id, branch),
+                    )
+                    self._ensure_tenant_and_branch_cursor(cur, tenant_id, branch, "protected")
+                    if removed:
+                        cur.execute(
+                            "UPDATE evidence SET retired_at = %s WHERE tenant_id = %s AND branch = %s "
+                            "AND user_id = %s AND cid = ANY(%s) AND erased = false AND retired_at IS NULL",
+                            (saved["updated_at"], db_tenant_id, branch, _stable_uuid("user", owner_id),
+                             _cid_list_to_bytes(removed)),
+                        )
+                        if cur.rowcount != len(removed):
+                            raise DocumentConflict("document source changed during retirement")
+                    if current is None:
+                        cur.execute(
+                            "INSERT INTO documents(tenant_id, branch, owner_id, document_id, revision, record) "
+                            "VALUES (%s, %s, %s, %s, %s, %s) "
+                            "ON CONFLICT (tenant_id, branch, owner_id, document_id) DO NOTHING RETURNING revision",
+                            (db_tenant_id, branch, owner_id, document_id, saved["revision"], self._jsonb(saved)),
+                        )
+                    else:
+                        cur.execute(
+                            "UPDATE documents SET revision = %s, record = %s WHERE tenant_id = %s AND branch = %s "
+                            "AND owner_id = %s AND document_id = %s AND revision = %s RETURNING revision",
+                            (saved["revision"], self._jsonb(saved), db_tenant_id, branch, owner_id,
+                             document_id, expected_revision),
+                        )
+                    if cur.fetchone() is None:
+                        raise DocumentConflict("document revision conflict")
+                    self._invalidate_mental_models(cur, db_tenant_id, branch)
+                    cur.execute(
+                        "UPDATE graph_ppr_cache SET relation_fingerprint = '', hits = '[]'::jsonb "
+                        "WHERE tenant_id = %s AND branch = %s", (db_tenant_id, branch),
+                    )
+                    self._audit(
+                        cur, db_tenant_id, owner_id, "save_document", document_id,
+                        {"branch": branch, "revision": saved["revision"], "deleted": saved["deleted"],
+                         "segment_count": len(saved["segments"])}, source="document",
+                    )
+                    state["invalidate_passages"] = True
+            return copy.deepcopy(saved)
+
+    def _scrub_document_records(self, cur: Any, db_tenant_id: Any, branch: str, erased_cids: set[str]) -> None:
+        for record in self._document_records(cur, db_tenant_id, branch):
+            scrubbed = scrub_document_record(record, erased_cids)
+            if scrubbed is not None:
+                cur.execute(
+                    "UPDATE documents SET revision = %s, record = %s WHERE tenant_id = %s AND branch = %s "
+                    "AND owner_id = %s AND document_id = %s",
+                    (scrubbed["revision"], self._jsonb(scrubbed), db_tenant_id, branch,
+                     record["owner_id"], record["document_id"]),
+                )
+
+    def _copy_document_records(self, cur: Any, db_tenant_id: Any, frm: str, into: str) -> None:
+        for record in self._document_records(cur, db_tenant_id, frm):
+            copied = {**record, "branch": into}
+            cur.execute(
+                "INSERT INTO documents(tenant_id, branch, owner_id, document_id, revision, record) "
+                "VALUES (%s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (tenant_id, branch, owner_id, document_id) DO NOTHING",
+                (db_tenant_id, into, copied["owner_id"], copied["document_id"],
+                 copied["revision"], self._jsonb(copied)),
+            )
+
+    def _check_document_merge(self, cur: Any, db_tenant_id: Any, frm: str, into: str) -> None:
+        target = {(row["owner_id"], row["document_id"]): row
+                  for row in self._document_records(cur, db_tenant_id, into)}
+        for source in self._document_records(cur, db_tenant_id, frm):
+            existing = target.get((source["owner_id"], source["document_id"]))
+            if existing is not None and not document_records_equivalent(source, existing):
+                raise DocumentConflict("divergent document records cannot be merged")
+            # An unrelated target tombstone or retirement must never become
+            # the live source of an imported manifest merely because CIDs match.
+            for retired, entries in ((False, source["segments"]), (True, source["retired_segments"])):
+                for segment in entries:
+                    cur.execute(
+                        "SELECT user_id, document_segment_id, erased, retired_at FROM evidence "
+                        "WHERE tenant_id = %s AND branch = %s AND cid = %s",
+                        (db_tenant_id, into, _cid_to_bytes(segment["cid"])),
+                    )
+                    row = cur.fetchone()
+                    if row is not None and (
+                        str(row["user_id"]) != str(_stable_uuid("user", source["owner_id"]))
+                        or row["document_segment_id"] != segment["segment_id"]
+                        or row["erased"] or (row["retired_at"] is not None) != retired
+                    ):
+                        raise DocumentConflict("target evidence conflicts with document custody")
 
     def append_evidence(self, ev: Evidence, branch: str = "main") -> str:
         with self._source_operation_scope(ev.tenant_id, branch):
             return self._append_evidence(ev, branch)
 
     def _append_evidence(self, ev: Evidence, branch: str) -> str:
+        if ev.retired_at is not None:
+            raise ValueError("append_evidence cannot set retired_at")
         access_policy = validate_access_policy(ev.access_policy, tenant_id=ev.tenant_id, location="evidence.access_policy")
         if self._source_transaction_state() is None:
             self.ensure_tenant_and_branch(ev.tenant_id, branch)
@@ -2340,11 +2513,12 @@ class PostgresEngine:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
                 cur.execute(
-                    """
+                    f"""
                     SELECT e.*, t.name AS tenant_name
                     FROM evidence e
                     JOIN tenants t ON t.id = e.tenant_id
                     WHERE e.tenant_id = %s AND e.branch = %s AND e.cid = %s AND e.erased = false
+                    {"FOR SHARE OF e" if self._source_transaction_state() is not None else ""}
                     """,
                     (db_tenant_id, branch, cid_bytes),
                 )
@@ -2367,7 +2541,7 @@ class PostgresEngine:
                 cur.execute(
                     """
                     SELECT created_at FROM evidence
-                    WHERE tenant_id = %s AND branch = %s AND cid = %s AND erased = false
+                    WHERE tenant_id = %s AND branch = %s AND cid = %s AND erased = false AND retired_at IS NULL
                     """,
                     (db_tenant_id, branch, _cid_to_bytes(cid)),
                 )
@@ -2399,7 +2573,7 @@ class PostgresEngine:
                 cur.execute(
                     """
                     SELECT cid, created_at FROM evidence
-                    WHERE tenant_id = %s AND branch = %s AND erased = false AND cid = ANY(%s)
+                    WHERE tenant_id = %s AND branch = %s AND erased = false AND retired_at IS NULL AND cid = ANY(%s)
                     """,
                     (db_tenant_id, branch, [_cid_to_bytes(cid) for cid in wanted]),
                 )
@@ -3387,10 +3561,11 @@ class PostgresEngine:
                     """
                     WITH q AS (SELECT plainto_tsquery('english', %s) AS query)
                     SELECT e.cid, e.branch, e.content, e.metadata, e.trust_tier, e.sensitivity, e.access_policy,
-                      e.actor, e.source_type,
+                      e.actor, e.source_type, e.document_segment_id, e.retired_at,
+                      e.metadata->>'_external_user_id' AS user_id,
                       ts_rank_cd(coalesce(e.lexeme, to_tsvector('english', coalesce(e.content, ''))), q.query) AS score
                     FROM evidence e, q
-                    WHERE e.tenant_id = %s AND e.branch = %s AND e.erased = false
+                    WHERE e.tenant_id = %s AND e.branch = %s AND e.erased = false AND e.retired_at IS NULL
                       AND e.trust_tier <= %s AND e.sensitivity <= %s
                       AND (%s OR NOT (e.metadata ? 'quarantine_reason'))
                       AND NOT (
@@ -3622,9 +3797,10 @@ class PostgresEngine:
                     """
                     SELECT cid, branch, content, content_pointer, modality, metadata,
                       trust_tier, sensitivity, access_policy, actor, source_type,
+                      document_segment_id, retired_at, metadata->>'_external_user_id' AS user_id,
                       embedding_partition, 1.0 - (embedding <=> %s::vector) AS score
                     FROM evidence
-                    WHERE tenant_id = %s AND branch = %s AND erased = false
+                    WHERE tenant_id = %s AND branch = %s AND erased = false AND retired_at IS NULL
                       AND trust_tier <= %s AND sensitivity <= %s
                       AND (%s OR NOT (metadata ? 'quarantine_reason'))
                       AND NOT (
@@ -3735,9 +3911,10 @@ class PostgresEngine:
                 cur.execute(
                     """
                     SELECT cid, branch, content, content_pointer, modality, metadata,
-                      trust_tier, sensitivity, access_policy, actor, source_type, embedding_partition
+                      trust_tier, sensitivity, access_policy, actor, source_type, embedding_partition,
+                      document_segment_id, retired_at, metadata->>'_external_user_id' AS user_id
                     FROM evidence
-                    WHERE tenant_id = %s AND branch = %s AND erased = false
+                    WHERE tenant_id = %s AND branch = %s AND erased = false AND retired_at IS NULL
                       AND trust_tier <= %s AND sensitivity <= %s
                       AND (%s OR NOT (metadata ? 'quarantine_reason'))
                       AND NOT (
@@ -3952,7 +4129,8 @@ class PostgresEngine:
                 if relation_source_cids:
                     cur.execute(
                         """
-                        SELECT cid, metadata, trust_tier, sensitivity, access_policy, erased, actor, source_type
+                        SELECT cid, metadata, trust_tier, sensitivity, access_policy, erased, actor, source_type,
+                          document_segment_id, retired_at, metadata->>'_external_user_id' AS user_id
                         FROM evidence
                         WHERE tenant_id = %s AND branch = %s AND cid = ANY(%s::bytea[])
                         """,
@@ -4245,7 +4423,8 @@ class PostgresEngine:
                 if source_cid_bytes:
                     cur.execute(
                         """
-                        SELECT cid, trust_tier, sensitivity, metadata, erased, source_type, actor, access_policy
+                        SELECT cid, trust_tier, sensitivity, metadata, erased, source_type, actor, access_policy,
+                          document_segment_id, retired_at, metadata->>'_external_user_id' AS user_id
                         FROM evidence
                         WHERE tenant_id = %s AND branch = %s AND cid = ANY(%s::bytea[])
                         ORDER BY cid
@@ -4273,6 +4452,9 @@ class PostgresEngine:
                         "sensitivity": int(evidence_by_cid[cid].get("sensitivity") or 0) if cid in evidence_by_cid else None,
                         "metadata": dict(evidence_by_cid[cid].get("metadata") or {}) if cid in evidence_by_cid else None,
                         "erased": bool(evidence_by_cid[cid].get("erased")) if cid in evidence_by_cid else None,
+                        "retired_at": iso_utc(evidence_by_cid[cid].get("retired_at")) if cid in evidence_by_cid else None,
+                        "document_segment_id": evidence_by_cid[cid].get("document_segment_id") if cid in evidence_by_cid else None,
+                        "user_id": evidence_by_cid[cid].get("user_id") if cid in evidence_by_cid else None,
                         "source_type": str(evidence_by_cid[cid].get("source_type") or "")
                         if cid in evidence_by_cid
                         else None,
@@ -4705,7 +4887,8 @@ class PostgresEngine:
                         self._set_tenant(cur, db_tenant_id)
                         cur.execute(
                             """
-                            SELECT cid, trust_tier, sensitivity, access_policy, metadata, erased, source_type, actor
+                            SELECT cid, trust_tier, sensitivity, access_policy, metadata, erased, source_type, actor,
+                          document_segment_id, retired_at, metadata->>'_external_user_id' AS user_id
                             FROM evidence
                             WHERE tenant_id = %s AND branch = %s AND cid = ANY(%s::bytea[])
                             """,
@@ -4937,7 +5120,7 @@ class PostgresEngine:
             cur.execute(
                 """
                 SELECT cid, actor, source_type, source_identity, content_pointer,
-                  metadata, trust_tier, erased, capability_tags
+                  metadata, trust_tier, erased, retired_at, capability_tags
                 FROM evidence
                 WHERE tenant_id = %s AND branch = %s AND cid = ANY(%s)
                 """,
@@ -4969,7 +5152,7 @@ class PostgresEngine:
                 reason = "erased"
             elif metadata.get("quarantine_reason"):
                 reason = "quarantined"
-            elif is_retired_summary_metadata(metadata):
+            elif row.get("retired_at") is not None or is_retired_summary_metadata(metadata):
                 reason = "retired"
             elif is_write_tainted(list(row.get("capability_tags") or [])):
                 reason = "sanitized_data_only"
@@ -5256,7 +5439,17 @@ class PostgresEngine:
                 state["invalidate_passages"] = True
             else:
                 self._passage_bm25_index = None
+            if result.get("erased"):
+                self._after_source_commit(self._purge_erased_embedding_cache)
             return result
+
+    def _purge_erased_embedding_cache(self) -> None:
+        purge = getattr(self.adapters.embedding, "purge_cache", None)
+        if purge is not None:
+            try:
+                purge()
+            except Exception:  # Cache cleanup cannot undo durable erasure.
+                logger.warning("embedding cache purge failed after source erasure", exc_info=True)
 
     def _forget(
         self, tenant_id: str, cid: str, branch: str, requested_by: str,
@@ -5428,16 +5621,7 @@ class PostgresEngine:
                         (db_tenant_id, branch, affected_cid_bytes),
                     )
                 self._invalidate_mental_models(cur, db_tenant_id, branch)
-                # Erasure hook: cached embedding vectors are derived data keyed
-                # by text hash, so they cannot be invalidated row-precisely once
-                # the source is erased — purge the provider's cache scope
-                # (mirrors SqliteEngine's purge_embedding_cache-on-forget).
-                purge_embedding_cache = getattr(self.adapters.embedding, "purge_cache", None)
-                if purge_embedding_cache is not None:
-                    try:
-                        purge_embedding_cache()
-                    except Exception:  # pragma: no cover - purge must not block erasure.
-                        pass
+                self._scrub_document_records(cur, db_tenant_id, branch, affected_cids)
                 for retained_bytes, metadata in retained_metadata.items():
                     cur.execute(
                         """
@@ -5610,7 +5794,7 @@ class PostgresEngine:
                     SELECT e.*, t.name AS tenant_name
                     FROM evidence e
                     JOIN tenants t ON t.id = e.tenant_id
-                    WHERE e.tenant_id = %s AND e.branch = %s AND e.erased = false
+                    WHERE e.tenant_id = %s AND e.branch = %s AND e.erased = false AND e.retired_at IS NULL
                       AND e.source_type = 'consolidation-summary'
                     ORDER BY e.cid
                     """,
@@ -5757,7 +5941,9 @@ class PostgresEngine:
                 intentions = [item.to_dict() for item in self.list_intentions(tenant_id)]
                 cur.execute("SELECT record FROM mental_models WHERE tenant_id = %s ORDER BY branch, model_id", (db_tenant_id,))
                 mental_models = [copy_model_json(row["record"]) for row in cur.fetchall()]
-        return {
+                cur.execute("SELECT record FROM documents WHERE tenant_id = %s ORDER BY branch, owner_id, document_id", (db_tenant_id,))
+                documents = [copy.deepcopy(row["record"]) for row in cur.fetchall()]
+        result = {
             "tenant_id": tenant_id,
             "evidence": evidence,
             "assertions": assertions,
@@ -5773,6 +5959,9 @@ class PostgresEngine:
             "deletion_log": deletion,
             "merge_log": merge_log,
         }
+        if documents:
+            result["documents"] = documents
+        return result
 
     def export_tenant_filtered(self, tenant_id: str, access_context: dict[str, Any]) -> dict[str, Any]:
         return filter_export_for_context(
@@ -5843,10 +6032,12 @@ class PostgresEngine:
             "calibrations": [item for exported in tenant_exports for item in exported["calibrations"]],
             "entities": [item for exported in tenant_exports for item in exported["entities"]],
             "mental_models": [item for exported in tenant_exports for item in exported["mental_models"]],
+            "documents": [item for exported in tenant_exports for item in exported.get("documents", [])],
             "audit_log": [item for exported in tenant_exports for item in exported["audit_log"]],
             "deletion_log": [item for exported in tenant_exports for item in exported["deletion_log"]],
             "merge_log": merge_log,
             "tenants": tenant_exports,
+            "working_memory": [item for t in tenant_exports for item in t.get("working_memory", [])],
         }
 
     def branch(self, name: str, frm: str = "main", kind: str = "scratch", tenant_id: str | None = None) -> None:
@@ -5854,10 +6045,11 @@ class PostgresEngine:
             return
         if not tenant_id:
             raise ValueError("PostgresEngine.branch requires tenant_id")
-        self.ensure_tenant_and_branch(tenant_id, frm)
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self.connect() as conn:
             with conn.cursor() as cur:
+                self._lock_working_tenant(cur, tenant_id)
+                self._ensure_tenant_and_branch_cursor(cur, tenant_id, frm, "protected")
                 self._set_tenant(cur, db_tenant_id)
                 self._ensure_evidence_vector_schema(cur)
                 self._ensure_evidence_document_schema(cur)
@@ -5879,18 +6071,19 @@ class PostgresEngine:
                           cid, branch, tenant_id, user_id, session_id, actor, source_type,
                           source_identity, document_segment_id, content, content_pointer, modality, metadata,
                           trust_tier, capability_tags, sensitivity, signed_provenance,
-                          access_policy, embedding, embedding_partition, erased, created_at
+                          access_policy, embedding, embedding_partition, erased, created_at, retired_at
                         )
                         SELECT cid, %s, tenant_id, user_id, session_id, actor, source_type,
                           source_identity, document_segment_id, content, content_pointer, modality, metadata,
                           trust_tier, capability_tags, sensitivity, signed_provenance,
-                          access_policy, embedding, embedding_partition, erased, created_at
+                          access_policy, embedding, embedding_partition, erased, created_at, retired_at
                         FROM evidence
                         WHERE tenant_id = %s AND branch = %s
                         ON CONFLICT (tenant_id, branch, cid) DO NOTHING
                         """,
                         (name, db_tenant_id, frm),
                     )
+                    self._copy_document_records(cur, db_tenant_id, frm, name)
                     cur.execute(
                         """
                         INSERT INTO assertions (
@@ -5931,7 +6124,9 @@ class PostgresEngine:
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._lock_working_tenant(cur, tenant_id)
                 self._set_tenant(cur, db_tenant_id)
+                self._check_document_merge(cur, db_tenant_id, frm, into)
                 # Run the schema-ensure DDL once for the whole merge so the
                 # per-row replay below does not reacquire ACCESS EXCLUSIVE
                 # locks or rerun table-wide backfills inside the transaction.
@@ -5953,12 +6148,12 @@ class PostgresEngine:
                           cid, branch, tenant_id, user_id, session_id, actor, source_type,
                           source_identity, document_segment_id, content, content_pointer, modality, metadata,
                           trust_tier, capability_tags, sensitivity, signed_provenance,
-                          access_policy, embedding, embedding_partition, erased, created_at
+                          access_policy, embedding, embedding_partition, erased, created_at, retired_at
                         )
                         SELECT cid, %s, tenant_id, user_id, session_id, actor, source_type,
                           source_identity, document_segment_id, content, content_pointer, modality, metadata,
                           trust_tier, capability_tags, sensitivity, signed_provenance,
-                          access_policy, embedding, embedding_partition, erased, created_at
+                          access_policy, embedding, embedding_partition, erased, created_at, retired_at
                         FROM evidence
                         WHERE tenant_id = %s AND branch = %s
                         ON CONFLICT (tenant_id, branch, cid) DO NOTHING
@@ -5966,6 +6161,7 @@ class PostgresEngine:
                         (into, db_tenant_id, frm),
                     )
                     report.evidence_added += cur.rowcount
+                    self._copy_document_records(cur, db_tenant_id, frm, into)
                     cur.execute(
                         """
                         SELECT a.*, t.name AS tenant_name
@@ -6114,7 +6310,9 @@ class PostgresEngine:
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self.connect() as conn:
             with conn.cursor() as cur:
+                self._lock_working_tenant(cur, tenant_id)
                 self._set_tenant(cur, db_tenant_id)
+                cur.execute("DELETE FROM documents WHERE tenant_id = %s AND branch = %s", (db_tenant_id, branch))
                 cur.execute("DELETE FROM relations WHERE tenant_id = %s AND branch = %s", (db_tenant_id, branch))
                 cur.execute("DELETE FROM mental_models WHERE tenant_id = %s AND branch = %s", (db_tenant_id, branch))
                 cur.execute("DELETE FROM assertions WHERE tenant_id = %s AND branch = %s", (db_tenant_id, branch))
@@ -6173,9 +6371,10 @@ class PostgresEngine:
                 self._set_tenant(cur, db_tenant_id)
                 cur.execute(
                     """
-                    SELECT cid, tenant_id, branch, content, metadata, trust_tier, sensitivity, access_policy, actor, source_type
+                    SELECT cid, tenant_id, branch, content, metadata, trust_tier, sensitivity, access_policy, actor, source_type,
+                          document_segment_id, retired_at, metadata->>'_external_user_id' AS user_id
                     FROM evidence
-                    WHERE tenant_id = %s AND branch = %s AND erased = false
+                    WHERE tenant_id = %s AND branch = %s AND erased = false AND retired_at IS NULL
                       AND trust_tier <= %s AND sensitivity <= %s
                       AND (%s OR NOT (metadata ? 'quarantine_reason'))
                       AND NOT (
@@ -6415,9 +6614,9 @@ class PostgresEngine:
             SELECT cid, user_id,
                    COALESCE(metadata->>'_external_user_id', user_id::text)
                      AS external_user_id,
-                   trust_tier, capability_tags, erased
+                   trust_tier, capability_tags, erased, retired_at
             FROM evidence
-            WHERE tenant_id = %s AND cid = ANY(%s)
+            WHERE tenant_id = %s AND branch = 'main' AND cid = ANY(%s)
             ORDER BY cid
             FOR SHARE
             """,
@@ -6430,8 +6629,8 @@ class PostgresEngine:
         provenance: list[dict[str, Any]] = []
         for cid in intention.evidence_ids:
             row = by_cid.get(cid)
-            if row is None or row["erased"]:
-                raise ValueError(f"evidence {cid!r} is missing or outside the intention tenant")
+            if row is None or row["erased"] or row.get("retired_at") is not None:
+                raise ValueError(f"evidence {cid!r} is missing or outside the intention tenant, erased, or retired")
             validate_intention_provenance_claim(
                 intention,
                 evidence_id=cid,
@@ -6739,7 +6938,7 @@ class PostgresEngine:
                     )
 
     def list_intentions(self, tenant_id: str) -> list[Intention]:
-        """Return detached tenant-only copies in lexicographic intention_id order."""
+        """Return tenant copies, withholding retired or foreign document sources."""
 
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self._mental_model_connection(tenant_id) as conn:
@@ -6757,7 +6956,24 @@ class PostgresEngine:
                     """,
                     (db_tenant_id,),
                 )
-                return [self._row_to_intention(row, tenant_id) for row in cur.fetchall()]
+                rows = list(cur.fetchall())
+                current: list[Intention] = []
+                for row in rows:
+                    intention = self._row_to_intention(row, tenant_id)
+                    cur.execute(
+                        "SELECT user_id, document_segment_id, erased, retired_at FROM evidence "
+                        "WHERE tenant_id = %s AND branch = 'main' AND cid = ANY(%s)",
+                        (db_tenant_id, _cid_list_to_bytes(intention.evidence_ids)),
+                    )
+                    sources = list(cur.fetchall())
+                    if any(source["retired_at"] is not None or (
+                        source["document_segment_id"] is not None and (
+                            source["erased"] or str(source["user_id"]) != _stable_uuid("user", intention.user_id)
+                        )
+                    ) for source in sources):
+                        continue
+                    current.append(intention)
+                return current
 
     def update_intention(
         self, tenant_id: str, intention_id: str, *, user_id: str, agent_id: str,
@@ -7425,6 +7641,7 @@ def _row_to_evidence(row: dict[str, Any], cid: str) -> Evidence:
         cid=cid,
         created_at=parse_dt(row["created_at"]) or utc_now(),
         erased=row["erased"],
+        retired_at=parse_dt(row.get("retired_at")),
     )
 
 

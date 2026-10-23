@@ -62,6 +62,22 @@ def run_confabulation_eval() -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     for index, case in enumerate(CONFABULATION_CASES, start=1):
         tenant = f"g0-confab-{case['id']}"
+        meta = dict(case["metadata"])
+        if "summary" in meta:
+            raw_cid = engine.append_evidence(
+                Evidence(
+                    tenant_id=tenant,
+                    user_id="g0-eval",
+                    actor="system",
+                    source_type="chat",
+                    source_identity=f"g0:raw:{case['id']}",
+                    content=f"Raw backing source for {case['id']}.",
+                    trust_tier=2,
+                    access_policy={"tenant": tenant},
+                )
+            )
+            meta["summary"] = dict(meta["summary"])
+            meta["summary"]["source_evidence_cids"] = [raw_cid]
         cid = engine.append_evidence(
             Evidence(
                 tenant_id=tenant,
@@ -70,7 +86,7 @@ def run_confabulation_eval() -> dict[str, Any]:
                 source_type=case["source_type"],
                 source_identity=f"g0:{case['id']}",
                 content=case["content"],
-                metadata=dict(case["metadata"]),
+                metadata=meta,
                 trust_tier=2,
                 capability_tags=list(case["capability_tags"]),
                 access_policy={"tenant": tenant},

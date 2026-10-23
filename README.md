@@ -314,6 +314,7 @@ synthetic fixtures and made no benchmark or model-provider calls.
 - [Grounded reflection](docs/reflect.md)
 - [Maintained mental models](docs/mental-models.md)
 - [Source identity and atomic updates](docs/source-transactions.md)
+- [Atomic document revisions](docs/document-revisions.md)
 - [Codex answer evaluation](eval/longmemeval_s/README.md)
 - [BurnSkill standard](docs/BURNSKILL.md)
 - [CLI reference](https://github.com/onfire7777/Mnemosyne/wiki/CLI-Reference)
