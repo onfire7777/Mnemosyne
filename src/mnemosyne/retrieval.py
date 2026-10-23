@@ -2220,6 +2220,16 @@ def is_retired_summary_metadata(metadata: object) -> bool:
     )
 
 
+def evidence_current_for_context(item: Any, filt: Mapping[str, Any] | None) -> bool:
+    """Document lifecycle and owner gate shared by every current-read path."""
+    if _item_field(item, "retired_at") is not None:
+        return False
+    if _item_field(item, "document_segment_id") is not None:
+        owner = _item_field(item, "user_id")
+        return isinstance(owner, str) and bool(owner) and (filt or {}).get("user_id") == owner
+    return True
+
+
 def query_mode_from_filter(filt: Mapping[str, Any] | None) -> str | None:
     """Return a requested retrieve query_mode, or None for the default path."""
 
@@ -2421,6 +2431,8 @@ def derived_evidence_readable(
     missing, malformed, foreign, erased, retired, or partially redacted sources.
     No results are cached across requests or policy/metadata mutations.
     """
+    if not evidence_current_for_context(item, filt):
+        return False
     if not is_derived_evidence(item):
         return True
     root = str(_item_field(item, "cid") or "__root__")
@@ -2661,6 +2673,8 @@ def classify_scoped_evidence(
         return False, "foreign_branch"
     if bool(_item_field(item, "erased")):
         return False, "erased"
+    if not evidence_current_for_context(item, filt):
+        return False, "retired_or_document_owner_mismatch"
     metadata = _item_field(item, "metadata") or {}
     if not isinstance(metadata, dict):
         metadata = {}

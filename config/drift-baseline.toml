@@ -136,6 +136,7 @@ required_tables = [
   "trajectories",
   "self_model",
   "mental_models",
+  "documents",
   "eval_cases",
   "resources",
   "merges",

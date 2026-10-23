@@ -456,28 +456,32 @@ def filter_export_for_context(
         if bool(privacy.get("redacted")):
             redacted[collection] = redacted.get(collection, 0) + 1
 
-    evidence_by_cid: dict[str, Mapping[str, Any]] = {
-        str(item.get("cid")): item
+    evidence_by_cid: dict[tuple[str, str], Mapping[str, Any]] = {
+        (str(item.get("branch") or "main"), str(item.get("cid"))): item
         for item in exported.get("evidence", [])
         if isinstance(item, Mapping) and item.get("cid")
     }
-    allowed_evidence_cids: set[str] = set()
+    allowed_evidence_cids: set[tuple[str, str]] = set()
+
+    def foreign_branch(row: Mapping[str, Any]) -> bool:
+        return bool(ctx.get("branch")) and str(row.get("branch") or "main") != ctx["branch"]
 
     def source_sensitivity(row: Mapping[str, Any]) -> int:
         sensitivities: list[int] = []
         if row.get("sensitivity") is not None:
             sensitivities.append(_int_or_zero(row.get("sensitivity")))
         for cid in _str_list(row.get("source_evidence_cids")):
-            source = evidence_by_cid.get(cid)
+            source = evidence_by_cid.get((str(row.get("branch") or "main"), cid))
             if source is not None:
                 sensitivities.append(_int_or_zero(source.get("sensitivity")))
         return max(sensitivities or [0])
 
     def source_denial_reason(row: Mapping[str, Any]) -> str | None:
         for cid in _str_list(row.get("source_evidence_cids")):
-            if cid not in evidence_by_cid:
+            key = (str(row.get("branch") or "main"), cid)
+            if key not in evidence_by_cid:
                 return "source_evidence_missing"
-            if cid not in allowed_evidence_cids:
+            if key not in allowed_evidence_cids:
                 return "source_evidence_denied"
         return None
 
@@ -514,6 +518,17 @@ def filter_export_for_context(
         if not isinstance(item, Mapping):
             omit("evidence", "invalid_record")
             continue
+        if foreign_branch(item):
+            omit("evidence", "foreign_branch")
+            continue
+        if item.get("retired_at") is not None:
+            omit("evidence", "retired")
+            continue
+        if item.get("document_segment_id") is not None and (
+            not item.get("user_id") or item.get("user_id") != ctx.get("user_id")
+        ):
+            omit("evidence", "document_owner_mismatch")
+            continue
         if evidence_gate is not None and not evidence_gate(item):
             omit("evidence", "source_custody_denied")
             continue
@@ -540,7 +555,7 @@ def filter_export_for_context(
         record_redaction("evidence", privacy)
         filtered_evidence.append(record)
         if record.get("cid"):
-            allowed_evidence_cids.add(str(record["cid"]))
+            allowed_evidence_cids.add((str(record.get("branch") or "main"), str(record["cid"])))
 
     def filter_assertions() -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
@@ -548,6 +563,9 @@ def filter_export_for_context(
         for item in exported.get("assertions", []):
             if not isinstance(item, Mapping):
                 omit("assertions", "invalid_record")
+                continue
+            if foreign_branch(item):
+                omit("assertions", "foreign_branch")
                 continue
             source_denial = source_denial_reason(item)
             if source_denial:
@@ -604,6 +622,9 @@ def filter_export_for_context(
         for item in exported.get("relations", []):
             if not isinstance(item, Mapping):
                 omit("relations", "invalid_record")
+                continue
+            if foreign_branch(item):
+                omit("relations", "foreign_branch")
                 continue
             source_denial = source_denial_reason(item)
             if source_denial:

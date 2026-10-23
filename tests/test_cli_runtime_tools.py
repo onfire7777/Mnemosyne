@@ -1850,6 +1850,16 @@ def test_postgres_engine_delegates_to_command_retrieval_adapters(tmp_path: Path)
             graph_retriever=CommandGraphRetriever(retrieval_command, backend="apache-age"),
         ),
     )
+    engine.get_evidence = lambda tenant, cid, branch="main": Evidence(
+        tenant_id=tenant,
+        user_id="u",
+        actor="user",
+        source_type="chat",
+        content="operator facts",
+        trust_tier=0,
+        access_policy={"tenant": tenant},
+        cid=cid,
+    )
 
     lexical_hits = engine.lexical_search("operator facts", 1, {"tenant_id": TENANT, "branch": "main"})
     graph_hits = engine.graph_ppr(["operator"], 1, tenant_id=TENANT, branch="main")

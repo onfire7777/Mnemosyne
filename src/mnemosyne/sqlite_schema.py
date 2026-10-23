@@ -96,6 +96,7 @@ ENSURE_STATEMENTS: list[str] = [
         access_policy TEXT NOT NULL DEFAULT '{}',
         created_at TEXT NOT NULL,
         erased INTEGER NOT NULL DEFAULT 0,
+        retired_at TEXT,
         PRIMARY KEY (tenant_id, branch, cid),
         FOREIGN KEY (tenant_id, branch) REFERENCES branches(tenant_id, name)
     )
@@ -210,6 +211,19 @@ ENSURE_STATEMENTS: list[str] = [
         version INTEGER NOT NULL CHECK (version > 0),
         record TEXT NOT NULL,
         PRIMARY KEY (tenant_id, branch, model_id),
+        FOREIGN KEY (tenant_id, branch) REFERENCES branches(tenant_id, name)
+    )
+    """,
+    # Owner-scoped source manifests are committed with their evidence changes.
+    """
+    CREATE TABLE IF NOT EXISTS documents (
+        tenant_id TEXT NOT NULL,
+        branch TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        document_id TEXT NOT NULL,
+        revision INTEGER NOT NULL CHECK (revision > 0),
+        record TEXT NOT NULL,
+        PRIMARY KEY (tenant_id, branch, owner_id, document_id),
         FOREIGN KEY (tenant_id, branch) REFERENCES branches(tenant_id, name)
     )
     """,

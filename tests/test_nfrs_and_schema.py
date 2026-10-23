@@ -105,6 +105,7 @@ def test_canonical_schema_includes_all_blueprint_core_tables() -> None:
     schema = Path("sql/schema.sql").read_text(encoding="utf-8")
     required_tables = {
         "evidence",
+        "documents",
         "assertions",
         "justifications",
         "entities",

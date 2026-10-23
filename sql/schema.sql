@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS evidence (
   source_type TEXT NOT NULL,
   source_identity TEXT,
   document_segment_id TEXT,
+  retired_at TIMESTAMPTZ,
   content TEXT,
   content_pointer TEXT,
   modality TEXT NOT NULL DEFAULT 'text',
@@ -50,6 +51,19 @@ CREATE TABLE IF NOT EXISTS evidence (
 
 -- Additive migration: legacy evidence keeps its original content identity.
 ALTER TABLE evidence ADD COLUMN IF NOT EXISTS document_segment_id TEXT;
+ALTER TABLE evidence ADD COLUMN IF NOT EXISTS retired_at TIMESTAMPTZ;
+
+-- Mutable source manifests are control records, never retrieval evidence.
+CREATE TABLE IF NOT EXISTS documents (
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  branch TEXT NOT NULL,
+  owner_id TEXT NOT NULL,
+  document_id TEXT NOT NULL,
+  revision BIGINT NOT NULL CHECK (revision > 0),
+  record JSONB NOT NULL CHECK (jsonb_typeof(record) = 'object'),
+  PRIMARY KEY (tenant_id, branch, owner_id, document_id),
+  FOREIGN KEY (tenant_id, branch) REFERENCES branches(tenant_id, name) ON DELETE CASCADE
+);
 
 CREATE INDEX IF NOT EXISTS evidence_embedding_public_hnsw ON evidence USING hnsw (embedding vector_cosine_ops) WHERE embedding_partition = 'public';
 CREATE INDEX IF NOT EXISTS evidence_embedding_private_hnsw ON evidence USING hnsw (embedding vector_cosine_ops) WHERE embedding_partition = 'private';
@@ -591,6 +605,13 @@ ALTER TABLE mental_models ENABLE ROW LEVEL SECURITY;
 ALTER TABLE mental_models FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS mental_models_tenant_isolation ON mental_models;
 CREATE POLICY mental_models_tenant_isolation ON mental_models
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
+ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE documents FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS documents_tenant_isolation ON documents;
+CREATE POLICY documents_tenant_isolation ON documents
   USING (tenant_id = mnemosyne_current_tenant())
   WITH CHECK (tenant_id = mnemosyne_current_tenant());
 

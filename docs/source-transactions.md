@@ -70,15 +70,15 @@ before further appends, including appends without a segment ID:
 ALTER TABLE evidence ADD COLUMN IF NOT EXISTS document_segment_id TEXT;
 ```
 
-## Remaining document lifecycle work
+## Document lifecycle
 
-These are storage primitives, not a finished document synchronization service.
-There is no document registry, append/replace MCP tool, revision CAS, durable
-operation receipt, document-level deletion marker or automatic delta extraction
-in this layer. The caller remains responsible for source ownership and policy.
+These primitives underpin the atomic document revision service described in
+[document revisions](document-revisions.md): document registry, revision CAS,
+durable operation receipts, nondestructive retirement, a document-level
+deletion marker and erasure scrubbing are implemented there. The caller remains
+responsible for authentication.
 
-Permanent `forget` is an erasure operation, not revision retirement. A complete
-growing-document service still needs active revision membership, nondestructive
-retirement, shared-support revalidation, branch merge rules and coordinated
-extraction/index jobs. A fresh segment ID must never be used to bypass a future
+Permanent `forget` is an erasure operation, not revision retirement. Still
+pending are branch merge rules for documents and coordinated, crash-safe
+extraction/index jobs. A fresh segment ID must never be used to bypass a
 document deletion marker.
