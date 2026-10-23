@@ -5950,6 +5950,18 @@ class PostgresEngine:
                 mental_models = [copy_model_json(row["record"]) for row in cur.fetchall()]
                 cur.execute("SELECT record FROM documents WHERE tenant_id = %s ORDER BY branch, owner_id, document_id", (db_tenant_id,))
                 documents = [copy.deepcopy(row["record"]) for row in cur.fetchall()]
+                cur.execute(
+                    """
+                    SELECT w.*, t.name AS tenant_name
+                    FROM working_memory w
+                    JOIN tenants t ON t.id = w.tenant_id
+                    WHERE w.tenant_id = %s
+                      AND cardinality(w.evidence_ids) > 0
+                    ORDER BY w.created_at, w.item_id
+                    """,
+                    (db_tenant_id,),
+                )
+                working_memory = [self._working_from_row(row).to_dict() for row in cur.fetchall()]
         result = {
             "tenant_id": tenant_id,
             "evidence": evidence,
@@ -5962,12 +5974,12 @@ class PostgresEngine:
             "contradictions": contradictions,
             "intentions": intentions,
             "mental_models": mental_models,
+            "documents": documents,
+            "working_memory": working_memory,
             "audit_log": audit,
             "deletion_log": deletion,
             "merge_log": merge_log,
         }
-        if documents:
-            result["documents"] = documents
         return result
 
     def export_tenant_filtered(self, tenant_id: str, access_context: dict[str, Any]) -> dict[str, Any]:

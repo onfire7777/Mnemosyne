@@ -1143,6 +1143,10 @@ def test_shared_engine_contract_working_memory_is_scoped_detached_and_non_durabl
     assert engine.get_working(tenant, "shared-session", item.item_id, as_of=expires_at) is None
 
     exported = engine.export_tenant(tenant)
+    assert "working_memory" in exported
+    assert any(row["item_id"] == item.item_id for row in exported["working_memory"])
+    assert "documents" in exported
+    assert exported["documents"] == []
     assert all(row.get("content") != item.content for row in exported["evidence"])
     assert any(
         row["op"] == "put_working" and row["target_id"] == item.item_id
@@ -2044,6 +2048,33 @@ def test_shared_engine_contract_exports_all_and_json(engine_bundle: tuple[Any, s
         source_evidence_cids=[cid],
         access_policy={"tenant": tenant},
     )
+    wm_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            session_id="shared-session",
+            actor="user",
+            source_type="shared-contract",
+            content="Working memory export evidence.",
+            access_policy={"tenant": tenant},
+        )
+    )
+    now = datetime.now(UTC)
+    wm_item = WorkingMemoryItem(
+        item_id="shared-export-wm-item",
+        tenant_id=tenant,
+        session_id="shared-session",
+        user_id=user,
+        agent_id=user,
+        kind="active_goal",
+        task_id="shared-task",
+        content="Shared export working memory item.",
+        created_at=now,
+        expires_at=now + timedelta(hours=1),
+        evidence_ids=[wm_cid],
+        access_policy={"tenant": tenant},
+    )
+    engine.put_working(wm_item)
 
     exported = engine.export_all()
     parsed = json.loads(engine.to_json())
@@ -2062,6 +2093,8 @@ def test_shared_engine_contract_exports_all_and_json(engine_bundle: tuple[Any, s
         "deletion_log",
         "merge_log",
         "tenants",
+        "documents",
+        "working_memory",
     }
 
     assert expected_keys <= set(exported)
@@ -2076,11 +2109,16 @@ def test_shared_engine_contract_exports_all_and_json(engine_bundle: tuple[Any, s
     assert any(item["memory_type"] == "fact" and item["tenant_id"] == tenant for item in parsed["calibrations"])
     assert any(item["canonical"] == entity["canonical"] and item["tenant_id"] == tenant for item in exported["entities"])
     assert any(item["canonical"] == entity["canonical"] and item["tenant_id"] == tenant for item in parsed["entities"])
+    assert any(item["item_id"] == wm_item.item_id and item["tenant_id"] == tenant for item in exported["working_memory"])
+    assert any(item["item_id"] == wm_item.item_id and item["tenant_id"] == tenant for item in parsed["working_memory"])
+    assert "documents" in exported
     assert all(item["tenant_id"] != "*" for item in exported["tenants"])
     tenant_export = next(item for item in exported["tenants"] if item["tenant_id"] == tenant)
     assert any(item["cid"] == cid for item in tenant_export["evidence"])
     assert all(item["cid"] != erased_cid for item in tenant_export["evidence"])
     assert any(item["canonical"] == entity["canonical"] for item in tenant_export["entities"])
+    assert any(item["item_id"] == wm_item.item_id for item in tenant_export["working_memory"])
+    assert "documents" in tenant_export
 
 
 def test_shared_engine_contract_explain_reports_channels_rails_and_provenance(engine_bundle: tuple[Any, str, str]) -> None:
