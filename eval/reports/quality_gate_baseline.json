@@ -63,15 +63,15 @@
       "quality_gate_dev.json": "1252ba4911d8e9276a1dc77bc9beaf26ac158bc555b9a7ca11ca2f1b86652df2",
       "quality_gate_heldout.json": "c74b494a481ca7ddb7b2b781d866cd3d747cc2999637ee8804459bfd3438c95f"
     },
-    "generated_at": "2026-10-23T08:05:56.520372+00:00",
-    "git_commit": "e751f13d4c2dc8e5c7abb2a4e430fea994ee7122",
+    "generated_at": "2026-10-23T09:11:30.948356+00:00",
+    "git_commit": "4cdc7e83de1cd846853d4a48a1668fc02a94e559",
     "k": 5,
     "offline": true,
     "platform": {
       "os": "Darwin",
       "python_version": "3.14.7"
     },
-    "runtime_seconds": 60.74,
+    "runtime_seconds": 61.16,
     "seed": 42,
     "split": "all"
   },
@@ -84,7 +84,7 @@
         "answer_6ea1541e_2",
         "answer_6ea1541e_1"
       ],
-      "latency_ms": 92.46,
+      "latency_ms": 93.15,
       "ndcg_at_5": 0.0,
       "qid": "08f4fc43",
       "query": "How many days had passed between the Sunday mass at St. Mary's Church and the Ash Wednesday service at the cathedral?",
@@ -99,7 +99,7 @@
       "gold_references": [
         "answer_f6d6e33f_1"
       ],
-      "latency_ms": 210.47,
+      "latency_ms": 211.71,
       "ndcg_at_5": 1.0,
       "qid": "gpt4_a2d1d1f6",
       "query": "How many days ago did I harvest my first batch of fresh herbs from the herb garden kit?",
@@ -121,7 +121,7 @@
         "answer_ab603dd5_1",
         "answer_ab603dd5_2"
       ],
-      "latency_ms": 196.44,
+      "latency_ms": 198.52,
       "ndcg_at_5": 1.0,
       "qid": "982b5123",
       "query": "How many months ago did I book the Airbnb in San Francisco?",
@@ -147,7 +147,7 @@
         "answer_e9ad5914_5",
         "answer_e9ad5914_6"
       ],
-      "latency_ms": 203.17,
+      "latency_ms": 206.41,
       "ndcg_at_5": 1.0,
       "qid": "gpt4_a1b77f9c",
       "query": "How many weeks in total do I spent on reading 'The Nightingale' and listening to 'Sapiens: A Brief History of Humankind' and 'The Power'?",
@@ -170,7 +170,7 @@
         "answer_8c64ce26_1",
         "answer_8c64ce26_3"
       ],
-      "latency_ms": 195.7,
+      "latency_ms": 197.19,
       "ndcg_at_5": 0.0,
       "qid": "gpt4_e061b84g",
       "query": "I mentioned participating in a sports event two weeks ago. What was the event?",
@@ -192,7 +192,7 @@
         "answer_e28c1f0e_1",
         "answer_e28c1f0e_2"
       ],
-      "latency_ms": 192.28,
+      "latency_ms": 194.66,
       "ndcg_at_5": 1.0,
       "qid": "gpt4_e414231f",
       "query": "Which bike did I fixed or serviced the past weekend?",
@@ -213,7 +213,7 @@
       "gold_references": [
         "answer_b51b6115_1"
       ],
-      "latency_ms": 214.8,
+      "latency_ms": 215.13,
       "ndcg_at_5": 1.0,
       "qid": "af082822",
       "query": "How many weeks ago did I attend the friends and family sale at Nordstrom?",
@@ -235,7 +235,7 @@
         "answer_d39b7977_1",
         "answer_d39b7977_2"
       ],
-      "latency_ms": 192.89,
+      "latency_ms": 194.92,
       "ndcg_at_5": 1.0,
       "qid": "2c63a862",
       "query": "How many days did it take for me to find a house I loved after starting to work with Rachel?",
@@ -257,7 +257,7 @@
         "answer_0a00c163_1",
         "answer_0a00c163_2"
       ],
-      "latency_ms": 79.98,
+      "latency_ms": 80.14,
       "ndcg_at_5": 0.0,
       "qid": "gpt4_4edbafa2",
       "query": "What was the date on which I attended the first BBQ event in June?",
@@ -273,7 +273,7 @@
         "answer_1c6b85ea_2",
         "answer_1c6b85ea_1"
       ],
-      "latency_ms": 193.03,
+      "latency_ms": 193.76,
       "ndcg_at_5": 0.9197,
       "qid": "gpt4_2487a7cb",
       "query": "Which event did I attend first, the 'Effective Time Management' workshop or the 'Data Analysis using Python' webinar?",
@@ -294,7 +294,7 @@
       "gold_references": [
         "answer_56521e66_1"
       ],
-      "latency_ms": 102.61,
+      "latency_ms": 103.37,
       "ndcg_at_5": 0.0,
       "qid": "gpt4_8279ba03",
       "query": "What kitchen appliance did I buy 10 days ago?",
@@ -315,7 +315,7 @@
       "gold_references": [
         "answer_550bb2d1_1"
       ],
-      "latency_ms": 199.2,
+      "latency_ms": 202.11,
       "ndcg_at_5": 0.6309,
       "qid": "gpt4_b0863698",
       "query": "How many days ago did I participate in the 5K charity run?",
@@ -337,7 +337,7 @@
         "answer_016f6bd4_2",
         "answer_016f6bd4_1"
       ],
-      "latency_ms": 194.53,
+      "latency_ms": 196.15,
       "ndcg_at_5": 1.0,
       "qid": "a3045048",
       "query": "How many days before my best friend's birthday party did I order her gift?",
@@ -359,7 +359,7 @@
         "answer_72d9aa58_1",
         "answer_72d9aa58_2"
       ],
-      "latency_ms": 196.41,
+      "latency_ms": 196.14,
       "ndcg_at_5": 1.0,
       "qid": "gpt4_8c8961ae",
       "query": "Which trip did I take first, the one to Europe with family or the solo trip to Thailand?",
@@ -381,7 +381,7 @@
         "answer_4bebc782_1",
         "answer_4bebc782_2"
       ],
-      "latency_ms": 200.94,
+      "latency_ms": 201.86,
       "ndcg_at_5": 1.0,
       "qid": "4dfccbf7",
       "query": "How many days had passed since I started taking ukulele lessons when I decided to take my acoustic guitar to the guitar tech for servicing?",
@@ -403,7 +403,7 @@
         "answer_4cb841a8_1",
         "answer_4cb841a8_2"
       ],
-      "latency_ms": 204.83,
+      "latency_ms": 201.07,
       "ndcg_at_5": 1.0,
       "qid": "1c549ce4",
       "query": "What is the total cost of the car cover and detailing spray I purchased?",
@@ -425,7 +425,7 @@
         "answer_f9de4602_2",
         "answer_f9de4602_1"
       ],
-      "latency_ms": 211.52,
+      "latency_ms": 213.52,
       "ndcg_at_5": 0.6131,
       "qid": "dd2973ad",
       "query": "What time did I go to bed on the day before I had a doctor's appointment?",
@@ -447,7 +447,7 @@
         "answer_688f9a3f_1",
         "answer_688f9a3f_2"
       ],
-      "latency_ms": 191.15,
+      "latency_ms": 190.75,
       "ndcg_at_5": 1.0,
       "qid": "5025383b",
       "query": "What are the two hobbies that led me to join online communities?",
@@ -470,7 +470,7 @@
         "answer_2504635e_2",
         "answer_2504635e_1"
       ],
-      "latency_ms": 194.76,
+      "latency_ms": 198.71,
       "ndcg_at_5": 0.7039,
       "qid": "gpt4_d12ceb0e",
       "query": "What is the average age of me, my parents, and my grandparents?",
@@ -492,7 +492,7 @@
         "answer_87e3a1cb_1",
         "answer_87e3a1cb_2"
       ],
-      "latency_ms": 192.7,
+      "latency_ms": 200.19,
       "ndcg_at_5": 1.0,
       "qid": "ef9cf60a",
       "query": "How much did I spend on gifts for my sister?",
@@ -516,7 +516,7 @@
         "answer_5a0d28f8_3",
         "answer_5a0d28f8_1"
       ],
-      "latency_ms": 193.46,
+      "latency_ms": 193.87,
       "ndcg_at_5": 0.8048,
       "qid": "d23cf73b",
       "query": "How many different cuisines have I learned to cook or tried out in the past few months?",
@@ -539,7 +539,7 @@
         "answer_7726e7e9_3",
         "answer_7726e7e9_2"
       ],
-      "latency_ms": 193.68,
+      "latency_ms": 195.31,
       "ndcg_at_5": 0.4693,
       "qid": "bf659f65",
       "query": "How many music albums or EPs have I purchased or downloaded?",
@@ -561,7 +561,7 @@
         "answer_8de18468_2",
         "answer_8de18468_1"
       ],
-      "latency_ms": 204.01,
+      "latency_ms": 199.0,
       "ndcg_at_5": 0.3869,
       "qid": "157a136e",
       "query": "How many years older is my grandma than me?",
@@ -583,7 +583,7 @@
         "answer_35e36341_1",
         "answer_35e36341_2"
       ],
-      "latency_ms": 202.39,
+      "latency_ms": 202.66,
       "ndcg_at_5": 1.0,
       "qid": "8979f9ec",
       "query": "What is the total number of lunch meals I got from the chicken fajitas and lentil soup?",
@@ -605,7 +605,7 @@
         "answer_d8454588_1",
         "answer_d8454588_2"
       ],
-      "latency_ms": 198.41,
+      "latency_ms": 198.57,
       "ndcg_at_5": 1.0,
       "qid": "1f2b8d4f",
       "query": "What is the difference in price between my luxury boots and the similar pair found at the budget store?",
@@ -629,7 +629,7 @@
         "answer_2bd23659_4",
         "answer_2bd23659_1"
       ],
-      "latency_ms": 243.59,
+      "latency_ms": 243.96,
       "ndcg_at_5": 0.7366,
       "qid": "1a8a66a6",
       "query": "How many magazine subscriptions do I currently have?",
@@ -651,7 +651,7 @@
         "answer_dc5e537d_1",
         "answer_dc5e537d_2"
       ],
-      "latency_ms": 194.82,
+      "latency_ms": 195.73,
       "ndcg_at_5": 1.0,
       "qid": "0ea62687",
       "query": "How much more miles per gallon was my car getting a few months ago compared to now?",
@@ -673,7 +673,7 @@
         "answer_923c0221_1",
         "answer_923c0221_2"
       ],
-      "latency_ms": 196.36,
+      "latency_ms": 196.52,
       "ndcg_at_5": 1.0,
       "qid": "c2ac3c61",
       "query": "How many online courses have I completed in total?",
@@ -697,7 +697,7 @@
         "answer_8f6b938d_4",
         "answer_8f6b938d_2"
       ],
-      "latency_ms": 201.19,
+      "latency_ms": 197.28,
       "ndcg_at_5": 0.8319,
       "qid": "2788b940",
       "query": "How many fitness classes do I attend in a typical week?",
@@ -721,7 +721,7 @@
         "answer_6350aa4f_3",
         "answer_6350aa4f_4"
       ],
-      "latency_ms": 199.07,
+      "latency_ms": 198.22,
       "ndcg_at_5": 1.0,
       "qid": "gpt4_e05b82a6",
       "query": "How many times did I ride rollercoasters across all the events I attended from July to October?",
@@ -743,7 +743,7 @@
         "answer_25df025b_1",
         "answer_25df025b_2"
       ],
-      "latency_ms": 192.78,
+      "latency_ms": 193.0,
       "ndcg_at_5": 1.0,
       "qid": "f685340e",
       "query": "How often do I play tennis with my friends at the local park previously? How often do I play now?",
@@ -765,7 +765,7 @@
         "answer_babbaccb_1",
         "answer_babbaccb_2"
       ],
-      "latency_ms": 227.89,
+      "latency_ms": 228.91,
       "ndcg_at_5": 1.0,
       "qid": "ed4ddc30",
       "query": "How many dozen eggs do we currently have stocked up in our refrigerator?",
@@ -787,7 +787,7 @@
         "answer_b28f2c7a_1",
         "answer_b28f2c7a_2"
       ],
-      "latency_ms": 189.12,
+      "latency_ms": 189.92,
       "ndcg_at_5": 1.0,
       "qid": "59524333",
       "query": "What time do I usually go to the gym?",
@@ -809,7 +809,7 @@
         "answer_d6d2eba8_1",
         "answer_d6d2eba8_2"
       ],
-      "latency_ms": 192.81,
+      "latency_ms": 193.48,
       "ndcg_at_5": 1.0,
       "qid": "0f05491a",
       "query": "How many stars do I need to reach the gold level on my Starbucks Rewards app?",
@@ -831,7 +831,7 @@
         "answer_d08a934d_1",
         "answer_d08a934d_2"
       ],
-      "latency_ms": 206.24,
+      "latency_ms": 201.1,
       "ndcg_at_5": 1.0,
       "qid": "7a87bd0c",
       "query": "How long have I been sticking to my daily tidying routine?",
@@ -853,7 +853,7 @@
         "answer_f762ad8d_1",
         "answer_f762ad8d_2"
       ],
-      "latency_ms": 220.39,
+      "latency_ms": 220.24,
       "ndcg_at_5": 1.0,
       "qid": "26bdc477",
       "query": "How many trips have I taken my Canon EOS 80D camera on?",
@@ -875,7 +875,7 @@
         "answer_8a791264_1",
         "answer_8a791264_2"
       ],
-      "latency_ms": 198.19,
+      "latency_ms": 198.62,
       "ndcg_at_5": 1.0,
       "qid": "eace081b",
       "query": "Where am I planning to stay for my birthday trip to Hawaii?",
@@ -897,7 +897,7 @@
         "answer_77f32504_1",
         "answer_77f32504_2"
       ],
-      "latency_ms": 192.05,
+      "latency_ms": 189.64,
       "ndcg_at_5": 1.0,
       "qid": "6a27ffc2",
       "query": "How many videos of Corey Schafer's Python programming series have I completed so far?",
@@ -919,7 +919,7 @@
         "answer_73540165_1",
         "answer_73540165_2"
       ],
-      "latency_ms": 192.22,
+      "latency_ms": 192.65,
       "ndcg_at_5": 1.0,
       "qid": "ce6d2d27",
       "query": "What day of the week do I take a cocktail-making class?",
@@ -941,7 +941,7 @@
         "answer_b0f3dfff_1",
         "answer_b0f3dfff_2"
       ],
-      "latency_ms": 230.21,
+      "latency_ms": 231.89,
       "ndcg_at_5": 1.0,
       "qid": "5a4f22c0",
       "query": "What company is Rachel, an old colleague from my previous company, currently working at?",
@@ -963,7 +963,7 @@
         "answer_8748f791_1",
         "answer_8748f791_2"
       ],
-      "latency_ms": 194.83,
+      "latency_ms": 193.01,
       "ndcg_at_5": 1.0,
       "qid": "031748ae",
       "query": "How many engineers do I lead when I just started my new role as Senior Software Engineer? How many engineers do I lead now?",
@@ -985,7 +985,7 @@
         "answer_5126c02d_1",
         "answer_5126c02d_2"
       ],
-      "latency_ms": 191.17,
+      "latency_ms": 192.58,
       "ndcg_at_5": 1.0,
       "qid": "a2f3aa27",
       "query": "How many followers do I have on Instagram now?",
@@ -1007,7 +1007,7 @@
         "answer_d3bf812b_1",
         "answer_d3bf812b_2"
       ],
-      "latency_ms": 192.68,
+      "latency_ms": 193.11,
       "ndcg_at_5": 0.3869,
       "qid": "c4ea545c",
       "query": "Do I go to the gym more frequently than I did previously?",
@@ -1029,7 +1029,7 @@
         "answer_79c395a9_1",
         "answer_79c395a9_2"
       ],
-      "latency_ms": 222.41,
+      "latency_ms": 228.88,
       "ndcg_at_5": 1.0,
       "qid": "1cea1afa",
       "query": "How many Instagram followers do I currently have?",
@@ -1051,7 +1051,7 @@
         "answer_c44b9df4_1",
         "answer_c44b9df4_2"
       ],
-      "latency_ms": 214.75,
+      "latency_ms": 219.89,
       "ndcg_at_5": 1.0,
       "qid": "71315a70",
       "query": "How many hours have I spent on my abstract ocean sculpture?",
@@ -1072,7 +1072,7 @@
       "gold_references": [
         "answer_586de428_abs"
       ],
-      "latency_ms": 188.24,
+      "latency_ms": 190.57,
       "ndcg_at_5": 1.0,
       "qid": "15745da0_abs",
       "query": "How long have I been collecting vintage films?",
@@ -1093,7 +1093,7 @@
       "gold_references": [
         "answer_c6fd8ebd_abs"
       ],
-      "latency_ms": 191.03,
+      "latency_ms": 192.48,
       "ndcg_at_5": 0.6309,
       "qid": "0862e8bf_abs",
       "query": "What is the name of my hamster?",
@@ -1115,7 +1115,7 @@
         "answer_e0956e0a_abs_2",
         "answer_e0956e0a_abs_1"
       ],
-      "latency_ms": 203.62,
+      "latency_ms": 200.73,
       "ndcg_at_5": 0.6131,
       "qid": "60bf93ed_abs",
       "query": "How many days did it take for my iPad case to arrive after I bought it?",
@@ -1139,7 +1139,7 @@
         "answer_733e443a_abs_2",
         "answer_733e443a_abs_4"
       ],
-      "latency_ms": 195.58,
+      "latency_ms": 197.12,
       "ndcg_at_5": 0.3633,
       "qid": "88432d0a_abs",
       "query": "How many times did I bake egg tarts in the past two weeks?",
@@ -1160,7 +1160,7 @@
       "gold_references": [
         "answer_e6143162_abs"
       ],
-      "latency_ms": 193.92,
+      "latency_ms": 194.62,
       "ndcg_at_5": 1.0,
       "qid": "bc8a6e93_abs",
       "query": "What did I bake for my uncle's birthday party?",
@@ -1182,7 +1182,7 @@
         "answer_60e8941a_abs_1",
         "answer_60e8941a_abs_2"
       ],
-      "latency_ms": 195.17,
+      "latency_ms": 193.79,
       "ndcg_at_5": 1.0,
       "qid": "edced276_abs",
       "query": "How many days did I spend in total traveling in Hawaii and in Seattle?",
@@ -1204,7 +1204,7 @@
         "answer_8748f791_abs_1",
         "answer_8748f791_abs_2"
       ],
-      "latency_ms": 192.66,
+      "latency_ms": 192.0,
       "ndcg_at_5": 1.0,
       "qid": "031748ae_abs",
       "query": "How many engineers do I lead when I just started my new role as Software Engineer Manager?",
@@ -1226,7 +1226,7 @@
         "answer_3e5fea0e_abs_2",
         "answer_3e5fea0e_abs_1"
       ],
-      "latency_ms": 189.84,
+      "latency_ms": 190.3,
       "ndcg_at_5": 1.0,
       "qid": "eeda8a6d_abs",
       "query": "How many fish are there in my 30-gallon tank?",
@@ -1248,7 +1248,7 @@
         "answer_3f9693b7_abs_1",
         "answer_3f9693b7_abs_2"
       ],
-      "latency_ms": 220.27,
+      "latency_ms": 220.58,
       "ndcg_at_5": 1.0,
       "qid": "6aeb4375_abs",
       "query": "How many Italian restaurants have I tried in my city?",
@@ -1271,7 +1271,7 @@
         "answer_990c8992_abs_3",
         "answer_990c8992_abs_1"
       ],
-      "latency_ms": 80.96,
+      "latency_ms": 81.07,
       "ndcg_at_5": 0.0,
       "qid": "80ec1f4f_abs",
       "query": "How many different museums or galleries did I visit in December?",
@@ -1287,7 +1287,7 @@
         "answer_96c743d0_abs_1",
         "answer_96c743d0_abs_2"
       ],
-      "latency_ms": 193.23,
+      "latency_ms": 194.15,
       "ndcg_at_5": 1.0,
       "qid": "09ba9854_abs",
       "query": "How much will I save by taking the bus from the airport to my hotel instead of a taxi?",
@@ -1310,7 +1310,7 @@
         "answer_35c5419d_abs_1",
         "answer_35c5419d_abs_2"
       ],
-      "latency_ms": 194.16,
+      "latency_ms": 194.45,
       "ndcg_at_5": 0.6714,
       "qid": "gpt4_372c3eed_abs",
       "query": "How many years in total did I spend in formal education from high school to the completion of my Master's degree?",
@@ -1332,7 +1332,7 @@
         "answer_65600ff6_abs_1",
         "answer_65600ff6_abs_2"
       ],
-      "latency_ms": 185.04,
+      "latency_ms": 184.76,
       "ndcg_at_5": 0.3869,
       "qid": "gpt4_fe651585_abs",
       "query": "Who became a parent first, Tom or Alex?",
@@ -1354,7 +1354,7 @@
         "answer_d8e33f5c_abs_1",
         "answer_d8e33f5c_abs_2"
       ],
-      "latency_ms": 186.19,
+      "latency_ms": 186.08,
       "ndcg_at_5": 1.0,
       "qid": "gpt4_c27434e8_abs",
       "query": "Which project did I start first, the Ferrari model or the Porsche 991 Turbo S model?",
@@ -1376,7 +1376,7 @@
         "answer_e5131a1b_abs_1",
         "answer_e5131a1b_abs_2"
       ],
-      "latency_ms": 222.36,
+      "latency_ms": 224.12,
       "ndcg_at_5": 0.3066,
       "qid": "gpt4_93159ced_abs",
       "query": "How long have I been working before I started my current job at Google?",
@@ -1398,7 +1398,7 @@
         "doc_mara_helios",
         "doc_helios_deadline"
       ],
-      "latency_ms": 0.63,
+      "latency_ms": 0.62,
       "ndcg_at_5": 0.6131,
       "qid": "mh_01_mara_helios",
       "query": "When does Mara's project ship?",
@@ -1416,7 +1416,7 @@
         "doc_daniel_sirius",
         "doc_sirius_deadline"
       ],
-      "latency_ms": 0.52,
+      "latency_ms": 0.54,
       "ndcg_at_5": 0.6131,
       "qid": "mh_15_daniel_sirius",
       "query": "When does Daniel's project ship?",
@@ -1434,7 +1434,7 @@
         "doc_hanna_pollux",
         "doc_pollux_deadline"
       ],
-      "latency_ms": 0.5,
+      "latency_ms": 0.51,
       "ndcg_at_5": 0.6131,
       "qid": "mh_18_hanna_pollux",
       "query": "When does Hanna's project ship?",
@@ -1470,7 +1470,7 @@
         "doc_fatima_altair",
         "doc_altair_deadline"
       ],
-      "latency_ms": 0.51,
+      "latency_ms": 0.5,
       "ndcg_at_5": 0.6131,
       "qid": "mh_16_fatima_altair",
       "query": "When does Fatima's project ship?",
@@ -1488,7 +1488,7 @@
         "doc_sora_polaris",
         "doc_polaris_deadline"
       ],
-      "latency_ms": 0.56,
+      "latency_ms": 0.48,
       "ndcg_at_5": 0.6131,
       "qid": "mh_06_sora_polaris",
       "query": "When does Sora's project ship?",
@@ -1524,7 +1524,7 @@
         "doc_leo_pegasus",
         "doc_pegasus_deadline"
       ],
-      "latency_ms": 0.49,
+      "latency_ms": 0.48,
       "ndcg_at_5": 0.6131,
       "qid": "mh_10_leo_pegasus",
       "query": "When does Leo's project ship?",
@@ -1560,7 +1560,7 @@
         "doc_olivia_aldebaran",
         "doc_aldebaran_deadline"
       ],
-      "latency_ms": 0.49,
+      "latency_ms": 0.48,
       "ndcg_at_5": 0.6131,
       "qid": "mh_24_olivia_aldebaran",
       "query": "When does Olivia's project ship?",
@@ -1578,7 +1578,7 @@
         "doc_owen_borealis",
         "doc_borealis_deadline"
       ],
-      "latency_ms": 0.47,
+      "latency_ms": 0.48,
       "ndcg_at_5": 0.6131,
       "qid": "mh_02_owen_borealis",
       "query": "When does Owen's project ship?",
@@ -1615,7 +1615,7 @@
         "answer_5d8c99d3_2",
         "answer_5d8c99d3_3"
       ],
-      "latency_ms": 182.87,
+      "latency_ms": 184.23,
       "ndcg_at_5": 0.1815,
       "qid": "gpt4_7f6b06db",
       "query": "What is the order of the three trips I took in the past three months, from earliest to latest?",
@@ -1641,7 +1641,7 @@
         "answer_7093d898_5",
         "answer_7093d898_6"
       ],
-      "latency_ms": 185.74,
+      "latency_ms": 186.56,
       "ndcg_at_5": 0.8304,
       "qid": "gpt4_7abb270c",
       "query": "What is the order of the six museums I visited from earliest to latest?",
@@ -1663,7 +1663,7 @@
         "answer_b535969f_1",
         "answer_b535969f_2"
       ],
-      "latency_ms": 105.41,
+      "latency_ms": 106.01,
       "ndcg_at_5": 0.0,
       "qid": "gpt4_76048e76",
       "query": "Which vehicle did I take care of first in February, the bike or the car?",
@@ -1680,7 +1680,7 @@
         "answer_8c64ce25_1",
         "answer_8c64ce25_3"
       ],
-      "latency_ms": 182.86,
+      "latency_ms": 183.85,
       "ndcg_at_5": 0.0,
       "qid": "gpt4_e061b84f",
       "query": "What is the order of the three sports events I participated in during the past month, from earliest to latest?",
@@ -1702,7 +1702,7 @@
         "answer_cf425855_1",
         "answer_cf425855_2"
       ],
-      "latency_ms": 204.53,
+      "latency_ms": 196.38,
       "ndcg_at_5": 1.0,
       "qid": "e4e14d04",
       "query": "How long had I been a member of 'Book Lovers Unite' when I attended the meetup?",
@@ -1724,7 +1724,7 @@
         "answer_9793daa4_2",
         "answer_9793daa4_1"
       ],
-      "latency_ms": 99.33,
+      "latency_ms": 97.54,
       "ndcg_at_5": 0.6131,
       "qid": "gpt4_68e94288",
       "query": "What was the social media activity I participated 5 days ago?",
@@ -1746,7 +1746,7 @@
         "answer_70dc7d08_2",
         "answer_70dc7d08_1"
       ],
-      "latency_ms": 180.63,
+      "latency_ms": 180.36,
       "ndcg_at_5": 1.0,
       "qid": "c8090214",
       "query": "How many days before I bought the iPhone 13 Pro did I attend the Holiday Market?",
@@ -1767,7 +1767,7 @@
       "gold_references": [
         "answer_0b4a8adc_1"
       ],
-      "latency_ms": 188.12,
+      "latency_ms": 184.91,
       "ndcg_at_5": 1.0,
       "qid": "71017276",
       "query": "How many weeks ago did I meet up with my aunt and receive the crystal chandelier?",
@@ -1790,7 +1790,7 @@
         "answer_c862f65a_3",
         "answer_c862f65a_1"
       ],
-      "latency_ms": 200.85,
+      "latency_ms": 199.82,
       "ndcg_at_5": 1.0,
       "qid": "gpt4_18c2b244",
       "query": "What is the order of the three events: 'I signed up for the rewards program at ShopRite', 'I used a Buy One Get One Free coupon on Luvs diapers at Walmart', and 'I redeemed $12 cashback for a $10 Amazon gift card from Ibotta'?",
@@ -1812,7 +1812,7 @@
         "answer_be07688f_1",
         "answer_be07688f_2"
       ],
-      "latency_ms": 197.6,
+      "latency_ms": 197.52,
       "ndcg_at_5": 1.0,
       "qid": "gpt4_4fc4f797",
       "query": "How many days passed between the day I received feedback about my car's suspension and the day I tested my new suspension setup?",
@@ -1834,7 +1834,7 @@
         "answer_991d55e5_1",
         "answer_991d55e5_2"
       ],
-      "latency_ms": 198.9,
+      "latency_ms": 200.54,
       "ndcg_at_5": 1.0,
       "qid": "d01c6aa8",
       "query": "How old was I when I moved to the United States?",
@@ -1856,7 +1856,7 @@
         "answer_54f0d6f9_1",
         "answer_54f0d6f9_2"
       ],
-      "latency_ms": 187.46,
+      "latency_ms": 194.37,
       "ndcg_at_5": 1.0,
       "qid": "993da5e2",
       "query": "How long had I been using the new area rug when I rearranged my living room furniture?",
@@ -1878,7 +1878,7 @@
         "answer_5fcca8bc_2",
         "answer_5fcca8bc_1"
       ],
-      "latency_ms": 224.43,
+      "latency_ms": 239.66,
       "ndcg_at_5": 1.0,
       "qid": "gpt4_4cd9eba1",
       "query": "How many weeks have I been accepted into the exchange program when I started attending the pre-departure orientation sessions?",
@@ -1900,7 +1900,7 @@
         "answer_447052a5_2",
         "answer_447052a5_1"
       ],
-      "latency_ms": 201.49,
+      "latency_ms": 209.1,
       "ndcg_at_5": 1.0,
       "qid": "gpt4_1916e0ea",
       "query": "How many days passed between the day I cancelled my FarmFresh subscription and the day I did my online grocery shopping from Instacart?",
@@ -1921,7 +1921,7 @@
       "gold_references": [
         "answer_c4df007f_1"
       ],
-      "latency_ms": 190.58,
+      "latency_ms": 188.39,
       "ndcg_at_5": 1.0,
       "qid": "gpt4_6dc9b45b",
       "query": "How many months ago did I attend the Seattle International Film Festival?",
@@ -1943,7 +1943,7 @@
         "answer_e184e4c3_2",
         "answer_e184e4c3_1"
       ],
-      "latency_ms": 192.95,
+      "latency_ms": 192.6,
       "ndcg_at_5": 1.0,
       "qid": "1192316e",
       "query": "What is the total time it takes I to get ready and commute to work?",
@@ -1965,7 +1965,7 @@
         "answer_4eb6d671_2",
         "answer_4eb6d671_1"
       ],
-      "latency_ms": 181.53,
+      "latency_ms": 181.76,
       "ndcg_at_5": 1.0,
       "qid": "e6041065",
       "query": "What percentage of packed shoes did I wear on my last trip?",
@@ -1987,7 +1987,7 @@
         "answer_e2278b24_1",
         "answer_e2278b24_2"
       ],
-      "latency_ms": 189.09,
+      "latency_ms": 188.5,
       "ndcg_at_5": 0.9197,
       "qid": "8cf4d046",
       "query": "What is the average GPA of my undergraduate and graduate studies?",
@@ -2009,7 +2009,7 @@
         "answer_05d808e6_1",
         "answer_05d808e6_2"
       ],
-      "latency_ms": 182.87,
+      "latency_ms": 183.75,
       "ndcg_at_5": 1.0,
       "qid": "b3c15d39",
       "query": "How many days did it take for me to receive the new remote shutter release after I ordered it?",
@@ -2033,7 +2033,7 @@
         "answer_2880eb6c_1",
         "answer_2880eb6c_3"
       ],
-      "latency_ms": 190.33,
+      "latency_ms": 191.02,
       "ndcg_at_5": 0.3462,
       "qid": "gpt4_d84a3211",
       "query": "How much total money have I spent on bike-related expenses since the start of the year?",
@@ -2057,7 +2057,7 @@
         "answer_5cdf9bd2_3",
         "answer_5cdf9bd2_4"
       ],
-      "latency_ms": 192.49,
+      "latency_ms": 192.55,
       "ndcg_at_5": 1.0,
       "qid": "d851d5ba",
       "query": "How much money did I raise for charity in total?",
@@ -2081,7 +2081,7 @@
         "answer_593bdffd_3",
         "answer_593bdffd_2"
       ],
-      "latency_ms": 224.08,
+      "latency_ms": 224.94,
       "ndcg_at_5": 0.6367,
       "qid": "gpt4_59c863d7",
       "query": "How many model kits have I worked on or bought?",
@@ -2106,7 +2106,7 @@
         "answer_02b63d04_3",
         "answer_02b63d04_4"
       ],
-      "latency_ms": 176.91,
+      "latency_ms": 176.35,
       "ndcg_at_5": 0.8304,
       "qid": "gpt4_31ff4165",
       "query": "How many health-related devices do I use in a day?",
@@ -2128,7 +2128,7 @@
         "answer_17dc2f5b_2",
         "answer_17dc2f5b_1"
       ],
-      "latency_ms": 196.92,
+      "latency_ms": 193.4,
       "ndcg_at_5": 0.3869,
       "qid": "a1cc6108",
       "query": "How old was I when Alex was born?",
@@ -2150,7 +2150,7 @@
         "answer_477ae455_1",
         "answer_477ae455_2"
       ],
-      "latency_ms": 196.58,
+      "latency_ms": 191.8,
       "ndcg_at_5": 0.0,
       "qid": "8e91e7d9",
       "query": "What is the total number of siblings I have?",
@@ -2174,7 +2174,7 @@
         "answer_56d02cab_2",
         "answer_56d02cab_1"
       ],
-      "latency_ms": 191.78,
+      "latency_ms": 193.28,
       "ndcg_at_5": 1.0,
       "qid": "c4a1ceb8",
       "query": "How many different types of citrus fruits have I used in my cocktail recipes?",
@@ -2196,7 +2196,7 @@
         "answer_f7fd1029_2",
         "answer_f7fd1029_1"
       ],
-      "latency_ms": 191.3,
+      "latency_ms": 192.27,
       "ndcg_at_5": 0.3869,
       "qid": "ef66a6e5",
       "query": "How many sports have I played competitively in the past?",
@@ -2218,7 +2218,7 @@
         "answer_c69ee1f9_2",
         "answer_c69ee1f9_1"
       ],
-      "latency_ms": 197.33,
+      "latency_ms": 197.06,
       "ndcg_at_5": 1.0,
       "qid": "a11281a2",
       "query": "What was the approximate increase in Instagram followers I experienced in two weeks?",
@@ -2241,7 +2241,7 @@
         "answer_669318cf_1",
         "answer_669318cf_3"
       ],
-      "latency_ms": 199.31,
+      "latency_ms": 201.33,
       "ndcg_at_5": 1.0,
       "qid": "gpt4_2f91af09",
       "query": "How many total pieces of writing have I completed since I started writing again three weeks ago, including short stories, poems, and pieces for the writing challenge?",
@@ -2263,7 +2263,7 @@
         "answer_4934b2d7_2",
         "answer_4934b2d7_1"
       ],
-      "latency_ms": 181.42,
+      "latency_ms": 187.86,
       "ndcg_at_5": 1.0,
       "qid": "a346bb18",
       "query": "How many minutes did I exceed my target time by in the marathon?",
@@ -2285,7 +2285,7 @@
         "answer_ac0140ce_1",
         "answer_ac0140ce_2"
       ],
-      "latency_ms": 218.99,
+      "latency_ms": 220.89,
       "ndcg_at_5": 1.0,
       "qid": "e66b632c",
       "query": "What was my previous personal best time for the charity 5K run?",
@@ -2307,7 +2307,7 @@
         "answer_a5b68517_1",
         "answer_a5b68517_2"
       ],
-      "latency_ms": 176.02,
+      "latency_ms": 177.47,
       "ndcg_at_5": 1.0,
       "qid": "cc5ded98",
       "query": "How much time do I dedicate to coding exercises each day?",
@@ -2329,7 +2329,7 @@
         "answer_3a6f1e82_1",
         "answer_3a6f1e82_2"
       ],
-      "latency_ms": 197.02,
+      "latency_ms": 199.64,
       "ndcg_at_5": 1.0,
       "qid": "852ce960",
       "query": "What was the amount I was pre-approved for when I got my mortgage from Wells Fargo?",
@@ -2351,7 +2351,7 @@
         "answer_7e9ad7b4_1",
         "answer_7e9ad7b4_2"
       ],
-      "latency_ms": 208.02,
+      "latency_ms": 211.55,
       "ndcg_at_5": 1.0,
       "qid": "07741c45",
       "query": "Where do I currently keep my old sneakers?",
@@ -2373,7 +2373,7 @@
         "answer_a22b654d_1",
         "answer_a22b654d_2"
       ],
-      "latency_ms": 185.03,
+      "latency_ms": 202.79,
       "ndcg_at_5": 1.0,
       "qid": "0ddfec37",
       "query": "How many autographed baseballs have I added to my collection in the first three months of collection?",
@@ -2395,7 +2395,7 @@
         "answer_e3892371_1",
         "answer_e3892371_2"
       ],
-      "latency_ms": 185.31,
+      "latency_ms": 186.8,
       "ndcg_at_5": 1.0,
       "qid": "42ec0761",
       "query": "Do I have a spare screwdriver for opening up my laptop?",
@@ -2417,7 +2417,7 @@
         "answer_8afdebac_1",
         "answer_8afdebac_2"
       ],
-      "latency_ms": 191.42,
+      "latency_ms": 198.84,
       "ndcg_at_5": 1.0,
       "qid": "603deb26",
       "query": "How many times have I tried making a Negroni at home since my friend Emma showed me how to make it?",
@@ -2439,7 +2439,7 @@
         "answer_c6a0c6c2_1",
         "answer_c6a0c6c2_2"
       ],
-      "latency_ms": 187.76,
+      "latency_ms": 193.93,
       "ndcg_at_5": 1.0,
       "qid": "9bbe84a2",
       "query": "What was my previous goal for my Apex Legends level before I updated my goal?",
@@ -2461,7 +2461,7 @@
         "answer_07664d43_1",
         "answer_07664d43_2"
       ],
-      "latency_ms": 179.62,
+      "latency_ms": 182.52,
       "ndcg_at_5": 1.0,
       "qid": "45dc21b6",
       "query": "How many of Emma's recipes have I tried out?",
@@ -2483,7 +2483,7 @@
         "answer_0b1a0942_1",
         "answer_0b1a0942_2"
       ],
-      "latency_ms": 176.25,
+      "latency_ms": 178.02,
       "ndcg_at_5": 0.3869,
       "qid": "830ce83f",
       "query": "Where did Rachel move to after her recent relocation?",
@@ -2505,7 +2505,7 @@
         "answer_e1403127_1",
         "answer_e1403127_2"
       ],
-      "latency_ms": 237.97,
+      "latency_ms": 235.67,
       "ndcg_at_5": 1.0,
       "qid": "89941a94",
       "query": "Before I purchased the gravel bike, do I have other bikes in addition to my mountain bike and my commuter bike?",
@@ -2527,7 +2527,7 @@
         "answer_4dac77cb_1",
         "answer_4dac77cb_2"
       ],
-      "latency_ms": 195.36,
+      "latency_ms": 196.67,
       "ndcg_at_5": 1.0,
       "qid": "6071bd76",
       "query": "For the coffee-to-water ratio in my French press, did I switch to more water per tablespoon of coffee, or less?",
@@ -2549,7 +2549,7 @@
         "answer_d6028d6e_1",
         "answer_d6028d6e_2"
       ],
-      "latency_ms": 182.57,
+      "latency_ms": 184.09,
       "ndcg_at_5": 1.0,
       "qid": "69fee5aa",
       "query": "How many pre-1920 American coins do I have in my collection?",
@@ -2571,7 +2571,7 @@
         "answer_f2f998c7_1",
         "answer_f2f998c7_2"
       ],
-      "latency_ms": 225.29,
+      "latency_ms": 224.74,
       "ndcg_at_5": 1.0,
       "qid": "0e4e4c46",
       "query": "What is my current highest score in Ticket to Ride?",
@@ -2593,7 +2593,7 @@
         "answer_02e66dec_1",
         "answer_02e66dec_2"
       ],
-      "latency_ms": 182.97,
+      "latency_ms": 183.37,
       "ndcg_at_5": 1.0,
       "qid": "9ea5eabc",
       "query": "Where did I go on my most recent family trip?",
@@ -2615,7 +2615,7 @@
         "answer_ab603dd5_abs_1",
         "answer_ab603dd5_abs_2"
       ],
-      "latency_ms": 182.65,
+      "latency_ms": 183.88,
       "ndcg_at_5": 0.6131,
       "qid": "982b5123_abs",
       "query": "When did I book the Airbnb in Sacramento?",
@@ -2637,7 +2637,7 @@
         "answer_a22b654d_abs_1",
         "answer_a22b654d_abs_2"
       ],
-      "latency_ms": 179.39,
+      "latency_ms": 180.45,
       "ndcg_at_5": 1.0,
       "qid": "0ddfec37_abs",
       "query": "How many autographed football have I added to my collection in the first three months of collection?",
@@ -2659,7 +2659,7 @@
         "answer_9282283d_abs_1",
         "answer_9282283d_abs_2"
       ],
-      "latency_ms": 176.81,
+      "latency_ms": 175.91,
       "ndcg_at_5": 1.0,
       "qid": "2698e78f_abs",
       "query": "How often do I see Dr. Johnson?",
@@ -2680,7 +2680,7 @@
       "gold_references": [
         "answer_f5b33470_abs"
       ],
-      "latency_ms": 188.05,
+      "latency_ms": 188.82,
       "ndcg_at_5": 1.0,
       "qid": "f4f1d8a4_abs",
       "query": "What did my dad gave me as a birthday gift?",
@@ -2701,7 +2701,7 @@
       "gold_references": [
         "answer_7cc5362f_abs"
       ],
-      "latency_ms": 231.5,
+      "latency_ms": 231.99,
       "ndcg_at_5": 0.0,
       "qid": "29f2956b_abs",
       "query": "How much time do I dedicate to practicing violin every day?",
@@ -2722,7 +2722,7 @@
       "gold_references": [
         "answer_5ff494b9_abs"
       ],
-      "latency_ms": 186.63,
+      "latency_ms": 188.62,
       "ndcg_at_5": 1.0,
       "qid": "19b5f2b3_abs",
       "query": "How long was I in Korea for?",
@@ -2744,7 +2744,7 @@
         "answer_70dc7d08_abs_1",
         "answer_70dc7d08_abs_2"
       ],
-      "latency_ms": 180.3,
+      "latency_ms": 181.82,
       "ndcg_at_5": 0.6131,
       "qid": "c8090214_abs",
       "query": "How many days before I bought my iPad did I attend the Holiday Market?",
@@ -2766,7 +2766,7 @@
         "answer_ef84b994_abs_1",
         "answer_ef84b994_abs_2"
       ],
-      "latency_ms": 187.61,
+      "latency_ms": 195.64,
       "ndcg_at_5": 1.0,
       "qid": "a96c20ee_abs",
       "query": "At which university did I present a poster for my undergrad course research project?",
@@ -2788,7 +2788,7 @@
         "answer_cbd08e3c_abs_1",
         "answer_cbd08e3c_abs_2"
       ],
-      "latency_ms": 180.68,
+      "latency_ms": 198.3,
       "ndcg_at_5": 0.6131,
       "qid": "ba358f49_abs",
       "query": "How old will Rachel be when I get married?",
@@ -2810,7 +2810,7 @@
         "answer_52382508_abs_1",
         "answer_52382508_abs_2"
       ],
-      "latency_ms": 215.06,
+      "latency_ms": 218.16,
       "ndcg_at_5": 0.6131,
       "qid": "2133c1b5_abs",
       "query": "How long have I been living in my current apartment in Shinjuku?",
@@ -2832,7 +2832,7 @@
         "answer_743f03a1_abs_1",
         "answer_743f03a1_abs_2"
       ],
-      "latency_ms": 177.92,
+      "latency_ms": 179.63,
       "ndcg_at_5": 0.6131,
       "qid": "6456829e_abs",
       "query": "How many plants did I initially plant for tomatoes and chili peppers?",
@@ -2854,7 +2854,7 @@
         "answer_e49ed9d3_abs_1",
         "answer_e49ed9d3_abs_2"
       ],
-      "latency_ms": 196.16,
+      "latency_ms": 197.59,
       "ndcg_at_5": 0.9197,
       "qid": "e5ba910e_abs",
       "query": "What is the total cost of my recently purchased headphones and the iPad?",
@@ -2876,7 +2876,7 @@
         "answer_25df025b_abs_1",
         "answer_25df025b_abs_2"
       ],
-      "latency_ms": 191.64,
+      "latency_ms": 194.19,
       "ndcg_at_5": 1.0,
       "qid": "f685340e_abs",
       "query": "How often do I play table tennis with my friends at the local park?",
@@ -2898,7 +2898,7 @@
         "answer_bf633415_abs_1",
         "answer_bf633415_abs_2"
       ],
-      "latency_ms": 218.28,
+      "latency_ms": 222.64,
       "ndcg_at_5": 1.0,
       "qid": "2311e44b_abs",
       "query": "How many pages do I have left to read in 'Sapiens'?",
@@ -2920,7 +2920,7 @@
         "answer_b3070ec4_abs_2",
         "answer_b3070ec4_abs_1"
       ],
-      "latency_ms": 192.73,
+      "latency_ms": 188.83,
       "ndcg_at_5": 1.0,
       "qid": "gpt4_70e84552_abs",
       "query": "Which task did I complete first, fixing the fence or purchasing three cows from Peter?",
@@ -2942,7 +2942,7 @@
         "doc_alex_nova",
         "doc_nova_deadline"
       ],
-      "latency_ms": 0.65,
+      "latency_ms": 0.58,
       "ndcg_at_5": 0.6131,
       "qid": "mh_13_alex_nova",
       "query": "When does Alex's project ship?",
@@ -2960,7 +2960,7 @@
         "doc_priya_zephyr",
         "doc_zephyr_deadline"
       ],
-      "latency_ms": 0.53,
+      "latency_ms": 0.52,
       "ndcg_at_5": 0.6131,
       "qid": "mh_04_priya_zephyr",
       "query": "When does Priya's project ship?",
@@ -2996,7 +2996,7 @@
         "doc_julia_betelgeuse",
         "doc_betelgeuse_deadline"
       ],
-      "latency_ms": 0.5,
+      "latency_ms": 0.49,
       "ndcg_at_5": 0.6131,
       "qid": "mh_20_julia_betelgeuse",
       "query": "When does Julia's project ship?",
@@ -3014,7 +3014,7 @@
         "doc_nadia_phoenix",
         "doc_phoenix_deadline"
       ],
-      "latency_ms": 0.5,
+      "latency_ms": 0.48,
       "ndcg_at_5": 0.6131,
       "qid": "mh_11_nadia_phoenix",
       "query": "When does Nadia's project ship?",
@@ -3032,7 +3032,7 @@
         "doc_gabriel_castor",
         "doc_castor_deadline"
       ],
-      "latency_ms": 0.53,
+      "latency_ms": 0.48,
       "ndcg_at_5": 0.6131,
       "qid": "mh_17_gabriel_castor",
       "query": "When does Gabriel's project ship?",
@@ -3050,7 +3050,7 @@
         "doc_elena_cygnus",
         "doc_cygnus_deadline"
       ],
-      "latency_ms": 0.58,
+      "latency_ms": 0.47,
       "ndcg_at_5": 0.6131,
       "qid": "mh_07_elena_cygnus",
       "query": "When does Elena's project ship?",
@@ -3068,7 +3068,7 @@
         "doc_mia_spica",
         "doc_spica_deadline"
       ],
-      "latency_ms": 0.53,
+      "latency_ms": 0.49,
       "ndcg_at_5": 0.6131,
       "qid": "mh_22_mia_spica",
       "query": "When does Mia's project ship?",
@@ -3086,7 +3086,7 @@
         "doc_maya_orion",
         "doc_orion_deadline"
       ],
-      "latency_ms": 0.51,
+      "latency_ms": 0.47,
       "ndcg_at_5": 0.6131,
       "qid": "mh_09_maya_orion",
       "query": "When does Maya's project ship?",
@@ -3104,7 +3104,7 @@
         "doc_isaac_rigel",
         "doc_rigel_deadline"
       ],
-      "latency_ms": 0.49,
+      "latency_ms": 0.56,
       "ndcg_at_5": 0.6131,
       "qid": "mh_19_isaac_rigel",
       "query": "When does Isaac's project ship?",
@@ -3122,7 +3122,7 @@
         "doc_tomas_eclipse",
         "doc_eclipse_deadline"
       ],
-      "latency_ms": 0.49,
+      "latency_ms": 0.52,
       "ndcg_at_5": 0.6131,
       "qid": "mh_05_tomas_eclipse",
       "query": "When does Tomas's project ship?",
@@ -3267,22 +3267,6 @@
       "check": "cognitive_integrity",
       "note": "5/5 mandatory \u00a733 cognitive classes pass",
       "operator": "==",
-      "passed": true,
-      "target": 1.0,
-      "value": 1.0
-    },
-    {
-      "check": "pareto_no_quality_drop",
-      "note": "Quality composite score does not regress against baseline",
-      "operator": ">=",
-      "passed": true,
-      "target": 0.6099,
-      "value": 0.6099
-    },
-    {
-      "check": "pareto_no_safety_drop",
-      "note": "Poison block rate does not regress against baseline",
-      "operator": ">=",
       "passed": true,
       "target": 1.0,
       "value": 1.0

@@ -7353,6 +7353,8 @@ def _load_belief_revision_cases(args: argparse.Namespace) -> list[Mapping[str, A
         loaded = json.loads(Path(args.cases).expanduser().read_text(encoding="utf-8")) if args.cases else json.loads(args.cases_json)
     except (OSError, json.JSONDecodeError) as exc:
         raise SystemExit(f"belief revision cases denied: {exc}") from exc
+    if isinstance(loaded, Mapping) and "belief_cases" in loaded:
+        loaded = loaded["belief_cases"]
     if not isinstance(loaded, list):
         raise SystemExit("belief revision cases must be a JSON array")
     if not all(isinstance(item, Mapping) for item in loaded):
