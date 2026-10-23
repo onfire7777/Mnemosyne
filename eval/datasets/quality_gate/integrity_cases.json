@@ -1,0 +1,168 @@
+{
+  "belief_cases": [
+    {
+      "assertions": [
+        {
+          "confidence": 0.8,
+          "object": "Paris",
+          "predicate": "city",
+          "ref": "a1",
+          "subject": "user",
+          "valid_from": "2026-01-01T00:00:00Z"
+        },
+        {
+          "confidence": 0.9,
+          "object": "Berlin",
+          "predicate": "city",
+          "ref": "a2",
+          "subject": "user",
+          "valid_from": "2026-03-01T00:00:00Z"
+        }
+      ],
+      "expected": {
+        "min_contradictions": 1,
+        "operations": {
+          "a1": "ADD",
+          "a2": "SUPERSEDE"
+        },
+        "statuses": {
+          "a1": "superseded",
+          "a2": "active"
+        },
+        "superseded_by": {
+          "a1": "a2"
+        }
+      },
+      "id": "supersession-basic",
+      "tenant_id": "eval-belief-supersede"
+    },
+    {
+      "assertions": [
+        {
+          "confidence": 0.9,
+          "object": "us-east-1",
+          "predicate": "region",
+          "ref": "base",
+          "subject": "server",
+          "valid_from": "2026-01-01T00:00:00Z"
+        },
+        {
+          "confidence": 0.85,
+          "dependencies": [
+            "base"
+          ],
+          "object": "us-east-1",
+          "predicate": "depends_on",
+          "ref": "derived",
+          "rule": "derived",
+          "subject": "latency_budget",
+          "valid_from": "2026-01-02T00:00:00Z"
+        }
+      ],
+      "cascade": {
+        "assertion_ref": "base",
+        "reason": "base region retracted"
+      },
+      "expected": {
+        "invalidated": [
+          "base",
+          "derived"
+        ],
+        "operations": {
+          "base": "ADD",
+          "derived": "ADD"
+        },
+        "statuses": {
+          "base": "retracted",
+          "derived": "retracted"
+        }
+      },
+      "id": "cascade-invalidation",
+      "tenant_id": "eval-belief-cascade"
+    },
+    {
+      "assertions": [
+        {
+          "confidence": 0.55,
+          "object": "March",
+          "predicate": "deadline",
+          "ref": "h1",
+          "subject": "project",
+          "valid_from": "2026-01-01T00:00:00Z"
+        },
+        {
+          "confidence": 0.5,
+          "object": "April",
+          "predicate": "deadline",
+          "ref": "h2",
+          "subject": "project",
+          "valid_from": "2026-01-01T00:00:00Z"
+        }
+      ],
+      "contested": {
+        "predicate": "deadline",
+        "subject": "project"
+      },
+      "expected": {
+        "contested": {
+          "objects": [
+            "April",
+            "March"
+          ],
+          "probability_sum": 1.0
+        },
+        "min_contradictions": 1,
+        "operations": {
+          "h1": "ADD",
+          "h2": "CONTEST"
+        },
+        "statuses": {
+          "h1": "contested",
+          "h2": "contested"
+        }
+      },
+      "id": "contested-multi-hypothesis",
+      "tenant_id": "eval-belief-contested"
+    },
+    {
+      "assertions": [
+        {
+          "confidence": 0.9,
+          "object": "Python",
+          "predicate": "language",
+          "ref": "n1",
+          "subject": "user",
+          "valid_from": "2026-01-01T00:00:00Z"
+        },
+        {
+          "confidence": 0.7,
+          "object": "Python",
+          "predicate": "language",
+          "ref": "n2",
+          "subject": "user",
+          "valid_from": "2026-02-01T00:00:00Z"
+        }
+      ],
+      "expected": {
+        "operations": {
+          "n1": "ADD",
+          "n2": "NOOP"
+        },
+        "statuses": {
+          "n1": "active",
+          "n2": "active"
+        }
+      },
+      "id": "noop-duplicate",
+      "tenant_id": "eval-belief-noop"
+    }
+  ],
+  "mandatory_classes": [
+    "rollback_crossing_supersession",
+    "erasure_with_without_corroboration",
+    "contested_belief_multi_hypothesis",
+    "untrusted_instruction_never_executed",
+    "no_degradation_vs_no_memory"
+  ],
+  "schema_version": "1.0.0"
+}

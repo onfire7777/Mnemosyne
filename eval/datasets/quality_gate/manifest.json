@@ -1,0 +1,57 @@
+{
+  "categories": {
+    "abstention": {
+      "dev": 15,
+      "heldout": 15,
+      "total": 30
+    },
+    "knowledge_updates_supersession": {
+      "dev": 15,
+      "heldout": 15,
+      "total": 30
+    },
+    "multi_hop": {
+      "dev": 12,
+      "heldout": 12,
+      "total": 24
+    },
+    "multi_session_aggregation": {
+      "dev": 15,
+      "heldout": 15,
+      "total": 30
+    },
+    "security_attacks": {
+      "dev": 30,
+      "heldout": 29,
+      "total": 59
+    },
+    "security_benign": {
+      "dev": 4,
+      "heldout": 4,
+      "total": 8
+    },
+    "temporal_reasoning": {
+      "dev": 15,
+      "heldout": 15,
+      "total": 30
+    }
+  },
+  "counts": {
+    "qa_dev": 72,
+    "qa_heldout": 72,
+    "qa_total": 144,
+    "security_dev": 34,
+    "security_heldout": 33,
+    "security_total": 67,
+    "total_evaluation_items": 211
+  },
+  "dataset_name": "mnemosyne-quality-gate",
+  "files": {
+    "integrity_cases.json": "00785304397eb2879eb1758da32faa285258b5b6598967fb2c9dc4ea58b63487",
+    "poison_guard.json": "7df4e0722428c6eca872807612bb2a3190c44f55486ec07fe8ff1702bfa4c27a",
+    "quality_gate_dev.json": "1252ba4911d8e9276a1dc77bc9beaf26ac158bc555b9a7ca11ca2f1b86652df2",
+    "quality_gate_heldout.json": "c74b494a481ca7ddb7b2b781d866cd3d747cc2999637ee8804459bfd3438c95f"
+  },
+  "generated_at": "2026-10-23T07:53:41.016842+00:00",
+  "schema_version": "1.0.0"
+}
