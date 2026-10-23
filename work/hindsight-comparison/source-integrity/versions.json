@@ -1,0 +1,6 @@
+{
+  "python": "3.14.7",
+  "psycopg": "3.3.4",
+  "postgresql": "16.15 (Debian 16.15-1.pgdg12+2)",
+  "pgvector": "0.8.7"
+}

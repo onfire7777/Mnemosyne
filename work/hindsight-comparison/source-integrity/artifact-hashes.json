@@ -1,0 +1,19 @@
+{
+  "REPORT.md": "213a5ebdb9f77d34436a97ec9a6515b9ef6307a7529ae0d656e0210e638c30fc",
+  "cleanup.json": "0a73c4847825f9cea657b0aa0e2be9c138bda13324a5fd0d297ccb3d917dc49f",
+  "docker-after.jsonl": "a08a90453990eb9fcb259b51aacd003ef9c4030d02cb934bfbc7535cbf36228d",
+  "environment.json": "682a95f8dd928bd0259a481be1c6d10546b6663cb6f71872a28b7adaa0aa97dc",
+  "initial-local.xml": "3bea783ebf8a6cbfcec381919e45aa9ff10ffa45c22e9e866f8646c5bfbae5ec",
+  "lint.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+  "postgres-role-check.json": "5f6222cd08a65cbf2533db09ff79d19595dfb8951726f57450dcf676cb4b501b",
+  "postgres-source-transaction.xml": "3f76958ffc705b20d921a9c15f03f92e6d86a21ef23fae82c13fae0b07be6be3",
+  "projection-custody.log": "f80d9994ee9a886ec444dcc94cf9c23b88102e843d17b575f8c00549b8b3ea5a",
+  "projection-custody.xml": "a1edea6f90b93b5b7ea8f4afa1e4b3c928df5173b5781f590fdfbd577eda9702",
+  "regression.log": "dd308e535db1f4d1294c5a122d7b5decac7db56f57c678f138bebf2cd882b9cf",
+  "regression.xml": "ef7114f99ba8e69c7c01bae3583023a7f184453973ba0ebe04a25d477bf02f5b",
+  "skips.json": "ed44387bcfd57243cff74c498b88fb7076f6fa39d4e63c4d0594bc6c5f33aa89",
+  "source-manifest.json": "8441c256303031db91e57615fd9b021ea8ee78308f6e84843ddb5152bfc3d996",
+  "verification.json": "8945ac05ac35e02add10d4d5aa52931e0476ad448ec88424ac1188310cbbdc10",
+  "verify.py": "266be641f5ef68892eee764ea91354b39015e24d38cb1c40483b34eb93ee6ac7",
+  "versions.json": "58528ea006a483c0efff5384bc7f69419a42d1327346d40895d2af1f7533731f"
+}

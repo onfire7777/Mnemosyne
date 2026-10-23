@@ -99,6 +99,7 @@ from mnemosyne.privacy import ErasureMode
 from mnemosyne.retrieval import (
     derived_evidence_readable,
     derived_source_cids,
+    projection_sources_readable,
     trim_derived_source_cids,
     filter_derived_adapter_hits,
     read_evidence_for_context,
@@ -558,8 +559,16 @@ class PostgresEngine:
         self._calibration_cache: dict[tuple[str, str], CalibrationSet] = {}
         self._calibration_cache_lock = threading.Lock()
         self._mental_model_guard_context = threading.local()
+        self._source_transaction_context = threading.local()
 
     def connect(self) -> Any:
+        state = self._source_transaction_state()
+        if state is not None:
+            state["failed"] = True
+            raise RuntimeError(
+                "source_transaction supports only append_evidence, get_evidence, "
+                "update_evidence_metadata, and forget"
+            )
         if self._psycopg is None or self._jsonb is None:
             self._psycopg, self._jsonb = _require_psycopg()
         if not self._conn_reuse:
@@ -612,6 +621,82 @@ class PostgresEngine:
             "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
             (str(tenant_id),),
         )
+
+    def _source_transaction_state(self) -> dict[str, Any] | None:
+        return getattr(getattr(self, "_source_transaction_context", None), "state", None)
+
+    @contextmanager
+    def _source_operation_scope(self, tenant_id: str, branch: str):
+        """Reject mismatched scopes before an operation can acquire/write a row."""
+        state = self._source_transaction_state()
+        try:
+            if state is not None:
+                if (tenant_id, branch) != (state["tenant_id"], state["branch"]):
+                    raise ValueError("source transaction tenant/branch scope mismatch")
+                if state["failed"]:
+                    raise RuntimeError("source transaction is aborted")
+            yield
+        except BaseException:
+            if state is not None:
+                state["failed"] = True
+            raise
+
+    @contextmanager
+    def _source_connection(self, tenant_id: str, branch: str, *, read: bool = False):
+        """Borrow the outer lease without committing or rolling it back."""
+        state = self._source_transaction_state()
+        if state is not None:
+            with self._source_operation_scope(tenant_id, branch):
+                yield state["connection"]
+        elif read:
+            with self._mental_model_connection(tenant_id) as conn:
+                yield conn
+        else:
+            with self.connect() as conn:
+                yield conn
+
+    @contextmanager
+    def source_transaction(self, tenant_id: str, branch: str = "main"):
+        """Atomically compose the four source operations in one tenant/branch.
+
+        Nested same-scope contexts join the transaction. Any nested operation
+        failure aborts the outer transaction, even if its exception is caught.
+        Other engine operations and mental-model publication guards cannot be
+        mixed into this boundary. Prepare provider output before entering it.
+        """
+        with self._source_operation_scope(tenant_id, branch):
+            model_key(tenant_id, "source-transaction", branch)
+            if self._source_transaction_state() is not None:
+                yield
+                return
+            if self._active_mental_model_connection(tenant_id) is not None:
+                raise RuntimeError("source transaction cannot join a mental model guard")
+            state = {"tenant_id": tenant_id, "branch": branch, "failed": False,
+                     "invalidate_passages": False}
+            with self.connect() as conn:
+                # A safe-role probe may have begun a transaction on a fresh
+                # non-pooled lease. This context owns that lease exclusively.
+                conn.rollback()
+                with conn.cursor() as cur:
+                    cur.execute("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
+                    cur.execute("SET LOCAL lock_timeout = '5s'")
+                    # Match forget/working-memory lock order before source rows
+                    # or schema migration locks are acquired.
+                    self._lock_working_tenant(cur, tenant_id)
+                    self._set_tenant(cur, _stable_uuid("tenant", tenant_id))
+                state["connection"] = conn
+                self._source_transaction_context.state = state
+                try:
+                    yield
+                    if state["failed"]:
+                        raise RuntimeError("source transaction is aborted")
+                except BaseException:
+                    state["failed"] = True
+                    raise
+                finally:
+                    del self._source_transaction_context.state
+            if state["invalidate_passages"]:
+                self._passage_bm25_index = None
 
     @staticmethod
     def _set_pgvector_hnsw_query_settings(cur: Any, filt: dict[str, Any]) -> None:
@@ -1795,26 +1880,41 @@ class PostgresEngine:
                 return [_working_from_values(values) for values in expired_values]
 
     def ensure_tenant_and_branch(self, tenant_id: str, branch: str = "main", kind: str = "protected") -> None:
-        db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self.connect() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    "INSERT INTO tenants(id, name) VALUES (%s, %s) ON CONFLICT (id) DO NOTHING",
-                    (db_tenant_id, tenant_id),
-                )
-                self._set_tenant(cur, db_tenant_id)
-                cur.execute(
-                    """
-                    INSERT INTO branches(tenant_id, name, kind)
-                    VALUES (%s, %s, %s)
-                    ON CONFLICT (tenant_id, name) DO NOTHING
-                    """,
-                    (db_tenant_id, branch, kind),
-                )
+                self._ensure_tenant_and_branch_cursor(cur, tenant_id, branch, kind)
+
+    def _ensure_tenant_and_branch_cursor(self, cur: Any, tenant_id: str, branch: str, kind: str) -> None:
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        cur.execute(
+            "INSERT INTO tenants(id, name) VALUES (%s, %s) ON CONFLICT (id) DO NOTHING",
+            (db_tenant_id, tenant_id),
+        )
+        self._set_tenant(cur, db_tenant_id)
+        cur.execute(
+            """
+            INSERT INTO branches(tenant_id, name, kind)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (tenant_id, name) DO NOTHING
+            """,
+            (db_tenant_id, branch, kind),
+        )
+
+    @classmethod
+    def _ensure_evidence_document_schema(cls, cur: Any) -> None:
+        cls._ensure_required_column(
+            cur, table="evidence", column="document_segment_id",
+            ddl="ALTER TABLE evidence ADD COLUMN IF NOT EXISTS document_segment_id TEXT",
+        )
 
     def append_evidence(self, ev: Evidence, branch: str = "main") -> str:
+        with self._source_operation_scope(ev.tenant_id, branch):
+            return self._append_evidence(ev, branch)
+
+    def _append_evidence(self, ev: Evidence, branch: str) -> str:
         access_policy = validate_access_policy(ev.access_policy, tenant_id=ev.tenant_id, location="evidence.access_policy")
-        self.ensure_tenant_and_branch(ev.tenant_id, branch)
+        if self._source_transaction_state() is None:
+            self.ensure_tenant_and_branch(ev.tenant_id, branch)
         db_tenant_id = _stable_uuid("tenant", ev.tenant_id)
         db_user_id = _stable_uuid("user", ev.user_id)
         db_session_id = _stable_uuid("session", ev.session_id) if ev.session_id else None
@@ -1831,12 +1931,16 @@ class PostgresEngine:
             content_pointer=ev.content_pointer,
             modality=ev.modality,
             sensitivity=int(ev.sensitivity),
+            document_segment_id=ev.document_segment_id,
         )
         cid_bytes = _cid_to_bytes(cid)
-        with self.connect() as conn:
+        with self._source_connection(ev.tenant_id, branch) as conn:
             with conn.cursor() as cur:
+                if self._source_transaction_state() is not None:
+                    self._ensure_tenant_and_branch_cursor(cur, ev.tenant_id, branch, "protected")
                 self._set_tenant(cur, db_tenant_id)
                 self._ensure_evidence_vector_schema(cur)
+                self._ensure_evidence_document_schema(cur)
                 replay_cid = self._erased_replay_cid(
                     cur,
                     external_tenant_id=ev.tenant_id,
@@ -1846,6 +1950,8 @@ class PostgresEngine:
                     source_type=ev.source_type,
                     content_pointer=ev.content_pointer,
                     modality=ev.modality,
+                    user_id=ev.user_id,
+                    document_segment_id=ev.document_segment_id,
                 )
                 if replay_cid is not None:
                     cid = replay_cid
@@ -1916,6 +2022,12 @@ class PostgresEngine:
                     metadata["_mnemosyne_embedding_explicit"] = True
                     embedding = _vector_literal(ev.embedding)
                 elif embedding_partition == "public":
+                    if (self._source_transaction_state() is not None and ev.content
+                            and type(self.adapters.embedding) is not HashingEmbeddingProvider):
+                        raise ValueError(
+                            "source_transaction requires a supplied embedding or local "
+                            "HashingEmbeddingProvider; prepare provider output before entering"
+                        )
                     embedding = _vector_literal(self.adapters.embedding.embed(ev.content)) if ev.content else None
                 else:
                     embedding = None
@@ -1923,12 +2035,12 @@ class PostgresEngine:
                     """
                     INSERT INTO evidence (
                       cid, branch, tenant_id, user_id, session_id, actor, source_type,
-                      source_identity, content, content_pointer, modality, metadata,
+                      source_identity, document_segment_id, content, content_pointer, modality, metadata,
                       trust_tier, capability_tags, sensitivity, signed_provenance,
                       access_policy, embedding, embedding_partition, erased, created_at
                     )
                     VALUES (
-                      %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::vector, %s, false, %s
+                      %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::vector, %s, false, %s
                     )
                     ON CONFLICT (tenant_id, branch, cid) DO NOTHING
                     """,
@@ -1941,6 +2053,7 @@ class PostgresEngine:
                         ev.actor,
                         ev.source_type,
                         ev.source_identity,
+                        ev.document_segment_id,
                         ev.content,
                         ev.content_pointer,
                         ev.modality,
@@ -1986,6 +2099,8 @@ class PostgresEngine:
         source_type: str,
         content_pointer: str | None,
         modality: str,
+        user_id: str | None = None,
+        document_segment_id: str | None = None,
     ) -> str | None:
         unscoped_cid = evidence_unscoped_cid(
             content,
@@ -1996,7 +2111,7 @@ class PostgresEngine:
         )
         cur.execute(
             """
-            SELECT cid, sensitivity, metadata
+            SELECT cid, sensitivity, metadata, document_segment_id
             FROM evidence
             WHERE tenant_id = %s
               AND branch = %s
@@ -2011,7 +2126,14 @@ class PostgresEngine:
             row_cid = _bytes_to_cid(row[0])
             metadata = dict(row[2] or {})
             row_user_id = metadata.get("_external_user_id")
-            if unscoped_cid == row_cid:
+            row_segment_id = row[3]
+            # A legacy tombstone continues to fence all replays of the old
+            # bytes. A segment tombstone fences only that owner's segment.
+            if row_segment_id is not None and (
+                row_segment_id != document_segment_id or row_user_id != user_id
+            ):
+                continue
+            if row_segment_id is None and unscoped_cid == row_cid:
                 return row_cid
             if not isinstance(row_user_id, str) or not row_user_id:
                 continue
@@ -2023,6 +2145,7 @@ class PostgresEngine:
                 content_pointer=content_pointer,
                 modality=modality,
                 sensitivity=int(row[1]),
+                document_segment_id=row_segment_id,
             )
             if scoped_cid == row_cid:
                 return row_cid
@@ -2087,6 +2210,10 @@ class PostgresEngine:
         of this guard. Source locks and the pinned connection live until the
         outer lease commits or rolls back; nested reads must not end that lease.
         """
+        source_state = self._source_transaction_state()
+        if source_state is not None:
+            source_state["failed"] = True
+            raise RuntimeError("mental model guard cannot join a source transaction")
         model_key(tenant_id, "guard", "main")
         pinned = self._active_mental_model_connection(tenant_id)
         if pinned is not None:
@@ -2201,14 +2328,16 @@ class PostgresEngine:
         return read_evidence_for_context(self, tenant_id, cid, branch, access_context=access_context)
 
     def get_evidence(self, tenant_id: str, cid: str, branch: str = "main") -> Evidence | None:
+        with self._source_operation_scope(tenant_id, branch):
+            return self._get_evidence(tenant_id, cid, branch)
+
+    def _get_evidence(self, tenant_id: str, cid: str, branch: str) -> Evidence | None:
         cid_bytes = _cid_bytes_or_none(cid)
         if cid_bytes is None:
             return None
         db_tenant_id = _stable_uuid("tenant", tenant_id)
-        with self._mental_model_connection(tenant_id) as conn:
+        with self._source_connection(tenant_id, branch, read=True) as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
-                if self._active_mental_model_connection(tenant_id) is None:
-                    self._ensure_entity_registry_schema(cur)
                 self._set_tenant(cur, db_tenant_id)
                 cur.execute(
                     """
@@ -2396,6 +2525,15 @@ class PostgresEngine:
         actor: str = "consolidation",
         source: str = "metadata_update",
     ) -> bool:
+        with self._source_operation_scope(tenant_id, branch):
+            return self._update_evidence_metadata(
+                tenant_id, cid, metadata_patch, branch, actor=actor, source=source,
+            )
+
+    def _update_evidence_metadata(
+        self, tenant_id: str, cid: str, metadata_patch: dict[str, Any], branch: str,
+        *, actor: str, source: str,
+    ) -> bool:
         if "access_policy" in metadata_patch:
             raise ValueError("metadata_patch.access_policy cannot shadow evidence.access_policy")
         reserved_provenance_keys = {
@@ -2406,7 +2544,7 @@ class PostgresEngine:
         if reserved_provenance_keys.intersection(metadata_patch):
             raise ValueError("metadata_patch cannot modify reserved provenance metadata")
         db_tenant_id = _stable_uuid("tenant", tenant_id)
-        with self.connect() as conn:
+        with self._source_connection(tenant_id, branch) as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
                 # Serialize the read/merge/write with other evidence mutations.
@@ -3184,6 +3322,29 @@ class PostgresEngine:
             if row.get("branch", "main") == branch and not row.get("erased")]
         return [hit for hit in candidates if is_passage(hit)]
 
+    def _get_projection_for_adapter(
+        self, tenant_id: str, branch: str, kind: str, item_id: str,
+    ) -> Assertion | Preference | None:
+        if _uuid_or_none(item_id) is None or kind not in {"assertion", "preference"}:
+            return None
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                if kind == "assertion":
+                    cur.execute(
+                        "SELECT * FROM assertions WHERE tenant_id = %s AND branch = %s AND id = %s",
+                        (db_tenant_id, branch, item_id),
+                    )
+                    row = cur.fetchone()
+                    return _row_to_assertion({**row, "tenant_name": tenant_id}) if row is not None else None
+                cur.execute(
+                    "SELECT * FROM preferences WHERE tenant_id = %s AND id = %s",
+                    (db_tenant_id, item_id),
+                )
+                row = cur.fetchone()
+                return _row_to_preference(row, tenant_id) if row is not None else None
+
     def lexical_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
         tenant_id = str(filt["tenant_id"])
         branch = str(filt.get("branch", "main"))
@@ -3325,6 +3486,11 @@ class PostgresEngine:
                     )
                     if not decision.allowed:
                         continue
+                    if not projection_sources_readable(
+                        self, _bytes_list_to_cids(row["source_evidence_cids"]),
+                        tenant_id=tenant_id, branch=branch, filt=filt, policy=self.policy,
+                    ):
+                        continue
                     text, privacy_metadata = apply_statement_redactions(
                         subject=str(row["subject"]),
                         predicate=str(row["predicate"]),
@@ -3411,6 +3577,11 @@ class PostgresEngine:
                         sensitivity=int(row["sensitivity"]),
                         access_policy=dict(row["access_policy"] or {}),
                         embedding_partition=str(row["embedding_partition"] or ""),
+                    ):
+                        continue
+                    if not projection_sources_readable(
+                        self, _bytes_list_to_cids(row["source_evidence_cids"]),
+                        tenant_id=tenant_id, branch=branch, filt=filt, policy=self.policy,
                     ):
                         continue
                     text, privacy_metadata = apply_statement_redactions(
@@ -5078,7 +5249,19 @@ class PostgresEngine:
         requested_by: str = "user",
         erasure_mode: ErasureMode | str = ErasureMode.TOMBSTONE_RECOMPUTE,
     ) -> dict[str, Any]:
-        self._passage_bm25_index = None
+        with self._source_operation_scope(tenant_id, branch):
+            result = self._forget(tenant_id, cid, branch, requested_by, erasure_mode)
+            state = self._source_transaction_state()
+            if state is not None:
+                state["invalidate_passages"] = True
+            else:
+                self._passage_bm25_index = None
+            return result
+
+    def _forget(
+        self, tenant_id: str, cid: str, branch: str, requested_by: str,
+        erasure_mode: ErasureMode | str,
+    ) -> dict[str, Any]:
         mode = ErasureMode(erasure_mode)
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         cid_bytes = _cid_to_bytes(cid)
@@ -5098,7 +5281,7 @@ class PostgresEngine:
             "retained_derived_evidence": [],
             "trimmed_derived_evidence": [],
         }
-        with self.connect() as conn:
+        with self._source_connection(tenant_id, branch) as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
                 self._lock_working_tenant(cur, tenant_id)
@@ -5677,6 +5860,7 @@ class PostgresEngine:
             with conn.cursor() as cur:
                 self._set_tenant(cur, db_tenant_id)
                 self._ensure_evidence_vector_schema(cur)
+                self._ensure_evidence_document_schema(cur)
                 for db_tenant_id in [db_tenant_id]:
                     cur.execute(
                         """
@@ -5693,12 +5877,12 @@ class PostgresEngine:
                         """
                         INSERT INTO evidence (
                           cid, branch, tenant_id, user_id, session_id, actor, source_type,
-                          source_identity, content, content_pointer, modality, metadata,
+                          source_identity, document_segment_id, content, content_pointer, modality, metadata,
                           trust_tier, capability_tags, sensitivity, signed_provenance,
                           access_policy, embedding, embedding_partition, erased, created_at
                         )
                         SELECT cid, %s, tenant_id, user_id, session_id, actor, source_type,
-                          source_identity, content, content_pointer, modality, metadata,
+                          source_identity, document_segment_id, content, content_pointer, modality, metadata,
                           trust_tier, capability_tags, sensitivity, signed_provenance,
                           access_policy, embedding, embedding_partition, erased, created_at
                         FROM evidence
@@ -5753,6 +5937,7 @@ class PostgresEngine:
                 # locks or rerun table-wide backfills inside the transaction.
                 self._ensure_entity_registry_schema(cur)
                 self._ensure_evidence_vector_schema(cur)
+                self._ensure_evidence_document_schema(cur)
                 for db_tenant_id in [db_tenant_id]:
                     cur.execute(
                         """
@@ -5766,12 +5951,12 @@ class PostgresEngine:
                         """
                         INSERT INTO evidence (
                           cid, branch, tenant_id, user_id, session_id, actor, source_type,
-                          source_identity, content, content_pointer, modality, metadata,
+                          source_identity, document_segment_id, content, content_pointer, modality, metadata,
                           trust_tier, capability_tags, sensitivity, signed_provenance,
                           access_policy, embedding, embedding_partition, erased, created_at
                         )
                         SELECT cid, %s, tenant_id, user_id, session_id, actor, source_type,
-                          source_identity, content, content_pointer, modality, metadata,
+                          source_identity, document_segment_id, content, content_pointer, modality, metadata,
                           trust_tier, capability_tags, sensitivity, signed_provenance,
                           access_policy, embedding, embedding_partition, erased, created_at
                         FROM evidence
@@ -6081,6 +6266,11 @@ class PostgresEngine:
                             status=str(row["status"]),
                         )
                         if not decision.allowed:
+                            continue
+                        if not projection_sources_readable(
+                            self, _bytes_list_to_cids(row["source_evidence_cids"]),
+                            tenant_id=tenant_id, branch=branch, filt=filt, policy=self.policy,
+                        ):
                             continue
                         text, privacy_metadata = apply_statement_redactions(
                             subject=str(row["subject"]),
@@ -7219,6 +7409,7 @@ def _row_to_evidence(row: dict[str, Any], cid: str) -> Evidence:
         actor=row["actor"],
         source_type=row["source_type"],
         source_identity=row["source_identity"],
+        document_segment_id=row.get("document_segment_id"),
         session_id=str(metadata.get("_external_session_id") or row["session_id"]) if row["session_id"] else None,
         content=row["content"] or "",
         metadata=public_metadata,

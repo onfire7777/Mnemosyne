@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from mnemosyne.cid_lists import bump_evidence_epoch, evidence_tracked
-from mnemosyne.ids import new_id
+from mnemosyne.ids import new_id, validate_document_segment_id
 
 Actor = Literal["user", "assistant", "tool", "system", "external"]
 AssertionStatus = Literal[
@@ -84,6 +84,10 @@ class Evidence:
     cid: str | None = None
     created_at: datetime = field(default_factory=utc_now)
     erased: bool = False
+    document_segment_id: str | None = None
+
+    def __post_init__(self) -> None:
+        validate_document_segment_id(self.document_segment_id)
 
     def __setattr__(self, name: str, value: Any) -> None:
         object.__setattr__(self, name, value)
@@ -94,6 +98,8 @@ class Evidence:
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["created_at"] = dt_to_json(self.created_at)
+        if self.document_segment_id is None:
+            data.pop("document_segment_id")
         return data
 
     @classmethod

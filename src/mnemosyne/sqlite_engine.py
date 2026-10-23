@@ -301,8 +301,8 @@ INSERT INTO evidence (
     tenant_id, branch, cid, user_id, actor, source_type, content,
     source_identity, session_id, metadata, content_pointer, modality,
     embedding, signed_provenance, trust_tier, capability_tags, sensitivity,
-    access_policy, created_at, erased
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    access_policy, created_at, erased, document_segment_id
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 # Branch row-copy variant: evidence keeps its cid, so an INSERT OR IGNORE on the
@@ -412,6 +412,7 @@ def _evidence_insert_values(ev: Evidence) -> tuple[Any, ...]:
         json_text(ev.access_policy),
         dt_to_json(ev.created_at),
         int(bool(ev.erased)),
+        ev.document_segment_id,
     )
 
 
@@ -442,6 +443,7 @@ def _evidence_from_row(row: sqlite3.Row) -> Evidence:
             "source_type": row["source_type"],
             "content": row["content"],
             "source_identity": row["source_identity"],
+            "document_segment_id": row["document_segment_id"] if "document_segment_id" in row.keys() else None,
             "session_id": row["session_id"],
             "metadata": json.loads(row["metadata"]),
             "content_pointer": row["content_pointer"],
@@ -705,6 +707,61 @@ def _working_audit_diff(values: dict[str, Any], *, status: str, sweep: datetime 
     return diff
 
 
+class _SourceConnection(sqlite3.Connection):
+    """Keep an explicit source transaction under its outer owner's control."""
+
+    _source_guard: dict[str, Any] | None = None
+
+    def _reject_source_control(self) -> None:
+        if self._source_guard is not None:
+            self._source_guard["failed"] = True
+            raise RuntimeError("source transaction owns commit and rollback")
+
+    def __enter__(self):
+        self._reject_source_control()
+        return super().__enter__()
+
+    def __exit__(self, *args):
+        self._reject_source_control()
+        return super().__exit__(*args)
+
+    def commit(self):
+        self._reject_source_control()
+        return super().commit()
+
+    def rollback(self):
+        self._reject_source_control()
+        return super().rollback()
+
+    def close(self):
+        self._reject_source_control()
+        return super().close()
+
+    def executescript(self, *args, **kwargs):
+        self._reject_source_control()
+        return super().executescript(*args, **kwargs)
+
+    def set_authorizer(self, *args, **kwargs):
+        self._reject_source_control()
+        return super().set_authorizer(*args, **kwargs)
+
+    def _authorize_source(self, action, *args):
+        state = self._source_guard
+        if (state is not None and not state.get("ending")
+                and action in {sqlite3.SQLITE_TRANSACTION, sqlite3.SQLITE_SAVEPOINT}):
+            state["failed"] = True
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+
+    def execute(self, sql, *args, **kwargs):
+        try:
+            return super().execute(sql, *args, **kwargs)
+        except BaseException:
+            if self._source_guard is not None:
+                self._source_guard["failed"] = True
+            raise
+
+
 class SqliteEngine:
     """One-SQLite-file-per-tenant engine; LocalMemoryEngine is the parity oracle."""
 
@@ -735,6 +792,8 @@ class SqliteEngine:
         self._lock = threading.RLock()
         self._connections: dict[str, sqlite3.Connection] = {}
         self._mental_model_guard_state: tuple[str, sqlite3.Connection] | None = None
+        self._source_transaction_state: dict[str, Any] | None = None
+        self._source_operation_depth = 0
         self._integrity_checked: set[str] = set()
         self._retrieval_result_cache_nonce = secrets.token_hex(16)
         # Task 8: tenant-granular embedding-cache hit/miss telemetry (never
@@ -791,13 +850,21 @@ class SqliteEngine:
     def _connect(self, tenant_id: str) -> sqlite3.Connection:
         """Open (or reuse) the tenant connection with pragmas + schema applied."""
         with self._lock:
+            state = self._source_transaction_state
+            if state is not None:
+                if state["tenant_id"] != tenant_id:
+                    state["failed"] = True
+                    raise ValueError("source transaction tenant scope mismatch")
+                if self._source_operation_depth == 0:
+                    state["failed"] = True
+                    raise RuntimeError("operation is not supported inside a source transaction")
             path = self._tenant_db_path(tenant_id)
             key = str(path)
             cached = self._connections.get(key)
             if cached is not None:
                 return cached
             existed = path.exists()
-            conn = sqlite3.connect(path, check_same_thread=False)
+            conn = sqlite3.connect(path, check_same_thread=False, factory=_SourceConnection)
             try:
                 conn.row_factory = sqlite3.Row
                 try:
@@ -829,6 +896,9 @@ class SqliteEngine:
         with conn:
             for statement in ENSURE_STATEMENTS:
                 conn.execute(statement)
+            evidence_columns = {row[1] for row in conn.execute("PRAGMA table_info(evidence)")}
+            if "document_segment_id" not in evidence_columns:
+                conn.execute("ALTER TABLE evidence ADD COLUMN document_segment_id TEXT")
             working_columns = {
                 row[1] for row in conn.execute("PRAGMA table_info(working_memory)")
             }
@@ -1381,7 +1451,119 @@ class SqliteEngine:
 
     # --- MemoryEngine Protocol surface (stubs name their implementing task) --
 
+    def _check_source_scope(self, tenant_id: str, branch: str) -> dict[str, Any] | None:
+        state = self._source_transaction_state
+        if state is not None:
+            if (state["tenant_id"], state["branch"]) != (tenant_id, branch):
+                state["failed"] = True
+                raise ValueError("source transaction tenant/branch scope mismatch")
+            if state["failed"] or not state["connection"].in_transaction:
+                state["failed"] = True
+                raise RuntimeError("source transaction is aborted")
+        return state
+
+    @contextmanager
+    def _source_operation(self, tenant_id: str, branch: str, *, writable: bool = True):
+        with self._lock:
+            state = self._check_source_scope(tenant_id, branch)
+            if writable and self._mental_model_guard_state is not None:
+                raise RuntimeError("source operations cannot run inside a mental model guard")
+            self._source_operation_depth += 1
+            try:
+                yield
+            except BaseException:
+                if state is not None:
+                    state["failed"] = True
+                raise
+            finally:
+                self._source_operation_depth -= 1
+
+    @contextmanager
+    def _source_write(self, conn: sqlite3.Connection):
+        state = self._source_transaction_state
+        if state is None:
+            with conn:
+                yield
+        else:
+            if state["connection"] is not conn or state["failed"] or not conn.in_transaction:
+                state["failed"] = True
+                raise RuntimeError("source transaction connection is not active")
+            yield
+
+    def _after_source_commit(self, callback) -> None:
+        state = self._source_transaction_state
+        if state is None:
+            callback()
+        else:
+            state["after_commit"].append(callback)
+
+    @contextmanager
+    def source_transaction(self, tenant_id: str, branch: str = "main"):
+        """Atomically compose source append, metadata update, read and erasure.
+
+        Nested same-scope calls join; a caught inner error still aborts the
+        outer transaction. Journal effects run after SQL commits. Providers,
+        unrelated mutators and mental-model guards do not belong in this scope.
+        """
+        with self._lock:
+            if self._mental_model_guard_state is not None:
+                raise RuntimeError("source transaction cannot run inside a mental model guard")
+            state = self._check_source_scope(tenant_id, branch)
+            if state is not None:
+                try:
+                    yield
+                except BaseException:
+                    state["failed"] = True
+                    raise
+                return
+            model_key(tenant_id, "source-transaction", branch)
+            conn = self._connect(tenant_id)
+            if conn.in_transaction:
+                raise RuntimeError("source transaction cannot adopt an existing transaction")
+            conn.execute("BEGIN IMMEDIATE")
+            state = {"tenant_id": tenant_id, "branch": branch, "connection": conn,
+                     "failed": False, "after_commit": []}
+            self._source_transaction_state = state
+            conn._source_guard = state
+            # The authorizer also covers existing cursors and commented SQL;
+            # parsing only Connection.execute would permit premature commits.
+            sqlite3.Connection.set_authorizer(conn, conn._authorize_source)
+            try:
+                self._require_branch(conn, tenant_id, branch)
+                yield
+                if state["failed"] or not conn.in_transaction:
+                    raise RuntimeError("source transaction is aborted")
+                state["ending"] = True
+                sqlite3.Connection.commit(conn)
+            except BaseException:
+                state["ending"] = True
+                sqlite3.Connection.rollback(conn)
+                self._scan_oracle_memo.clear()
+                self._registries.clear()
+                self._passage_bm25_index = None
+                self._retrieval_result_cache_nonce = secrets.token_hex(16)
+                raise
+            finally:
+                sqlite3.Connection.set_authorizer(conn, None)
+                conn._source_guard = None
+                self._source_transaction_state = None
+            first_error: BaseException | None = None
+            for callback in state["after_commit"]:
+                try:
+                    callback()
+                except BaseException as error:
+                    # An append failure must not skip a later erasure purge.
+                    # SQL already committed; attempt every queued side effect.
+                    if first_error is None:
+                        first_error = error
+            if first_error is not None:
+                raise first_error
+
     def append_evidence(self, ev: Evidence, branch: str = "main") -> str:
+        with self._source_operation(ev.tenant_id, branch):
+            return self._append_evidence_impl(ev, branch)
+
+    def _append_evidence_impl(self, ev: Evidence, branch: str = "main") -> str:
         """Ledger write mirroring ``LocalMemoryEngine.append_evidence`` over SQL:
         validate policy, require the branch (ValueError before the FK), compute the
         subject-scoped CID, apply the erased-replay blocklist (scoped + legacy
@@ -1401,6 +1583,7 @@ class SqliteEngine:
                 content_pointer=ev.content_pointer,
                 modality=ev.modality,
                 sensitivity=int(ev.sensitivity),
+                document_segment_id=ev.document_segment_id,
             )
             unscoped_cid = evidence_unscoped_cid(
                 ev.content,
@@ -1414,6 +1597,10 @@ class SqliteEngine:
                     existing.source_type == ev.source_type
                     and existing.content_pointer == ev.content_pointer
                     and existing.modality == ev.modality
+                    and (existing.document_segment_id is None or (
+                        existing.document_segment_id == ev.document_segment_id
+                        and existing.user_id == ev.user_id
+                    ))
                     and existing.cid
                 ):
                     replay_cid = evidence_cid(
@@ -1424,15 +1611,18 @@ class SqliteEngine:
                         content_pointer=ev.content_pointer,
                         modality=ev.modality,
                         sensitivity=int(existing.sensitivity),
+                        document_segment_id=existing.document_segment_id,
                     )
-                    if replay_cid == existing.cid or unscoped_cid == existing.cid:
+                    if replay_cid == existing.cid or (
+                        existing.document_segment_id is None and unscoped_cid == existing.cid
+                    ):
                         cid = existing.cid
                         break
             existing = self._fetch_evidence(ev.tenant_id, cid, branch)
             reality_class = LocalMemoryEngine._classify_evidence_reality(ev)
             if existing is not None:
                 op = "append_evidence.blocked_erased_replay" if existing.erased else "append_evidence.noop_dedup"
-                with conn:
+                with self._source_write(conn):
                     self._audit_row(
                         conn,
                         ev.tenant_id,
@@ -1462,7 +1652,7 @@ class SqliteEngine:
                     window_ticks=self.policy.self_generation_budget_window_ticks,
                 )
                 if not budget_report["allowed"]:
-                    with conn:
+                    with self._source_write(conn):
                         self._audit_row(
                             conn,
                             ev.tenant_id,
@@ -1507,7 +1697,7 @@ class SqliteEngine:
                     "pointer_preserved": bool(stored.content_pointer or stored.cid),
                     "critical_path_allowed": False,
                 }
-            with conn:
+            with self._source_write(conn):
                 self._insert_evidence_row(conn, stored)
                 self._audit_row(
                     conn,
@@ -1520,29 +1710,38 @@ class SqliteEngine:
                     trust_tier=ev.trust_tier,
                     capability_tags=ev.capability_tags,
                 )
-            if self._journal_dir is not None:
-                # Evidence-durability signal (§1a, highest SLO): the per-line
-                # CIDJournal.append fsyncs — time it as the durability/journal-lag
-                # sample so a divergence between ledger and journal is observable.
-                journal_start = time.perf_counter()
-                CIDJournal(self._journal_dir / journal_filename(stored.tenant_id)).append(
-                    {
-                        "cid": stored.cid,
-                        "tenant_id": stored.tenant_id,
-                        "kind": "evidence",
-                        "content": stored.content,
-                        "created_at": stored.created_at.isoformat(),
-                    }
-                )
-                self.metrics.observe(
-                    "sqlite.evidence.durability.journal_lag_ms",
-                    (time.perf_counter() - journal_start) * 1000.0,
-                )
-            # The WAL commit above (synchronous=FULL) is the durable ledger write;
-            # count it and keep the evidence-loss counter pinned at zero.
-            self.metrics.increment("sqlite.evidence.durability.appends")
-            self.metrics.increment("sqlite.evidence.durability.loss", 0)
+            def committed_effects():
+                # A later operation in the same batch may already have erased
+                # this source. Never publish that plaintext after commit.
+                live_copy = conn.execute(
+                    "SELECT 1 FROM evidence WHERE tenant_id = ? AND cid = ? "
+                    "AND erased = 0 LIMIT 1", (stored.tenant_id, stored.cid),
+                ).fetchone()
+                if live_copy is not None:
+                    self._append_source_journal(stored)
+                self.metrics.increment("sqlite.evidence.durability.appends")
+                self.metrics.increment("sqlite.evidence.durability.loss", 0)
+
+            self._after_source_commit(committed_effects)
             return cid
+
+    def _append_source_journal(self, stored: Evidence) -> None:
+        if self._journal_dir is not None:
+            # Keep durable journal publication outside the SQL transaction.
+            journal_start = time.perf_counter()
+            CIDJournal(self._journal_dir / journal_filename(stored.tenant_id)).append(
+                {
+                    "cid": stored.cid,
+                    "tenant_id": stored.tenant_id,
+                    "kind": "evidence",
+                    "content": stored.content,
+                    "created_at": stored.created_at.isoformat(),
+                }
+            )
+            self.metrics.observe(
+                "sqlite.evidence.durability.journal_lag_ms",
+                (time.perf_counter() - journal_start) * 1000.0,
+            )
 
     def backfill_evidence_privacy(
         self,
@@ -1619,8 +1818,11 @@ class SqliteEngine:
         Only model save/delete may write inside this narrowly scoped guard; do
         not run providers or unrelated mutators, which manage their own commits.
         """
-        model_key(tenant_id, "guard", "main")
         with self._lock:
+            if self._source_transaction_state is not None:
+                self._source_transaction_state["failed"] = True
+                raise RuntimeError("mental model guard cannot join a source transaction")
+            model_key(tenant_id, "guard", "main")
             conn = self._connect(tenant_id)
             if self._mental_model_guard_state is not None:
                 if self._mental_model_guard_state != (tenant_id, conn) or not conn.in_transaction:
@@ -1741,7 +1943,7 @@ class SqliteEngine:
             return read_evidence_for_context(self, tenant_id, cid, branch, access_context=access_context)
 
     def get_evidence(self, tenant_id: str, cid: str, branch: str = "main") -> Evidence | None:
-        with self._lock:
+        with self._source_operation(tenant_id, branch, writable=False):
             ev = self._fetch_evidence(tenant_id, cid, branch)
             if ev and not ev.erased:
                 return ev
@@ -1810,6 +2012,15 @@ class SqliteEngine:
         actor: str = "consolidation",
         source: str = "metadata_update",
     ) -> bool:
+        with self._source_operation(tenant_id, branch):
+            return self._update_evidence_metadata_impl(
+                tenant_id, cid, metadata_patch, branch, actor=actor, source=source,
+            )
+
+    def _update_evidence_metadata_impl(
+        self, tenant_id: str, cid: str, metadata_patch: dict[str, Any], branch: str = "main", *,
+        actor: str = "consolidation", source: str = "metadata_update",
+    ) -> bool:
         if "access_policy" in metadata_patch:
             raise ValueError("metadata_patch.access_policy cannot shadow evidence.access_policy")
         with self._lock:
@@ -1819,7 +2030,7 @@ class SqliteEngine:
                 return False
             before_keys = sorted(ev.metadata.keys())
             ev.metadata = {**ev.metadata, **metadata_patch}
-            with conn:
+            with self._source_write(conn):
                 self._write_evidence_mutable(conn, ev)
                 # A metadata patch that signals a restriction/hold/quarantine
                 # change (or drops the embedding partition to "none") invalidates
@@ -2439,6 +2650,25 @@ class SqliteEngine:
 
         scoped = {**filt, "query_mode": "passages"}
         return [hit for hit in self._scan_oracle(scoped)._candidate_hits(scoped) if is_passage(hit)]
+
+    def _get_projection_for_adapter(
+        self, tenant_id: str, branch: str, kind: str, item_id: str,
+    ) -> Assertion | Preference | None:
+        conn = self._connect(tenant_id)
+        with self._lock:
+            if kind == "assertion":
+                row = conn.execute(
+                    "SELECT * FROM assertions WHERE tenant_id = ? AND branch = ? AND id = ?",
+                    (tenant_id, branch, item_id),
+                ).fetchone()
+                return _assertion_from_row(row) if row is not None else None
+            if kind == "preference":
+                row = conn.execute(
+                    "SELECT record FROM preferences WHERE tenant_id = ? AND id = ?",
+                    (tenant_id, item_id),
+                ).fetchone()
+                return Preference.from_dict(json.loads(row["record"])) if row is not None else None
+        return None
 
     def lexical_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
         """FTS5-prefiltered lexical scan (spec §4.2).
@@ -4074,6 +4304,13 @@ class SqliteEngine:
         requested_by: str = "user",
         erasure_mode: ErasureMode | str = ErasureMode.TOMBSTONE_RECOMPUTE,
     ) -> dict[str, Any]:
+        with self._source_operation(tenant_id, branch):
+            return self._forget_impl(tenant_id, cid, branch, requested_by, erasure_mode)
+
+    def _forget_impl(
+        self, tenant_id: str, cid: str, branch: str = "main", requested_by: str = "user",
+        erasure_mode: ErasureMode | str = ErasureMode.TOMBSTONE_RECOMPUTE,
+    ) -> dict[str, Any]:
         """Erase evidence + cascade, byte-parity with ``LocalMemoryEngine.forget``.
 
         A direct SQL port of ``PostgresEngine.forget`` (the derived-evidence plan is
@@ -4128,7 +4365,7 @@ class SqliteEngine:
         }
         with self._lock:
             conn = self._connect(tenant_id)
-            with conn:
+            with self._source_write(conn):
                 target = conn.execute(
                     "SELECT cid, source_type, trust_tier, capability_tags, metadata, user_id "
                     "FROM evidence WHERE tenant_id = ? AND branch = ? AND cid = ?",
@@ -4452,29 +4689,50 @@ class SqliteEngine:
                 )
             # Journal AFTER commit (append-parity): tombstone keeps a salted-hash
             # marker per affected cid; a hard delete purges the lines outright.
-            if self._journal_dir is not None:
-                journal = CIDJournal(self._journal_dir / journal_filename(tenant_id))
-                erased_at = utc_now().isoformat()
-                for affected_cid in affected_order:
-                    if mode is ErasureMode.HARD_DELETE_LEGAL:
-                        journal.purge(affected_cid)
-                    else:
-                        original_content, original_user = originals.get(affected_cid, ("", ""))
-                        journal.tombstone(
-                            affected_cid,
-                            salted_hash=erasure_tombstone_hash(original_content, tenant_id, original_user),
-                            erased_at=erased_at,
-                        )
+            def committed_effects():
+                journal_steps = 0.0
+                first_error: BaseException | None = None
+                if self._journal_dir is not None:
+                    journal = CIDJournal(self._journal_dir / journal_filename(tenant_id))
+                    erased_at = utc_now().isoformat()
+                    for affected_cid in affected_order:
+                        try:
+                            # Journals are tenant-wide, while erasure is scoped
+                            # to this branch. Preserve surviving branch content.
+                            live_copy = conn.execute(
+                                "SELECT 1 FROM evidence WHERE tenant_id = ? AND cid = ? "
+                                "AND erased = 0 LIMIT 1", (tenant_id, affected_cid),
+                            ).fetchone()
+                            if live_copy is not None:
+                                continue
+                            if mode is ErasureMode.HARD_DELETE_LEGAL:
+                                journal.purge(affected_cid)
+                            else:
+                                original_content, original_user = originals.get(affected_cid, ("", ""))
+                                journal.tombstone(
+                                    affected_cid,
+                                    salted_hash=erasure_tombstone_hash(original_content, tenant_id, original_user),
+                                    erased_at=erased_at,
+                                )
+                            journal_steps += 1.0
+                        except BaseException as error:
+                            # A failed source purge must not skip its derived
+                            # records. Surface the first error after all attempts.
+                            if first_error is None:
+                                first_error = error
+                self.metrics.increment("sqlite.erasure.propagations")
+                self.metrics.observe("sqlite.erasure.propagation.cache_purges", float(len(affected_order)))
+                self.metrics.observe("sqlite.erasure.propagation.journal_steps", journal_steps)
+                if first_error is not None:
+                    raise first_error
+
+            self._after_source_commit(committed_effects)
         # Erasure / deletion-propagation signal (§3): an erasure produces a
         # traceable propagation log — the deletion_log entry plus the crypto-shred
         # / transitive-invalidation steps across derived projections. Surface the
         # cache-purge and journal (compaction/tombstone) step counts so a purge is
         # observable live, distinct from the returned `propagated` cascade dict
         # (which stays byte-parity with Local/Postgres — no new keys added there).
-        self.metrics.increment("sqlite.erasure.propagations")
-        self.metrics.observe("sqlite.erasure.propagation.cache_purges", float(len(affected_order)))
-        journal_steps = float(len(affected_order)) if self._journal_dir is not None else 0.0
-        self.metrics.observe("sqlite.erasure.propagation.journal_steps", journal_steps)
         return {"erased": True, "cid": cid, "erasure_mode": mode.value, "propagated": propagated}
 
     # --- prospective memory (Phase 2, exact Local parity) --------------------

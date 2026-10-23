@@ -1,0 +1,18 @@
+{
+  "scope": "Synthetic local regression tests; no benchmark or model inference",
+  "recorded_at": "2026-10-22T23:58:39.097401+00:00",
+  "base_commit": "ca7da5ef1dd8abe109f78932ed393be377d28647",
+  "docker_context": "colima-pentestswarm",
+  "container": "mnemosyne-source-integrity-ca7da5ef",
+  "container_id": "b4f7a31ba80d09bf53a6021c705335fa6153ea368c8c3400bf6deac1281720d1",
+  "image": "sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a",
+  "binding": "127.0.0.1:55434",
+  "storage": "tmpfs /var/lib/postgresql/data",
+  "existing_services": {
+    "pentestswarm-redis-1": "c4be243bc1f2",
+    "pentestswarm-postgres-1": "c7424db61529"
+  },
+  "runtime_role": "consolidator_user",
+  "schema": "sql/schema.sql",
+  "grants": "infra/postgres/roles.sql"
+}
