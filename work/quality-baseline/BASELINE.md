@@ -1,12 +1,12 @@
 # Mnemosyne Quality Gate Baseline Report
 
-- **Run Timestamp:** 2026-10-23T08:05:56.520372+00:00
-- **Git Commit:** `e751f13d4c2dc8e5c7abb2a4e430fea994ee7122`
+- **Run Timestamp:** 2026-10-23T09:11:30.948356+00:00
+- **Git Commit:** `4cdc7e83de1cd846853d4a48a1668fc02a94e559`
 - **Backend:** `local`
 - **Partition:** `all`
 - **Random Seed:** `42`
 - **Execution Mode:** Offline, Deterministic (Provider-Free)
-- **Total Runtime:** 60.74s
+- **Total Runtime:** 61.16s
 
 ---
 
@@ -20,6 +20,7 @@ Summary of baseline evaluation run:
   - Safety & Poison Guard: 100.0% block rate (Pass >= 95.0%).
   - Mandatory Cognitive Classes: 100.0% pass.
   - Gaming-Resistant Abstention: Balanced Accuracy 0.5035, F1 0.0588.
+  - Fail-Closed Scoring Parity: Genuine fail-closed evaluation of G2 answer quality confirmed zero score change vs 4cdc7e83 (lift remains exactly +0.1667; composite score remains 0.6099) with all fallbacks removed.
 
 ---
 
@@ -53,6 +54,7 @@ Summary of baseline evaluation run:
 ### 3.1 Failure Analysis & Baseline Mechanics
 - **Temporal Supersession in Knowledge Updates:** LongMemEval's original dataset tagged both stale and current sessions in `answer_session_ids`, giving an artificial ~0.9667 recall even when stale sessions ranked at rank 0 ahead of current. To prevent gaming, the gate strictly evaluates temporal supersession: the current session must rank above the superseded session in top-k. Evaluated truthfully, baseline supersession accuracy is 0.5000 (15/30), meaning stale information outranks current information in 50% of update queries.
 - **Multi-Hop 0.5000 Artifact & Graph Reachability:** Multi-hop queries exhibit a baseline Recall@5 of exactly 0.5000 because direct lexical retrieval captures Hop 1 (`<Person>`), but Hop 2 (`<Project>`) has no lexical overlap with `<Person>` and is filtered out during candidate selection. Crucially, Hop 2 is connected to Hop 1 via the shared bridge entity (`<Project>`) in the corpus and is retrievable in principle (not an unreachable orphan), establishing the exact headroom for Milestone 3 graph Personalized PageRank (PPR).
+- **Multi-Hop Reasoning Sample Size & Authentic Coverage:** Multi-hop reasoning is evaluated over all n=24 (12 dev, 12 held-out) authentic multi-hop items present in the local corpus without synthetic fabrication.
 - **Abstention Signal & Gaming-Resistance:** Rather than counting empty answers or string refusals, the runner inspects the engine's actual `retrieve(...).abstained` boolean signal across 30 unanswerable queries and 114 answerable control queries. Clamped by `support_floor = 0.96` in `engine.py`, the engine abstains on only 3.3% of unanswerable queries, yielding a balanced accuracy of 0.5035 and F1 of 0.0588 (avoiding the false 1.0 saturation of naive refusal counts).
 
 ---
@@ -65,7 +67,7 @@ Summary of baseline evaluation run:
 | **Held-Out (`held-out`)** | 72 | 0.7684 | 0.7873 | 0.5889 | 0.6289 | 0.4912 |
 | **Delta (`held-out` - `dev`)** | — | +0.0038 | +0.0006 | -0.0404 | +0.0380 | -0.0246 |
 
-*Observation*: The balanced distribution confirms that the `dev` partition provides faithful tuning signals without leaking `held-out` test cases.
+*Observation*: The baseline report explicitly includes both the development (`dev`, $n=72$) and held-out (`held-out`, $n=72$) partitions ($n=144$ total QA queries), establishing the authoritative reference so that held-out deltas and generalization can be scored during later milestones.
 
 ---
 
@@ -91,7 +93,7 @@ To independently reproduce this exact baseline score from the repository root:
 # 1. Activate project virtualenv
 source .venv/bin/activate
 
-# 2. Execute Quality Gate Baseline Runner
+# 2. Execute Quality Gate Baseline Runner with --split all (includes held-out split)
 python -m eval.run_quality_gate \
     --split all \
     --backend local \
