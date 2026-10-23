@@ -3484,6 +3484,10 @@ class PostgresEngine:
 
         tenant_id = str(filt["tenant_id"])
         branch = str(filt.get("branch", "main"))
+        include_quarantined = bool(filt.get("include_quarantined", False))
+        default_max_trust = int(TrustTier.UNTRUSTED_EXTERNAL) if include_quarantined else self.policy.max_trust_tier
+        max_trust = int(filt.get("max_trust_tier", filt.get("min_trust_tier", default_max_trust)))
+        max_sensitivity = effective_max_sensitivity(filt, self.policy.max_sensitivity)
         snapshot = self.export_tenant_filtered(tenant_id, filt)
         candidates = [Hit(
             id=row["cid"], kind="evidence", tenant_id=tenant_id, branch=branch,
@@ -3493,7 +3497,10 @@ class PostgresEngine:
             metadata={**(row.get("metadata") or {}),
                       "source_type": row.get("source_type"), "actor": row.get("actor")},
         ) for row in snapshot.get("evidence", [])
-            if row.get("branch", "main") == branch and not row.get("erased")]
+            if row.get("branch", "main") == branch and not row.get("erased")
+            and int(row.get("trust_tier", 0)) <= max_trust
+            and int(row.get("sensitivity", 0)) <= max_sensitivity
+            and (include_quarantined or not (row.get("metadata") or {}).get("quarantine_reason"))]
         return [hit for hit in candidates if is_passage(hit)]
 
     def _get_projection_for_adapter(

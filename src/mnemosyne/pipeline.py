@@ -73,6 +73,7 @@ from mnemosyne.retrieval import (
     workspace_broadcast_from_context,
     working_memory_route_hits,
 )
+from mnemosyne.security import TrustTier
 from mnemosyne.text import tokenize
 
 #: Capability-tier default to overlap the dense/lexical/graph channel calls on
@@ -327,7 +328,12 @@ def _requested_max_trust_tier(effective_filter: Mapping[str, Any], policy: Opera
                 return int(effective_filter[key])
             except (TypeError, ValueError):
                 break
-    return int(policy.max_trust_tier)
+    default_max_trust = (
+        int(TrustTier.UNTRUSTED_EXTERNAL)
+        if bool(effective_filter.get("include_quarantined", False))
+        else int(policy.max_trust_tier)
+    )
+    return default_max_trust
 
 
 def _working_memory_route(
@@ -629,7 +635,9 @@ def _source_only_local_routes(adapters: RetrievalAdapters, routes: list[list[Hit
         and type(adapters.reranker.embedding_provider) is HashingEmbeddingProvider
         and adapters.reranker == LocalSimilarityReranker(embedding_provider=adapters.embedding)
         and (adapters.lexical_backend, adapters.graph_backend) in {
-            ("local-bm25-lite", "local-ppr"), ("sqlite-fts5", "sqlite-cached-ppr"),
+            ("local-bm25-lite", "local-ppr"),
+            ("sqlite-fts5", "sqlite-cached-ppr"),
+            ("postgres-fts", "postgres-recursive-ppr"),
         }
         and adapters.lexical_retriever is None
         and adapters.graph_retriever is None
@@ -1436,6 +1444,17 @@ def run_retrieval_pipeline(
         # Reauthorize the complete source corpus, not only the first channel's top
         # hits. The passage route builds BM25 solely from readable, redacted text.
         sources = ops.lexical_search(query, width, {**effective_filter, "query_mode": "passages"})
+        include_quarantined = bool(effective_filter.get("include_quarantined", False))
+        default_max_trust = int(TrustTier.UNTRUSTED_EXTERNAL) if include_quarantined else policy.max_trust_tier
+        max_trust = int(effective_filter.get("max_trust_tier", effective_filter.get("min_trust_tier", default_max_trust)))
+        from mnemosyne.access_policy import effective_max_sensitivity
+        max_sensitivity = effective_max_sensitivity(effective_filter, policy.max_sensitivity)
+        sources = [
+            hit for hit in sources
+            if hit.trust_tier <= max_trust
+            and hit.sensitivity <= max_sensitivity
+            and (include_quarantined or not hit.metadata.get("quarantine_reason"))
+        ]
         # Explicit confidence switches the legacy conformal set to per-example
         # probabilities. Do not feed unbounded BM25 siblings into that path,
         # including sources found beyond the original channels' cutoff.
