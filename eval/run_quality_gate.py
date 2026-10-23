@@ -548,6 +548,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    # Fail-closed baseline path validation
+    if args.baseline is not None and not args.baseline.is_file():
+        raise FileNotFoundError(f"Baseline file does not exist: {args.baseline}")
+
     # 1. Determinism and manifest verification
     random.seed(args.seed)
     manifest_hashes = _verify_dataset_manifest()
@@ -796,11 +800,21 @@ def main(argv: list[str] | None = None) -> int:
     ]
 
     # Baseline comparison if requested
-    if args.baseline and args.baseline.is_file():
+    if args.baseline is not None:
+        if not args.baseline.is_file():
+            raise FileNotFoundError(f"Baseline file does not exist: {args.baseline}")
         baseline_data = json.loads(args.baseline.read_text(encoding="utf-8"))
         base_summary = baseline_data.get("summary", {})
-        base_composite = base_summary.get("composite_score", 0.0)
-        base_pbr = base_summary.get("poison_block_rate", 0.95)
+        base_split_breakdown = baseline_data.get("split_breakdown", {})
+
+        split_key = args.split.replace("-", "_")
+        if args.split in ("dev", "held-out", "held_out") and split_key in base_split_breakdown:
+            split_target = base_split_breakdown[split_key]
+            base_composite = split_target.get("composite_score", base_summary.get("composite_score", 0.0))
+            base_pbr = split_target.get("poison_block_rate", base_summary.get("poison_block_rate", 0.95))
+        else:
+            base_composite = base_summary.get("composite_score", 0.0)
+            base_pbr = base_summary.get("poison_block_rate", 0.95)
 
         verdicts.append({
             "check": "pareto_no_quality_drop",

@@ -74,3 +74,90 @@ def test_quality_gate_baseline_reproduces_bit_for_bit(tmp_path: Path) -> None:
         f"Actual summary: {actual_clean.get('summary')}\n"
         f"Expected summary: {expected_clean.get('summary')}"
     )
+
+
+def test_quality_gate_split_dev_baseline_assert_gate_passes() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    baseline_path = repo_root / "eval" / "reports" / "quality_gate_baseline.json"
+    assert baseline_path.is_file(), f"Committed baseline report missing at {baseline_path}"
+
+    cmd = [
+        sys.executable,
+        "-m",
+        "eval.run_quality_gate",
+        "--split",
+        "dev",
+        "--backend",
+        "local",
+        "--seed",
+        "42",
+        "--baseline",
+        str(baseline_path),
+        "--assert-gate",
+    ]
+    proc = subprocess.run(
+        cmd,
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, f"run_quality_gate --split dev failed:\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"
+    assert "pareto_no_quality_drop: value=0.5909 >= 0.5909" in proc.stdout
+
+
+def test_quality_gate_split_all_baseline_assert_gate_passes() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    baseline_path = repo_root / "eval" / "reports" / "quality_gate_baseline.json"
+    assert baseline_path.is_file(), f"Committed baseline report missing at {baseline_path}"
+
+    cmd = [
+        sys.executable,
+        "-m",
+        "eval.run_quality_gate",
+        "--split",
+        "all",
+        "--backend",
+        "local",
+        "--seed",
+        "42",
+        "--baseline",
+        str(baseline_path),
+        "--assert-gate",
+    ]
+    proc = subprocess.run(
+        cmd,
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, f"run_quality_gate --split all failed:\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"
+    assert "pareto_no_quality_drop: value=0.6099 >= 0.6099" in proc.stdout
+
+
+def test_quality_gate_nonexistent_baseline_fails_closed() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    nonexistent_path = repo_root / "eval" / "reports" / "nonexistent.json"
+    assert not nonexistent_path.exists()
+
+    cmd = [
+        sys.executable,
+        "-m",
+        "eval.run_quality_gate",
+        "--split",
+        "dev",
+        "--backend",
+        "local",
+        "--seed",
+        "42",
+        "--baseline",
+        str(nonexistent_path),
+        "--assert-gate",
+    ]
+    proc = subprocess.run(
+        cmd,
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode != 0, "Expected non-zero exit code for nonexistent baseline"
+
