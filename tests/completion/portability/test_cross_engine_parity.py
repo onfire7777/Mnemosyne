@@ -1314,10 +1314,15 @@ def test_parity_forget_evidence() -> None:
 def test_parity_export_all_and_to_json() -> None:
     import json
 
+    from mnemosyne.engine import WorkingMemoryItem
+
     harness = _harness("export-all")
 
     def scenario(engine: Any, tenant: str, user: str) -> dict[str, Any]:
-        cid = engine.append_evidence(_evidence(tenant, user, "Portability export-all evidence."))
+        session_id = f"session-{tenant}"
+        cid = engine.append_evidence(
+            _evidence(tenant, user, "Portability export-all evidence.", session_id=session_id)
+        )
         engine.set_calibration(
             CalibrationSet(tenant_id=tenant, memory_type="fact", scores=[0.91], target_coverage=0.9)
         )
@@ -1329,6 +1334,22 @@ def test_parity_export_all_and_to_json() -> None:
             source_evidence_cids=[cid],
             access_policy={"tenant": tenant},
         )
+        now = datetime.now(UTC)
+        working_item = WorkingMemoryItem(
+            item_id="wm-port-1",
+            tenant_id=tenant,
+            session_id=f"session-{tenant}",
+            user_id=user,
+            agent_id="agent-port",
+            kind="active_goal",
+            task_id="task-port-1",
+            content="Working memory export parity content.",
+            created_at=now,
+            expires_at=now + timedelta(hours=1),
+            evidence_ids=[cid],
+            access_policy={"tenant": tenant},
+        )
+        engine.put_working(working_item)
         exported = engine.export_all()
         parsed = json.loads(engine.to_json())
         return {
@@ -1338,6 +1359,16 @@ def test_parity_export_all_and_to_json() -> None:
             "json_policy_top_k": parsed["policy"]["top_k"],
             "evidence_has_cid": any(item["cid"] == cid for item in exported["evidence"]),
             "json_evidence_has_cid": any(item["cid"] == cid for item in parsed["evidence"]),
+            "working_memory_item_ids": [
+                item["item_id"]
+                for item in exported.get("working_memory", [])
+                if item.get("tenant_id") == tenant
+            ],
+            "json_working_memory_item_ids": [
+                item["item_id"]
+                for item in parsed.get("working_memory", [])
+                if item.get("tenant_id") == tenant
+            ],
         }
 
     local = harness.run("export_all+to_json", scenario)
@@ -1356,11 +1387,15 @@ def test_parity_export_all_and_to_json() -> None:
         "deletion_log",
         "merge_log",
         "tenants",
+        "documents",
+        "working_memory",
     }
     assert expected <= set(local["export_keys"])
     assert expected <= set(local["json_keys"])
     assert local["policy_top_k"] == local["json_policy_top_k"]
     assert local["evidence_has_cid"] is True
+    assert "wm-port-1" in local["working_memory_item_ids"]
+    assert "wm-port-1" in local["json_working_memory_item_ids"]
 
 
 # ------------------------------------------------------- DSN gate visibility
@@ -1387,3 +1422,147 @@ def test_postgres_half_runs_when_dsn_present() -> None:
     local = harness.run("dsn-gate round-trip", scenario)
     assert local["content"] == "DSN gate round-trip evidence."
     assert harness.postgres_ran is True
+
+
+# ------------------------------------------------------- working memory & documents parity
+
+
+def test_parity_working_memory_and_documents_export(tmp_path: Any) -> None:
+    """Proves exact export parity of working_memory and documents across all engines.
+
+    Guarantees:
+    1. export_tenant unconditionally includes 'working_memory' and 'documents' (even if empty).
+    2. Non-empty WorkingMemoryItem exports with identical keys and serialized types across
+       LocalMemoryEngine, SqliteEngine, and PostgresEngine.
+    3. export_all includes 'working_memory' and 'documents', and tenant items are present.
+    4. Tenant RLS isolation: foreign tenant working items never appear in another tenant export.
+    5. Session scoping: items are scoped to their external session ID.
+    6. Erasure: forgetting backing evidence scrubs working memory from export_tenant.
+    """
+    from mnemosyne.answering import AnswerReadContext
+    from mnemosyne.documents import DocumentService
+    from mnemosyne.engine import LocalMemoryEngine, WorkingMemoryItem
+    from mnemosyne.postgres_engine import PostgresEngine
+    from mnemosyne.sqlite_engine import SqliteEngine
+
+    tenant_a = f"tenant-port-wm-a-{_RUN_TOKEN}"
+    tenant_b = f"tenant-port-wm-b-{_RUN_TOKEN}"
+    user = f"user-port-wm-{_RUN_TOKEN}"
+    now = datetime.now(UTC).replace(microsecond=0)
+    created_at = now
+    expires_at = now + timedelta(hours=2)
+
+    dsn = live_dsn()
+    engines: dict[str, Any] = {
+        "local": LocalMemoryEngine(),
+        "sqlite": SqliteEngine(tmp_path / "sqlite-wm-parity"),
+    }
+    if dsn:
+        pytest.importorskip("psycopg")
+        engines["postgres"] = PostgresEngine(dsn)
+
+    exported_states: dict[str, dict[str, Any]] = {}
+
+    for name, engine in engines.items():
+        # Step 1: Append backing evidence for Tenant A
+        ev_a = _evidence(tenant_a, user, "Backing evidence for Tenant A working memory.", session_id="session-a")
+        cid_a = engine.append_evidence(ev_a)
+
+        # Step 2: Seed non-empty WorkingMemoryItem for Tenant A
+        wm_a = WorkingMemoryItem(
+            item_id="wm-item-1",
+            tenant_id=tenant_a,
+            session_id="session-a",
+            user_id=user,
+            agent_id="agent-port",
+            kind="active_goal",
+            task_id="task-parity",
+            content="Active goal content across engines.",
+            created_at=created_at,
+            expires_at=expires_at,
+            evidence_ids=[cid_a],
+            trust_tier=0,
+            access_policy={"tenant": tenant_a},
+            metadata={"priority": "high", "step": 1},
+            capability_tags=["parity", "working-memory"],
+            sensitivity=0,
+        )
+        engine.put_working(wm_a)
+
+        # Step 3: Seed Tenant B working memory item to verify strict RLS/tenant isolation
+        ev_b = _evidence(tenant_b, "user-b", "Tenant B evidence.", session_id="session-b")
+        cid_b = engine.append_evidence(ev_b)
+        wm_b = WorkingMemoryItem(
+            item_id="wm-item-b",
+            tenant_id=tenant_b,
+            session_id="session-b",
+            user_id="user-b",
+            agent_id="agent-b",
+            kind="active_goal",
+            task_id="task-b",
+            content="Secret Tenant B goal.",
+            created_at=created_at,
+            expires_at=expires_at,
+            evidence_ids=[cid_b],
+            access_policy={"tenant": tenant_b},
+        )
+        engine.put_working(wm_b)
+
+        # Step 4: Verify export_tenant before documents created
+        exp_initial = engine.export_tenant(tenant_a)
+        assert "working_memory" in exp_initial, f"{name}: export_tenant missing working_memory"
+        assert "documents" in exp_initial, f"{name}: export_tenant missing documents key"
+        assert exp_initial["documents"] == [], f"{name}: documents should be [] when empty"
+        assert len(exp_initial["working_memory"]) == 1
+        assert exp_initial["working_memory"][0]["item_id"] == "wm-item-1"
+        assert exp_initial["working_memory"][0]["tenant_id"] == tenant_a
+        assert exp_initial["working_memory"][0]["content"] == "Active goal content across engines."
+        assert "Secret Tenant B goal" not in str(exp_initial), f"{name}: Tenant B leaked to Tenant A"
+
+        # Step 5: Seed a Document for Tenant A
+        doc_service = DocumentService(engine)
+        ctx = AnswerReadContext(tenant_id=tenant_a, user_id=user, role="agent")
+        doc_service.create(ctx, "parity-doc", "Paragraph 1\n\nParagraph 2\n\n", operation_id="op-doc")
+
+        # Step 6: Export tenant with document present
+        exp_with_doc = engine.export_tenant(tenant_a)
+        assert len(exp_with_doc["documents"]) == 1
+        assert exp_with_doc["documents"][0]["document_id"] == "parity-doc"
+
+        # Step 7: Verify Session Scoping
+        assert engine.get_working(tenant_a, "other-session", "wm-item-1", as_of=created_at) is None
+        assert engine.list_working(tenant_a, "other-session", as_of=created_at) == []
+
+        # Step 8: Verify Erasure Propagation
+        engine.forget(tenant_a, cid_a)
+        assert engine.get_working(tenant_a, "session-a", "wm-item-1", as_of=created_at) is None
+        assert engine.list_working(tenant_a, "session-a", as_of=created_at) == []
+        exp_after_forget = engine.export_tenant(tenant_a)
+        assert exp_after_forget["working_memory"] == [], f"{name}: erased working memory leaked in export"
+
+        exported_states[name] = {
+            "initial": exp_initial,
+            "with_doc": exp_with_doc,
+        }
+
+    # Step 9: Cross-Engine Parity Assertions
+    local_state = exported_states["local"]
+    sqlite_state = exported_states["sqlite"]
+
+    # Local vs SQLite byte-equality on working_memory items
+    assert local_state["initial"]["working_memory"] == sqlite_state["initial"]["working_memory"]
+    assert local_state["initial"]["documents"] == sqlite_state["initial"]["documents"]
+    assert local_state["with_doc"]["documents"][0]["document_id"] == sqlite_state["with_doc"]["documents"][0]["document_id"]
+
+    if "postgres" in exported_states:
+        pg_state = exported_states["postgres"]
+        # Exact field parity on working_memory across Local and Postgres
+        local_wm = local_state["initial"]["working_memory"][0]
+        pg_wm = pg_state["initial"]["working_memory"][0]
+        assert sorted(local_wm.keys()) == sorted(pg_wm.keys())
+        for key in local_wm:
+            assert local_wm[key] == pg_wm[key], f"Field {key!r} diverged: local={local_wm[key]!r}, pg={pg_wm[key]!r}"
+
+        # Exact field parity on documents across Local and Postgres
+        assert sorted(local_state["with_doc"]["documents"][0].keys()) == sorted(pg_state["with_doc"]["documents"][0].keys())
+        assert local_state["with_doc"]["documents"][0]["document_id"] == pg_state["with_doc"]["documents"][0]["document_id"]
