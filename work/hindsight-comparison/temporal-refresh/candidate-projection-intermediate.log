@@ -1,0 +1,280 @@
+......................................................FFFFFFFFFFFF...... [ 88%]
+.........                                                                [100%]
+=================================== FAILURES ===================================
+_ test_calendar_recency_survives_utc_projection_and_dst[local-2026-10-01T00:00:00-07:00-2026-11-01T00:00:00-07:00-2026-10-08T12:00:00+00:00] _
+
+candidates = <function candidates.<locals>.read at 0x109851640>
+start = '2026-10-01T00:00:00-07:00', end = '2026-11-01T00:00:00-07:00'
+now = '2026-10-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+        assert hits[0].metadata["_candidate_event_calendar"] is True
+>       assert hit_recency_for_unit(hits[0], datetime.fromisoformat(now)) == 0.5
+E       AssertionError: assert 0.8798611111111111 == 0.5
+E        +  where 0.8798611111111111 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...ne', 'capability_tags': ['data-only', 'no-write-authority', 'sanitize-as-data'], 'content': 'launch code: Secret123'}}), datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc))
+E        +    where datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc) = <built-in method fromisoformat of type object at 0x1030e5748>('2026-10-08T12:00:00+00:00')
+E        +      where <built-in method fromisoformat of type object at 0x1030e5748> = datetime.fromisoformat
+
+tests/test_candidate_time_metadata.py:94: AssertionError
+_ test_calendar_recency_survives_utc_projection_and_dst[local-2026-03-01T00:00:00-08:00-2026-04-01T00:00:00-07:00-2026-03-08T12:00:00+00:00] _
+
+candidates = <function candidates.<locals>.read at 0x109851590>
+start = '2026-03-01T00:00:00-08:00', end = '2026-04-01T00:00:00-07:00'
+now = '2026-03-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+        assert hits[0].metadata["_candidate_event_calendar"] is True
+>       assert hit_recency_for_unit(hits[0], datetime.fromisoformat(now)) == 0.5
+E       AssertionError: assert 0.8805555555555555 == 0.5
+E        +  where 0.8805555555555555 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...ne', 'capability_tags': ['data-only', 'no-write-authority', 'sanitize-as-data'], 'content': 'launch code: Secret123'}}), datetime.datetime(2026, 3, 8, 12, 0, tzinfo=datetime.timezone.utc))
+E        +    where datetime.datetime(2026, 3, 8, 12, 0, tzinfo=datetime.timezone.utc) = <built-in method fromisoformat of type object at 0x1030e5748>('2026-03-08T12:00:00+00:00')
+E        +      where <built-in method fromisoformat of type object at 0x1030e5748> = datetime.fromisoformat
+
+tests/test_candidate_time_metadata.py:94: AssertionError
+_ test_calendar_recency_survives_utc_projection_and_dst[local-2026-01-01T00:00:00+05:30-2027-01-01T00:00:00+05:30-2026-01-08T12:00:00+00:00] _
+
+candidates = <function candidates.<locals>.read at 0x1098516f0>
+start = '2026-01-01T00:00:00+05:30', end = '2027-01-01T00:00:00+05:30'
+now = '2026-01-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+        assert hits[0].metadata["_candidate_event_calendar"] is True
+>       assert hit_recency_for_unit(hits[0], datetime.fromisoformat(now)) == 0.5
+E       AssertionError: assert 0.8711805555555555 == 0.5
+E        +  where 0.8711805555555555 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...ne', 'capability_tags': ['data-only', 'no-write-authority', 'sanitize-as-data'], 'content': 'launch code: Secret123'}}), datetime.datetime(2026, 1, 8, 12, 0, tzinfo=datetime.timezone.utc))
+E        +    where datetime.datetime(2026, 1, 8, 12, 0, tzinfo=datetime.timezone.utc) = <built-in method fromisoformat of type object at 0x1030e5748>('2026-01-08T12:00:00+00:00')
+E        +      where <built-in method fromisoformat of type object at 0x1030e5748> = datetime.fromisoformat
+
+tests/test_candidate_time_metadata.py:94: AssertionError
+_ test_calendar_recency_survives_utc_projection_and_dst[local-2026-10-01T00:00:00-07:00-2026-10-31T23:59:59-07:00-2026-10-08T12:00:00+00:00] _
+
+candidates = <function candidates.<locals>.read at 0x109851dd0>
+start = '2026-10-01T00:00:00-07:00', end = '2026-10-31T23:59:59-07:00'
+now = '2026-10-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+        assert hits[0].metadata["_candidate_event_calendar"] is True
+>       assert hit_recency_for_unit(hits[0], datetime.fromisoformat(now)) == 0.5
+E       AssertionError: assert 0.8798611111111111 == 0.5
+E        +  where 0.8798611111111111 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...ne', 'capability_tags': ['data-only', 'no-write-authority', 'sanitize-as-data'], 'content': 'launch code: Secret123'}}), datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc))
+E        +    where datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc) = <built-in method fromisoformat of type object at 0x1030e5748>('2026-10-08T12:00:00+00:00')
+E        +      where <built-in method fromisoformat of type object at 0x1030e5748> = datetime.fromisoformat
+
+tests/test_candidate_time_metadata.py:94: AssertionError
+_ test_calendar_recency_survives_utc_projection_and_dst[sqlite-2026-10-01T00:00:00-07:00-2026-11-01T00:00:00-07:00-2026-10-08T12:00:00+00:00] _
+
+candidates = <function candidates.<locals>.read at 0x109851a60>
+start = '2026-10-01T00:00:00-07:00', end = '2026-11-01T00:00:00-07:00'
+now = '2026-10-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+        assert hits[0].metadata["_candidate_event_calendar"] is True
+>       assert hit_recency_for_unit(hits[0], datetime.fromisoformat(now)) == 0.5
+E       AssertionError: assert 0.8798611111111111 == 0.5
+E        +  where 0.8798611111111111 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...ne', 'capability_tags': ['data-only', 'no-write-authority', 'sanitize-as-data'], 'content': 'launch code: Secret123'}}), datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc))
+E        +    where datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc) = <built-in method fromisoformat of type object at 0x1030e5748>('2026-10-08T12:00:00+00:00')
+E        +      where <built-in method fromisoformat of type object at 0x1030e5748> = datetime.fromisoformat
+
+tests/test_candidate_time_metadata.py:94: AssertionError
+_ test_calendar_recency_survives_utc_projection_and_dst[sqlite-2026-03-01T00:00:00-08:00-2026-04-01T00:00:00-07:00-2026-03-08T12:00:00+00:00] _
+
+candidates = <function candidates.<locals>.read at 0x109852610>
+start = '2026-03-01T00:00:00-08:00', end = '2026-04-01T00:00:00-07:00'
+now = '2026-03-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+        assert hits[0].metadata["_candidate_event_calendar"] is True
+>       assert hit_recency_for_unit(hits[0], datetime.fromisoformat(now)) == 0.5
+E       AssertionError: assert 0.8805555555555555 == 0.5
+E        +  where 0.8805555555555555 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...ne', 'capability_tags': ['data-only', 'no-write-authority', 'sanitize-as-data'], 'content': 'launch code: Secret123'}}), datetime.datetime(2026, 3, 8, 12, 0, tzinfo=datetime.timezone.utc))
+E        +    where datetime.datetime(2026, 3, 8, 12, 0, tzinfo=datetime.timezone.utc) = <built-in method fromisoformat of type object at 0x1030e5748>('2026-03-08T12:00:00+00:00')
+E        +      where <built-in method fromisoformat of type object at 0x1030e5748> = datetime.fromisoformat
+
+tests/test_candidate_time_metadata.py:94: AssertionError
+_ test_calendar_recency_survives_utc_projection_and_dst[sqlite-2026-01-01T00:00:00+05:30-2027-01-01T00:00:00+05:30-2026-01-08T12:00:00+00:00] _
+
+candidates = <function candidates.<locals>.read at 0x109851a60>
+start = '2026-01-01T00:00:00+05:30', end = '2027-01-01T00:00:00+05:30'
+now = '2026-01-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+        assert hits[0].metadata["_candidate_event_calendar"] is True
+>       assert hit_recency_for_unit(hits[0], datetime.fromisoformat(now)) == 0.5
+E       AssertionError: assert 0.8711805555555555 == 0.5
+E        +  where 0.8711805555555555 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...ne', 'capability_tags': ['data-only', 'no-write-authority', 'sanitize-as-data'], 'content': 'launch code: Secret123'}}), datetime.datetime(2026, 1, 8, 12, 0, tzinfo=datetime.timezone.utc))
+E        +    where datetime.datetime(2026, 1, 8, 12, 0, tzinfo=datetime.timezone.utc) = <built-in method fromisoformat of type object at 0x1030e5748>('2026-01-08T12:00:00+00:00')
+E        +      where <built-in method fromisoformat of type object at 0x1030e5748> = datetime.fromisoformat
+
+tests/test_candidate_time_metadata.py:94: AssertionError
+_ test_calendar_recency_survives_utc_projection_and_dst[sqlite-2026-10-01T00:00:00-07:00-2026-10-31T23:59:59-07:00-2026-10-08T12:00:00+00:00] _
+
+candidates = <function candidates.<locals>.read at 0x109852da0>
+start = '2026-10-01T00:00:00-07:00', end = '2026-10-31T23:59:59-07:00'
+now = '2026-10-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+        assert hits[0].metadata["_candidate_event_calendar"] is True
+>       assert hit_recency_for_unit(hits[0], datetime.fromisoformat(now)) == 0.5
+E       AssertionError: assert 0.8798611111111111 == 0.5
+E        +  where 0.8798611111111111 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...ne', 'capability_tags': ['data-only', 'no-write-authority', 'sanitize-as-data'], 'content': 'launch code: Secret123'}}), datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc))
+E        +    where datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc) = <built-in method fromisoformat of type object at 0x1030e5748>('2026-10-08T12:00:00+00:00')
+E        +      where <built-in method fromisoformat of type object at 0x1030e5748> = datetime.fromisoformat
+
+tests/test_candidate_time_metadata.py:94: AssertionError
+_ test_calendar_recency_survives_utc_projection_and_dst[postgres-projection-2026-10-01T00:00:00-07:00-2026-11-01T00:00:00-07:00-2026-10-08T12:00:00+00:00] _
+
+candidates = <function candidates.<locals>.read at 0x109851a60>
+start = '2026-10-01T00:00:00-07:00', end = '2026-11-01T00:00:00-07:00'
+now = '2026-10-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+        assert hits[0].metadata["_candidate_event_calendar"] is True
+>       assert hit_recency_for_unit(hits[0], datetime.fromisoformat(now)) == 0.5
+E       AssertionError: assert 0.8798611111111111 == 0.5
+E        +  where 0.8798611111111111 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...vent_start': '2026-10-01T07:00:00+00:00', 'event_end': '2026-11-01T07:00:00+00:00', '_candidate_event_calendar': True}), datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc))
+E        +    where datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc) = <built-in method fromisoformat of type object at 0x1030e5748>('2026-10-08T12:00:00+00:00')
+E        +      where <built-in method fromisoformat of type object at 0x1030e5748> = datetime.fromisoformat
+
+tests/test_candidate_time_metadata.py:94: AssertionError
+_ test_calendar_recency_survives_utc_projection_and_dst[postgres-projection-2026-03-01T00:00:00-08:00-2026-04-01T00:00:00-07:00-2026-03-08T12:00:00+00:00] _
+
+candidates = <function candidates.<locals>.read at 0x109852fb0>
+start = '2026-03-01T00:00:00-08:00', end = '2026-04-01T00:00:00-07:00'
+now = '2026-03-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+        assert hits[0].metadata["_candidate_event_calendar"] is True
+>       assert hit_recency_for_unit(hits[0], datetime.fromisoformat(now)) == 0.5
+E       AssertionError: assert 0.8805555555555555 == 0.5
+E        +  where 0.8805555555555555 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...vent_start': '2026-03-01T08:00:00+00:00', 'event_end': '2026-04-01T07:00:00+00:00', '_candidate_event_calendar': True}), datetime.datetime(2026, 3, 8, 12, 0, tzinfo=datetime.timezone.utc))
+E        +    where datetime.datetime(2026, 3, 8, 12, 0, tzinfo=datetime.timezone.utc) = <built-in method fromisoformat of type object at 0x1030e5748>('2026-03-08T12:00:00+00:00')
+E        +      where <built-in method fromisoformat of type object at 0x1030e5748> = datetime.fromisoformat
+
+tests/test_candidate_time_metadata.py:94: AssertionError
+_ test_calendar_recency_survives_utc_projection_and_dst[postgres-projection-2026-01-01T00:00:00+05:30-2027-01-01T00:00:00+05:30-2026-01-08T12:00:00+00:00] _
+
+candidates = <function candidates.<locals>.read at 0x109852c40>
+start = '2026-01-01T00:00:00+05:30', end = '2027-01-01T00:00:00+05:30'
+now = '2026-01-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+        assert hits[0].metadata["_candidate_event_calendar"] is True
+>       assert hit_recency_for_unit(hits[0], datetime.fromisoformat(now)) == 0.5
+E       AssertionError: assert 0.8711805555555555 == 0.5
+E        +  where 0.8711805555555555 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...vent_start': '2025-12-31T18:30:00+00:00', 'event_end': '2026-12-31T18:30:00+00:00', '_candidate_event_calendar': True}), datetime.datetime(2026, 1, 8, 12, 0, tzinfo=datetime.timezone.utc))
+E        +    where datetime.datetime(2026, 1, 8, 12, 0, tzinfo=datetime.timezone.utc) = <built-in method fromisoformat of type object at 0x1030e5748>('2026-01-08T12:00:00+00:00')
+E        +      where <built-in method fromisoformat of type object at 0x1030e5748> = datetime.fromisoformat
+
+tests/test_candidate_time_metadata.py:94: AssertionError
+_ test_calendar_recency_survives_utc_projection_and_dst[postgres-projection-2026-10-01T00:00:00-07:00-2026-10-31T23:59:59-07:00-2026-10-08T12:00:00+00:00] _
+
+candidates = <function candidates.<locals>.read at 0x109853e20>
+start = '2026-10-01T00:00:00-07:00', end = '2026-10-31T23:59:59-07:00'
+now = '2026-10-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+        assert hits[0].metadata["_candidate_event_calendar"] is True
+>       assert hit_recency_for_unit(hits[0], datetime.fromisoformat(now)) == 0.5
+E       AssertionError: assert 0.8798611111111111 == 0.5
+E        +  where 0.8798611111111111 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...vent_start': '2026-10-01T07:00:00+00:00', 'event_end': '2026-11-01T06:59:59+00:00', '_candidate_event_calendar': True}), datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc))
+E        +    where datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc) = <built-in method fromisoformat of type object at 0x1030e5748>('2026-10-08T12:00:00+00:00')
+E        +      where <built-in method fromisoformat of type object at 0x1030e5748> = datetime.fromisoformat
+
+tests/test_candidate_time_metadata.py:94: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_candidate_time_metadata.py::test_calendar_recency_survives_utc_projection_and_dst[local-2026-10-01T00:00:00-07:00-2026-11-01T00:00:00-07:00-2026-10-08T12:00:00+00:00]
+FAILED tests/test_candidate_time_metadata.py::test_calendar_recency_survives_utc_projection_and_dst[local-2026-03-01T00:00:00-08:00-2026-04-01T00:00:00-07:00-2026-03-08T12:00:00+00:00]
+FAILED tests/test_candidate_time_metadata.py::test_calendar_recency_survives_utc_projection_and_dst[local-2026-01-01T00:00:00+05:30-2027-01-01T00:00:00+05:30-2026-01-08T12:00:00+00:00]
+FAILED tests/test_candidate_time_metadata.py::test_calendar_recency_survives_utc_projection_and_dst[local-2026-10-01T00:00:00-07:00-2026-10-31T23:59:59-07:00-2026-10-08T12:00:00+00:00]
+FAILED tests/test_candidate_time_metadata.py::test_calendar_recency_survives_utc_projection_and_dst[sqlite-2026-10-01T00:00:00-07:00-2026-11-01T00:00:00-07:00-2026-10-08T12:00:00+00:00]
+FAILED tests/test_candidate_time_metadata.py::test_calendar_recency_survives_utc_projection_and_dst[sqlite-2026-03-01T00:00:00-08:00-2026-04-01T00:00:00-07:00-2026-03-08T12:00:00+00:00]
+FAILED tests/test_candidate_time_metadata.py::test_calendar_recency_survives_utc_projection_and_dst[sqlite-2026-01-01T00:00:00+05:30-2027-01-01T00:00:00+05:30-2026-01-08T12:00:00+00:00]
+FAILED tests/test_candidate_time_metadata.py::test_calendar_recency_survives_utc_projection_and_dst[sqlite-2026-10-01T00:00:00-07:00-2026-10-31T23:59:59-07:00-2026-10-08T12:00:00+00:00]
+FAILED tests/test_candidate_time_metadata.py::test_calendar_recency_survives_utc_projection_and_dst[postgres-projection-2026-10-01T00:00:00-07:00-2026-11-01T00:00:00-07:00-2026-10-08T12:00:00+00:00]
+FAILED tests/test_candidate_time_metadata.py::test_calendar_recency_survives_utc_projection_and_dst[postgres-projection-2026-03-01T00:00:00-08:00-2026-04-01T00:00:00-07:00-2026-03-08T12:00:00+00:00]
+FAILED tests/test_candidate_time_metadata.py::test_calendar_recency_survives_utc_projection_and_dst[postgres-projection-2026-01-01T00:00:00+05:30-2027-01-01T00:00:00+05:30-2026-01-08T12:00:00+00:00]
+FAILED tests/test_candidate_time_metadata.py::test_calendar_recency_survives_utc_projection_and_dst[postgres-projection-2026-10-01T00:00:00-07:00-2026-10-31T23:59:59-07:00-2026-10-08T12:00:00+00:00]

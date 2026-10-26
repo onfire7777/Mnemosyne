@@ -9,6 +9,7 @@ import pytest
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Evidence
 from mnemosyne.postgres_engine import PostgresEngine
+from mnemosyne.retrieval import hit_recency_for_unit
 from mnemosyne.sqlite_engine import SqliteEngine
 
 
@@ -72,3 +73,47 @@ def test_invalid_event_values_are_omitted(candidates, value):
 def test_raw_authorized_reader_keeps_safe_dates(candidates):
     hits = candidates(source({"event_start": "2026-10-22T12:00:00-07:00"}, redacted=True), role="operator")
     assert hits[0].metadata["event_start"] == "2026-10-22T19:00:00+00:00"
+
+
+@pytest.mark.parametrize("bad", ["invalid", "", {"private": "Secret123"}])
+def test_invalid_interval_endpoint_does_not_turn_interval_into_point(candidates, bad):
+    hits = candidates(source({"event_start": "2026-10-22T10:00:00Z", "event_end": bad}))
+    assert not {"event_start", "event_end"}.intersection(hits[0].metadata)
+    assert hits[0].metadata["_candidate_created_at"] == "2026-10-22T19:00:00+00:00"
+
+
+@pytest.mark.parametrize("start,end,now", [
+    ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+    ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+    ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+    ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+])
+def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+    hits = candidates(source({"event_start": start, "event_end": end}))
+    assert hits[0].metadata["_candidate_event_calendar"] is True
+    assert hit_recency_for_unit(hits[0], datetime.fromisoformat(now)) == 0.5
+
+
+@pytest.mark.parametrize("redacted", [False, True])
+def test_input_cannot_spoof_calendar_projection(candidates, redacted):
+    hits = candidates(source({"event_start": "2026-10-22T10:00:00Z",
+                              "_candidate_event_calendar": "Secret123"}, redacted=redacted))
+    assert "_candidate_event_calendar" not in hits[0].metadata
+
+
+def test_redacted_calendar_interval_withholds_derived_precision(candidates):
+    hits = candidates(source({"event_start": "2026-10-01", "event_end": "2026-11-01"}, redacted=True))
+    assert "_candidate_event_calendar" not in hits[0].metadata
+
+
+def test_month_long_trip_is_not_calendar_precision(candidates):
+    hits = candidates(source({"event_start": "2026-10-15T00:00:00-07:00",
+                              "event_end": "2026-11-15T00:00:00-08:00"}))
+    assert "_candidate_event_calendar" not in hits[0].metadata
+
+
+def test_valid_endpoint_alias_can_replace_invalid_primary(candidates):
+    hits = candidates(source({"event_start": "2026-10-01", "event_end": "invalid",
+                              "occurred_end": "2026-11-01"}))
+    assert hits[0].metadata["event_end"] == "2026-11-01T00:00:00+00:00"
+    assert hits[0].metadata["_candidate_event_calendar"] is True

@@ -1,0 +1,23 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.7, pytest-8.3.3, pluggy-1.5.0
+rootdir: /Users/admin/Desktop/Mnemosyne
+configfile: pyproject.toml
+plugins: anyio-4.6.2.post1
+collected 381 items
+
+tests/test_candidate_time_metadata.py ................................... [  9%]
+..................................................                       [ 22%]
+tests/test_event_time_recall.py ........................................ [ 32%]
+.......................................................                  [ 47%]
+tests/test_mental_model_scan_efficiency.py ............................. [ 54%]
+.....................                                                    [ 60%]
+tests/test_mental_model_change_refresh.py .............................. [ 68%]
+....................                                                     [ 73%]
+tests/test_phase12_graph_baseline.py ......                              [ 75%]
+tests/test_golden_equivalence.py .........                               [ 77%]
+tests/test_planning_traceability.py .................................... [ 86%]
+....................................................                     [100%]
+tests/test_runtime_exclusive_lock.py .
+
+- Generated junitxml: work/hindsight-comparison/temporal-refresh/regression.xml -
+============================= 381 passed in 75.76s =============================

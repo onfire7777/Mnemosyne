@@ -51,9 +51,9 @@ def test_local_capture_path_has_deterministic_dead_graph_baseline(tmp_path: Path
         assert run["query_count"] == 24
         assert run["relations"] == 0
         assert run["graph_ppr_channel_sum"] == 0
-        assert run["direct_retrieval_recall_at_5"] == 0.5
+        assert run["direct_retrieval_recall_at_5"] == 1.0
         assert run["per_query"]["q01"] == {
-            "direct_retrieval_recall_at_5": 0.5,
+            "direct_retrieval_recall_at_5": 1.0,
             "graph_ppr": 0,
         }
 

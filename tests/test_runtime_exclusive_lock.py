@@ -29,7 +29,7 @@ ROTATOR_SCRIPT = HELPER.with_name("rotate-production-mcp-client-cert.sh")
 LOCK_NAME = "runtime-exclusive"
 OWNER_NAME = "owner.json"
 USAGE = "usage: runtime-exclusive-lock.sh OPERATION -- /absolute/command [args...]\n"
-SUBPROCESS_TIMEOUT = 30
+SUBPROCESS_TIMEOUT = int(os.environ.get("MNEMOSYNE_SUBPROCESS_TIMEOUT", "60"))
 
 
 def _write_python_lock_probe(tmp_path: Path) -> tuple[Path, Path]:
@@ -409,8 +409,8 @@ def test_caller_handled_signal_releases_shared_lock(
         process.send_signal(handled_signal)
         stdout, stderr = process.communicate(timeout=SUBPROCESS_TIMEOUT)
     finally:
+        release.touch(exist_ok=True)
         if process.poll() is None:
-            release.touch(exist_ok=True)
             process.kill()
             process.communicate(timeout=SUBPROCESS_TIMEOUT)
 

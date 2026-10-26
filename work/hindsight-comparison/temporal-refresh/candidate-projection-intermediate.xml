@@ -1,0 +1,229 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="12" skipped="0" tests="81" time="1.205" timestamp="2026-10-26T14:19:11.115767-07:00" hostname="Admins-MacBook-Pro.local"><testcase classname="tests.test_candidate_time_metadata" name="test_redacted_source_cannot_leak_arbitrary_text_via_event_metadata[local-False-event_start]" time="0.003" /><testcase classname="tests.test_candidate_time_metadata" name="test_redacted_source_cannot_leak_arbitrary_text_via_event_metadata[local-False-event_end]" time="0.002" /><testcase classname="tests.test_candidate_time_metadata" name="test_redacted_source_cannot_leak_arbitrary_text_via_event_metadata[local-False-occurred_start]" time="0.002" /><testcase classname="tests.test_candidate_time_metadata" name="test_redacted_source_cannot_leak_arbitrary_text_via_event_metadata[local-False-occurred_end]" time="0.002" /><testcase classname="tests.test_candidate_time_metadata" name="test_redacted_source_cannot_leak_arbitrary_text_via_event_metadata[local-True-event_start]" time="0.023" /><testcase classname="tests.test_candidate_time_metadata" name="test_redacted_source_cannot_leak_arbitrary_text_via_event_metadata[local-True-event_end]" time="0.002" /><testcase classname="tests.test_candidate_time_metadata" name="test_redacted_source_cannot_leak_arbitrary_text_via_event_metadata[local-True-occurred_start]" time="0.002" /><testcase classname="tests.test_candidate_time_metadata" name="test_redacted_source_cannot_leak_arbitrary_text_via_event_metadata[local-True-occurred_end]" time="0.002" /><testcase classname="tests.test_candidate_time_metadata" name="test_redacted_source_cannot_leak_arbitrary_text_via_event_metadata[sqlite-False-event_start]" time="0.024" /><testcase classname="tests.test_candidate_time_metadata" name="test_redacted_source_cannot_leak_arbitrary_text_via_event_metadata[sqlite-False-event_end]" time="0.017" /><testcase classname="tests.test_candidate_time_metadata" name="test_redacted_source_cannot_leak_arbitrary_text_via_event_metadata[sqlite-False-occurred_start]" time="0.016" /><testcase classname="tests.test_candidate_time_metadata" name="test_redacted_source_cannot_leak_arbitrary_text_via_event_metadata[sqlite-False-occurred_end]" time="0.015" /><testcase classname="tests.test_candidate_time_metadata" name="test_redacted_source_cannot_leak_arbitrary_text_via_event_metadata[sqlite-True-event_start]" time="0.013" /><testcase classname="tests.test_candidate_time_metadata" name="test_redacted_source_cannot_leak_arbitrary_text_via_event_metadata[sqlite-True-event_end]" time="0.014" /><testcase classname="tests.test_candidate_time_metadata" name="test_redacted_source_cannot_leak_arbitrary_text_via_event_metadata[sqlite-True-occurred_start]" time="0.012" /><testcase classname="tests.test_candidate_time_metadata" name="test_redacted_source_cannot_leak_arbitrary_text_via_event_metadata[sqlite-True-occurred_end]" time="0.012" /><testcase classname="tests.test_candidate_time_metadata" name="test_redacted_source_cannot_leak_arbitrary_text_via_event_metadata[postgres-projection-False-event_start]" time="0.002" /><testcase classname="tests.test_candidate_time_metadata" name="test_redacted_source_cannot_leak_arbitrary_text_via_event_metadata[postgres-projection-False-event_end]" time="0.001" /><testcase classname="tests.test_candidate_time_metadata" name="test_redacted_source_cannot_leak_arbitrary_text_via_event_metadata[postgres-projection-False-occurred_start]" time="0.001" /><testcase classname="tests.test_candidate_time_metadata" name="test_redacted_source_cannot_leak_arbitrary_text_via_event_metadata[postgres-projection-False-occurred_end]" time="0.002" /><testcase classname="tests.test_candidate_time_metadata" name="test_redacted_source_cannot_leak_arbitrary_text_via_event_metadata[postgres-projection-True-event_start]" time="0.003" /><testcase classname="tests.test_candidate_time_metadata" name="test_redacted_source_cannot_leak_arbitrary_text_via_event_metadata[postgres-projection-True-event_end]" time="0.001" /><testcase classname="tests.test_candidate_time_metadata" name="test_redacted_source_cannot_leak_arbitrary_text_via_event_metadata[postgres-projection-True-occurred_start]" time="0.001" /><testcase classname="tests.test_candidate_time_metadata" name="test_redacted_source_cannot_leak_arbitrary_text_via_event_metadata[postgres-projection-True-occurred_end]" time="0.002" /><testcase classname="tests.test_candidate_time_metadata" name="test_redacted_source_withholds_even_valid_event_dates[local]" time="0.002" /><testcase classname="tests.test_candidate_time_metadata" name="test_redacted_source_withholds_even_valid_event_dates[sqlite]" time="0.015" /><testcase classname="tests.test_candidate_time_metadata" name="test_redacted_source_withholds_even_valid_event_dates[postgres-projection]" time="0.001" /><testcase classname="tests.test_candidate_time_metadata" name="test_unredacted_dates_are_canonical_and_candidates_serialize[local]" time="0.001" /><testcase classname="tests.test_candidate_time_metadata" name="test_unredacted_dates_are_canonical_and_candidates_serialize[sqlite]" time="0.012" /><testcase classname="tests.test_candidate_time_metadata" name="test_unredacted_dates_are_canonical_and_candidates_serialize[postgres-projection]" time="0.001" /><testcase classname="tests.test_candidate_time_metadata" name="test_invalid_event_values_are_omitted[local-not-a-date]" time="0.001" /><testcase classname="tests.test_candidate_time_metadata" name="test_invalid_event_values_are_omitted[local-value1]" time="0.001" /><testcase classname="tests.test_candidate_time_metadata" name="test_invalid_event_values_are_omitted[local-value2]" time="0.001" /><testcase classname="tests.test_candidate_time_metadata" name="test_invalid_event_values_are_omitted[local-123]" time="0.001" /><testcase classname="tests.test_candidate_time_metadata" name="test_invalid_event_values_are_omitted[sqlite-not-a-date]" time="0.013" /><testcase classname="tests.test_candidate_time_metadata" name="test_invalid_event_values_are_omitted[sqlite-value1]" time="0.016" /><testcase classname="tests.test_candidate_time_metadata" name="test_invalid_event_values_are_omitted[sqlite-value2]" time="0.015" /><testcase classname="tests.test_candidate_time_metadata" name="test_invalid_event_values_are_omitted[sqlite-123]" time="0.012" /><testcase classname="tests.test_candidate_time_metadata" name="test_invalid_event_values_are_omitted[postgres-projection-not-a-date]" time="0.001" /><testcase classname="tests.test_candidate_time_metadata" name="test_invalid_event_values_are_omitted[postgres-projection-value1]" time="0.001" /><testcase classname="tests.test_candidate_time_metadata" name="test_invalid_event_values_are_omitted[postgres-projection-value2]" time="0.001" /><testcase classname="tests.test_candidate_time_metadata" name="test_invalid_event_values_are_omitted[postgres-projection-123]" time="0.001" /><testcase classname="tests.test_candidate_time_metadata" name="test_raw_authorized_reader_keeps_safe_dates[local]" time="0.001" /><testcase classname="tests.test_candidate_time_metadata" name="test_raw_authorized_reader_keeps_safe_dates[sqlite]" time="0.012" /><testcase classname="tests.test_candidate_time_metadata" name="test_raw_authorized_reader_keeps_safe_dates[postgres-projection]" time="0.001" /><testcase classname="tests.test_candidate_time_metadata" name="test_invalid_interval_endpoint_does_not_turn_interval_into_point[local-invalid]" time="0.001" /><testcase classname="tests.test_candidate_time_metadata" name="test_invalid_interval_endpoint_does_not_turn_interval_into_point[local-]" time="0.001" /><testcase classname="tests.test_candidate_time_metadata" name="test_invalid_interval_endpoint_does_not_turn_interval_into_point[local-bad2]" time="0.001" /><testcase classname="tests.test_candidate_time_metadata" name="test_invalid_interval_endpoint_does_not_turn_interval_into_point[sqlite-invalid]" time="0.011" /><testcase classname="tests.test_candidate_time_metadata" name="test_invalid_interval_endpoint_does_not_turn_interval_into_point[sqlite-]" time="0.010" /><testcase classname="tests.test_candidate_time_metadata" name="test_invalid_interval_endpoint_does_not_turn_interval_into_point[sqlite-bad2]" time="0.015" /><testcase classname="tests.test_candidate_time_metadata" name="test_invalid_interval_endpoint_does_not_turn_interval_into_point[postgres-projection-invalid]" time="0.001" /><testcase classname="tests.test_candidate_time_metadata" name="test_invalid_interval_endpoint_does_not_turn_interval_into_point[postgres-projection-]" time="0.002" /><testcase classname="tests.test_candidate_time_metadata" name="test_invalid_interval_endpoint_does_not_turn_interval_into_point[postgres-projection-bad2]" time="0.002" /><testcase classname="tests.test_candidate_time_metadata" name="test_calendar_recency_survives_utc_projection_and_dst[local-2026-10-01T00:00:00-07:00-2026-11-01T00:00:00-07:00-2026-10-08T12:00:00+00:00]" time="0.002"><failure message="AssertionError: assert 0.8798611111111111 == 0.5&#10; +  where 0.8798611111111111 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...ne', 'capability_tags': ['data-only', 'no-write-authority', 'sanitize-as-data'], 'content': 'launch code: Secret123'}}), datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc))&#10; +    where datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc) = &lt;built-in method fromisoformat of type object at 0x1030e5748&gt;('2026-10-08T12:00:00+00:00')&#10; +      where &lt;built-in method fromisoformat of type object at 0x1030e5748&gt; = datetime.fromisoformat">candidates = &lt;function candidates.&lt;locals&gt;.read at 0x109851640&gt;
+start = '2026-10-01T00:00:00-07:00', end = '2026-11-01T00:00:00-07:00'
+now = '2026-10-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+        assert hits[0].metadata["_candidate_event_calendar"] is True
+&gt;       assert hit_recency_for_unit(hits[0], datetime.fromisoformat(now)) == 0.5
+E       AssertionError: assert 0.8798611111111111 == 0.5
+E        +  where 0.8798611111111111 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...ne', 'capability_tags': ['data-only', 'no-write-authority', 'sanitize-as-data'], 'content': 'launch code: Secret123'}}), datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc))
+E        +    where datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc) = &lt;built-in method fromisoformat of type object at 0x1030e5748&gt;('2026-10-08T12:00:00+00:00')
+E        +      where &lt;built-in method fromisoformat of type object at 0x1030e5748&gt; = datetime.fromisoformat
+
+tests/test_candidate_time_metadata.py:94: AssertionError</failure></testcase><testcase classname="tests.test_candidate_time_metadata" name="test_calendar_recency_survives_utc_projection_and_dst[local-2026-03-01T00:00:00-08:00-2026-04-01T00:00:00-07:00-2026-03-08T12:00:00+00:00]" time="0.002"><failure message="AssertionError: assert 0.8805555555555555 == 0.5&#10; +  where 0.8805555555555555 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...ne', 'capability_tags': ['data-only', 'no-write-authority', 'sanitize-as-data'], 'content': 'launch code: Secret123'}}), datetime.datetime(2026, 3, 8, 12, 0, tzinfo=datetime.timezone.utc))&#10; +    where datetime.datetime(2026, 3, 8, 12, 0, tzinfo=datetime.timezone.utc) = &lt;built-in method fromisoformat of type object at 0x1030e5748&gt;('2026-03-08T12:00:00+00:00')&#10; +      where &lt;built-in method fromisoformat of type object at 0x1030e5748&gt; = datetime.fromisoformat">candidates = &lt;function candidates.&lt;locals&gt;.read at 0x109851590&gt;
+start = '2026-03-01T00:00:00-08:00', end = '2026-04-01T00:00:00-07:00'
+now = '2026-03-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+        assert hits[0].metadata["_candidate_event_calendar"] is True
+&gt;       assert hit_recency_for_unit(hits[0], datetime.fromisoformat(now)) == 0.5
+E       AssertionError: assert 0.8805555555555555 == 0.5
+E        +  where 0.8805555555555555 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...ne', 'capability_tags': ['data-only', 'no-write-authority', 'sanitize-as-data'], 'content': 'launch code: Secret123'}}), datetime.datetime(2026, 3, 8, 12, 0, tzinfo=datetime.timezone.utc))
+E        +    where datetime.datetime(2026, 3, 8, 12, 0, tzinfo=datetime.timezone.utc) = &lt;built-in method fromisoformat of type object at 0x1030e5748&gt;('2026-03-08T12:00:00+00:00')
+E        +      where &lt;built-in method fromisoformat of type object at 0x1030e5748&gt; = datetime.fromisoformat
+
+tests/test_candidate_time_metadata.py:94: AssertionError</failure></testcase><testcase classname="tests.test_candidate_time_metadata" name="test_calendar_recency_survives_utc_projection_and_dst[local-2026-01-01T00:00:00+05:30-2027-01-01T00:00:00+05:30-2026-01-08T12:00:00+00:00]" time="0.001"><failure message="AssertionError: assert 0.8711805555555555 == 0.5&#10; +  where 0.8711805555555555 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...ne', 'capability_tags': ['data-only', 'no-write-authority', 'sanitize-as-data'], 'content': 'launch code: Secret123'}}), datetime.datetime(2026, 1, 8, 12, 0, tzinfo=datetime.timezone.utc))&#10; +    where datetime.datetime(2026, 1, 8, 12, 0, tzinfo=datetime.timezone.utc) = &lt;built-in method fromisoformat of type object at 0x1030e5748&gt;('2026-01-08T12:00:00+00:00')&#10; +      where &lt;built-in method fromisoformat of type object at 0x1030e5748&gt; = datetime.fromisoformat">candidates = &lt;function candidates.&lt;locals&gt;.read at 0x1098516f0&gt;
+start = '2026-01-01T00:00:00+05:30', end = '2027-01-01T00:00:00+05:30'
+now = '2026-01-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+        assert hits[0].metadata["_candidate_event_calendar"] is True
+&gt;       assert hit_recency_for_unit(hits[0], datetime.fromisoformat(now)) == 0.5
+E       AssertionError: assert 0.8711805555555555 == 0.5
+E        +  where 0.8711805555555555 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...ne', 'capability_tags': ['data-only', 'no-write-authority', 'sanitize-as-data'], 'content': 'launch code: Secret123'}}), datetime.datetime(2026, 1, 8, 12, 0, tzinfo=datetime.timezone.utc))
+E        +    where datetime.datetime(2026, 1, 8, 12, 0, tzinfo=datetime.timezone.utc) = &lt;built-in method fromisoformat of type object at 0x1030e5748&gt;('2026-01-08T12:00:00+00:00')
+E        +      where &lt;built-in method fromisoformat of type object at 0x1030e5748&gt; = datetime.fromisoformat
+
+tests/test_candidate_time_metadata.py:94: AssertionError</failure></testcase><testcase classname="tests.test_candidate_time_metadata" name="test_calendar_recency_survives_utc_projection_and_dst[local-2026-10-01T00:00:00-07:00-2026-10-31T23:59:59-07:00-2026-10-08T12:00:00+00:00]" time="0.002"><failure message="AssertionError: assert 0.8798611111111111 == 0.5&#10; +  where 0.8798611111111111 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...ne', 'capability_tags': ['data-only', 'no-write-authority', 'sanitize-as-data'], 'content': 'launch code: Secret123'}}), datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc))&#10; +    where datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc) = &lt;built-in method fromisoformat of type object at 0x1030e5748&gt;('2026-10-08T12:00:00+00:00')&#10; +      where &lt;built-in method fromisoformat of type object at 0x1030e5748&gt; = datetime.fromisoformat">candidates = &lt;function candidates.&lt;locals&gt;.read at 0x109851dd0&gt;
+start = '2026-10-01T00:00:00-07:00', end = '2026-10-31T23:59:59-07:00'
+now = '2026-10-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+        assert hits[0].metadata["_candidate_event_calendar"] is True
+&gt;       assert hit_recency_for_unit(hits[0], datetime.fromisoformat(now)) == 0.5
+E       AssertionError: assert 0.8798611111111111 == 0.5
+E        +  where 0.8798611111111111 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...ne', 'capability_tags': ['data-only', 'no-write-authority', 'sanitize-as-data'], 'content': 'launch code: Secret123'}}), datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc))
+E        +    where datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc) = &lt;built-in method fromisoformat of type object at 0x1030e5748&gt;('2026-10-08T12:00:00+00:00')
+E        +      where &lt;built-in method fromisoformat of type object at 0x1030e5748&gt; = datetime.fromisoformat
+
+tests/test_candidate_time_metadata.py:94: AssertionError</failure></testcase><testcase classname="tests.test_candidate_time_metadata" name="test_calendar_recency_survives_utc_projection_and_dst[sqlite-2026-10-01T00:00:00-07:00-2026-11-01T00:00:00-07:00-2026-10-08T12:00:00+00:00]" time="0.021"><failure message="AssertionError: assert 0.8798611111111111 == 0.5&#10; +  where 0.8798611111111111 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...ne', 'capability_tags': ['data-only', 'no-write-authority', 'sanitize-as-data'], 'content': 'launch code: Secret123'}}), datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc))&#10; +    where datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc) = &lt;built-in method fromisoformat of type object at 0x1030e5748&gt;('2026-10-08T12:00:00+00:00')&#10; +      where &lt;built-in method fromisoformat of type object at 0x1030e5748&gt; = datetime.fromisoformat">candidates = &lt;function candidates.&lt;locals&gt;.read at 0x109851a60&gt;
+start = '2026-10-01T00:00:00-07:00', end = '2026-11-01T00:00:00-07:00'
+now = '2026-10-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+        assert hits[0].metadata["_candidate_event_calendar"] is True
+&gt;       assert hit_recency_for_unit(hits[0], datetime.fromisoformat(now)) == 0.5
+E       AssertionError: assert 0.8798611111111111 == 0.5
+E        +  where 0.8798611111111111 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...ne', 'capability_tags': ['data-only', 'no-write-authority', 'sanitize-as-data'], 'content': 'launch code: Secret123'}}), datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc))
+E        +    where datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc) = &lt;built-in method fromisoformat of type object at 0x1030e5748&gt;('2026-10-08T12:00:00+00:00')
+E        +      where &lt;built-in method fromisoformat of type object at 0x1030e5748&gt; = datetime.fromisoformat
+
+tests/test_candidate_time_metadata.py:94: AssertionError</failure></testcase><testcase classname="tests.test_candidate_time_metadata" name="test_calendar_recency_survives_utc_projection_and_dst[sqlite-2026-03-01T00:00:00-08:00-2026-04-01T00:00:00-07:00-2026-03-08T12:00:00+00:00]" time="0.018"><failure message="AssertionError: assert 0.8805555555555555 == 0.5&#10; +  where 0.8805555555555555 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...ne', 'capability_tags': ['data-only', 'no-write-authority', 'sanitize-as-data'], 'content': 'launch code: Secret123'}}), datetime.datetime(2026, 3, 8, 12, 0, tzinfo=datetime.timezone.utc))&#10; +    where datetime.datetime(2026, 3, 8, 12, 0, tzinfo=datetime.timezone.utc) = &lt;built-in method fromisoformat of type object at 0x1030e5748&gt;('2026-03-08T12:00:00+00:00')&#10; +      where &lt;built-in method fromisoformat of type object at 0x1030e5748&gt; = datetime.fromisoformat">candidates = &lt;function candidates.&lt;locals&gt;.read at 0x109852610&gt;
+start = '2026-03-01T00:00:00-08:00', end = '2026-04-01T00:00:00-07:00'
+now = '2026-03-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+        assert hits[0].metadata["_candidate_event_calendar"] is True
+&gt;       assert hit_recency_for_unit(hits[0], datetime.fromisoformat(now)) == 0.5
+E       AssertionError: assert 0.8805555555555555 == 0.5
+E        +  where 0.8805555555555555 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...ne', 'capability_tags': ['data-only', 'no-write-authority', 'sanitize-as-data'], 'content': 'launch code: Secret123'}}), datetime.datetime(2026, 3, 8, 12, 0, tzinfo=datetime.timezone.utc))
+E        +    where datetime.datetime(2026, 3, 8, 12, 0, tzinfo=datetime.timezone.utc) = &lt;built-in method fromisoformat of type object at 0x1030e5748&gt;('2026-03-08T12:00:00+00:00')
+E        +      where &lt;built-in method fromisoformat of type object at 0x1030e5748&gt; = datetime.fromisoformat
+
+tests/test_candidate_time_metadata.py:94: AssertionError</failure></testcase><testcase classname="tests.test_candidate_time_metadata" name="test_calendar_recency_survives_utc_projection_and_dst[sqlite-2026-01-01T00:00:00+05:30-2027-01-01T00:00:00+05:30-2026-01-08T12:00:00+00:00]" time="0.012"><failure message="AssertionError: assert 0.8711805555555555 == 0.5&#10; +  where 0.8711805555555555 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...ne', 'capability_tags': ['data-only', 'no-write-authority', 'sanitize-as-data'], 'content': 'launch code: Secret123'}}), datetime.datetime(2026, 1, 8, 12, 0, tzinfo=datetime.timezone.utc))&#10; +    where datetime.datetime(2026, 1, 8, 12, 0, tzinfo=datetime.timezone.utc) = &lt;built-in method fromisoformat of type object at 0x1030e5748&gt;('2026-01-08T12:00:00+00:00')&#10; +      where &lt;built-in method fromisoformat of type object at 0x1030e5748&gt; = datetime.fromisoformat">candidates = &lt;function candidates.&lt;locals&gt;.read at 0x109851a60&gt;
+start = '2026-01-01T00:00:00+05:30', end = '2027-01-01T00:00:00+05:30'
+now = '2026-01-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+        assert hits[0].metadata["_candidate_event_calendar"] is True
+&gt;       assert hit_recency_for_unit(hits[0], datetime.fromisoformat(now)) == 0.5
+E       AssertionError: assert 0.8711805555555555 == 0.5
+E        +  where 0.8711805555555555 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...ne', 'capability_tags': ['data-only', 'no-write-authority', 'sanitize-as-data'], 'content': 'launch code: Secret123'}}), datetime.datetime(2026, 1, 8, 12, 0, tzinfo=datetime.timezone.utc))
+E        +    where datetime.datetime(2026, 1, 8, 12, 0, tzinfo=datetime.timezone.utc) = &lt;built-in method fromisoformat of type object at 0x1030e5748&gt;('2026-01-08T12:00:00+00:00')
+E        +      where &lt;built-in method fromisoformat of type object at 0x1030e5748&gt; = datetime.fromisoformat
+
+tests/test_candidate_time_metadata.py:94: AssertionError</failure></testcase><testcase classname="tests.test_candidate_time_metadata" name="test_calendar_recency_survives_utc_projection_and_dst[sqlite-2026-10-01T00:00:00-07:00-2026-10-31T23:59:59-07:00-2026-10-08T12:00:00+00:00]" time="0.011"><failure message="AssertionError: assert 0.8798611111111111 == 0.5&#10; +  where 0.8798611111111111 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...ne', 'capability_tags': ['data-only', 'no-write-authority', 'sanitize-as-data'], 'content': 'launch code: Secret123'}}), datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc))&#10; +    where datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc) = &lt;built-in method fromisoformat of type object at 0x1030e5748&gt;('2026-10-08T12:00:00+00:00')&#10; +      where &lt;built-in method fromisoformat of type object at 0x1030e5748&gt; = datetime.fromisoformat">candidates = &lt;function candidates.&lt;locals&gt;.read at 0x109852da0&gt;
+start = '2026-10-01T00:00:00-07:00', end = '2026-10-31T23:59:59-07:00'
+now = '2026-10-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+        assert hits[0].metadata["_candidate_event_calendar"] is True
+&gt;       assert hit_recency_for_unit(hits[0], datetime.fromisoformat(now)) == 0.5
+E       AssertionError: assert 0.8798611111111111 == 0.5
+E        +  where 0.8798611111111111 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...ne', 'capability_tags': ['data-only', 'no-write-authority', 'sanitize-as-data'], 'content': 'launch code: Secret123'}}), datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc))
+E        +    where datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc) = &lt;built-in method fromisoformat of type object at 0x1030e5748&gt;('2026-10-08T12:00:00+00:00')
+E        +      where &lt;built-in method fromisoformat of type object at 0x1030e5748&gt; = datetime.fromisoformat
+
+tests/test_candidate_time_metadata.py:94: AssertionError</failure></testcase><testcase classname="tests.test_candidate_time_metadata" name="test_calendar_recency_survives_utc_projection_and_dst[postgres-projection-2026-10-01T00:00:00-07:00-2026-11-01T00:00:00-07:00-2026-10-08T12:00:00+00:00]" time="0.001"><failure message="AssertionError: assert 0.8798611111111111 == 0.5&#10; +  where 0.8798611111111111 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...vent_start': '2026-10-01T07:00:00+00:00', 'event_end': '2026-11-01T07:00:00+00:00', '_candidate_event_calendar': True}), datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc))&#10; +    where datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc) = &lt;built-in method fromisoformat of type object at 0x1030e5748&gt;('2026-10-08T12:00:00+00:00')&#10; +      where &lt;built-in method fromisoformat of type object at 0x1030e5748&gt; = datetime.fromisoformat">candidates = &lt;function candidates.&lt;locals&gt;.read at 0x109851a60&gt;
+start = '2026-10-01T00:00:00-07:00', end = '2026-11-01T00:00:00-07:00'
+now = '2026-10-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+        assert hits[0].metadata["_candidate_event_calendar"] is True
+&gt;       assert hit_recency_for_unit(hits[0], datetime.fromisoformat(now)) == 0.5
+E       AssertionError: assert 0.8798611111111111 == 0.5
+E        +  where 0.8798611111111111 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...vent_start': '2026-10-01T07:00:00+00:00', 'event_end': '2026-11-01T07:00:00+00:00', '_candidate_event_calendar': True}), datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc))
+E        +    where datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc) = &lt;built-in method fromisoformat of type object at 0x1030e5748&gt;('2026-10-08T12:00:00+00:00')
+E        +      where &lt;built-in method fromisoformat of type object at 0x1030e5748&gt; = datetime.fromisoformat
+
+tests/test_candidate_time_metadata.py:94: AssertionError</failure></testcase><testcase classname="tests.test_candidate_time_metadata" name="test_calendar_recency_survives_utc_projection_and_dst[postgres-projection-2026-03-01T00:00:00-08:00-2026-04-01T00:00:00-07:00-2026-03-08T12:00:00+00:00]" time="0.002"><failure message="AssertionError: assert 0.8805555555555555 == 0.5&#10; +  where 0.8805555555555555 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...vent_start': '2026-03-01T08:00:00+00:00', 'event_end': '2026-04-01T07:00:00+00:00', '_candidate_event_calendar': True}), datetime.datetime(2026, 3, 8, 12, 0, tzinfo=datetime.timezone.utc))&#10; +    where datetime.datetime(2026, 3, 8, 12, 0, tzinfo=datetime.timezone.utc) = &lt;built-in method fromisoformat of type object at 0x1030e5748&gt;('2026-03-08T12:00:00+00:00')&#10; +      where &lt;built-in method fromisoformat of type object at 0x1030e5748&gt; = datetime.fromisoformat">candidates = &lt;function candidates.&lt;locals&gt;.read at 0x109852fb0&gt;
+start = '2026-03-01T00:00:00-08:00', end = '2026-04-01T00:00:00-07:00'
+now = '2026-03-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+        assert hits[0].metadata["_candidate_event_calendar"] is True
+&gt;       assert hit_recency_for_unit(hits[0], datetime.fromisoformat(now)) == 0.5
+E       AssertionError: assert 0.8805555555555555 == 0.5
+E        +  where 0.8805555555555555 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...vent_start': '2026-03-01T08:00:00+00:00', 'event_end': '2026-04-01T07:00:00+00:00', '_candidate_event_calendar': True}), datetime.datetime(2026, 3, 8, 12, 0, tzinfo=datetime.timezone.utc))
+E        +    where datetime.datetime(2026, 3, 8, 12, 0, tzinfo=datetime.timezone.utc) = &lt;built-in method fromisoformat of type object at 0x1030e5748&gt;('2026-03-08T12:00:00+00:00')
+E        +      where &lt;built-in method fromisoformat of type object at 0x1030e5748&gt; = datetime.fromisoformat
+
+tests/test_candidate_time_metadata.py:94: AssertionError</failure></testcase><testcase classname="tests.test_candidate_time_metadata" name="test_calendar_recency_survives_utc_projection_and_dst[postgres-projection-2026-01-01T00:00:00+05:30-2027-01-01T00:00:00+05:30-2026-01-08T12:00:00+00:00]" time="0.001"><failure message="AssertionError: assert 0.8711805555555555 == 0.5&#10; +  where 0.8711805555555555 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...vent_start': '2025-12-31T18:30:00+00:00', 'event_end': '2026-12-31T18:30:00+00:00', '_candidate_event_calendar': True}), datetime.datetime(2026, 1, 8, 12, 0, tzinfo=datetime.timezone.utc))&#10; +    where datetime.datetime(2026, 1, 8, 12, 0, tzinfo=datetime.timezone.utc) = &lt;built-in method fromisoformat of type object at 0x1030e5748&gt;('2026-01-08T12:00:00+00:00')&#10; +      where &lt;built-in method fromisoformat of type object at 0x1030e5748&gt; = datetime.fromisoformat">candidates = &lt;function candidates.&lt;locals&gt;.read at 0x109852c40&gt;
+start = '2026-01-01T00:00:00+05:30', end = '2027-01-01T00:00:00+05:30'
+now = '2026-01-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+        assert hits[0].metadata["_candidate_event_calendar"] is True
+&gt;       assert hit_recency_for_unit(hits[0], datetime.fromisoformat(now)) == 0.5
+E       AssertionError: assert 0.8711805555555555 == 0.5
+E        +  where 0.8711805555555555 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...vent_start': '2025-12-31T18:30:00+00:00', 'event_end': '2026-12-31T18:30:00+00:00', '_candidate_event_calendar': True}), datetime.datetime(2026, 1, 8, 12, 0, tzinfo=datetime.timezone.utc))
+E        +    where datetime.datetime(2026, 1, 8, 12, 0, tzinfo=datetime.timezone.utc) = &lt;built-in method fromisoformat of type object at 0x1030e5748&gt;('2026-01-08T12:00:00+00:00')
+E        +      where &lt;built-in method fromisoformat of type object at 0x1030e5748&gt; = datetime.fromisoformat
+
+tests/test_candidate_time_metadata.py:94: AssertionError</failure></testcase><testcase classname="tests.test_candidate_time_metadata" name="test_calendar_recency_survives_utc_projection_and_dst[postgres-projection-2026-10-01T00:00:00-07:00-2026-10-31T23:59:59-07:00-2026-10-08T12:00:00+00:00]" time="0.001"><failure message="AssertionError: assert 0.8798611111111111 == 0.5&#10; +  where 0.8798611111111111 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...vent_start': '2026-10-01T07:00:00+00:00', 'event_end': '2026-11-01T06:59:59+00:00', '_candidate_event_calendar': True}), datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc))&#10; +    where datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc) = &lt;built-in method fromisoformat of type object at 0x1030e5748&gt;('2026-10-08T12:00:00+00:00')&#10; +      where &lt;built-in method fromisoformat of type object at 0x1030e5748&gt; = datetime.fromisoformat">candidates = &lt;function candidates.&lt;locals&gt;.read at 0x109853e20&gt;
+start = '2026-10-01T00:00:00-07:00', end = '2026-10-31T23:59:59-07:00'
+now = '2026-10-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+        assert hits[0].metadata["_candidate_event_calendar"] is True
+&gt;       assert hit_recency_for_unit(hits[0], datetime.fromisoformat(now)) == 0.5
+E       AssertionError: assert 0.8798611111111111 == 0.5
+E        +  where 0.8798611111111111 = hit_recency_for_unit(Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...vent_start': '2026-10-01T07:00:00+00:00', 'event_end': '2026-11-01T06:59:59+00:00', '_candidate_event_calendar': True}), datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc))
+E        +    where datetime.datetime(2026, 10, 8, 12, 0, tzinfo=datetime.timezone.utc) = &lt;built-in method fromisoformat of type object at 0x1030e5748&gt;('2026-10-08T12:00:00+00:00')
+E        +      where &lt;built-in method fromisoformat of type object at 0x1030e5748&gt; = datetime.fromisoformat
+
+tests/test_candidate_time_metadata.py:94: AssertionError</failure></testcase><testcase classname="tests.test_candidate_time_metadata" name="test_input_cannot_spoof_calendar_projection[local-False]" time="0.001" /><testcase classname="tests.test_candidate_time_metadata" name="test_input_cannot_spoof_calendar_projection[local-True]" time="0.001" /><testcase classname="tests.test_candidate_time_metadata" name="test_input_cannot_spoof_calendar_projection[sqlite-False]" time="0.010" /><testcase classname="tests.test_candidate_time_metadata" name="test_input_cannot_spoof_calendar_projection[sqlite-True]" time="0.013" /><testcase classname="tests.test_candidate_time_metadata" name="test_input_cannot_spoof_calendar_projection[postgres-projection-False]" time="0.003" /><testcase classname="tests.test_candidate_time_metadata" name="test_input_cannot_spoof_calendar_projection[postgres-projection-True]" time="0.001" /><testcase classname="tests.test_candidate_time_metadata" name="test_redacted_calendar_interval_withholds_derived_precision[local]" time="0.001" /><testcase classname="tests.test_candidate_time_metadata" name="test_redacted_calendar_interval_withholds_derived_precision[sqlite]" time="0.014" /><testcase classname="tests.test_candidate_time_metadata" name="test_redacted_calendar_interval_withholds_derived_precision[postgres-projection]" time="0.001" /><testcase classname="tests.test_candidate_time_metadata" name="test_month_long_trip_is_not_calendar_precision[local]" time="0.001" /><testcase classname="tests.test_candidate_time_metadata" name="test_month_long_trip_is_not_calendar_precision[sqlite]" time="0.175" /><testcase classname="tests.test_candidate_time_metadata" name="test_month_long_trip_is_not_calendar_precision[postgres-projection]" time="0.001" /><testcase classname="tests.test_candidate_time_metadata" name="test_valid_endpoint_alias_can_replace_invalid_primary[local]" time="0.001" /><testcase classname="tests.test_candidate_time_metadata" name="test_valid_endpoint_alias_can_replace_invalid_primary[sqlite]" time="0.013" /><testcase classname="tests.test_candidate_time_metadata" name="test_valid_endpoint_alias_can_replace_invalid_primary[postgres-projection]" time="0.003" /></testsuite></testsuites>

@@ -90,6 +90,19 @@ def fake_chat(system, user, max_tokens=0, task="", shared=""):
     raise AssertionError(task)
 
 
+@pytest.fixture(autouse=True)
+def _isolate_framework_cache():
+    """Ensure tests in this module run with a clean, isolated framework cache."""
+    token = fx.CACHE.set("")
+    try:
+        yield
+    finally:
+        try:
+            fx.CACHE.reset(token)
+        finally:
+            fx.CACHE.set("")
+
+
 @pytest.fixture
 def store(tmp_path, monkeypatch):
     monkeypatch.setattr(fx, "chat_json", fake_chat)
@@ -212,9 +225,13 @@ def test_a_stalled_call_is_asked_again(monkeypatch):
 def test_code_fences_inside_the_answer_are_kept(monkeypatch):
     inner = {"content": "Run it:\n```bash\nnpm test\n```\nThen read the output."}
     monkeypatch.setenv("OPENROUTER_API_KEY", "k")
-    for wrapped in (json.dumps(inner), "```json\n" + json.dumps(inner) + "\n```", "Here it is: " + json.dumps(inner)):
-        monkeypatch.setattr(fx, "_post", lambda body, key, w=wrapped: {"choices": [{"message": {"content": w}}]})
-        assert fx.chat_json("s", "u", 0, "t") == inner
+    token = fx.CACHE.set("")
+    try:
+        for wrapped in (json.dumps(inner), "```json\n" + json.dumps(inner) + "\n```", "Here it is: " + json.dumps(inner)):
+            monkeypatch.setattr(fx, "_post", lambda body, key, w=wrapped: {"choices": [{"message": {"content": w}}]})
+            assert fx.chat_json("s", "u", 0, "t") == inner
+    finally:
+        fx.CACHE.reset(token)
 
 
 def test_a_resumed_build_does_not_ask_twice(monkeypatch, tmp_path):

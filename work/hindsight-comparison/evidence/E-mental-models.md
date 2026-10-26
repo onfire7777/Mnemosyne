@@ -3,6 +3,13 @@
 Date: 2026-10-22. Baseline: `00d8ea9f7389d3a423d233e5fc0ab959ead8e520`.
 Branch: `codex/hindsight-memory-audit`, local uncommitted implementation.
 
+Historical phase receipt. Status reconciled on 2026-10-26 against `0d947f5c`:
+the PostgreSQL limitation below was subsequently closed by the publication guard
+and [live PostgreSQL validation](../postgres-live/change-refresh/REPORT.md).
+The follow-up passed 239 mixed tests, including 20 live cases, and 9/9 role checks.
+The original phase's test counts and implementation description are retained below.
+Production-scale cross-tenant lock contention remains unmeasured.
+
 Implemented service: `src/mnemosyne/mental_models.py`; storage validator:
 `src/mnemosyne/mental_model_storage.py`. Local/SQLite/PostgreSQL storage and
 Python/MCP/CLI surfaces reuse the existing grounded orchestrator. Documentation:

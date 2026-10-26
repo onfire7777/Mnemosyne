@@ -809,7 +809,8 @@ _MONTHS = ("january", "february", "march", "april", "may", "june", "july", "augu
 _DAY_PARTS = {"morning": (5, 12), "afternoon": (12, 17), "evening": (17, 24), "tonight": (17, 24), "night": (18, 24)}
 _SMALL_NUMBERS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "a": 1}
 _PAST_CUE = re.compile(
-    r"\b(did|was|were|had|remember|recall|said|told|asked|talked|mentioned|happened|discussed|spoke|first thing|last thing)\b"
+    r"\b(did|was|were|had|remember|recall|said|told|asked|talked|mentioned|happened|discussed|spoke|"
+    r"wrote|recorded|logged|messaged|replied|suggested|answered|first thing|last thing)\b"
 )
 
 
@@ -817,8 +818,27 @@ _PAST_CUE = re.compile(
 #: what it is about: an answer from a time span need not repeat them.
 _RECALL_FRAMING = re.compile(
     r"\b(ask|asked|asking|say|said|tell|told|talk|talked|mention|mentioned|discuss|discussed|"
-    r"speak|spoke|remember|recall|happen|happened|do|did|done)\b"
+    r"speak|spoke|remember|recall|happen|happened|do|did|done|write|wrote|recorded|logged|"
+    r"messaged|replied|suggested|answered)\b"
 )
+
+
+def _query_time_axis(text: str) -> str:
+    """Explicit questions about records/speech use source time; activities use occurrence time."""
+    source = re.search(
+        r"\b(asked|said|told|mentioned|discussed|spoke|talked|wrote|recorded|logged|messaged|replied|suggested|answered|"
+        r"conversations?|messages?|transcripts?)\b", text,
+    )
+    # "Tell me what happened" and "can you tell me what I did" are requests to
+    # recall events, not claims about past speech. Bare verbs need a past auxiliary.
+    speaking = re.search(
+        r"\b(?:did|have|had)\s+[a-z0-9']+\s+"
+        r"(?:(?:first|last|just|previously|originally|recently|already|ever|actually|initially)\s+)*"
+        r"(?:ask|say|tell|mention|discuss|speak|talk|write|answer|reply|suggest|record|log|message)\b", text,
+    )
+    record_time = (re.search(r"\b(?:documents?|sources?|records?|notes?|entries|files?)\b", text)
+                   and re.search(r"\b(?:created|written|saved|uploaded|imported|received)\b", text))
+    return "source" if source or speaking or record_time else "event"
 
 
 @dataclass(frozen=True, slots=True)
@@ -829,13 +849,21 @@ class TimeWindow:
     end: datetime
     label: str
     rest: str
+    axis: str = "source"
 
 
 def window_support_query(window: TimeWindow) -> str:
     """What a time-span answer must cover: the rest of the question without its framing, so
     "what did I ask you yesterday" needs nothing more than the span, and "what did I say
     about Leeds yesterday" still needs Leeds."""
-    return " ".join(_RECALL_FRAMING.sub(" ", window.rest).split())
+    rest = _RECALL_FRAMING.sub(" ", window.rest)
+    rest = re.sub(r"\b(?:first|last|earliest|latest)\s+things?\b", " ", rest)
+    rest = re.sub(r"\b(?:first|last|earliest|latest|most recent|recently)\b", " ", rest)
+    if window.axis == "event":
+        rest = re.sub(r"\bevents?\b", " ", rest)
+    else:
+        rest = re.sub(r"\b(?:messages?|send|sent|conversations?|transcripts?)\b", " ", rest)
+    return " ".join(rest.split())
 
 
 def resolve_query_timezone(value: str | None) -> ZoneInfo | None:
@@ -861,14 +889,16 @@ def query_time_window(
 
     Deterministic, no model: today, yesterday, the day before yesterday, this morning /
     afternoon / evening, tonight, last night, (on / last) <weekday> with an optional part of
-    the day, this week, last week, N days ago, and in <month>. ``now`` is the instant the
+    the day, this/last week, month or year, N days ago, in <month>/<year>, and ISO days.
+    Speech/record questions use source time; other retrospective questions use event time.
+    ``now`` is the instant the
     question is asked at. An explicit IANA ``query_timezone`` supplies the caller's
     calendar (including DST); otherwise the machine's local timezone is preserved.
     """
     from datetime import timedelta
 
     zone = resolve_query_timezone(query_timezone)
-    text = " ".join(re.findall(r"[a-z0-9']+", query.lower()))
+    text = " ".join(re.findall(r"[a-z0-9'-]+", query.lower()))
     # Only a question about what was said or done then: "I'm tired today" or "what's the
     # weather tonight" must still search all of memory.
     if not _PAST_CUE.search(text):
@@ -891,9 +921,29 @@ def query_time_window(
     def make_window(start: datetime, end: datetime, label: str, rest: str) -> TimeWindow:
         if zone is None:
             start, end = start.astimezone(), end.astimezone()
-        return TimeWindow(start, end, label, rest)
+        return TimeWindow(start, end, label, rest, _query_time_axis(text))
 
-    if found := re.search(r"\b(?:the )?day before yesterday\b", text):
+    iso_tokens = [token for token in text.split() if re.match(r"\d{4}-", token)]
+    if any(not re.fullmatch(r"\d{4}-\d{2}-\d{2}", token) for token in iso_tokens):
+        return None
+    if re.search(r"\b(?:before|after|since|until|between|through|from|as of|earlier than|later than) "
+                 r"\d{4}-\d{2}-\d{2}\b", text):
+        return None  # These ask for ranges/instants, not one calendar day.
+    iso_days = list(re.finditer(r"(?<![\w-])(?:(?:on|during|in) )?(\d{4}-\d{2}-\d{2})(?![\w-])", text))
+    month_expression = r"\b(?:in|during|back in) (" + "|".join(_MONTHS) + r")(?: (\d+))?\b"
+    year_expression = r"\b(?:in|during|back in) (\d{4})(?![\d-])\b"
+    explicit_spans = iso_days + list(re.finditer(month_expression, text)) + list(re.finditer(year_expression, text))
+    if len(explicit_spans) > 1:
+        return None  # Compound periods need their own interpretation, never just the first date.
+    if iso_days:
+        found = iso_days[0]
+        try:
+            date = datetime.fromisoformat(found.group(1))
+            day = today.replace(year=date.year, month=date.month, day=date.day)
+            return make_window(day, day + timedelta(days=1), found.group(1), rest_without(found))
+        except (ValueError, OverflowError):
+            return None
+    elif found := re.search(r"\b(?:the )?day before yesterday\b", text):
         day, label = today - timedelta(days=2), "the day before yesterday"
     elif found := re.search(r"\blast night\b", text):
         start = today - timedelta(days=1) + timedelta(hours=18)
@@ -914,12 +964,24 @@ def query_time_window(
         return make_window(start, start + timedelta(days=7), "last week", rest_without(found))
     elif found := re.search(r"\bthis week\b", text):
         return make_window(today - timedelta(days=today.weekday()), local, "this week", rest_without(found))
+    elif found := re.search(r"\b(last|this) (month|year)\b", text):
+        try:
+            if found.group(2) == "year":
+                end = today.replace(month=1, day=1)
+                start = end.replace(year=end.year - 1) if found.group(1) == "last" else end
+            else:
+                end = today.replace(day=1)
+                start = (end - timedelta(days=1)).replace(day=1) if found.group(1) == "last" else end
+            return make_window(start, end if found.group(1) == "last" else local,
+                               found.group(0), rest_without(found))
+        except (ValueError, OverflowError):
+            return None
     elif found := re.search(r"\b(?:(last|on|this past) )?(" + "|".join(_WEEKDAYS) + r")\b", text):
         offset = (today.weekday() - _WEEKDAYS.index(found.group(2))) % 7
         if offset == 0 and found.group(1) in {"last", "this past"}:
             offset = 7
         day, label = today - timedelta(days=offset), found.group(2)
-    elif found := re.search(r"\b(?:in|during|back in) (" + "|".join(_MONTHS) + r")(?: (\d+))?\b", text):
+    elif found := re.search(month_expression, text):
         month = _MONTHS.index(found.group(1)) + 1
         explicit_year = found.group(2)
         try:
@@ -930,6 +992,13 @@ def query_time_window(
             return None
         label = f"{found.group(1)} {explicit_year}" if explicit_year else found.group(1)
         return make_window(start, end, label, rest_without(found))
+    elif found := re.search(year_expression, text):
+        try:
+            start = today.replace(year=int(found.group(1)), month=1, day=1)
+            end = start.replace(year=start.year + 1)
+        except (ValueError, OverflowError):
+            return None
+        return make_window(start, end, found.group(1), rest_without(found))
     elif found := re.search(r"\b(today|this (?:morning|afternoon|evening)|tonight)\b", text):
         day, label = today, found.group(1)
     if day is None or found is None:
@@ -1054,7 +1123,17 @@ def hit_recency_for_unit(
     if now_utc is None:
         return 0.5
 
-    if start_utc is not None and end_utc is not None and _spans_calendar_period(start_utc, end_utc):
+    def local_calendar_span() -> bool:
+        try:
+            local_start = occ_start if isinstance(occ_start, datetime) else datetime.fromisoformat(occ_start)
+            local_end = occ_end if isinstance(occ_end, datetime) else datetime.fromisoformat(occ_end)
+        except (TypeError, ValueError, OverflowError):
+            return False
+        return _spans_calendar_period(local_start.replace(tzinfo=None), local_end.replace(tzinfo=None))
+
+    if start_utc is not None and end_utc is not None and (
+            hit.metadata.get("_candidate_event_calendar") is True or local_calendar_span()
+            or _spans_calendar_period(start_utc, end_utc)):
         sec = max(0.0, (now_utc - end_utc).total_seconds())
         days_ago = 0.0 if sec < 60.0 else sec / 86400.0
         recency = compute_recency_decay(days_ago, function, linear_window_days, halflife_days)

@@ -1,0 +1,18 @@
+{
+  "src/mnemosyne/engine.py": "72a7d67ec63e0a5c8e168006a8cb9d8d495eebbf9f63ab463a33e27fe43e4896",
+  "src/mnemosyne/mental_model_refresh.py": "8fcc16d5d6cbd45c2afab8ab13974762891abe9ebda26278fed6719c26583469",
+  "src/mnemosyne/mental_models.py": "5ee32721f2a8ef54e4f934e5935d32d35f58578f9867a58affa5850fd318d18a",
+  "src/mnemosyne/pipeline.py": "471e77bf747fa70ffa148327dccaba79263f6bd53060bd6ddec41eb07222739a",
+  "src/mnemosyne/postgres_engine.py": "66bb5df5de26be031a4ca9b00fb868c037017b2693c0948983d30222b6d4e989",
+  "src/mnemosyne/retrieval.py": "1cda779d6da8e10999a7f4b63b7113d116a3657268c14f061a5be2f331b9b7ec",
+  "tests/test_candidate_time_metadata.py": "98628892f133c1f387e4ce94469df46640d6db090ecbe3dea313b0c5b2189e74",
+  "tests/test_event_time_recall.py": "577b004cd57516d8137ba3583a84b45ff2dfc0d5f768398094a8effeff0a369f",
+  "tests/test_mental_model_change_refresh.py": "413c9d44bdd0d6b89926da6dd97e306ca4dae25d3c2849c6c3fd721a8c619499",
+  "tests/test_mental_model_scan_efficiency.py": "d857079ec9be94787067edd52999f68baa135cfddd3c9e3b71b41ceaacd9cc75",
+  "tests/test_phase12_graph_baseline.py": "14c1e60c85942f39a664e08a9d97bd5fb7bcf3e9e54257511553acca29c7c0a4",
+  "tests/test_runtime_exclusive_lock.py": "9cd8d857e057cbd0149f7d04e4cd133874439117ec737d41b2f53fc2cbeeb788",
+  "tests/test_skill_frameworks.py": "3b0cf66f5b52cf26687d78754d85e531d61b60012abb05e572dc3e5a45b54eb5",
+  "eval/reports/phase-12-graph-baseline-2026-07-15.md": "b16af3113e0c5d914bd07ed63a5cc3b9b76488e9e3cae9d6d658a4e88626a1df",
+  "eval/perf/golden/synthetic-growth.json.gz": "c69e8fc7d6ff568c6da7ed0b2795a45df5e34d66189cb8c656a87e0902e3217d",
+  "eval/perf/golden/synthetic-conflicts.json.gz": "6fcc12db726d8e0f5d91e8c4f27bc3846fccd4bab4c4fadf1e32d76094a540be"
+}

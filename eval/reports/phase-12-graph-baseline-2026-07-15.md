@@ -32,9 +32,9 @@ matrix tests decomposition behavior and is reported separately from the
 | Queries | 24 | 24 |
 | Persisted relations | 0 | 0 |
 | `graph_ppr` channel contribution | 0 | 0 |
-| Direct-query Recall@5 proxy | 0.5 | 0.5 |
-| Direct-query nDCG@5 proxy | 0.6131471927654584 | 0.6131471927654584 |
-| `traces.jsonl` SHA-256 | `1a16bb0d00dc106e59c3eafd3942d4a9eded08a1f56c07a59f02605361925437` | `1a16bb0d00dc106e59c3eafd3942d4a9eded08a1f56c07a59f02605361925437` |
+| Direct-query Recall@5 proxy | 1.0 | 1.0 |
+| Direct-query nDCG@5 proxy | 1.0 | 1.0 |
+| `traces.jsonl` SHA-256 | `415e8b252e7c5fd21b798d38aa2f37e05c2bc75641263dd2d3da905a76a9b1f4` | `415e8b252e7c5fd21b798d38aa2f37e05c2bc75641263dd2d3da905a76a9b1f4` |
 
 The two `traces.jsonl` files are byte-identical. The current direct-query
 lexical/dense path retrieves one of the two relevant documents, producing a

@@ -1,0 +1,612 @@
+HEAD 0d947f5c; local deterministic regressions only; no providers or benchmarks.
+FFFFFFFFFFFFFFFFFFFFFFFFFF..FFFFFFF....FF......                          [100%]
+=================================== FAILURES ===================================
+__ test_event_and_source_queries_choose_different_authoritative_clocks[local] __
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x10741a270>
+
+    def test_event_and_source_queries_choose_different_authoritative_clocks(engine):
+        actual = add(engine, "The workshop was at the harbor.", start="2026-10-07T10:00:00Z")
+        mentioned = add(engine, "The workshop was at the museum.", created="2026-10-07T09:00:00Z",
+                        start="2026-08-02T10:00:00Z")
+        event = ask(engine, "What workshop happened yesterday?")
+        source = ask(engine, "What did I say about the workshop yesterday?")
+>       assert [hit.id for hit in event.hits] == [actual]
+E       AssertionError: assert ['f5557241db1...ece2519a4114'] == ['b95a3e49f4c...6dd0beb0f99d']
+E         
+E         At index 0 diff: 'f5557241db1f9904bde37fe05effd334ed5b6fb2eb8151f80565ece2519a4114' != 'b95a3e49f4c3ce7512d4dfe66e4dc455e1e4185083318cb88ab96dd0beb0f99d'
+E         Use -v to get more diff
+
+tests/test_event_time_recall.py:47: AssertionError
+_ test_event_and_source_queries_choose_different_authoritative_clocks[sqlite] __
+
+engine = <mnemosyne.sqlite_engine.SqliteEngine object at 0x107a16270>
+
+    def test_event_and_source_queries_choose_different_authoritative_clocks(engine):
+        actual = add(engine, "The workshop was at the harbor.", start="2026-10-07T10:00:00Z")
+        mentioned = add(engine, "The workshop was at the museum.", created="2026-10-07T09:00:00Z",
+                        start="2026-08-02T10:00:00Z")
+        event = ask(engine, "What workshop happened yesterday?")
+        source = ask(engine, "What did I say about the workshop yesterday?")
+>       assert [hit.id for hit in event.hits] == [actual]
+E       AssertionError: assert ['f5557241db1...ece2519a4114'] == ['b95a3e49f4c...6dd0beb0f99d']
+E         
+E         At index 0 diff: 'f5557241db1f9904bde37fe05effd334ed5b6fb2eb8151f80565ece2519a4114' != 'b95a3e49f4c3ce7512d4dfe66e4dc455e1e4185083318cb88ab96dd0beb0f99d'
+E         Use -v to get more diff
+
+tests/test_event_time_recall.py:47: AssertionError
+_________ test_event_interval_overlap_and_exclusive_boundaries[local] __________
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x107a16cf0>
+
+    def test_event_interval_overlap_and_exclusive_boundaries(engine):
+        overlap = add(engine, "A workshop spanning the day.", start="2026-10-06T12:00:00Z", end="2026-10-08T10:00:00Z")
+        point = add(engine, "A workshop at the first instant.", start="2026-10-07T00:00:00Z")
+        zero = add(engine, "A workshop with a precise instant.", start="2026-10-07T12:00:00Z", end="2026-10-07T12:00:00Z")
+        add(engine, "A workshop ending before the day.", start="2026-10-06T12:00:00Z", end="2026-10-07T00:00:00Z")
+        add(engine, "A workshop beginning next day.", start="2026-10-08T00:00:00Z")
+        result = ask(engine, "What workshop happened yesterday?")
+>       assert {hit.id for hit in result.hits} == {overlap, point, zero}
+E       AssertionError: assert set() == {'0edbbd94e32...6713914ad6f2'}
+E         
+E         Extra items in the right set:
+E         '662f2c3563bd737a62c1baf9e146579b3ffd476966d1f8d5005be5f123d4a0e0'
+E         'fd0c720848056177e58be33dec8be115e1b05f81c92397c7a5516713914ad6f2'
+E         '0edbbd94e327fcf0ca689ce309d8bedd60d3b8db65bc14770e5b2ec54ba23f39'
+E         Use -v to get more diff
+
+tests/test_event_time_recall.py:60: AssertionError
+_________ test_event_interval_overlap_and_exclusive_boundaries[sqlite] _________
+
+engine = <mnemosyne.sqlite_engine.SqliteEngine object at 0x107b5c410>
+
+    def test_event_interval_overlap_and_exclusive_boundaries(engine):
+        overlap = add(engine, "A workshop spanning the day.", start="2026-10-06T12:00:00Z", end="2026-10-08T10:00:00Z")
+        point = add(engine, "A workshop at the first instant.", start="2026-10-07T00:00:00Z")
+        zero = add(engine, "A workshop with a precise instant.", start="2026-10-07T12:00:00Z", end="2026-10-07T12:00:00Z")
+        add(engine, "A workshop ending before the day.", start="2026-10-06T12:00:00Z", end="2026-10-07T00:00:00Z")
+        add(engine, "A workshop beginning next day.", start="2026-10-08T00:00:00Z")
+        result = ask(engine, "What workshop happened yesterday?")
+>       assert {hit.id for hit in result.hits} == {overlap, point, zero}
+E       AssertionError: assert set() == {'0edbbd94e32...6713914ad6f2'}
+E         
+E         Extra items in the right set:
+E         '662f2c3563bd737a62c1baf9e146579b3ffd476966d1f8d5005be5f123d4a0e0'
+E         'fd0c720848056177e58be33dec8be115e1b05f81c92397c7a5516713914ad6f2'
+E         '0edbbd94e327fcf0ca689ce309d8bedd60d3b8db65bc14770e5b2ec54ba23f39'
+E         Use -v to get more diff
+
+tests/test_event_time_recall.py:60: AssertionError
+_ test_missing_or_invalid_event_time_does_not_borrow_recording_time[local-metadata0] _
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x107a16f90>
+metadata = {}
+
+    @pytest.mark.parametrize("metadata", [{}, {"event_start": "invalid"}, {"event_end": "2026-10-07"},
+        {"event_start": "2026-10-08", "event_end": "2026-10-06"}])
+    def test_missing_or_invalid_event_time_does_not_borrow_recording_time(engine, metadata):
+        add(engine, "A workshop was discussed.", created="2026-10-07T10:00:00Z", metadata=metadata)
+        result = ask(engine, "What workshop happened yesterday?")
+>       assert result.hits == [] and result.abstained
+E       AssertionError: assert ([Hit(id='aea7...': 'record'})] == []
+E         
+E         Left contains one more item: Hit(id='aea783cfdc509cfe51bde2ce36e65fd5801692efff4ded86c85200f82e6407b6', kind='evidence', tenant_id='events', branch...was discussed.'}, 'memory_type': 'evidence', 'created_at': '2026-10-07T10:00:00+00:00', 'created_at_source': 'record'})
+E         Use -v to get more diff)
+
+tests/test_event_time_recall.py:68: AssertionError
+_ test_missing_or_invalid_event_time_does_not_borrow_recording_time[local-metadata1] _
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x107a170e0>
+metadata = {'event_start': 'invalid'}
+
+    @pytest.mark.parametrize("metadata", [{}, {"event_start": "invalid"}, {"event_end": "2026-10-07"},
+        {"event_start": "2026-10-08", "event_end": "2026-10-06"}])
+    def test_missing_or_invalid_event_time_does_not_borrow_recording_time(engine, metadata):
+        add(engine, "A workshop was discussed.", created="2026-10-07T10:00:00Z", metadata=metadata)
+        result = ask(engine, "What workshop happened yesterday?")
+>       assert result.hits == [] and result.abstained
+E       AssertionError: assert ([Hit(id='aea7...': 'record'})] == []
+E         
+E         Left contains one more item: Hit(id='aea783cfdc509cfe51bde2ce36e65fd5801692efff4ded86c85200f82e6407b6', kind='evidence', tenant_id='events', branch...was discussed.'}, 'memory_type': 'evidence', 'created_at': '2026-10-07T10:00:00+00:00', 'created_at_source': 'record'})
+E         Use -v to get more diff)
+
+tests/test_event_time_recall.py:68: AssertionError
+_ test_missing_or_invalid_event_time_does_not_borrow_recording_time[local-metadata2] _
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x107a17230>
+metadata = {'event_end': '2026-10-07'}
+
+    @pytest.mark.parametrize("metadata", [{}, {"event_start": "invalid"}, {"event_end": "2026-10-07"},
+        {"event_start": "2026-10-08", "event_end": "2026-10-06"}])
+    def test_missing_or_invalid_event_time_does_not_borrow_recording_time(engine, metadata):
+        add(engine, "A workshop was discussed.", created="2026-10-07T10:00:00Z", metadata=metadata)
+        result = ask(engine, "What workshop happened yesterday?")
+>       assert result.hits == [] and result.abstained
+E       AssertionError: assert ([Hit(id='aea7...': 'record'})] == []
+E         
+E         Left contains one more item: Hit(id='aea783cfdc509cfe51bde2ce36e65fd5801692efff4ded86c85200f82e6407b6', kind='evidence', tenant_id='events', branch...was discussed.'}, 'memory_type': 'evidence', 'created_at': '2026-10-07T10:00:00+00:00', 'created_at_source': 'record'})
+E         Use -v to get more diff)
+
+tests/test_event_time_recall.py:68: AssertionError
+_ test_missing_or_invalid_event_time_does_not_borrow_recording_time[local-metadata3] _
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x10741a270>
+metadata = {'event_start': '2026-10-08', 'event_end': '2026-10-06'}
+
+    @pytest.mark.parametrize("metadata", [{}, {"event_start": "invalid"}, {"event_end": "2026-10-07"},
+        {"event_start": "2026-10-08", "event_end": "2026-10-06"}])
+    def test_missing_or_invalid_event_time_does_not_borrow_recording_time(engine, metadata):
+        add(engine, "A workshop was discussed.", created="2026-10-07T10:00:00Z", metadata=metadata)
+        result = ask(engine, "What workshop happened yesterday?")
+>       assert result.hits == [] and result.abstained
+E       AssertionError: assert ([Hit(id='aea7...': 'record'})] == []
+E         
+E         Left contains one more item: Hit(id='aea783cfdc509cfe51bde2ce36e65fd5801692efff4ded86c85200f82e6407b6', kind='evidence', tenant_id='events', branch...was discussed.'}, 'memory_type': 'evidence', 'created_at': '2026-10-07T10:00:00+00:00', 'created_at_source': 'record'})
+E         Use -v to get more diff)
+
+tests/test_event_time_recall.py:68: AssertionError
+_ test_missing_or_invalid_event_time_does_not_borrow_recording_time[sqlite-metadata0] _
+
+engine = <mnemosyne.sqlite_engine.SqliteEngine object at 0x107a2b390>
+metadata = {}
+
+    @pytest.mark.parametrize("metadata", [{}, {"event_start": "invalid"}, {"event_end": "2026-10-07"},
+        {"event_start": "2026-10-08", "event_end": "2026-10-06"}])
+    def test_missing_or_invalid_event_time_does_not_borrow_recording_time(engine, metadata):
+        add(engine, "A workshop was discussed.", created="2026-10-07T10:00:00Z", metadata=metadata)
+        result = ask(engine, "What workshop happened yesterday?")
+>       assert result.hits == [] and result.abstained
+E       AssertionError: assert ([Hit(id='aea7...': 'record'})] == []
+E         
+E         Left contains one more item: Hit(id='aea783cfdc509cfe51bde2ce36e65fd5801692efff4ded86c85200f82e6407b6', kind='evidence', tenant_id='events', branch...was discussed.'}, 'memory_type': 'evidence', 'created_at': '2026-10-07T10:00:00+00:00', 'created_at_source': 'record'})
+E         Use -v to get more diff)
+
+tests/test_event_time_recall.py:68: AssertionError
+_ test_missing_or_invalid_event_time_does_not_borrow_recording_time[sqlite-metadata1] _
+
+engine = <mnemosyne.sqlite_engine.SqliteEngine object at 0x107a56b10>
+metadata = {'event_start': 'invalid'}
+
+    @pytest.mark.parametrize("metadata", [{}, {"event_start": "invalid"}, {"event_end": "2026-10-07"},
+        {"event_start": "2026-10-08", "event_end": "2026-10-06"}])
+    def test_missing_or_invalid_event_time_does_not_borrow_recording_time(engine, metadata):
+        add(engine, "A workshop was discussed.", created="2026-10-07T10:00:00Z", metadata=metadata)
+        result = ask(engine, "What workshop happened yesterday?")
+>       assert result.hits == [] and result.abstained
+E       AssertionError: assert ([Hit(id='aea7...': 'record'})] == []
+E         
+E         Left contains one more item: Hit(id='aea783cfdc509cfe51bde2ce36e65fd5801692efff4ded86c85200f82e6407b6', kind='evidence', tenant_id='events', branch...was discussed.'}, 'memory_type': 'evidence', 'created_at': '2026-10-07T10:00:00+00:00', 'created_at_source': 'record'})
+E         Use -v to get more diff)
+
+tests/test_event_time_recall.py:68: AssertionError
+_ test_missing_or_invalid_event_time_does_not_borrow_recording_time[sqlite-metadata2] _
+
+engine = <mnemosyne.sqlite_engine.SqliteEngine object at 0x107a56190>
+metadata = {'event_end': '2026-10-07'}
+
+    @pytest.mark.parametrize("metadata", [{}, {"event_start": "invalid"}, {"event_end": "2026-10-07"},
+        {"event_start": "2026-10-08", "event_end": "2026-10-06"}])
+    def test_missing_or_invalid_event_time_does_not_borrow_recording_time(engine, metadata):
+        add(engine, "A workshop was discussed.", created="2026-10-07T10:00:00Z", metadata=metadata)
+        result = ask(engine, "What workshop happened yesterday?")
+>       assert result.hits == [] and result.abstained
+E       AssertionError: assert ([Hit(id='aea7...': 'record'})] == []
+E         
+E         Left contains one more item: Hit(id='aea783cfdc509cfe51bde2ce36e65fd5801692efff4ded86c85200f82e6407b6', kind='evidence', tenant_id='events', branch...was discussed.'}, 'memory_type': 'evidence', 'created_at': '2026-10-07T10:00:00+00:00', 'created_at_source': 'record'})
+E         Use -v to get more diff)
+
+tests/test_event_time_recall.py:68: AssertionError
+_ test_missing_or_invalid_event_time_does_not_borrow_recording_time[sqlite-metadata3] _
+
+engine = <mnemosyne.sqlite_engine.SqliteEngine object at 0x107a52210>
+metadata = {'event_start': '2026-10-08', 'event_end': '2026-10-06'}
+
+    @pytest.mark.parametrize("metadata", [{}, {"event_start": "invalid"}, {"event_end": "2026-10-07"},
+        {"event_start": "2026-10-08", "event_end": "2026-10-06"}])
+    def test_missing_or_invalid_event_time_does_not_borrow_recording_time(engine, metadata):
+        add(engine, "A workshop was discussed.", created="2026-10-07T10:00:00Z", metadata=metadata)
+        result = ask(engine, "What workshop happened yesterday?")
+>       assert result.hits == [] and result.abstained
+E       AssertionError: assert ([Hit(id='aea7...': 'record'})] == []
+E         
+E         Left contains one more item: Hit(id='aea783cfdc509cfe51bde2ce36e65fd5801692efff4ded86c85200f82e6407b6', kind='evidence', tenant_id='events', branch...was discussed.'}, 'memory_type': 'evidence', 'created_at': '2026-10-07T10:00:00+00:00', 'created_at_source': 'record'})
+E         Use -v to get more diff)
+
+tests/test_event_time_recall.py:68: AssertionError
+_________________ test_occurrence_aliases_are_supported[local] _________________
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x107a170e0>
+
+    def test_occurrence_aliases_are_supported(engine):
+        cid = add(engine, "A workshop at the coast.", metadata={"occurred_start": "2026-10-07T12:00:00Z"})
+>       assert [hit.id for hit in ask(engine, "What workshop happened yesterday?").hits] == [cid]
+E       AssertionError: assert [] == ['c7d84fc6515...e6c4fdc89dbf']
+E         
+E         Right contains one more item: 'c7d84fc6515a76292b7e1042b77d7d136d0326e7f9c751fdd219e6c4fdc89dbf'
+E         Use -v to get more diff
+
+tests/test_event_time_recall.py:74: AssertionError
+________________ test_occurrence_aliases_are_supported[sqlite] _________________
+
+engine = <mnemosyne.sqlite_engine.SqliteEngine object at 0x107bcc7c0>
+
+    def test_occurrence_aliases_are_supported(engine):
+        cid = add(engine, "A workshop at the coast.", metadata={"occurred_start": "2026-10-07T12:00:00Z"})
+>       assert [hit.id for hit in ask(engine, "What workshop happened yesterday?").hits] == [cid]
+E       AssertionError: assert [] == ['c7d84fc6515...e6c4fdc89dbf']
+E         
+E         Right contains one more item: 'c7d84fc6515a76292b7e1042b77d7d136d0326e7f9c751fdd219e6c4fdc89dbf'
+E         Use -v to get more diff
+
+tests/test_event_time_recall.py:74: AssertionError
+_ test_date_only_recall_does_not_require_repeating_question_framing[local-What did I say yesterday?-source] _
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x107a16f90>
+query = 'What did I say yesterday?', clock = 'source'
+
+    @pytest.mark.parametrize("query,clock", [("What did I say yesterday?", "source"),
+        ("What happened yesterday?", "event"), ("What was the first thing I said yesterday?", "source")])
+    def test_date_only_recall_does_not_require_repeating_question_framing(engine, query, clock):
+        cid = add(engine, "The workshop was at the museum.", created="2026-10-07T10:00:00Z",
+                  start="2026-10-07T11:00:00Z")
+        result = ask(engine, query)
+        assert [hit.id for hit in result.hits] == [cid]
+>       assert result.abstained is False
+E       AssertionError: assert True is False
+E        +  where True = RetrievalResult(query='What did I say yesterday?', hits=[Hit(id='f5557241db1f9904bde37fe05effd334ed5b6fb2eb8151f80565e...sterday', 'start': '2026-10-07T00:00:00+00:00', 'end': '2026-10-08T00:00:00+00:00', 'speaker': 'user', 'passages': 1}}).abstained
+
+tests/test_event_time_recall.py:84: AssertionError
+_ test_date_only_recall_does_not_require_repeating_question_framing[local-What happened yesterday?-event] _
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x107a16270>
+query = 'What happened yesterday?', clock = 'event'
+
+    @pytest.mark.parametrize("query,clock", [("What did I say yesterday?", "source"),
+        ("What happened yesterday?", "event"), ("What was the first thing I said yesterday?", "source")])
+    def test_date_only_recall_does_not_require_repeating_question_framing(engine, query, clock):
+        cid = add(engine, "The workshop was at the museum.", created="2026-10-07T10:00:00Z",
+                  start="2026-10-07T11:00:00Z")
+        result = ask(engine, query)
+        assert [hit.id for hit in result.hits] == [cid]
+>       assert result.abstained is False
+E       AssertionError: assert True is False
+E        +  where True = RetrievalResult(query='What happened yesterday?', hits=[Hit(id='f5557241db1f9904bde37fe05effd334ed5b6fb2eb8151f80565ec...dow': {'label': 'yesterday', 'start': '2026-10-07T00:00:00+00:00', 'end': '2026-10-08T00:00:00+00:00', 'passages': 1}}).abstained
+
+tests/test_event_time_recall.py:84: AssertionError
+_ test_date_only_recall_does_not_require_repeating_question_framing[local-What was the first thing I said yesterday?-source] _
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x107a16120>
+query = 'What was the first thing I said yesterday?', clock = 'source'
+
+    @pytest.mark.parametrize("query,clock", [("What did I say yesterday?", "source"),
+        ("What happened yesterday?", "event"), ("What was the first thing I said yesterday?", "source")])
+    def test_date_only_recall_does_not_require_repeating_question_framing(engine, query, clock):
+        cid = add(engine, "The workshop was at the museum.", created="2026-10-07T10:00:00Z",
+                  start="2026-10-07T11:00:00Z")
+        result = ask(engine, query)
+        assert [hit.id for hit in result.hits] == [cid]
+>       assert result.abstained is False
+E       AssertionError: assert True is False
+E        +  where True = RetrievalResult(query='What was the first thing I said yesterday?', hits=[Hit(id='f5557241db1f9904bde37fe05effd334ed5b...-07T00:00:00+00:00', 'end': '2026-10-08T00:00:00+00:00', 'order': 'earliest_first', 'speaker': 'user', 'passages': 1}}).abstained
+
+tests/test_event_time_recall.py:84: AssertionError
+_ test_date_only_recall_does_not_require_repeating_question_framing[sqlite-What did I say yesterday?-source] _
+
+engine = <mnemosyne.sqlite_engine.SqliteEngine object at 0x107bcce20>
+query = 'What did I say yesterday?', clock = 'source'
+
+    @pytest.mark.parametrize("query,clock", [("What did I say yesterday?", "source"),
+        ("What happened yesterday?", "event"), ("What was the first thing I said yesterday?", "source")])
+    def test_date_only_recall_does_not_require_repeating_question_framing(engine, query, clock):
+        cid = add(engine, "The workshop was at the museum.", created="2026-10-07T10:00:00Z",
+                  start="2026-10-07T11:00:00Z")
+        result = ask(engine, query)
+        assert [hit.id for hit in result.hits] == [cid]
+>       assert result.abstained is False
+E       AssertionError: assert True is False
+E        +  where True = RetrievalResult(query='What did I say yesterday?', hits=[Hit(id='f5557241db1f9904bde37fe05effd334ed5b6fb2eb8151f80565e...sterday', 'start': '2026-10-07T00:00:00+00:00', 'end': '2026-10-08T00:00:00+00:00', 'speaker': 'user', 'passages': 1}}).abstained
+
+tests/test_event_time_recall.py:84: AssertionError
+_ test_date_only_recall_does_not_require_repeating_question_framing[sqlite-What happened yesterday?-event] _
+
+engine = <mnemosyne.sqlite_engine.SqliteEngine object at 0x107bba050>
+query = 'What happened yesterday?', clock = 'event'
+
+    @pytest.mark.parametrize("query,clock", [("What did I say yesterday?", "source"),
+        ("What happened yesterday?", "event"), ("What was the first thing I said yesterday?", "source")])
+    def test_date_only_recall_does_not_require_repeating_question_framing(engine, query, clock):
+        cid = add(engine, "The workshop was at the museum.", created="2026-10-07T10:00:00Z",
+                  start="2026-10-07T11:00:00Z")
+        result = ask(engine, query)
+        assert [hit.id for hit in result.hits] == [cid]
+>       assert result.abstained is False
+E       AssertionError: assert True is False
+E        +  where True = RetrievalResult(query='What happened yesterday?', hits=[Hit(id='f5557241db1f9904bde37fe05effd334ed5b6fb2eb8151f80565ec...dow': {'label': 'yesterday', 'start': '2026-10-07T00:00:00+00:00', 'end': '2026-10-08T00:00:00+00:00', 'passages': 1}}).abstained
+
+tests/test_event_time_recall.py:84: AssertionError
+_ test_date_only_recall_does_not_require_repeating_question_framing[sqlite-What was the first thing I said yesterday?-source] _
+
+engine = <mnemosyne.sqlite_engine.SqliteEngine object at 0x107afcd50>
+query = 'What was the first thing I said yesterday?', clock = 'source'
+
+    @pytest.mark.parametrize("query,clock", [("What did I say yesterday?", "source"),
+        ("What happened yesterday?", "event"), ("What was the first thing I said yesterday?", "source")])
+    def test_date_only_recall_does_not_require_repeating_question_framing(engine, query, clock):
+        cid = add(engine, "The workshop was at the museum.", created="2026-10-07T10:00:00Z",
+                  start="2026-10-07T11:00:00Z")
+        result = ask(engine, query)
+        assert [hit.id for hit in result.hits] == [cid]
+>       assert result.abstained is False
+E       AssertionError: assert True is False
+E        +  where True = RetrievalResult(query='What was the first thing I said yesterday?', hits=[Hit(id='f5557241db1f9904bde37fe05effd334ed5b...-07T00:00:00+00:00', 'end': '2026-10-08T00:00:00+00:00', 'order': 'earliest_first', 'speaker': 'user', 'passages': 1}}).abstained
+
+tests/test_event_time_recall.py:84: AssertionError
+________ test_temporal_presence_does_not_support_unrelated_topic[local] ________
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x10741a270>
+
+    def test_temporal_presence_does_not_support_unrelated_topic(engine):
+        add(engine, "The workshop was at the museum.", created="2026-10-07T10:00:00Z", start="2026-10-07T11:00:00Z")
+        for query in ("What did I say about glaciers yesterday?", "What glacier expedition happened yesterday?"):
+            result = ask(engine, query)
+            assert result.abstained
+>           assert not result.explain["time_window"]["date_only"]
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           KeyError: 'date_only'
+
+tests/test_event_time_recall.py:94: KeyError
+_______ test_temporal_presence_does_not_support_unrelated_topic[sqlite] ________
+
+engine = <mnemosyne.sqlite_engine.SqliteEngine object at 0x107bb6210>
+
+    def test_temporal_presence_does_not_support_unrelated_topic(engine):
+        add(engine, "The workshop was at the museum.", created="2026-10-07T10:00:00Z", start="2026-10-07T11:00:00Z")
+        for query in ("What did I say about glaciers yesterday?", "What glacier expedition happened yesterday?"):
+            result = ask(engine, query)
+            assert result.abstained
+>           assert not result.explain["time_window"]["date_only"]
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           KeyError: 'date_only'
+
+tests/test_event_time_recall.py:94: KeyError
+_ test_event_order_uses_occurrence_time_across_repeated_dst_hour[local-first] __
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x107a17770>
+position = 'first'
+
+    @pytest.mark.parametrize("position", ["first", "last"])
+    def test_event_order_uses_occurrence_time_across_repeated_dst_hour(engine, position):
+        early = add(engine, "The workshop at the harbor.", created="2026-11-03T12:00:00Z", start="2026-11-01T01:50:00-04:00")
+        late = add(engine, "The workshop at the museum.", created="2026-11-02T12:00:00Z", start="2026-11-01T01:10:00-05:00")
+        result = ask(engine, f"What workshop happened {position} yesterday?", evaluated_at="2026-11-02T12:00:00Z",
+                     query_timezone="America/New_York")
+>       assert [hit.id for hit in result.hits] == ([early, late] if position == "first" else [late, early])
+E       AssertionError: assert [] == ['8d971f71422...302330370206']
+E         
+E         Right contains 2 more items, first extra item: '8d971f71422178da9dfdd85ca672eee0fd729f7f94eb706ea71f5e7fcd28e30d'
+E         Use -v to get more diff
+
+tests/test_event_time_recall.py:104: AssertionError
+__ test_event_order_uses_occurrence_time_across_repeated_dst_hour[local-last] __
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x107a16120>
+position = 'last'
+
+    @pytest.mark.parametrize("position", ["first", "last"])
+    def test_event_order_uses_occurrence_time_across_repeated_dst_hour(engine, position):
+        early = add(engine, "The workshop at the harbor.", created="2026-11-03T12:00:00Z", start="2026-11-01T01:50:00-04:00")
+        late = add(engine, "The workshop at the museum.", created="2026-11-02T12:00:00Z", start="2026-11-01T01:10:00-05:00")
+        result = ask(engine, f"What workshop happened {position} yesterday?", evaluated_at="2026-11-02T12:00:00Z",
+                     query_timezone="America/New_York")
+>       assert [hit.id for hit in result.hits] == ([early, late] if position == "first" else [late, early])
+E       AssertionError: assert [] == ['2668d68e495...5e7fcd28e30d']
+E         
+E         Right contains 2 more items, first extra item: '2668d68e49565626564c3a2e3b15cb2412a9fe35b3acd2c66c8a302330370206'
+E         Use -v to get more diff
+
+tests/test_event_time_recall.py:104: AssertionError
+_ test_event_order_uses_occurrence_time_across_repeated_dst_hour[sqlite-first] _
+
+engine = <mnemosyne.sqlite_engine.SqliteEngine object at 0x107b2d9a0>
+position = 'first'
+
+    @pytest.mark.parametrize("position", ["first", "last"])
+    def test_event_order_uses_occurrence_time_across_repeated_dst_hour(engine, position):
+        early = add(engine, "The workshop at the harbor.", created="2026-11-03T12:00:00Z", start="2026-11-01T01:50:00-04:00")
+        late = add(engine, "The workshop at the museum.", created="2026-11-02T12:00:00Z", start="2026-11-01T01:10:00-05:00")
+        result = ask(engine, f"What workshop happened {position} yesterday?", evaluated_at="2026-11-02T12:00:00Z",
+                     query_timezone="America/New_York")
+>       assert [hit.id for hit in result.hits] == ([early, late] if position == "first" else [late, early])
+E       AssertionError: assert [] == ['8d971f71422...302330370206']
+E         
+E         Right contains 2 more items, first extra item: '8d971f71422178da9dfdd85ca672eee0fd729f7f94eb706ea71f5e7fcd28e30d'
+E         Use -v to get more diff
+
+tests/test_event_time_recall.py:104: AssertionError
+_ test_event_order_uses_occurrence_time_across_repeated_dst_hour[sqlite-last] __
+
+engine = <mnemosyne.sqlite_engine.SqliteEngine object at 0x107acecf0>
+position = 'last'
+
+    @pytest.mark.parametrize("position", ["first", "last"])
+    def test_event_order_uses_occurrence_time_across_repeated_dst_hour(engine, position):
+        early = add(engine, "The workshop at the harbor.", created="2026-11-03T12:00:00Z", start="2026-11-01T01:50:00-04:00")
+        late = add(engine, "The workshop at the museum.", created="2026-11-02T12:00:00Z", start="2026-11-01T01:10:00-05:00")
+        result = ask(engine, f"What workshop happened {position} yesterday?", evaluated_at="2026-11-02T12:00:00Z",
+                     query_timezone="America/New_York")
+>       assert [hit.id for hit in result.hits] == ([early, late] if position == "first" else [late, early])
+E       AssertionError: assert [] == ['2668d68e495...5e7fcd28e30d']
+E         
+E         Right contains 2 more items, first extra item: '2668d68e49565626564c3a2e3b15cb2412a9fe35b3acd2c66c8a302330370206'
+E         Use -v to get more diff
+
+tests/test_event_time_recall.py:104: AssertionError
+____________ test_event_route_never_reads_hidden_event_dates[local] ____________
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x107a15fd0>
+
+    def test_event_route_never_reads_hidden_event_dates(engine):
+        public = add(engine, "A public workshop.", start="2026-10-07T10:00:00Z")
+        add(engine, "An inaccessible workshop.", start="2026-10-07T10:00:00Z", access={"allow_roles": ["operator"]})
+        add(engine, "Another tenant's workshop.", start="2026-10-07T10:00:00Z", tenant="another")
+        add(engine, "Another branch's workshop.", start="2026-10-07T10:00:00Z", branch="other")
+        add(engine, "workshop code: secret", start="2026-10-07T10:00:00Z", created="2026-10-07T12:00:00Z",
+            access={"redact_fields": ["code"], "min_role_for_raw": "operator"})
+        result = ask(engine, "What workshop happened yesterday?", role="reader")
+>       assert [hit.id for hit in result.hits] == [public]
+E       AssertionError: assert ['a6be2a731c6...72b15f597731'] == ['71d1a678ad9...cd7eb18b2f82']
+E         
+E         At index 0 diff: 'a6be2a731c61e32ed293302842247b65429de081c57e7a65bd6272b15f597731' != '71d1a678ad957fdf88ac47b57f5c9fb887a00be70bca3dd00857cd7eb18b2f82'
+E         Use -v to get more diff
+
+tests/test_event_time_recall.py:122: AssertionError
+___________ test_event_route_never_reads_hidden_event_dates[sqlite] ____________
+
+engine = <mnemosyne.sqlite_engine.SqliteEngine object at 0x107aceeb0>
+
+    def test_event_route_never_reads_hidden_event_dates(engine):
+        public = add(engine, "A public workshop.", start="2026-10-07T10:00:00Z")
+        add(engine, "An inaccessible workshop.", start="2026-10-07T10:00:00Z", access={"allow_roles": ["operator"]})
+        add(engine, "Another tenant's workshop.", start="2026-10-07T10:00:00Z", tenant="another")
+        add(engine, "Another branch's workshop.", start="2026-10-07T10:00:00Z", branch="other")
+        add(engine, "workshop code: secret", start="2026-10-07T10:00:00Z", created="2026-10-07T12:00:00Z",
+            access={"redact_fields": ["code"], "min_role_for_raw": "operator"})
+        result = ask(engine, "What workshop happened yesterday?", role="reader")
+>       assert [hit.id for hit in result.hits] == [public]
+E       AssertionError: assert ['a6be2a731c6...72b15f597731'] == ['71d1a678ad9...cd7eb18b2f82']
+E         
+E         At index 0 diff: 'a6be2a731c61e32ed293302842247b65429de081c57e7a65bd6272b15f597731' != '71d1a678ad957fdf88ac47b57f5c9fb887a00be70bca3dd00857cd7eb18b2f82'
+E         Use -v to get more diff
+
+tests/test_event_time_recall.py:122: AssertionError
+____ test_common_historical_calendar_windows[in 2025-2025-01-01-2026-01-01] ____
+
+phrase = 'in 2025', start = '2025-01-01', end = '2026-01-01'
+
+    @pytest.mark.parametrize("phrase,start,end", [
+        ("in 2025", "2025-01-01", "2026-01-01"), ("last year", "2025-01-01", "2026-01-01"),
+        ("last month", "2026-09-01", "2026-10-01"), ("on 2026-10-07", "2026-10-07", "2026-10-08"),
+    ])
+    def test_common_historical_calendar_windows(phrase, start, end):
+        window = query_time_window(f"What happened {phrase}?", parse_dt(NOW), query_timezone="UTC")
+>       assert window is not None
+E       assert None is not None
+
+tests/test_event_time_recall.py:131: AssertionError
+___ test_common_historical_calendar_windows[last year-2025-01-01-2026-01-01] ___
+
+phrase = 'last year', start = '2025-01-01', end = '2026-01-01'
+
+    @pytest.mark.parametrize("phrase,start,end", [
+        ("in 2025", "2025-01-01", "2026-01-01"), ("last year", "2025-01-01", "2026-01-01"),
+        ("last month", "2026-09-01", "2026-10-01"), ("on 2026-10-07", "2026-10-07", "2026-10-08"),
+    ])
+    def test_common_historical_calendar_windows(phrase, start, end):
+        window = query_time_window(f"What happened {phrase}?", parse_dt(NOW), query_timezone="UTC")
+>       assert window is not None
+E       assert None is not None
+
+tests/test_event_time_recall.py:131: AssertionError
+__ test_common_historical_calendar_windows[last month-2026-09-01-2026-10-01] ___
+
+phrase = 'last month', start = '2026-09-01', end = '2026-10-01'
+
+    @pytest.mark.parametrize("phrase,start,end", [
+        ("in 2025", "2025-01-01", "2026-01-01"), ("last year", "2025-01-01", "2026-01-01"),
+        ("last month", "2026-09-01", "2026-10-01"), ("on 2026-10-07", "2026-10-07", "2026-10-08"),
+    ])
+    def test_common_historical_calendar_windows(phrase, start, end):
+        window = query_time_window(f"What happened {phrase}?", parse_dt(NOW), query_timezone="UTC")
+>       assert window is not None
+E       assert None is not None
+
+tests/test_event_time_recall.py:131: AssertionError
+_ test_common_historical_calendar_windows[on 2026-10-07-2026-10-07-2026-10-08] _
+
+phrase = 'on 2026-10-07', start = '2026-10-07', end = '2026-10-08'
+
+    @pytest.mark.parametrize("phrase,start,end", [
+        ("in 2025", "2025-01-01", "2026-01-01"), ("last year", "2025-01-01", "2026-01-01"),
+        ("last month", "2026-09-01", "2026-10-01"), ("on 2026-10-07", "2026-10-07", "2026-10-08"),
+    ])
+    def test_common_historical_calendar_windows(phrase, start, end):
+        window = query_time_window(f"What happened {phrase}?", parse_dt(NOW), query_timezone="UTC")
+>       assert window is not None
+E       assert None is not None
+
+tests/test_event_time_recall.py:131: AssertionError
+_________________ test_exact_iso_day_has_local_dst_boundaries __________________
+
+    def test_exact_iso_day_has_local_dst_boundaries():
+        window = query_time_window("What did I say on 2026-03-08?", parse_dt(NOW), query_timezone="America/New_York")
+>       assert window is not None and window.axis == "source"
+E       assert (None is not None)
+
+tests/test_event_time_recall.py:138: AssertionError
+____ test_historical_year_selects_metadata_dates_not_recording_year[local] _____
+
+engine = <mnemosyne.engine.LocalMemoryEngine object at 0x10741a270>
+
+    def test_historical_year_selects_metadata_dates_not_recording_year(engine):
+        event = add(engine, "A workshop on the coast.", start="2025-08-07T10:00:00Z")
+        add(engine, "A workshop on the mountain.", created="2025-08-07T10:00:00Z", start="2024-08-07T10:00:00Z")
+        result = ask(engine, "What workshop happened in 2025?")
+>       assert [hit.id for hit in result.hits] == [event]
+E       AssertionError: assert ['429586d7ce2...f5cf36f97764'] == ['429586d7ce2...74954e2d1a4a']
+E         
+E         Left contains one more item: 'b6cc5c41ab9741e5bad3e868aedd190289c1029fa73f034d8a10f5cf36f97764'
+E         Use -v to get more diff
+
+tests/test_event_time_recall.py:153: AssertionError
+____ test_historical_year_selects_metadata_dates_not_recording_year[sqlite] ____
+
+engine = <mnemosyne.sqlite_engine.SqliteEngine object at 0x107acf5b0>
+
+    def test_historical_year_selects_metadata_dates_not_recording_year(engine):
+        event = add(engine, "A workshop on the coast.", start="2025-08-07T10:00:00Z")
+        add(engine, "A workshop on the mountain.", created="2025-08-07T10:00:00Z", start="2024-08-07T10:00:00Z")
+        result = ask(engine, "What workshop happened in 2025?")
+>       assert [hit.id for hit in result.hits] == [event]
+E       AssertionError: assert ['429586d7ce2...f5cf36f97764'] == ['429586d7ce2...74954e2d1a4a']
+E         
+E         Left contains one more item: 'b6cc5c41ab9741e5bad3e868aedd190289c1029fa73f034d8a10f5cf36f97764'
+E         Use -v to get more diff
+
+tests/test_event_time_recall.py:153: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_event_time_recall.py::test_event_and_source_queries_choose_different_authoritative_clocks[local]
+FAILED tests/test_event_time_recall.py::test_event_and_source_queries_choose_different_authoritative_clocks[sqlite]
+FAILED tests/test_event_time_recall.py::test_event_interval_overlap_and_exclusive_boundaries[local]
+FAILED tests/test_event_time_recall.py::test_event_interval_overlap_and_exclusive_boundaries[sqlite]
+FAILED tests/test_event_time_recall.py::test_missing_or_invalid_event_time_does_not_borrow_recording_time[local-metadata0]
+FAILED tests/test_event_time_recall.py::test_missing_or_invalid_event_time_does_not_borrow_recording_time[local-metadata1]
+FAILED tests/test_event_time_recall.py::test_missing_or_invalid_event_time_does_not_borrow_recording_time[local-metadata2]
+FAILED tests/test_event_time_recall.py::test_missing_or_invalid_event_time_does_not_borrow_recording_time[local-metadata3]
+FAILED tests/test_event_time_recall.py::test_missing_or_invalid_event_time_does_not_borrow_recording_time[sqlite-metadata0]
+FAILED tests/test_event_time_recall.py::test_missing_or_invalid_event_time_does_not_borrow_recording_time[sqlite-metadata1]
+FAILED tests/test_event_time_recall.py::test_missing_or_invalid_event_time_does_not_borrow_recording_time[sqlite-metadata2]
+FAILED tests/test_event_time_recall.py::test_missing_or_invalid_event_time_does_not_borrow_recording_time[sqlite-metadata3]
+FAILED tests/test_event_time_recall.py::test_occurrence_aliases_are_supported[local]
+FAILED tests/test_event_time_recall.py::test_occurrence_aliases_are_supported[sqlite]
+FAILED tests/test_event_time_recall.py::test_date_only_recall_does_not_require_repeating_question_framing[local-What did I say yesterday?-source]
+FAILED tests/test_event_time_recall.py::test_date_only_recall_does_not_require_repeating_question_framing[local-What happened yesterday?-event]
+FAILED tests/test_event_time_recall.py::test_date_only_recall_does_not_require_repeating_question_framing[local-What was the first thing I said yesterday?-source]
+FAILED tests/test_event_time_recall.py::test_date_only_recall_does_not_require_repeating_question_framing[sqlite-What did I say yesterday?-source]
+FAILED tests/test_event_time_recall.py::test_date_only_recall_does_not_require_repeating_question_framing[sqlite-What happened yesterday?-event]
+FAILED tests/test_event_time_recall.py::test_date_only_recall_does_not_require_repeating_question_framing[sqlite-What was the first thing I said yesterday?-source]
+FAILED tests/test_event_time_recall.py::test_temporal_presence_does_not_support_unrelated_topic[local]
+FAILED tests/test_event_time_recall.py::test_temporal_presence_does_not_support_unrelated_topic[sqlite]
+FAILED tests/test_event_time_recall.py::test_event_order_uses_occurrence_time_across_repeated_dst_hour[local-first]
+FAILED tests/test_event_time_recall.py::test_event_order_uses_occurrence_time_across_repeated_dst_hour[local-last]
+FAILED tests/test_event_time_recall.py::test_event_order_uses_occurrence_time_across_repeated_dst_hour[sqlite-first]
+FAILED tests/test_event_time_recall.py::test_event_order_uses_occurrence_time_across_repeated_dst_hour[sqlite-last]
+FAILED tests/test_event_time_recall.py::test_event_route_never_reads_hidden_event_dates[local]
+FAILED tests/test_event_time_recall.py::test_event_route_never_reads_hidden_event_dates[sqlite]
+FAILED tests/test_event_time_recall.py::test_common_historical_calendar_windows[in 2025-2025-01-01-2026-01-01]
+FAILED tests/test_event_time_recall.py::test_common_historical_calendar_windows[last year-2025-01-01-2026-01-01]
+FAILED tests/test_event_time_recall.py::test_common_historical_calendar_windows[last month-2026-09-01-2026-10-01]
+FAILED tests/test_event_time_recall.py::test_common_historical_calendar_windows[on 2026-10-07-2026-10-07-2026-10-08]
+FAILED tests/test_event_time_recall.py::test_exact_iso_day_has_local_dst_boundaries
+FAILED tests/test_event_time_recall.py::test_historical_year_selects_metadata_dates_not_recording_year[local]
+FAILED tests/test_event_time_recall.py::test_historical_year_selects_metadata_dates_not_recording_year[sqlite]
+35 failed, 12 passed in 0.79s

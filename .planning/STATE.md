@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: "Scoped book-answer grounding and CI repairs; see quick/2026-10-26-book-answer-grounding. No full benchmarks or provider inference. Historical milestone acceptance remains open."
+stopped_at: "Scoped temporal recall and refresh efficiency at main@f688c747; see quick/2026-10-26-temporal-refresh. No full benchmarks or provider inference. Historical milestone acceptance remains open."
 last_updated: "2026-10-26"
 last_activity: 2026-10-26
 progress:
@@ -18,10 +18,11 @@ progress:
 
 ## Current execution — 2026-10-26
 
-The active continuation is Mnemosyne book-answer grounding and CI repairs in
-[`quick/2026-10-26-book-answer-grounding`](quick/2026-10-26-book-answer-grounding/PLAN.md).
-Runtime changes and focused regression evidence are complete; final delivery is
-recorded in that task's summary. The current user restriction forbids full
+The active continuation is Mnemosyne temporal recall and refresh efficiency in
+[`quick/2026-10-26-temporal-refresh`](quick/2026-10-26-temporal-refresh/PLAN.md).
+The preceding book-answer and runtime repairs are pushed at `0d947f5c`.
+Current implementation, review, verification and delivery are recorded in the
+new task's summary. The current user restriction forbids full
 benchmarks and provider inference. Mnemosyne and Mnemetric have independent code
 and data; comparison references are allowed. Do not resume historical benchmark
 or leaderboard tasks from the older checkpoints below as part of this request.

@@ -93,6 +93,7 @@ from mnemosyne.pipeline import run_retrieval_pipeline
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.privacy import ErasureMode
 from mnemosyne.retrieval import (
+    _spans_calendar_period,
     derived_evidence_readable,
     evidence_current_for_context,
     derived_source_cids,
@@ -1508,7 +1509,7 @@ def _bounded_float(value: object, *, default: float) -> float:
 
 def _candidate_time_metadata(
     created_at: Any, metadata: Mapping[str, Any], *, redacted: bool = False,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     """Expose canonical dates, never arbitrary text stored under date keys.
 
     Event dates are source-provided content. A redacted read cannot safely
@@ -1529,10 +1530,29 @@ def _candidate_time_metadata(
     if created is not None:
         result["_candidate_created_at"] = created
     if not redacted:
+        dates: dict[str, str] = {}
+        local_dates: dict[str, datetime] = {}
         for name, alias in (("event_start", "occurred_start"), ("event_end", "occurred_end")):
-            value = canonical(metadata.get(name)) or canonical(metadata.get(alias))
-            if value is not None:
-                result[name] = value
+            supplied = (metadata.get(name), metadata.get(alias))
+            for raw in supplied:
+                value = canonical(raw)
+                if value is not None:
+                    dates[name] = value
+                    local_dates[name] = raw if isinstance(raw, datetime) else datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                    break
+            else:
+                # A malformed explicit end must not turn an interval into a
+                # valid point. None remains an ordinary absent endpoint.
+                if any(raw is not None for raw in supplied):
+                    return result
+        result.update(dates)
+        start, end = local_dates.get("event_start"), local_dates.get("event_end")
+        if start is not None and end is not None and _spans_calendar_period(
+            start.replace(tzinfo=None), end.replace(tzinfo=None)
+        ):
+            # Preserve civil calendar precision before UTC normalization, including
+            # months crossing DST. Never copy this marker from user metadata.
+            result["_candidate_event_calendar"] = True
     return result
 
 

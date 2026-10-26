@@ -123,14 +123,20 @@ the failure count and schedule the next check one interval after completion.
 Due times, claims, and retry state survive worker restarts.
 
 Enable `--check-changes` when saved answers should react sooner to new facts,
-corrections, deletion, or access-policy changes. The worker takes one shared
-authorized-corpus snapshot per eligible polling cycle and compares it with the
-saved answers. It processes normally due work first and can then refresh stale
+corrections, deletion, or access-policy changes. A long-lived worker takes one
+shared authorized-corpus snapshot, then waits at least five seconds after the
+scan finishes before scanning again. Failed scans have the same delay. Between
+scans it keeps only versioned model identifiers awaiting work, never source
+text or saved answers. It processes normally due work first and can then refresh stale
 models before their interval expires. The existing batch limit still applies.
 Early attempts require at least 60 seconds since that model's last start and finish;
 active leases and retry backoff are respected. Unchanged models never load a
 provider. This is opt-in polling, not an event subscription or incremental
-synthesis, and the snapshot cost grows with the readable corpus.
+synthesis, and the snapshot cost grows with the readable corpus. Scan coalescing
+can add up to five seconds plus the caller's polling interval to early detection.
+Each poll still validates authority, and scheduled work is not delayed by this
+scan interval. A new worker can scan immediately; the interval is per worker,
+not a cross-process cache.
 
 ```sh
 mneme --backend sqlite --store ./memory-db mental-model-worker \
@@ -197,13 +203,17 @@ direct reads; lists include only matching models. Signed MCP sessions bind the
 tenant, user, role, and source trust as on other authenticated tools. Mutation
 and requested refresh require write authorization.
 
-Freshness scans and fingerprints the authorized branch's evidence, assertions,
+Ready and abstained views scan and fingerprint the authorized branch's evidence, assertions,
 relations, preferences, and policy, excluding read telemetry. Its cost grows with
-that corpus; incremental change tracking is not yet implemented. New facts and corrections can
+that corpus; incremental change tracking is not yet implemented. Pending and
+error views return no answer or source identifiers and need no corpus scan.
+Lists filter the owner and read scope before deciding whether a scan is needed.
+New facts and corrections can
 invalidate an answer even when its old citations remain. Before returning a
 ready answer, the service revalidates exact citation spans, hashes, claim text,
 and supported deterministic derivations. A stale read hides the answer rather
-than silently refreshing it.
+than silently refreshing it. The worker's advisory scan interval never applies
+to these direct reads or to source validation during refresh publication.
 
 Parsed relative day windows also invalidate when their boundaries change,
 without requiring a memory write. Continuously moving questions such as
