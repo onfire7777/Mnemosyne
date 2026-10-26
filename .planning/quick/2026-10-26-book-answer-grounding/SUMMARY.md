@@ -1,7 +1,8 @@
 ---
 phase: quick-book-answer-grounding
 plan: "01"
-status: delivery_pending
+status: complete
+source_commit: 1557f8aafa47018a5218a821ce397f00f9592a5b
 ---
 
 # Book answer grounding summary
@@ -16,5 +17,6 @@ intentionally ignored fixture tests; 9 restricted PostgreSQL role checks passed.
 Ruff, Clippy, formatting and whitespace checks passed. No external inference or
 full benchmark ran. The user guide describes the new behavior and its limits.
 
-Normal commit/push confirmation is pending. Historical benchmark acceptance and
+Implementation commit `1557f8aafa47018a5218a821ce397f00f9592a5b` was pushed normally to `origin/main`.
+`git ls-remote --heads origin main` returned that exact SHA for `refs/heads/main`. Historical benchmark acceptance and
 the ongoing broad memory-quality goal remain open.
