@@ -1,0 +1,29 @@
+{
+  "repository": "onfire7777/Mnemosyne",
+  "source": "GitHub plugin fetch_workflow_job_logs",
+  "reviewed_on": "2026-10-26",
+  "failing_run_id": 40400787108,
+  "failing_commit": "b63b34616f65e31457f3bc243b158d479f734e68",
+  "local_review_head": "97091695",
+  "jobs": [
+    {
+      "id": 121845744435,
+      "name": "Postgres integration",
+      "url": "https://github.com/onfire7777/Mnemosyne/actions/runs/40400787108/job/121845744435",
+      "failure": "postgres-role-check: documents is absent from app DELETE allowlist",
+      "excerpt": "postgres-role-check.log"
+    },
+    {
+      "id": 121845744505,
+      "name": "Compact ONNX tensor parity",
+      "url": "https://github.com/onfire7777/Mnemosyne/actions/runs/40400787108/job/121845744505",
+      "failure": "runtime::tests::synthetic_components_share_protocol_runtime_and_preserve_identity: read.result None at runtime.rs:1149",
+      "excerpt": "onnx-runtime-failure.log"
+    }
+  ],
+  "later_run_observed": {
+    "id": 40402212127,
+    "state": "in_progress",
+    "note": "Read-only snapshot; no rerun was dispatched and no later success is claimed."
+  }
+}

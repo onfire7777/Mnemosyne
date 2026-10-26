@@ -1,0 +1,13 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_____________ test_role_check_default_matches_narrow_schema_grants _____________
+tests/test_postgres_role_check.py:337: in test_role_check_default_matches_narrow_schema_grants
+    assert set(args.app_fk_cascade_delete_tables.split(",")) == grants
+E   AssertionError: assert {'contradicti...ental_models'} == {'contradicti...ental_models'}
+E     
+E     Extra items in the right set:
+E     'documents'
+E     Use -v to get more diff
+=========================== short test summary info ============================
+FAILED tests/test_postgres_role_check.py::test_role_check_default_matches_narrow_schema_grants
+1 failed in 0.17s

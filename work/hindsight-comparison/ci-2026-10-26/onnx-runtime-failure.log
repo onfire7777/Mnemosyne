@@ -1,0 +1,76 @@
+2026-10-26T21:02:19.0620150Z    Compiling num_cpus v1.17.0
+2026-10-26T21:02:20.3468330Z    Compiling answering-ort v0.1.0 (/home/runner/work/Mnemosyne/Mnemosyne/services/answering-ort)
+2026-10-26T21:02:29.3297691Z     Finished `test` profile [unoptimized + debuginfo] target(s) in 35.52s
+2026-10-26T21:02:29.3455811Z      Running unittests src/lib.rs (services/answering-ort/target/debug/deps/answering_ort-8a22172cd378abb7)
+2026-10-26T21:02:29.3479877Z 
+2026-10-26T21:02:29.3480447Z running 48 tests
+2026-10-26T21:02:29.3487731Z test embed::tests::ranking_empty_candidates_returns_empty ... ok
+2026-10-26T21:02:29.3489284Z test embed::tests::request_and_response_require_version_and_all_identities ... ok
+2026-10-26T21:02:29.3490917Z test embed::tests::ranking_ties_are_broken_by_candidate_id ... ok
+2026-10-26T21:02:29.3493013Z test embed::tests::vectors_must_be_finite_nonzero_and_exactly_padded ... ok
+2026-10-26T21:02:29.3494536Z test embed::tests::native_and_zero_padded_cosine_have_the_same_result ... ok
+2026-10-26T21:02:29.3495821Z test onnx_reader::tests::span_selection_masks_question_and_gaps_and_abstains_at_threshold ... ok
+2026-10-26T21:02:29.3497288Z test protocol::tests::preserves_recursive_duplicate_and_existing_limit_rejection ... ok
+2026-10-26T21:02:29.3498682Z test protocol::tests::exact_versioned_request_schema_accepts_all_operations ... ok
+2026-10-26T21:02:29.3500028Z test protocol::tests::responses_have_exact_common_schema_and_one_payload ... ok
+2026-10-26T21:02:29.3501255Z test reader::tests::expired_deadline_is_fail_closed_by_caller ... ok
+2026-10-26T21:02:29.3502288Z test reader::tests::logits_are_validated_before_return ... ok
+2026-10-26T21:02:29.3503475Z test reader::tests::null_yes_no_and_unsupported_types_are_bounded ... ok
+2026-10-26T21:02:29.3505105Z test protocol::tests::wrong_version_and_malformed_identity_are_rejected ... ok
+2026-10-26T21:02:29.3515304Z test reader::tests::rejects_drifted_identity_nonfinite_and_bad_utf8_offsets ... ok
+2026-10-26T21:02:29.3516446Z test reader::tests::span_reconstructs_exact_source_bytes ... ok
+2026-10-26T21:02:29.3517289Z test reader::tests::spans_must_be_grounded_in_supporting_facts ... ok
+2026-10-26T21:02:29.3518255Z test reader::tests::windows_must_cover_the_full_source_context ... ok
+2026-10-26T21:02:29.3519297Z test rerank::tests::orders_scores_descending_then_by_evidence_id_and_caps_width ... ok
+2026-10-26T21:02:29.3520369Z test rerank::tests::rejects_duplicate_and_unknown_json_fields ... ok
+2026-10-26T21:02:29.3521301Z test rerank::tests::parses_exact_versioned_request_and_response ... ok
+2026-10-26T21:02:29.3522298Z test rerank::tests::rejects_expired_deadline_before_admitting_scores ... ok
+2026-10-26T21:02:29.3523315Z test rerank::tests::rejects_limits_identity_drift_and_nonfinite_scores ... ok
+2026-10-26T21:02:29.3524432Z test rerank::tests::rejects_unknown_duplicate_and_incomplete_scores ... ok
+2026-10-26T21:02:29.3524944Z test runtime::tests::configuration_enforces_the_resource_contract ... ok
+2026-10-26T21:02:29.3527610Z test runtime::tests::component_identity_drift_is_typed_and_fail_closed ... ok
+2026-10-26T21:02:29.3531131Z test runtime::tests::expired_deadline_fails_before_session_access ... ok
+2026-10-26T21:02:29.3533615Z test runtime::tests::custody_identity_is_configured_not_adopted_from_requests ... ok
+2026-10-26T21:02:29.3556544Z test runtime::tests::late_session_result_fails_closed ... ok
+2026-10-26T21:02:29.3558312Z test runtime::tests::malformed_custody_environment_fails_closed ... ok
+2026-10-26T21:02:29.3570722Z test runtime::tests::one_in_flight_is_enforced_and_permit_is_released ... ok
+2026-10-26T21:02:29.3585140Z test runtime::tests::partial_custody_environment_fails_closed ... ok
+2026-10-26T21:02:29.3592786Z test runtime::tests::invalid_session_outputs_fail_closed ... ok
+2026-10-26T21:02:29.3594061Z test runtime::tests::process_runtime_is_shared_and_unavailable_fails_closed ... ok
+2026-10-26T21:02:29.3595531Z test runtime::tests::runtime_config_loads_trusted_custody_identity_from_environment ... ok
+2026-10-26T21:02:29.3601073Z test runtime::tests::session_success_and_error_are_propagated ... ok
+2026-10-26T21:02:29.3602371Z test runtime::tests::synthetic_components_share_protocol_runtime_and_preserve_identity ... FAILED
+2026-10-26T21:02:29.3606695Z test runtime::tests::unset_custody_environment_keeps_development_identity ... ok
+2026-10-26T21:02:29.3608078Z test tests::admission_is_bounded_to_one_active_and_one_queued_connection ... ok
+2026-10-26T21:02:29.3621630Z test tests::loopback_transport_returns_deterministic_fail_closed_response ... ok
+2026-10-26T21:02:29.3624378Z test tests::rejects_non_loopback_before_binding ... ok
+2026-10-26T21:02:29.3727600Z test tests::framing_accepts_crlf_and_rejects_oversized_bodies ... ok
+2026-10-26T21:02:29.3728947Z test tests::unix_bind_does_not_remove_non_socket_paths ... ok
+2026-10-26T21:02:29.3732410Z test tests::unix_bind_preserves_live_socket ... ok
+2026-10-26T21:02:29.3746495Z test tests::unix_bind_replaces_stale_socket_and_sets_owner_only_permissions ... ok
+2026-10-26T21:02:29.3756461Z test runtime::tests::hard_deadline_returns_while_blocked_session_remains_busy ... ok
+2026-10-26T21:02:29.3798515Z test tests::unix_probe_timeout_is_bounded_and_treated_as_live ... ok
+2026-10-26T21:02:29.3840291Z test tests::request_deadline_covers_incomplete_frames ... ok
+2026-10-26T21:02:29.4518680Z test onnx_reader::tests::tokenizer_rejects_stochastic_or_ambiguous_inputs_and_keeps_all_windows ... ok
+2026-10-26T21:02:29.4519202Z 
+2026-10-26T21:02:29.4519299Z failures:
+2026-10-26T21:02:29.4519415Z 
+2026-10-26T21:02:29.4519749Z ---- runtime::tests::synthetic_components_share_protocol_runtime_and_preserve_identity stdout ----
+2026-10-26T21:02:29.4520187Z 
+2026-10-26T21:02:29.4520594Z thread 'runtime::tests::synthetic_components_share_protocol_runtime_and_preserve_identity' (4560) panicked at src/runtime.rs:1149:9:
+2026-10-26T21:02:29.4521227Z assertion `left == right` failed
+2026-10-26T21:02:29.4521477Z   left: None
+2026-10-26T21:02:29.4521911Z  right: Some(Read { prediction: Span { evidence_id: "fact-1", start: 0, end: 5, supporting_ids: ["fact-1"] } })
+2026-10-26T21:02:29.4522558Z note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+2026-10-26T21:02:29.4522870Z 
+2026-10-26T21:02:29.4522874Z 
+2026-10-26T21:02:29.4522977Z failures:
+2026-10-26T21:02:29.4523380Z     runtime::tests::synthetic_components_share_protocol_runtime_and_preserve_identity
+2026-10-26T21:02:29.4523723Z 
+2026-10-26T21:02:29.4523990Z test result: FAILED. 47 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+2026-10-26T21:02:29.4524663Z 
+2026-10-26T21:02:29.4527343Z error: test failed, to rerun pass `--lib`
+2026-10-26T21:02:29.4590237Z ##[error]Process completed with exit code 101.
+2026-10-26T21:02:29.4748370Z Post job cleanup.
+2026-10-26T21:02:29.5678797Z [command]/usr/bin/git version
+2026-10-26T21:02:29.5733313Z git version 2.55.0

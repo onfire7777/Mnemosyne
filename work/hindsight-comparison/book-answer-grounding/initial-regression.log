@@ -1,0 +1,21 @@
+..............................F......................................... [ 27%]
+........................................................................ [ 55%]
+........................................................................ [ 82%]
+.............................................                            [100%]
+=================================== FAILURES ===================================
+_______________ test_a_built_book_imports_at_once_under_any_name _______________
+tests/test_skill_frameworks.py:631: in test_a_built_book_imports_at_once_under_any_name
+    assert again == {"skill_id": first["skill_id"], "revision": 1, "name": "Weekly Book", "kind": "burnskill",
+E   AssertionError: assert {'skill_id': ...rnskill', ...} == {'skill_id': ...rnskill', ...}
+E     
+E     Omitting 2 identical items, use -vv to show
+E     Differing items:
+E     {'skill_id': 'skill-003069406da2'} != {'skill_id': 'skill-71ad5e15989b'}
+E     {'name': 'renamed copy'} != {'name': 'Weekly Book'}
+E     {'status': 'converting'} != {'status': 'ready'}
+E     Left contains 1 more item:...
+E     
+E     ...Full output truncated (4 lines hidden), use '-vv' to show
+=========================== short test summary info ============================
+FAILED tests/test_skill_frameworks.py::test_a_built_book_imports_at_once_under_any_name
+1 failed, 260 passed in 3.85s

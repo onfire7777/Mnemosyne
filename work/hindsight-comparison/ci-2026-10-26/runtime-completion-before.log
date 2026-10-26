@@ -1,0 +1,21 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.00s
+     Running unittests src/lib.rs (services/answering-ort/target/debug/deps/answering_ort-686c6469152fb0cc)
+
+running 1 test
+test runtime::tests::completion_releases_admission_before_publishing_success_or_failure ... FAILED
+
+failures:
+
+---- runtime::tests::completion_releases_admission_before_publishing_success_or_failure stdout ----
+
+thread 'runtime::tests::completion_releases_admission_before_publishing_success_or_failure' (9012848) panicked at src/runtime.rs:1281:22:
+a completed inference must admit work before its result is visible
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    runtime::tests::completion_releases_admission_before_publishing_success_or_failure
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 46 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--lib`

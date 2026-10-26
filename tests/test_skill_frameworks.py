@@ -625,9 +625,13 @@ def test_a_failed_book_imported_again_is_built_again(store, tmp_path, monkeypatc
 
 
 def test_a_built_book_imports_at_once_under_any_name(store, tmp_path):
-    first = store.import_skill(str(_epub(tmp_path / "Weekly Book.epub")), "m")
-    _done(store, first["skill_id"], first["revision"])
-    again = store.import_skill(str(_epub(tmp_path / "renamed copy.epub")), "m")
+    original = _epub(tmp_path / "Weekly Book.epub")
+    first = store.import_skill(str(original), "m")
+    assert _done(store, first["skill_id"], first["revision"])["conversion"] == "completed"
+    renamed = tmp_path / "renamed copy.epub"
+    # A renamed file keeps its bytes; rebuilding the ZIP can change its member timestamps.
+    renamed.write_bytes(original.read_bytes())
+    again = store.import_skill(str(renamed), "m")
     assert again == {"skill_id": first["skill_id"], "revision": 1, "name": "Weekly Book", "kind": "burnskill",
                      "status": "ready", "unchanged": True}
 

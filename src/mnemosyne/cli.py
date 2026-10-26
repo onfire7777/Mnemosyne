@@ -19786,7 +19786,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--app-fk-cascade-delete-tables",
         default=os.environ.get(
             "MNEMOSYNE_POSTGRES_APP_FK_CASCADE_DELETE_TABLES",
-            "justifications,contradictions,mental_models,entity_aliases",
+            "justifications,contradictions,mental_models,documents,entity_aliases",
         ),
         help=(
             "Comma-separated public tables the app role is permitted to hold DELETE on "

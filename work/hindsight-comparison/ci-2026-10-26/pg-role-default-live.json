@@ -1,0 +1,132 @@
+{
+  "checks": [
+    {
+      "current_user": "app_user",
+      "name": "app_role_safety",
+      "ok": true,
+      "rolbypassrls": false,
+      "rolsuper": false
+    },
+    {
+      "expected_group": "mnemosyne_app",
+      "name": "app_group_membership",
+      "ok": true
+    },
+    {
+      "allowed_fk_cascade_delete_tables": [
+        "contradictions",
+        "documents",
+        "entity_aliases",
+        "justifications",
+        "mental_models"
+      ],
+      "delete_table_count": 5,
+      "delete_tables_outside_fk_cascade": [],
+      "name": "app_destructive_writes_denied",
+      "ok": true,
+      "truncate_table_count": 0
+    },
+    {
+      "audit_table": "audit_log",
+      "name": "audit_log_append_only_app",
+      "ok": true
+    },
+    {
+      "expected_groups": [
+        "mnemosyne_app",
+        "mnemosyne_consolidator",
+        "mnemosyne_readonly"
+      ],
+      "name": "group_role_posture",
+      "ok": true
+    },
+    {
+      "current_user": "consolidator_user",
+      "name": "consolidator_role_safety",
+      "ok": true,
+      "rolbypassrls": false,
+      "rolsuper": false
+    },
+    {
+      "expected_group": "mnemosyne_consolidator",
+      "name": "consolidator_group_membership",
+      "ok": true
+    },
+    {
+      "delete_table_count": 29,
+      "name": "consolidator_sole_write",
+      "ok": true,
+      "table_count": 30
+    },
+    {
+      "audit_table": "audit_log",
+      "name": "audit_log_append_only_consolidator",
+      "ok": true
+    }
+  ],
+  "expected_fingerprint_present": false,
+  "findings": [],
+  "fingerprint": "a939566ec3ad589daeb35e1fa6a1283642946bc029c69c1e262d1f5287f8f130",
+  "latency_ms": 156.393,
+  "ok": true,
+  "requirements": {
+    "allow_localhost": true,
+    "audit_table": "audit_log",
+    "expected_app_group": "mnemosyne_app",
+    "expected_consolidator_group": "mnemosyne_consolidator",
+    "readonly_group": "mnemosyne_readonly"
+  },
+  "roles": {
+    "app": {
+      "current_user": "app_user",
+      "expected_group": "mnemosyne_app",
+      "group_exists": true,
+      "group_member": true,
+      "rolbypassrls": false,
+      "rolsuper": false
+    },
+    "consolidator": {
+      "current_user": "consolidator_user",
+      "expected_group": "mnemosyne_consolidator",
+      "group_exists": true,
+      "group_member": true,
+      "rolbypassrls": false,
+      "rolsuper": false
+    },
+    "groups": {
+      "mnemosyne_app": {
+        "rolbypassrls": false,
+        "rolcanlogin": false,
+        "rolsuper": false
+      },
+      "mnemosyne_consolidator": {
+        "rolbypassrls": false,
+        "rolcanlogin": false,
+        "rolsuper": false
+      },
+      "mnemosyne_readonly": {
+        "rolbypassrls": false,
+        "rolcanlogin": false,
+        "rolsuper": false
+      }
+    }
+  },
+  "target": {
+    "app": {
+      "configured": true,
+      "dbname": "mnemosyne",
+      "dsn_sha256": "sha256:e5955044bbbfe996c2c76a8f679d8290de02b551888cb542acc443867add104c",
+      "host": "127.0.0.1",
+      "local": true,
+      "port": 55434
+    },
+    "consolidator": {
+      "configured": true,
+      "dbname": "mnemosyne",
+      "dsn_sha256": "sha256:b7604de481620918ba57143a48d0a118db0e8d53a2d5ffc55c0e276e0c14dc79",
+      "host": "127.0.0.1",
+      "local": true,
+      "port": 55434
+    }
+  }
+}
