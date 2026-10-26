@@ -9187,13 +9187,38 @@ def cmd_procedure_search(args: argparse.Namespace) -> None:
 
 
 def cmd_framework_import(args: argparse.Namespace) -> None:
-    emit(load_tools(args).framework_import(args.path, model=args.model, name=args.name, tenant_id=args.tenant_id,
-                                           user_id=args.user_id))
+    tools = load_tools(args)
+    result = tools.framework_import(args.path, model=args.model, name=args.name, tenant_id=args.tenant_id,
+                                    user_id=args.user_id)
+    _emit_framework_job(tools, result, wait_for_completion=getattr(args, "wait", False))
 
 
 def cmd_skill_make_burnskill(args: argparse.Namespace) -> None:
-    emit(load_tools(args).skill_make_burnskill(args.skill_id, model=args.model, tenant_id=args.tenant_id,
-                                               user_id=args.user_id))
+    tools = load_tools(args)
+    result = tools.skill_make_burnskill(args.skill_id, model=args.model, tenant_id=args.tenant_id,
+                                        user_id=args.user_id)
+    _emit_framework_job(tools, result, wait_for_completion=getattr(args, "wait", False))
+
+
+def _emit_framework_job(tools: Any, result: dict[str, Any], *, wait_for_completion: bool) -> None:
+    """Keep the CLI's conversion worker alive when completion was requested."""
+    if not wait_for_completion or result.get("status") != "converting":
+        emit(result)
+        if wait_for_completion and result.get("status") != "ready":
+            raise SystemExit(1)
+        return
+    progress = None
+    while True:
+        status = tools.framework_status(result["skill_id"], revision=result["revision"])
+        if status.get("progress") and status["progress"] != progress:
+            progress = status["progress"]
+            print(progress, file=sys.stderr, flush=True)
+        if status.get("conversion") != "converting":
+            emit(status)
+            if status.get("conversion") != "completed":
+                raise SystemExit(1)
+            return
+        time.sleep(1)
 
 
 def cmd_skill_ask(args: argparse.Namespace) -> None:
@@ -20727,6 +20752,7 @@ def build_parser() -> argparse.ArgumentParser:
     framework_import.add_argument("--name")
     framework_import.add_argument("--tenant-id")
     framework_import.add_argument("--user-id")
+    framework_import.add_argument("--wait", action="store_true", help="keep running until conversion finishes")
     framework_import.set_defaults(func=cmd_framework_import)
 
     make_burnskill = sub.add_parser("skill-make-burnskill")
@@ -20734,6 +20760,7 @@ def build_parser() -> argparse.ArgumentParser:
     make_burnskill.add_argument("--model", default="")
     make_burnskill.add_argument("--tenant-id")
     make_burnskill.add_argument("--user-id")
+    make_burnskill.add_argument("--wait", action="store_true", help="keep running until conversion finishes")
     make_burnskill.set_defaults(func=cmd_skill_make_burnskill)
 
     skill_ask = sub.add_parser("skill-ask")

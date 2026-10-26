@@ -1,0 +1,23 @@
+{
+  "baseline": "b63b34616f65e31457f3bc243b158d479f734e68",
+  "suites": {
+    "book": {
+      "tests": "171",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "3.013"
+    },
+    "cli": {
+      "tests": "664",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "133.185"
+    }
+  },
+  "unique_tests": 823,
+  "book_pdf_parser": "pypdf 6.10.0 from existing bundled runtime",
+  "benchmark_run": false,
+  "model_provider_calls": false
+}

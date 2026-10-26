@@ -127,3 +127,11 @@ written text; reordered boundaries can form sensitive data that individual chunk
 do not reveal. Treat source metadata as another disclosure surface. Retrieval
 must not change behavior based on evaluation process flags. Reproducibility
 compares repeated current runs; non-regression compares matching data partitions.
+
+Whole-book coverage needs an explicit source ledger, not a model's claim of
+completion. Treat page/spine inventory, publisher TOC and inferred chapters as
+different evidence. Preserve each original contribution when merging concepts;
+split audit views instead of truncating merged evidence. Recheck imported success
+flags against source text, and never approve an original that only a validation
+copy repaired. Source accounting and literal quotation checks do not prove
+exhaustive semantic understanding.

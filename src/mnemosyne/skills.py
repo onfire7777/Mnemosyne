@@ -12,10 +12,13 @@ Scripts are stored, never run.
 from __future__ import annotations
 
 import base64
+import copy
 import hashlib
+import io
 import json
 import math
 import os
+import posixpath
 import queue
 import re
 import shutil
@@ -27,6 +30,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
+from urllib.parse import unquote, urlsplit
 from uuid import uuid4
 
 from mnemosyne import frameworks
@@ -47,6 +51,7 @@ TEXT_SUFFIXES = {".md", ".markdown", ".txt"}
 BOOK_SUFFIXES = {".pdf", ".epub"}
 BOOK_MAX_BYTES = 200_000_000
 CHUNK_WORDS = 500
+CHUNK_CHARS = 4000
 FRAGMENT_WORDS = 40
 LEGAL = {"license", "licence", "notice", "copying"}
 RUNNABLE_SUFFIXES = {".py", ".sh", ".bash", ".ps1", ".psm1", ".bat", ".cmd", ".js", ".mjs", ".cjs",
@@ -142,56 +147,281 @@ def source_units(texts: list[tuple[str, str]], limit: int = MAX_UNITS) -> list[s
     return ["\n\n".join(parts[i:i + size]) for i in range(0, len(parts), size)]
 
 
-def book_pages(path: Path) -> list[tuple[str, str]]:
-    """A book's text with where it stands: ("p.12", text) for a PDF page, ("ch.3", text) for an EPUB chapter."""
-    if path.stat().st_size > BOOK_MAX_BYTES:
+def _epub_member(base: str, href: str) -> str:
+    """Resolve one package URL inside the archive, never on the filesystem."""
+    url = urlsplit(href)
+    if url.scheme or url.netloc or url.query:
+        raise ValueError(f"unsupported EPUB chapter URL: {href!r}")
+    relative = unquote(url.path, errors="strict")
+    if not relative or relative.startswith("/") or "\\" in relative or "\x00" in relative:
+        raise ValueError(f"unsafe EPUB chapter URL: {href!r}")
+    member = posixpath.normpath(posixpath.join(base, relative))
+    if member == ".." or member.startswith("../"):
+        raise ValueError(f"EPUB chapter URL leaves the archive: {href!r}")
+    return member
+
+
+def _epub_text(raw: bytes, *, fragment_ids: set[str] | None = None) -> str:
+    """Read XML encodings and mixed text without stripping literal markup text."""
+    from xml.etree import ElementTree
+
+    root = ElementTree.fromstring(raw)
+    if fragment_ids is not None:
+        for element in root.iter():
+            for key in ("id", "{http://www.w3.org/XML/1998/namespace}id"):
+                if element.get(key):
+                    fragment_ids.add(element.get(key))
+    local = lambda e: e.tag.rsplit("}", 1)[-1].lower()  # noqa: E731
+    body = next((e for e in root.iter() if local(e) == "body"), root)
+    blocks = {"address", "article", "aside", "blockquote", "br", "div", "dl", "dt", "dd", "figure",
+              "figcaption", "footer", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hr", "li",
+              "main", "nav", "ol", "p", "pre", "section", "table", "td", "th", "tr", "ul"}
+    parts: list[str] = []
+
+    def walk(element: Any) -> None:
+        tag = local(element)
+        if tag in {"head", "script", "style"}:
+            return
+        if tag in blocks:
+            parts.append("\n")
+        if tag == "img" and element.get("alt"):
+            parts.extend((" ", element.get("alt"), " "))
+        if element.text:
+            parts.append(element.text)
+        for child in element:
+            walk(child)
+            if child.tail:
+                parts.append(child.tail)
+        if tag in blocks:
+            parts.append("\n")
+
+    walk(body)
+    return " ".join("".join(parts).split())
+
+
+def _epub_toc(book: zipfile.ZipFile, opf: Any, base: str, sources: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Publisher navigation inventory; unresolved targets remain visible for review."""
+    from xml.etree import ElementTree
+
+    tag = lambda e: e.tag.rsplit("}", 1)[-1].lower()  # noqa: E731
+    items = [e for e in opf.iter() if tag(e) == "item"]
+    spine = next((e for e in opf.iter() if tag(e) == "spine"), None)
+    ncx_id = spine.get("toc") if spine is not None else None
+    candidates = [(e, "epub3-nav") for e in items if "nav" in (e.get("properties") or "").split()]
+    ncx = next((e for e in items if ncx_id and e.get("id") == ncx_id), None)
+    missing_ncx = bool(ncx_id and ncx is None)
+    if ncx is None:
+        ncx = next((e for e in items if e.get("media-type") == "application/x-dtbncx+xml"), None)
+    if ncx is not None:
+        candidates.append((ncx, "epub2-ncx"))
+    members = set(book.namelist())
+    report: dict[str, Any] = {"detection": "publisher-toc-unreadable" if candidates or missing_ncx else "spine-only",
+                              "format": None, "entries": [],
+                              "errors": [f"declared NCX item {ncx_id!r} is missing"] if missing_ncx else [],
+                              "source_count": sum(len(s["labels"]) for s in sources.values())}
+    for item, format_name in candidates:
+        entries: list[dict[str, Any]] = []
+        try:
+            member = _epub_member(base, item.get("href") or "")
+            root = ElementTree.fromstring(book.read(member))
+            toc_base = posixpath.dirname(member)
+
+            def entry(title: str, href: str | None, depth: int, parent: int | None) -> int:
+                order = len(entries) + 1
+                result = {"order": order, "title": " ".join(title.split()), "depth": depth, "parent": parent,
+                          "href": href, "target": None, "fragment": None, "source_labels": [],
+                          "status": "heading" if not href else "unresolved", "reason": None}
+                if href:
+                    try:
+                        url = urlsplit(href)
+                        target = member if href.startswith("#") else _epub_member(toc_base, href)
+                        fragment = unquote(url.fragment, errors="strict")
+                        result.update(target=target, fragment=fragment or None)
+                        source = sources.get(target)
+                        if source is None:
+                            result["reason"] = "target is outside the spine" if target in members else "target is missing"
+                        else:
+                            result["source_labels"] = list(source["labels"])
+                            if fragment and fragment not in source["fragments"]:
+                                result["reason"] = "target fragment is missing"
+                            else:
+                                result["status"] = "resolved"
+                    except (ValueError, UnicodeError) as exc:
+                        result["reason"] = str(exc)
+                entries.append(result)
+                return order
+
+            if format_name == "epub3-nav":
+                nav = next((e for e in root.iter() if tag(e) == "nav" and (
+                    "toc" in (e.get("{http://www.idpf.org/2007/ops}type") or e.get("type") or "").split()
+                    or "doc-toc" in (e.get("role") or "").split())), None)
+                listing = next((e for e in nav.iter() if tag(e) == "ol"), None) if nav is not None else None
+                if listing is None:
+                    raise ValueError("navigation document has no toc ordered list")
+
+                def walk_list(node: Any, depth: int = 0, parent: int | None = None) -> None:
+                    for li in node:
+                        if tag(li) != "li":
+                            continue
+                        label = next((e for e in li if tag(e) in {"a", "span"}), None)
+                        title = "".join(label.itertext()) if label is not None else (li.text or "")
+                        order = entry(title, label.get("href") if label is not None else None, depth, parent)
+                        for child in li:
+                            if tag(child) == "ol":
+                                walk_list(child, depth + 1, order)
+
+                walk_list(listing)
+            else:
+                nav_map = next((e for e in root.iter() if tag(e) == "navmap"), None)
+                if nav_map is None:
+                    raise ValueError("NCX document has no navMap")
+
+                def walk_ncx(node: Any, depth: int = 0, parent: int | None = None) -> None:
+                    for point in node:
+                        if tag(point) != "navpoint":
+                            continue
+                        label = next((e for e in point if tag(e) == "navlabel"), None)
+                        content = next((e for e in point if tag(e) == "content"), None)
+                        order = entry("".join(label.itertext()) if label is not None else "",
+                                      content.get("src") if content is not None else None, depth, parent)
+                        walk_ncx(point, depth + 1, order)
+
+                walk_ncx(nav_map)
+            if not entries:
+                raise ValueError("publisher table of contents has no entries")
+            report.update(detection="publisher-toc", format=format_name, entries=entries)
+            break
+        except (KeyError, ValueError, ElementTree.ParseError, LookupError) as exc:
+            report["errors"].append(f"{format_name}: {exc}")
+    report.update(toc_entry_count=len(report["entries"]),
+                  resolved_count=sum(e["status"] == "resolved" for e in report["entries"]),
+                  unresolved_count=sum(e["status"] == "unresolved" for e in report["entries"]),
+                  heading_count=sum(e["status"] == "heading" for e in report["entries"]))
+    return report
+
+
+def book_pages(path: Path, *, source_bytes: bytes | None = None,
+               inventory: dict[str, Any] | None = None) -> list[tuple[str, str]]:
+    """Text only, located by PDF page or EPUB spine item; no OCR or visual interpretation.
+
+    Provably blank PDF pages retain an empty entry. Unreadable nonblank pages
+    fail the import instead of silently presenting partial text as the book.
+    """
+    if source_bytes is None and path.stat().st_size > BOOK_MAX_BYTES:
+        raise ValueError(f"{path.name} is over {BOOK_MAX_BYTES} bytes")
+    source_bytes = path.read_bytes() if source_bytes is None else source_bytes
+    if len(source_bytes) > BOOK_MAX_BYTES:
         raise ValueError(f"{path.name} is over {BOOK_MAX_BYTES} bytes")
     if path.suffix.lower() == ".pdf":
         try:
             from pypdf import PdfReader
         except ImportError as exc:
             raise ValueError("reading a PDF needs pypdf (pip install pypdf)") from exc
-        return [(f"p.{n}", text.strip()) for n, page in enumerate(PdfReader(str(path)).pages, 1)
-                if (text := page.extract_text() or "").strip()]
+        pages = []
+        unreadable = []
+        for n, page in enumerate(PdfReader(io.BytesIO(source_bytes)).pages, 1):
+            try:
+                text = (page.extract_text() or "").strip()
+                content = page.get_contents()
+                annotations = page.get("/Annots") if hasattr(page, "get") else None
+                blank = (content is None or not content.get_data().strip()) and not annotations
+            except Exception:  # malformed text streams must not yield a partial book
+                unreadable.append(n)
+                continue
+            if not text and not blank:
+                unreadable.append(n)
+            pages.append((f"p.{n}", text))
+        if unreadable:
+            raise ValueError(f"incomplete PDF text extraction in {path.name}: pages {unreadable} have content "
+                             "but no readable text; apply OCR or repair their text layer before importing")
+        return pages
     # EPUB: a zip of XHTML chapters, in the order its package file's spine gives.
-    import html
     from xml.etree import ElementTree
 
-    with zipfile.ZipFile(path) as book:
+    with zipfile.ZipFile(io.BytesIO(source_bytes)) as book:
         if sum(i.file_size for i in book.infolist()) > BOOK_MAX_BYTES:
             raise ValueError(f"{path.name} unpacks to over {BOOK_MAX_BYTES} bytes")
-        container = ElementTree.fromstring(book.read("META-INF/container.xml"))
+        try:
+            container = ElementTree.fromstring(book.read("META-INF/container.xml"))
+        except (KeyError, ElementTree.ParseError) as exc:
+            raise ValueError(f"incomplete EPUB: cannot read its container: {exc}") from exc
         tag = lambda e: e.tag.rsplit("}", 1)[-1]  # noqa: E731 - with or without the OPF namespace
-        opf_path = next(e.get("full-path") for e in container.iter() if tag(e) == "rootfile")
-        opf = ElementTree.fromstring(book.read(opf_path))
-        hrefs = {e.get("id"): e.get("href") for e in opf.iter() if tag(e) == "item"}
-        base = PurePosixPath(opf_path).parent
+        package = next((e.get("full-path") for e in container.iter() if tag(e) == "rootfile"), None)
+        if not package:
+            raise ValueError("incomplete EPUB: no package path in its container")
+        opf_path = _epub_member("", package)
+        try:
+            opf = ElementTree.fromstring(book.read(opf_path))
+        except (KeyError, ElementTree.ParseError) as exc:
+            raise ValueError(f"incomplete EPUB: cannot read its package: {exc}") from exc
+        hrefs = {}
+        for item in (e for e in opf.iter() if tag(e) == "item"):
+            key = item.get("id")
+            if key in hrefs:
+                raise ValueError(f"incomplete EPUB: duplicate manifest ID {key!r}")
+            hrefs[key] = item.get("href")
+        base = posixpath.dirname(opf_path)
         pages = []
-        for n, ref in enumerate((e.get("idref") for e in opf.iter() if tag(e) == "itemref"), 1):
-            if ref not in hrefs:
-                continue
-            raw = book.read(str(base / hrefs[ref])).decode("utf-8", errors="replace")
-            raw = re.sub(r"(?is)<(script|style)\b.*?</\1>", " ", raw)
-            text = " ".join(html.unescape(re.sub(r"<[^>]+>", " ", raw)).split())
-            if text:
-                pages.append((f"ch.{n}", text))
+        sources: dict[str, dict[str, Any]] = {}
+        refs = [e.get("idref") for e in opf.iter() if tag(e) == "itemref"]
+        if not refs:
+            raise ValueError(f"incomplete EPUB: {path.name} has no reading-order spine")
+        for n, ref in enumerate(refs, 1):
+            if ref not in hrefs or not hrefs[ref]:
+                raise ValueError(f"incomplete EPUB: spine item {n} ({ref!r}) has no chapter in the manifest")
+            member = _epub_member(base, hrefs[ref])
+            fragments: set[str] = set()
+            try:
+                text = _epub_text(book.read(member), fragment_ids=fragments)
+            except (KeyError, ElementTree.ParseError, ValueError, LookupError) as exc:
+                raise ValueError(f"incomplete EPUB: cannot read spine item {n} ({member}): {exc}") from exc
+            if not text:
+                raise ValueError(f"incomplete EPUB: spine item {n} ({member}) has no readable text; "
+                                 "extract its image or embedded content before importing")
+            pages.append((f"ch.{n}", text))
+            source = sources.setdefault(member, {"labels": [], "fragments": fragments})
+            source["labels"].append(f"ch.{n}")
+        if inventory is not None:
+            inventory["publisher_toc"] = _epub_toc(book, opf, base, sources)
         return pages
 
 
 def chunk_pages(pages: list[tuple[str, str]]) -> list[str]:
-    """Passages of at most CHUNK_WORDS words, each led by where it stands in the book. A scrap shorter
+    """Bounded passages, each led by where it stands in the book. A scrap shorter
     than FRAGMENT_WORDS (a page break's tail, a caption) joins the passage before it - or after it,
-    at the start - so it is read in context instead of standing alone as a passage of its own."""
+    at the start - when it fits. Separate EPUB chapters never share a passage."""
     out: list[str] = []
+    counts: list[int] = []
+    labels: list[str] = []
     for label, text in pages:
-        words = text.split()
         head = f"[{label}] " if label else ""
-        for i in range(0, len(words), CHUNK_WORDS):
-            piece = head + " ".join(words[i:i + CHUNK_WORDS])
-            if out and (len(words[i:i + CHUNK_WORDS]) < FRAGMENT_WORDS or len(out[-1].split()) < FRAGMENT_WORDS):
+        room = CHUNK_CHARS - len(head)
+        if room < 1:
+            raise ValueError("book location label exceeds the passage size limit")
+        words = [word[i:i + room] for word in text.split() for i in range(0, len(word), room)]
+        groups: list[list[str]] = []
+        size = 0
+        for word in words:
+            if not groups or len(groups[-1]) >= CHUNK_WORDS or size + 1 + len(word) > room:
+                groups.append([])
+                size = 0
+            size += len(word) + bool(groups[-1])
+            groups[-1].append(word)
+        for group in groups:
+            piece = head + " ".join(group)
+            count = len(group)
+            chapter_boundary = bool(out and label != labels[-1]
+                                    and (label.startswith("ch.") or labels[-1].startswith("ch.")))
+            if (out and not chapter_boundary and counts[-1] + count <= CHUNK_WORDS
+                    and len(out[-1]) + 1 + len(piece) <= CHUNK_CHARS
+                    and (count < FRAGMENT_WORDS or counts[-1] < FRAGMENT_WORDS)):
                 out[-1] += f" {piece}"
+                counts[-1] += count
+                labels[-1] = label
             else:
                 out.append(piece)
+                counts.append(count)
+                labels.append(label)
     return out
 
 
@@ -210,15 +440,42 @@ def effects_of(nodes: list[dict[str, Any]], files: list[str], judged: list[str] 
 
 def _from_v1(payload: dict[str, Any]) -> tuple[list[str], dict[str, Any]]:
     """A Mnemosyne 1.3.0 framework (Proper Thinking's tables) in this module's form."""
-    units = [c["chunk_text"] for c in sorted(payload["chunks"], key=lambda c: c["page_number"])]
+    chunks = sorted(payload["chunks"], key=lambda c: c["page_number"])
+    units = [c["chunk_text"] for c in chunks]
+    page_units: dict[int, list[int]] = {}
+    for number, chunk in enumerate(chunks, 1):
+        page = chunk["page_number"]
+        if type(page) is int and page >= 0:
+            page_units.setdefault(page, []).append(number)
+
+    def cited_units(reference: Any) -> list[int]:
+        if not isinstance(reference, str):
+            return []
+        # Legacy references name source pages, not chunk positions. A page can
+        # have several chunks; a missing page must never cite an unrelated unit.
+        value = re.sub(r"\b(?:pages?|pp?)\.?\s*(?=\d)", "", reference, flags=re.I).strip(" []()")
+        item = r"\d{1,9}(?:\s*[-–]\s*\d{1,9})?"
+        if not re.fullmatch(rf"{item}(?:(?:\s*[,;]\s*|\s+){item})*", value):
+            return []
+        cited: set[int] = set()
+        for match in re.finditer(r"(\d{1,9})(?:\s*[-–]\s*(\d{1,9}))?", value):
+            first = int(match[1])
+            last = int(match[2]) if match[2] is not None else first
+            # Iterate the actual inventory, never allocate a potentially huge
+            # numeric range supplied by an imported reference.
+            for page, numbers in page_units.items():
+                if first <= page <= last:
+                    cited.update(numbers)
+        return sorted(cited)
+
     ids = {n["id"]: i for i, n in enumerate(payload["nodes"])}
     nodes = []
     for n in payload["nodes"]:
         fields = json.loads(n["definitive_fields"]) if isinstance(n.get("definitive_fields"), str) else {}
-        cited = {int(x) for x in re.findall(r"\d+", n.get("page_ref") or "") if 0 < int(x) <= len(units)}
+        cited = cited_units(n.get("page_ref"))
         nodes.append({"id": ids[n["id"]], "type": n["node_type"], "title": n["title"], "content": n["content"],
                       "parent": ids.get(n.get("parent_id")), "depends_on": ids.get(n.get("depends_on_node_id")),
-                      "units": sorted(cited), "fields": fields or {}, "epistemic_type": n.get("epistemic_type")})
+                      "units": cited, "fields": fields or {}, "epistemic_type": n.get("epistemic_type")})
     edges = [{"from": ids[e["from_node_id"]], "to": ids[e["to_node_id"]], "type": e["edge_type"],
               "why": e.get("why") or ""} for e in payload["edges"]
              if e["from_node_id"] in ids and e["to_node_id"] in ids]
@@ -311,6 +568,128 @@ def validate_burnskill(path: str) -> dict[str, Any]:
         warnings.append("its mechanical audit did not pass: " + "; ".join(fw["mechanical"].get("failures") or [])[:300])
     return {"valid": not errors, "version": 2, "name": name, "nodes": len(nodes), "edges": len(edges),
             "errors": errors[:50], "warnings": warnings[:50]}
+
+
+def _verified_framework(fw: dict[str, Any], units: list[str]) -> tuple[dict[str, Any], list[str]]:
+    """Recheck stored source accounting and quotes without trusting saved verdicts."""
+    if not isinstance(fw, dict) or not isinstance(units, list) or not units or not all(isinstance(u, str) for u in units):
+        raise ValueError("framework and nonempty text source units are required")
+    checked = copy.deepcopy(fw)
+    nodes, edges = checked.get("nodes"), checked.get("edges")
+    if not isinstance(nodes, list) or not isinstance(edges, list):
+        raise ValueError("framework nodes and edges must be lists")
+
+    def source_record(node: Any) -> None:
+        if (not isinstance(node, dict) or node.get("type") not in frameworks.NODE_TYPES
+                or not isinstance(node.get("title"), str) or not node["title"].strip()
+                or not isinstance(node.get("content"), str) or not isinstance(node.get("fields"), dict)
+                or not isinstance(node.get("units"), list)
+                or any(type(u) is not int or not 1 <= u <= len(units) for u in node["units"])):
+            raise ValueError("invalid framework node or source-unit reference")
+        quote = node["fields"].get("Source Quote")
+        if quote is not None and (not isinstance(quote, dict)
+                                  or any(not isinstance(quote.get(k, ""), str) for k in ("Quote", "Core Sentence"))):
+            raise ValueError("invalid framework source quote")
+        if any(k in node["fields"] and not isinstance(node["fields"][k], str) for k in ("ES", "EC", "CT", "CN")):
+            raise ValueError("invalid framework epistemic tags")
+
+    for index, node in enumerate(nodes):
+        source_record(node)
+        if type(node.get("id")) is not int or node["id"] != index:
+            raise ValueError("framework node IDs must be consecutive integers")
+        for key in ("parent", "depends_on"):
+            if node.get(key) is not None and (type(node[key]) is not int or not 0 <= node[key] < len(nodes)):
+                raise ValueError("invalid framework node relationship")
+            node.setdefault(key, None)
+        contributions = node.get("contributions")
+        if contributions is not None:
+            if not isinstance(contributions, list) or not contributions:
+                raise ValueError("invalid framework contributions")
+            for contribution in contributions:
+                source_record(contribution)
+                if contribution["type"] != node["type"] or contribution.get("contributions"):
+                    raise ValueError("invalid nested or mismatched framework contribution")
+            if {u for c in contributions for u in c["units"]} != set(node["units"]):
+                raise ValueError("framework contributions do not account for the node's cited units")
+    for edge in edges:
+        if (not isinstance(edge, dict) or edge.get("type") not in frameworks.EDGE_TYPES
+                or any(type(edge.get(k)) is not int or not 0 <= edge[k] < len(nodes) for k in ("from", "to"))
+                or edge["from"] == edge["to"]):
+            raise ValueError("invalid framework edge")
+    problems = []
+    if checked.get("approved") is not True:
+        problems.append("framework was not approved")
+    logic, judgment = checked.get("logic"), checked.get("judgment")
+    if (not isinstance(logic, dict) or any(not isinstance(logic.get(k), list)
+            or not all(isinstance(x, str) for x in logic[k]) for k in ("graph_issues", "logic_issues", "logic_warnings"))):
+        problems.append("framework lacks a valid logic review")
+    elif logic["graph_issues"] or logic["logic_issues"]:
+        problems.append("framework has unresolved review issues")
+    if (not isinstance(judgment, dict) or type(judgment.get("warrants_reextract")) is not bool
+            or not isinstance(judgment.get("findings"), list)
+            or not all(isinstance(x, str) for x in judgment["findings"])):
+        problems.append("framework lacks a valid judgment review")
+    elif judgment["warrants_reextract"]:
+        problems.append("framework requires further extraction")
+    reference: dict[int, str] = {}
+    manifest = checked.get("chapter_manifest")
+    if manifest is not None:
+        accounted: list[int] = []
+        valid = isinstance(manifest, list) and bool(manifest)
+        for chapter in manifest if isinstance(manifest, list) else []:
+            if (not isinstance(chapter, dict) or chapter.get("kind") not in {"content", "reference"}
+                    or not isinstance(chapter.get("title"), str) or not isinstance(chapter.get("units"), list)
+                    or not chapter["units"] or any(type(u) is not int or not 1 <= u <= len(units) for u in chapter["units"])
+                    or chapter.get("first_unit") != chapter["units"][0] or chapter.get("last_unit") != chapter["units"][-1]
+                    or chapter["units"] != list(range(chapter["units"][0], chapter["units"][-1] + 1))):
+                valid = False
+                continue
+            accounted.extend(chapter["units"])
+            if chapter.get("complete") is not True or chapter.get("failures") != []:
+                problems.append("chapter review is incomplete")
+            if chapter["kind"] == "reference":
+                if chapter.get("status") != "reference" or chapter.get("part") is not None:
+                    valid = False
+                reference.update({u: chapter["title"] for u in chapter["units"]})
+            elif chapter.get("status") != "complete" or type(chapter.get("part")) is not int:
+                problems.append("chapter review is incomplete")
+        if not valid or accounted != list(range(1, len(units) + 1)):
+            reference = {}
+            problems.append("chapter manifest does not account for every source unit exactly once")
+    checked["coverage"] = frameworks.coverage(units, nodes, reference=reference)
+    # The audit repairs fields/edges internally. Its validation copy must not
+    # rewrite an imported artifact, especially a legacy draft kept for review.
+    audit_copy = copy.deepcopy(checked)
+    checked["mechanical"] = frameworks.mechanical_audit(audit_copy, units)
+    if audit_copy["edges"] != checked["edges"]:
+        checked["mechanical"]["passed"] = False
+        checked["mechanical"]["failures"].append("stored graph requires structural repair before activation")
+    if audit_copy["nodes"] != checked["nodes"]:
+        checked["mechanical"]["passed"] = False
+        checked["mechanical"]["failures"].append("stored node fields require repair before activation")
+    if not checked["coverage"]["complete"]:
+        problems.append("source coverage is incomplete")
+    if not checked["mechanical"]["passed"]:
+        problems.append("mechanical audit did not pass")
+    if not nodes or not isinstance(checked.get("document"), str) or not checked["document"].strip():
+        problems.append("framework has no usable nodes or document")
+    if not problems:
+        try:
+            canonical_document = frameworks.render(checked)
+        except (KeyError, TypeError, ValueError, AttributeError):
+            problems.append("framework lacks complete canonical document metadata")
+        else:
+            if checked["document"].strip() != canonical_document.strip():
+                problems.append("framework document does not match its verified nodes and metadata")
+    checked["approved"] = not problems
+    return checked, list(dict.fromkeys(problems))
+
+
+def _framework_problems(fw: dict[str, Any], units: list[str]) -> list[str]:
+    try:
+        return _verified_framework(fw, units)[1]
+    except (ValueError, KeyError, TypeError) as exc:
+        return [f"invalid framework: {exc}"]
 
 
 class SkillStore:
@@ -512,10 +891,16 @@ class SkillStore:
         return {"skill_id": skill_id, "revision": revision, "name": skill_name, "kind": "skill", "status": "ready",
                 "effects": status["effects"], "attachments": sorted(kept)}
 
-    def make_burnskill(self, skill_id: str, model: str, memory: dict[str, str] | None = None) -> dict[str, Any]:
+    def make_burnskill(self, skill_id: str, model: str, memory: dict[str, str] | None = None, *,
+                      source_revision: int | None = None) -> dict[str, Any]:
         """The framework of a skill's kept text, built in the background as a new revision; when it is
         done it becomes the active one and, given ``memory``, its nodes go into that memory."""
-        row = self._skill(skill_id)
+        row = self._skill(skill_id, source_revision)
+        if source_revision is None:
+            latest = self._rows("SELECT * FROM skill_revisions WHERE skill_id = ? ORDER BY revision DESC LIMIT 1",
+                                (row["skill_id"],))[0]
+            if latest["revision"] > row["revision"] and latest["conversion"] in {"failed", "incomplete"}:
+                row = latest
         head = {"skill_id": row["skill_id"], "name": row["name"]}
         busy = self._rows("SELECT revision FROM skill_revisions WHERE skill_id = ? AND conversion = 'converting'",
                           (row["skill_id"],))
@@ -538,22 +923,44 @@ class SkillStore:
                      memory: dict[str, str] | None) -> dict[str, Any]:
         """A book becomes one BurnSkill, built in the background; the file is kept as it came."""
         # a book's file name can be very long; kept under skill-sources/<sha>/ it must stay inside Windows' 260
+        if src.stat().st_size > BOOK_MAX_BYTES:
+            raise ValueError(f"{src.name} is over {BOOK_MAX_BYTES} bytes")
         files = [(src.stem[:60].strip() + src.suffix.lower(), src.read_bytes())]
         source_sha = _sha_of([(src.suffix.lower(), files[0][1])])  # the book's contents, whatever the file is called
         title = (name or src.stem).strip()
-        built = self._rows("SELECT skill_id, revision, name FROM skill_revisions WHERE source_sha = ? AND "
-                           "conversion = 'completed' ORDER BY revision DESC LIMIT 1", (source_sha,))
+        built = self._rows("SELECT skill_id, revision, name, framework, units FROM skill_revisions WHERE source_sha = ? AND "
+                           "conversion = 'completed' ORDER BY revision DESC", (source_sha,))
+        built = [row for row in built if not _framework_problems(json.loads(row["framework"] or "{}"), json.loads(row["units"]))]
         if built:  # the same book, whatever its file is called: built once, here at once
-            return {**built[0], "kind": "burnskill", "status": "ready", "unchanged": True}
+            return {**{k: built[0][k] for k in ("skill_id", "revision", "name")},
+                    "kind": "burnskill", "status": "ready", "unchanged": True}
         nxt = self._next(title, source_sha, False)
         if isinstance(nxt, dict):
-            if self._skill(nxt["skill_id"], nxt["revision"])["conversion"] == "failed":  # built again, from the cache
-                return {**self.make_burnskill(nxt["skill_id"], model, memory), "kind": "burnskill"}
+            previous = self._skill(nxt["skill_id"], nxt["revision"])
+            if (previous["conversion"] in {"failed", "incomplete"}
+                    or previous["conversion"] == "completed"
+                    and _framework_problems(json.loads(previous["framework"] or "{}"), json.loads(previous["units"]))):
+                return {**self.make_burnskill(nxt["skill_id"], model, memory, source_revision=nxt["revision"]),
+                        "kind": "burnskill"}
             return nxt
-        units = chunk_pages(book_pages(src))
+        inventory: dict[str, Any] = {}
+        pages = book_pages(src, source_bytes=files[0][1], inventory=inventory)
+        units = chunk_pages(pages)
         if not units:
             raise ValueError(f"{src.name} holds no text to read (a scanned book needs OCR first)")
-        self._insert(*nxt, title, units, source_sha, self._keep(source_sha, files), model, {"book": src.name},
+        meta = {"book": src.name, "book_text_only": True, "book_visual_content_processed": False,
+                "book_pages": [{"label": label, "has_text": bool(text)} for label, text in pages]}
+        if "publisher_toc" in inventory:
+            meta["publisher_toc"] = inventory["publisher_toc"]
+            toc_orders: dict[str, list[int]] = {}
+            for entry in inventory["publisher_toc"]["entries"]:
+                for label in entry["source_labels"]:
+                    toc_orders.setdefault(label, []).append(entry["order"])
+            for page in meta["book_pages"]:
+                orders = toc_orders.get(page["label"], [])
+                if orders:
+                    page["toc_entry_orders"] = orders
+        self._insert(*nxt, title, units, source_sha, self._keep(source_sha, files), model, meta,
                      [], [], None, memory=memory)
         self._jobs.put(nxt)
         return {"skill_id": nxt[0], "revision": nxt[1], "name": title, "kind": "burnskill",
@@ -594,8 +1001,19 @@ class SkillStore:
         embedder = self.embedder
         similar = ((lambda texts: [v for i in range(0, len(texts), 64) for v in self._vectors(embedder, texts[i:i + 64])])
                    if embedder is not None and getattr(embedder, "name", "") != "local-hashing" else None)
-        fw = frameworks.build(row["name"], units, progress, similar)
+        fw = frameworks.build(row["name"], units, progress, similar, book=bool(json.loads(row["meta"]).get("book")))
         fw["usage"] = usage
+        fw, problems = _verified_framework(fw, units)
+        if problems:
+            # Keep the draft and its diagnostics reviewable without displacing
+            # the last usable revision or publishing unapproved memory nodes.
+            with self._sql() as conn:
+                conn.execute(
+                    "UPDATE skill_revisions SET framework = ?, conversion = 'incomplete', "
+                    "progress = 'needs review', error = ?, state = 'draft' WHERE skill_id = ? AND revision = ?",
+                    (json.dumps(fw), "; ".join(problems), skill_id, revision),
+                )
+            return
         scope = " ".join(fw["meta"][k] for k in ("claimed_scope", "evidenced_scope") if "Not stated" not in fw["meta"][k])
         with self._sql() as conn:
             conn.execute(
@@ -697,6 +1115,7 @@ class SkillStore:
     def _import_bs(self, src: Path, memory: dict[str, str] | None = None) -> dict[str, Any]:
         _, payload, files = read_burnskill(src)
         units, fw = (payload["units"], payload["framework"]) if payload["version"] == 2 else _from_v1(payload)
+        fw, problems = _verified_framework(fw, units)
         skill = payload["skill"]
         source_sha = _sha_of(files)
         nxt = self._next(skill["name"], source_sha, False)
@@ -705,8 +1124,14 @@ class SkillStore:
         load = lambda v: json.loads(v) if isinstance(v, str) else v  # noqa: E731
         self._insert(*nxt, skill["name"], units, source_sha, self._keep(source_sha, files), skill.get("model", ""),
                      load(skill.get("meta") or {}), load(skill.get("needs") or []), load(skill.get("attachments") or []),
-                     fw, state="active", applicability=skill.get("applicability", ""), memory=memory)
-        return {"skill_id": nxt[0], "revision": nxt[1], "name": skill["name"], "kind": "burnskill", "status": "ready"}
+                     fw, state="draft" if problems else "active", conversion="incomplete" if problems else "completed",
+                     applicability=skill.get("applicability", ""), memory=memory)
+        if problems:
+            with self._sql() as conn:
+                conn.execute("UPDATE skill_revisions SET progress = 'needs review', error = ? "
+                             "WHERE skill_id = ? AND revision = ?", ("; ".join(problems), *nxt))
+        return {"skill_id": nxt[0], "revision": nxt[1], "name": skill["name"], "kind": "burnskill",
+                "status": "incomplete" if problems else "ready"}
 
     # ------------------------------------------------------------------ read
 
@@ -722,12 +1147,18 @@ class SkillStore:
     def status(self, skill_id: str, revision: int | None = None) -> dict[str, Any]:
         row = self._skill(skill_id, revision)
         fw = json.loads(row["framework"]) if row["framework"] else {}
+        meta = json.loads(row["meta"])
         return {
             "skill_id": row["skill_id"], "revision": row["revision"], "name": row["name"], "state": row["state"],
             "kind": "burnskill" if row["framework"] else "skill",
             "conversion": row["conversion"], "progress": row["progress"], "error": row["error"],
             "nodes": len(fw.get("nodes") or []), "edges": len(fw.get("edges") or []),
-            "coverage": {k: fw["coverage"][k] for k in ("complete", "unresolved")} if fw else None,
+            "coverage": {"complete": (fw.get("coverage") or {}).get("complete", False),
+                         "unresolved": (fw.get("coverage") or {}).get("unresolved", [])} if fw else None,
+            "source_coverage": fw.get("coverage"), "chapter_manifest": fw.get("chapter_manifest", []),
+            "source_inventory": meta.get("book_pages", []), "text_only": meta.get("book_text_only"),
+            "visual_content_processed": meta.get("book_visual_content_processed"),
+            "publisher_toc": meta.get("publisher_toc"),
             "mechanical_audit_passed": (fw.get("mechanical") or {}).get("passed"),
             "judgment_findings": ((fw.get("judgment") or {}).get("findings") or [])[:5],
             "usage": fw.get("usage"),  # calls, seconds, tokens in / cached / out, cost, answers from the cache
@@ -749,7 +1180,12 @@ class SkillStore:
             return {**head, "text": text[start:end], "offset": start, "total": len(text), "more": end < len(text)}
 
         base = Path(row["source_dir"]).resolve()
-        if row["conversion"] != "completed" and attachment is None and node_id is None and section != "source":
+        if section == "coverage":
+            status = self.status(row["skill_id"], row["revision"])
+            return {**head, **{key: status[key] for key in ("conversion", "state", "error", "source_coverage",
+                                                          "chapter_manifest", "source_inventory", "text_only",
+                                                          "visual_content_processed", "publisher_toc")}}
+        if not row["framework"] and row["conversion"] != "completed" and attachment is None and node_id is None and section != "source":
             if json.loads(row["meta"]).get("book"):
                 raise ValueError(f"{row['name']} is a book; its BurnSkill is {row['conversion']} ({row['progress']})")
             # A plain skill is read as written: SKILL.md (or its one page), the rest by name on demand.
@@ -784,7 +1220,7 @@ class SkillStore:
         if section:
             kind = section.lower().rstrip("s")
             if kind not in SECTIONS:
-                raise ValueError("section is one of document, source, graph, " + ", ".join(s + "s" for s in SECTIONS))
+                raise ValueError("section is one of document, source, graph, coverage, " + ", ".join(s + "s" for s in SECTIONS))
             return {**head, "section": section, "nodes": [
                 {k: n.get(k) for k in ("id", "title", "content", "units", "fields", "epistemic_type")}
                 for n in fw["nodes"] if n["type"] == kind]}
@@ -925,6 +1361,10 @@ class SkillStore:
         row = self._skill(skill_id, revision)
         if state == "active" and row["conversion"] not in ("completed", "native"):
             raise ValueError(f"{row['name']} is not converted yet ({row['conversion']})")
+        if state == "active" and row["framework"]:
+            problems = _framework_problems(json.loads(row["framework"]), json.loads(row["units"]))
+            if problems:
+                raise ValueError("framework needs review: " + "; ".join(problems))
         with self._sql() as conn:
             if state == "active":  # one active revision per skill
                 conn.execute("UPDATE skill_revisions SET state = 'draft' WHERE skill_id = ? AND state = 'active'",

@@ -168,17 +168,19 @@ uv run --locked mneme skill-get --help
 uv run --locked mneme skill-validate --path ./example.burnskill
 ```
 
-In v1.7.0, long books are mapped as a whole and their content chapters are processed in parallel.
-Shared names connect definitions and steps across chapters. Reference matter is retained;
-coverage records represented, duplicate, reference and unresolved passages. Auditors check each
-completed chapter pass and the combined framework receives logic and mechanical checks.
-Model answers are cached for retries and resumable work. When a memory destination is configured,
-book passages become available to the memory integration before conversion finishes.
+Books receive chapter mapping with bounded parallel processing, source inventories and
+explicit coverage for every passage. Merged concepts retain each chapter's fields, quotations
+and relationship explanations. Incomplete conversions remain drafts, preserving the previous
+active revision. Model answers are cached for retries and resumable work. Use `--wait` for a
+CLI import or conversion that stays alive until completion. Coverage does not guarantee that
+every idea was interpreted correctly. When a memory destination is configured,
+book passages can become available to the memory integration before conversion finishes.
 
 Conversion supports OpenRouter and `codex:<model>` through an installed, authenticated Codex CLI.
 Provider access, subscription limits and costs still apply. Original files remain packed with the
 skill; importing a file does not execute its scripts. Read the
-[BurnSkill v2 format and behavior](docs/BURNSKILL.md) for details.
+[BurnSkill v2 format and behavior](docs/BURNSKILL.md) and the
+[whole-book processing guide](docs/whole-book-processing.md) for details.
 
 ## How memory fits together
 

@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: "Phase 12 CAP-003/BENCH-005 remains the operator-measurement critical path at `main@f688c747`; later merged receipts are recorded in the lease map. PR #117 is merged and owns no active lifecycle writer. PR #135 discharges P13-C, closes BENCH-007, and retires the unavailable Mac signed-publication reservation. N12 and REPRO-001 source are delivered; Phase 15 S2-S5 source and M06 Stage A/B are delivered with acceptance boundaries retained, and official benchmark, protected, hardware, custody, and publication gates remain open."
-last_updated: "2026-10-04"
-last_activity: 2026-10-04
+stopped_at: "Scoped whole-book integrity continuation; see quick/2026-10-26-whole-book-integrity. No full benchmarks or provider inference. Historical milestone acceptance remains open."
+last_updated: "2026-10-26"
+last_activity: 2026-10-26
 progress:
   total_phases: 7
   completed_phases: 2
@@ -15,6 +15,17 @@ progress:
 ---
 
 # Project State
+
+## Current execution — 2026-10-26
+
+The active request is the scoped Mnemosyne whole-book integrity continuation in
+[`quick/2026-10-26-whole-book-integrity`](quick/2026-10-26-whole-book-integrity/PLAN.md).
+Runtime changes and focused regression evidence are complete; final delivery is
+recorded in that task's summary. The current user restriction forbids full
+benchmarks and provider inference. Mnemosyne and Mnemetric have independent code
+and data; comparison references are allowed. Do not resume historical benchmark
+or leaderboard tasks from the older checkpoints below as part of this request.
+Historical phase acceptance and milestone counters are unchanged.
 
 ## Current local integration checkpoint — 2026-10-04
 
