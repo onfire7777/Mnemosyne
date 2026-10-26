@@ -46,22 +46,34 @@ def fake_chat(system, user, max_tokens=0, task="", shared=""):
         return {"nodes": [
             {"type": "section", "title": "Procedures", "content": "", "parent": None, "units": units[:1]},
             {"type": "step", "title": "Step 1: Read the done column", "content": "Read it.", "parent": 0,
-             "units": units[1:2]},
+             "units": units[:2]},
             {"type": "step", "title": "Step 2: Send the summary", "content": "Send the summary to the team channel.",
-             "parent": "0", "depends_on": "1", "units": [str(u) for u in units[2:]]},
+             "parent": "0", "depends_on": "1", "units": [str(u) for u in (units[2:] or units[-1:])]},
             {"type": "warning", "title": "Warning: wrong channel", "content": "Check the channel.", "parent": 0,
-             "depends_on": 2, "units": units[2:], "cross": cross}]}
-    if task == "map":  # one reading of the whole book
-        return {"chapters": [{"title": "One", "first_unit": 1}, {"title": "Two", "first_unit": 2},
-                             {"title": "Three", "first_unit": 3, "kind": "reference"}],
-                "spine": [{"title": "Step 1: Read the done column"}, {"title": "Send the summary"}],
+             "depends_on": 2, "units": units[2:] or units[-1:], "cross": cross}]}
+    if task == "map":
+        numbers = sorted({int(u) for u in re.findall(r"\[Unit (\d+)\]", shared)})
+        names = {1: "One", 2: "Two", 3: "Three"}
+        return {"chapters": [{"title": names.get(u, f"Chapter {u}"), "first_unit": u, "last_unit": u,
+                               "kind": "reference" if f"[Unit {u}]\ncccccccc" in shared else "content"}
+                              for u in numbers],
+                "spine": [{"title": "Step 1: Read the done column", "chapter": 1},
+                          {"title": "Send the summary", "chapter": 1}],
                 "glossary": [], "links": [],
                 "overview": {"purpose": "Read the book.", "claimed_scope": "Books.", "effects": ["sends", "x"]}}
     if task == "fields":
         items = json.loads(user.split("Items:\n", 1)[1])
-        return {"items": [{"index": i["index"], "epistemic_type": "fact", "fields": {
-            "Action": "Do it.", "ES": "Asserted", "EC": "Verbatim", "CT": "Prescriptive", "CN": "Core",
-            "Source Quote": {"Quote": " ".join(["word"] * 80), "Core Sentence": "word"}}} for i in items]}
+        source = shared.split("\n\nFRAMEWORK NODES", 1)[0]
+        passages = {int(number): " ".join(text.split()) for number, text in re.findall(
+            r"\[Unit (\d+)\]\n(.*?)(?=\n\n\[Unit |\Z)", source, re.S)}
+        result = []
+        for item in items:
+            text = next((passages[int(u)] for u in item["units"] if int(u) in passages), "")
+            quote = " ".join(text.split()[:20])
+            result.append({"index": item["index"], "epistemic_type": "fact", "fields": {
+                "Action": "Do it.", "ES": "Asserted", "EC": "Verbatim", "CT": "Prescriptive", "CN": "Core",
+                "Source Quote": {"Quote": quote, "Core Sentence": quote}}})
+        return {"items": result}
     if task == "edges":  # drawn the wrong way round on purpose: the taxonomy turns it
         return {"edges": [{"from": "2", "to": 3, "type": "warns", "why": "x"}, {"from": 9, "to": 1, "type": "leads_to"}]}
     if task == "logic":
@@ -113,7 +125,7 @@ def test_engine_passes(monkeypatch):
     assert (3, 2, "warns") in kinds and (1, 2, "leads_to") in kinds  # turned, plus the depends_on edge
     assert not any(e["from"] == 9 for e in fw["edges"])  # an id that does not exist is dropped
     quote = fw["nodes"][1]["fields"]["Source Quote"]["Quote"]
-    assert len(quote.split()) == 61  # 60 words and the ellipsis
+    assert quote == "# Weekly update"  # exact source text, never an invented citation
     assert fw["nodes"][3]["fields"]["Symptoms"] == [fx.GAPS["Symptoms"]]  # the audit filled Proper Thinking's gap
     for heading in ("## 1. Metadata", "## 5. Steps", "### Step 1: Read the done column", "## 8. Dependency Map",
                     "## 9. Scope and Limits", "- minor"):
@@ -329,7 +341,7 @@ def test_front_matter_units_and_coverage():
     units = sk.source_units([("SKILL.md", body)])
     assert units[0] == "# Weekly update\nCollect what was finished this week."
     assert any("```bash\necho never run\n```" in u for u in units)
-    nodes = [{"title": "x", "units": [1, 2]}]
+    nodes = [{"type": "principle", "title": "x", "content": "a and b", "units": [1, 2]}]
     ledger = fx.coverage(["a", "b", "a", "c"], nodes)
     assert [u["status"] for u in ledger["units"]] == ["represented", "represented", "duplicate", "unresolved"]
 
@@ -572,11 +584,13 @@ def test_a_book_is_built_part_by_part_and_joined(monkeypatch):
     monkeypatch.setattr(fx, "chat_json", lambda *a, **k: calls.append((a[3], k.get("shared", ""))) or fake_chat(*a, **k))
     fw = fx.build("book", units)
     tasks = [t for t, _ in calls]
-    assert tasks.count("map") == 1 and "meta" not in tasks  # one reading maps it and writes the overview
-    assert tasks[0] == "map" and all(f"[Unit {u}]" in calls[0][1] for u in (1, 2, 3))  # one whole reading
+    assert tasks.count("map") == 3 and "meta" not in tasks  # every bounded window is mapped
+    assert tasks[0] == "map"
+    mapped = [shared for task, shared in calls if task == "map"]
+    assert all(sum(f"[Unit {u}]" in text for text in mapped) == 1 for u in (1, 2, 3))
     assert all(s.count("[Unit 2]") <= 1 for _, s in calls[1:])  # then only its own chapter carries a passage
     assert sum("[Unit 2]" in s for t, s in calls[1:] if t == "extract") == 1
-    assert tasks.count("extract") == 2 and not any("[Unit 3]" in s for _, s in calls[1:])  # reference: not built
+    assert tasks.count("extract") == 2 and not any("[Unit 3]" in s for t, s in calls if t == "extract")
     assert fw["parts"] == 2 and fw["coverage"]["complete"] and fw["coverage"]["unresolved"] == []
     assert fw["coverage"]["units"][2] == {"unit": 3, "status": "reference", "of": "Three"}
     assert "Three (units 3-3) is reference matter" in fw["document"]
@@ -634,15 +648,16 @@ def test_a_book_is_in_memory_before_its_framework(tmp_path, monkeypatch):
 
 def test_the_map_chapters_cover_every_unit_once():
     units = ["x" * 5] * 10
-    got = fx.chapters({"chapters": [{"title": "Index", "first_unit": 4, "kind": "reference"},
-                                    {"title": "A", "first_unit": 3}, {"title": "dup", "first_unit": 4},
+    got = fx.chapters({"chapters": [{"title": "Index", "first_unit": 4, "last_unit": 10, "kind": "reference"},
+                                    {"title": "A", "first_unit": 3, "last_unit": 3}, {"title": "dup", "first_unit": 4, "last_unit": 4},
                                     {"title": "bad", "first_unit": 99}]}, units)
     assert [n for _, ns, _ in got for n in ns] == list(range(1, 11))  # gap before 3 and the duplicate start handled
-    assert [(t, r) for t, _, r in got] == [("Front matter", False), ("A", False), ("Index", True)]
-    assert fx.chapters({}, units) == [("Part 1", list(range(1, 11)), False)]
-    titled = fx.chapters({"chapters": [{"title": "Renew Blue Oceans", "first_unit": 1, "kind": "content"},
-                                       {"title": "Notes", "first_unit": 6, "kind": "content"}]}, units)
-    assert [r for _, _, r in titled] == [False, True]  # back matter by its title, whatever the map said
+    assert [n for _, ns, ref in got if ref for n in ns] == list(range(5, 11))
+    assert any("Overlapping" in title and not ref for title, _, ref in got)
+    assert fx.chapters({}, units) == [("Unmapped units 1-10", list(range(1, 11)), False)]
+    titled = fx.chapters({"chapters": [{"title": "Renew Blue Oceans", "first_unit": 1, "last_unit": 5, "kind": "content"},
+                                       {"title": "Notes", "first_unit": 6, "last_unit": 10, "kind": "content"}]}, units)
+    assert [r for _, _, r in titled] == [False, False]  # explicit content cannot be skipped by its title
 
 
 def test_codex_server_asks_in_throwaway_conversations_with_one_start():

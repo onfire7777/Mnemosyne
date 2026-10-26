@@ -1,5 +1,14 @@
 # Roadmap: v2.0 Public Benchmark and Memory Leadership
 
+## Current request routing — 2026-10-26
+
+The active whole-book improvement is tracked separately in
+[`quick/2026-10-26-whole-book-integrity`](quick/2026-10-26-whole-book-integrity/PLAN.md).
+It follows the user's current Mnemosyne-only scope with no full benchmark or
+provider inference runs. The historical roadmap below is retained as evidence;
+this continuation does not execute its unrelated work or close its acceptance
+gates. See the scoped verification and delivery summary for current results.
+
 ## Benchmark-platform scope reaffirmed — 2026-10-04
 
 The website is the public **multi-system benchmark platform** described by

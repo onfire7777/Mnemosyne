@@ -1,0 +1,10 @@
+{
+  "src/mnemosyne/frameworks.py": "48b976e8d95da0ce5e3d676ca9085f49d3aa06ae764e3e4c8e3eab3ff1741c9b",
+  "src/mnemosyne/skills.py": "2927d5a2ee677fd4c662b9db6db5e37b28286d3c2caa600cb5f4bf94d894f0c1",
+  "src/mnemosyne/cli.py": "97c4b5ee2368117063a182fab3f95e6613c3975a68d1092891bc9abf449e2c45",
+  "tests/test_skill_frameworks.py": "46bce0c070cfe999d62c3f569f5b593f34cc22c93629a9555403304cdc816543",
+  "tests/test_book_framework_integrity.py": "7ed3ef78dac0744bc54df9c6f732600454c838f9cc5a00f72548047c03df6148",
+  "tests/test_book_import_integrity.py": "3a52421f6eacbe83acfe3230aad3d6f7b353405535841f214c9c6fc605490aee",
+  "tests/test_book_cli_wait.py": "884ebcdb6bcddc8835a2b3fa9e092da9ea202a95f8af2264dd7ce6fd86f4084b",
+  "tests/test_book_ask_integrity.py": "0738ecf23d56978facfa241b87796f4dba5f5eadccd5bf66d27ffb500aebf1a6"
+}

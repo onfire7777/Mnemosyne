@@ -15,14 +15,17 @@ recorded as a duplicate, or listed unresolved - and an unresolved unit drives an
 from __future__ import annotations
 
 import contextvars
+import copy
 import hashlib
 import http.client
 import json
 import logging
 import os
 import re
+import tempfile
 import threading
 import time
+import unicodedata
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextvars import ContextVar
 from datetime import UTC, datetime
@@ -43,6 +46,11 @@ FIELD_BATCH = 6
 #: The most source one extraction prompt reads; a longer source (a book) is built part by part,
 #: every part through the whole method, and the parts joined - so no passage is left out.
 WINDOW_CHARS = 60_000
+CHAPTER_WORKERS = 3
+PARALLEL_WORKERS = 8
+MAP_CONTEXT_CHARS = 12_000
+GLOBAL_AUDIT_CHARS = 150_000
+MAX_PROMPT_CHARS = 250_000
 GAP = "Not specified in the source."
 #: Seconds a step may take before it is asked again alongside: about twice the longest each step took
 #: on gpt-5.2 (live runs, 18 Oct 2026), so only a real stall is sent twice.
@@ -172,6 +180,8 @@ def chat_json(system: str, user: str, max_tokens: int = 8192, task: str = "", sh
     for the provider's prompt cache: the fixed RULEBOOK, then ``shared``, then this call's task
     (``system`` and ``user``). Calls of one pass then differ only at their end, so the long start
     is read from the cache at a fraction of the price."""
+    if len(RULEBOOK) + len(system) + len(user) + len(shared) > MAX_PROMPT_CHARS:
+        raise ValueError(f"{task or 'framework'} prompt exceeds the bounded input limit; source was not truncated")
     model = MODEL.get() or os.getenv("MNEMOSYNE_FRAMEWORK_MODEL") or DEFAULT_MODEL
     cli = model.startswith("codex:")
     key = (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY") or "").strip()
@@ -234,9 +244,16 @@ def chat_json(system: str, user: str, max_tokens: int = 8192, task: str = "", sh
             if isinstance(parsed, dict):
                 if kept:
                     os.makedirs(os.path.dirname(kept), exist_ok=True)
-                    with open(kept + ".tmp", "w", encoding="utf-8") as f:
-                        json.dump(parsed, f)
-                    os.replace(kept + ".tmp", kept)
+                    pending = None
+                    try:
+                        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=os.path.dirname(kept),
+                                                         prefix=".framework-", suffix=".tmp", delete=False) as f:
+                            pending = f.name
+                            json.dump(parsed, f)
+                        os.replace(pending, kept)
+                    finally:
+                        if pending and os.path.exists(pending):
+                            os.unlink(pending)
                 return parsed
         except json.JSONDecodeError:
             pass
@@ -523,27 +540,31 @@ def _int(value: Any) -> int | None:
     return int(value) if isinstance(value, str) and value.strip().isdigit() else None
 
 
-def _parallel(calls: list[Callable[[], Any]]) -> list[Any]:
+def _parallel(calls: list[Callable[[], Any]], *, workers: int = PARALLEL_WORKERS) -> list[Any]:
     """Run the calls side by side, each in a copy of this thread's context (the model)."""
-    with ThreadPoolExecutor(max_workers=max(1, min(64, len(calls)))) as pool:  # every chapter and batch at once
+    with ThreadPoolExecutor(max_workers=max(1, min(workers, len(calls)))) as pool:
         futures = [pool.submit(contextvars.copy_context().run, c) for c in calls]
         return [f.result() for f in futures]
 
 
 def _units_block(units: list[str], numbers: list[int] | None = None) -> str:
     """The units by their number in the whole source - all of them, or one part's."""
-    return "\n\n".join(f"[Unit {i}]\n{units[i - 1]}" for i in (numbers or range(1, len(units) + 1)))
+    return "\n\n".join(f"[Unit {i}]\n{units[i - 1]}" for i in (range(1, len(units) + 1) if numbers is None else numbers))
 
 
 def _nodes_block(nodes: list[dict[str, Any]], fields: bool = False) -> str:
     """Every node with its whole content - and, for the auditors, its definitive fields and tags."""
     return "\n".join(f"[{n['id']}] {n['type']}: {n['title']} - {' '.join(n['content'].split())}"
                      + (f"\n    fields: {json.dumps(n['fields'], ensure_ascii=False)}" if fields and n['fields'] else "")
+                     + (f"\n    chapter contributions: {json.dumps(n['contributions'], ensure_ascii=False)}"
+                        if fields and n.get("contributions") else "")
                      for n in nodes)
 
 
 def _edges_block(edges: list[dict[str, Any]]) -> str:
-    return "\n".join(f"{e['from']} -[{e['type']}]-> {e['to']}: {e.get('why') or ''}" for e in edges) or "none"
+    return "\n".join(f"{e['from']} -[{e['type']}]-> {e['to']}: {e.get('why') or ''}"
+                     + ("\nChapter relationship evidence: " + json.dumps(e["contributions"], ensure_ascii=False)
+                        if e.get("contributions") else "") for e in edges) or "none"
 
 
 def _source(name: str, units: list[str], numbers: list[int] | None) -> str:
@@ -553,7 +574,9 @@ def _source(name: str, units: list[str], numbers: list[int] | None) -> str:
     if book and not numbers:
         return f"{book}\n\nTHE WHOLE BOOK'S FRAMEWORK, joined from its chapters, follows."
     if book:  # read once already: this part is a pointer into it, never a second copy of its text
-        return (f"{book}\n\nTHIS PART: {LABEL.get() or 'a part'} - units {numbers[0]}-{numbers[-1]} of {len(units)}. "
+        context = _map_for_parts(BOOK_MAP.get() or {}, numbers)
+        return (f"{book}\n\nBOOK MAP CONTEXT (bounded to this part):\n{json.dumps(context, ensure_ascii=False)}"
+                f"\n\nTHIS PART: {LABEL.get() or 'a part'} - units {numbers[0]}-{numbers[-1]} of {len(units)}. "
                 "Work on these units only; the other chapters are built beside it. Use the BOOK MAP: title a "
                 "definition with its glossary term exactly, and create a definition node only for glossary terms "
                 "this chapter defines (or key terms the glossary lacks); title the steps of the book's spine exactly "
@@ -692,10 +715,11 @@ def fill_fields(fw: dict[str, Any], units: list[str], only: set[int] | None = No
         items.append(item)
 
     def batch(chunk: list[dict[str, Any]]) -> None:
+        assigned = {item["index"] for item in chunk}
         data = chat_json(FIELDS_SYSTEM, f"Items:\n{json.dumps(chunk, ensure_ascii=False)}", 8192, "fields", shared=shared)
         for out in data.get("items") or []:
             idx = _int(out.get("index")) if isinstance(out, dict) else None
-            if idx is not None and 0 <= idx < len(nodes):
+            if idx in assigned:
                 if isinstance(out.get("fields"), dict):
                     nodes[idx]["fields"] = out["fields"]
                 if out.get("epistemic_type") in ("fact", "interpretation", "assumption"):
@@ -710,22 +734,26 @@ def repair_fields(fw: dict[str, Any], units: list[str]) -> list[Callable[[], Non
     with missing ES/EC/CT/CN or no Source Quote although it cites source. Empty when nothing failed."""
     nodes = fw["nodes"]
     shared = _shared(fw, units)
-    weak = [n for n in nodes if n["type"] in _TAGGED and n["units"] and (
-        not all(n["fields"].get(t) for t in ("ES", "EC", "CT", "CN"))
-        or not (n["fields"].get("Source Quote") or {}).get("Quote"))]
+    weak = [n for n in nodes if n["type"] != "section" and n["units"] and (
+        (n["type"] in _TAGGED and not all(n["fields"].get(t) for t in ("ES", "EC", "CT", "CN"))) or _quote_errors(n, units))]
 
     def batch(chunk: list[dict[str, Any]]) -> None:
-        items = [{"index": n["id"], "type": n["type"], "title": n["title"], "units": n["units"]} for n in chunk]
-        system = ("These framework items lack their evidence tags or quote. Output ONLY valid JSON: {\"items\": "
+        assigned = {item["id"] for item in chunk}
+        items = [{"index": n["id"], "type": n["type"], "title": n["title"], "units": n["units"],
+                  "current_quote": n["fields"].get("Source Quote"), "validation_failures": _quote_errors(n, units)} for n in chunk]
+        system = ("These framework items have missing or invalid evidence tags or quotes. Correct only the "
+                  "reported defects, preserving valid fields. Output ONLY valid JSON: {\"items\": "
                   "[{\"index\": int, \"Source Quote\": {\"Quote\": at most 60 words copied from the units the item "
                   "cites, \"Core Sentence\": its most evidential sentence}, \"ES\", \"EC\", \"CT\", \"CN\", "
                   "\"Tag justifications\"}]}. " + TAGS + " Never use gap wording for tags; pick the closest label.")
-        data = chat_json(system, f"Items:\n{json.dumps(items, ensure_ascii=False)}", 8192, "repair", shared=shared)
+        data = chat_json(system, f"Mechanical repair pass {fw.get('passes', 1)}.\nItems:\n{json.dumps(items, ensure_ascii=False)}",
+                         8192, "repair", shared=shared)
         for out in data.get("items") or []:
             idx = _int(out.get("index")) if isinstance(out, dict) else None
-            if idx is not None and 0 <= idx < len(nodes):
+            if idx in assigned:
                 for key in ("Source Quote", "ES", "EC", "CT", "CN", "Tag justifications"):
-                    if out.get(key) and not nodes[idx]["fields"].get(key):
+                    invalid_quote = key == "Source Quote" and bool(_quote_errors(nodes[idx], units))
+                    if out.get(key) and (invalid_quote or not nodes[idx]["fields"].get(key)):
                         nodes[idx]["fields"][key] = out[key]
 
     return [lambda c=weak[i:i + FIELD_BATCH]: batch(c) for i in range(0, len(weak), FIELD_BATCH)]
@@ -758,10 +786,171 @@ def relate(fw: dict[str, Any], units: list[str]) -> None:
 
 
 def _logic(fw: dict[str, Any], units: list[str]) -> dict[str, Any]:
-    data = chat_json(LOGIC_SYSTEM, f"Relations:\n{_edges_block(fw['edges'])}", 8192, "logic", shared=_shared(fw, units))
-    logic: dict[str, Any] = {k: [str(x) for x in data.get(k) or []] for k in ("graph_issues", "logic_issues", "logic_warnings")}
+    shared = _shared(fw, units)
+    relations = f"Relations:\n{_edges_block(fw['edges'])}"
+    if not fw.get("numbers"):
+        # The global reviewer sees complete fields and all preserved chapter contributions.
+        shared = f"{_source(fw['name'], units, None)}\n\nFRAMEWORK NODES:\n{_nodes_block(fw['nodes'], fields=True)}"
+        if len(shared) + len(relations) > GLOBAL_AUDIT_CHARS:
+            return _bounded_logic(fw, units)
+    data = chat_json(LOGIC_SYSTEM, relations, 8192, "logic", shared=shared)
+    logic = _logic_result(data)
     logic["note"] = str(data.get("note") or "")
     return logic
+
+
+def _logic_result(data: dict[str, Any]) -> dict[str, Any]:
+    keys = ("graph_issues", "logic_issues", "logic_warnings")
+    if not isinstance(data, dict) or any(not isinstance(data.get(key), list) for key in keys):
+        return {"graph_issues": [], "logic_issues": ["Logic audit did not return a valid result; review is incomplete."],
+                "logic_warnings": []}
+    return {key: [str(item) for item in data[key]] for key in keys}
+
+
+def _bounded_logic(fw: dict[str, Any], units: list[str]) -> dict[str, Any]:
+    """Review every original contribution, then canonical edges with explicit endpoint views.
+
+    Merging repeated chapter content must not make a book indivisible. The stored node stays whole;
+    an audit view retains one original contribution and its canonical identity. Edge checks select
+    a pair of endpoint views, preferring a shared chapter. They are not a Cartesian comparison of
+    every wording of the two nodes, and the recorded scope makes that limitation explicit.
+    """
+    nodes, edges = fw["nodes"], fw["edges"]
+    views: dict[str, dict[str, Any]] = {}
+    by_node: dict[int, list[str]] = {}
+    for n in nodes:
+        contributions = n.get("contributions") or [n]
+        for index, contribution in enumerate(contributions):
+            identity = f"{n['id']}:{index}"
+            view = copy.deepcopy(contribution)
+            view.pop("contributions", None)
+            view.update(id=n["id"], audit_view=identity, canonical_title=n["title"],
+                        contribution_index=index, contribution_count=len(contributions))
+            views[identity] = view
+            by_node.setdefault(n["id"], []).append(identity)
+    blocks = {identity: json.dumps(view, ensure_ascii=False) for identity, view in views.items()}
+    header = _source(fw["name"], units, None) + "\n\nFRAMEWORK NODE BATCH:\n"
+    batches: list[tuple[list[str], str, str, set[int], list[str]]] = []
+    failures: list[str] = []
+    reviewed_edges: set[int] = set()
+    edge_views: dict[int, tuple[str, str]] = {}
+    evidence: dict[str, dict[str, Any]] = {}
+    evidence_endpoints: dict[str, list[str]] = {}
+    reviewed_evidence: set[str] = set()
+    for position, edge in enumerate(edges):
+        for index, contribution in enumerate(edge.get("contributions") or [edge]):
+            identity = f"{position}:{index}"
+            evidence[identity] = {**copy.deepcopy(contribution), "audit_edge_view": identity,
+                                  "canonical_from": edge["from"], "canonical_to": edge["to"],
+                                  "canonical_type": edge["type"], "edge_index": position}
+
+    def material(ids: list[str], evidence_ids: list[str]) -> tuple[str, str, set[int]]:
+        selected = {views[i]["id"] for i in ids}
+        positions = {i for i, edge in enumerate(edges) if edge["from"] in selected and edge["to"] in selected}
+        # Canonical graph context is separate from full original rationales, which have their own
+        # bounded views. Repeating the entire merged rationale list would make an edge indivisible.
+        relations = "Relations inside this batch:\n" + _edges_block([
+            {"from": edges[i]["from"], "to": edges[i]["to"], "type": edges[i]["type"]} for i in sorted(positions)])
+        if evidence_ids:
+            relations += "\nOriginal relationship evidence views:\n" + "\n".join(
+                json.dumps(evidence[i], ensure_ascii=False) for i in evidence_ids)
+        return (header + "\n".join(blocks[i] for i in ids),
+                relations, positions)
+
+    def fits(ids: list[str], evidence_ids: list[str] | None = None) -> bool:
+        text, relations, _ = material(ids, evidence_ids or [])
+        return len(text) + len(relations) <= GLOBAL_AUDIT_CHARS
+
+    def add(ids: list[str], evidence_ids: list[str] | None = None) -> None:
+        if ids:
+            evidence_ids = evidence_ids or []
+            text, relations, positions = material(ids, evidence_ids)
+            batches.append((list(ids), text, relations, positions, list(evidence_ids)))
+            reviewed_edges.update(positions)
+            reviewed_evidence.update(evidence_ids)
+            for position in positions:
+                edge = edges[position]
+                edge_views.setdefault(position, (next(i for i in ids if views[i]["id"] == edge["from"]),
+                                                  next(i for i in ids if views[i]["id"] == edge["to"])))
+
+    current: list[str] = []
+    oversized: set[str] = set()
+    for idx, view in views.items():
+        if not fits([idx]):
+            oversized.add(idx)
+            failures.append(f"Contribution {idx} ({view['canonical_title']}) exceeds the global audit batch limit; its complete record is retained but unreviewed.")
+            continue
+        if current and not fits(current + [idx]):
+            last = current[-1]
+            add(current)
+            current = [last] if fits([last, idx]) else []
+        current.append(idx)
+    add(current)
+    # Every original relationship rationale is checked with explicit endpoint views. Match its
+    # chapter when available; there is no quadratic expansion across unrelated node variants.
+    current = []
+    current_evidence: list[str] = []
+    for identity, original in evidence.items():
+        i = original["edge_index"]
+        edge = edges[i]
+        left = [v for v in by_node.get(edge["from"], []) if v not in oversized]
+        right = [v for v in by_node.get(edge["to"], []) if v not in oversized]
+        chapter = original.get("part")
+        chapter_left = next((v for v in left if chapter is not None and views[v].get("part") == chapter), None)
+        chapter_right = next((v for v in right if chapter is not None and views[v].get("part") == chapter), None)
+        right_parts = {views[v].get("part"): v for v in right if views[v].get("part") is not None}
+        matched = next(([v, right_parts[views[v].get("part")]] for v in left if views[v].get("part") in right_parts), None)
+        pair = ([chapter_left, chapter_right] if chapter_left and chapter_right else matched) or (
+            [min(left, key=lambda v: len(blocks[v])), min(right, key=lambda v: len(blocks[v]))] if left and right else [])
+        if not pair or not fits(pair, [identity]):
+            failures.append(f"Relationship evidence {identity}, {edge['from']} -> {edge['to']} ({edge['type']}), "
+                            "exceeds the audit batch limit with its endpoints and remains unreviewed.")
+            continue
+        evidence_endpoints[identity] = pair
+        combined = list(dict.fromkeys(current + pair))
+        if current and not fits(combined, current_evidence + [identity]):
+            add(current, current_evidence)
+            current = pair
+            current_evidence = [identity]
+        else:
+            current = combined
+            current_evidence.append(identity)
+    add(current, current_evidence)
+
+    def review(batch: tuple[list[str], str, str, set[int], list[str]]) -> dict[str, Any]:
+        _, text, relations, _, _ = batch
+        return chat_json(LOGIC_SYSTEM + " This is a bounded whole-book audit batch, not the whole graph. "
+                         "Each audit_view contains a full original contribution to a canonical node; its id is the "
+                         "canonical node id, while parent/depends_on refer to the original chapter's local ids. "
+                         "Use only the canonical relations below for graph checks. Other contributions to the same "
+                         "node are reviewed in other batches. Each audit_edge_view is one full original relationship "
+                         "rationale, with its canonical endpoints recorded separately. Report only issues supported by the provided views; "
+                         "do not infer that omitted material is absent from the book.",
+                         relations, 8192, "logic", shared=text)
+
+    results = _parallel([lambda batch=batch: review(batch) for batch in batches], workers=CHAPTER_WORKERS)
+    out: dict[str, Any] = {key: [] for key in ("graph_issues", "logic_issues", "logic_warnings")}
+    for index, result in enumerate(results, 1):
+        result = _logic_result(result)
+        for key in out:
+            out[key].extend(f"Audit batch {index}: {item}" for item in result.get(key) or [])
+    out["logic_issues"].extend(failures)
+    reviewed = {idx for batch in batches for idx in batch[0]}
+    reviewed_nodes = sorted(n for n, ids in by_node.items() if set(ids) <= reviewed)
+    out["note"] = "Bounded audit scope is recorded below; omitted nodes or relations require review."
+    out["audit_scope"] = {"mode": "bounded_node_and_edge_batches", "input_limit_chars": GLOBAL_AUDIT_CHARS,
+                          "batches": [batch[0] for batch in batches], "reviewed_node_ids": reviewed_nodes,
+                          "total_nodes": len(nodes), "reviewed_edge_count": len(reviewed_edges), "total_edges": len(edges),
+                          "reviewed_contribution_count": len(reviewed), "total_contributions": len(views),
+                          "reviewed_edge_contribution_count": len(reviewed_evidence), "total_edge_contributions": len(evidence),
+                          "edge_evidence_batches": [batch[4] for batch in batches],
+                          "edge_contribution_endpoint_views": evidence_endpoints,
+                          "edge_endpoint_views": [{"edge": i, "from_view": pair[0], "to_view": pair[1]}
+                                                  for i, pair in sorted(edge_views.items())],
+                          "complete": not failures and len(reviewed) == len(views) and len(reviewed_edges) == len(edges)
+                          and len(reviewed_evidence) == len(evidence),
+                          "limitation": "The counts above record which original node contributions and relationship rationales were checked. Relationship evidence uses recorded endpoint views; not every variant pair or unrelated statement pair is compared. Coverage does not prove every source idea was extracted."}
+    return out
 
 
 REPAIR_SYSTEM = (
@@ -792,7 +981,9 @@ def audit_logic(fw: dict[str, Any], units: list[str]) -> None:
     """Proper Thinking's Logic Auditor over the drawn graph, then its graph repair: the structural
     findings are fixed once, as operations, and the repaired graph is audited again."""
     fw["logic"] = _logic(fw, units)
-    if fw["logic"]["graph_issues"]:
+    if fw["logic"]["graph_issues"] and fw["logic"].get("audit_scope", {}).get("mode") == "bounded_node_and_edge_batches":
+        fw["logic"]["logic_warnings"].append("Global graph findings require targeted repair; no unbounded repair prompt was sent.")
+    elif fw["logic"]["graph_issues"]:
         fix = chat_json(REPAIR_SYSTEM, f"Current relations:\n{_edges_block(fw['edges'])}\n\nGraph issues:\n"
                         + "\n".join(fw["logic"]["graph_issues"]), 16384, "graph-repair", shared=_shared(fw, units))
         if isinstance(fix.get("operations"), list) and apply_operations(fw, fix["operations"]):
@@ -846,8 +1037,9 @@ RULEBOOK = (
     "and the framework given, never outside knowledge, and output ONLY the valid JSON the task asks for.\n\n"
     "DEFINITIVE FIELDS AND RULES PER NODE TYPE:\n"
     + "\n".join(f"- {k}: {FIELDS[k]}\n  Rules: {RULES[k]}" for k in FIELDS)
-    + "\nEvery definition, principle, step, warning and constraint also has \"Source Quote\": {\"Quote\": at most "
-    "60 words from the units it cites, \"Core Sentence\": its most evidential sentence}, \"ES\", \"EC\", \"CT\", "
+    + "\nEvery substantive item (including cases and examples, excluding section headings) has \"Source Quote\": {\"Quote\": at most "
+    "60 words copied from the units it cites, \"Core Sentence\": its most evidential sentence copied from those units}. "
+    "Definitions, principles, steps, warnings and constraints also have \"ES\", \"EC\", \"CT\", "
     "\"CN\" and \"Tag justifications\". " + TAGS + "\n\nRELATIONS. " + EDGES_SYSTEM[EDGES_SYSTEM.index("Edge types:"):]
 )
 
@@ -859,8 +1051,11 @@ def judge(fw: dict[str, Any], units: list[str]) -> dict[str, Any]:
             f"{_edges_block(fw['edges'])}\n\nLogic audit: {json.dumps(fw['logic'])}\n\nMechanical audit: "
             f"{json.dumps(fw['mechanical'])}\n\nUnits no node cites: {fw['coverage']['unresolved'] or 'none'}")
     data = chat_json(JUDGE_SYSTEM, user, 4096, "judge", shared=_shared(fw, units))
+    if not isinstance(data.get("warrants_reextract"), bool) or not isinstance(data.get("findings"), list):
+        return {"warrants_reextract": True, "rebuild": False,
+                "extractor_instructions": "", "findings": ["Judgment audit did not return a valid result; review is incomplete."]}
     instructions = str(data.get("extractor_instructions") or "").strip()
-    return {"warrants_reextract": bool(data.get("warrants_reextract")) and len(instructions) >= 24,
+    return {"warrants_reextract": bool(data.get("warrants_reextract")),
             "rebuild": bool(data.get("rebuild")),
             "extractor_instructions": instructions, "findings": [str(f) for f in data.get("findings") or []]}
 
@@ -889,7 +1084,7 @@ def tidy_edges(nodes: list[dict[str, Any]], proposed: list[Any]) -> list[dict[st
     raw = [e for e in proposed if isinstance(e, dict)]
     raw += [e for n in nodes if n["depends_on"] is not None
             for e in [_dependency_edge(n, nodes[n["depends_on"]])] if e]
-    seen, out = set(), []
+    seen, out = {}, []
     for e in raw:
         a, b, kind = _int(e.get("from")), _int(e.get("to")), str(e.get("type") or "").strip().lower()
         kind = "tension" if kind in ("opposes", "tension_pair") else kind
@@ -898,9 +1093,15 @@ def tidy_edges(nodes: list[dict[str, Any]], proposed: list[Any]) -> list[dict[st
         kind, flip = REMAP.get((kinds[a], kinds[b], kind), (kind, False))
         if flip or (kind == "tension" and a > b):
             a, b = b, a
-        if (a, b, kind) not in seen:
-            seen.add((a, b, kind))
+        key = (a, b, kind)
+        if key not in seen:
+            seen[key] = len(out)
             out.append({"from": a, "to": b, "type": kind, "why": str(e.get("why") or "")[:300]})
+        if e.get("contributions"):
+            target = out[seen[key]].setdefault("contributions", [])
+            for contribution in e["contributions"]:
+                if contribution not in target:
+                    target.append(copy.deepcopy(contribution))
     return out
 
 
@@ -911,13 +1112,18 @@ def coverage(units: list[str], nodes: list[dict[str, Any]], numbers: list[int] |
     reference = reference or {}
     cited: dict[int, list[str]] = {}
     for n in nodes:
-        for u in n["units"]:
-            cited.setdefault(u, []).append(n["title"])
+        if not isinstance(n, dict) or n.get("type") not in set(NODE_TYPES) - {"section"} or not str(n.get("content") or "").strip():
+            continue
+        for u in n.get("units") or []:
+            if isinstance(u, int) and not isinstance(u, bool) and 1 <= u <= len(units):
+                cited.setdefault(u, []).append(str(n.get("title") or "Untitled"))
     seen: dict[str, int] = {}
     rows = []
     for i in numbers or range(1, len(units) + 1):
         text = units[i - 1]
-        key = " ".join(text.split()).lower()
+        # Case and indentation can change meaning (US/us, Python blocks). Only exact repeats
+        # can inherit another unit's representation without reading their own content.
+        key = text
         if i in cited:
             rows.append({"unit": i, "status": "represented", "nodes": cited[i]})
         elif key in seen:
@@ -926,12 +1132,31 @@ def coverage(units: list[str], nodes: list[dict[str, Any]], numbers: list[int] |
             rows.append({"unit": i, "status": "reference", "of": reference[i]})
         else:
             rows.append({"unit": i, "status": "unresolved"})
-        seen.setdefault(key, i)
+        if rows[-1]["status"] in {"represented", "duplicate"}:
+            seen.setdefault(key, i)
     unresolved = [r["unit"] for r in rows if r["status"] == "unresolved"]
-    return {"units": rows, "unresolved": unresolved, "complete": not unresolved}
+    reference_units = [r["unit"] for r in rows if r["status"] == "reference"]
+    return {"units": rows, "unresolved": unresolved, "complete": not unresolved,
+            "reference_units": reference_units, "content_complete": not unresolved}
 
 
-def mechanical_audit(fw: dict[str, Any]) -> dict[str, Any]:
+def _quote_errors(node: dict[str, Any], units: list[str]) -> list[str]:
+    fields = node.get("fields") or {}
+    quoted = fields.get("Source Quote")
+    quoted = quoted if isinstance(quoted, dict) else {}
+    errors = []
+    if len(str(quoted.get("Quote") or "").split()) > 60:
+        errors.append("Source Quote exceeds 60 words; original quote preserved")
+    sources = [" ".join(units[u - 1].split()) for u in node.get("units", [])
+               if isinstance(u, int) and not isinstance(u, bool) and 1 <= u <= len(units)]
+    for field in ("Quote", "Core Sentence"):
+        text = " ".join(str(quoted.get(field) or "").split())
+        if not text or not any(text in source for source in sources):
+            errors.append(f"{field} is missing or not grounded in its cited source units")
+    return errors
+
+
+def mechanical_audit(fw: dict[str, Any], units: list[str] | None = None) -> dict[str, Any]:
     """Proper Thinking's delivery checks, repaired where a rule can repair them."""
     nodes, failures, repairs = fw["nodes"], [], []
     definitions = {n["title"] for n in nodes if n["type"] == "definition"}
@@ -947,11 +1172,16 @@ def mechanical_audit(fw: dict[str, Any]) -> dict[str, Any]:
                 f["Requires"] = [r for r in requires if r in definitions]
                 repairs.append(f"{n['title']}: Requires named titles that are not definitions")
         quote = f.get("Source Quote") if isinstance(f.get("Source Quote"), dict) else None
-        if quote and len(str(quote.get("Quote") or "").split()) > 60:
-            quote["Quote"] = " ".join(str(quote["Quote"]).split()[:60]) + " ..."
-            repairs.append(f"{n['title']}: Source Quote cut to 60 words")
+        if units is None and quote and len(str(quote.get("Quote") or "").split()) > 60:
+            failures.append(f"{n['title']}: Source Quote exceeds 60 words; original quote preserved")
         if n["type"] in _TAGGED and not all(f.get(t) for t in ("ES", "EC", "CT", "CN")):
             failures.append(f"{n['title']}: epistemic tags missing")
+        if units is not None:
+            contributions = n.get("contributions") or [n]
+            for contribution in contributions:
+                if contribution["type"] == "section":
+                    continue
+                failures.extend(f"{n['title']}: {error}" for error in _quote_errors(contribution, units))
     # A loop of leads_to has no first step. Proper Thinking marks a repeating procedure with
     # feeds_back_to, so the link that returns to the earliest step of the loop becomes one.
     steps = [n["id"] for n in nodes if n["type"] == "step"]
@@ -1015,6 +1245,8 @@ def _field_lines(fields: dict[str, Any]) -> list[str]:
     quote = fields.get("Source Quote") if isinstance(fields.get("Source Quote"), dict) else {}
     if quote.get("Quote"):
         lines.append(f"\n> {quote['Quote']}")
+    if quote.get("Core Sentence"):
+        lines.append(f"\n**Core Sentence:** {quote['Core Sentence']}")
     tags = [f"{t}: {fields[t]}" for t in ("ES", "EC", "CT", "CN") if fields.get(t)]
     if tags:
         lines.append("\n*" + " | ".join(tags) + "*")
@@ -1028,8 +1260,14 @@ def render(fw: dict[str, Any]) -> str:
 
     def block(n: dict[str, Any], heading: str) -> list[str]:
         cite = ", ".join(str(u) for u in n["units"])
-        return [f"### {heading}", n["content"], *_field_lines(n["fields"]),
-                f"\n*Source units: {cite or 'none'}*", ""]
+        result = [f"### {heading}", n["content"], *_field_lines(n["fields"]),
+                  f"\n*Source units: {cite or 'none'}*", ""]
+        if len(n.get("contributions") or []) > 1:
+            for contribution in n["contributions"]:
+                result += [f"#### Chapter contribution: {contribution.get('chapter') or contribution.get('part', 'source')}",
+                           contribution["content"], *_field_lines(contribution.get("fields") or {}),
+                           f"*Source units: {', '.join(map(str, contribution['units']))}*", ""]
+        return result
 
     def section(kind: str) -> list[str]:
         return [line for n in nodes if n["type"] == kind for line in block(n, n["title"])] or ["None in the source.", ""]
@@ -1063,7 +1301,11 @@ def render(fw: dict[str, Any]) -> str:
     for label, kinds in (("8A Sequential Dependencies", {"leads_to", "feeds_back_to"}),
                          ("8B Governing Relationships", set(EDGE_TYPES) - {"leads_to", "feeds_back_to", "tension"}),
                          ("8C Tension Pairs", {"tension"})):
-        rows = [f"| {by_id[e['from']]['title']} | {e['type']} | {by_id[e['to']]['title']} | {e['why']} |"
+        def reasons(edge: dict[str, Any]) -> str:
+            return edge["why"] + "".join(f"<br>Chapter {c.get('chapter') or c.get('part', '')}: {c.get('why') or ''}"
+                                          for c in edge.get("contributions") or [])
+
+        rows = [f"| {by_id[e['from']]['title']} | {e['type']} | {by_id[e['to']]['title']} | {reasons(e)} |"
                 for e in fw["edges"] if e["type"] in kinds]
         out += [f"### {label}", "", *(["| From | Relation | To | Why |", "|---|---|---|---|", *rows] if rows else ["None."]), ""]
     gap_texts = {GAP, *GAPS.values()}
@@ -1077,11 +1319,29 @@ def render(fw: dict[str, Any]) -> str:
     gaps += [f"{title} (units {us[0]}-{us[-1]}) is reference matter: kept with the source, not built into "
              "the framework." for title, us in kept.items()]
     tensions = fw["logic"]["logic_issues"] + fw["logic"]["logic_warnings"]
+    gaps += fw.get("mechanical", {}).get("failures", [])
     out += ["## 9. Scope and Limits", "", "### 9A Scope conditions",
             f"Claimed: {meta['claimed_scope']}", "", f"Evidenced: {meta['evidenced_scope']}", "",
             "### 9B Methodological limits", meta["assumptions_limits"], "", "### 9C Acknowledged gaps",
             *([f"- {g}" for g in gaps] or ["None."]), "", "### 9D Internal tensions",
             *([f"- {t}" for t in tensions] or ["None found."]), ""]
+    if fw.get("chapter_manifest"):
+        out += ["### Chapter accounting", "",
+                "Reference units remain in the saved source. Complete means all mechanical and coverage checks passed; it is not proof that a model found every idea.", ""]
+        for chapter in fw["chapter_manifest"]:
+            out.append(f"- {chapter['title']} — units {chapter['first_unit']}-{chapter['last_unit']}; "
+                       f"{chapter['kind']}; {chapter['status']}" +
+                       (f"; part {chapter['part']}" if chapter['part'] is not None else "") +
+                       (": " + "; ".join(chapter["failures"]) if chapter["failures"] else ""))
+        out.append("")
+    scope = fw["logic"].get("audit_scope")
+    if scope:
+        out += ["### Whole-book audit scope", "",
+                f"Reviewed {len(scope['reviewed_node_ids'])} of {scope['total_nodes']} nodes and "
+                f"{scope['reviewed_edge_count']} of {scope['total_edges']} relations in {len(scope['batches'])} bounded batches. "
+                f"Checked {scope['reviewed_contribution_count']} of {scope['total_contributions']} original node contributions "
+                f"and {scope['reviewed_edge_contribution_count']} of {scope['total_edge_contributions']} relationship rationales.",
+                scope["limitation"], ""]
     return "\n".join(out)
 
 
@@ -1090,10 +1350,12 @@ def render(fw: dict[str, Any]) -> str:
 
 def windows(units: list[str]) -> list[list[int]]:
     """Unit numbers in reading order, cut into parts of at most WINDOW_CHARS (a unit is never split)."""
-    parts: list[list[int]] = [[]]
+    parts: list[list[int]] = []
     size = 0
     for i, text in enumerate(units, 1):
-        if parts[-1] and size + len(text) > WINDOW_CHARS:
+        if len(text) > WINDOW_CHARS:
+            raise ValueError(f"source unit {i} exceeds {WINDOW_CHARS} characters; split it into smaller units before building")
+        if not parts or (parts[-1] and size + len(text) > WINDOW_CHARS):
             parts.append([])
             size = 0
         parts[-1].append(i)
@@ -1102,8 +1364,9 @@ def windows(units: list[str]) -> list[list[int]]:
 
 
 MAP_SYSTEM = (
-    "You have read the WHOLE book above. Map it, from the whole text, for the parts that will be built from "
-    "it side by side. Output ONLY valid JSON: {\"chapters\": [{\"title\": str, \"first_unit\": int, "
+    "Map ONLY the bounded window of book units above. Keep their GLOBAL unit numbers; a chapter may be "
+    "a continuation of a chapter in another window. Do not infer content outside this window. "
+    "Output ONLY valid JSON: {\"chapters\": [{\"title\": str, \"first_unit\": int, "
     "\"last_unit\": int, \"kind\": \"content\"|\"reference\"}] - every chapter in order, together covering "
     "every unit exactly once. kind is \"reference\" ONLY for matter that teaches nothing - title and copyright "
     "pages, table of contents, praise, acknowledgments, bibliography, endnotes, index, about the authors; every "
@@ -1115,17 +1378,64 @@ MAP_SYSTEM = (
     "\"to_chapter\": int, \"why\": one sentence}] - how the chapters build on, warn about, constrain or "
     "illustrate each other; \"overview\": {the keys and rules below}}.\n\nOverview rules: "
 )
-#: The whole book (and, once written, its map): the start every call of a book build shares. The
-#: book is read once, here; every part's work branches from it.
+#: Book identification only; source and map context are bounded separately for each part.
 BOOK: ContextVar[str] = ContextVar("framework_book", default="")
+BOOK_MAP: ContextVar[dict[str, Any] | None] = ContextVar("framework_book_map", default=None)
 #: The chapter a part of a book build is working on.
 LABEL: ContextVar[str] = ContextVar("framework_part", default="")
 
 
 def map_book(name: str, units: list[str]) -> dict[str, Any]:
-    """The map of the whole book, from one reading of it."""
-    data = chat_json(MAP_SYSTEM + META_SYSTEM, "Write the map of the whole book.", 32000, "map", shared=BOOK.get())
-    return data if isinstance(data, dict) else {}
+    """Map bounded source windows and retain every valid local contribution with global indexes."""
+    result: dict[str, Any] = {k: [] for k in ("chapters", "glossary", "spine", "links", "windows")}
+    overviews: list[dict[str, Any]] = []
+    ranges = windows(units)
+
+    def read_window(numbers: list[int]) -> dict[str, Any]:
+        return chat_json(MAP_SYSTEM + META_SYSTEM, "Write the map of this source window.", 32000, "map",
+                         shared=f"Framework name: {name}\n\nSOURCE WINDOW:\n{_units_block(units, numbers)}")
+
+    mapped = _parallel([lambda numbers=numbers: read_window(numbers) for numbers in ranges], workers=CHAPTER_WORKERS)
+    for numbers, data in zip(ranges, mapped):
+        data = data if isinstance(data, dict) else {}
+        where: dict[int, int] = {}
+        invalid = 0
+        for i, chapter in enumerate(data.get("chapters") or [], 1):
+            if not isinstance(chapter, dict):
+                invalid += 1
+                continue
+            first, last = _int(chapter.get("first_unit")), _int(chapter.get("last_unit"))
+            # An absent end is not permission to consume later units, especially as reference matter.
+            if first not in numbers or last not in numbers or last < first:
+                invalid += 1
+                continue
+            where[i] = len(result["chapters"]) + 1
+            result["chapters"].append({"title": str(chapter.get("title") or f"Chapter {where[i]}")[:160],
+                                       "first_unit": first, "last_unit": last,
+                                       "kind": "reference" if chapter.get("kind") == "reference" else "content"})
+        for key in ("glossary", "spine", "links"):
+            for entry in data.get(key) or []:
+                if not isinstance(entry, dict):
+                    continue
+                value = copy.deepcopy(entry)
+                index_keys = ("from_chapter", "to_chapter") if key == "links" else ("chapter",)
+                if any(_int(value.get(k)) not in where for k in index_keys):
+                    continue
+                for k in index_keys:
+                    value[k] = where[_int(value[k])]
+                if key == "glossary":
+                    value["units"] = sorted({u for u in map(_int, value.get("units") or []) if u in numbers})
+                result[key].append(value)
+        if isinstance(data.get("overview"), dict):
+            overviews.append(data["overview"])
+        result["windows"].append({"first_unit": numbers[0], "last_unit": numbers[-1],
+                                  "valid_chapters": len(where), "invalid_chapters": invalid})
+    result["window_overviews"] = overviews
+    result["overview"] = {key: "\n\n".join(dict.fromkeys(str(o[key]) for o in overviews if o.get(key)))
+                          for key in ("purpose", "assumptions_limits", "target_audience", "claimed_scope",
+                                      "evidenced_scope", "problem", "core_argument", "method")}
+    result["overview"]["effects"] = [e for e in EFFECTS if any(e in (o.get("effects") or []) for o in overviews)]
+    return result
 
 
 REFERENCE_TITLE = re.compile(r"^\s*(notes|end ?notes|bibliography|references|works cited|index|acknowledge?ments?|"
@@ -1133,35 +1443,40 @@ REFERENCE_TITLE = re.compile(r"^\s*(notes|end ?notes|bibliography|references|wor
 
 
 def chapters(book_map: dict[str, Any], units: list[str]) -> list[tuple[str, list[int], bool]]:
-    """The map's chapters as unit ranges that cover every unit exactly once, in order: a gap joins the
-    chapter before it, an overlap is cut, and a chapter longer than one part is split - so no
-    passage falls between chapters or is built twice. Fixed parts when the map gives none. The third
-    value is True for reference matter (bibliography, notes, index ...), which is not built."""
-    marks = []
-    for c in book_map.get("chapters") or []:
-        first = _int(c.get("first_unit")) if isinstance(c, dict) else None
-        if first is not None and 1 <= first <= len(units):
-            title = str(c.get("title") or "").strip()[:80]
-            # the model kept a book's Notes as content once (Blue Ocean, 18 Oct 2026): titles settle it too
-            marks.append((first, (title, str(c.get("kind")).lower() == "reference" or bool(REFERENCE_TITLE.match(title)))))
-    marks = sorted(dict(sorted(marks, reverse=True)).items())  # one title per first unit
-    if not marks:
-        return [(f"Part {i}", part, False) for i, part in enumerate(windows(units), 1)]
-    if marks[0][0] != 1:
-        marks.insert(0, (1, ("Front matter", False)))  # unmapped: built, never dropped unseen
+    """Honor explicit ranges; build every ambiguous or unmapped unit as content, exactly once."""
+    windows(units)  # Validate individual source units before any map can hide them as reference.
+    claims: dict[int, list[int]] = {}
+    valid: dict[int, tuple[str, bool]] = {}
+    for idx, c in enumerate(book_map.get("chapters") or []):
+        if not isinstance(c, dict):
+            continue
+        first, last = _int(c.get("first_unit")), _int(c.get("last_unit"))
+        if first is None or last is None or not 1 <= first <= last <= len(units):
+            continue
+        valid[idx] = (str(c.get("title") or f"Chapter {idx + 1}").strip()[:160], c.get("kind") == "reference")
+        for u in range(first, last + 1):
+            claims.setdefault(u, []).append(idx)
+    groups: list[tuple[tuple[int, ...], list[int]]] = []
+    for u in range(1, len(units) + 1):
+        owners = tuple(claims.get(u, []))
+        if groups and groups[-1][0] == owners:
+            groups[-1][1].append(u)
+        else:
+            groups.append((owners, [u]))
     out: list[tuple[str, list[int], bool]] = []
-    for i, (first, (title, reference)) in enumerate(marks):
-        last = marks[i + 1][0] - 1 if i + 1 < len(marks) else len(units)
+    for owners, numbers in groups:
+        first, last = numbers[0], numbers[-1]
+        title, reference = (valid[owners[0]] if len(owners) == 1 else
+                            (f"{'Overlapping chapter ranges' if owners else 'Unmapped units'} {first}-{last}", False))
         pieces = windows(units[first - 1:last])
         for j, piece in enumerate(pieces, 1):
-            label = title or f"Chapter {i + 1}"
-            out.append((label if len(pieces) == 1 else f"{label} ({j} of {len(pieces)})",
+            out.append((title if len(pieces) == 1 else f"{title} ({j} of {len(pieces)})",
                         [first - 1 + u for u in piece], reference))
     return out
 
 
 def build(name: str, units: list[str], progress: Callable[[str], None] = lambda _: None,
-          similar: Callable[[list[str]], list[list[float]]] | None = None) -> dict[str, Any]:
+          similar: Callable[[list[str]], list[list[float]]] | None = None, *, book: bool = False) -> dict[str, Any]:
     """The complete framework of a source. For a codex: model the build runs on one long-lived Codex
     server (CodexServer), so the source is read once and every call branches from it."""
     model = MODEL.get() or os.getenv("MNEMOSYNE_FRAMEWORK_MODEL") or DEFAULT_MODEL
@@ -1176,7 +1491,7 @@ def build(name: str, units: list[str], progress: Callable[[str], None] = lambda 
             log.warning("Codex app-server unavailable (%s); using codex exec", exc)
     token = SERVER.set(server)
     try:
-        return _build(name, units, progress, similar)
+        return _build(name, units, progress, similar, book=book)
     finally:
         SERVER.reset(token)
         if server:
@@ -1184,57 +1499,114 @@ def build(name: str, units: list[str], progress: Callable[[str], None] = lambda 
 
 
 def _build(name: str, units: list[str], progress: Callable[[str], None],
-           similar: Callable[[list[str]], list[list[float]]] | None) -> dict[str, Any]:
-    """A source that fits one prompt goes through Proper Thinking's loop once. A book is read ONCE,
-    whole, and mapped (chapters, glossary, spine, links, overview); then every chapter goes through
-    the whole loop side by side, branching from that reading with the map in hand, and the
-    chapters are joined by the map's canonical names. Nothing is selected or left out: coverage
-    is checked over every unit."""
-    if len(windows(units)) == 1:
+           similar: Callable[[list[str]], list[list[float]]] | None, *, book: bool = False) -> dict[str, Any]:
+    """Build every content part with bounded source context and publish an explicit chapter ledger."""
+    if not units:
+        raise ValueError("a framework needs at least one source unit")
+    if len(windows(units)) == 1 and not book:
         fw = _passes(name, units, list(range(1, len(units) + 1)), progress)
+        fw["chapter_manifest"] = [_chapter_record(name, fw["numbers"], fw, 1)]
     else:
-        progress("reading the whole book once and mapping it")
-        token = BOOK.set(f"Framework name: {name}\n\nTHE WHOLE BOOK ({len(units)} units):\n{_units_block(units)}")
+        progress("mapping the book in bounded source windows")
+        token = BOOK.set(f"Framework name: {name}")
+        map_token = BOOK_MAP.set(None)
         try:
             book_map = map_book(name, units)
-            # read once: from here on the chapters carry the map and only their own passages
-            BOOK.set(f"Framework name: {name}\n\nBOOK MAP (written from one reading of the whole book):\n"
-                     f"{json.dumps(_map_for_parts(book_map), ensure_ascii=False)}")
+            BOOK_MAP.set(book_map)
             mapped = chapters(book_map, units)
             parts = [(label, numbers) for label, numbers, reference in mapped if not reference]
             reference = {u: label for label, numbers, ref in mapped if ref for u in numbers}
-            if not parts:  # a map that calls everything reference is wrong: build it all
+            if not parts:  # Do not approve an empty framework based only on a model's reference classification.
                 parts, reference = [(label, numbers) for label, numbers, _ in mapped], {}
+                mapped = [(label, numbers, False) for label, numbers, _ in mapped]
             done: list[int] = []
 
             def one(label: str, numbers: list[int]) -> dict[str, Any]:
-                out = _passes(name, units, numbers, label=label)
+                try:
+                    out = _passes(name, units, numbers, label=label)
+                except Exception as exc:  # Preserve other finished chapters and mark the failed source range.
+                    out = {"name": name, "numbers": numbers, "part": label, "nodes": [], "edges": [],
+                           "model": MODEL.get() or DEFAULT_MODEL, "passes": 0,
+                           "coverage": coverage(units, [], numbers),
+                           "mechanical": {"passed": False, "failures": [f"Chapter build failed: {exc}"], "repairs": []},
+                           "logic": {"graph_issues": [], "logic_issues": [], "logic_warnings": []},
+                           "judgment": {"warrants_reextract": True, "findings": [f"Chapter build failed: {exc}"]}}
                 done.append(1)
                 progress(f"{len(done)} of {len(parts)} chapters built")
                 return out
 
-            progress(f"building the book's {len(parts)} chapters side by side")
-            fw = join(name, units, _parallel([lambda p=p: one(*p) for p in parts]), book_map, reference)
+            progress(f"building {len(parts)} chapter parts, up to {CHAPTER_WORKERS} at a time")
+            built = _parallel([lambda p=p: one(*p) for p in parts], workers=CHAPTER_WORKERS)
+            fw = join(name, units, built, book_map, reference)
+            completed = iter(enumerate(built, 1))
+            fw["chapter_manifest"] = []
+            for label, numbers, is_reference in mapped:
+                if is_reference:
+                    fw["chapter_manifest"].append(_chapter_record(label, numbers, None, None))
+                else:
+                    part, out = next(completed)
+                    fw["chapter_manifest"].append(_chapter_record(label, numbers, out, part))
+            fw["book_map"] = book_map
             if similar:
                 merge_near_duplicates(fw, units, similar)
             progress("auditing the whole book")
             fw["meta"] = _overview(book_map.get("overview") or {})
             by_chapter = fw["logic"]
-            audit_logic(fw, units)  # contradictions between chapters, over the joined nodes
+            try:
+                audit_logic(fw, units)  # contradictions between chapters, over the joined nodes
+            except Exception as exc:
+                fw["logic"] = {"graph_issues": [], "logic_issues": [f"Whole-book audit failed: {exc}"],
+                               "logic_warnings": [], "note": "joined chapter results retained for review"}
             for k in ("graph_issues", "logic_issues", "logic_warnings"):
                 fw["logic"][k] = by_chapter[k] + [f"Whole book: {x}" for x in fw["logic"][k]]
-            fw["mechanical"] = mechanical_audit(fw)
+            fw["mechanical"] = mechanical_audit(fw, units)
+            chapter_failures = [f"{c['title']}: {failure}" for c in fw["chapter_manifest"] for failure in c["failures"]]
+            if chapter_failures:
+                fw["mechanical"]["failures"].extend(chapter_failures)
+                fw["mechanical"]["passed"] = False
         finally:
+            BOOK_MAP.reset(map_token)
             BOOK.reset(token)
     fw["generated"] = datetime.now(UTC).isoformat(timespec="seconds")
-    fw["approved"] = not fw["logic"]["logic_issues"]  # Proper Thinking's governor: reported, never blocking
+    fw["approved"] = _complete(fw)
     fw["document"] = render(fw)
     return fw
 
 
-def _map_for_parts(book_map: dict[str, Any]) -> dict[str, Any]:
-    """What every chapter is told: the chapters, glossary, spine and links (not the overview)."""
-    return {k: book_map.get(k) or [] for k in ("chapters", "glossary", "spine", "links")}
+def _complete(fw: dict[str, Any]) -> bool:
+    return bool(fw.get("nodes") and fw["coverage"]["complete"] and fw["mechanical"]["passed"]
+                and not fw["logic"]["logic_issues"] and not fw["logic"]["graph_issues"]
+                and not fw.get("judgment", {}).get("warrants_reextract"))
+
+
+def _chapter_record(title: str, numbers: list[int], fw: dict[str, Any] | None, part: int | None) -> dict[str, Any]:
+    failures = ([] if fw is None else list(dict.fromkeys(
+        fw["mechanical"]["failures"] + fw["logic"]["graph_issues"] + fw["logic"]["logic_issues"]
+        + (["Judgment requests further extraction"] if fw.get("judgment", {}).get("warrants_reextract") else []))))
+    complete = fw is None or _complete(fw)
+    return {"title": title, "first_unit": numbers[0], "last_unit": numbers[-1], "units": list(numbers),
+            "kind": "reference" if fw is None else "content", "part": part, "complete": complete,
+            "status": "reference" if fw is None else "complete" if complete else "incomplete", "failures": failures}
+
+
+def _map_for_parts(book_map: dict[str, Any], numbers: list[int] | None = None) -> dict[str, Any]:
+    """A bounded context; the full map stays in the result, never repeated in every chapter prompt."""
+    chapters_ = book_map.get("chapters") or []
+    relevant = {i for i, chapter in enumerate(chapters_, 1)
+                if numbers is None or any(chapter["first_unit"] <= u <= chapter["last_unit"] for u in numbers)}
+    candidates = {"chapters": [dict(c, chapter=i) for i, c in enumerate(chapters_, 1) if i in relevant],
+                  "glossary": [c for c in book_map.get("glossary") or [] if c.get("chapter") in relevant],
+                  "spine": [c for c in book_map.get("spine") or [] if c.get("chapter") in relevant],
+                  "links": [c for c in book_map.get("links") or [] if c.get("from_chapter") in relevant or c.get("to_chapter") in relevant]}
+    out: dict[str, Any] = {k: [] for k in candidates}
+    out["omitted_context_entries"] = 0
+    for key, entries in candidates.items():
+        for entry in entries:
+            out[key].append(entry)
+            if len(json.dumps(out, ensure_ascii=False)) > MAP_CONTEXT_CHARS - 32:
+                out[key].pop()
+                out["omitted_context_entries"] += 1
+    return out
 
 
 def _overview(data: dict[str, Any]) -> dict[str, Any]:
@@ -1271,12 +1643,15 @@ def _loop(name: str, units: list[str], numbers: list[int], progress: Callable[[s
     relations, Logic Auditor, mechanical audit, judgment - runs again over the whole framework.
     Only a judgment that the framework is wrong as a whole extracts it again from nothing."""
     whole = len(numbers) == len(units)
-    instructions, rebuild = "", True
+    instructions, rebuild, repair_only = "", True, False
     fw: dict[str, Any] = {}
     model = MODEL.get() or os.getenv("MNEMOSYNE_FRAMEWORK_MODEL") or DEFAULT_MODEL
     for passes in range(1, MAX_PASSES + 1):
         touched: set[int] | None = None  # None: every node is new
-        if rebuild:
+        if repair_only:
+            progress(f"pass {passes}: repairing failed mechanical checks")
+            touched = set()  # Keep all valid node text and fields; repair_fields selects only defects.
+        elif rebuild:
             progress(f"pass {passes}: extracting")
             try:
                 nodes = extract(name, units, instructions, numbers)
@@ -1307,13 +1682,15 @@ def _loop(name: str, units: list[str], numbers: list[int], progress: Callable[[s
 
         progress(f"pass {passes}: relations, logic audit, overview and fields")
         _parallel([structure, detail])
-        fw["mechanical"] = mechanical_audit(fw)
+        fw["mechanical"] = mechanical_audit(fw, units)
         progress(f"pass {passes}: judgment audit")
         fw["judgment"] = judge(fw, units)
         missing = fw["coverage"]["unresolved"]
-        if passes < MAX_PASSES and (missing or fw["judgment"]["warrants_reextract"]):
+        if passes < MAX_PASSES and (missing or fw["judgment"]["warrants_reextract"] or not fw["mechanical"]["passed"]):
             instructions = fw["judgment"]["extractor_instructions"]
             rebuild = fw["judgment"]["rebuild"]
+            repair_only = not missing and not fw["mechanical"]["passed"] and (
+                not fw["judgment"]["warrants_reextract"] or not instructions)
             if missing:
                 instructions += (f"\nCOVERAGE: units {missing} are not represented by any node. Represent "
                                  "every one of them, keeping everything already represented.")
@@ -1323,12 +1700,33 @@ def _loop(name: str, units: list[str], numbers: list[int], progress: Callable[[s
 
 
 def _name(title: str) -> str:
-    """A title as a name to match on: case, punctuation, a Step/Warning/Constraint prefix and plurals aside."""
+    """Canonical title identity without discarding non-ASCII words or guessing word stems."""
     title = re.sub(r"^(step\s*\d+|warning|constraint)\s*[:.-]\s*", "", title.strip(), flags=re.I)
-    return " ".join(w.rstrip("s") for w in re.sub(r"[^a-z0-9]+", " ", title.lower()).split())
+    return " ".join(re.findall(r"[^\W_]+", unicodedata.normalize("NFKC", title).casefold()))
 
 
 MERGED = ("section", "definition", "step", "principle")
+
+
+def _contributions(node: dict[str, Any], part: int | None = None, chapter: str = "") -> list[dict[str, Any]]:
+    """Preserve full original node records; links inside a contribution use its original chapter IDs."""
+    if node.get("contributions"):
+        return copy.deepcopy(node["contributions"])
+    value = copy.deepcopy({k: v for k, v in node.items() if k not in {"contributions", "parts"}})
+    value["part"] = part if part is not None else node.get("part")
+    value["chapter"] = chapter or node.get("chapter", "")
+    return [value]
+
+
+def _merge_content(keep: dict[str, Any], incoming: dict[str, Any], contributions: list[dict[str, Any]]) -> None:
+    if not keep.get("contributions"):
+        keep["contributions"] = _contributions(keep)
+    keep["contributions"].extend(contributions)
+    keep["parts"] = sorted({c["part"] for c in keep["contributions"] if c.get("part") is not None})
+    keep["units"] = sorted(set(keep["units"]) | set(incoming["units"]))
+    if incoming["content"] and incoming["content"] not in keep["content"]:
+        keep["content"] += f"\n\n{incoming['content']}"
+    keep["cross"] = (keep.get("cross") or []) + copy.deepcopy(incoming.get("cross") or [])
 
 
 def join(name: str, units: list[str], parts: list[dict[str, Any]],
@@ -1350,25 +1748,25 @@ def join(name: str, units: list[str], parts: list[dict[str, Any]],
             key = (n["type"], _name(n["title"]))
             # the same section, term, step or principle met in another chapter is one node (the book's
             # main procedure recurs chapter after chapter); cases, warnings and constraints stay apart
-            if n["type"] in MERGED and key in seen:
+            if n["type"] in MERGED and key[1] and key in seen:
                 same = nodes[seen[key]]
-                same["units"] = sorted(set(same["units"]) | set(n["units"]))
-                if n["type"] != "section" and n["content"] and n["content"] not in same["content"]:
-                    same["content"] += f"\n\n{n['content']}"
-                same["cross"] = (same.get("cross") or []) + (n.get("cross") or [])
+                _merge_content(same, n, _contributions(n, p, str(part.get("part", ""))))
                 where[n["id"]] = same["id"]
                 continue
             where[n["id"]] = len(nodes)
-            nodes.append({**n, "id": len(nodes), "part": p})
+            nodes.append({**copy.deepcopy(n), "id": len(nodes), "part": p, "parts": [p],
+                          "contributions": _contributions(n, p, str(part.get("part", "")))})
             new.append(nodes[-1])
-            if n["type"] in MERGED:
+            if n["type"] in MERGED and key[1]:
                 seen[key] = where[n["id"]]
         for n in new:  # a part's own indexes, now the joined framework's
             for key in ("parent", "depends_on"):
                 n[key] = where.get(n[key]) if n[key] is not None else None
                 if n[key] == n["id"]:
                     n[key] = None
-        edges += [{**e, "from": where[e["from"]], "to": where[e["to"]]} for e in part["edges"]
+        edges += [{**e, "from": where[e["from"]], "to": where[e["to"]],
+                   "contributions": [{**copy.deepcopy(c), "part": p, "chapter": str(part.get("part", p))}
+                                     for c in e.get("contributions") or [e]]} for e in part["edges"]
                   if e["from"] in where and e["to"] in where]
         label = f"Part {p} ({part.get('part', p)})"
         for k in ("graph_issues", "logic_issues", "logic_warnings"):
@@ -1390,7 +1788,8 @@ def join(name: str, units: list[str], parts: list[dict[str, Any]],
     return {"name": name, "model": parts[0]["model"], "passes": max(p["passes"] for p in parts), "parts": len(parts),
             "nodes": nodes, "edges": tidy_edges(nodes, edges), "logic": logic,
             "coverage": coverage(units, nodes, reference=reference),
-            "judgment": {"warrants_reextract": False, "extractor_instructions": "", "findings": findings}}
+            "judgment": {"warrants_reextract": any(p.get("judgment", {}).get("warrants_reextract") for p in parts),
+                         "extractor_instructions": "", "findings": findings}}
 
 
 MERGE_SYSTEM = (
@@ -1420,7 +1819,12 @@ def merge_near_duplicates(fw: dict[str, Any], units: list[str], similar: Callabl
     if not pairs:
         return
     listing = "\n".join(f"{a} & {b}" for a, b in pairs)
-    data = chat_json(MERGE_SYSTEM, f"Pairs (by node id):\n{listing}", 4096, "merge", shared=_shared(fw, units))
+    candidates = {i for pair in pairs for i in pair}
+    shared = _nodes_block([n for n in fw["nodes"] if n["id"] in candidates], fields=True)
+    if len(shared) > GLOBAL_AUDIT_CHARS:
+        fw["judgment"]["findings"].append("Optional definition deduplication skipped: candidate records exceed the bounded input.")
+        return
+    data = chat_json(MERGE_SYSTEM, f"Pairs (by node id):\n{listing}", 4096, "merge", shared=shared)
     allowed = set(pairs)
     into: dict[int, int] = {}
     for pair in data.get("same") or []:
@@ -1445,9 +1849,7 @@ def _merge(fw: dict[str, Any], units: list[str], into: dict[int, int]) -> None:
     nodes = fw["nodes"]
     for drop in into:
         keep = nodes[root(drop)]
-        keep["units"] = sorted(set(keep["units"]) | set(nodes[drop]["units"]))
-        if nodes[drop]["content"] and nodes[drop]["content"] not in keep["content"]:
-            keep["content"] += f"\n\n{nodes[drop]['content']}"
+        _merge_content(keep, nodes[drop], _contributions(nodes[drop]))
     kept = [n for n in nodes if n["id"] not in into]
     new = {n["id"]: i for i, n in enumerate(kept)}
     renum = {old: new[root(old)] for old in range(len(nodes))}
@@ -1481,7 +1883,7 @@ def ask(fw: dict[str, Any], units: list[str], question: str, numbers: list[int] 
     system = ("You answer questions about one framework using ONLY its definitive document and source units. "
               "If they do not answer it, say so. Output ONLY valid JSON: {\"answer\": str, \"units\": [cited unit "
               "numbers], \"answered\": bool}.")
-    user = f"{fw.get('document', '')[:40000]}\n\nSOURCE UNITS:\n{_units_block(units)[:40000]}\n\nQUESTION: {question}"
+    user = f"{fw.get('document', '')}\n\nSOURCE UNITS:\n{_units_block(units)}\n\nQUESTION: {question}"
     data = chat_json(system, user, 4096, "ask")
     return {"answer": str(data.get("answer") or "No answer."), "units": data.get("units") or [],
             "answered": bool(data.get("answered"))}
