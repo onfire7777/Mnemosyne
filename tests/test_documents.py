@@ -13,7 +13,7 @@ from mnemosyne.document_storage import DocumentConflict
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Assertion, Evidence, utc_now
 from mnemosyne.postgres_engine import PostgresEngine
-from mnemosyne.privacy import ErasureMode
+from mnemosyne.privacy import ErasureMode, detect_pii_tags
 from mnemosyne.sqlite_engine import SqliteEngine
 
 
@@ -306,15 +306,113 @@ def test_pii_raises_document_and_segment_sensitivity_monotonically(store):
     service.append(ctx, "guide", "Reach me at synthetic.person@example.com", expected_revision=1, operation_id="pii")
     record = manifest(store)
     assert record["settings"]["sensitivity"] == 3
-    new_cid = record["segments"][-1]["cid"]
-    row = engine.get_evidence(ctx.tenant_id, new_cid)
-    assert row.sensitivity == 3 and any(tag.startswith("pii:") for tag in row.capability_tags)
+    for segment in record["segments"]:
+        row = engine.get_evidence(ctx.tenant_id, segment["cid"])
+        assert row.sensitivity == 3 and any(tag.startswith("pii:") for tag in row.capability_tags)
     # Removing the PII never lowers the document's sensitivity again.
     service.replace(ctx, "guide", "Plain intro.\n\n", expected_revision=2, operation_id="scrub")
     assert engine.get_document_record(ctx.tenant_id, ctx.user_id, "guide", ctx.branch)["settings"]["sensitivity"] == 3
     low = replace(ctx, max_sensitivity=1)
     with pytest.raises(PermissionError):
         service.get(low, "guide")
+
+
+def test_pii_created_by_reordering_replaces_lower_sensitivity_sources(store):
+    engine, service, ctx = store
+    ctx = replace(ctx, role="consolidator")
+    low = replace(ctx, max_sensitivity=0)
+    # Neither occurrence contains an SSN on its own; only their new order does.
+    first = "amber " + " " * 54 + "123-"
+    second = "45-6789" + " " * 57
+    assert len(first) == len(second) == 64
+    assert detect_pii_tags(second + first) == []
+    assert detect_pii_tags(first + second) == ["ssn"]
+    service.create(ctx, "guide", second + first, operation_id="create", chunk_chars=64)
+    old = service.get(ctx, "guide")
+    old_marker = old.segment_cids[1]
+    fact = engine.upsert_assertion(Assertion(
+        tenant_id=ctx.tenant_id, user_id=ctx.user_id, subject="marker", predicate="is", object="amber",
+        source_evidence_cids=[old_marker], confidence=0.95, status="active",
+    ))
+    summary = engine.append_evidence(Evidence(
+        tenant_id=ctx.tenant_id, user_id=ctx.user_id, actor="system", source_type="consolidation-summary",
+        content="The marker is amber.",
+        metadata={"summary": {"source_evidence_cids": [old_marker], "status": "active"}},
+    ))
+
+    def search(route, context):
+        if route == "retrieve":
+            return engine.retrieve("amber", tenant_id=ctx.tenant_id,
+                                   filt=context.to_filter(), record_access=False).hits
+        return getattr(engine, f"{route}_search")("amber", 20, context.to_filter())
+
+    routes = ("lexical", "vector", "retrieve")
+    for route in routes:
+        assert {old_marker, fact} & {hit.id for hit in search(route, low)}, route
+    changed = service.replace(ctx, "guide", first + second, operation_id="reorder", expected_revision=1)
+    assert (changed.revision, changed.created, changed.reused, changed.retired) == (2, 2, 0, 2)
+    current = service.get(ctx, "guide")
+    assert current.content == first + second
+    assert not set(current.segment_cids) & set(old.segment_cids)
+    for cid in current.segment_cids:
+        row = engine.get_evidence(ctx.tenant_id, cid)
+        assert row.sensitivity == 3 and "pii:ssn" in row.capability_tags
+        assert engine.get_evidence_for_read(ctx.tenant_id, cid, access_context=low.to_filter()) is None
+        assert engine.get_evidence_for_read(ctx.tenant_id, cid, access_context=ctx.to_filter()) is not None
+    for cid in old.segment_cids:
+        assert engine.get_evidence(ctx.tenant_id, cid).retired_at is not None
+        assert engine.get_evidence_for_read(ctx.tenant_id, cid, access_context=ctx.to_filter()) is None
+    blocked = set(old.segment_cids) | set(current.segment_cids) | {fact, summary}
+    for route in routes:
+        assert not blocked & {hit.id for hit in search(route, low)}
+        authorized_hits = {hit.id for hit in search(route, ctx)}
+        # PostgreSQL does not generate stored vectors for private sources.
+        if route != "vector":
+            assert current.segment_cids[0] in authorized_hits, route
+        assert not (set(old.segment_cids) | {fact, summary}) & authorized_hits
+
+    before_retry = manifest(store)
+    sources_before_retry = engine.export_tenant(ctx.tenant_id)["evidence"]
+    assert service.replace(ctx, "guide", first + second, operation_id="reorder", expected_revision=1) == changed
+    assert manifest(store) == before_retry
+    assert engine.export_tenant(ctx.tenant_id)["evidence"] == sources_before_retry
+    with pytest.raises(DocumentConflict):
+        service.replace(ctx, "guide", first + second, operation_id="stale", expected_revision=1)
+    with pytest.raises(DocumentConflict):
+        service.create(ctx, "guide", second + first, operation_id="create", chunk_chars=64)
+    # An already protected occurrence can still be reused, including after PII
+    # disappears; the revision's sensitivity never decreases.
+    reordered = service.replace(ctx, "guide", second + first, operation_id="remove-pii", expected_revision=2)
+    assert (reordered.created, reordered.reused, reordered.retired) == (0, 2, 0)
+    assert service.get(ctx, "guide").segment_cids == tuple(reversed(current.segment_cids))
+    assert manifest(store)["settings"]["sensitivity"] == 3
+
+
+def test_sensitivity_reclassification_rolls_back_sources_and_receipt(store, monkeypatch):
+    engine, service, ctx = store
+    ctx = replace(ctx, role="consolidator")
+    service.create(ctx, "guide", "Plain intro.\n\n", operation_id="create")
+    before = manifest(store)
+    before_sources = engine.export_tenant(ctx.tenant_id)["evidence"]
+    save = engine.save_document_record
+
+    def fail_after_save(*args, **kwargs):
+        save(*args, **kwargs)
+        raise RuntimeError("injected after sensitivity reclassification")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(engine, "save_document_record", fail_after_save)
+        with pytest.raises(RuntimeError, match="reclassification"):
+            service.append(ctx, "guide", "synthetic.person@example.com", expected_revision=1, operation_id="pii")
+    assert manifest(store) == before
+    assert engine.export_tenant(ctx.tenant_id)["evidence"] == before_sources
+    assert service.get(ctx, "guide").content == "Plain intro.\n\n"
+    assert engine.get_evidence_for_read(
+        ctx.tenant_id, before["segments"][0]["cid"], access_context=replace(ctx, max_sensitivity=0).to_filter(),
+    ) is not None
+    # Failed publication did not consume the operation ID.
+    committed = service.append(ctx, "guide", "synthetic.person@example.com", expected_revision=1, operation_id="pii")
+    assert (committed.revision, committed.created, committed.reused, committed.retired) == (2, 2, 0, 1)
 
 
 def test_source_revoked_during_read_is_never_returned(store):

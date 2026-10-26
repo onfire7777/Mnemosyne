@@ -121,3 +121,9 @@ when an earlier journal operation fails, and report the error without undoing
 committed ledger state. A tenant journal cannot erase a shared CID while a live
 copy remains in another branch. A source created and erased within one group
 must not emit plaintext during post-commit journal processing.
+
+A document-wide sensitivity increase must protect reused chunks as well as newly
+written text; reordered boundaries can form sensitive data that individual chunks
+do not reveal. Treat source metadata as another disclosure surface. Retrieval
+must not change behavior based on evaluation process flags. Reproducibility
+compares repeated current runs; non-regression compares matching data partitions.

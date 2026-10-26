@@ -11,8 +11,9 @@ from __future__ import annotations
 
 from array import array
 from collections import defaultdict
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Mapping, Sequence
 from itertools import chain
+import math
 
 from mnemosyne import text
 from mnemosyne.cid_lists import shared_or_copy
@@ -89,6 +90,85 @@ def rrf_fuse(
             )
         fused.append(item)
     return sorted(fused, key=lambda item: item.score, reverse=True)[:k]
+
+
+def interleave_fusion(
+    ranked_lists: Sequence[Sequence[Hit]],
+    k: int,
+    *,
+    annotate_channel_scores: bool = False,
+) -> list[Hit]:
+    """Balanced round-robin interleaving across channel hit lists.
+
+    Protects channel-exclusive rank-1 hits (such as semantic near-twins)
+    from multi-channel sum starvation under RRF.
+    """
+    if k <= 0 or not ranked_lists:
+        return []
+
+    def identity(hit: Hit) -> tuple[str, str, str, str]:
+        return (hit.tenant_id, hit.branch, hit.kind, hit.id)
+
+    channels: dict[tuple[str, str, str, str], list[str]] = defaultdict(list)
+    channel_scores: dict[tuple[str, str, str, str], dict[str, float]] = defaultdict(dict)
+    for ranked in ranked_lists:
+        for hit in ranked:
+            key = identity(hit)
+            channels[key].append(hit.channel)
+            if annotate_channel_scores and math.isfinite(hit.score):
+                channel_scores[key][hit.channel] = max(
+                    channel_scores[key].get(hit.channel, hit.score), hit.score
+                )
+
+    seen: set[tuple[str, str, str, str]] = set()
+    selected: list[Hit] = []
+    iterators = [iter(lst) for lst in ranked_lists]
+    active = list(range(len(ranked_lists)))
+
+    while active and len(selected) < k:
+        still_active = []
+        for idx in active:
+            try:
+                hit = next(iterators[idx])
+                still_active.append(idx)
+            except StopIteration:
+                continue
+
+            key = identity(hit)
+            if key not in seen:
+                seen.add(key)
+                selected.append(hit)
+                if len(selected) >= k:
+                    break
+        active = still_active
+
+    result: list[Hit] = []
+    for rank, hit in enumerate(selected, start=1):
+        key = identity(hit)
+        merged_channels = "+".join(sorted(set(channels[key])))
+        score = 1.0 / rank
+
+        metadata = dict(hit.metadata)
+        metadata["score_scale"] = "reciprocal_rank"
+        if annotate_channel_scores:
+            metadata["channels"] = sorted(set(channels[key]))
+            metadata["channel_scores"] = dict(sorted(channel_scores[key].items()))
+
+        item = Hit(
+            id=hit.id,
+            kind=hit.kind,
+            tenant_id=hit.tenant_id,
+            branch=hit.branch,
+            text=hit.text,
+            score=score,
+            channel=merged_channels,
+            provenance=shared_or_copy(hit.provenance),
+            trust_tier=hit.trust_tier,
+            sensitivity=hit.sensitivity,
+            metadata=metadata,
+        )
+        result.append(item)
+    return result
 
 
 def u_curve_order(hits: list[Hit]) -> list[Hit]:

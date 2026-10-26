@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any, Literal
 
 from mnemosyne.cid_lists import bump_evidence_epoch, evidence_tracked
@@ -25,9 +25,15 @@ def utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-def parse_dt(value: str | datetime | None) -> datetime | None:
-    if value is None or isinstance(value, datetime):
-        return value
+def parse_dt(value: str | date | datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+    if isinstance(value, date):
+        return datetime.combine(value, datetime.min.time(), tzinfo=UTC)
+    if not isinstance(value, str):
+        raise TypeError("timestamp must be an ISO string, date, datetime, or None")
     normalized = value.replace("Z", "+00:00")
     parsed = datetime.fromisoformat(normalized)
     if parsed.tzinfo is None:

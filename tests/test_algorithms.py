@@ -208,3 +208,80 @@ def test_mmr_select_missing_vector_means_zero_relevance_no_penalty():
     weak = _hit("evidence", "weak", 0.0, "lexical")
     picked = mmr_select([weak, strong], 2, query_vec=[1.0], embed_hit=lambda h: None, mmr_lambda=0.7)
     assert {h.id for h in picked} == {"weak", "strong"}
+
+
+def test_interleave_fusion_protects_semantic_rank1_near_twin():
+    from mnemosyne.algorithms import interleave_fusion, rrf_fuse
+
+    # Near-twin 'a' is rank 1 in dense, absent in lexical
+    dense = [_hit("evidence", "a", 0.99, "dense_hash"), _hit("evidence", "b", 0.70, "dense_hash")]
+    lexical = [_hit("evidence", "b", 3.00, "lexical"), _hit("evidence", "c", 1.00, "lexical")]
+
+    # Under RRF, 'b' starves 'a'
+    rrf_result = rrf_fuse([dense, lexical], k=2, rrf_k=60.0)
+    assert rrf_result[0].id == "b"
+
+    # Under interleave_fusion, 'a' is preserved at rank 1
+    interleaved = interleave_fusion([dense, lexical], k=2)
+    assert interleaved[0].id == "a"
+    assert interleaved[1].id == "b"
+    assert interleaved[1].channel == "dense_hash+lexical"
+
+
+def test_interleave_fusion_round_robin_and_dedup():
+    from mnemosyne.algorithms import interleave_fusion
+
+    list1 = [_hit("evidence", "1", 1.0, "ch1"), _hit("evidence", "2", 0.8, "ch1")]
+    list2 = [_hit("evidence", "3", 2.0, "ch2"), _hit("evidence", "1", 1.5, "ch2")]
+    list3 = [_hit("evidence", "4", 0.5, "ch3")]
+
+    fused = interleave_fusion([list1, list2, list3], k=5)
+    # Turn 1: 1 from list1, 3 from list2, 4 from list3
+    # Turn 2: 2 from list1, 1 from list2 (already seen -> merged channel), nothing from list3
+    assert [h.id for h in fused] == ["1", "3", "4", "2"]
+    h1 = next(h for h in fused if h.id == "1")
+    assert h1.channel == "ch1+ch2"
+    assert [h.score for h in fused] == [1.0, 0.5, 1.0 / 3.0, 0.25]
+
+
+def test_interleave_fusion_empty_and_zero_k():
+    from mnemosyne.algorithms import interleave_fusion
+
+    assert interleave_fusion([], k=5) == []
+    assert interleave_fusion([[]], k=5) == []
+    assert interleave_fusion([[_hit("evidence", "1", 1.0, "ch1")]], k=0) == []
+    assert interleave_fusion([[_hit("evidence", "1", 1.0, "ch1")]], k=-1) == []
+
+
+def test_interleave_fusion_annotates_channel_scores():
+    from mnemosyne.algorithms import interleave_fusion
+
+    list1 = [_hit("evidence", "a", 0.9, "ch1")]
+    list2 = [_hit("evidence", "a", 2.5, "ch2")]
+
+    fused = interleave_fusion([list1, list2], k=1, annotate_channel_scores=True)
+    assert len(fused) == 1
+    assert fused[0].metadata["channels"] == ["ch1", "ch2"]
+    assert fused[0].metadata["channel_scores"] == {"ch1": 0.9, "ch2": 2.5}
+
+
+def test_interleave_does_not_merge_identities_across_tenants_or_branches():
+    from mnemosyne.algorithms import interleave_fusion
+    first = _hit('evidence', 'same', 1, 'lexical')
+    other_tenant = _hit('evidence', 'same', 2, 'dense')
+    other_tenant.tenant_id = 'tenant-b'
+    other_branch = _hit('evidence', 'same', 3, 'graph')
+    other_branch.branch = 'private'
+    result = interleave_fusion([[first], [other_tenant], [other_branch]], 3)
+    assert [(h.tenant_id, h.branch, h.channel) for h in result] == [
+        ('tenant-a', 'main', 'lexical'), ('tenant-b', 'main', 'dense'), ('tenant-a', 'private', 'graph')]
+
+
+def test_interleave_annotations_remain_valid_json_with_nonfinite_scores():
+    import json
+    from mnemosyne.algorithms import interleave_fusion
+    hits = [_hit('evidence', str(i), score, 'lexical') for i, score in enumerate([float('nan'), float('inf'), -4])]
+    result = interleave_fusion([hits], 3, annotate_channel_scores=True)
+    json.dumps([h.to_dict() for h in result], allow_nan=False)
+    assert result[-1].metadata['channel_scores'] == {'lexical': -4}
+    assert all(h.metadata['score_scale'] == 'reciprocal_rank' for h in result)

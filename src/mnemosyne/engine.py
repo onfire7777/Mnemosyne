@@ -1506,6 +1506,36 @@ def _bounded_float(value: object, *, default: float) -> float:
     return max(0.0, min(1.0, number))
 
 
+def _candidate_time_metadata(
+    created_at: Any, metadata: Mapping[str, Any], *, redacted: bool = False,
+) -> dict[str, str]:
+    """Expose canonical dates, never arbitrary text stored under date keys.
+
+    Event dates are source-provided content. A redacted read cannot safely
+    assume they do not repeat the withheld value, even under a different key.
+    The ledger's creation timestamp remains available for time-window routing.
+    """
+    def canonical(value: Any) -> str | None:
+        if not isinstance(value, (str, datetime)):
+            return None
+        try:
+            parsed = parse_dt(value)
+            return iso_utc(parsed) if parsed is not None else None
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    result = {}
+    created = canonical(created_at)
+    if created is not None:
+        result["_candidate_created_at"] = created
+    if not redacted:
+        for name, alias in (("event_start", "occurred_start"), ("event_end", "occurred_end")):
+            value = canonical(metadata.get(name)) or canonical(metadata.get(alias))
+            if value is not None:
+                result[name] = value
+    return result
+
+
 def _normalise_privacy_tags(pii_tags: list[str]) -> list[str]:
     return sorted({str(tag).strip().lower() for tag in pii_tags if str(tag).strip()})
 
@@ -6948,6 +6978,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     access_policy=ev.access_policy,
                 ),
                 "privacy": privacy_metadata,
+                **_candidate_time_metadata(ev.created_at, ev.metadata, redacted=decision.redacted),
             }
             if isinstance(ev.metadata.get("media_embedding"), dict):
                 metadata["media_embedding"] = dict(ev.metadata["media_embedding"])
@@ -7181,12 +7212,12 @@ class LocalMemoryEngine(CanaryOverlayMixin):
     def _confidence(query: str, hits: list[Hit], *, support_score: float | None = None) -> float:
         if not hits:
             return 0.0
-        max_score = max((max(hit.score, 0.0) for hit in hits), default=0.0)
+        scores = [max(hit.score, 0.0) if math.isfinite(hit.score) else 0.0 for hit in hits]
+        max_score = max(scores, default=0.0)
         weighted = 0.0
         total = 0.0
-        ranked_scores = sorted((max(hit.score, 0.0) for hit in hits), reverse=True)
-        for rank, hit in enumerate(hits, start=1):
-            score = max(hit.score, 0.0)
+        ranked_scores = sorted(scores, reverse=True)
+        for rank, (hit, score) in enumerate(zip(hits, scores, strict=True), start=1):
             relevance = score / max(max_score, 0.01)
             trust = trust_weight(hit.trust_tier)
             explicit = hit.metadata.get("confidence")
@@ -7203,7 +7234,9 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             if explicit is not None:
                 quality = 0.55 * _bounded_float(explicit, default=0.0) + 0.45 * quality
             quality *= 0.55 + 0.45 * trust
-            rank_weight = (score + 0.01) / max(rank, 1)
+            # Common-scale weights preserve the finite-score ratio without
+            # overflowing when several individually finite scores are huge.
+            rank_weight = (relevance + 0.01 / max(max_score, 0.01)) / rank
             weighted += max(0.0, min(1.0, quality)) * rank_weight
             total += rank_weight
         confidence = weighted / max(total, 0.01)
@@ -7214,13 +7247,12 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         confidence *= 0.85 + 0.15 * support
         evidence_quality = max(0.0, min(1.0, confidence))
         query_support_score = support_score if support_score is not None else query_support(query, hits)["score"]
-        query_support_score = max(0.0, min(1.0, query_support_score))
+        query_support_score = _bounded_float(query_support_score, default=0.0)
         if query_support_score < QUERY_SUPPORT_THRESHOLD:
             return min(evidence_quality, 0.05 * (query_support_score / QUERY_SUPPORT_THRESHOLD))
-        support_floor = 0.96 + 0.04 * (
-            (query_support_score - QUERY_SUPPORT_THRESHOLD) / max(1.0 - QUERY_SUPPORT_THRESHOLD, 0.01)
-        )
-        return max(evidence_quality, min(1.0, support_floor))
+        # Word overlap can reject unsupported answers; it cannot manufacture
+        # certainty when the evidence itself is weak or low-trust.
+        return evidence_quality
 
     @staticmethod
     def _prediction_set_size(hits: list[Hit], threshold: float) -> int:

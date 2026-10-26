@@ -28,7 +28,7 @@ authentication boundary. There is no MCP tool for documents yet.
   separators belong to the preceding paragraph; long paragraphs split at exact
   code-point boundaries). Concatenating the segments reproduces the input.
 - **Occurrence reuse.** An unchanged paragraph keeps its source CID across
-  revisions; duplicates are matched once each. Changed or removed segments are
+  revisions when its source sensitivity satisfies the current document policy; duplicates are matched once each. Changed or removed segments are
   **retired** (`Evidence.retired_at`), not erased: they leave current recall
   (lexical, vector, `retrieve`, `graph_as_of` and summary capture) along with
   derived facts and summaries that depend on them, while staying in the ledger
@@ -47,8 +47,10 @@ authentication boundary. There is no MCP tool for documents yet.
   break-glass and historical (`as_of`) contexts are refused.
 - **Trust and privacy.** A lower-trust writer cannot replace or extend a document
   created with stronger trust (no trust laundering). Tier-5 writers' segments
-  are tagged `data-only`/`no-write-authority`. PII raises the document and new
-  segments to sensitivity 3, monotonically; content whose sensitivity would exceed
+  are tagged `data-only`/`no-write-authority`. PII raises the document and every
+  current segment to sensitivity 3, monotonically. Reused text at a lower
+  sensitivity receives a fresh protected occurrence; the old CID retires in
+  the same transaction. This also covers PII formed by reordering chunk boundaries; content whose sensitivity would exceed
   the writer's own read ceiling is refused before any source is written.
 - **Bounds.** Content length (`max_content_chars`, default 2,000,000), segment,
   retired-segment and receipt counts (100,000 each) are checked before writes.
@@ -74,5 +76,10 @@ GRANT DELETE ON documents TO mnemosyne_app;
 ## Not yet implemented
 
 Automatic model extraction of facts from new segments needs a durable,
-crash-safe job queue and is intentionally out of scope. Branch merge rules for
-documents and an MCP transport are also pending.
+crash-safe job queue. Branch merges reject differing document manifests;
+automatic reconciliation and an MCP transport are still pending.
+
+Older persisted manifests whose source rows already have inconsistent sensitivity
+are not automatically migrated. Republishing through `replace` creates protected
+occurrences for those rows. Administrators should repair such records before
+serving a database affected by the earlier boundary-reordering defect.
