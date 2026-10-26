@@ -19,5 +19,11 @@
     "ok": true
   },
   "benchmark_run": false,
-  "provider_inference_run": false
+  "provider_inference_run": false,
+  "source_commit": "1557f8aafa47018a5218a821ce397f00f9592a5b",
+  "remote_confirmation": {
+    "ref": "refs/heads/main",
+    "observed_commit": "1557f8aafa47018a5218a821ce397f00f9592a5b",
+    "method": "git ls-remote --heads origin main"
+  }
 }
