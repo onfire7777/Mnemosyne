@@ -19,5 +19,11 @@
   "unique_tests": 823,
   "book_pdf_parser": "pypdf 6.10.0 from existing bundled runtime",
   "benchmark_run": false,
-  "model_provider_calls": false
+  "model_provider_calls": false,
+  "source_commit": "9340354c7cc20601d736dbb56d19d073e4b4ae43",
+  "remote_confirmation": {
+    "ref": "refs/heads/main",
+    "observed_commit": "9340354c7cc20601d736dbb56d19d073e4b4ae43",
+    "method": "git ls-remote --heads origin main"
+  }
 }

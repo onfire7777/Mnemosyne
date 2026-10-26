@@ -1,7 +1,8 @@
 ---
 phase: quick-whole-book-integrity
 plan: "01"
-status: delivery_pending
+status: complete
+source_commit: 9340354c7cc20601d736dbb56d19d073e4b4ae43
 requirements: [WB1, WB2, WB3, WB4, WB5, WB6, WB7]
 ---
 
@@ -35,8 +36,8 @@ commands are retained in
 `VERIFICATION.md` maps WB1–WB7 to runtime and behavioral evidence; `REVIEW.md`
 records the final independent review and the corrected immediate CLI exit bug.
 
-All runtime findings are closed. Final delivery confirmation is recorded after
-the normal push to `origin/main`; passing tests alone do not establish delivery.
+All runtime findings are closed. The reviewed implementation commit `9340354c7cc20601d736dbb56d19d073e4b4ae43`
+was pushed normally and independently confirmed by `git ls-remote --heads origin main`.
 No full benchmark or provider inference ran. Source accounting does not prove
 semantic exhaustiveness, visual understanding, competitive ranking, or measured
 real-model throughput. Historical milestone acceptance remains unchanged.
@@ -44,4 +45,7 @@ real-model throughput. Historical milestone acceptance remains unchanged.
 ## Delivery
 
 Final receipts: 171 book checks and 664 CLI checks passed (823 unique cases).
-Normal commit/push confirmation is pending.
+Implementation commit: `9340354c7cc20601d736dbb56d19d073e4b4ae43`.
+`git push origin main` succeeded and `git ls-remote --heads origin main` returned
+the identical commit for `refs/heads/main`. This final evidence update follows
+that observed delivery; no CI completion is inferred from the push.

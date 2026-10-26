@@ -28,3 +28,10 @@ Model doubles exercise mechanics and state transitions. They do not establish th
 The saved source is exact bytes; extracted passages normalize whitespace and provide text-only accounting. There is no OCR, visual interpretation, general PDF reading-order guarantee, exhaustive cross-batch pair comparison, measured provider quality, or measured real-model speedup. These limits are explicit in the documentation.
 
 Final suite identities and file fingerprints belong in `VERIFICATION.md`. Commit/push confirmation is pending with the orchestrator; no remote delivery or milestone completion is asserted by this review. No runtime files were changed and no commit was made by this reviewer.
+
+## Orchestrator delivery confirmation
+
+The final retained suites passed 171 book checks and 664 CLI checks (823 unique).
+Implementation commit `9340354c7cc20601d736dbb56d19d073e4b4ae43` was pushed to `origin/main` and confirmed
+by `git ls-remote --heads origin main`. The pending-delivery statements above
+describe the reviewer handoff before that push.

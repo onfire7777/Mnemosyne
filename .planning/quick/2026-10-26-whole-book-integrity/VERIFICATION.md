@@ -1,10 +1,11 @@
 ---
 phase: quick-whole-book-integrity
 verified: "2026-10-26T21:09:08Z"
-status: gaps_found
+status: passed
 runtime_status: passed
-delivery_status: pending
-score: 6/7 WB criteria verified
+delivery_status: confirmed
+source_commit: 9340354c7cc20601d736dbb56d19d073e4b4ae43
+score: 7/7 WB criteria verified
 behavior_unverified: 0
 overrides_applied: 0
 covered_files:
@@ -28,21 +29,13 @@ covered_files:
   - work/hindsight-comparison/whole-book/cli.xml
   - work/hindsight-comparison/whole-book/source-sha256.json
   - work/hindsight-comparison/whole-book/verification.json
-covered_digest: "v3:sha256:607da6a56e67adf72e1150c9a3fe80ee7061301dc2669f11b75a5f2ac372f11c"
-gaps:
-  - truth: "WB7: Documentation matches the delivered source, and the explicit book-work commit is confirmed on origin/main."
-    status: partial
-    reason: "Documentation is reviewed; the orchestrator has not yet recorded the book-work commit and remote confirmation."
-    artifacts:
-      - path: .planning/quick/2026-10-26-whole-book-integrity/SUMMARY.md
-        issue: "Delivery receipt pending."
-    missing:
-      - "Record the reviewed commit and confirm it on origin/main; then close this delivery-only gap."
+covered_digest: "v3:sha256:63db8361161ef77d381a8cd9c7966c4ded78bff5f5dc275b20f7591f486128db"
+gaps: []
 ---
 
 # Whole-book integrity verification
 
-**Goal:** Validate the in-flight whole-book continuation, reconcile its documentation, and deliver the authorized book change. **Runtime result: passed. Overall task: delivery pending.** This is initial verification of this quick task; no prior verification report or accepted override existed. `CONTEXT.md` WB1–WB7 define the contract. Historical v2.0/Phase 15 acceptance remains open and is not assessed or advanced here.
+**Goal:** Validate the in-flight whole-book continuation, reconcile its documentation, and deliver the authorized book change. **Runtime result: passed. Delivery: confirmed on origin/main.** This is initial verification of this quick task; no prior verification report or accepted override existed. `CONTEXT.md` WB1–WB7 define the contract. Historical v2.0/Phase 15 acceptance remains open and is not assessed or advanced here.
 
 ## Observable truths and requirements
 
@@ -56,9 +49,9 @@ Test locators below omit the common `tests/` prefix. They name actual behavioral
 | WB4 | Joined nodes/edges retain original contributions; bounded global review accounts for them or reports incomplete. | VERIFIED | `join`, `_merge`, `_contributions`, `_bounded_logic`, `render`. `test_join_preserves_all_chapter_fields_quotes_and_original_parts`, `test_join_preserves_both_chapter_relationship_rationales`, `test_large_merged_node_audits_all_contributions_without_cartesian_edges`, `test_large_merged_edge_audits_every_rationale_in_bounded_views`, oversized-node and global-provider-error tests. |
 | WB5 | Work and context remain bounded; cached identical calls are reusable; completed work survives partial failures. | VERIFIED | Source windows 60,000 characters; map context 12,000; map/chapter workers 3; helper pool at most 8; global batches 150,000; absolute request check 250,000. `test_map_and_chapter_prompts_only_carry_their_source_window`, worker/concurrency/context/prompt-limit tests, `test_concurrent_identical_cached_calls_publish_atomically`, chapter/global failure tests. `test_book_ask_integrity.py` checks both source/document tails and oversized rejection before dispatch. |
 | WB6 | Import/activation recomputes integrity; bad work cannot displace the active revision; retry and CLI outcomes are truthful. | VERIFIED | `_verified_framework` is called by conversion/import and active-state validation; `_import_book` verifies reuse; `make_burnskill` selects the intended unfinished revision. `test_incomplete_framework_does_not_replace_active_revision`, malformed/forged-import, defensive-copy, structural/field-repair and correct-source-retry tests. All queued and immediate outcome branches of `_emit_framework_job` are covered by `test_book_cli_wait.py`; the immediate-result bug found during review is fixed. |
-| WB7 | Guidance agrees with the code and delivery is confirmed on `origin/main`. | FAILED — delivery-only gap | README, `docs/BURNSKILL.md`, and `docs/whole-book-processing.md` agree with inspected code, command signatures, inventories, bounds, retry and limitations. Commit/push receipt is pending with the orchestrator. |
+| WB7 | Guidance agrees with the code and delivery is confirmed on `origin/main`. | VERIFIED | README, `docs/BURNSKILL.md`, and `docs/whole-book-processing.md` agree with inspected code, command signatures, inventories, bounds, retry and limitations. Implementation commit `9340354c7cc20601d736dbb56d19d073e4b4ae43` was pushed and the same SHA was observed on `refs/heads/main`. |
 
-All WB requirements are claimed in PLAN frontmatter; none are orphaned. PLAN's first three must-have truths map to WB1–WB6 and pass. Its fourth truth maps to WB7 and remains partially met solely because delivery is pending. No gap is deferred to an unrelated historical milestone.
+All WB requirements are claimed in PLAN frontmatter; none are orphaned. PLAN's first three must-have truths map to WB1–WB6 and pass. Its fourth truth maps to WB7 and passes after the observed source-commit push. No gap is deferred to an unrelated historical milestone.
 
 ## Artifacts, wiring and data flow
 
@@ -68,7 +61,7 @@ All WB requirements are claimed in PLAN frontmatter; none are orphaned. PLAN's f
 | `cli.py` → `mcp_tools.py` → `SkillStore` | VERIFIED | Import/make handlers reuse their tools instance; MCP methods delegate to `import_skill`, `make_burnskill`, and `status`; waiting polls the returned exact revision. |
 | Persisted source/result → user inspection | VERIFIED | `status` reads saved framework and metadata; `get(section="coverage")` returns those inventories; source/document paging and node citations return saved data. The source is not a hardcoded empty value or ignored query result. |
 | Tests → runtime modules | VERIFIED | Tests import `mnemosyne.skills`, `mnemosyne.frameworks`, and `mnemosyne.cli` and invoke their behavior. The generic key-link helper reported 0/3 because it searched for literal filesystem paths; Python module imports and executed assertions resolve all three links directly. |
-| Guides and quick-task artifacts | PARTIAL | Both guides and this report are substantive. `SUMMARY.md` and its commit/push receipt are the orchestrator's remaining delivery work. |
+| Guides and quick-task artifacts | VERIFIED | Both guides and this report are substantive. `SUMMARY.md` records the source commit and observed remote confirmation. |
 
 ## Behavioral evidence and test quality
 
@@ -92,8 +85,8 @@ No skipped/disabled requirement tests or unresolved `TBD`/`FIXME`/`XXX` markers 
 
 ## Decision coverage, limits and remaining work
 
-D-01 and D-04 are honored by the scoped checks and explicit non-claims; D-03's long regression remains present and passing. D-02 is honored by limited file ownership, with commit/push still assigned to the orchestrator. CONTEXT uses ordinary Markdown decisions rather than `<decisions>` blocks, so this mapping was reviewed directly.
+D-01 and D-04 are honored by the scoped checks and explicit non-claims; D-03's long regression remains present and passing. D-02 is honored by limited file ownership, with commit/push completed and confirmed by the orchestrator. CONTEXT uses ordinary Markdown decisions rather than `<decisions>` blocks, so this mapping was reviewed directly.
 
 No user approval checkpoint is needed for these deterministic checks. The PLAN's documentation review was performed by this verifier; it is not a request for human authorization. Interpreting a real book still needs judgment, but semantic accuracy, real-model speed/quality, OCR/visual understanding and exhaustive cross-chapter pair comparison are explicitly outside this quick task's guarantees. Source accounting is not semantic exhaustiveness. No historical acceptance gate is closed.
 
-**Remaining gap:** record final durable receipts/fingerprint and the reviewed commit's presence on `origin/main`. Runtime correctness findings are closed; delivery must not be inferred from passing tests.
+**Delivery evidence:** normal push succeeded for `9340354c7cc20601d736dbb56d19d073e4b4ae43`; `git ls-remote --heads origin main` returned that exact SHA. Final durable test receipts and the covered-file fingerprint are refreshed. No remaining gap in this scoped continuation; historical acceptance remains open.

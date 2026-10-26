@@ -6,6 +6,7 @@ or inconsistent results remain drafts. This is implementation and regression
 evidence, not a benchmark or evidence of superiority over another memory system.
 
 Baseline: `b63b34616f65e31457f3bc243b158d479f734e68`.
+Delivered implementation: [`9340354c`](https://github.com/onfire7777/Mnemosyne/commit/9340354c7cc20601d736dbb56d19d073e4b4ae43), confirmed on `origin/main`.
 The exact tested source and test bytes are in [source-sha256.json](source-sha256.json).
 
 ## Delivered behavior
