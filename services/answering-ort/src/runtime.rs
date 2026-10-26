@@ -597,8 +597,11 @@ impl Runtime {
         if std::thread::Builder::new()
             .name("answering-ort-inference".into())
             .spawn(move || {
-                let _permit = permit;
-                let _ = sender.send(session.infer(&worker_request, deadline));
+                let permit = permit;
+                let result = session.infer(&worker_request, deadline);
+                permit.publish_after_release(|| {
+                    let _ = sender.send(result);
+                });
             })
             .is_err()
         {
@@ -716,6 +719,13 @@ impl InFlightPermit {
         flag.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .ok()
             .map(|_| Self(Arc::clone(flag)))
+    }
+
+    fn publish_after_release(self, publish: impl FnOnce()) {
+        // Once a completion is visible, an immediate next request must be admitted.
+        // The worker owns this permit until inference returns, even after a timeout.
+        drop(self);
+        publish();
     }
 }
 
@@ -1252,6 +1262,54 @@ mod tests {
             assert_eq!(response.attestation, configured);
             assert!(!response.ok);
             assert!(response.result.is_none());
+        }
+    }
+
+    #[test]
+    fn completion_releases_admission_before_publishing_success_or_failure() {
+        for result in [
+            Ok(Output::Embed {
+                embedding: vec![1.0],
+            }),
+            Err(ApiError::inference_failed()),
+        ] {
+            let in_flight = Arc::new(AtomicBool::new(false));
+            let permit = InFlightPermit::acquire(&in_flight).unwrap();
+            assert!(InFlightPermit::acquire(&in_flight).is_none());
+            let expected = result.clone();
+            let mut published = None;
+            permit.publish_after_release(|| {
+                let _next = InFlightPermit::acquire(&in_flight)
+                    .expect("a completed inference must admit work before its result is visible");
+                published = Some(result);
+            });
+            assert_eq!(published, Some(expected));
+            assert!(!in_flight.load(Ordering::Acquire));
+        }
+    }
+
+    #[test]
+    fn inference_panic_releases_admission_before_disconnection_is_visible() {
+        struct PanickingSession;
+
+        impl InferenceSession for PanickingSession {
+            fn infer(&self, _request: &Request, _deadline: Deadline) -> Result<Output, ApiError> {
+                panic!("synthetic inference panic");
+            }
+        }
+
+        let runtime = Runtime::with_session(RuntimeConfig::default(), Arc::new(PanickingSession));
+        for _ in 0..2 {
+            let response = runtime.execute(
+                Request::Embed {
+                    protocol_version: crate::protocol::PROTOCOL_VERSION.into(),
+                    expected_identity: CustodyIdentity::development(),
+                    query: "synthetic panic".into(),
+                },
+                Deadline::default(),
+            );
+            assert_eq!(response.error.unwrap().code, ErrorCode::InferenceFailed);
+            assert!(!runtime.in_flight.load(Ordering::Acquire));
         }
     }
 

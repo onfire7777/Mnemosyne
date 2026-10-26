@@ -692,6 +692,94 @@ def _framework_problems(fw: dict[str, Any], units: list[str]) -> list[str]:
         return [f"invalid framework: {exc}"]
 
 
+def _answer_views(fw: dict[str, Any]) -> list[dict[str, Any]]:
+    """Keep each original contribution independently retrievable, with its complete provenance."""
+    views = []
+    for node in fw.get("nodes", []):
+        originals = node.get("contributions") or [node]
+        for position, original in enumerate(originals):
+            # A wrapper preserves even original keys that happen to match our answer metadata.
+            views.append({"view_id": f"{node['id']}:{position}", "canonical_id": node["id"],
+                          "units": original.get("units", []), "record": original})
+    return views
+
+
+def _select_answer_context(views: list[dict[str, Any]], units: list[str], question: str
+                           ) -> tuple[list[int], list[dict[str, Any]], dict[str, Any]]:
+    """Pack whole matching records together with all their evidence, never clipped excerpts."""
+    from mnemosyne.passages import PassageIndex
+
+    empty_context = len(frameworks._answer_context_prompt([], units, [], ""))
+    overhead = frameworks._answer_prompt_size([], units, [], question) - empty_context
+    budget = min(80_000, frameworks.MAX_PROMPT_CHARS - overhead)
+    if empty_context > budget:
+        raise ValueError("ask prompt exceeds the bounded input limit; question was not truncated")
+    words = " ".join(w for w in re.findall(r"\w+", question.lower()) if w not in STOPWORDS)
+    rendered = [frameworks._answer_nodes_block([view]) for view in views]
+    view_scores = PassageIndex(tuple(rendered)).scores(words) if words else {}
+    source_scores = PassageIndex(tuple(units)).scores(words) if words else {}
+    unit_sizes = [len(f"[Unit {i}]\n") + len(text) for i, text in enumerate(units, 1)]
+    selected: list[int] = []
+    numbers: set[int] = set()
+    node_chars = source_chars = 0
+    view_reasons = {"no_match": len(views) - len(view_scores), "invalid_source_units": 0,
+                    "context_budget": 0}
+
+    def context_size(nodes: int, sources: int) -> int:
+        # The empty renderer has two literal 'none' placeholders, replaced by complete blocks.
+        return empty_context - 8 + (nodes or 4) + (sources or 4)
+
+    def source_size(extra: set[int]) -> int:
+        return source_chars + sum(unit_sizes[i - 1] for i in extra) + 2 * (
+            len(extra) if numbers else max(0, len(extra) - 1))
+
+    for index in sorted(view_scores, key=lambda i: (-view_scores[i], i)):
+        cited = views[index]["units"]
+        if (not isinstance(cited, list) or not cited or any(
+                type(i) is not int or not 1 <= i <= len(units) for i in cited)
+                or len(set(cited)) != len(cited)):
+            view_reasons["invalid_source_units"] += 1
+            continue
+        extra = set(cited) - numbers
+        added_sources = source_size(extra)
+        added_nodes = node_chars + len(rendered[index]) + bool(selected)
+        if context_size(added_nodes, added_sources) > budget:
+            view_reasons["context_budget"] += 1
+            continue
+        selected.append(index)
+        numbers.update(extra)
+        node_chars, source_chars = added_nodes, added_sources
+
+    # Lexical source matches also help when the question uses wording absent from a framework item.
+    for index in sorted(source_scores, key=lambda i: (-source_scores[i], i)):
+        number = index + 1
+        if number in numbers:
+            continue
+        added_sources = source_size({number})
+        if context_size(node_chars, added_sources) > budget:
+            continue
+        numbers.add(number)
+        source_chars = added_sources
+
+    selected_views = [views[i] for i in sorted(selected)]
+    supplied = sorted(numbers)
+    context_chars = context_size(node_chars, source_chars)
+    matched_sources = {i + 1 for i in source_scores}
+    metadata = {
+        "mode": "selected", "framework_representation": "original_records",
+        "partial": len(supplied) < len(units) or len(selected_views) < len(views),
+        "selected_units": supplied, "selected_view_ids": [view["view_id"] for view in selected_views],
+        "total_unit_count": len(units), "selected_unit_count": len(supplied),
+        "total_view_count": len(views), "selected_view_count": len(selected_views),
+        "omitted_unit_count": len(units) - len(supplied), "omitted_view_count": len(views) - len(selected_views),
+        "omission_reasons": {"views": view_reasons, "units": {
+            "no_match": len(set(range(1, len(units) + 1)) - matched_sources - numbers),
+            "context_budget": len(matched_sources - numbers)}},
+        "context_chars": context_chars, "context_budget_chars": budget,
+    }
+    return supplied, selected_views, metadata
+
+
 class SkillStore:
     """One per store file; WORKERS threads convert skills side by side."""
 
@@ -1244,27 +1332,35 @@ class SkillStore:
             raise ValueError(f"{row['name']} is not a BurnSkill ({row['conversion']}): read it with skill_get")
         frameworks.MODEL.set(row["model"])
         fw, units = json.loads(row["framework"]), json.loads(row["units"])
-        numbers = node_ids = None
-        if sum(map(len, units)) + len(fw.get("document") or "") > 80_000:
-            # a whole book is too long for one answer: the passages and nodes the question is about, in full
-            from mnemosyne.passages import PassageIndex
-
-            words = " ".join(w for w in re.findall(r"\w+", question.lower()) if w not in STOPWORDS)
-
-            def best(texts: list[str], budget: int) -> list[int]:
-                scores = PassageIndex(tuple(texts)).scores(words) if words else {}
-                picked, used = [], 0
-                for i in sorted(scores, key=lambda i: -scores[i]):
-                    if used + len(texts[i]) > budget:
-                        break
-                    picked.append(i)
-                    used += len(texts[i])
-                return sorted(picked)
-
-            numbers = [i + 1 for i in best(units, 40_000)]
-            node_ids = best([f"{n['title']} {n['content']} {json.dumps(n['fields'])}" for n in fw["nodes"]], 40_000)
-        answer = frameworks.ask(fw, units, question, numbers, node_ids)
-        return {"skill_id": row["skill_id"], "revision": row["revision"], **answer}
+        views = _answer_views(fw)
+        full_chars = (len(fw.get("document") or "") + sum(
+            len(f"[Unit {i}]\n") + len(text) for i, text in enumerate(units, 1))
+            + 2 * max(0, len(units) - 1) + len("\n\nSOURCE UNITS:\n\n\nQUESTION: "))
+        overhead = (frameworks._answer_prompt_size([], units, [], question)
+                    - len(frameworks._answer_context_prompt([], units, [], "")))
+        if full_chars <= min(80_000, frameworks.MAX_PROMPT_CHARS - overhead):
+            answer = frameworks.ask(fw, units, question)
+            context = {
+                "mode": "full", "framework_representation": "document", "partial": False,
+                "selected_units": list(range(1, len(units) + 1)),
+                "selected_view_ids": [], "selected_view_count": 0,
+                "total_unit_count": len(units), "selected_unit_count": len(units),
+                "omitted_unit_count": 0,
+                "context_chars": full_chars, "context_budget_chars": min(80_000, frameworks.MAX_PROMPT_CHARS - overhead),
+            }
+        else:
+            numbers, selected, context = _select_answer_context(views, units, question)
+            if numbers:
+                answer = frameworks.ask(fw, units, question, numbers,
+                                        sorted({view["canonical_id"] for view in selected}), node_views=selected)
+            else:
+                answer = {"answer": "No matching source passages fit the answer context.",
+                          "units": [], "answered": False}
+            if context["partial"] and not answer["answered"]:
+                answer["answer"] = ("No supported answer was established from the selected context. "
+                                    "Other parts of the book were not included; this does not establish "
+                                    "that the answer is absent from the whole book.")
+        return {"skill_id": row["skill_id"], "revision": row["revision"], **answer, "context": context}
 
     # ------------------------------------------------------------------ search
 

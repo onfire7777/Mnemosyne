@@ -1,0 +1,157 @@
+2026-10-26T21:01:55.4138082Z ##[group]Run uv run --locked mneme postgres-role-check --allow-localhost --consolidator-dsn "$MNEMOSYNE_POSTGRES_DSN"
+2026-10-26T21:01:55.4138961Z [36;1muv run --locked mneme postgres-role-check --allow-localhost --consolidator-dsn "$MNEMOSYNE_POSTGRES_DSN"[0m
+2026-10-26T21:01:55.4199729Z shell: /usr/bin/bash -e {0}
+2026-10-26T21:01:55.4199988Z env:
+2026-10-26T21:01:55.4200626Z   MNEMOSYNE_POSTGRES_ADMIN_DSN: ***localhost:5432/mnemosyne
+2026-10-26T21:01:55.4201274Z   MNEMOSYNE_POSTGRES_DSN: ***localhost:5432/mnemosyne
+2026-10-26T21:01:55.4202198Z   MNEMOSYNE_POSTGRES_APP_DSN: ***localhost:5432/mnemosyne
+2026-10-26T21:01:55.4202851Z   MNEMOSYNE_POSTGRES_READONLY_DSN: ***localhost:5432/mnemosyne
+2026-10-26T21:01:55.4203274Z   MNEMOSYNE_POSTGRES_RLS_TEST_ROLE: mnemosyne_consolidator
+2026-10-26T21:01:55.4203687Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-10-26T21:01:55.4204145Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib/pkgconfig
+2026-10-26T21:01:55.4204624Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-10-26T21:01:55.4205041Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-10-26T21:01:55.4205454Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-10-26T21:01:55.4205868Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib
+2026-10-26T21:01:55.4206237Z ##[endgroup]
+2026-10-26T21:01:56.4379113Z {
+2026-10-26T21:01:56.4379501Z   "checks": [
+2026-10-26T21:01:56.4379843Z     {
+2026-10-26T21:01:56.4380213Z       "current_user": "app_user",
+2026-10-26T21:01:56.4380682Z       "name": "app_role_safety",
+2026-10-26T21:01:56.4381103Z       "ok": true,
+2026-10-26T21:01:56.4381434Z       "rolbypassrls": false,
+2026-10-26T21:01:56.4382056Z       "rolsuper": false
+2026-10-26T21:01:56.4382383Z     },
+2026-10-26T21:01:56.4382655Z     {
+2026-10-26T21:01:56.4382967Z       "expected_group": "mnemosyne_app",
+2026-10-26T21:01:56.4383426Z       "name": "app_group_membership",
+2026-10-26T21:01:56.4383873Z       "ok": true
+2026-10-26T21:01:56.4384162Z     },
+2026-10-26T21:01:56.4384440Z     {
+2026-10-26T21:01:56.4384760Z       "allowed_fk_cascade_delete_tables": [
+2026-10-26T21:01:56.4385220Z         "contradictions",
+2026-10-26T21:01:56.4385581Z         "entity_aliases",
+2026-10-26T21:01:56.4385907Z         "justifications",
+2026-10-26T21:01:56.4386232Z         "mental_models"
+2026-10-26T21:01:56.4386550Z       ],
+2026-10-26T21:01:56.4386839Z       "delete_table_count": 5,
+2026-10-26T21:01:56.4387228Z       "delete_tables_outside_fk_cascade": [
+2026-10-26T21:01:56.4387644Z         "documents"
+2026-10-26T21:01:56.4387940Z       ],
+2026-10-26T21:01:56.4388325Z       "name": "app_destructive_writes_denied",
+2026-10-26T21:01:56.4388758Z       "ok": false,
+2026-10-26T21:01:56.4389077Z       "truncate_table_count": 0
+2026-10-26T21:01:56.4389423Z     },
+2026-10-26T21:01:56.4389681Z     {
+2026-10-26T21:01:56.4389964Z       "audit_table": "audit_log",
+2026-10-26T21:01:56.4390377Z       "name": "audit_log_append_only_app",
+2026-10-26T21:01:56.4390793Z       "ok": true
+2026-10-26T21:01:56.4391075Z     },
+2026-10-26T21:01:56.4391755Z     {
+2026-10-26T21:01:56.4392196Z       "expected_groups": [
+2026-10-26T21:01:56.4392547Z         "mnemosyne_app",
+2026-10-26T21:01:56.4392914Z         "mnemosyne_consolidator",
+2026-10-26T21:01:56.4393315Z         "mnemosyne_readonly"
+2026-10-26T21:01:56.4393644Z       ],
+2026-10-26T21:01:56.4393925Z       "name": "group_role_posture",
+2026-10-26T21:01:56.4394293Z       "ok": true
+2026-10-26T21:01:56.4394570Z     },
+2026-10-26T21:01:56.4394830Z     {
+2026-10-26T21:01:56.4395119Z       "current_user": "consolidator_user",
+2026-10-26T21:01:56.4396117Z       "name": "consolidator_role_safety",
+2026-10-26T21:01:56.4396527Z       "ok": true,
+2026-10-26T21:01:56.4396863Z       "rolbypassrls": false,
+2026-10-26T21:01:56.4397217Z       "rolsuper": false
+2026-10-26T21:01:56.4397547Z     },
+2026-10-26T21:01:56.4397822Z     {
+2026-10-26T21:01:56.4398136Z       "expected_group": "mnemosyne_consolidator",
+2026-10-26T21:01:56.4398907Z       "name": "consolidator_group_membership",
+2026-10-26T21:01:56.4399331Z       "ok": true
+2026-10-26T21:01:56.4399609Z     },
+2026-10-26T21:01:56.4399859Z     {
+2026-10-26T21:01:56.4400130Z       "delete_table_count": 29,
+2026-10-26T21:01:56.4400518Z       "name": "consolidator_sole_write",
+2026-10-26T21:01:56.4400905Z       "ok": true,
+2026-10-26T21:01:56.4401199Z       "table_count": 30
+2026-10-26T21:01:56.4401513Z     },
+2026-10-26T21:01:56.4401971Z     {
+2026-10-26T21:01:56.4402246Z       "audit_table": "audit_log",
+2026-10-26T21:01:56.4402665Z       "name": "audit_log_append_only_consolidator",
+2026-10-26T21:01:56.4403117Z       "ok": true
+2026-10-26T21:01:56.4403389Z     }
+2026-10-26T21:01:56.4403645Z   ],
+2026-10-26T21:01:56.4403950Z   "expected_fingerprint_present": false,
+2026-10-26T21:01:56.4404354Z   "findings": [
+2026-10-26T21:01:56.4404632Z     {
+2026-10-26T21:01:56.4404980Z       "code": "app_destructive_writes_denied_failed",
+2026-10-26T21:01:56.4405833Z       "message": "app role must not hold DELETE (outside the documented FK-cascade targets) or TRUNCATE on any public table"
+2026-10-26T21:01:56.4406630Z     }
+2026-10-26T21:01:56.4406882Z   ],
+2026-10-26T21:01:56.4407380Z   "fingerprint": "94de02f30646456e2c40d7dee65ff4f26cc29d562a59f371bd5faf20711471ba",
+2026-10-26T21:01:56.4408020Z   "latency_ms": 255.128,
+2026-10-26T21:01:56.4408357Z   "ok": false,
+2026-10-26T21:01:56.4408637Z   "requirements": {
+2026-10-26T21:01:56.4408962Z     "allow_localhost": true,
+2026-10-26T21:01:56.4409328Z     "audit_table": "audit_log",
+2026-10-26T21:01:56.4409727Z     "expected_app_group": "mnemosyne_app",
+2026-10-26T21:01:56.4410257Z     "expected_consolidator_group": "mnemosyne_consolidator",
+2026-10-26T21:01:56.4410774Z     "readonly_group": "mnemosyne_readonly"
+2026-10-26T21:01:56.4411156Z   },
+2026-10-26T21:01:56.4411402Z   "roles": {
+2026-10-26T21:01:56.4411867Z     "app": {
+2026-10-26T21:01:56.4412156Z       "current_user": "app_user",
+2026-10-26T21:01:56.4412553Z       "expected_group": "mnemosyne_app",
+2026-10-26T21:01:56.4412955Z       "group_exists": true,
+2026-10-26T21:01:56.4413292Z       "group_member": true,
+2026-10-26T21:01:56.4413635Z       "rolbypassrls": false,
+2026-10-26T21:01:56.4413978Z       "rolsuper": false
+2026-10-26T21:01:56.4414279Z     },
+2026-10-26T21:01:56.4414541Z     "consolidator": {
+2026-10-26T21:01:56.4414879Z       "current_user": "consolidator_user",
+2026-10-26T21:01:56.4415346Z       "expected_group": "mnemosyne_consolidator",
+2026-10-26T21:01:56.4415799Z       "group_exists": true,
+2026-10-26T21:01:56.4416144Z       "group_member": true,
+2026-10-26T21:01:56.4416489Z       "rolbypassrls": false,
+2026-10-26T21:01:56.4416843Z       "rolsuper": false
+2026-10-26T21:01:56.4417150Z     },
+2026-10-26T21:01:56.4417402Z     "groups": {
+2026-10-26T21:01:56.4417703Z       "mnemosyne_app": {
+2026-10-26T21:01:56.4418042Z         "rolbypassrls": false,
+2026-10-26T21:01:56.4418405Z         "rolcanlogin": false,
+2026-10-26T21:01:56.4418746Z         "rolsuper": false
+2026-10-26T21:01:56.4419065Z       },
+2026-10-26T21:01:56.4419342Z       "mnemosyne_consolidator": {
+2026-10-26T21:01:56.4419713Z         "rolbypassrls": false,
+2026-10-26T21:01:56.4420056Z         "rolcanlogin": false,
+2026-10-26T21:01:56.4420407Z         "rolsuper": false
+2026-10-26T21:01:56.4420723Z       },
+2026-10-26T21:01:56.4420998Z       "mnemosyne_readonly": {
+2026-10-26T21:01:56.4421352Z         "rolbypassrls": false,
+2026-10-26T21:01:56.4421908Z         "rolcanlogin": false,
+2026-10-26T21:01:56.4422256Z         "rolsuper": false
+2026-10-26T21:01:56.4422567Z       }
+2026-10-26T21:01:56.4422815Z     }
+2026-10-26T21:01:56.4423279Z   },
+2026-10-26T21:01:56.4423526Z   "target": {
+2026-10-26T21:01:56.4423796Z     "app": {
+2026-10-26T21:01:56.4424075Z       "configured": true,
+2026-10-26T21:01:56.4424426Z       "dbname": "mnemosyne",
+2026-10-26T21:01:56.4425006Z       "dsn_sha256": "sha256:2d429029d51bb2523016f488291a66334b2296601518d8783c51778ab388e657",
+2026-10-26T21:01:56.4425643Z       "host": "localhost",
+2026-10-26T21:01:56.4426153Z       "local": true,
+2026-10-26T21:01:56.4426461Z       "port": 5432
+2026-10-26T21:01:56.4426736Z     },
+2026-10-26T21:01:56.4427002Z     "consolidator": {
+2026-10-26T21:01:56.4427310Z       "configured": true,
+2026-10-26T21:01:56.4427645Z       "dbname": "mnemosyne",
+2026-10-26T21:01:56.4428273Z       "dsn_sha256": "sha256:eac5e7cb03822fabe1cb09bc83948d40f3f81c13fca21bc7dc0bfd8a47f49fdf",
+2026-10-26T21:01:56.4428976Z       "host": "localhost",
+2026-10-26T21:01:56.4429309Z       "local": true,
+2026-10-26T21:01:56.4429609Z       "port": 5432
+2026-10-26T21:01:56.4429892Z     }
+2026-10-26T21:01:56.4430138Z   }
+2026-10-26T21:01:56.4430394Z }
+2026-10-26T21:01:56.4795625Z ##[error]Process completed with exit code 1.
+2026-10-26T21:01:56.4936718Z Post job cleanup.
+2026-10-26T21:01:56.5921885Z [command]/usr/bin/git version

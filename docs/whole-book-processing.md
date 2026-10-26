@@ -221,6 +221,32 @@ be completed.
 
 ## Review and reuse
 
+### Ask questions with inspectable context
+
+`skill_ask` uses the full document and source when they fit its context budget.
+For larger books, it searches both source passages and the full original chapter
+contributions. A selected contribution includes all its cited source passages;
+oversized candidates are skipped so smaller useful matches can still be included.
+Selected records are preserved in full, with an 80,000-character context budget
+that is further reduced when needed to honor the complete request limit.
+
+The answer includes `context`: its mode, `partial` flag, selected source unit
+numbers and character budget. `framework_representation` distinguishes the full
+rendered document from selected original records. Selected-context mode also
+reports contribution view IDs, total/selected/omitted counts and omission reasons;
+full-document mode does not claim to have supplied every original JSON field.
+A partial-context abstention
+means that no supported answer was established from those selected passages. It
+does not establish that the answer is absent from the rest of the book.
+
+A successful answer must contain text and cite valid integer source-unit numbers
+that were actually supplied. Invalid response types, duplicate citations, or
+citations outside that context produce an abstention with
+`diagnostic.code: "invalid_answer_response"`. These checks validate the response
+structure and citation availability; they do not prove that a cited passage
+semantically supports every claim. No provider request is made when no matching
+source passage fits the selected context.
+
 Read the reported source coverage, unresolved units, audit findings, and source
 quotations alongside the framework. Check that chapter-specific conditions,
 exceptions, examples, and disagreements remain represented. Coverage means source

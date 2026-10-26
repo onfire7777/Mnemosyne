@@ -1,0 +1,12 @@
+{
+  "src/mnemosyne/skills.py": "97b7b5e2a2d15fbbf1278230d4949f7651f1da41c1e2abb91433ac359845014b",
+  "src/mnemosyne/frameworks.py": "2155436ba3bf81240d40b73683cd6ad836533b1b9bb2d1429b46b9d6f77d18b0",
+  "src/mnemosyne/cli.py": "c595caca98577460130b2df0399f02a03cd34bd7bd1987dc71fb99b3acf3ea25",
+  "services/answering-ort/src/runtime.rs": "94baec07be5a1bb2822a851659e2bcc2e046815b176128bf5cf9ef8861c34bbf",
+  "tests/test_book_answer_context.py": "19693a28a14f0f13fe177fca21711c3c95455579129d8c1308c019a72412afd1",
+  "tests/test_book_ask_integrity.py": "ad2cb16bfb3cc9b8b38f69f1566f70afc95b657307d1998ce9e4532d8e5a0c58",
+  "tests/test_postgres_role_check.py": "044b5938f3da08ce0d9edc354e5ff54fdc5eef2a70a5c265997e14337796c513",
+  "tests/test_skill_frameworks.py": "72c8b9bb8be2f68d0a46eef34a3e2505a1bed541cac1f349730c44282ff3f9b9",
+  "infra/postgres/roles.sql": "80db1e09e5a794f1fffb2122a06b59ff40970bdff9a8e57ad703e93762761bc3",
+  "sql/schema.sql": "c8179095cb668f731217c71265f487aec32932f0d8e35ef7af90ddcc53c408c3"
+}

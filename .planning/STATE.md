@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: "Scoped whole-book integrity continuation; see quick/2026-10-26-whole-book-integrity. No full benchmarks or provider inference. Historical milestone acceptance remains open."
+stopped_at: "Scoped book-answer grounding and CI repairs; see quick/2026-10-26-book-answer-grounding. No full benchmarks or provider inference. Historical milestone acceptance remains open."
 last_updated: "2026-10-26"
 last_activity: 2026-10-26
 progress:
@@ -18,8 +18,8 @@ progress:
 
 ## Current execution — 2026-10-26
 
-The active request is the scoped Mnemosyne whole-book integrity continuation in
-[`quick/2026-10-26-whole-book-integrity`](quick/2026-10-26-whole-book-integrity/PLAN.md).
+The active continuation is Mnemosyne book-answer grounding and CI repairs in
+[`quick/2026-10-26-book-answer-grounding`](quick/2026-10-26-book-answer-grounding/PLAN.md).
 Runtime changes and focused regression evidence are complete; final delivery is
 recorded in that task's summary. The current user restriction forbids full
 benchmarks and provider inference. Mnemosyne and Mnemetric have independent code

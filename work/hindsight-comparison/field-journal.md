@@ -135,3 +135,15 @@ split audit views instead of truncating merged evidence. Recheck imported succes
 flags against source text, and never approve an original that only a validation
 copy repaired. Source accounting and literal quotation checks do not prove
 exhaustive semantic understanding.
+
+Preserving chapter contributions at ingestion is insufficient if retrieval only
+indexes the merged node's first fields. Retrieve complete original contributions
+and budget their serialized records together with the source passages they cite.
+One oversized candidate must not starve smaller matches. Validate answer types
+and citations against the passages actually supplied, and label partial-context
+abstention without claiming the entire source lacks an answer.
+
+A worker's completion message must follow release of its admission permit.
+Publishing first creates a race where a successful response is immediately
+followed by a spurious busy response. Retain the permit while timed-out work is
+still running, but release it before publishing actual completion.

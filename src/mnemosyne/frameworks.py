@@ -1866,24 +1866,108 @@ def _merge(fw: dict[str, Any], units: list[str], into: dict[int, int]) -> None:
                                                        if r["status"] == "reference"})
 
 
+_ANSWER_RESPONSE_CONTRACT = (
+    " A successful answer must contain nonempty answer text and cite at least one supplied "
+    "source unit. Cite only the positive integer unit numbers shown in the source passages, "
+    "without duplicates. Otherwise set answered to false and explain the limitation.")
+_ANSWER_SELECTED_SYSTEM = (
+    "You answer questions about one framework built from a book, using ONLY the framework items "
+    "and book passages given, which were found for this question. If they do not answer it, say so. "
+    "This is selected context, not necessarily the whole book; do not claim the entire book lacks "
+    "something merely because these passages do not show it. "
+    "Output ONLY valid JSON: {\"answer\": str, \"units\": [cited unit numbers], \"answered\": bool}."
+    + _ANSWER_RESPONSE_CONTRACT)
+
+
+def _answer_nodes_block(views: list[dict[str, Any]]) -> str:
+    """Render full original contribution views deterministically, without losing field provenance."""
+    if not isinstance(views, list) or any(not isinstance(view, dict) for view in views):
+        raise ValueError("answer node views must be a list of objects")
+    return "\n".join(json.dumps(view, ensure_ascii=False, sort_keys=True, allow_nan=False) for view in views)
+
+
+def _answer_context_prompt(views: list[dict[str, Any]], units: list[str], numbers: list[int], question: str) -> str:
+    """The exact selected-context prompt, shared with the source-aware selection budget."""
+    return (f"FRAMEWORK ITEMS:\n{_answer_nodes_block(views) or 'none'}\n\nBOOK PASSAGES:\n"
+            f"{_units_block(units, numbers) if numbers else 'none'}\n\nQUESTION: {question}")
+
+
+def _answer_prompt_size(views: list[dict[str, Any]], units: list[str], numbers: list[int], question: str) -> int:
+    """Exact character cost used by chat_json's pre-dispatch guard for selected Q&A."""
+    return len(RULEBOOK) + len(_ANSWER_SELECTED_SYSTEM) + len(_answer_context_prompt(views, units, numbers, question))
+
+
+def _validate_answer_views(views: list[dict[str, Any]], supplied_units: set[int]) -> None:
+    """Selected framework records may only carry provenance present in the supplied passages."""
+    if not isinstance(views, list) or any(not isinstance(view, dict) for view in views):
+        raise ValueError("answer node views must be a list of objects")
+    for view in views:
+        citations = view.get("units")
+        if not isinstance(citations, list) or any(type(unit) is not int or unit <= 0 or unit not in supplied_units
+                                                for unit in citations):
+            raise ValueError("answer node view units must be valid indexes within the supplied source passages")
+        if len(set(citations)) != len(citations):
+            raise ValueError("answer node view units must be unique")
+        if "contributions" in view:
+            _validate_answer_views(view["contributions"], supplied_units)
+        if "view_id" in view and "record" in view:
+            _validate_answer_views([view["record"]], supplied_units)
+
+
+def _answer_result(data: Any, supplied_units: set[int]) -> dict[str, Any]:
+    """Do not turn a malformed or unsupported provider result into a grounded success."""
+    issues: list[str] = []
+    if not isinstance(data, dict):
+        issues.append("response must be an object")
+    else:
+        answer, answered, citations = data.get("answer"), data.get("answered"), data.get("units")
+        if not isinstance(answer, str):
+            issues.append("answer must be a string")
+        if type(answered) is not bool:
+            issues.append("answered must be a boolean")
+        if not isinstance(citations, list):
+            issues.append("units must be a list")
+        else:
+            seen: set[int] = set()
+            for citation in citations:
+                if type(citation) is not int or citation <= 0:
+                    issues.append("citations must be positive integers")
+                elif citation not in supplied_units:
+                    issues.append("citation refers to a source unit that was not supplied")
+                elif citation in seen:
+                    issues.append("citations must be unique")
+                else:
+                    seen.add(citation)
+        if answered is True:
+            if isinstance(answer, str) and not answer.strip():
+                issues.append("a successful answer must contain text")
+            if isinstance(citations, list) and not citations:
+                issues.append("a successful answer must cite at least one supplied source unit")
+        if not issues:
+            return {"answer": answer, "units": list(citations), "answered": answered}
+    return {"answer": "I could not validate the model's answer against the supplied source passages.",
+            "units": [], "answered": False,
+            "diagnostic": {"code": "invalid_answer_response", "issues": list(dict.fromkeys(issues))}}
+
+
 def ask(fw: dict[str, Any], units: list[str], question: str, numbers: list[int] | None = None,
-        node_ids: list[int] | None = None) -> dict[str, Any]:
+        node_ids: list[int] | None = None, *, node_views: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Proper Thinking's framework Q&A: answered from the framework and its source only. For a book,
     ``numbers`` and ``node_ids`` are the passages and nodes the question is about, given in full."""
-    if numbers is not None:
-        nodes = [n for n in fw["nodes"] if n["id"] in set(node_ids or [])]
-        system = ("You answer questions about one framework built from a book, using ONLY the framework items "
-                  "and book passages given, which were found for this question. If they do not answer it, say so. "
-                  "Output ONLY valid JSON: {\"answer\": str, \"units\": [cited unit numbers], \"answered\": bool}.")
-        user = (f"FRAMEWORK ITEMS:\n{_nodes_block(nodes, fields=True) or 'none'}\n\nBOOK PASSAGES:\n"
-                f"{_units_block(units, numbers) if numbers else 'none'}\n\nQUESTION: {question}")
-        data = chat_json(system, user, 4096, "ask")
-        return {"answer": str(data.get("answer") or "No answer."), "units": data.get("units") or [],
-                "answered": bool(data.get("answered"))}
+    if numbers is not None and (not isinstance(numbers, list) or any(
+            type(number) is not int or not 1 <= number <= len(units) for number in numbers)):
+        raise ValueError("requested source units must be positive integer indexes within the source")
+    supplied = list(range(1, len(units) + 1)) if numbers is None else list(numbers)
+    if numbers is not None or node_views is not None:
+        nodes = (node_views if node_views is not None else
+                 [n for n in fw["nodes"] if n["id"] in set(node_ids or [])])
+        _validate_answer_views(nodes, set(supplied))
+        user = _answer_context_prompt(nodes, units, supplied, question)
+        data = chat_json(_ANSWER_SELECTED_SYSTEM, user, 4096, "ask")
+        return _answer_result(data, set(supplied))
     system = ("You answer questions about one framework using ONLY its definitive document and source units. "
               "If they do not answer it, say so. Output ONLY valid JSON: {\"answer\": str, \"units\": [cited unit "
-              "numbers], \"answered\": bool}.")
+              "numbers], \"answered\": bool}." + _ANSWER_RESPONSE_CONTRACT)
     user = f"{fw.get('document', '')}\n\nSOURCE UNITS:\n{_units_block(units)}\n\nQUESTION: {question}"
     data = chat_json(system, user, 4096, "ask")
-    return {"answer": str(data.get("answer") or "No answer."), "units": data.get("units") or [],
-            "answered": bool(data.get("answered"))}
+    return _answer_result(data, set(supplied))

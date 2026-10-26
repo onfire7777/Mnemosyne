@@ -1,0 +1,23 @@
+{
+  "baseline": "97091695ccd90330e8300804524bd5b2d3043c7a",
+  "python": {
+    "tests": "262",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0",
+    "time": "2.955"
+  },
+  "native": {
+    "passed": 51,
+    "ignored": 2,
+    "failures": 0,
+    "feature": "onnx",
+    "offline": true
+  },
+  "postgres_role_checks": {
+    "passed": 9,
+    "ok": true
+  },
+  "benchmark_run": false,
+  "provider_inference_run": false
+}
