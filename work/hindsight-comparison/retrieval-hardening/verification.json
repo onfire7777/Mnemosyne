@@ -1,0 +1,28 @@
+{
+  "baseline": "fe1f8695e3988104182dcec7fff408dd1e22ce66",
+  "suites": {
+    "native": {
+      "tests": "269",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "1",
+      "time": "19.603"
+    },
+    "retrieval": {
+      "tests": "417",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "1",
+      "time": "5.295"
+    },
+    "roles": {
+      "tests": "46",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.676"
+    }
+  },
+  "benchmark_run": false,
+  "model_provider_calls": false
+}

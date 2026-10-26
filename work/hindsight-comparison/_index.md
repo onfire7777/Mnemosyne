@@ -42,3 +42,5 @@
 - source-integrity/verify.py — selected regression modules and source identity checks
 - source-integrity/projection-custody.xml — focused native/adapter/canary custody verification
 - source-integrity/postgres-source-transaction.xml — live transaction and identity verification
+
+- retrieval-hardening/REPORT.md — October 26 privacy, confidence, bridge and validation repairs

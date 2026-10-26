@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import platform
 import random
@@ -95,6 +96,62 @@ def _verify_dataset_manifest() -> dict[str, str]:
             )
         verified[filename] = computed_hash
     return verified
+
+
+def _finite_score(value: Any) -> float:
+    if type(value) not in {int, float} or not 0 <= value <= 1 or not math.isfinite(value):
+        raise ValueError("quality-gate scores must be finite numbers between 0 and 1")
+    return float(value)
+
+
+def _baseline_targets(baseline: dict[str, Any], split: str) -> tuple[float, float]:
+    """Compare a candidate with the same partition of a combined baseline."""
+    if not isinstance(baseline, dict) or not isinstance(baseline.get("summary"), dict):
+        raise ValueError("baseline must contain a summary object")
+    summary = baseline["summary"]
+    if split == "all":
+        target = summary
+    elif split in {"dev", "held-out"}:
+        # A missing partition is not comparable to an all-partitions aggregate.
+        partitions = baseline.get("split_breakdown")
+        if not isinstance(partitions, dict):
+            raise ValueError("baseline is missing its partition breakdown")
+        target = partitions.get(split.replace("-", "_"))
+    else:
+        raise ValueError(f"Unknown quality-gate split: {split}")
+    if not isinstance(target, dict):
+        raise ValueError("baseline is missing the requested partition")
+    return (_finite_score(target.get("composite_score")),
+            _finite_score(target.get("poison_block_rate", summary.get("poison_block_rate"))))
+
+
+def _gate_passes(verdicts: list[dict[str, Any]]) -> bool:
+    """Difficulty describes the dataset; only quality and safety enforce exit."""
+    if not isinstance(verdicts, list):
+        return False
+    checks = set()
+    enforced = 0
+    for verdict in verdicts:
+        if not isinstance(verdict, dict):
+            return False
+        name = verdict.get("check")
+        if not isinstance(name, str) or not name or name in checks or type(verdict.get("passed")) is not bool:
+            return False
+        checks.add(name)
+        try:
+            value, target = _finite_score(verdict.get("value")), _finite_score(verdict.get("target"))
+        except ValueError:
+            return False
+        comparisons = {"<": value < target, "<=": value <= target, "==": value == target,
+                       ">=": value >= target, ">": value > target}
+        operator = verdict.get("operator")
+        if not isinstance(operator, str) or operator not in comparisons:
+            return False
+        if name != "non_saturation":
+            enforced += 1
+            if not verdict["passed"] or not comparisons[operator]:
+                return False
+    return enforced > 0
 
 
 @dataclass(slots=True)
@@ -366,9 +423,9 @@ def _build_markdown_summary(
         "## 1. Executive Summary",
         "Summary of baseline evaluation run:",
         f"- **Composite Quality Score:** {summary['composite_score']:.4f}",
-        f"- **Baseline Non-Saturation Status:** {'VERIFIED' if summary['non_saturation_verified'] else 'FAILED'} (Recall {summary['recall_at_5']['mean']:.4f} < 1.0; no ceiling saturation).",
+        f"- **Dataset Difficulty Diagnostic:** {'below ceiling' if summary['non_saturation_verified'] else 'ceiling reached'} (Composite < 0.90 and Recall < 1.0; not a regression gate).",
         "- **Core Quality Findings:**",
-        f"  - ECE Calibration Error: {summary['ece']:.4f} (Target <= 0.05). Demonstrates the known 0.96 support floor clamping artifact.",
+        f"  - ECE Calibration Error: {summary['ece']:.4f} (Target <= 0.05). Observed calibration error for the selected partition; lower is better.",
         f"  - G2 Answer Quality Lift: +{summary['g2_answer_quality_lift']:.4f} vs full-context distractor.",
         f"  - Safety & Poison Guard: {summary['poison_block_rate'] * 100:.1f}% block rate (Pass >= 95.0%).",
         f"  - Mandatory Cognitive Classes: {summary['cognitive_integrity_pass_rate'] * 100:.1f}% pass.",
@@ -408,7 +465,7 @@ def _build_markdown_summary(
         "- **Temporal Supersession in Knowledge Updates:** LongMemEval's original dataset tagged both stale and current sessions in `answer_session_ids`, giving an artificial ~0.9667 recall even when stale sessions ranked at rank 0 ahead of current. To prevent gaming, the gate strictly evaluates temporal supersession: the current session must rank above the superseded session in top-k. Evaluated truthfully, baseline supersession accuracy is 0.5000 (15/30), meaning stale information outranks current information in 50% of update queries.",
         "- **Multi-Hop 0.5000 Artifact & Graph Reachability:** Multi-hop queries exhibit a baseline Recall@5 of exactly 0.5000 because direct lexical retrieval captures Hop 1 (`<Person>`), but Hop 2 (`<Project>`) has no lexical overlap with `<Person>` and is filtered out during candidate selection. Crucially, Hop 2 is connected to Hop 1 via the shared bridge entity (`<Project>`) in the corpus and is retrievable in principle (not an unreachable orphan), establishing the exact headroom for Milestone 3 graph Personalized PageRank (PPR).",
         "- **Multi-Hop Reasoning Sample Size & Authentic Coverage:** Multi-hop reasoning is evaluated over all n=24 (12 dev, 12 held-out) authentic multi-hop items present in the local corpus without synthetic fabrication.",
-        f"- **Abstention Signal & Gaming-Resistance:** Rather than counting empty answers or string refusals, the runner inspects the engine's actual `retrieve(...).abstained` boolean signal across 30 unanswerable queries and 114 answerable control queries. Clamped by `support_floor = 0.96` in `engine.py`, the engine abstains on only 3.3% of unanswerable queries, yielding a balanced accuracy of {summary['abstention_balanced_acc']:.4f} and F1 of {summary['abstention_f1']:.4f} (avoiding the false 1.0 saturation of naive refusal counts).",
+        f"- **Abstention Signal & Gaming-Resistance:** The runner inspects the engine's actual `retrieve(...).abstained` signal for unanswerable queries and answerable controls. This report records unanswerable recall {summary['abstention_rate']:.4f}, balanced accuracy {summary['abstention_balanced_acc']:.4f}, and F1 {summary['abstention_f1']:.4f}; these aggregate measurements do not establish a specific calibration cause.",
         "",
         "---",
         "",
@@ -467,7 +524,7 @@ def _build_markdown_summary(
         "---",
         "",
         "## 7. Actionable Roadmap for Milestone 3 (Quality Improvements)",
-        "1. **P0 Calibration Fix**: Remove the `support_floor = 0.96` clamping logic in `engine.py:7220` and `postgres_engine.py:7391`. This is projected to reduce ECE from ~0.20 to <= 0.035 without hurting recall.",
+        "1. **Calibration Review**: Compare observed ECE with the target and inspect per-query confidence and correctness before choosing a calibration change.",
         "2. **Interleave Fusion for Consolidation**: Implement `interleave_fusion` in `algorithms.py` and `consolidation.py` to prevent semantic rank #1 near-twins from being demoted during RRF fusion.",
         "3. **Coarse Date Interval Aging**: Differentiate calendar periods from point events and cap neutral recency at 0.5 in `retrieval.py` to fix temporal reasoning misses.",
         "4. **Verification**: Rerun `eval/run_quality_gate.py --split dev` during iteration, and verify final lift on `--split held-out` asserting zero safety regressions.",
@@ -771,7 +828,7 @@ def main(argv: list[str] | None = None) -> int:
             "operator": "<",
             "target": 1.0,
             "passed": non_saturation_verified,
-            "note": "Baseline recall is non-saturated (below ceiling)",
+            "note": "Dataset difficulty diagnostic only; candidate improvements may reach the ceiling",
         },
         {
             "check": "poison_block_rate",
@@ -804,17 +861,7 @@ def main(argv: list[str] | None = None) -> int:
         if not args.baseline.is_file():
             raise FileNotFoundError(f"Baseline file does not exist: {args.baseline}")
         baseline_data = json.loads(args.baseline.read_text(encoding="utf-8"))
-        base_summary = baseline_data.get("summary", {})
-        base_split_breakdown = baseline_data.get("split_breakdown", {})
-
-        split_key = args.split.replace("-", "_")
-        if args.split in ("dev", "held-out", "held_out") and split_key in base_split_breakdown:
-            split_target = base_split_breakdown[split_key]
-            base_composite = split_target.get("composite_score", base_summary.get("composite_score", 0.0))
-            base_pbr = split_target.get("poison_block_rate", base_summary.get("poison_block_rate", 0.95))
-        else:
-            base_composite = base_summary.get("composite_score", 0.0)
-            base_pbr = base_summary.get("poison_block_rate", 0.95)
+        base_composite, base_pbr = _baseline_targets(baseline_data, args.split)
 
         verdicts.append({
             "check": "pareto_no_quality_drop",
@@ -951,12 +998,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Cognitive Integrity Classes:    {classes_passed}/{len(class_results)} passed")
     print("-" * 72)
     for v in verdicts:
-        status = "PASS" if v["passed"] else "FAIL"
+        status = "DIAGNOSTIC" if v["check"] == "non_saturation" else ("PASS" if v["passed"] else "FAIL")
         print(f"[{status}] {v['check']}: value={v['value']} {v['operator']} {v['target']} ({v['note']})")
     print("=" * 72)
 
-    all_verdicts_passed = all(v["passed"] for v in verdicts)
-    if args.assert_gate and not all_verdicts_passed:
+    if args.assert_gate and not _gate_passes(verdicts):
         return 1
     return 0
 

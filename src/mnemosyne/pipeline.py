@@ -49,6 +49,7 @@ from mnemosyne.retrieval import (
     GLOBAL_SENSEMAKING_MODE,
     HashingEmbeddingProvider,
     LocalSimilarityReranker,
+    QUERY_SUPPORT_STOPWORDS,
     QUERY_SUPPORT_THRESHOLD,
     PROSPECTIVE_MEMORY_CHANNEL,
     RetrievalAdapters,
@@ -837,6 +838,7 @@ def _stamp_hit_origin(
         # the fields out or passing an unreadable value on as a date.
         metadata["created_at"] = created
         metadata["created_at_source"] = source if created is not None else "unknown"
+        metadata.pop("_candidate_created_at", None)
 
 
 def lean_retrieval_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -1437,6 +1439,7 @@ def run_retrieval_pipeline(
         )
     ranked_routes = [dense, lexical, graph, prospective, working]
     source_ranked: list[Hit] | None = None
+    bridge_report: dict[str, Any] | None = None
     if (
         window is None and query_mode is None and not deep and not effective_filter.get("as_of")
         and passage_graph is None and _source_only_local_routes(ops.adapters, ranked_routes)
@@ -1455,13 +1458,56 @@ def run_retrieval_pipeline(
             and hit.sensitivity <= max_sensitivity
             and (include_quarantined or not hit.metadata.get("quarantine_reason"))
         ]
+        # Expand at most two entities from already authorized, redacted sources.
+        # Process flags and source labels never change retrieval semantics.
+        explicit_bridge = effective_filter.get("multi_hop") is True
+        relational_query = bool(re.search(
+            r"\b(\w+('s|’s)|of the|assigned to|reports to|led by)\b", query, re.I
+        ))
+        salient = {t for t in tokenize(query) if t not in QUERY_SUPPORT_STOPWORDS and len(t) > 2}
+        uncovered = bool(sources and salient - set(tokenize(sources[0].text)))
+        if sources and k > 1 and (explicit_bridge or (relational_query and uncovered)):
+            from mnemosyne.algorithms import interleave_fusion
+            from mnemosyne.consolidation import _SALIENT_ENTITY, _entity_span
+
+            query_tokens = set(tokenize(query))
+            bridges: dict[str, tuple[str, Hit]] = {}
+            for source in sources[:2]:
+                for match in _SALIENT_ENTITY.finditer(source.text):
+                    entity = _entity_span(match.group())
+                    entity_tokens = set(tokenize(entity)) - QUERY_SUPPORT_STOPWORDS
+                    if entity_tokens and not entity_tokens.issubset(query_tokens):
+                        bridges.setdefault(entity.casefold(), (entity, source))
+                    if len(bridges) >= 2:
+                        break
+                if len(bridges) >= 2:
+                    break
+            bridge_lists: list[list[Hit]] = []
+            bridge_seeds: list[Hit] = []
+            for entity, seed in bridges.values():
+                terms = set(tokenize(entity))
+                hits = ops.lexical_search(entity, width, {**effective_filter, "query_mode": "passages"})
+                hits = [
+                    hit for hit in hits
+                    if hit.tenant_id == tenant_id and hit.branch == branch
+                    and hit.id != seed.id and terms.issubset(set(tokenize(hit.text)))
+                    and hit.trust_tier <= max_trust and hit.sensitivity <= max_sensitivity
+                    and (include_quarantined or not hit.metadata.get("quarantine_reason"))
+                ]
+                if hits:
+                    bridge_lists.append(hits)
+                    bridge_seeds.append(seed)
+            bridge_report = {"applied": bool(bridge_lists), "entity_count": len(bridges),
+                             "candidate_count": sum(len(hits) for hits in bridge_lists)}
+            if bridge_lists:
+                sources = interleave_fusion([bridge_seeds + sources, *bridge_lists], k=width)
         # Explicit confidence switches the legacy conformal set to per-example
         # probabilities. Do not feed unbounded BM25 siblings into that path,
         # including sources found beyond the original channels' cutoff.
-        if not any("confidence" in hit.metadata for hit in sources):
+        if (bridge_report and bridge_report["applied"]) or not any("confidence" in hit.metadata for hit in sources):
             source_ranked = sources
             for hit in source_ranked:
-                hit.metadata = {**hit.metadata, "score_scale": "bm25"}
+                hit.metadata.setdefault("score_scale", "bm25")
     # An embeddings-only index scores every passage by cosine, one scale for every question:
     # its order is final and its scores are kept; what only the other channels found follows.
     cosine_ranked = (
@@ -1497,6 +1543,18 @@ def run_retrieval_pipeline(
         # "First/last said" is an ordering constraint on source timestamps,
         # not a relevance hint that a learned or schema reranker may replace.
         schema_fast_path = {"applied": False, "reason": "explicit_temporal_order", "boosted_hit_ids": []}
+    elif window is not None:
+        schema_fast_path = {"applied": False, "reason": "time_window_route", "boosted_hit_ids": []}
+        from mnemosyne.retrieval import hit_recency_for_unit
+        # Within the requested interval, freshness only breaks relevance ties.
+        # It must not make an unrelated recent item outrank an older exact match.
+        asked_speaker = (window_explain or {}).get("speaker")
+        def speaker_priority(hit: Hit) -> int:
+            actor = hit.metadata.get("actor")
+            return int(actor != asked_speaker) if asked_speaker else int(actor == "tool")
+        reranked.sort(key=lambda hit: (
+            speaker_priority(hit), -hit.score, -hit_recency_for_unit(hit, now=retrieval_instant)
+        ))
     else:
         reranked, schema_fast_path = schema_fast_path_rerank(query, reranked, policy)
     if semantic:
@@ -1513,7 +1571,7 @@ def run_retrieval_pipeline(
     # Retrieval exposes a relevance ranking. U-curve layout is a presentation
     # decision for a reader prompt and must not move rank 2 to the last slot.
     ordered = activated
-    if chronological_window:
+    if chronological_window or window is not None:
         schema_fast_path_final = dict(schema_fast_path)
     else:
         ordered, schema_fast_path_final = schema_fast_path_rerank(query, ordered, policy)
@@ -1682,9 +1740,13 @@ def run_retrieval_pipeline(
         explain["query_mode"] = "passages"
     if source_ranked is not None:
         explain["source_only_local_fallback"] = {
-            "applied": True, "ranker": "scoped_bm25", "score_scale": "bm25",
+            "applied": True,
+            "ranker": "bridge_interleave" if bridge_report and bridge_report["applied"] else "scoped_bm25",
+            "score_scale": "reciprocal_rank" if bridge_report and bridge_report["applied"] else "bm25",
             "candidate_width": width, "candidate_count": len(source_ranked),
         }
+    if bridge_report is not None:
+        explain["bridge_expansion"] = bridge_report
     if relevance_order:
         explain["activation"] = {"applied": False, "reason": "passage_relevance_order"}
         explain["candidate_width"] = width

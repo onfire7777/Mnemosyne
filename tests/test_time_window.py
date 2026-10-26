@@ -623,3 +623,14 @@ def test_default_window_does_not_replace_explicit_read_semantics(temporal_engine
         assert result.explain["query_mode"] == mode
     else:
         assert result.hits
+
+
+def test_temporal_freshness_preserves_requested_speaker_priority():
+    engine = LocalMemoryEngine()
+    when = TODAY - timedelta(days=1) + timedelta(hours=12)
+    for actor, text in [('user', 'Please schedule launch.'), ('tool', 'You asked about launch launch launch.')]:
+        engine.append_evidence(Evidence(tenant_id=TENANT, user_id='u', actor=actor, source_type='conversation',
+                                      content=text, created_at=when))
+    result = _ask(engine, 'What did I ask you yesterday about launch?')
+    assert result.explain['time_window']['speaker'] == 'user'
+    assert result.hits[0].metadata['actor'] == 'user'

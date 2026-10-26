@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import calendar
 import copy
 import hashlib
 import json
@@ -56,7 +57,6 @@ WORKING_MEMORY_RECENCY_WEIGHT = 0.25
 HttpEmbeddingCacheKey = tuple[str, str, str, str, int, str, str]
 _HTTP_EMBEDDING_CACHE: OrderedDict[HttpEmbeddingCacheKey, tuple[float, ...]] = OrderedDict()
 _HTTP_EMBEDDING_CACHE_LOCK = RLock()
-
 
 def _plane_value(item: Any, name: str, default: Any = None) -> Any:
     if isinstance(item, Mapping):
@@ -260,6 +260,64 @@ QUERY_SUPPORT_STOPWORDS = {
     "you",
     "your",
 }
+
+MINIMAL_QUERY_SUPPORT_STOPWORDS = frozenset(QUERY_SUPPORT_STOPWORDS)
+
+QUERY_SUPPORT_QUESTION_STOPWORDS = {
+    "across",
+    "after",
+    "ago",
+    "also",
+    "before",
+    "between",
+    "can",
+    "compare",
+    "could",
+    "currently",
+    "day",
+    "days",
+    "first",
+    "four",
+    "frequently",
+    "get",
+    "getting",
+    "got",
+    "had",
+    "has",
+    "have",
+    "having",
+    "instead",
+    "just",
+    "last",
+    "long",
+    "many",
+    "month",
+    "months",
+    "much",
+    "number",
+    "often",
+    "one",
+    "passed",
+    "past",
+    "previously",
+    "recently",
+    "since",
+    "there",
+    "three",
+    "time",
+    "times",
+    "total",
+    "two",
+    "typical",
+    "week",
+    "weeks",
+    "will",
+    "would",
+    "year",
+    "years",
+}
+
+QUERY_SUPPORT_STOPWORDS = set(QUERY_SUPPORT_STOPWORDS) | QUERY_SUPPORT_QUESTION_STOPWORDS
 
 _SCHEMA_NAME_RE = r"([A-Z][A-Za-z0-9_-]*)"
 _ASSIGNED_PROJECT_RE = re.compile(
@@ -735,9 +793,14 @@ def normalise_query_term(token: str) -> str:
 def similar_query_terms(left: str, right: str) -> bool:
     if left == right:
         return True
-    if len(left) >= 5 and len(right) >= 5 and (left.startswith(right[:5]) or right.startswith(left[:5])):
-        return True
-    return bool(len(left) >= 4 and len(right) >= 4 and (left.startswith(right[:4]) or right.startswith(left[:4])))
+    shorter, longer = (left, right) if len(left) <= len(right) else (right, left)
+    if len(shorter) >= 4 and longer.startswith(shorter):
+        suffix = longer[len(shorter):]
+        if suffix in {"s", "e", "d", "y", "ed", "es", "ing"}:
+            return True
+        if suffix.startswith(("-", "_")) and len(suffix) > 1:
+            return True
+    return False
 
 
 _WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
@@ -892,6 +955,13 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
             continue
         query_terms.append(term)
     if not query_terms:
+        # Fallback to minimal stopwords if all query terms are conversational stopwords
+        for token in tokenize(query):
+            term = normalise_query_term(token)
+            if len(term) <= 2 or term in MINIMAL_QUERY_SUPPORT_STOPWORDS or term in query_terms:
+                continue
+            query_terms.append(term)
+    if not query_terms:
         return {
             "score": 1.0,
             "threshold": QUERY_SUPPORT_THRESHOLD,
@@ -917,6 +987,85 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
         "missing_terms": missing_terms,
         "query_terms": query_terms,
     }
+
+
+def _spans_calendar_period(start: datetime, end: datetime) -> bool:
+    """Recognize complete calendar months/years, not arbitrary month-long trips."""
+    if start.day != 1 or any((start.hour, start.minute, start.second, start.microsecond)):
+        return False
+    if end <= start:
+        return False
+    periods = [calendar.monthrange(start.year, start.month)[1] * 86400.0]
+    if start.month == 1:
+        periods.append((366.0 if calendar.isleap(start.year) else 365.0) * 86400.0)
+    span = (end - start).total_seconds()
+    # Accept both exclusive bounds and inclusive final-second timestamps.
+    return any(0 <= period - span <= 1.0 for period in periods)
+
+
+def compute_recency_decay(
+    days_ago: float,
+    function: str = "linear",
+    linear_window_days: float = 60.0,
+    halflife_days: float = 30.0,
+) -> float:
+    """Map a memory's age in days to a freshness signal in [0, 1] (neutral 0.5)."""
+    if function not in {"none", "linear", "exponential"}:
+        raise ValueError("unknown recency decay function")
+    if function == "none" or not math.isfinite(days_ago):
+        return 0.5
+    if function == "exponential":
+        if not math.isfinite(halflife_days) or halflife_days <= 0:
+            return 0.5
+        if days_ago <= 0:
+            return 1.0
+        return 0.5 ** (days_ago / halflife_days)
+    window = linear_window_days if math.isfinite(linear_window_days) and linear_window_days > 0 else 60.0
+    return max(0.1, min(1.0, 1.0 - (days_ago / window)))
+
+
+def hit_recency_for_unit(
+    hit: Hit,
+    now: datetime,
+    function: str = "linear",
+    linear_window_days: float = 60.0,
+    halflife_days: float = 30.0,
+) -> float:
+    """Freshness signal in [0, 1] (neutral 0.5) for a candidate hit.
+
+    Distinguishes coarse calendar periods (capped at neutral 0.5) from point events.
+    """
+    occ_start = hit.metadata.get("event_start") or hit.metadata.get("occurred_start")
+    occ_end = hit.metadata.get("event_end") or hit.metadata.get("occurred_end")
+    created_at = hit.metadata.get("_candidate_created_at") or hit.metadata.get("created_at")
+
+    def _safe_dt(val: Any) -> datetime | None:
+        if val is None:
+            return None
+        try:
+            return parse_dt(val)
+        except (ValueError, TypeError):
+            return None
+
+    start_utc = _safe_dt(occ_start)
+    end_utc = _safe_dt(occ_end)
+    created_utc = _safe_dt(created_at)
+    now_utc = _safe_dt(now)
+    if now_utc is None:
+        return 0.5
+
+    if start_utc is not None and end_utc is not None and _spans_calendar_period(start_utc, end_utc):
+        sec = max(0.0, (now_utc - end_utc).total_seconds())
+        days_ago = 0.0 if sec < 60.0 else sec / 86400.0
+        recency = compute_recency_decay(days_ago, function, linear_window_days, halflife_days)
+        return min(0.5, recency)
+
+    effective = start_utc or created_utc or end_utc
+    if effective is None or effective > now_utc:
+        return 0.5
+    sec = max(0.0, (now_utc - effective).total_seconds())
+    days_ago = 0.0 if sec < 60.0 else sec / 86400.0
+    return compute_recency_decay(days_ago, function, linear_window_days, halflife_days)
 
 
 def schema_fast_path_rerank(

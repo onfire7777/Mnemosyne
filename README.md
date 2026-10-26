@@ -250,7 +250,11 @@ The [source integrity follow-up](work/hindsight-comparison/source-integrity/REPO
 blocks derived facts whose remaining source support is unreadable, adds
 [atomic source groups and optional segment identities](docs/source-transactions.md)
 to the native engines, and removes erased plaintext from the local journal.
-Document revision synchronization remains under development.
+The [document revision service](docs/document-revisions.md) publishes and retires
+source occurrences atomically across Local, SQLite and PostgreSQL, including
+sensitivity increases. The [retrieval hardening notes](docs/retrieval-reliability.md)
+cover bounded multi-hop source lookup, temporal ordering, privacy-safe timestamps
+and confidence corrections, with linked regression evidence.
 
 - Core capture and retrieval are usable; advanced deployment profiles have separate validation needs.
 - Default deterministic embeddings support offline operation but are not equivalent to a configured semantic model.

@@ -67,8 +67,9 @@ def split_document_text(content: str, *, chunk_chars: int = 2048) -> list[str]:
 class DocumentService:
     """Create, replace, append and read current private document revisions.
 
-    Unchanged occurrences in the current revision keep their source CIDs. A
-    retired occurrence is never reactivated: A→B→A allocates a new occurrence.
+    Unchanged occurrences keep their source CIDs when their sensitivity meets
+    the current revision's classification. A retired occurrence is never
+    reactivated: A→B→A allocates a new occurrence.
     The most recent operation can be retried exactly; earlier consumed IDs are
     rejected after their fingerprints are removed for data minimization.
     """
@@ -248,7 +249,13 @@ class DocumentService:
                 raise ValueError("document exceeds the operation receipt limit")
             by_text: dict[str, deque[Evidence]] = defaultdict(deque)
             for row in old_rows:
-                by_text[row.content].append(row)
+                # Classification applies to the whole document, including PII
+                # newly formed across reordered chunk boundaries. Reusing a
+                # lower-sensitivity source would bypass the manifest policy in
+                # generic recall. Replace it so retirement and dependent-source
+                # invalidation happen atomically with this revision.
+                if row.sensitivity >= selected_settings["sensitivity"]:
+                    by_text[row.content].append(row)
             plan = [(text, by_text[text].popleft() if by_text[text] else None) for text in chunks]
             reused_ids = {row.document_segment_id for _, row in plan if row is not None}
             removed = [entry for entry in (current or {}).get("segments", []) if entry["segment_id"] not in reused_ids]

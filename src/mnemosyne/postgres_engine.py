@@ -44,6 +44,7 @@ from mnemosyne.engine import (
     ProspectiveOperatingPoint,
     TriggerEvaluationContext,
     WorkingMemoryItem,
+    _candidate_time_metadata,
     _evaluate_trigger,
     _merge_relation_overlap_component,
     _normalise_privacy_tags,
@@ -105,6 +106,7 @@ from mnemosyne.policy import OperatingPolicy
 from mnemosyne.postgres_security import assert_postgres_safe_role, env_flag, postgres_safe_role_required
 from mnemosyne.privacy import ErasureMode
 from mnemosyne.retrieval import (
+    _bounded_float,
     derived_evidence_readable,
     derived_source_cids,
     projection_sources_readable,
@@ -3494,8 +3496,11 @@ class PostgresEngine:
             text=row.get("content") or "", score=0.0, channel="candidate",
             provenance=[row["cid"]], trust_tier=int(row.get("trust_tier", 0)),
             sensitivity=int(row.get("sensitivity", 0)),
-            metadata={**(row.get("metadata") or {}),
-                      "source_type": row.get("source_type"), "actor": row.get("actor")},
+            metadata={**{key: value for key, value in (row.get("metadata") or {}).items()
+                         if key not in {"event_start", "event_end", "occurred_start", "occurred_end", "_candidate_created_at"}},
+                      "source_type": row.get("source_type"), "actor": row.get("actor"),
+                      **_candidate_time_metadata(row.get("created_at"), row.get("metadata") or {},
+                                                 redacted=bool((row.get("privacy") or {}).get("redacted")))},
         ) for row in snapshot.get("evidence", [])
             if row.get("branch", "main") == branch and not row.get("erased")
             and int(row.get("trust_tier", 0)) <= max_trust
@@ -7393,22 +7398,47 @@ class PostgresEngine:
     def _confidence(query: str, hits: list[Hit], *, support_score: float | None = None) -> float:
         if not hits:
             return 0.0
+        scores = [max(hit.score, 0.0) if math.isfinite(hit.score) else 0.0 for hit in hits]
+        max_score = max(scores, default=0.0)
         weighted = 0.0
         total = 0.0
-        for hit in hits:
+        ranked_scores = sorted(scores, reverse=True)
+        for rank, (hit, score) in enumerate(zip(hits, scores, strict=True), start=1):
+            relevance = score / max(max_score, 0.01)
             trust = trust_weight(hit.trust_tier)
-            base = float(hit.metadata.get("confidence", 0.7))
-            weighted += max(hit.score, 0.01) * trust * base
-            total += max(hit.score, 0.01)
-        evidence_quality = max(0.0, min(1.0, weighted / max(total, 0.01)))
+            explicit = hit.metadata.get("confidence")
+            channel_count = len({part for part in hit.channel.split("+") if part and part != "candidate"})
+            channel_support = min(channel_count / 3.0, 1.0)
+            provenance_support = min(len(hit.provenance) / 3.0, 1.0)
+            quality = (
+                0.03
+                + 0.25 * relevance
+                + 0.35 * trust
+                + 0.10 * channel_support
+                + 0.27 * provenance_support
+            )
+            if explicit is not None:
+                quality = 0.55 * _bounded_float(explicit, default=0.0) + 0.45 * quality
+            quality *= 0.55 + 0.45 * trust
+            # Common-scale weights preserve the finite-score ratio without
+            # overflowing when several individually finite scores are huge.
+            rank_weight = (relevance + 0.01 / max(max_score, 0.01)) / rank
+            weighted += max(0.0, min(1.0, quality)) * rank_weight
+            total += rank_weight
+        confidence = weighted / max(total, 0.01)
+        if len(ranked_scores) > 1:
+            margin = (ranked_scores[0] - ranked_scores[1]) / max(ranked_scores[0], 0.01)
+            confidence *= 0.90 + 0.10 * max(0.0, min(1.0, margin))
+        support = min(len(hits) / 3.0, 1.0)
+        confidence *= 0.85 + 0.15 * support
+        evidence_quality = max(0.0, min(1.0, confidence))
         query_support_score = support_score if support_score is not None else query_support(query, hits)["score"]
-        query_support_score = max(0.0, min(1.0, query_support_score))
+        query_support_score = _bounded_float(query_support_score, default=0.0)
         if query_support_score < QUERY_SUPPORT_THRESHOLD:
             return min(evidence_quality, 0.05 * (query_support_score / QUERY_SUPPORT_THRESHOLD))
-        support_floor = 0.96 + 0.04 * (
-            (query_support_score - QUERY_SUPPORT_THRESHOLD) / max(1.0 - QUERY_SUPPORT_THRESHOLD, 0.01)
-        )
-        return max(evidence_quality, min(1.0, support_floor))
+        # Word overlap can reject unsupported answers; it cannot manufacture
+        # certainty when the evidence itself is weak or low-trust.
+        return evidence_quality
 
     @staticmethod
     def _prediction_set_size(hits: list[Hit], threshold: float) -> int:

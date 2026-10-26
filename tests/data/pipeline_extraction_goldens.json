@@ -13,11 +13,11 @@
       "graph_ppr": 1,
       "lexical": 1
     },
-    "confidence": "0x1.0000000000000p+0",
+    "confidence": "0x1.1c22aa8a444b9p-1",
     "confidence_block": {
-      "answer_score": "0x1.0000000000000p+0",
+      "answer_score": "0x1.1c22aa8a444b9p-1",
       "prediction_set_size": 2,
-      "score": "0x1.0000000000000p+0",
+      "score": "0x1.1c22aa8a444b9p-1",
       "source": "evidence_quality",
       "threshold": "0x1.ccccccccccccdp-2"
     },
@@ -158,11 +158,11 @@
       "graph_ppr": 0,
       "lexical": 2
     },
-    "confidence": "0x1.0000000000000p+0",
+    "confidence": "0x1.14e634d6ea655p-1",
     "confidence_block": {
-      "answer_score": "0x1.0000000000000p+0",
+      "answer_score": "0x1.14e634d6ea655p-1",
       "prediction_set_size": 2,
-      "score": "0x1.0000000000000p+0",
+      "score": "0x1.14e634d6ea655p-1",
       "source": "evidence_quality",
       "threshold": "0x1.ccccccccccccdp-2"
     },

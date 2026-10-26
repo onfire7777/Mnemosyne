@@ -44,3 +44,5 @@
 - WI-source-transactions: added optional owner-scoped segment identities and narrow atomic source groups to Local/SQLite/PostgreSQL. Kept legacy CIDs and replay guards; document registry/revision retirement remain unfinished.
 - WI-source-journals: fixed local journal erasure and cross-branch shared entries; post-commit processing skips already-erased new plaintext and attempts later erasures after an earlier journal failure. Independent review added nested guard and SQLite transaction-authorizer regressions.
 - WI-source-integrity-final: 2167 passed, eight explained skips, zero failures/errors across 53 selected modules in 152.269s. All 328 source/test/configuration hashes stayed stable. Global Ruff, diff checks and 9/9 role checks passed. Removed only the disposable PostgreSQL container, preserving both existing services. No benchmark/model inference ran.
+
+- 2026-10-26: Checked live main fe1f8695 and pending retrieval changes. Reproduced privacy/crash/calibration defects, repaired them, and verified focused Local/SQLite/restricted-PostgreSQL regressions. Full benchmark remained stopped. Whole-book framework review started at owner request.
