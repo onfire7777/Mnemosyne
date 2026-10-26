@@ -2,6 +2,15 @@
 
 Date: 2026-10-22. Parent baseline: `00d8ea9f7389d3a423d233e5fc0ab959ead8e520`.
 
+Historical phase receipt. Status reconciled on 2026-10-26 against `0d947f5c`:
+the [subsequent PostgreSQL follow-up](../postgres-live/change-refresh/REPORT.md)
+completed live publication, permission, lock-timeout and source-change refresh
+checks: 239 mixed tests passed, including 20 live cases, with 9/9 role checks.
+The "live validation" items below describe what was pending at this phase;
+production-scale contention is still unmeasured. Delta synthesis, incremental
+invalidation and consolidation-triggered jobs remain gaps. The historical results
+below have not been replaced with later test totals.
+
 Added opt-in periodic full refresh through `mental_model_schedule`, `mneme mental-model
 schedule`, and a standalone `mental-model-worker`. Durable schedule state includes next due,
 attempt outcome, capped retry count/backoff and an expiring lease. The worker uses caller-supplied

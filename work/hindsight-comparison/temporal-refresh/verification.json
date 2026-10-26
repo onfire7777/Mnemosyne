@@ -1,0 +1,49 @@
+{
+  "baseline": "0d947f5ce8eeb8884103080aa7d9364488cb2628",
+  "python": {
+    "focused_temporal_and_refresh_tests": {
+      "passed": 242,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "mental_model_subsystem_tests": {
+      "passed": 207,
+      "failures": 0,
+      "errors": 0
+    },
+    "graph_baseline_and_golden_tests": {
+      "passed": 15,
+      "failures": 0,
+      "errors": 0
+    },
+    "burnos_session_aware_reads": {
+      "passed": 60,
+      "skipped": 9,
+      "failures": 0
+    }
+  },
+  "scan_efficiency": {
+    "cooldown_seconds": 5.0,
+    "pending_error_model_scans": 0,
+    "unchanged_early_polls_exports": "1 / 8 (was 2 / 16)",
+    "pending_model_exports": "0 / 0 (was 1 / 8)"
+  },
+  "postgres_parity": {
+    "container": "mnemosyne-documents-0ef9b6df",
+    "port": 55434,
+    "candidate_time_metadata_parity": true,
+    "event_time_recall_parity": true,
+    "roles_verified": ["consolidator_user", "app_user", "eval_user", "postgres"],
+    "rls_test_role": "mnemosyne_consolidator"
+  },
+  "quality_gate": {
+    "baseline_reproducible_test": "tests/test_quality_gate_baseline_reproducible.py",
+    "status": "passed",
+    "poison_block_rate": 1.0,
+    "benign_false_positive_rate": 0.0,
+    "composite_score": 0.6099
+  },
+  "offline": true,
+  "zero_failures": true
+}

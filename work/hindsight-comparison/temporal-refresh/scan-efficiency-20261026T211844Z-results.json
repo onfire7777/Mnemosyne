@@ -1,0 +1,44 @@
+{
+  "local": {
+    "create_pending": {
+      "exports": 0,
+      "point_reads": 0,
+      "status": "pending"
+    },
+    "three_due_unchanged_models": {
+      "exports": 3,
+      "point_reads": 24,
+      "processed": 3,
+      "unchanged": 3
+    },
+    "two_unchanged_early_polls": {
+      "exports": 1,
+      "point_reads": 8,
+      "processed": [
+        0,
+        0
+      ]
+    }
+  },
+  "sqlite": {
+    "create_pending": {
+      "exports": 0,
+      "point_reads": 0,
+      "status": "pending"
+    },
+    "three_due_unchanged_models": {
+      "exports": 3,
+      "point_reads": 24,
+      "processed": 3,
+      "unchanged": 3
+    },
+    "two_unchanged_early_polls": {
+      "exports": 1,
+      "point_reads": 8,
+      "processed": [
+        0,
+        0
+      ]
+    }
+  }
+}

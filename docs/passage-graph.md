@@ -39,9 +39,10 @@ explicit-confidence sources, deep search and historical `as_of` routes retain th
 - `forget` purges a passage's triples and vector, and every fact or entity vector no other
   passage of the tenant still derives (`passage_index_purge` in the forget report).
 
-## Recall conversations by local date
+## Recall conversations and events by local date
 
-Passage searches understand phrases such as "yesterday" and "in August 2024". Supply an
+Passage searches understand phrases such as "yesterday", "in August 2024",
+"in 2025", "last month", "last year" and "on 2026-10-07". Supply an
 IANA timezone when the caller's calendar differs from the server's:
 
 ```bash
@@ -55,10 +56,28 @@ The MCP/Python `search` arguments are `evaluated_at` and `query_timezone`. Omitt
 transitions; Windows installs include `tzdata`. A minimal Unix image without system timezone
 data also needs `tzdata`. Invalid or unavailable zones produce a validation error.
 
-These windows filter when evidence was created, not when an event mentioned in its text
-occurred. They remain separate from historical belief queries using `as_of`. Searches using
-the live clock bypass the result cache for inferred date windows, so "yesterday" advances
-when the day changes.
+Conversation questions such as "What did I say yesterday?" use the source's
+creation timestamp. Event questions such as "What happened yesterday?" use
+authorized `event_start` / `event_end` metadata (`occurred_start` / `occurred_end`
+are accepted aliases). The selected axis appears in `explain.time_window.axis`.
+The route does not extract dates from prose or substitute recording time for an
+unknown event date. Missing, invalid or withheld event dates are counted in
+`unknown_event_time` and excluded from the event window.
+
+An event start without an end, or with an equal end, denotes a point. Otherwise
+the event interval and query window are half-open: an event ending exactly when
+the requested day begins does not overlap it. A malformed supplied endpoint
+invalidates the pair. First/last ordering uses the selected time axis. Broad
+date-only recall can match the time constraint without repeating the question's
+framing words; topical queries still require topical support, and trust and
+grounding checks still apply. Whole calendar month/year intervals retain their
+coarse recency cap after timezone conversion, including DST boundaries.
+
+These deterministic English patterns are a limited parser, not general date
+understanding or proof of complete event coverage. They remain separate from
+historical belief queries using `as_of`. Searches using the live clock bypass
+the result cache for inferred date windows, so "yesterday" advances when the day
+changes.
 
 ## Configure
 

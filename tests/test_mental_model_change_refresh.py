@@ -60,6 +60,7 @@ def setup(request, tmp_path, monkeypatch):
     engine = LocalMemoryEngine(tmp_path / "store.json") if request.param == "local" else SqliteEngine(tmp_path / "store")
     now = [datetime.now(UTC)]
     monkeypatch.setattr(scheduling, "utc_now", lambda: now[0])
+    monkeypatch.setattr(scheduling, "monotonic", lambda: now[0].timestamp())
     reader = Reader()
     service = MentalModelService(engine, lambda: reader)
     cid = append(engine)

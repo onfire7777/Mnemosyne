@@ -2,8 +2,8 @@
 
 ## Current request routing — 2026-10-26
 
-The active book-answer grounding and CI repair work is tracked separately in
-[`quick/2026-10-26-book-answer-grounding`](quick/2026-10-26-book-answer-grounding/PLAN.md).
+The active temporal recall and refresh efficiency work is tracked separately in
+[`quick/2026-10-26-temporal-refresh`](quick/2026-10-26-temporal-refresh/PLAN.md).
 It follows the user's current Mnemosyne-only scope with no full benchmark or
 provider inference runs. The historical roadmap below is retained as evidence;
 this continuation does not execute its unrelated work or close its acceptance

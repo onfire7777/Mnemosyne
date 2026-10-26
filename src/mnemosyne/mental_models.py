@@ -226,15 +226,19 @@ class MentalModelService:
 
     def _view(self, record: dict[str, Any], context: AnswerReadContext,
               snapshot: tuple[str, dict[str, dict[str, Any]]] | None = None) -> dict[str, Any]:
-        try:
-            fingerprint, evidence = snapshot or self._snapshot(context)
-            clock = _question_clock(record["question"], context)
-            fresh = fingerprint == record.get("corpus_fingerprint") and record.get("time_fingerprint") == clock
-            ready = fresh and record.get("status") == "ready" and self._answer_valid(record, evidence)
-            stale = record.get("status") not in {"pending", "error"} and not (
-                ready or (fresh and record.get("status") == "abstained"))
-        except Exception:
-            ready, stale = False, True
+        if record.get("status") in {"pending", "error"}:
+            # These states never return saved prose or source IDs. A corpus scan cannot
+            # make them readable; an explicit refresh must still check current sources.
+            ready, stale = False, False
+        else:
+            try:
+                fingerprint, evidence = snapshot or self._snapshot(context)
+                clock = _question_clock(record["question"], context)
+                fresh = fingerprint == record.get("corpus_fingerprint") and record.get("time_fingerprint") == clock
+                ready = fresh and record.get("status") == "ready" and self._answer_valid(record, evidence)
+                stale = not (ready or (fresh and record.get("status") == "abstained"))
+            except Exception:
+                ready, stale = False, True
         payload = record.get("answer") if ready else {}
         refresh_error = record.get("refresh_error")
         return {
@@ -279,10 +283,11 @@ class MentalModelService:
     def list(self, context: AnswerReadContext) -> list[dict[str, Any]]:
         scope = _scope(context)
         with self._lock():
-            snapshot = self._snapshot(context)
-            return [self._view(record, context, snapshot) for record in
-                    self.engine.list_mental_model_records(context.tenant_id, context.branch)
-                    if record.get("owner_id") == context.user_id and record.get("scope") == scope]
+            records = [record for record in self.engine.list_mental_model_records(context.tenant_id, context.branch)
+                       if record.get("owner_id") == context.user_id and record.get("scope") == scope]
+            snapshot = (self._snapshot(context) if any(record.get("status") not in {"pending", "error"}
+                                                       for record in records) else None)
+            return [self._view(record, context, snapshot) for record in records]
 
     def history(self, context: AnswerReadContext, model_id: str) -> list[dict[str, Any]]:
         # History deliberately contains no old answers, question text or source excerpts.

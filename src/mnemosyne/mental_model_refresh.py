@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import copy
 from datetime import UTC, datetime, timedelta
+from time import monotonic
 from typing import TYPE_CHECKING, Any, Callable
 from uuid import uuid4
 
@@ -21,6 +22,9 @@ _SCHEMA = "mnemosyne.refresh-schedule/v1"
 _OUTCOMES = {"running", "refreshed", "unchanged", "abstained", "retry"}
 _FIELDS = {"schema_version", "enabled", "interval_seconds", "next_run_at",
            "consecutive_failures", "last_started_at", "last_finished_at", "last_outcome", "lease"}
+# Coalesce advisory scans within one long-lived worker: five seconds after a scan
+# finishes, in addition to polling and scan runtime. Due work and reads are not delayed.
+_CHANGE_SCAN_INTERVAL_SECONDS = 5.0
 
 
 class MentalModelLeaseLost(ValueError):
@@ -131,6 +135,9 @@ class MentalModelRefreshWorker:
         if authorize is not None and validate_authority is None:
             raise ValueError("authorize requires a side-effect-free validate_authority callback")
         self._validate_callback = validate_authority
+        self._next_change_scan_at: float | None = None
+        # Only scheduling hints are retained: no source rows, prose, or authorization.
+        self._change_hints: dict[str, int] = {}
 
     def _validate(self) -> None:
         self.service._write(self.context)
@@ -236,21 +243,34 @@ class MentalModelRefreshWorker:
             except (ValueError, TypeError, OverflowError):
                 report["invalid"] += 1
         if change_candidates:
-            try:
-                # One authorized corpus scan per poll, not per model or append.
-                # This is only a scheduling hint: _refresh independently checks
-                # current sources before any provider call and at publication.
-                with self.service._lock():
-                    snapshot = self.service._snapshot(self.context)
-            except Exception:
-                report["change_check_failed"] += 1
-            else:
-                for record, schedule in change_candidates:
-                    try:
-                        if self.service._view(record, self.context, snapshot)["stale"]:
-                            due.append((1, timestamp(schedule["next_run_at"]), record["model_id"], record["version"]))
-                    except (KeyError, ValueError, TypeError, OverflowError):
-                        report["invalid"] += 1
+            eligible = {record["model_id"]: record["version"] for record, _ in change_candidates}
+            self._change_hints = {key: version for key, version in self._change_hints.items()
+                                  if eligible.get(key) == version}
+            if self._next_change_scan_at is None or monotonic() >= self._next_change_scan_at:
+                try:
+                    # The scan is a scheduling hint. _refresh independently checks
+                    # current sources before provider work and at publication.
+                    with self.service._lock():
+                        snapshot = self.service._snapshot(self.context)
+                except Exception:
+                    report["change_check_failed"] += 1
+                else:
+                    hints = {}
+                    for record, _ in change_candidates:
+                        try:
+                            if self.service._view(record, self.context, snapshot)["stale"]:
+                                hints[record["model_id"]] = record["version"]
+                        except (KeyError, ValueError, TypeError, OverflowError):
+                            report["invalid"] += 1
+                    self._change_hints = hints
+                finally:
+                    # Failed scans are also bounded, preventing a tight failure loop.
+                    self._next_change_scan_at = monotonic() + _CHANGE_SCAN_INTERVAL_SECONDS
+            for record, schedule in change_candidates:
+                if self._change_hints.get(record["model_id"]) == record["version"]:
+                    due.append((1, timestamp(schedule["next_run_at"]), record["model_id"], record["version"]))
+        else:
+            self._change_hints.clear()
         for _, _, model_id, changed_version in sorted(due):
             if report["processed"] >= self.max_batch:
                 break
@@ -260,6 +280,7 @@ class MentalModelRefreshWorker:
                 continue  # A competing worker or edit won the version check.
             if claim is None:
                 continue
+            self._change_hints.pop(model_id, None)
             token, version = claim
             report["processed"] += 1
             try:

@@ -544,6 +544,22 @@ def _asked_speaker(question: str) -> str | None:
     return speakers[0] if len(speakers) == 1 else None
 
 
+def _event_time_interval(hit: Hit) -> tuple[datetime, datetime] | None:
+    """Only authorized event metadata can establish an occurrence; creation time is not a substitute."""
+    start_value = hit.metadata.get("event_start") or hit.metadata.get("occurred_start")
+    end_value = hit.metadata.get("event_end") or hit.metadata.get("occurred_end")
+    if start_value is None:
+        return None
+    try:
+        start = parse_dt(start_value)
+        end = parse_dt(end_value) if end_value is not None else start
+    except (ValueError, TypeError, OverflowError):
+        return None
+    if start is None or end is None or end < start:
+        return None
+    return start, end
+
+
 def _time_window_route(
     ops: RetrievalPipelineOps,
     window: TimeWindow,
@@ -553,20 +569,26 @@ def _time_window_route(
     branch: str,
     passage_graph: Any,
 ) -> tuple[list[Hit], dict[str, Any]]:
-    """The passages made inside the window a question names ("what did I ask you yesterday"),
-    ranked by what the rest of the question asks for: earliest first for "first", newest
-    first for "last", otherwise by relevance; the speaker it asks about goes first."""
+    """Authorized passages matching the requested source/event interval and remaining topic.
+
+    Speech questions use ledger timestamps. Event questions require known occurrence
+    intervals; missing/invalid dates stay unknown. Nonzero intervals are half-open,
+    while a start without an end (or an equal end) is a point event.
+    """
     from dataclasses import replace
 
     from mnemosyne.passages import rank_passages
 
     candidates = ops.passage_candidates(effective_filter)
     question = window.rest or "what happened"
+    date_only = not query_support(window_support_query(window), [])["query_terms"]
+    speaker = _asked_speaker(question)
     explain: dict[str, Any] = {
         "label": window.label, "start": window.start.isoformat(), "end": window.end.isoformat(),
+        "axis": window.axis, "date_only": date_only,
     }
-    ranked: list[Hit] | None = None
-    if passage_graph is not None:
+    ranked: list[Hit] | None = list(candidates) if date_only else None
+    if passage_graph is not None and not date_only:
         try:
             ranked, _graph_explain = passage_graph.rank(question, candidates, ops.adapters.embedding, len(candidates))
         except (ValueError, OSError) as exc:
@@ -576,19 +598,40 @@ def _time_window_route(
     seen = {hit.id for hit in ranked}
     # Passages the ranking did not score still belong to the window, in stored order.
     ranked = list(ranked) + [replace(hit, metadata=dict(hit.metadata)) for hit in candidates if hit.id not in seen]
-    times = ops.evidence_created_at_many(tenant_id, [hit.id for hit in ranked], branch)
+    times = (ops.evidence_created_at_many(tenant_id, [hit.id for hit in ranked], branch)
+             if window.axis == "source" else {})
     inside: list[tuple[datetime, Hit]] = []
     start, end = window.start.astimezone(timezone.utc), window.end.astimezone(timezone.utc)
+    unknown = 0
     for hit in ranked:
-        moment = times.get(hit.id)
-        if moment is None:
-            continue
+        if window.axis == "event":
+            interval = _event_time_interval(hit)
+            if interval is None:
+                unknown += 1
+                continue
+            moment, until = interval
+        else:
+            moment = times.get(hit.id)
+            if moment is None:
+                continue
+            until = moment
         if moment.tzinfo is None:
             moment = moment.replace(tzinfo=timezone.utc)
+        if until.tzinfo is None:
+            until = until.replace(tzinfo=timezone.utc)
         # Python compares wall times when datetimes share a ZoneInfo instance;
         # converting to UTC keeps both occurrences of a DST hour distinct.
         moment = moment.astimezone(timezone.utc)
-        if start <= moment < end:
+        until = until.astimezone(timezone.utc)
+        matches = start <= moment < end if moment == until else moment < end and until > start
+        if matches:
+            hit = replace(hit, metadata={**hit.metadata, "temporal_match": {
+                "axis": window.axis, "start": moment.isoformat(), "end": until.isoformat(),
+            }})
+            if date_only and (speaker is None or hit.metadata.get("actor") == speaker):
+                # A known authorized time match is the retrieval signal for a date-only
+                # question. Topic questions still need their own lexical/semantic support.
+                hit = replace(hit, score=1.0, channel=hit.channel + "+time-window")
             inside.append((moment, hit))
     if re.search(r"\b(first|earliest)\b", question):
         inside.sort(key=lambda item: item[0])
@@ -597,11 +640,12 @@ def _time_window_route(
         inside.sort(key=lambda item: item[0], reverse=True)
         explain["order"] = "latest_first"
     hits = [hit for _moment, hit in inside]
-    speaker = _asked_speaker(question)
     if speaker is not None:
         said = [hit for hit in hits if hit.metadata.get("actor") == speaker]
         hits = said + [hit for hit in hits if hit not in said]
         explain["speaker"] = speaker
+    if window.axis == "event":
+        explain["unknown_event_time"] = unknown
     explain["passages"] = len(hits)
     return hits, explain
 
@@ -1545,7 +1589,6 @@ def run_retrieval_pipeline(
         schema_fast_path = {"applied": False, "reason": "explicit_temporal_order", "boosted_hit_ids": []}
     elif window is not None:
         schema_fast_path = {"applied": False, "reason": "time_window_route", "boosted_hit_ids": []}
-        from mnemosyne.retrieval import hit_recency_for_unit
         # Within the requested interval, freshness only breaks relevance ties.
         # It must not make an unrelated recent item outrank an older exact match.
         asked_speaker = (window_explain or {}).get("speaker")
@@ -1553,7 +1596,8 @@ def run_retrieval_pipeline(
             actor = hit.metadata.get("actor")
             return int(actor != asked_speaker) if asked_speaker else int(actor == "tool")
         reranked.sort(key=lambda hit: (
-            speaker_priority(hit), -hit.score, -hit_recency_for_unit(hit, now=retrieval_instant)
+            speaker_priority(hit), -hit.score,
+            -parse_dt(hit.metadata["temporal_match"]["start"]).timestamp(),
         ))
     else:
         reranked, schema_fast_path = schema_fast_path_rerank(query, reranked, policy)

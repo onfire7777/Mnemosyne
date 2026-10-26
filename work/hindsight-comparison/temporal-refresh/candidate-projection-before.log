@@ -1,0 +1,453 @@
+.............................................FFFFFFFFFFFFFFFFFFFFF....FF [ 88%]
+......FFF                                                                [100%]
+=================================== FAILURES ===================================
+_ test_invalid_interval_endpoint_does_not_turn_interval_into_point[local-invalid] _
+
+candidates = <function candidates.<locals>.read at 0x10807f110>, bad = 'invalid'
+
+    @pytest.mark.parametrize("bad", ["invalid", "", {"private": "Secret123"}])
+    def test_invalid_interval_endpoint_does_not_turn_interval_into_point(candidates, bad):
+        hits = candidates(source({"event_start": "2026-10-22T10:00:00Z", "event_end": bad}))
+>       assert not {"event_start", "event_end"}.intersection(hits[0].metadata)
+E       AssertionError: assert not {'event_start'}
+E        +  where {'event_start'} = <built-in method intersection of set object at 0x107fd1ee0>({'actor': 'user', 'source_type': 'doc', 'modality': 'text', 'content_pointer': None, ...})
+E        +    where <built-in method intersection of set object at 0x107fd1ee0> = {'event_end', 'event_start'}.intersection
+E        +    and   {'actor': 'user', 'source_type': 'doc', 'modality': 'text', 'content_pointer': None, ...} = Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...ne', 'capability_tags': ['data-only', 'no-write-authority', 'sanitize-as-data'], 'content': 'launch code: Secret123'}}).metadata
+
+tests/test_candidate_time_metadata.py:81: AssertionError
+___ test_invalid_interval_endpoint_does_not_turn_interval_into_point[local-] ___
+
+candidates = <function candidates.<locals>.read at 0x10807f1c0>, bad = ''
+
+    @pytest.mark.parametrize("bad", ["invalid", "", {"private": "Secret123"}])
+    def test_invalid_interval_endpoint_does_not_turn_interval_into_point(candidates, bad):
+        hits = candidates(source({"event_start": "2026-10-22T10:00:00Z", "event_end": bad}))
+>       assert not {"event_start", "event_end"}.intersection(hits[0].metadata)
+E       AssertionError: assert not {'event_start'}
+E        +  where {'event_start'} = <built-in method intersection of set object at 0x107fd3760>({'actor': 'user', 'source_type': 'doc', 'modality': 'text', 'content_pointer': None, ...})
+E        +    where <built-in method intersection of set object at 0x107fd3760> = {'event_end', 'event_start'}.intersection
+E        +    and   {'actor': 'user', 'source_type': 'doc', 'modality': 'text', 'content_pointer': None, ...} = Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...ne', 'capability_tags': ['data-only', 'no-write-authority', 'sanitize-as-data'], 'content': 'launch code: Secret123'}}).metadata
+
+tests/test_candidate_time_metadata.py:81: AssertionError
+_ test_invalid_interval_endpoint_does_not_turn_interval_into_point[local-bad2] _
+
+candidates = <function candidates.<locals>.read at 0x10807f7f0>
+bad = {'private': 'Secret123'}
+
+    @pytest.mark.parametrize("bad", ["invalid", "", {"private": "Secret123"}])
+    def test_invalid_interval_endpoint_does_not_turn_interval_into_point(candidates, bad):
+        hits = candidates(source({"event_start": "2026-10-22T10:00:00Z", "event_end": bad}))
+>       assert not {"event_start", "event_end"}.intersection(hits[0].metadata)
+E       AssertionError: assert not {'event_start'}
+E        +  where {'event_start'} = <built-in method intersection of set object at 0x107feeea0>({'actor': 'user', 'source_type': 'doc', 'modality': 'text', 'content_pointer': None, ...})
+E        +    where <built-in method intersection of set object at 0x107feeea0> = {'event_end', 'event_start'}.intersection
+E        +    and   {'actor': 'user', 'source_type': 'doc', 'modality': 'text', 'content_pointer': None, ...} = Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...ne', 'capability_tags': ['data-only', 'no-write-authority', 'sanitize-as-data'], 'content': 'launch code: Secret123'}}).metadata
+
+tests/test_candidate_time_metadata.py:81: AssertionError
+_ test_invalid_interval_endpoint_does_not_turn_interval_into_point[sqlite-invalid] _
+
+candidates = <function candidates.<locals>.read at 0x1080c8040>, bad = 'invalid'
+
+    @pytest.mark.parametrize("bad", ["invalid", "", {"private": "Secret123"}])
+    def test_invalid_interval_endpoint_does_not_turn_interval_into_point(candidates, bad):
+        hits = candidates(source({"event_start": "2026-10-22T10:00:00Z", "event_end": bad}))
+>       assert not {"event_start", "event_end"}.intersection(hits[0].metadata)
+E       AssertionError: assert not {'event_start'}
+E        +  where {'event_start'} = <built-in method intersection of set object at 0x107fef920>({'actor': 'user', 'source_type': 'doc', 'modality': 'text', 'content_pointer': None, ...})
+E        +    where <built-in method intersection of set object at 0x107fef920> = {'event_end', 'event_start'}.intersection
+E        +    and   {'actor': 'user', 'source_type': 'doc', 'modality': 'text', 'content_pointer': None, ...} = Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...ne', 'capability_tags': ['data-only', 'no-write-authority', 'sanitize-as-data'], 'content': 'launch code: Secret123'}}).metadata
+
+tests/test_candidate_time_metadata.py:81: AssertionError
+__ test_invalid_interval_endpoint_does_not_turn_interval_into_point[sqlite-] ___
+
+candidates = <function candidates.<locals>.read at 0x10807ecf0>, bad = ''
+
+    @pytest.mark.parametrize("bad", ["invalid", "", {"private": "Secret123"}])
+    def test_invalid_interval_endpoint_does_not_turn_interval_into_point(candidates, bad):
+        hits = candidates(source({"event_start": "2026-10-22T10:00:00Z", "event_end": bad}))
+>       assert not {"event_start", "event_end"}.intersection(hits[0].metadata)
+E       AssertionError: assert not {'event_start'}
+E        +  where {'event_start'} = <built-in method intersection of set object at 0x107feea40>({'actor': 'user', 'source_type': 'doc', 'modality': 'text', 'content_pointer': None, ...})
+E        +    where <built-in method intersection of set object at 0x107feea40> = {'event_end', 'event_start'}.intersection
+E        +    and   {'actor': 'user', 'source_type': 'doc', 'modality': 'text', 'content_pointer': None, ...} = Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...ne', 'capability_tags': ['data-only', 'no-write-authority', 'sanitize-as-data'], 'content': 'launch code: Secret123'}}).metadata
+
+tests/test_candidate_time_metadata.py:81: AssertionError
+_ test_invalid_interval_endpoint_does_not_turn_interval_into_point[sqlite-bad2] _
+
+candidates = <function candidates.<locals>.read at 0x1080c8720>
+bad = {'private': 'Secret123'}
+
+    @pytest.mark.parametrize("bad", ["invalid", "", {"private": "Secret123"}])
+    def test_invalid_interval_endpoint_does_not_turn_interval_into_point(candidates, bad):
+        hits = candidates(source({"event_start": "2026-10-22T10:00:00Z", "event_end": bad}))
+>       assert not {"event_start", "event_end"}.intersection(hits[0].metadata)
+E       AssertionError: assert not {'event_start'}
+E        +  where {'event_start'} = <built-in method intersection of set object at 0x107fedfc0>({'actor': 'user', 'source_type': 'doc', 'modality': 'text', 'content_pointer': None, ...})
+E        +    where <built-in method intersection of set object at 0x107fedfc0> = {'event_end', 'event_start'}.intersection
+E        +    and   {'actor': 'user', 'source_type': 'doc', 'modality': 'text', 'content_pointer': None, ...} = Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...ne', 'capability_tags': ['data-only', 'no-write-authority', 'sanitize-as-data'], 'content': 'launch code: Secret123'}}).metadata
+
+tests/test_candidate_time_metadata.py:81: AssertionError
+_ test_invalid_interval_endpoint_does_not_turn_interval_into_point[postgres-projection-invalid] _
+
+candidates = <function candidates.<locals>.read at 0x1080c8460>, bad = 'invalid'
+
+    @pytest.mark.parametrize("bad", ["invalid", "", {"private": "Secret123"}])
+    def test_invalid_interval_endpoint_does_not_turn_interval_into_point(candidates, bad):
+        hits = candidates(source({"event_start": "2026-10-22T10:00:00Z", "event_end": bad}))
+>       assert not {"event_start", "event_end"}.intersection(hits[0].metadata)
+E       AssertionError: assert not {'event_start'}
+E        +  where {'event_start'} = <built-in method intersection of set object at 0x107fd3760>({'reality_class': 'grounded', 'embedding_partition': 'public', 'source_type': 'doc', 'actor': 'user', ...})
+E        +    where <built-in method intersection of set object at 0x107fd3760> = {'event_end', 'event_start'}.intersection
+E        +    and   {'reality_class': 'grounded', 'embedding_partition': 'public', 'source_type': 'doc', 'actor': 'user', ...} = Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...c', 'actor': 'user', '_candidate_created_at': '2026-10-22T19:00:00+00:00', 'event_start': '2026-10-22T10:00:00+00:00'}).metadata
+
+tests/test_candidate_time_metadata.py:81: AssertionError
+_ test_invalid_interval_endpoint_does_not_turn_interval_into_point[postgres-projection-] _
+
+candidates = <function candidates.<locals>.read at 0x1080c8300>, bad = ''
+
+    @pytest.mark.parametrize("bad", ["invalid", "", {"private": "Secret123"}])
+    def test_invalid_interval_endpoint_does_not_turn_interval_into_point(candidates, bad):
+        hits = candidates(source({"event_start": "2026-10-22T10:00:00Z", "event_end": bad}))
+>       assert not {"event_start", "event_end"}.intersection(hits[0].metadata)
+E       AssertionError: assert not {'event_start'}
+E        +  where {'event_start'} = <built-in method intersection of set object at 0x107feea40>({'reality_class': 'grounded', 'embedding_partition': 'public', 'source_type': 'doc', 'actor': 'user', ...})
+E        +    where <built-in method intersection of set object at 0x107feea40> = {'event_end', 'event_start'}.intersection
+E        +    and   {'reality_class': 'grounded', 'embedding_partition': 'public', 'source_type': 'doc', 'actor': 'user', ...} = Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...c', 'actor': 'user', '_candidate_created_at': '2026-10-22T19:00:00+00:00', 'event_start': '2026-10-22T10:00:00+00:00'}).metadata
+
+tests/test_candidate_time_metadata.py:81: AssertionError
+_ test_invalid_interval_endpoint_does_not_turn_interval_into_point[postgres-projection-bad2] _
+
+candidates = <function candidates.<locals>.read at 0x1080c9010>
+bad = {'private': 'Secret123'}
+
+    @pytest.mark.parametrize("bad", ["invalid", "", {"private": "Secret123"}])
+    def test_invalid_interval_endpoint_does_not_turn_interval_into_point(candidates, bad):
+        hits = candidates(source({"event_start": "2026-10-22T10:00:00Z", "event_end": bad}))
+>       assert not {"event_start", "event_end"}.intersection(hits[0].metadata)
+E       AssertionError: assert not {'event_start'}
+E        +  where {'event_start'} = <built-in method intersection of set object at 0x1080dc3c0>({'reality_class': 'grounded', 'embedding_partition': 'public', 'source_type': 'doc', 'actor': 'user', ...})
+E        +    where <built-in method intersection of set object at 0x1080dc3c0> = {'event_end', 'event_start'}.intersection
+E        +    and   {'reality_class': 'grounded', 'embedding_partition': 'public', 'source_type': 'doc', 'actor': 'user', ...} = Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...c', 'actor': 'user', '_candidate_created_at': '2026-10-22T19:00:00+00:00', 'event_start': '2026-10-22T10:00:00+00:00'}).metadata
+
+tests/test_candidate_time_metadata.py:81: AssertionError
+_ test_calendar_recency_survives_utc_projection_and_dst[local-2026-10-01T00:00:00-07:00-2026-11-01T00:00:00-07:00-2026-10-08T12:00:00+00:00] _
+
+candidates = <function candidates.<locals>.read at 0x1080c8b40>
+start = '2026-10-01T00:00:00-07:00', end = '2026-11-01T00:00:00-07:00'
+now = '2026-10-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+>       assert hits[0].metadata["_candidate_event_calendar"] is True
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: '_candidate_event_calendar'
+
+tests/test_candidate_time_metadata.py:93: KeyError
+_ test_calendar_recency_survives_utc_projection_and_dst[local-2026-03-01T00:00:00-08:00-2026-04-01T00:00:00-07:00-2026-03-08T12:00:00+00:00] _
+
+candidates = <function candidates.<locals>.read at 0x1080c9e80>
+start = '2026-03-01T00:00:00-08:00', end = '2026-04-01T00:00:00-07:00'
+now = '2026-03-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+>       assert hits[0].metadata["_candidate_event_calendar"] is True
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: '_candidate_event_calendar'
+
+tests/test_candidate_time_metadata.py:93: KeyError
+_ test_calendar_recency_survives_utc_projection_and_dst[local-2026-01-01T00:00:00+05:30-2027-01-01T00:00:00+05:30-2026-01-08T12:00:00+00:00] _
+
+candidates = <function candidates.<locals>.read at 0x1080c90c0>
+start = '2026-01-01T00:00:00+05:30', end = '2027-01-01T00:00:00+05:30'
+now = '2026-01-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+>       assert hits[0].metadata["_candidate_event_calendar"] is True
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: '_candidate_event_calendar'
+
+tests/test_candidate_time_metadata.py:93: KeyError
+_ test_calendar_recency_survives_utc_projection_and_dst[local-2026-10-01T00:00:00-07:00-2026-10-31T23:59:59-07:00-2026-10-08T12:00:00+00:00] _
+
+candidates = <function candidates.<locals>.read at 0x1080c9430>
+start = '2026-10-01T00:00:00-07:00', end = '2026-10-31T23:59:59-07:00'
+now = '2026-10-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+>       assert hits[0].metadata["_candidate_event_calendar"] is True
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: '_candidate_event_calendar'
+
+tests/test_candidate_time_metadata.py:93: KeyError
+_ test_calendar_recency_survives_utc_projection_and_dst[sqlite-2026-10-01T00:00:00-07:00-2026-11-01T00:00:00-07:00-2026-10-08T12:00:00+00:00] _
+
+candidates = <function candidates.<locals>.read at 0x1080c90c0>
+start = '2026-10-01T00:00:00-07:00', end = '2026-11-01T00:00:00-07:00'
+now = '2026-10-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+>       assert hits[0].metadata["_candidate_event_calendar"] is True
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: '_candidate_event_calendar'
+
+tests/test_candidate_time_metadata.py:93: KeyError
+_ test_calendar_recency_survives_utc_projection_and_dst[sqlite-2026-03-01T00:00:00-08:00-2026-04-01T00:00:00-07:00-2026-03-08T12:00:00+00:00] _
+
+candidates = <function candidates.<locals>.read at 0x1080c8b40>
+start = '2026-03-01T00:00:00-08:00', end = '2026-04-01T00:00:00-07:00'
+now = '2026-03-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+>       assert hits[0].metadata["_candidate_event_calendar"] is True
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: '_candidate_event_calendar'
+
+tests/test_candidate_time_metadata.py:93: KeyError
+_ test_calendar_recency_survives_utc_projection_and_dst[sqlite-2026-01-01T00:00:00+05:30-2027-01-01T00:00:00+05:30-2026-01-08T12:00:00+00:00] _
+
+candidates = <function candidates.<locals>.read at 0x1080ca610>
+start = '2026-01-01T00:00:00+05:30', end = '2027-01-01T00:00:00+05:30'
+now = '2026-01-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+>       assert hits[0].metadata["_candidate_event_calendar"] is True
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: '_candidate_event_calendar'
+
+tests/test_candidate_time_metadata.py:93: KeyError
+_ test_calendar_recency_survives_utc_projection_and_dst[sqlite-2026-10-01T00:00:00-07:00-2026-10-31T23:59:59-07:00-2026-10-08T12:00:00+00:00] _
+
+candidates = <function candidates.<locals>.read at 0x1080ca350>
+start = '2026-10-01T00:00:00-07:00', end = '2026-10-31T23:59:59-07:00'
+now = '2026-10-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+>       assert hits[0].metadata["_candidate_event_calendar"] is True
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: '_candidate_event_calendar'
+
+tests/test_candidate_time_metadata.py:93: KeyError
+_ test_calendar_recency_survives_utc_projection_and_dst[postgres-projection-2026-10-01T00:00:00-07:00-2026-11-01T00:00:00-07:00-2026-10-08T12:00:00+00:00] _
+
+candidates = <function candidates.<locals>.read at 0x1080c9e80>
+start = '2026-10-01T00:00:00-07:00', end = '2026-11-01T00:00:00-07:00'
+now = '2026-10-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+>       assert hits[0].metadata["_candidate_event_calendar"] is True
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: '_candidate_event_calendar'
+
+tests/test_candidate_time_metadata.py:93: KeyError
+_ test_calendar_recency_survives_utc_projection_and_dst[postgres-projection-2026-03-01T00:00:00-08:00-2026-04-01T00:00:00-07:00-2026-03-08T12:00:00+00:00] _
+
+candidates = <function candidates.<locals>.read at 0x1080ca2a0>
+start = '2026-03-01T00:00:00-08:00', end = '2026-04-01T00:00:00-07:00'
+now = '2026-03-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+>       assert hits[0].metadata["_candidate_event_calendar"] is True
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: '_candidate_event_calendar'
+
+tests/test_candidate_time_metadata.py:93: KeyError
+_ test_calendar_recency_survives_utc_projection_and_dst[postgres-projection-2026-01-01T00:00:00+05:30-2027-01-01T00:00:00+05:30-2026-01-08T12:00:00+00:00] _
+
+candidates = <function candidates.<locals>.read at 0x1080c85c0>
+start = '2026-01-01T00:00:00+05:30', end = '2027-01-01T00:00:00+05:30'
+now = '2026-01-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+>       assert hits[0].metadata["_candidate_event_calendar"] is True
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: '_candidate_event_calendar'
+
+tests/test_candidate_time_metadata.py:93: KeyError
+_ test_calendar_recency_survives_utc_projection_and_dst[postgres-projection-2026-10-01T00:00:00-07:00-2026-10-31T23:59:59-07:00-2026-10-08T12:00:00+00:00] _
+
+candidates = <function candidates.<locals>.read at 0x1080cb1c0>
+start = '2026-10-01T00:00:00-07:00', end = '2026-10-31T23:59:59-07:00'
+now = '2026-10-08T12:00:00+00:00'
+
+    @pytest.mark.parametrize("start,end,now", [
+        ("2026-10-01T00:00:00-07:00", "2026-11-01T00:00:00-07:00", "2026-10-08T12:00:00+00:00"),
+        ("2026-03-01T00:00:00-08:00", "2026-04-01T00:00:00-07:00", "2026-03-08T12:00:00+00:00"),
+        ("2026-01-01T00:00:00+05:30", "2027-01-01T00:00:00+05:30", "2026-01-08T12:00:00+00:00"),
+        ("2026-10-01T00:00:00-07:00", "2026-10-31T23:59:59-07:00", "2026-10-08T12:00:00+00:00"),
+    ])
+    def test_calendar_recency_survives_utc_projection_and_dst(candidates, start, end, now):
+        hits = candidates(source({"event_start": start, "event_end": end}))
+>       assert hits[0].metadata["_candidate_event_calendar"] is True
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: '_candidate_event_calendar'
+
+tests/test_candidate_time_metadata.py:93: KeyError
+____ test_input_cannot_spoof_calendar_projection[postgres-projection-False] ____
+
+candidates = <function candidates.<locals>.read at 0x1080caf00>
+redacted = False
+
+    @pytest.mark.parametrize("redacted", [False, True])
+    def test_input_cannot_spoof_calendar_projection(candidates, redacted):
+        hits = candidates(source({"event_start": "2026-10-22T10:00:00Z",
+                                  "_candidate_event_calendar": "Secret123"}, redacted=redacted))
+>       assert "_candidate_event_calendar" not in hits[0].metadata
+E       AssertionError: assert '_candidate_event_calendar' not in {'_candidate_event_calendar': 'Secret123', 'reality_class': 'grounded', 'embedding_partition': 'public', 'source_type': 'doc', ...}
+E        +  where {'_candidate_event_calendar': 'Secret123', 'reality_class': 'grounded', 'embedding_partition': 'public', 'source_type': 'doc', ...} = Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...c', 'actor': 'user', '_candidate_created_at': '2026-10-22T19:00:00+00:00', 'event_start': '2026-10-22T10:00:00+00:00'}).metadata
+
+tests/test_candidate_time_metadata.py:101: AssertionError
+____ test_input_cannot_spoof_calendar_projection[postgres-projection-True] _____
+
+candidates = <function candidates.<locals>.read at 0x1080cb1c0>, redacted = True
+
+    @pytest.mark.parametrize("redacted", [False, True])
+    def test_input_cannot_spoof_calendar_projection(candidates, redacted):
+        hits = candidates(source({"event_start": "2026-10-22T10:00:00Z",
+                                  "_candidate_event_calendar": "Secret123"}, redacted=redacted))
+>       assert "_candidate_event_calendar" not in hits[0].metadata
+E       AssertionError: assert '_candidate_event_calendar' not in {'_candidate_event_calendar': 'Secret123', 'reality_class': 'grounded', 'embedding_partition': 'private', 'source_type': 'doc', ...}
+E        +  where {'_candidate_event_calendar': 'Secret123', 'reality_class': 'grounded', 'embedding_partition': 'private', 'source_type': 'doc', ...} = Hit(id='62cc15297ee21f70fa983d615bbed3281816eb98da1c7b64b2bc3a3987ad9ca8', kind='evidence', tenant_id='t', branch='mai...ng_partition': 'private', 'source_type': 'doc', 'actor': 'user', '_candidate_created_at': '2026-10-22T19:00:00+00:00'}).metadata
+
+tests/test_candidate_time_metadata.py:101: AssertionError
+_________ test_valid_endpoint_alias_can_replace_invalid_primary[local] _________
+
+candidates = <function candidates.<locals>.read at 0x1081090c0>
+
+    def test_valid_endpoint_alias_can_replace_invalid_primary(candidates):
+        hits = candidates(source({"event_start": "2026-10-01", "event_end": "invalid",
+                                  "occurred_end": "2026-11-01"}))
+        assert hits[0].metadata["event_end"] == "2026-11-01T00:00:00+00:00"
+>       assert hits[0].metadata["_candidate_event_calendar"] is True
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: '_candidate_event_calendar'
+
+tests/test_candidate_time_metadata.py:119: KeyError
+________ test_valid_endpoint_alias_can_replace_invalid_primary[sqlite] _________
+
+candidates = <function candidates.<locals>.read at 0x1081087d0>
+
+    def test_valid_endpoint_alias_can_replace_invalid_primary(candidates):
+        hits = candidates(source({"event_start": "2026-10-01", "event_end": "invalid",
+                                  "occurred_end": "2026-11-01"}))
+        assert hits[0].metadata["event_end"] == "2026-11-01T00:00:00+00:00"
+>       assert hits[0].metadata["_candidate_event_calendar"] is True
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: '_candidate_event_calendar'
+
+tests/test_candidate_time_metadata.py:119: KeyError
+__ test_valid_endpoint_alias_can_replace_invalid_primary[postgres-projection] __
+
+candidates = <function candidates.<locals>.read at 0x108109220>
+
+    def test_valid_endpoint_alias_can_replace_invalid_primary(candidates):
+        hits = candidates(source({"event_start": "2026-10-01", "event_end": "invalid",
+                                  "occurred_end": "2026-11-01"}))
+        assert hits[0].metadata["event_end"] == "2026-11-01T00:00:00+00:00"
+>       assert hits[0].metadata["_candidate_event_calendar"] is True
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: '_candidate_event_calendar'
+
+tests/test_candidate_time_metadata.py:119: KeyError
+=========================== short test summary info ============================
+FAILED tests/test_candidate_time_metadata.py::test_invalid_interval_endpoint_does_not_turn_interval_into_point[local-invalid]
+FAILED tests/test_candidate_time_metadata.py::test_invalid_interval_endpoint_does_not_turn_interval_into_point[local-]
+FAILED tests/test_candidate_time_metadata.py::test_invalid_interval_endpoint_does_not_turn_interval_into_point[local-bad2]
+FAILED tests/test_candidate_time_metadata.py::test_invalid_interval_endpoint_does_not_turn_interval_into_point[sqlite-invalid]
+FAILED tests/test_candidate_time_metadata.py::test_invalid_interval_endpoint_does_not_turn_interval_into_point[sqlite-]
+FAILED tests/test_candidate_time_metadata.py::test_invalid_interval_endpoint_does_not_turn_interval_into_point[sqlite-bad2]
+FAILED tests/test_candidate_time_metadata.py::test_invalid_interval_endpoint_does_not_turn_interval_into_point[postgres-projection-invalid]
+FAILED tests/test_candidate_time_metadata.py::test_invalid_interval_endpoint_does_not_turn_interval_into_point[postgres-projection-]
+FAILED tests/test_candidate_time_metadata.py::test_invalid_interval_endpoint_does_not_turn_interval_into_point[postgres-projection-bad2]
+FAILED tests/test_candidate_time_metadata.py::test_calendar_recency_survives_utc_projection_and_dst[local-2026-10-01T00:00:00-07:00-2026-11-01T00:00:00-07:00-2026-10-08T12:00:00+00:00]
+FAILED tests/test_candidate_time_metadata.py::test_calendar_recency_survives_utc_projection_and_dst[local-2026-03-01T00:00:00-08:00-2026-04-01T00:00:00-07:00-2026-03-08T12:00:00+00:00]
+FAILED tests/test_candidate_time_metadata.py::test_calendar_recency_survives_utc_projection_and_dst[local-2026-01-01T00:00:00+05:30-2027-01-01T00:00:00+05:30-2026-01-08T12:00:00+00:00]
+FAILED tests/test_candidate_time_metadata.py::test_calendar_recency_survives_utc_projection_and_dst[local-2026-10-01T00:00:00-07:00-2026-10-31T23:59:59-07:00-2026-10-08T12:00:00+00:00]
+FAILED tests/test_candidate_time_metadata.py::test_calendar_recency_survives_utc_projection_and_dst[sqlite-2026-10-01T00:00:00-07:00-2026-11-01T00:00:00-07:00-2026-10-08T12:00:00+00:00]
+FAILED tests/test_candidate_time_metadata.py::test_calendar_recency_survives_utc_projection_and_dst[sqlite-2026-03-01T00:00:00-08:00-2026-04-01T00:00:00-07:00-2026-03-08T12:00:00+00:00]
+FAILED tests/test_candidate_time_metadata.py::test_calendar_recency_survives_utc_projection_and_dst[sqlite-2026-01-01T00:00:00+05:30-2027-01-01T00:00:00+05:30-2026-01-08T12:00:00+00:00]
+FAILED tests/test_candidate_time_metadata.py::test_calendar_recency_survives_utc_projection_and_dst[sqlite-2026-10-01T00:00:00-07:00-2026-10-31T23:59:59-07:00-2026-10-08T12:00:00+00:00]
+FAILED tests/test_candidate_time_metadata.py::test_calendar_recency_survives_utc_projection_and_dst[postgres-projection-2026-10-01T00:00:00-07:00-2026-11-01T00:00:00-07:00-2026-10-08T12:00:00+00:00]
+FAILED tests/test_candidate_time_metadata.py::test_calendar_recency_survives_utc_projection_and_dst[postgres-projection-2026-03-01T00:00:00-08:00-2026-04-01T00:00:00-07:00-2026-03-08T12:00:00+00:00]
+FAILED tests/test_candidate_time_metadata.py::test_calendar_recency_survives_utc_projection_and_dst[postgres-projection-2026-01-01T00:00:00+05:30-2027-01-01T00:00:00+05:30-2026-01-08T12:00:00+00:00]
+FAILED tests/test_candidate_time_metadata.py::test_calendar_recency_survives_utc_projection_and_dst[postgres-projection-2026-10-01T00:00:00-07:00-2026-10-31T23:59:59-07:00-2026-10-08T12:00:00+00:00]
+FAILED tests/test_candidate_time_metadata.py::test_input_cannot_spoof_calendar_projection[postgres-projection-False]
+FAILED tests/test_candidate_time_metadata.py::test_input_cannot_spoof_calendar_projection[postgres-projection-True]
+FAILED tests/test_candidate_time_metadata.py::test_valid_endpoint_alias_can_replace_invalid_primary[local]
+FAILED tests/test_candidate_time_metadata.py::test_valid_endpoint_alias_can_replace_invalid_primary[sqlite]
+FAILED tests/test_candidate_time_metadata.py::test_valid_endpoint_alias_can_replace_invalid_primary[postgres-projection]

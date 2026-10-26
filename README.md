@@ -232,6 +232,8 @@ schedules, crash recovery and bounded retries on SQLite/PostgreSQL. Cached reads
 need no provider call. Optional `mental-model-worker --check-changes` polling
 detects stale sources before the normal interval, with a one-minute minimum
 spacing between early attempts and the same ownership, lease and retry checks.
+A long-lived worker coalesces advisory source scans for five seconds; direct
+answer reads and scheduled refreshes retain their current-source checks.
 
 The [controlled comparison protocol](docs/comparison-protocol.md) records a possible
 held-out pilot with native ingestion/recall and a common Codex reader and judge.

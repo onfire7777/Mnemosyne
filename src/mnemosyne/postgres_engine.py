@@ -3497,7 +3497,8 @@ class PostgresEngine:
             provenance=[row["cid"]], trust_tier=int(row.get("trust_tier", 0)),
             sensitivity=int(row.get("sensitivity", 0)),
             metadata={**{key: value for key, value in (row.get("metadata") or {}).items()
-                         if key not in {"event_start", "event_end", "occurred_start", "occurred_end", "_candidate_created_at"}},
+                         if key not in {"event_start", "event_end", "occurred_start", "occurred_end",
+                                        "_candidate_created_at", "_candidate_event_calendar"}},
                       "source_type": row.get("source_type"), "actor": row.get("actor"),
                       **_candidate_time_metadata(row.get("created_at"), row.get("metadata") or {},
                                                  redacted=bool((row.get("privacy") or {}).get("redacted")))},
