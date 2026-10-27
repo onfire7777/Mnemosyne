@@ -652,7 +652,7 @@ class MnemosyneMcpServer:
 #: Read tools on which ``session_id`` is an opt-in argument: a token proves the
 #: session when the caller names it, but is never read as a request for it. A
 #: signed search that does not name a session answers as it always has.
-_SESSION_OPT_IN_TOOLS = frozenset({"search", "deep_search"})
+_SESSION_OPT_IN_TOOLS = frozenset({"search", "deep_search", "capture"})
 
 
 @lru_cache(maxsize=1)
@@ -707,6 +707,10 @@ def _argument_schema_patches() -> tuple[dict[str, dict[str, Any]], dict[str, dic
                 "description": "Return only the newest `limit` items after the scope filter.",
             },
             "kinds": {"description": "Return only items whose kind is in this list."},
+        },
+        "working_replace": {
+            "salience": {"minimum": 0.0, "maximum": 1.0, "default": 0.5},
+            "ttl_seconds": {"minimum": 1, "maximum": 86400},
         },
         "search": session_reads,
         "deep_search": session_reads,

@@ -229,9 +229,26 @@ TOOL_SPEC: list[dict[str, Any]] = [
         "arguments": ["tenant_id", "session_id", "user_id", "agent_id", "task_id", "branch", "item_id", "as_of", "cases", "role", "source_trust_tier"],
     },
     {
+        "name": "working_replace",
+        "description": "Atomically replace or supersede an active working-memory item in the authenticated session.",
+        "arguments": [
+            "tenant_id", "session_id", "user_id", "agent_id", "task_id", "branch",
+            "kind", "content", "evidence_ids", "ttl_seconds", "created_at",
+            "supersedes_item_id", "role", "source_trust_tier", "item_id", "salience", "metadata"
+        ],
+    },
+    {
+        "name": "working_consolidate",
+        "description": "Distill eligible working-memory items into durable long-term Assertions or Preferences citing originating evidence.",
+        "arguments": [
+            "tenant_id", "session_id", "user_id", "agent_id", "task_id", "branch",
+            "item_ids", "as_of", "role", "source_trust_tier"
+        ],
+    },
+    {
         "name": "working_expire",
         "description": "Expire due working-memory items in an explicit authenticated subject scope.",
-        "arguments": ["tenant_id", "session_id", "user_id", "agent_id", "task_id", "branch", "expired_at", "role", "source_trust_tier"],
+        "arguments": ["tenant_id", "session_id", "user_id", "agent_id", "task_id", "branch", "expired_at", "role", "source_trust_tier", "consolidate"],
     },
     {
         "name": "capture",
@@ -870,10 +887,212 @@ class MemoryTools:
         gate = PromotionGate(self.engine, regression_cases).evaluate(tenant_id, candidate, apply_candidate)
         return {"item_id": item.item_id, "gate": gate.to_dict(), "security": security}
 
+    def working_replace(
+        self,
+        tenant_id: str,
+        session_id: str,
+        user_id: str,
+        agent_id: str,
+        task_id: str,
+        branch: str,
+        kind: str,
+        content: str,
+        evidence_ids: list[str],
+        ttl_seconds: int,
+        created_at: str | datetime,
+        supersedes_item_id: str | None = None,
+        role: WriteRole = "agent",
+        source_trust_tier: int = int(TrustTier.NORMAL),
+        item_id: str | None = None,
+        salience: float = 0.5,
+        metadata: dict[str, Any] | None = None,
+        session_identity: SessionIdentity | None = None,
+    ) -> dict[str, Any]:
+        identity = self._authorize_working(
+            session_identity,
+            tenant_id=tenant_id,
+            session_id=session_id,
+            user_id=user_id,
+            agent_id=agent_id,
+        )
+        role = identity.role
+        source_trust_tier = identity.source_trust_tier
+        if type(ttl_seconds) is not int or isinstance(ttl_seconds, bool) or ttl_seconds <= 0:
+            raise ValueError("ttl_seconds must be a positive integer")
+        if ttl_seconds > 24 * 60 * 60:
+            raise ValueError("ttl_seconds must not exceed 86400")
+        if not evidence_ids:
+            raise ValueError("working replacement requires non-empty evidence_ids")
+        if not isinstance(salience, (int, float)) or isinstance(salience, bool) or not (0.0 <= float(salience) <= 1.0):
+            raise ValueError("salience must be a float between 0.0 and 1.0")
+        if supersedes_item_id is None and kind not in {"active_goal", "current_plan"}:
+            raise ValueError(f"supersedes_item_id is required when replacing kind {kind!r}")
+        security = self._authorize(
+            "working_replace", role=role, source_trust_tier=source_trust_tier, target_sink="belief"
+        )
+        created = self._working_time(created_at, "created_at")
+        item_meta = dict(metadata or {})
+        item_meta["branch"] = branch
+        target_supersedes = supersedes_item_id
+        if target_supersedes is None and kind in {"active_goal", "current_plan"}:
+            active_items = self.engine.list_working(tenant_id, session_id, as_of=created)
+            candidates = [
+                it for it in active_items
+                if it.kind == kind and getattr(it, "status", "active") == "active"
+                and self._working_matches(it, user_id=user_id, agent_id=agent_id, task_id=task_id, branch=branch)
+            ]
+            if candidates:
+                target_supersedes = candidates[0].item_id
+
+        if target_supersedes is not None:
+            item_meta.setdefault("supersedes", target_supersedes)
+
+        item = WorkingMemoryItem(
+            item_id=item_id or new_id(),
+            tenant_id=tenant_id,
+            session_id=session_id,
+            user_id=user_id,
+            agent_id=agent_id,
+            kind=kind,
+            task_id=task_id,
+            content=content,
+            created_at=created,
+            expires_at=created + timedelta(seconds=ttl_seconds),
+            evidence_ids=list(evidence_ids),
+            trust_tier=source_trust_tier,
+            access_policy={"tenant": tenant_id},
+            metadata=item_meta,
+            salience=float(salience),
+        )
+
+        res = self.engine.replace_working(
+            item,
+            supersedes_item_id=target_supersedes,
+            singleton_kind=(supersedes_item_id is None and kind in {"active_goal", "current_plan"}),
+        )
+        if isinstance(res, tuple):
+            first, sup_ret = res
+            stored_item = first if isinstance(first, WorkingMemoryItem) else item
+            final_superseded = sup_ret if sup_ret is not None else target_supersedes
+        elif isinstance(res, WorkingMemoryItem):
+            stored_item = res
+            final_superseded = getattr(res, "superseded_by", None) or target_supersedes
+        else:
+            stored_item = item
+            final_superseded = target_supersedes
+
+        return {"item": stored_item.to_dict(), "superseded_item_id": final_superseded, "security": security}
+
+    def working_consolidate(
+        self,
+        tenant_id: str,
+        session_id: str,
+        user_id: str,
+        agent_id: str,
+        task_id: str,
+        branch: str = "main",
+        item_ids: list[str] | None = None,
+        as_of: str | datetime | None = None,
+        role: WriteRole = "agent",
+        source_trust_tier: int = int(TrustTier.NORMAL),
+        session_identity: SessionIdentity | None = None,
+    ) -> dict[str, Any]:
+        identity = self._authorize_working(
+            session_identity,
+            tenant_id=tenant_id,
+            session_id=session_id,
+            user_id=user_id,
+            agent_id=agent_id,
+        )
+        role = identity.role
+        source_trust_tier = identity.source_trust_tier
+        security = self._authorize(
+            "working_consolidate",
+            role=role,
+            source_trust_tier=source_trust_tier,
+            target_sink="belief",
+        )
+        clock = self._working_time(as_of, "as_of") if as_of is not None else datetime.now(UTC)
+        all_items = self.engine.list_working(tenant_id, session_id, as_of=clock)
+        scoped = [
+            it for it in all_items
+            if getattr(it, "status", "active") == "active"
+            and self._working_matches(it, user_id=user_id, agent_id=agent_id, task_id=task_id, branch=branch)
+        ]
+        if item_ids is not None:
+            scoped_by_id = {it.item_id: it for it in scoped}
+            target_items = []
+            for iid in item_ids:
+                if iid not in scoped_by_id:
+                    raise KeyError(f"active working item {iid!r} not found in authenticated session")
+                target_items.append(scoped_by_id[iid])
+        else:
+            target_items = scoped
+
+        assertions: list[Assertion] = []
+        preferences: list[Preference] = []
+        consolidated_ids: list[str] = []
+
+        for item in target_items:
+            if item.kind in {"active_constraint", "constraint"}:
+                pref = Preference(
+                    tenant_id=item.tenant_id,
+                    user_id=item.user_id,
+                    category="constraint",
+                    statement=item.content,
+                    source_evidence_cids=list(item.evidence_ids),
+                    access_policy=dict(item.access_policy),
+                    valid_from=clock,
+                )
+                self.engine.add_preference(pref)
+                preferences.append(pref)
+                consolidated_ids.append(item.item_id)
+            elif item.kind == "intermediate_conclusion":
+                assertion = Assertion(
+                    tenant_id=item.tenant_id,
+                    user_id=item.user_id,
+                    subject=item.task_id,
+                    predicate="conclusion",
+                    object=item.content,
+                    source_evidence_cids=list(item.evidence_ids),
+                    trust_tier=item.trust_tier,
+                    access_policy=dict(item.access_policy),
+                    valid_from=clock,
+                    branch=branch,
+                )
+                self.engine.upsert_assertion(assertion, branch=branch)
+                assertions.append(assertion)
+                consolidated_ids.append(item.item_id)
+            elif item.kind in {"active_goal", "current_plan"}:
+                assertion = Assertion(
+                    tenant_id=item.tenant_id,
+                    user_id=item.user_id,
+                    subject=item.task_id,
+                    predicate=item.kind,
+                    object=item.content,
+                    source_evidence_cids=list(item.evidence_ids),
+                    trust_tier=item.trust_tier,
+                    access_policy=dict(item.access_policy),
+                    valid_from=clock,
+                    branch=branch,
+                )
+                self.engine.upsert_assertion(assertion, branch=branch)
+                assertions.append(assertion)
+                consolidated_ids.append(item.item_id)
+
+        return {
+            "consolidated_count": len(assertions) + len(preferences),
+            "assertions": [a.to_dict() for a in assertions],
+            "preferences": [p.to_dict() for p in preferences],
+            "item_ids": consolidated_ids,
+            "security": security,
+        }
+
     def working_expire(
         self, tenant_id: str, session_id: str, user_id: str, agent_id: str,
         task_id: str, branch: str, expired_at: str | datetime, role: WriteRole,
         source_trust_tier: int, session_identity: SessionIdentity | None = None,
+        consolidate: bool = False,
     ) -> dict[str, Any]:
         identity = self._authorize_working(
             session_identity, tenant_id=tenant_id, session_id=session_id,
@@ -895,7 +1114,62 @@ class MemoryTools:
             branch=branch,
             expired_at=clock,
         )
-        return {"expired_at": clock.isoformat(), "items": [item.to_dict() for item in expired], "security": security}
+        res: dict[str, Any] = {
+            "expired_at": clock.isoformat(),
+            "items": [item.to_dict() for item in expired],
+            "security": security,
+        }
+        if consolidate:
+            assertions: list[Assertion] = []
+            preferences: list[Preference] = []
+            for item in expired:
+                if item.kind in {"active_constraint", "constraint"}:
+                    pref = Preference(
+                        tenant_id=item.tenant_id,
+                        user_id=item.user_id,
+                        category="constraint",
+                        statement=item.content,
+                        source_evidence_cids=list(item.evidence_ids),
+                        access_policy=dict(item.access_policy),
+                        valid_from=clock,
+                    )
+                    self.engine.add_preference(pref)
+                    preferences.append(pref)
+                elif item.kind == "intermediate_conclusion":
+                    assertion = Assertion(
+                        tenant_id=item.tenant_id,
+                        user_id=item.user_id,
+                        subject=item.task_id,
+                        predicate="conclusion",
+                        object=item.content,
+                        source_evidence_cids=list(item.evidence_ids),
+                        trust_tier=item.trust_tier,
+                        access_policy=dict(item.access_policy),
+                        valid_from=clock,
+                        branch=branch,
+                    )
+                    self.engine.upsert_assertion(assertion, branch=branch)
+                    assertions.append(assertion)
+                elif item.kind in {"active_goal", "current_plan"}:
+                    assertion = Assertion(
+                        tenant_id=item.tenant_id,
+                        user_id=item.user_id,
+                        subject=item.task_id,
+                        predicate=item.kind,
+                        object=item.content,
+                        source_evidence_cids=list(item.evidence_ids),
+                        trust_tier=item.trust_tier,
+                        access_policy=dict(item.access_policy),
+                        valid_from=clock,
+                        branch=branch,
+                    )
+                    self.engine.upsert_assertion(assertion, branch=branch)
+                    assertions.append(assertion)
+            res["consolidated"] = {
+                "assertions": [a.to_dict() for a in assertions],
+                "preferences": [p.to_dict() for p in preferences],
+            }
+        return res
 
     def capture(
         self,
@@ -909,6 +1183,8 @@ class MemoryTools:
         source_identity: str | None = None,
         session_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        mirror_turn: bool = False,
+        session_identity: SessionIdentity | None = None,
     ) -> dict[str, Any]:
         _require_text(tenant_id, field="tenant_id")
         enforce_byte_limit(
@@ -950,7 +1226,56 @@ class MemoryTools:
         idempotent = existed_before and stored and same_cid
         if created:
             self._index_later(tenant_id, branch)
-        return {"cid": cid, "branch": branch, "created": created, "idempotent": idempotent}
+
+        working_item_id: str | None = None
+        if mirror_turn:
+            if not isinstance(session_identity, SessionIdentity):
+                raise PermissionError("working memory turn mirroring requires verified session identity")
+            target_session = session_id or session_identity.session_id
+            if not target_session or session_identity.session_id != target_session:
+                raise PermissionError("working memory turn mirroring session mismatch")
+            if session_identity.tenant_id != tenant_id:
+                raise PermissionError("working memory turn mirroring tenant mismatch")
+
+            turn_created = datetime.now(UTC)
+            if idempotent:
+                active_working = self.engine.list_working(tenant_id, target_session, as_of=turn_created)
+                matching = [
+                    it for it in active_working
+                    if cid in it.evidence_ids and it.kind == "conversation_turn"
+                    and getattr(it, "status", "active") == "active"
+                ]
+                if matching:
+                    working_item_id = matching[0].item_id
+
+            if working_item_id is None:
+                working_item = WorkingMemoryItem(
+                    item_id=new_id(),
+                    tenant_id=tenant_id,
+                    session_id=target_session,
+                    user_id=user_id,
+                    agent_id=session_identity.agent_id or actor,
+                    kind="conversation_turn",
+                    task_id=str((metadata or {}).get("task_id", "conversation")),
+                    content=content,
+                    created_at=turn_created,
+                    expires_at=turn_created + timedelta(seconds=3600),
+                    evidence_ids=[cid],
+                    trust_tier=trust_tier,
+                    access_policy={"tenant": tenant_id},
+                    metadata={"branch": branch, "actor": actor, "source_type": source_type},
+                    salience=0.5,
+                )
+                self.engine.put_working(working_item)
+                working_item_id = working_item.item_id
+
+        return {
+            "cid": cid,
+            "branch": branch,
+            "created": created,
+            "idempotent": idempotent,
+            "working_item_id": working_item_id,
+        }
 
     def ingest(
         self,
