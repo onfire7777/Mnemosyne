@@ -30,11 +30,12 @@ from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
 from math import log
 from pathlib import Path
 from typing import Any
 
-from mnemosyne.models import Hit
+from mnemosyne.models import Hit, parse_dt
 from mnemosyne.text import tokenize
 
 
@@ -78,16 +79,64 @@ class PassageIndex:
         return dict(scores)
 
 
+_CURRENCY_RE = re.compile(
+    r"\b(currently|now|latest|today|presently|at present|these days|so far|current|recent|recently|right now|as of now)\b",
+    re.IGNORECASE,
+)
+
+
 def rank_passages(owner: object, query: str, candidates: Sequence[Hit], k: int) -> list[Hit]:
     passages = [hit for hit in candidates if is_passage(hit)]
     texts = tuple(hit.text for hit in passages)
     index = getattr(owner, "_passage_bm25_index", None)
     if index is None or index.texts != texts:
         index = PassageIndex(texts)
-        owner._passage_bm25_index = index
+        try:
+            owner._passage_bm25_index = index
+        except (AttributeError, TypeError):
+            pass
     scores = index.scores(query)
-    ranked = sorted(scores, key=lambda i: (-scores[i], passages[i].id))[:max(k, 0)]
-    return [replace(passages[i], score=scores[i], channel="lexical_bm25") for i in ranked]
+
+    dts: dict[int, datetime] = {}
+    for i, h in enumerate(passages):
+        val = (
+            h.metadata.get("_candidate_created_at")
+            or h.metadata.get("created_at")
+            or h.metadata.get("event_start")
+        )
+        if val is not None:
+            try:
+                dt = val if isinstance(val, datetime) else parse_dt(val)
+                if dt is not None:
+                    dts[i] = dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+            except (ValueError, TypeError, OverflowError):
+                pass
+    max_dt = max(dts.values()) if dts else None
+
+    is_currency = bool(_CURRENCY_RE.search(query))
+    boost = 0.40 if is_currency else 0.25
+    half_life = 30.0 if is_currency else 60.0
+
+    final_scores: dict[int, float] = {}
+    for i, sc in scores.items():
+        if max_dt and i in dts:
+            days_ago = max(0.0, (max_dt - dts[i]).total_seconds() / 86400.0)
+            rec_decay = 1.0 / (1.0 + days_ago / half_life)
+            final_scores[i] = sc * (1.0 + boost * rec_decay)
+        else:
+            final_scores[i] = sc
+
+    if is_currency and final_scores:
+        top_sc = max(final_scores.values())
+        if top_sc > 0.0:
+            thresh = top_sc * 0.85
+            top_cands = [i for i, sc in final_scores.items() if sc >= thresh and i in dts]
+            if top_cands:
+                latest = max(top_cands, key=lambda idx: dts[idx])
+                final_scores[latest] *= 1.15
+
+    ranked = sorted(scores, key=lambda i: (-final_scores.get(i, scores[i]), passages[i].id))[:max(k, 0)]
+    return [replace(passages[i], score=final_scores.get(i, scores[i]), channel="lexical_bm25") for i in ranked]
 
 
 # --------------------------------------------------------------------------------------------

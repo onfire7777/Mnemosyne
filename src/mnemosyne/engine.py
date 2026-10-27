@@ -6119,7 +6119,13 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             if item.subject == subject and item.predicate == predicate and self._valid_at(item.valid_from, item.valid_to, moment):
                 if item.status in {"active", "superseded", "contested"}:
                     matches.append(copy.deepcopy(item))
-        return sorted(matches, key=lambda item: item.valid_from)
+        return sorted(
+            matches,
+            key=lambda item: (
+                item.valid_from.astimezone(UTC) if item.valid_from.tzinfo else item.valid_from.replace(tzinfo=UTC),
+                str(item.id),
+            ),
+        )
 
     def correct(
         self,

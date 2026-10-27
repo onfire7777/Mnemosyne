@@ -107,6 +107,143 @@ class MentalModelService:
     def __init__(self, engine: Any, provider_factory: Callable[[], Any] | None = None):
         self.engine = engine
         self.provider_factory = provider_factory
+        self._snapshot_cache: dict[tuple[str, str, str, str | None], tuple[str, datetime | None, tuple[str, dict[str, dict[str, Any]]]]] = {}
+
+    def _get_cache(self) -> dict[Any, Any]:
+        if not hasattr(self.engine, "_mental_model_snapshot_cache"):
+            try:
+                self.engine._mental_model_snapshot_cache = {}
+            except (AttributeError, TypeError):
+                return self._snapshot_cache
+        return self.engine._mental_model_snapshot_cache
+
+    def clear_watermark_cache(self) -> None:
+        """Clear the snapshot digest cache for all tenants and branches."""
+        self._snapshot_cache.clear()
+        if hasattr(self.engine, "_mental_model_snapshot_cache"):
+            try:
+                self.engine._mental_model_snapshot_cache.clear()
+            except Exception:
+                pass
+
+    def invalidate_watermark(self, tenant_id: str | None = None, branch: str | None = None) -> None:
+        """Invalidate cached snapshots matching tenant_id and branch (or all if None)."""
+        cache = self._get_cache()
+        to_del = [
+            k for k in list(cache)
+            if (tenant_id is None or k[0] == tenant_id) and (branch is None or k[1] == branch)
+        ]
+        for k in to_del:
+            cache.pop(k, None)
+
+    def mutation_watermark(self, context: AnswerReadContext) -> str:
+        """Return the current lightweight branch/tenant mutation watermark digest.
+
+        Tracks mutation sequence numbers, revision counters, collection sizes, deletion logs,
+        merges, and security policy. Advances immediately on any write, erasure, rollback,
+        privacy change, or branch merge.
+        """
+        return self._mutation_watermark(context)
+
+    def _mutation_watermark(self, context: AnswerReadContext) -> str:
+        engine = self.engine
+        tenant_id = context.tenant_id
+        branch = context.branch
+        parts: list[Any] = [tenant_id, branch]
+
+        if callable(getattr(engine, "mutation_watermark", None)):
+            try:
+                return str(engine.mutation_watermark(tenant_id, branch))
+            except Exception:
+                pass
+
+        if hasattr(engine, "policy") and hasattr(engine.policy, "to_dict"):
+            try:
+                parts.append(engine.policy.to_dict())
+            except Exception:
+                pass
+
+        if hasattr(engine, "_store_version"):
+            parts.append(getattr(engine, "_store_version"))
+
+        if hasattr(engine, "audit_log") and isinstance(engine.audit_log, list):
+            parts.append(len(engine.audit_log))
+            if engine.audit_log:
+                parts.append(engine.audit_log[-1].get("id"))
+                parts.append(engine.audit_log[-1].get("op"))
+            parts.append(len(getattr(engine, "deletion_log", [])))
+            if getattr(engine, "deletion_log", None):
+                parts.append(engine.deletion_log[-1].get("id"))
+            parts.append(len(getattr(engine, "merge_log", [])))
+            if getattr(engine, "merge_log", None):
+                parts.append(engine.merge_log[-1])
+            parts.append((
+                len(getattr(engine, "evidence", {})),
+                len(getattr(engine, "assertions", {})),
+                len(getattr(engine, "relations", {})),
+                len(getattr(engine, "preferences", {})),
+            ))
+            if hasattr(engine, "branches") and isinstance(engine.branches, dict):
+                parts.append(engine.branches.get(branch))
+
+        elif hasattr(engine, "_connect") and callable(engine._connect):
+            try:
+                conn = engine._connect(tenant_id)
+                with getattr(engine, "_lock", nullcontext()):
+                    row = conn.execute(
+                        """
+                        SELECT
+                            (SELECT MAX(seq) FROM audit_log WHERE tenant_id = ? OR tenant_id = '*'),
+                            (SELECT COUNT(*) FROM audit_log WHERE tenant_id = ? OR tenant_id = '*'),
+                            (SELECT MAX(seq) FROM deletion_log WHERE tenant_id = ? OR tenant_id = '*'),
+                            (SELECT COUNT(*) FROM deletion_log WHERE tenant_id = ? OR tenant_id = '*'),
+                            (SELECT MAX(seq) FROM merge_log WHERE tenant_id = ? OR tenant_id = '*'),
+                            (SELECT COUNT(*) FROM evidence WHERE tenant_id = ? AND branch = ? AND erased = 0),
+                            (SELECT COUNT(*) FROM assertions WHERE tenant_id = ? AND branch = ?),
+                            (SELECT COUNT(*) FROM relations WHERE tenant_id = ? AND branch = ?),
+                            (SELECT COUNT(*) FROM preferences WHERE tenant_id = ?)
+                        """,
+                        (tenant_id, tenant_id, tenant_id, tenant_id, tenant_id,
+                         tenant_id, branch, tenant_id, branch, tenant_id, branch, tenant_id),
+                    ).fetchone()
+                    parts.append(list(row) if row else None)
+                    parts.append(getattr(conn, "total_changes", 0))
+                    try:
+                        dv = conn.execute("PRAGMA data_version").fetchone()
+                        if dv:
+                            parts.append(dv[0])
+                    except Exception:
+                        pass
+            except Exception as exc:
+                parts.append(f"sqlite_err:{exc}")
+
+        elif hasattr(engine, "connect") and callable(engine.connect):
+            try:
+                with engine.connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            SELECT
+                                (SELECT count(*) FROM audit_log WHERE tenant_id = %s),
+                                (SELECT max(at) FROM audit_log WHERE tenant_id = %s),
+                                (SELECT count(*) FROM deletion_log WHERE tenant_id = %s),
+                                (SELECT count(*) FROM merge_log WHERE tenant_id = %s),
+                                (SELECT count(*) FROM evidence WHERE tenant_id = %s AND branch = %s AND erased = false),
+                                (SELECT count(*) FROM assertions WHERE tenant_id = %s AND branch = %s),
+                                (SELECT count(*) FROM relations WHERE tenant_id = %s AND branch = %s),
+                                (SELECT count(*) FROM preferences WHERE tenant_id = %s)
+                            """,
+                            (tenant_id, tenant_id, tenant_id, tenant_id,
+                             tenant_id, branch, tenant_id, branch, tenant_id, branch, tenant_id),
+                        )
+                        parts.append(list(cur.fetchone() or []))
+            except Exception as exc:
+                parts.append(f"postgres_err:{exc}")
+
+        else:
+            parts.append(id(engine))
+
+        return _digest(parts)
 
     def _lock(self) -> Any:
         return getattr(self.engine, "_lock", None) or nullcontext()
@@ -132,10 +269,13 @@ class MentalModelService:
         return record
 
     def _snapshot(self, context: AnswerReadContext) -> tuple[str, dict[str, dict[str, Any]]]:
+        scope = _scope(context)
         filt = context.to_filter()
         exported = self.engine.export_tenant_filtered(context.tenant_id, filt)
-        corpus: dict[str, Any] = {"scope": _scope(context), "policy": self.engine.policy.to_dict()}
+        corpus: dict[str, Any] = {"scope": scope, "policy": self.engine.policy.to_dict()}
         evidence: dict[str, dict[str, Any]] = {}
+        earliest_expiry: datetime | None = None
+
         for collection in _COLLECTIONS:
             rows = exported.get(collection, [])
             if not isinstance(rows, list):
@@ -161,9 +301,69 @@ class MentalModelService:
                         continue
                     stable["source_policy_sha256"] = _digest(raw.access_policy)
                     evidence[cid] = copy.deepcopy(row)
+
+                    if isinstance(raw.access_policy, dict):
+                        exp_str = raw.access_policy.get("expires_at")
+                        if isinstance(exp_str, str):
+                            try:
+                                exp_dt = datetime.fromisoformat(exp_str).astimezone(UTC)
+                                if earliest_expiry is None or exp_dt < earliest_expiry:
+                                    earliest_expiry = exp_dt
+                            except (ValueError, TypeError):
+                                pass
+
                 included.append(stable)
             corpus[collection] = sorted(included, key=_canonical)
-        return _digest(corpus), evidence
+
+        result_snapshot = (_digest(corpus), evidence)
+        as_of_key = context.as_of.isoformat() if context.as_of is not None else None
+        cache_key = (context.tenant_id, context.branch, _canonical(scope), as_of_key)
+        watermark = self._mutation_watermark(context)
+        cache = self._get_cache()
+        cache[cache_key] = (watermark, earliest_expiry, (result_snapshot[0], copy.deepcopy(evidence)))
+        return result_snapshot
+
+    def _get_ready_snapshot(
+        self, context: AnswerReadContext, record: dict[str, Any]
+    ) -> tuple[str, dict[str, dict[str, Any]]] | None:
+        if record.get("status") not in {"ready", "abstained"}:
+            return None
+
+        clock = _question_clock(record["question"], context)
+        if record.get("time_fingerprint") != clock:
+            return None
+
+        scope = _scope(context)
+        as_of_key = context.as_of.isoformat() if context.as_of is not None else None
+        cache_key = (context.tenant_id, context.branch, _canonical(scope), as_of_key)
+
+        cache = self._get_cache()
+        entry = cache.get(cache_key)
+        if entry is None:
+            return None
+
+        cached_watermark, earliest_expiry, (fingerprint, evidence) = entry
+
+        watermark = self._mutation_watermark(context)
+        if cached_watermark != watermark:
+            cache.pop(cache_key, None)
+            return None
+
+        if fingerprint != record.get("corpus_fingerprint"):
+            return None
+
+        import mnemosyne.access_policy as access_policy_mod
+        now = context.as_of or getattr(access_policy_mod, "datetime", datetime).now(UTC)
+        if earliest_expiry is not None and now >= earliest_expiry:
+            cache.pop(cache_key, None)
+            return None
+
+        if record.get("status") == "ready":
+            if not self._answer_valid(record, evidence):
+                cache.pop(cache_key, None)
+                return None
+
+        return fingerprint, copy.deepcopy(evidence)
 
     @staticmethod
     def _answer_valid(record: dict[str, Any], evidence: dict[str, dict[str, Any]]) -> bool:
@@ -232,7 +432,14 @@ class MentalModelService:
             ready, stale = False, False
         else:
             try:
-                fingerprint, evidence = snapshot or self._snapshot(context)
+                if snapshot is not None:
+                    fingerprint, evidence = snapshot
+                else:
+                    cached = self._get_ready_snapshot(context, record)
+                    if cached is not None:
+                        fingerprint, evidence = cached
+                    else:
+                        fingerprint, evidence = self._snapshot(context)
                 clock = _question_clock(record["question"], context)
                 fresh = fingerprint == record.get("corpus_fingerprint") and record.get("time_fingerprint") == clock
                 ready = fresh and record.get("status") == "ready" and self._answer_valid(record, evidence)
@@ -285,8 +492,14 @@ class MentalModelService:
         with self._lock():
             records = [record for record in self.engine.list_mental_model_records(context.tenant_id, context.branch)
                        if record.get("owner_id") == context.user_id and record.get("scope") == scope]
-            snapshot = (self._snapshot(context) if any(record.get("status") not in {"pending", "error"}
-                                                       for record in records) else None)
+            snapshot = None
+            active_records = [r for r in records if r.get("status") not in {"pending", "error"}]
+            if active_records:
+                cached_candidates = [self._get_ready_snapshot(context, r) for r in active_records]
+                if cached_candidates and all(c is not None for c in cached_candidates):
+                    snapshot = cached_candidates[0]
+                else:
+                    snapshot = self._snapshot(context)
             return [self._view(record, context, snapshot) for record in records]
 
     def history(self, context: AnswerReadContext, model_id: str) -> list[dict[str, Any]]:

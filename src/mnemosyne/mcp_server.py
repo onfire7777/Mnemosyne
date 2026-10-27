@@ -673,6 +673,9 @@ def _argument_schema_patches() -> tuple[dict[str, dict[str, Any]], dict[str, dic
         "confidence": {"minimum": 0.0, "maximum": 1.0},
         "min_trust_tier": {"minimum": int(TrustTier.DIRECT_USER), "maximum": int(TrustTier.UNTRUSTED_EXTERNAL)},
         "max_trust_tier": {"minimum": int(TrustTier.DIRECT_USER), "maximum": int(TrustTier.UNTRUSTED_EXTERNAL)},
+        "chunk_chars": {"minimum": 64, "maximum": 16384},
+        "sensitivity": {"minimum": 0, "maximum": 3},
+        "expected_revision": {"minimum": 1},
     }
     session_reads: dict[str, dict[str, Any]] = {
         "session_id": {
