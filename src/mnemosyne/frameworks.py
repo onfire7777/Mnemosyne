@@ -27,6 +27,7 @@ import threading
 import time
 import unicodedata
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any, Callable
@@ -41,6 +42,54 @@ MODEL: ContextVar[str] = ContextVar("framework_model", default="")
 #: A folder where every answer of a conversion is kept, so a build cut off by a restart or a failed
 #: call picks up where it stopped: a request with the same model, prompt and inputs is not asked twice.
 CACHE: ContextVar[str] = ContextVar("framework_cache", default="")
+
+
+@contextmanager
+def cache_scope(path: str):
+    """Context manager ensuring CACHE.set(...) is always paired with CACHE.reset(token)."""
+    token = CACHE.set(path)
+    try:
+        yield token
+    finally:
+        CACHE.reset(token)
+
+
+@contextmanager
+def model_scope(model: str):
+    """Context manager ensuring MODEL.set(...) is always paired with MODEL.reset(token)."""
+    token = MODEL.set(model)
+    try:
+        yield token
+    finally:
+        MODEL.reset(token)
+
+
+@contextmanager
+def stats_scope(stats: dict[str, float] | None = None):
+    """Context manager ensuring STATS.set(...) is always paired with STATS.reset(token)."""
+    token = STATS.set({} if stats is None else stats)
+    try:
+        yield token
+    finally:
+        STATS.reset(token)
+
+
+@contextmanager
+def framework_context(*, cache: str | None = None, model: str | None = None, stats: dict[str, float] | None = None):
+    """Safe execution context for framework contextvars, guaranteeing all tokens are reset."""
+    tokens: list[tuple[ContextVar[Any], Any]] = []
+    try:
+        if cache is not None:
+            tokens.append((CACHE, CACHE.set(cache)))
+        if model is not None:
+            tokens.append((MODEL, MODEL.set(model)))
+        if stats is not None:
+            tokens.append((STATS, STATS.set(stats)))
+        yield
+    finally:
+        for var, tok in reversed(tokens):
+            var.reset(tok)
+
 MAX_PASSES = 2
 FIELD_BATCH = 6
 #: The most source one extraction prompt reads; a longer source (a book) is built part by part,
@@ -172,7 +221,8 @@ def _count(**amounts: float) -> None:
                 stats[k] = round(stats.get(k, 0) + (v or 0), 6)
 
 
-def chat_json(system: str, user: str, max_tokens: int = 8192, task: str = "", shared: str = "") -> dict[str, Any]:
+def chat_json(system: str, user: str, max_tokens: int = 8192, task: str = "", shared: str = "",
+              *, cache: str | None = None, model: str | None = None) -> dict[str, Any]:
     """One chat completion answered in JSON - on OpenRouter, or for a codex:<model> through the Codex
     program on the user's ChatGPT subscription; an empty or unreadable answer is asked again once.
 
@@ -180,6 +230,9 @@ def chat_json(system: str, user: str, max_tokens: int = 8192, task: str = "", sh
     for the provider's prompt cache: the fixed RULEBOOK, then ``shared``, then this call's task
     (``system`` and ``user``). Calls of one pass then differ only at their end, so the long start
     is read from the cache at a fraction of the price."""
+    if cache is not None or model is not None:
+        with framework_context(cache=cache, model=model):
+            return chat_json(system, user, max_tokens, task, shared)
     if len(RULEBOOK) + len(system) + len(user) + len(shared) > MAX_PROMPT_CHARS:
         raise ValueError(f"{task or 'framework'} prompt exceeds the bounded input limit; source was not truncated")
     model = MODEL.get() or os.getenv("MNEMOSYNE_FRAMEWORK_MODEL") or DEFAULT_MODEL
@@ -1476,19 +1529,22 @@ def chapters(book_map: dict[str, Any], units: list[str]) -> list[tuple[str, list
 
 
 def build(name: str, units: list[str], progress: Callable[[str], None] = lambda _: None,
-          similar: Callable[[list[str]], list[list[float]]] | None = None, *, book: bool = False) -> dict[str, Any]:
+          similar: Callable[[list[str]], list[list[float]]] | None = None, *, book: bool = False,
+          cache: str | None = None, model: str | None = None) -> dict[str, Any]:
     """The complete framework of a source. For a codex: model the build runs on one long-lived Codex
     server (CodexServer), so the source is read once and every call branches from it."""
-    model = MODEL.get() or os.getenv("MNEMOSYNE_FRAMEWORK_MODEL") or DEFAULT_MODEL
+    model_val = model if model is not None else (MODEL.get() or os.getenv("MNEMOSYNE_FRAMEWORK_MODEL") or DEFAULT_MODEL)
     server = None
     # shortcut: the long-lived server stalls under parallel book load (0 CPU, requests unanswered; Codex 0.163.0,
     # 18 Oct 2026), so it is opt-in and codex exec runs each call; make it the default once Codex fixes that.
-    if model.startswith("codex:") and SERVER.get() is None and os.getenv("MNEMOSYNE_CODEX_SERVER") == "1":
-        name_ = model.split(":", 1)[1].strip()
+    if model_val.startswith("codex:") and SERVER.get() is None and os.getenv("MNEMOSYNE_CODEX_SERVER") == "1":
+        name_ = model_val.split(":", 1)[1].strip()
         try:
             server = CodexServer(None if name_ in ("", "default") else name_)
         except Exception as exc:  # noqa: BLE001 - an older Codex: one program per call instead
             log.warning("Codex app-server unavailable (%s); using codex exec", exc)
+    model_token = MODEL.set(model_val) if model is not None else None
+    cache_token = CACHE.set(cache) if cache is not None else None
     token = SERVER.set(server)
     try:
         return _build(name, units, progress, similar, book=book)
@@ -1496,6 +1552,10 @@ def build(name: str, units: list[str], progress: Callable[[str], None] = lambda 
         SERVER.reset(token)
         if server:
             server.close()
+        if cache_token is not None:
+            CACHE.reset(cache_token)
+        if model_token is not None:
+            MODEL.reset(model_token)
 
 
 def _build(name: str, units: list[str], progress: Callable[[str], None],
@@ -1951,9 +2011,13 @@ def _answer_result(data: Any, supplied_units: set[int]) -> dict[str, Any]:
 
 
 def ask(fw: dict[str, Any], units: list[str], question: str, numbers: list[int] | None = None,
-        node_ids: list[int] | None = None, *, node_views: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        node_ids: list[int] | None = None, *, node_views: list[dict[str, Any]] | None = None,
+        cache: str | None = None, model: str | None = None) -> dict[str, Any]:
     """Proper Thinking's framework Q&A: answered from the framework and its source only. For a book,
     ``numbers`` and ``node_ids`` are the passages and nodes the question is about, given in full."""
+    if cache is not None or model is not None:
+        with framework_context(cache=cache, model=model):
+            return ask(fw, units, question, numbers, node_ids, node_views=node_views)
     if numbers is not None and (not isinstance(numbers, list) or any(
             type(number) is not int or not 1 <= number <= len(units) for number in numbers)):
         raise ValueError("requested source units must be positive integer indexes within the source")

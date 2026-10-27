@@ -24,7 +24,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from time import perf_counter
 from typing import Any, Literal, assert_never
-from uuid import NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from mnemosyne.answering import AnswerReadContext, GroundedProvider
 from mnemosyne.engine import (
@@ -659,6 +659,26 @@ TOOL_SPEC: list[dict[str, Any]] = [
         "name": "skill_outcome",
         "description": "Record one run of a skill revision with the evidence observed; also logged as a trajectory.",
         "arguments": ["tenant_id", "user_id", "skill_id", "revision", "success", "evidence"],
+    },
+    {
+        "name": "document_create",
+        "description": "Create a new private text document revision under atomic CAS without model extraction. Unchanged paragraphs keep their source CIDs across future revisions.",
+        "arguments": ["tenant_id", "user_id", "document_id", "content"],
+    },
+    {
+        "name": "document_replace",
+        "description": "Replace a private text document's content with atomic revision CAS and unchanged paragraph segment reuse. Changed paragraphs are retired from active recall.",
+        "arguments": ["tenant_id", "user_id", "document_id", "content", "expected_revision"],
+    },
+    {
+        "name": "document_append",
+        "description": "Append an exact suffix to a private text document with atomic revision CAS. Existing paragraphs are preserved without re-processing.",
+        "arguments": ["tenant_id", "user_id", "document_id", "suffix", "expected_revision"],
+    },
+    {
+        "name": "document_get",
+        "description": "Read the current revision of a private text document with custody and scope validation.",
+        "arguments": ["tenant_id", "user_id", "document_id"],
     },
 ]
 
@@ -1782,6 +1802,251 @@ class MemoryTools:
             lawful_basis, break_glass, as_of,
         )
         return self._mental_model_service().history(context, model_id)
+
+    def _document_service(self) -> Any:
+        from mnemosyne.documents import DocumentService
+
+        return DocumentService(self.engine, security=self.security)
+
+    def _document_context(
+        self,
+        tenant_id: str,
+        user_id: str,
+        branch: str,
+        role: WriteRole,
+        source_trust_tier: int | None,
+        max_trust_tier: int | None,
+        max_sensitivity: int | None,
+        capability_tags: list[str] | None,
+        purpose: list[str] | None,
+        residency: str | None,
+        region: str | None,
+        lawful_basis: list[str] | None,
+        session_identity: SessionIdentity | None,
+    ) -> AnswerReadContext:
+        for field, value in (("tenant_id", tenant_id), ("user_id", user_id), ("branch", branch)):
+            _require_text(value, field=field)
+        if session_identity is not None:
+            if not isinstance(session_identity, SessionIdentity):
+                raise TypeError("session_identity must be a SessionIdentity instance")
+            if session_identity.tenant_id != tenant_id:
+                raise PermissionError(
+                    f"session tenant mismatch: session is for {session_identity.tenant_id!r}, requested {tenant_id!r}"
+                )
+            if session_identity.user_id != user_id:
+                raise PermissionError(
+                    f"session user mismatch: session is for {session_identity.user_id!r}, requested {user_id!r}"
+                )
+            role = session_identity.role
+            source_trust_tier = session_identity.source_trust_tier
+        source_identity = session_identity.session_id if session_identity else None
+        return AnswerReadContext(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            branch=branch,
+            role=role,
+            source_trust_tier=source_trust_tier,
+            max_trust_tier=max_trust_tier,
+            max_sensitivity=max_sensitivity,
+            capability_tags=tuple(capability_tags) if capability_tags is not None else (),
+            purpose=tuple(purpose) if purpose is not None else (),
+            residency=residency,
+            region=region,
+            lawful_basis=tuple(lawful_basis) if lawful_basis is not None else (),
+            break_glass=False,
+            as_of=None,
+            source_identity=source_identity,
+        )
+
+    def document_create(
+        self,
+        tenant_id: str,
+        user_id: str,
+        document_id: str,
+        content: str,
+        operation_id: str | None = None,
+        chunk_chars: int = 2048,
+        sensitivity: int = 0,
+        access_policy: dict[str, Any] | None = None,
+        branch: str = "main",
+        role: WriteRole = "agent",
+        source_trust_tier: int | None = None,
+        max_trust_tier: int | None = None,
+        max_sensitivity: int | None = None,
+        capability_tags: list[str] | None = None,
+        purpose: list[str] | None = None,
+        residency: str | None = None,
+        region: str | None = None,
+        lawful_basis: list[str] | None = None,
+        session_identity: SessionIdentity | None = None,
+    ) -> dict[str, Any]:
+        _require_text(document_id, field="document_id")
+        if type(content) is not str:
+            raise ValueError("document content must be a string")
+        if type(chunk_chars) is not int or not 64 <= chunk_chars <= 16384:
+            raise ValueError("chunk_chars must be between 64 and 16384")
+        if type(sensitivity) is not int or not 0 <= sensitivity <= 3:
+            raise ValueError("sensitivity must be between 0 and 3")
+        op_id = operation_id if operation_id is not None else f"op-{uuid4().hex}"
+        context = self._document_context(
+            tenant_id, user_id, branch, role, source_trust_tier, max_trust_tier,
+            max_sensitivity, capability_tags, purpose, residency, region,
+            lawful_basis, session_identity,
+        )
+        self._authorize("document_create", role=context.role,
+                        source_trust_tier=(context.source_trust_tier if context.source_trust_tier is not None
+                                           else int(TrustTier.DIRECT_USER)),
+                        target_sink="evidence")
+        receipt = self._document_service().create(
+            context, document_id, content,
+            operation_id=op_id,
+            chunk_chars=chunk_chars,
+            sensitivity=sensitivity,
+            access_policy=access_policy,
+        )
+        return {
+            "document_id": receipt.document_id,
+            "operation_id": receipt.operation_id,
+            "action": receipt.action,
+            "revision": receipt.revision,
+            "created": receipt.created,
+            "reused": receipt.reused,
+            "retired": receipt.retired,
+        }
+
+    def document_replace(
+        self,
+        tenant_id: str,
+        user_id: str,
+        document_id: str,
+        content: str,
+        expected_revision: int,
+        operation_id: str | None = None,
+        branch: str = "main",
+        role: WriteRole = "agent",
+        source_trust_tier: int | None = None,
+        max_trust_tier: int | None = None,
+        max_sensitivity: int | None = None,
+        capability_tags: list[str] | None = None,
+        purpose: list[str] | None = None,
+        residency: str | None = None,
+        region: str | None = None,
+        lawful_basis: list[str] | None = None,
+        session_identity: SessionIdentity | None = None,
+    ) -> dict[str, Any]:
+        _require_text(document_id, field="document_id")
+        if type(content) is not str:
+            raise ValueError("document content must be a string")
+        if type(expected_revision) is not int or expected_revision < 1:
+            raise ValueError("expected_revision must be a positive integer")
+        op_id = operation_id if operation_id is not None else f"op-{uuid4().hex}"
+        context = self._document_context(
+            tenant_id, user_id, branch, role, source_trust_tier, max_trust_tier,
+            max_sensitivity, capability_tags, purpose, residency, region,
+            lawful_basis, session_identity,
+        )
+        self._authorize("document_replace", role=context.role,
+                        source_trust_tier=(context.source_trust_tier if context.source_trust_tier is not None
+                                           else int(TrustTier.DIRECT_USER)),
+                        target_sink="evidence")
+        receipt = self._document_service().replace(
+            context, document_id, content,
+            operation_id=op_id,
+            expected_revision=expected_revision,
+        )
+        return {
+            "document_id": receipt.document_id,
+            "operation_id": receipt.operation_id,
+            "action": receipt.action,
+            "revision": receipt.revision,
+            "created": receipt.created,
+            "reused": receipt.reused,
+            "retired": receipt.retired,
+        }
+
+    def document_append(
+        self,
+        tenant_id: str,
+        user_id: str,
+        document_id: str,
+        suffix: str,
+        expected_revision: int,
+        operation_id: str | None = None,
+        branch: str = "main",
+        role: WriteRole = "agent",
+        source_trust_tier: int | None = None,
+        max_trust_tier: int | None = None,
+        max_sensitivity: int | None = None,
+        capability_tags: list[str] | None = None,
+        purpose: list[str] | None = None,
+        residency: str | None = None,
+        region: str | None = None,
+        lawful_basis: list[str] | None = None,
+        session_identity: SessionIdentity | None = None,
+    ) -> dict[str, Any]:
+        _require_text(document_id, field="document_id")
+        if type(suffix) is not str:
+            raise ValueError("document suffix must be a string")
+        if type(expected_revision) is not int or expected_revision < 1:
+            raise ValueError("expected_revision must be a positive integer")
+        op_id = operation_id if operation_id is not None else f"op-{uuid4().hex}"
+        context = self._document_context(
+            tenant_id, user_id, branch, role, source_trust_tier, max_trust_tier,
+            max_sensitivity, capability_tags, purpose, residency, region,
+            lawful_basis, session_identity,
+        )
+        self._authorize("document_append", role=context.role,
+                        source_trust_tier=(context.source_trust_tier if context.source_trust_tier is not None
+                                           else int(TrustTier.DIRECT_USER)),
+                        target_sink="evidence")
+        receipt = self._document_service().append(
+            context, document_id, suffix,
+            operation_id=op_id,
+            expected_revision=expected_revision,
+        )
+        return {
+            "document_id": receipt.document_id,
+            "operation_id": receipt.operation_id,
+            "action": receipt.action,
+            "revision": receipt.revision,
+            "created": receipt.created,
+            "reused": receipt.reused,
+            "retired": receipt.retired,
+        }
+
+    def document_get(
+        self,
+        tenant_id: str,
+        user_id: str,
+        document_id: str,
+        branch: str = "main",
+        role: WriteRole = "agent",
+        source_trust_tier: int | None = None,
+        max_trust_tier: int | None = None,
+        max_sensitivity: int | None = None,
+        capability_tags: list[str] | None = None,
+        purpose: list[str] | None = None,
+        residency: str | None = None,
+        region: str | None = None,
+        lawful_basis: list[str] | None = None,
+        session_identity: SessionIdentity | None = None,
+    ) -> dict[str, Any]:
+        _require_text(document_id, field="document_id")
+        context = self._document_context(
+            tenant_id, user_id, branch, role, source_trust_tier, max_trust_tier,
+            max_sensitivity, capability_tags, purpose, residency, region,
+            lawful_basis, session_identity,
+        )
+        view = self._document_service().get(context, document_id)
+        if view is None:
+            return {"found": False, "document_id": document_id}
+        return {
+            "found": True,
+            "document_id": view.document_id,
+            "revision": view.revision,
+            "content": view.content,
+            "segment_cids": list(view.segment_cids),
+        }
 
     def search(
         self,

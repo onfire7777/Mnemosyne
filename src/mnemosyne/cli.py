@@ -2669,6 +2669,102 @@ def _add_mental_model_args(parser: argparse.ArgumentParser, operation: str) -> N
         parser.add_argument("--once", action="store_true", help="Run one cycle and exit")
 
 
+def _document_scope_args(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "tenant_id": args.tenant,
+        "user_id": args.user,
+        "branch": args.branch,
+        "role": args.role,
+        "source_trust_tier": args.source_trust_tier,
+        "max_trust_tier": args.max_trust_tier,
+        "max_sensitivity": args.max_sensitivity,
+        "capability_tags": args.capability_tag,
+        "purpose": args.purpose,
+        "residency": args.residency,
+        "region": args.region,
+        "lawful_basis": args.lawful_basis,
+    }
+
+
+def cmd_document(args: argparse.Namespace) -> None:
+    raise SystemExit("document requires a subcommand (create, replace, append, get)")
+
+
+def cmd_document_create(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.document_create(
+        **_document_scope_args(args),
+        document_id=args.document_id,
+        content=args.content,
+        operation_id=args.operation_id,
+        chunk_chars=args.chunk_chars,
+        sensitivity=args.sensitivity,
+        access_policy=_json_object_arg(args.access_policy, "--access-policy"),
+        session_identity=getattr(args, "session_identity", None),
+    ))
+
+
+def cmd_document_replace(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.document_replace(
+        **_document_scope_args(args),
+        document_id=args.document_id,
+        content=args.content,
+        expected_revision=args.expected_revision,
+        operation_id=args.operation_id,
+        session_identity=getattr(args, "session_identity", None),
+    ))
+
+
+def cmd_document_append(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.document_append(
+        **_document_scope_args(args),
+        document_id=args.document_id,
+        suffix=args.suffix,
+        expected_revision=args.expected_revision,
+        operation_id=args.operation_id,
+        session_identity=getattr(args, "session_identity", None),
+    ))
+
+
+def cmd_document_get(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.document_get(
+        **_document_scope_args(args),
+        document_id=args.document_id,
+        session_identity=getattr(args, "session_identity", None),
+    ))
+
+
+def _add_document_args(parser: argparse.ArgumentParser, operation: str) -> None:
+    parser.add_argument("--tenant", required=True)
+    parser.add_argument("--user", required=True)
+    parser.add_argument("--document-id", required=True)
+    parser.add_argument("--branch", default="main")
+    parser.add_argument("--role", default="agent", choices=["reader", "agent", "consolidator", "operator"])
+    parser.add_argument("--source-trust-tier", type=int)
+    parser.add_argument("--max-trust-tier", type=int)
+    parser.add_argument("--max-sensitivity", type=int)
+    parser.add_argument("--capability-tag", action="append", default=[])
+    parser.add_argument("--purpose", action="append", default=[])
+    parser.add_argument("--lawful-basis", action="append", default=[])
+    parser.add_argument("--residency")
+    parser.add_argument("--region")
+    if operation in {"create", "replace", "append"}:
+        parser.add_argument("--operation-id")
+    if operation in {"create", "replace"}:
+        parser.add_argument("--content", required=True)
+    if operation == "append":
+        parser.add_argument("--suffix", required=True)
+    if operation in {"replace", "append"}:
+        parser.add_argument("--expected-revision", type=int, required=True)
+    if operation == "create":
+        parser.add_argument("--chunk-chars", type=int, default=2048)
+        parser.add_argument("--sensitivity", type=int, default=0)
+        parser.add_argument("--access-policy", help="JSON object stored as the document access policy")
+
+
 def cmd_search(args: argparse.Namespace) -> None:
     tools = load_tools(args)
     emit(
@@ -20093,6 +20189,23 @@ def build_parser() -> argparse.ArgumentParser:
     mental_worker = sub.add_parser("mental-model-worker", help="Run opt-in scheduled mental-model freshness checks")
     _add_mental_model_args(mental_worker, "worker")
     mental_worker.set_defaults(func=cmd_mental_model_worker)
+
+    document = sub.add_parser("document", help="Manage private document revisions")
+    document.set_defaults(func=cmd_document)
+    document_sub = document.add_subparsers(dest="document_command", required=True)
+    for operation, handler in (
+        ("create", cmd_document_create),
+        ("replace", cmd_document_replace),
+        ("append", cmd_document_append),
+        ("get", cmd_document_get),
+    ):
+        command = document_sub.add_parser(operation)
+        _add_document_args(command, operation)
+        command.set_defaults(func=handler)
+        # Keep the canonical MCP-name route alongside the grouped CLI.
+        alias = sub.add_parser(f"document-{operation}", help=argparse.SUPPRESS)
+        _add_document_args(alias, operation)
+        alias.set_defaults(func=handler)
 
     search = sub.add_parser("search")
     search.add_argument("--tenant", required=True)

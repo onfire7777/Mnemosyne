@@ -461,9 +461,15 @@ class _PostgresConnectionPool:
     AUTHORIZATION.
     """
 
-    def __init__(self, factory: Any, max_idle: int = _POOL_MAX_IDLE):
+    def __init__(
+        self,
+        factory: Any,
+        max_idle: int = _POOL_MAX_IDLE,
+        require_safe_role: bool = False,
+    ):
         self._factory = factory
         self._max_idle = max_idle
+        self._require_safe_role = require_safe_role
         self._lock = threading.Lock()
         self._idle: list[Any] = []
 
@@ -486,16 +492,19 @@ class _PostgresConnectionPool:
     @staticmethod
     def _clear_tenant(conn: Any) -> None:
         with conn.cursor() as cur:
+            cur.execute("RESET ALL")
+            cur.execute("RESET ROLE")
             cur.execute(_TENANT_CLEAR_SQL)
         conn.commit()
 
-    @classmethod
-    def _reset_for_reuse(cls, conn: Any) -> bool:
+    def _reset_for_reuse(self, conn: Any) -> bool:
         try:
             if getattr(conn, "closed", False):
                 return False
             conn.rollback()  # drop any aborted-transaction state before reuse
-            cls._clear_tenant(conn)
+            self._clear_tenant(conn)
+            if self._require_safe_role:
+                assert_postgres_safe_role(conn, surface="PostgresEngine")
         except Exception:
             return False
         return True
@@ -604,7 +613,10 @@ class PostgresEngine:
                             raise RuntimeError("PostgresEngine was collected; pool factory unavailable")
                         return engine._new_connection()
 
-                    pool = self._pool = _PostgresConnectionPool(_pool_factory)
+                    pool = self._pool = _PostgresConnectionPool(
+                        _pool_factory,
+                        require_safe_role=self.require_safe_role,
+                    )
                     weakref.finalize(self, pool.close_all)
         return pool.acquire()
 
@@ -3272,7 +3284,12 @@ class PostgresEngine:
                     )
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (id) DO UPDATE
-                    SET confidence = EXCLUDED.confidence,
+                    SET source = EXCLUDED.source,
+                        predicate = EXCLUDED.predicate,
+                        target = EXCLUDED.target,
+                        confidence = EXCLUDED.confidence,
+                        valid_from = EXCLUDED.valid_from,
+                        valid_to = EXCLUDED.valid_to,
                         source_evidence_cids = EXCLUDED.source_evidence_cids,
                         access_policy = EXCLUDED.access_policy
                     """,
@@ -3533,7 +3550,9 @@ class PostgresEngine:
                 return _row_to_preference(row, tenant_id) if row is not None else None
 
     def lexical_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
-        tenant_id = str(filt["tenant_id"])
+        tenant_id = str(filt.get("tenant_id") or "")
+        if not tenant_id:
+            return []
         branch = str(filt.get("branch", "main"))
         if filt.get("query_mode") == "passages" and self.adapters.lexical_retriever is None:
             from mnemosyne.passages import rank_passages
@@ -3716,7 +3735,9 @@ class PostgresEngine:
         return self._mark_retrieved_text_as_data(sorted(hits, key=lambda item: item.score, reverse=True)[:k])
 
     def vector_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
-        tenant_id = filt["tenant_id"]
+        tenant_id = str(filt.get("tenant_id") or "")
+        if not tenant_id:
+            return []
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         branch = filt.get("branch", "main")
         include_quarantined = bool(filt.get("include_quarantined", False))
@@ -4057,17 +4078,18 @@ class PostgresEngine:
         filt: dict[str, Any] | None = None,
     ) -> list[Hit]:
         seed_set = {seed.lower() for seed in seeds}
+        graph_filter = dict(filt or {})
+        tenant_id = str(tenant_id or graph_filter.get("tenant_id") or "")
         if not seed_set or not tenant_id:
             return []
+
         def matches_seed(node: str) -> bool:
             node_lower = node.lower()
             return node_lower in seed_set or bool(set(tokenize(node_lower)) & seed_set)
 
-        tenant_id = str(tenant_id or "")
-        branch = str(branch or "main")
+        branch = str(branch or graph_filter.get("branch") or "main")
         moment = as_of or utc_now()
         moment = moment.astimezone(UTC) if moment.tzinfo else moment.replace(tzinfo=UTC)
-        graph_filter = dict(filt or {})
         graph_filter.setdefault("tenant_id", tenant_id)
         graph_filter.setdefault("branch", branch)
         include_quarantined = bool(graph_filter.get("include_quarantined", False))
@@ -4500,7 +4522,7 @@ class PostgresEngine:
                     WHERE a.tenant_id = %s AND a.branch = %s AND a.subject = %s AND a.predicate = %s
                       AND a.valid_from <= %s AND (a.valid_to IS NULL OR a.valid_to > %s)
                       AND a.status IN ('active', 'superseded', 'contested')
-                    ORDER BY a.valid_from ASC
+                    ORDER BY a.valid_from ASC, a.id ASC
                     """,
                     (db_tenant_id, branch, subject, predicate, moment, moment),
                 )

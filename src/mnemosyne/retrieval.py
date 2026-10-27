@@ -929,6 +929,10 @@ def query_time_window(
     if re.search(r"\b(?:before|after|since|until|between|through|from|as of|earlier than|later than) "
                  r"\d{4}-\d{2}-\d{2}\b", text):
         return None  # These ask for ranges/instants, not one calendar day.
+    if re.search(r"\bbetween\b.+\band\b", text, re.IGNORECASE):
+        return None  # Spans between named events are not single-calendar-day filters.
+    if re.search(r"\bwhat\s+(?:was|is)\s+the\s+(?:date|day|time)\b", text, re.IGNORECASE):
+        return None  # Target of the question is the date itself, not a search window.
     iso_days = list(re.finditer(r"(?<![\w-])(?:(?:on|during|in) )?(\d{4}-\d{2}-\d{2})(?![\w-])", text))
     month_expression = r"\b(?:in|during|back in) (" + "|".join(_MONTHS) + r")(?: (\d+))?\b"
     year_expression = r"\b(?:in|during|back in) (\d{4})(?![\d-])\b"
@@ -959,6 +963,16 @@ def query_time_window(
         except (ValueError, OverflowError):
             return None
         label = found.group(0)
+    elif found := re.search(r"\b(\d+|" + "|".join(_SMALL_NUMBERS) + r") weeks? ago\b", text):
+        count = found.group(1)
+        try:
+            weeks = int(count) if count.isdigit() else _SMALL_NUMBERS[count]
+            target_day = today - timedelta(days=7 * weeks)
+            start = target_day - timedelta(days=target_day.weekday())
+            end = start + timedelta(days=7)
+            return make_window(start, end, found.group(0), rest_without(found))
+        except (ValueError, OverflowError):
+            return None
     elif found := re.search(r"\blast week\b", text):
         start = today - timedelta(days=today.weekday() + 7)
         return make_window(start, start + timedelta(days=7), "last week", rest_without(found))
@@ -1238,6 +1252,11 @@ def _schema_fast_path_reasons(query: str, hits: Sequence[Hit]) -> dict[str, str]
         if selected_policy:
             reasons[selected_policy] = "current policy schema support"
 
+    if any(term in query_lower for term in ("current", "currently", "now", "latest", "today", "presently", "at present", "so far")):
+        selected_curr = _current_currency_hit_id(query_text, hits)
+        if selected_curr and selected_curr not in reasons:
+            reasons[selected_curr] = "current currency schema support"
+
     return reasons
 
 
@@ -1317,6 +1336,35 @@ def _current_policy_hit_id(query: str, hits: Sequence[Hit]) -> str | None:
         return None
     candidates.sort()
     return candidates[-1][2]
+
+
+def _current_currency_hit_id(query: str, hits: Sequence[Hit]) -> str | None:
+    if not hits:
+        return None
+    dts: dict[str, datetime] = {}
+    for h in hits:
+        val = (
+            h.metadata.get("_candidate_created_at")
+            or h.metadata.get("created_at")
+            or h.metadata.get("event_start")
+        )
+        if val is not None:
+            try:
+                dt = val if isinstance(val, datetime) else parse_dt(val)
+                if dt is not None:
+                    dts[h.id] = dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
+            except (ValueError, TypeError, OverflowError):
+                pass
+    if not dts:
+        return None
+    top_score = max(h.score for h in hits)
+    if top_score <= 0.0:
+        return None
+    candidates = [h for h in hits if h.id in dts and h.score >= top_score * 0.85]
+    if len(candidates) < 2:
+        return None
+    latest = max(candidates, key=lambda h: dts[h.id])
+    return latest.id
 
 
 def _append_channel(channel: str, suffix: str) -> str:
