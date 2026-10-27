@@ -373,6 +373,8 @@ def _require_authorization_context(args: argparse.Namespace) -> None:
         "working-query",
         "working-promote",
         "working-expire",
+        "working-replace",
+        "working-consolidate",
     } and not isinstance(getattr(args, "session_identity", None), SessionIdentity):
         raise SystemExit(f"{command} requires --session-token")
     if command not in {
@@ -1639,6 +1641,8 @@ def cmd_capture(args: argparse.Namespace) -> None:
             content=args.content,
             branch=args.branch,
             trust_tier=args.trust_tier,
+            mirror_turn=getattr(args, "mirror_turn", False),
+            session_identity=getattr(args, "session_identity", None),
         )
     )
 
@@ -1661,6 +1665,39 @@ def cmd_working_seed(args: argparse.Namespace) -> None:
             evidence_ids=args.evidence_cid, ttl_seconds=args.ttl_seconds,
             created_at=args.created_at, role=args.role,
             source_trust_tier=args.source_trust_tier, item_id=args.item_id,
+            session_identity=args.session_identity,
+        )
+    )
+
+
+def cmd_working_replace(args: argparse.Namespace) -> None:
+    emit(
+        load_tools(args).working_replace(
+            **_working_scope(args),
+            kind=args.kind,
+            content=args.content,
+            evidence_ids=args.evidence_cid,
+            ttl_seconds=args.ttl_seconds,
+            created_at=args.created_at,
+            supersedes_item_id=args.supersedes_item_id,
+            role=args.role,
+            source_trust_tier=args.source_trust_tier,
+            item_id=args.item_id,
+            salience=args.salience,
+            metadata=_json_object_arg(args.metadata, "--metadata"),
+            session_identity=args.session_identity,
+        )
+    )
+
+
+def cmd_working_consolidate(args: argparse.Namespace) -> None:
+    emit(
+        load_tools(args).working_consolidate(
+            **_working_scope(args),
+            item_ids=args.item_id or None,
+            as_of=args.as_of,
+            role=args.role,
+            source_trust_tier=args.source_trust_tier,
             session_identity=args.session_identity,
         )
     )
@@ -1693,6 +1730,7 @@ def cmd_working_expire(args: argparse.Namespace) -> None:
             **_working_scope(args), expired_at=args.expired_at,
             role=args.role, source_trust_tier=args.source_trust_tier,
             session_identity=args.session_identity,
+            consolidate=args.consolidate,
         )
     )
 
@@ -19964,6 +20002,7 @@ def build_parser() -> argparse.ArgumentParser:
     capture.add_argument("--branch", default="main")
     capture.add_argument("--trust-tier", type=int, default=0)
     capture.add_argument("--metadata", help="JSON object stored as the evidence metadata")
+    capture.add_argument("--mirror-turn", action="store_true", default=False, help="Mirror captured turn to working memory")
     capture.set_defaults(func=cmd_capture)
 
     def add_working_scope(command: argparse.ArgumentParser) -> None:
@@ -19986,6 +20025,29 @@ def build_parser() -> argparse.ArgumentParser:
     working_seed.add_argument("--source-trust-tier", type=int, required=True)
     working_seed.set_defaults(func=cmd_working_seed)
 
+    working_replace = sub.add_parser("working-replace")
+    add_working_scope(working_replace)
+    working_replace.add_argument("--kind", required=True)
+    working_replace.add_argument("--content", required=True)
+    working_replace.add_argument("--evidence-cid", action="append", required=True)
+    working_replace.add_argument("--ttl-seconds", type=int, required=True)
+    working_replace.add_argument("--created-at", required=True)
+    working_replace.add_argument("--supersedes-item-id")
+    working_replace.add_argument("--role", choices=["reader", "agent", "consolidator", "operator"], default="agent")
+    working_replace.add_argument("--source-trust-tier", type=int, required=True)
+    working_replace.add_argument("--item-id")
+    working_replace.add_argument("--salience", type=float, default=0.5)
+    working_replace.add_argument("--metadata")
+    working_replace.set_defaults(func=cmd_working_replace)
+
+    working_consolidate = sub.add_parser("working-consolidate")
+    add_working_scope(working_consolidate)
+    working_consolidate.add_argument("--item-id", action="append", default=[], help="Specific working item IDs to consolidate; omit for all eligible items")
+    working_consolidate.add_argument("--as-of")
+    working_consolidate.add_argument("--role", choices=["agent", "consolidator", "operator"], default="agent")
+    working_consolidate.add_argument("--source-trust-tier", type=int, default=0)
+    working_consolidate.set_defaults(func=cmd_working_consolidate)
+
     working_query = sub.add_parser("working-query")
     add_working_scope(working_query)
     working_query.add_argument("--as-of", required=True)
@@ -20007,6 +20069,7 @@ def build_parser() -> argparse.ArgumentParser:
     working_expire.add_argument("--expired-at", required=True)
     working_expire.add_argument("--role", choices=["consolidator", "operator"], required=True)
     working_expire.add_argument("--source-trust-tier", type=int, required=True)
+    working_expire.add_argument("--consolidate", action="store_true", default=False, help="Consolidate eligible items before expiry")
     working_expire.set_defaults(func=cmd_working_expire)
 
     capture_batch = sub.add_parser("capture-batch")

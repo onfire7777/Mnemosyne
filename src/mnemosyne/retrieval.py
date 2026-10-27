@@ -3784,6 +3784,7 @@ def working_memory_hits(
     access_context: Mapping[str, Any] | None = None,
     policy_max_sensitivity: int | None = None,
     max_trust_tier: int | None = None,
+    embedder: EmbeddingProvider | None = None,
 ) -> list[Hit]:
     """Rank active working items for one tenant/session at an explicit instant.
 
@@ -3801,6 +3802,12 @@ def working_memory_hits(
     if not isinstance(session_id, str) or not session_id.strip():
         return []
     clock = _working_datetime(evaluated_at, field="evaluated_at")
+    query_vec: list[float] | None = None
+    if embedder is not None and query.strip():
+        try:
+            query_vec = embed_query(embedder, query)
+        except Exception:
+            query_vec = None
     candidates: list[dict[str, Any]] = []
     for item in items:
         item_tenant = _working_text(_working_field(item, "tenant_id"))
@@ -3907,10 +3914,49 @@ def working_memory_hits(
                 metadata.setdefault(field_name, field_value)
         task_text = _working_task_text(task_id=task_id, kind=kind, metadata=metadata)
         task_raw = lexical_score(query, task_text)
-        content_raw = lexical_score(query, content)
+        lex_content = lexical_score(query, content)
+        if embedder is not None and query_vec:
+            try:
+                item_vec = embedder.embed(content)
+                dense_cos = max(0.0, cosine(query_vec, item_vec))
+                content_raw = 0.55 * lex_content + 0.45 * dense_cos
+            except Exception:
+                content_raw = lex_content
+        else:
+            content_raw = lex_content
+
+        access_count_val = _working_field(item, "access_count", metadata.get("access_count", 0))
+        salience_val = _working_field(item, "salience", metadata.get("salience", 0.5))
+        last_accessed_val = _working_field(item, "last_accessed_at", metadata.get("last_accessed_at"))
+
+        try:
+            access_count = max(0, int(access_count_val)) if access_count_val is not None else 0
+        except (TypeError, ValueError):
+            access_count = 0
+
+        try:
+            salience = max(0.0, min(1.0, float(salience_val))) if salience_val is not None else 0.5
+        except (TypeError, ValueError):
+            salience = 0.5
+
+        last_accessed_at: datetime | None = None
+        if last_accessed_val is not None:
+            try:
+                last_accessed_at = _working_datetime(last_accessed_val, field="last_accessed_at")
+            except ValueError:
+                last_accessed_at = None
+
         ttl_seconds = max((expires_at - created_at).total_seconds(), 1.0)
         age_seconds = max((clock - created_at).total_seconds(), 0.0)
-        recency = max(0.0, min(1.0, 1.0 - (age_seconds / ttl_seconds)))
+        ttl_recency = max(0.0, min(1.0, 1.0 - (age_seconds / ttl_seconds)))
+
+        ref_moment = last_accessed_at if last_accessed_at is not None else created_at
+        age_since_ref = max((clock - ref_moment).total_seconds(), 0.0)
+        rehearsal_recency = max(0.0, min(1.0, 1.0 - (age_since_ref / ttl_seconds)))
+
+        freq_factor = min(1.0, math.log1p(access_count) / math.log(11)) if access_count > 0 else 0.0
+        activation = max(0.0, min(1.0, 0.50 * rehearsal_recency + 0.25 * freq_factor + 0.25 * salience))
+
         candidates.append(
             {
                 "item": item,
@@ -3926,17 +3972,36 @@ def working_memory_hits(
                 "expires_at": expires_at,
                 "task_raw": task_raw,
                 "content_raw": content_raw,
-                "recency": recency,
+                "recency": activation,
+                "activation": activation,
+                "ttl_recency": ttl_recency,
+                "salience": salience,
+                "access_count": access_count,
+                "last_accessed_at": last_accessed_at,
             }
         )
 
     max_task = max((float(row["task_raw"]) for row in candidates), default=0.0)
     max_content = max((float(row["content_raw"]) for row in candidates), default=0.0)
+
+    if max_task > 0.0 and max_content > 0.0:
+        task_weight = 0.8
+        content_weight = 0.2
+    elif max_task > 0.0:
+        task_weight = 1.0
+        content_weight = 0.0
+    elif max_content > 0.0:
+        task_weight = 0.0
+        content_weight = 1.0
+    else:
+        task_weight = 0.0
+        content_weight = 0.0
+
     ranked: list[Hit] = []
     for row in candidates:
         task_relevance = min(1.0, float(row["task_raw"]) / max(max_task, 1.0))
         content_relevance = min(1.0, float(row["content_raw"]) / max(max_content, 1.0))
-        relevance = 0.8 * task_relevance + 0.2 * content_relevance
+        relevance = task_weight * task_relevance + content_weight * content_relevance
         score = WORKING_MEMORY_TASK_WEIGHT * relevance + WORKING_MEMORY_RECENCY_WEIGHT * row["recency"]
         metadata = dict(row["metadata"])
         metadata.update(
@@ -3945,12 +4010,23 @@ def working_memory_hits(
                 "working_item_id": row["item_id"],
                 "session_id": session_id,
                 "task_id": row["task_id"],
+                "working_kind": row["kind"],
                 "working_memory_route": WORKING_MEMORY_ROUTE_VERSION,
                 "working_memory": {
+                    "kind": row["kind"],
                     "task_relevance": round(task_relevance, 6),
                     "content_relevance": round(content_relevance, 6),
                     "relevance": round(relevance, 6),
                     "recency": round(row["recency"], 6),
+                    "activation": round(row["activation"], 6),
+                    "ttl_recency": round(row["ttl_recency"], 6),
+                    "salience": round(row["salience"], 6),
+                    "access_count": row["access_count"],
+                    "last_accessed_at": (
+                        row["last_accessed_at"].isoformat()
+                        if row["last_accessed_at"] is not None
+                        else None
+                    ),
                     "evaluated_at": clock.isoformat(),
                     "created_at": row["created_at"].isoformat(),
                     "expires_at": row["expires_at"].isoformat(),
@@ -4002,6 +4078,7 @@ def build_working_memory_hits(
     access_context: Mapping[str, Any] | None = None,
     policy_max_sensitivity: int | None = None,
     max_trust_tier: int | None = None,
+    embedder: EmbeddingProvider | None = None,
 ) -> list[Hit]:
     """Named adapter alias used by engine lanes and retrieval tests."""
 
@@ -4016,6 +4093,7 @@ def build_working_memory_hits(
         access_context=access_context,
         policy_max_sensitivity=policy_max_sensitivity,
         max_trust_tier=max_trust_tier,
+        embedder=embedder,
     )
 
 
@@ -4031,6 +4109,7 @@ def working_memory_route_hits(
     access_context: Mapping[str, Any],
     policy_max_sensitivity: int,
     max_trust_tier: int,
+    embedder: EmbeddingProvider | None = None,
 ) -> list[Hit]:
     """Adapt the Phase-3 security-aware working route to the shared plane shape."""
 
@@ -4045,6 +4124,7 @@ def working_memory_route_hits(
         access_context=access_context,
         policy_max_sensitivity=policy_max_sensitivity,
         max_trust_tier=max_trust_tier,
+        embedder=embedder,
     )
     for hit in hits:
         raw_id = hit.id

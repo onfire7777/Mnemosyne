@@ -75,7 +75,7 @@ from mnemosyne.retrieval import (
     working_memory_route_hits,
 )
 from mnemosyne.security import TrustTier
-from mnemosyne.text import tokenize
+from mnemosyne.text import approx_tokens, tokenize
 
 #: Capability-tier default to overlap the dense/lexical/graph channel calls on
 #: a 3-worker thread pool (registered in CONFIG-DRIFT-CHECKS.md). Operators can
@@ -378,6 +378,9 @@ def _working_memory_route(
         items = _scope_working_items(
             list(list_working(tenant_id, session_id, as_of=evaluated_at) or []), effective_filter
         )
+        embedder = getattr(getattr(ops, "adapters", None), "embedding", None)
+        if embedder is None:
+            embedder = getattr(ops, "embedder", None)
         scoped = working_memory_route_hits(
             items,
             query=query,
@@ -389,6 +392,7 @@ def _working_memory_route(
             access_context=effective_filter,
             policy_max_sensitivity=policy.max_sensitivity,
             max_trust_tier=_requested_max_trust_tier(effective_filter, policy),
+            embedder=embedder,
         )
         _stamp_working_kind(scoped, items)
     except Exception as exc:  # optional route failures must not suppress durable retrieval
@@ -436,6 +440,20 @@ _LEADING_SPEAKER_RE = re.compile(r"^\s*[^\W\d_][\w-]{0,31}\s*:\s+")
 CONVERSATION_TURN_KIND = "conversation_turn"
 #: Where a working hit says which kind of working item it is.
 WORKING_KIND_METADATA_KEY = "working_kind"
+#: High-priority working memory kinds reserved for live active session constraints.
+PRIORITY_WORKING_KINDS = frozenset({"active_goal", "active_constraint", "current_plan"})
+PRIORITY_WORKING_SUB_BUDGET_FRACTION = 0.20
+
+
+def _is_priority_working(hit: Hit) -> bool:
+    if hit.kind != "working" and hit.metadata.get("memory_type") != "working":
+        return False
+    kind = hit.metadata.get(WORKING_KIND_METADATA_KEY) or hit.metadata.get("working_kind") or hit.metadata.get("kind")
+    if not kind:
+        wm_meta = hit.metadata.get("working_memory")
+        if isinstance(wm_meta, Mapping):
+            kind = wm_meta.get("kind") or wm_meta.get("working_kind")
+    return str(kind or "").strip() in PRIORITY_WORKING_KINDS
 
 
 def requested_token_budget(effective_filter: Mapping[str, Any], policy: OperatingPolicy) -> int:
@@ -1633,7 +1651,39 @@ def run_retrieval_pipeline(
         if workspace_retrieval_advisory.get("status") == "applied":
             workspace_retrieval_advisory["used_for_ranking"] = False
             workspace_retrieval_advisory["ranking_preserved"] = "explicit_temporal_order"
-    budgeted, used = ops._fit_budget(ordered, token_budget)
+    priority_sub_budget = 0
+    priority_tokens_used = 0
+    priority_items_retained = 0
+    if working_requested and working:
+        priority_in_working = [hit for hit in working if _is_priority_working(hit)]
+        if priority_in_working:
+            ordered = [*priority_in_working, *[hit for hit in ordered if not _is_priority_working(hit)]]
+    if working_requested and any(_is_priority_working(hit) for hit in ordered):
+        priority_candidates = [hit for hit in ordered if _is_priority_working(hit)]
+        general_candidates = [hit for hit in ordered if not _is_priority_working(hit)]
+        reserved_sub_budget = max(1, int(PRIORITY_WORKING_SUB_BUDGET_FRACTION * token_budget))
+        first_priority_cost = approx_tokens(priority_candidates[0].text)
+        if first_priority_cost <= token_budget and reserved_sub_budget < first_priority_cost <= max(1, int(0.50 * token_budget)):
+            reserved_sub_budget = first_priority_cost
+        priority_sub_budget = reserved_sub_budget
+        kept_priority, used_priority = ops._fit_budget(priority_candidates, reserved_sub_budget)
+        remaining_budget = max(0, token_budget - used_priority)
+        kept_general, used_general = ops._fit_budget(general_candidates, remaining_budget)
+        leftover_budget = max(0, remaining_budget - used_general)
+        if leftover_budget > 0:
+            kept_priority_set = {id(h) for h in kept_priority}
+            unfitted_priority = [h for h in priority_candidates if id(h) not in kept_priority_set]
+            if unfitted_priority:
+                extra_priority, used_extra = ops._fit_budget(unfitted_priority, leftover_budget)
+                kept_priority.extend(extra_priority)
+                used_priority += used_extra
+        priority_tokens_used = used_priority
+        kept_all_ids = {id(h) for h in kept_priority} | {id(h) for h in kept_general}
+        budgeted = [hit for hit in ordered if id(hit) in kept_all_ids]
+        used = sum(approx_tokens(hit.text) for hit in budgeted)
+        priority_items_retained = len(kept_priority)
+    else:
+        budgeted, used = ops._fit_budget(ordered, token_budget)
     budgeted = ops._mark_retrieved_text_as_data(budgeted)
     _stamp_hit_origin(ops, budgeted, tenant_id=tenant_id, branch=branch)
     if working_requested:
@@ -1641,6 +1691,10 @@ def run_retrieval_pipeline(
             1 for hit in budgeted if hit.metadata.get("memory_type") == "working"
         )
         working_explain["collapsed_count"] = collapsed_turns
+        if priority_sub_budget > 0:
+            working_explain["priority_token_sub_budget"] = priority_sub_budget
+            working_explain["priority_tokens_used"] = priority_tokens_used
+            working_explain["priority_items_retained"] = priority_items_retained
     read_marks = (
         {"assertions": 0, "evidence": 0}
         if not record_access

@@ -1033,6 +1033,10 @@ _WORKING_MEMORY_KINDS = {
     "conversation_turn",
 }
 
+PINNED_WORKING_KINDS: frozenset[str] = frozenset(
+    {"active_goal", "active_constraint", "current_plan"}
+)
+
 
 def select_working_items(
     items: list[Any],
@@ -1086,11 +1090,15 @@ class WorkingMemoryItem:
     metadata: dict[str, Any] = field(default_factory=dict)
     capability_tags: list[str] = field(default_factory=list)
     sensitivity: int = 0
+    salience: float = 0.5
+    access_count: int = 0
+    last_accessed_at: datetime | None = None
     # Lifecycle state is intentionally excluded from value identity: callers
     # can retain the item submitted to put_working while expiry returns its
     # transitioned detached copy.
     status: Literal["active", "expired"] = field(default="active", compare=False)
     expired_at: datetime | None = field(default=None, compare=False)
+    superseded_by: str | None = field(default=None, compare=False)
 
     def __post_init__(self) -> None:
         for name in (
@@ -1151,6 +1159,28 @@ class WorkingMemoryItem:
             raise ValueError("sensitivity must be an integer")
         if self.sensitivity < 0:
             raise ValueError("sensitivity must not be negative")
+
+        if type(self.salience) not in {int, float} or isinstance(self.salience, bool) or not math.isfinite(float(self.salience)):
+            raise ValueError("salience must be a finite float")
+        if not (0.0 <= float(self.salience) <= 1.0):
+            raise ValueError("salience must be between 0.0 and 1.0")
+        self.salience = float(self.salience)
+
+        if type(self.access_count) is not int or isinstance(self.access_count, bool) or self.access_count < 0:
+            raise ValueError("access_count must be a non-negative integer")
+
+        if self.last_accessed_at is not None:
+            if not isinstance(self.last_accessed_at, datetime) or self.last_accessed_at.tzinfo is None:
+                raise ValueError("last_accessed_at must be timezone-aware")
+            self.last_accessed_at = self.last_accessed_at.astimezone(UTC)
+            if self.last_accessed_at < self.created_at:
+                raise ValueError("last_accessed_at cannot precede created_at")
+            if self.last_accessed_at > self.expires_at:
+                raise ValueError("last_accessed_at cannot exceed expires_at")
+
+        if self.superseded_by is not None:
+            if type(self.superseded_by) is not str or not self.superseded_by.strip():
+                raise ValueError("superseded_by must be a non-empty string")
         if self.status not in {"active", "expired"}:
             raise ValueError("status must be active or expired")
         if self.expired_at is not None:
@@ -1161,6 +1191,8 @@ class WorkingMemoryItem:
             raise ValueError("active working-memory items cannot have expired_at")
         if self.status == "expired" and self.expired_at is None:
             raise ValueError("expired working-memory items require expired_at")
+        if self.status == "active" and self.superseded_by is not None:
+            raise ValueError("active working-memory items cannot have superseded_by")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1180,8 +1212,12 @@ class WorkingMemoryItem:
             "metadata": copy.deepcopy(self.metadata),
             "capability_tags": list(self.capability_tags),
             "sensitivity": self.sensitivity,
+            "salience": self.salience,
+            "access_count": self.access_count,
+            "last_accessed_at": self.last_accessed_at.isoformat() if self.last_accessed_at else None,
             "status": self.status,
             "expired_at": self.expired_at.isoformat() if self.expired_at else None,
+            "superseded_by": self.superseded_by,
         }
 
     @classmethod
@@ -1189,7 +1225,7 @@ class WorkingMemoryItem:
         if type(row) is not dict:
             raise ValueError("stored working-memory item must be a JSON object")
         parsed = copy.deepcopy(row)
-        for name in ("created_at", "expires_at", "expired_at"):
+        for name in ("created_at", "expires_at", "expired_at", "last_accessed_at"):
             value = parsed.get(name)
             if value is not None:
                 if type(value) is not str:
@@ -1200,6 +1236,10 @@ class WorkingMemoryItem:
                     raise ValueError(
                         f"stored working-memory {name} must be ISO-8601"
                     ) from exc
+        parsed.setdefault("salience", 0.5)
+        parsed.setdefault("access_count", 0)
+        parsed.setdefault("last_accessed_at", None)
+        parsed.setdefault("superseded_by", None)
         return cls(**parsed)
 
 
@@ -2293,7 +2333,36 @@ class MemoryEngine(Protocol):
     def deep_search(self, query: str, tenant_id: str, branch: str = "main", filt: dict[str, Any] | None = None) -> RetrievalResult:
         raise NotImplementedError
 
-    def put_working(self, item: WorkingMemoryItem) -> str:
+    def put_working(
+        self,
+        item: WorkingMemoryItem,
+        *,
+        max_working_items_per_session: int | None = None,
+    ) -> str:
+        raise NotImplementedError
+
+    def replace_working(
+        self,
+        item: WorkingMemoryItem,
+        *,
+        supersedes_item_id: str | None = None,
+        singleton_kind: bool = False,
+        max_working_items_per_session: int | None = None,
+    ) -> str:
+        raise NotImplementedError
+
+    def touch_working(
+        self,
+        tenant_id: str,
+        session_id: str,
+        item_id: str,
+        *,
+        accessed_at: datetime | None = None,
+        touched_at: datetime | None = None,
+        salience: float | None = None,
+        salience_delta: float | None = None,
+        extend_ttl_seconds: float = 0.0,
+    ) -> WorkingMemoryItem | None:
         raise NotImplementedError
 
     def get_working(
@@ -3152,6 +3221,9 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             "metadata": copy.deepcopy(item.metadata),
             "capability_tags": list(item.capability_tags),
             "sensitivity": item.sensitivity,
+            "salience": item.salience,
+            "access_count": item.access_count,
+            "last_accessed_at": item.last_accessed_at.isoformat() if item.last_accessed_at else None,
         }
 
     @classmethod
@@ -3200,7 +3272,73 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         detached.access_policy = access_policy
         return detached
 
-    def put_working(self, item: WorkingMemoryItem) -> str:
+    def _evict_working_session_capacity(
+        self,
+        tenant_id: str,
+        session_id: str,
+        incoming_created_at: datetime,
+        capacity: int | None,
+        actor: str,
+    ) -> list[WorkingMemoryItem]:
+        if capacity is None or capacity <= 0:
+            return []
+        active = [
+            item
+            for (item_tenant, item_session, _), item in self.working_memory.items()
+            if item_tenant == tenant_id
+            and item_session == session_id
+            and item.status == "active"
+        ]
+        if len(active) + 1 <= capacity:
+            return []
+        deficit = (len(active) + 1) - capacity
+        candidates = [
+            item for item in active if item.kind not in PINNED_WORKING_KINDS
+        ]
+        candidates.sort(
+            key=lambda x: (x.salience, x.created_at.timestamp(), x.item_id)
+        )
+        to_evict = candidates[:deficit]
+        evicted = []
+        for evict_item in to_evict:
+            trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(evict_item)
+            evict_item.status = "expired"
+            evict_item.expired_at = incoming_created_at
+            evict_item.metadata = dict(evict_item.metadata or {})
+            evict_item.metadata["evicted"] = True
+            evict_item.metadata["eviction_reason"] = "capacity"
+            diff = self._working_audit_diff(evict_item, status="expired", sweep=incoming_created_at)
+            diff["reason"] = "capacity_eviction"
+            self._audit(
+                evict_item.tenant_id,
+                actor,
+                "expire_working",
+                evict_item.item_id,
+                diff,
+                source="working_memory",
+                trust_tier=trust_tier,
+                capability_tags=capability_tags,
+                event_id=content_cid(
+                    "working_memory_audit",
+                    {
+                        "tenant_id": evict_item.tenant_id,
+                        "session_id": evict_item.session_id,
+                        "item_id": evict_item.item_id,
+                        "op": "expire_working",
+                        "reason": "capacity_eviction",
+                    },
+                ),
+                occurred_at=incoming_created_at,
+            )
+            evicted.append(evict_item)
+        return evicted
+
+    def put_working(
+        self,
+        item: WorkingMemoryItem,
+        *,
+        max_working_items_per_session: int | None = None,
+    ) -> str:
         """Store one working item under its tenant/session/item composite key."""
 
         if not isinstance(item, WorkingMemoryItem):
@@ -3218,6 +3356,19 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             )
             stored = copy.deepcopy(item)
             try:
+                effective_capacity = (
+                    max_working_items_per_session
+                    if max_working_items_per_session is not None
+                    else getattr(self.policy, "max_working_items_per_session", None)
+                )
+                self._evict_working_session_capacity(
+                    stored.tenant_id,
+                    stored.session_id,
+                    stored.created_at,
+                    effective_capacity,
+                    actor=stored.agent_id,
+                )
+
                 trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(stored)
                 stored.trust_tier = trust_tier
                 stored.capability_tags = capability_tags
@@ -3247,6 +3398,235 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             item.sensitivity = stored.sensitivity
             item.access_policy = copy.deepcopy(stored.access_policy)
             return stored.item_id
+
+    def replace_working(
+        self,
+        item: WorkingMemoryItem,
+        *,
+        supersedes_item_id: str | None = None,
+        singleton_kind: bool = False,
+        max_working_items_per_session: int | None = None,
+    ) -> str:
+        """Atomically supersede an existing active item and store the replacement."""
+        if not isinstance(item, WorkingMemoryItem):
+            raise TypeError("item must be a WorkingMemoryItem")
+        if item.status != "active":
+            raise ValueError("replace_working accepts only active working items")
+        if supersedes_item_id is not None and supersedes_item_id == item.item_id:
+            raise ValueError("item cannot supersede itself")
+
+        with self._lock:
+            key = self._working_key(item.tenant_id, item.session_id, item.item_id)
+            if key in self.working_memory:
+                raise ValueError(f"working item {item.item_id!r} already exists")
+
+            # Locate item(s) to supersede
+            items_to_supersede: list[WorkingMemoryItem] = []
+            if supersedes_item_id is not None:
+                old_key = self._working_key(item.tenant_id, item.session_id, supersedes_item_id)
+                old_item = self.working_memory.get(old_key)
+                if old_item is None or old_item.status != "active":
+                    raise KeyError(
+                        f"working item to supersede {supersedes_item_id!r} not found in session"
+                    )
+                items_to_supersede.append(old_item)
+            elif singleton_kind or item.kind in {"active_goal", "current_plan"}:
+                for (it_tenant, it_session, _), it in self.working_memory.items():
+                    if (
+                        it_tenant == item.tenant_id
+                        and it_session == item.session_id
+                        and it.status == "active"
+                        and it.kind == item.kind
+                    ):
+                        items_to_supersede.append(it)
+            else:
+                raise ValueError(
+                    "supersedes_item_id is required when singleton_kind is not enabled"
+                )
+
+            before = (
+                copy.deepcopy(self.working_memory),
+                copy.deepcopy(self.audit_log),
+                self._store_version,
+            )
+            stored = copy.deepcopy(item)
+            try:
+                # 1. Supersede old item(s)
+                superseded_ids = []
+                for old_item in items_to_supersede:
+                    old_tt, old_ct, old_sens, old_ap = self._working_provenance(old_item)
+                    old_item.status = "expired"
+                    old_item.expired_at = stored.created_at
+                    old_item.superseded_by = stored.item_id
+                    old_item.metadata = dict(old_item.metadata or {})
+                    old_item.metadata["superseded_by"] = stored.item_id
+                    superseded_ids.append(old_item.item_id)
+
+                    old_diff = self._working_audit_diff(
+                        old_item, status="expired", sweep=stored.created_at
+                    )
+                    old_diff["superseded_by"] = stored.item_id
+                    self._audit(
+                        old_item.tenant_id,
+                        stored.agent_id,
+                        "expire_working",
+                        old_item.item_id,
+                        old_diff,
+                        source="working_memory",
+                        trust_tier=old_tt,
+                        capability_tags=old_ct,
+                        event_id=content_cid(
+                            "working_memory_audit",
+                            {
+                                "tenant_id": old_item.tenant_id,
+                                "session_id": old_item.session_id,
+                                "item_id": old_item.item_id,
+                                "op": "replace_working_supersede",
+                            },
+                        ),
+                        occurred_at=stored.created_at,
+                    )
+
+                if superseded_ids:
+                    stored.metadata = dict(stored.metadata or {})
+                    stored.metadata["supersedes"] = list(superseded_ids)
+
+                # 2. Apply kind-aware eviction
+                effective_capacity = (
+                    max_working_items_per_session
+                    if max_working_items_per_session is not None
+                    else getattr(self.policy, "max_working_items_per_session", None)
+                )
+                self._evict_working_session_capacity(
+                    stored.tenant_id,
+                    stored.session_id,
+                    stored.created_at,
+                    effective_capacity,
+                    actor=stored.agent_id,
+                )
+
+                # 3. Derive provenance and insert new active item
+                trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(stored)
+                stored.trust_tier = trust_tier
+                stored.capability_tags = capability_tags
+                stored.sensitivity = sensitivity
+                stored.access_policy = access_policy
+                self.working_memory[key] = stored
+
+                put_diff = self._working_audit_diff(stored, status=stored.status)
+                if superseded_ids:
+                    put_diff["supersedes"] = list(superseded_ids)
+                self._audit(
+                    stored.tenant_id,
+                    stored.agent_id,
+                    "put_working",
+                    stored.item_id,
+                    put_diff,
+                    source="working_memory",
+                    trust_tier=trust_tier,
+                    capability_tags=capability_tags,
+                    event_id=self._working_event_id(stored, "put_working"),
+                    occurred_at=stored.created_at,
+                )
+                self._persist()
+            except BaseException:
+                self.working_memory, self.audit_log, self._store_version = before
+                raise
+
+            item.trust_tier = stored.trust_tier
+            item.capability_tags = list(stored.capability_tags)
+            item.sensitivity = stored.sensitivity
+            item.access_policy = copy.deepcopy(stored.access_policy)
+            if superseded_ids:
+                item.metadata = dict(item.metadata or {})
+                item.metadata["supersedes"] = list(superseded_ids)
+            return stored.item_id
+
+    def touch_working(
+        self,
+        tenant_id: str,
+        session_id: str,
+        item_id: str,
+        *,
+        accessed_at: datetime | None = None,
+        touched_at: datetime | None = None,
+        salience: float | None = None,
+        salience_delta: float | None = None,
+        extend_ttl_seconds: float = 0.0,
+    ) -> WorkingMemoryItem | None:
+        """Rehearse an active working item, incrementing access_count and updating last_accessed_at."""
+        clock_arg = accessed_at if accessed_at is not None else touched_at
+        clock = self._working_clock(clock_arg, "accessed_at") if clock_arg is not None else utc_now()
+
+        with self._lock:
+            key = self._working_key(tenant_id, session_id, item_id)
+            item = self.working_memory.get(key)
+            if (
+                item is None
+                or item.status != "active"
+                or clock < item.created_at
+                or clock > item.created_at + timedelta(hours=24)
+                or self._has_retired_sources(tenant_id, item.evidence_ids)
+            ):
+                return None
+
+            before = (
+                copy.deepcopy(self.working_memory),
+                copy.deepcopy(self.audit_log),
+                self._store_version,
+            )
+            try:
+                item.access_count += 1
+                item.last_accessed_at = clock
+
+                if salience is not None:
+                    item.salience = min(1.0, max(0.0, float(salience)))
+                elif salience_delta is not None:
+                    item.salience = min(1.0, max(0.0, float(item.salience) + float(salience_delta)))
+
+                hard_ceiling = item.created_at + timedelta(hours=24)
+                if extend_ttl_seconds is not None and float(extend_ttl_seconds) > 0.0:
+                    proposed = clock + timedelta(seconds=float(extend_ttl_seconds))
+                    item.expires_at = min(hard_ceiling, max(item.expires_at, proposed))
+
+                trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(item)
+                diff = {
+                    "tenant_id": tenant_id,
+                    "session_id": session_id,
+                    "item_id": item_id,
+                    "access_count": item.access_count,
+                    "last_accessed_at": item.last_accessed_at.isoformat(),
+                    "salience": item.salience,
+                    "expires_at": item.expires_at.isoformat(),
+                    "status": "active",
+                }
+                self._audit(
+                    tenant_id,
+                    item.agent_id,
+                    "touch_working",
+                    item.item_id,
+                    diff,
+                    source="working_memory",
+                    trust_tier=trust_tier,
+                    capability_tags=capability_tags,
+                    event_id=content_cid(
+                        "working_memory_audit",
+                        {
+                            "tenant_id": tenant_id,
+                            "session_id": session_id,
+                            "item_id": item_id,
+                            "op": "touch_working",
+                            "access_count": item.access_count,
+                        },
+                    ),
+                    occurred_at=clock,
+                )
+                self._persist()
+            except BaseException:
+                self.working_memory, self.audit_log, self._store_version = before
+                raise
+
+            return self._working_detached(item)
 
     def get_working(
         self,

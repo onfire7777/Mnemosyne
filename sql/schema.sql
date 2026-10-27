@@ -413,6 +413,10 @@ CREATE TABLE IF NOT EXISTS working_memory (
   evidence_ids BYTEA[] NOT NULL DEFAULT '{}',
   access_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  salience REAL NOT NULL DEFAULT 0.5,
+  access_count INTEGER NOT NULL DEFAULT 0,
+  last_accessed_at TIMESTAMPTZ,
+  superseded_by TEXT,
   PRIMARY KEY (tenant_id, session_id, item_id),
   CHECK (expires_at > created_at),
   CHECK (expires_at <= created_at + interval '24 hours'),
@@ -423,13 +427,19 @@ CREATE TABLE IF NOT EXISTS working_memory (
   CHECK (jsonb_typeof(access_policy) = 'object'),
   CHECK (jsonb_typeof(metadata) = 'object'),
   CHECK (trust_tier BETWEEN 0 AND 5),
-  CHECK (sensitivity >= 0)
+  CHECK (sensitivity >= 0),
+  CHECK (salience >= 0.0 AND salience <= 1.0),
+  CHECK (access_count >= 0),
+  CHECK (last_accessed_at IS NULL OR (last_accessed_at >= created_at AND last_accessed_at <= expires_at))
 );
 
 CREATE INDEX IF NOT EXISTS working_memory_scope_created_idx
   ON working_memory(tenant_id, session_id, status, created_at DESC, item_id);
 CREATE INDEX IF NOT EXISTS working_memory_expiry_idx
   ON working_memory(tenant_id, status, expires_at, external_session_id, item_id)
+  WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS working_memory_eviction_idx
+  ON working_memory(tenant_id, session_id, status, salience, created_at)
   WHERE status = 'active';
 
 CREATE OR REPLACE FUNCTION mnemosyne_current_tenant()
@@ -802,3 +812,12 @@ ALTER TABLE intentions ALTER COLUMN external_user_id SET NOT NULL;
 ALTER TABLE evidence ADD COLUMN IF NOT EXISTS lexeme TSVECTOR
   GENERATED ALWAYS AS (to_tsvector('english', coalesce(content, ''))) STORED;
 CREATE INDEX IF NOT EXISTS evidence_lexeme_gin ON evidence USING gin (lexeme);
+
+-- working_memory: salience, access_count, last_accessed_at, superseded_by
+ALTER TABLE working_memory ADD COLUMN IF NOT EXISTS salience REAL NOT NULL DEFAULT 0.5;
+ALTER TABLE working_memory ADD COLUMN IF NOT EXISTS access_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE working_memory ADD COLUMN IF NOT EXISTS last_accessed_at TIMESTAMPTZ;
+ALTER TABLE working_memory ADD COLUMN IF NOT EXISTS superseded_by TEXT;
+CREATE INDEX IF NOT EXISTS working_memory_eviction_idx
+  ON working_memory(tenant_id, session_id, status, salience, created_at)
+  WHERE status = 'active';

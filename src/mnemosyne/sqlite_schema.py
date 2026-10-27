@@ -382,12 +382,20 @@ ENSURE_STATEMENTS: list[str] = [
         evidence_ids TEXT NOT NULL DEFAULT '[]',
         access_policy TEXT NOT NULL DEFAULT '{}',
         metadata TEXT NOT NULL DEFAULT '{}',
+        salience REAL NOT NULL DEFAULT 0.5 CHECK (salience >= 0.0 AND salience <= 1.0),
+        access_count INTEGER NOT NULL DEFAULT 0 CHECK (access_count >= 0),
+        last_accessed_at TEXT,
+        superseded_by TEXT,
         PRIMARY KEY (tenant_id, session_id, item_id)
     )
     """,
     """
     CREATE INDEX IF NOT EXISTS working_memory_scope_expiry_idx
         ON working_memory(tenant_id, session_id, status, expires_at, item_id)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS working_memory_eviction_idx
+        ON working_memory(tenant_id, session_id, status, salience, created_at)
     """,
     # evidence_fts (Task 4) — FTS5 candidate-recall index over evidence.content.
     #

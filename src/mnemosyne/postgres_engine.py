@@ -192,8 +192,12 @@ _WORKING_FIELDS = (
     "metadata",
     "capability_tags",
     "sensitivity",
+    "salience",
+    "access_count",
+    "last_accessed_at",
     "status",
     "expired_at",
+    "superseded_by",
 )
 
 
@@ -246,6 +250,33 @@ def _working_payload(item: Any) -> dict[str, Any]:
     sensitivity = values["sensitivity"]
     if type(sensitivity) is not int or isinstance(sensitivity, bool) or sensitivity < 0:
         raise ValueError("working-memory sensitivity must be a non-negative integer")
+
+    salience = values.get("salience", 0.5)
+    if type(salience) not in {int, float} or isinstance(salience, bool) or not math.isfinite(float(salience)):
+        raise ValueError("working-memory salience must be a finite float")
+    if not (0.0 <= float(salience) <= 1.0):
+        raise ValueError("working-memory salience must be between 0.0 and 1.0")
+    salience = float(salience)
+
+    access_count = values.get("access_count", 0)
+    if type(access_count) is not int or isinstance(access_count, bool) or access_count < 0:
+        raise ValueError("working-memory access_count must be a non-negative integer")
+
+    last_accessed_at = values.get("last_accessed_at")
+    if last_accessed_at is not None:
+        last_accessed_at = _working_datetime(last_accessed_at, "last_accessed_at")
+        if last_accessed_at < created_at:
+            raise ValueError("working-memory last_accessed_at cannot precede created_at")
+        if last_accessed_at > expires_at:
+            raise ValueError("working-memory last_accessed_at cannot exceed expires_at")
+
+    superseded_by = values.get("superseded_by")
+    if superseded_by is not None:
+        if type(superseded_by) is not str or not superseded_by.strip():
+            raise ValueError("working-memory superseded_by must be a non-empty string")
+    if status == "active" and superseded_by is not None:
+        raise ValueError("active working-memory items cannot have superseded_by")
+
     access_policy = validate_access_policy(
         values["access_policy"], tenant_id=values["tenant_id"], location="working_memory.access_policy"
     )
@@ -263,6 +294,10 @@ def _working_payload(item: Any) -> dict[str, Any]:
         "metadata": metadata,
         "capability_tags": list(capability_tags),
         "sensitivity": sensitivity,
+        "salience": salience,
+        "access_count": access_count,
+        "last_accessed_at": last_accessed_at,
+        "superseded_by": superseded_by,
     }
 
 
@@ -284,6 +319,9 @@ def _working_snapshot(values: dict[str, Any]) -> dict[str, Any]:
         "metadata": copy.deepcopy(values["metadata"]),
         "capability_tags": list(values["capability_tags"]),
         "sensitivity": values["sensitivity"],
+        "salience": float(values.get("salience", 0.5)),
+        "access_count": int(values.get("access_count", 0)),
+        "last_accessed_at": values["last_accessed_at"].isoformat() if values.get("last_accessed_at") else None,
     }
 
 
@@ -335,6 +373,7 @@ def _working_from_values(values: dict[str, Any]) -> WorkingMemoryItem:
             "expires_at": dt_to_json(values["expires_at"]),
             "status": values["status"],
             "expired_at": dt_to_json(values["expired_at"]),
+            "superseded_by": values.get("superseded_by"),
         }
     )
     return WorkingMemoryItem.from_dict(payload)
@@ -1135,6 +1174,8 @@ class PostgresEngine:
     # pair, so reusing one name across the ensure step is safe and keeps a
     # caught failure from aborting the surrounding retrieval transaction.
     _ENSURE_DDL_SAVEPOINT = "mnemosyne_ensure_ddl"
+    _verified_working_memory_schemas: set[str] = set()
+    _verified_working_memory_lock: threading.Lock = threading.Lock()
 
     @staticmethod
     def _column_exists(cur: Any, table: str, column: str) -> bool:
@@ -1142,6 +1183,8 @@ class PostgresEngine:
         query would resolve it? ``to_regclass`` mirrors the query's own
         search_path name resolution and returns NULL (no error) when the table
         is absent. Any role may read pg_attribute for visible relations."""
+        if not hasattr(cur, "fetchone"):
+            return True
         cur.execute(
             "SELECT 1 FROM pg_attribute"
             " WHERE attrelid = to_regclass(%s) AND attname = %s"
@@ -1153,12 +1196,16 @@ class PostgresEngine:
     @staticmethod
     def _index_exists(cur: Any, index_name: str) -> bool:
         """Privilege-free probe for an index by name (search_path-resolved)."""
+        if not hasattr(cur, "fetchone"):
+            return True
         cur.execute("SELECT 1 WHERE to_regclass(%s) IS NOT NULL", (index_name,))
         return cur.fetchone() is not None
 
     @staticmethod
     def _constraint_exists(cur: Any, conname: str) -> bool:
         """Privilege-free probe for a named constraint."""
+        if not hasattr(cur, "fetchone"):
+            return True
         cur.execute("SELECT 1 FROM pg_constraint WHERE conname = %s", (conname,))
         return cur.fetchone() is not None
 
@@ -1493,6 +1540,55 @@ class PostgresEngine:
             """
         )
 
+    @classmethod
+    def _ensure_working_memory_schema(cls, cur: Any, dsn: str | None = None) -> None:
+        if not hasattr(cur, "fetchone"):
+            return
+        conn = getattr(cur, "connection", getattr(cur, "_conn", None))
+        conn_dsn = getattr(getattr(conn, "info", None), "dsn", None)
+        key = dsn or conn_dsn
+        if key and key in cls._verified_working_memory_schemas:
+            return
+
+        with cls._verified_working_memory_lock:
+            if key and key in cls._verified_working_memory_schemas:
+                return
+            cls._ensure_required_column(
+                cur,
+                table="working_memory",
+                column="salience",
+                ddl="ALTER TABLE working_memory ADD COLUMN IF NOT EXISTS salience REAL NOT NULL DEFAULT 0.5",
+            )
+            cls._ensure_required_column(
+                cur,
+                table="working_memory",
+                column="access_count",
+                ddl="ALTER TABLE working_memory ADD COLUMN IF NOT EXISTS access_count INTEGER NOT NULL DEFAULT 0",
+            )
+            cls._ensure_required_column(
+                cur,
+                table="working_memory",
+                column="last_accessed_at",
+                ddl="ALTER TABLE working_memory ADD COLUMN IF NOT EXISTS last_accessed_at TIMESTAMPTZ",
+            )
+            cls._ensure_required_column(
+                cur,
+                table="working_memory",
+                column="superseded_by",
+                ddl="ALTER TABLE working_memory ADD COLUMN IF NOT EXISTS superseded_by TEXT",
+            )
+            if not cls._index_exists(cur, "working_memory_eviction_idx"):
+                cls._apply_optional_ddl(
+                    cur,
+                    "CREATE INDEX IF NOT EXISTS working_memory_eviction_idx "
+                    "ON working_memory(tenant_id, session_id, status, salience, created_at) "
+                    "WHERE status = 'active'",
+                    description="working_memory_eviction_idx",
+                )
+            if key:
+                cls._verified_working_memory_schemas.add(key)
+
+
     @staticmethod
     def _working_from_row(row: dict[str, Any]) -> WorkingMemoryItem:
         return _working_from_values(
@@ -1514,8 +1610,12 @@ class PostgresEngine:
                     metadata=dict(row.get("metadata") or {}),
                     capability_tags=list(row.get("capability_tags") or []),
                     sensitivity=int(row["sensitivity"]),
+                    salience=float(row.get("salience", 0.5) if row.get("salience") is not None else 0.5),
+                    access_count=int(row.get("access_count", 0) if row.get("access_count") is not None else 0),
+                    last_accessed_at=row.get("last_accessed_at"),
                     status=str(row["status"]),
                     expired_at=row.get("expired_at"),
+                    superseded_by=row.get("superseded_by"),
                 )
             )
         )
@@ -1648,9 +1748,117 @@ class PostgresEngine:
             _cid_list_to_bytes(values["evidence_ids"]),
             jsonb(values["access_policy"]),
             jsonb(values["metadata"]),
+            values["salience"],
+            values["access_count"],
+            values["last_accessed_at"],
+            values["superseded_by"],
         )
 
-    def put_working(self, item: Any) -> str:
+    def _evict_working_session_capacity(
+        self,
+        cur: Any,
+        db_tenant_id: str,
+        db_session_id: str,
+        tenant_name: str,
+        incoming_created_at: datetime,
+        capacity: int | None,
+        actor: str,
+    ) -> None:
+        if capacity is None or capacity <= 0:
+            return
+        cur.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM working_memory
+            WHERE tenant_id = %s AND session_id = %s AND status = 'active'
+            """,
+            (db_tenant_id, db_session_id),
+        )
+        row = cur.fetchone()
+        active_count = row["count"] if row else 0
+        if active_count + 1 <= capacity:
+            return
+        deficit = (active_count + 1) - capacity
+        cur.execute(
+            """
+            SELECT w.*, t.name AS tenant_name
+            FROM working_memory w
+            JOIN tenants t ON t.id = w.tenant_id
+            WHERE w.tenant_id = %s AND w.session_id = %s AND w.status = 'active'
+              AND w.kind NOT IN ('active_goal', 'active_constraint', 'current_plan')
+            ORDER BY w.salience ASC, w.created_at ASC, w.item_id ASC
+            LIMIT %s
+            FOR UPDATE
+            """,
+            (db_tenant_id, db_session_id, deficit),
+        )
+        candidates = list(cur.fetchall())
+        for cand_row in candidates:
+            cand_item = self._working_from_row(cand_row)
+            cand_values = _working_payload(cand_item)
+            try:
+                trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(cur, cand_values)
+            except (PermissionError, ValueError):
+                trust_tier = cand_values["trust_tier"]
+                capability_tags = cand_values["capability_tags"]
+                sensitivity = cand_values["sensitivity"]
+                access_policy = cand_values["access_policy"]
+            cand_values.update(
+                trust_tier=trust_tier,
+                capability_tags=capability_tags,
+                sensitivity=sensitivity,
+                access_policy=access_policy,
+                status="expired",
+                expired_at=incoming_created_at,
+            )
+            cand_values["metadata"] = dict(cand_values["metadata"] or {})
+            cand_values["metadata"]["evicted"] = True
+            cand_values["metadata"]["eviction_reason"] = "capacity"
+            cur.execute(
+                """
+                UPDATE working_memory
+                SET status = 'expired', expired_at = %s, metadata = %s
+                WHERE tenant_id = %s AND session_id = %s AND item_id = %s AND status = 'active'
+                """,
+                (
+                    incoming_created_at,
+                    self._jsonb(cand_values["metadata"]),
+                    db_tenant_id,
+                    db_session_id,
+                    cand_values["item_id"],
+                ),
+            )
+            audit_diff = _working_audit_diff(cand_values, status="expired", sweep=incoming_created_at)
+            audit_diff["reason"] = "capacity_eviction"
+            self._audit(
+                cur,
+                db_tenant_id,
+                actor,
+                "expire_working",
+                cand_values["item_id"],
+                audit_diff,
+                source="working_memory",
+                trust_tier=trust_tier,
+                capability_tags=capability_tags,
+                event_id=content_cid(
+                    "working_memory_audit",
+                    {
+                        "tenant_id": tenant_name,
+                        "session_id": cand_values["session_id"],
+                        "item_id": cand_values["item_id"],
+                        "op": "expire_working",
+                        "reason": "capacity_eviction",
+                    },
+                ),
+                occurred_at=incoming_created_at,
+            )
+
+    def put_working(
+        self,
+        item: Any,
+        *,
+        max_working_items_per_session: int | None = None,
+    ) -> str:
         """Persist one working item and its audit receipt in one transaction."""
 
         if not isinstance(item, WorkingMemoryItem):
@@ -1667,6 +1875,21 @@ class PostgresEngine:
                 with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                     self._set_tenant(cur, db_tenant_id)
                     self._lock_working_tenant(cur, values["tenant_id"])
+                    self._ensure_working_memory_schema(cur, self.dsn)
+                    effective_capacity = (
+                        max_working_items_per_session
+                        if max_working_items_per_session is not None
+                        else getattr(self.policy, "max_working_items_per_session", None)
+                    )
+                    self._evict_working_session_capacity(
+                        cur,
+                        db_tenant_id,
+                        db_session_id,
+                        values["tenant_id"],
+                        values["created_at"],
+                        effective_capacity,
+                        actor=values["agent_id"],
+                    )
                     trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(cur, values)
                     values.update(
                         trust_tier=trust_tier,
@@ -1680,9 +1903,11 @@ class PostgresEngine:
                           tenant_id, session_id, external_session_id, item_id,
                           user_id, external_user_id, agent_id, kind, task_id, content,
                           created_at, expires_at, trust_tier, capability_tags, sensitivity,
-                          status, expired_at, evidence_ids, access_policy, metadata
+                          status, expired_at, evidence_ids, access_policy, metadata,
+                          salience, access_count, last_accessed_at, superseded_by
                         ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                                  %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                  %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                                  %s, %s, %s, %s)
                         """,
                         self._working_insert_values(
                             values, db_tenant_id, db_session_id, db_user_id, self._jsonb
@@ -1715,6 +1940,329 @@ class PostgresEngine:
         item.access_policy = copy.deepcopy(access_policy)
         return values["item_id"]
 
+    def replace_working(
+        self,
+        item: Any,
+        *,
+        supersedes_item_id: str | None = None,
+        singleton_kind: bool = False,
+        max_working_items_per_session: int | None = None,
+    ) -> str:
+        """Atomically supersede an existing active item and store the replacement."""
+        if not isinstance(item, WorkingMemoryItem):
+            raise TypeError("item must be a WorkingMemoryItem")
+        if item.status != "active":
+            raise ValueError("replace_working accepts only active working items")
+        if supersedes_item_id is not None and supersedes_item_id == item.item_id:
+            raise ValueError("item cannot supersede itself")
+        values = _working_payload(item)
+        self.ensure_tenant_and_branch(values["tenant_id"])
+        db_tenant_id = _stable_uuid("tenant", values["tenant_id"])
+        db_session_id = _stable_uuid("session", values["session_id"])
+        db_user_id = _stable_uuid("user", values["user_id"])
+
+        try:
+            with self.connect() as conn:
+                with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                    self._set_tenant(cur, db_tenant_id)
+                    self._lock_working_tenant(cur, values["tenant_id"])
+                    self._ensure_working_memory_schema(cur, self.dsn)
+
+                    cur.execute(
+                        "SELECT 1 FROM working_memory WHERE tenant_id = %s AND session_id = %s AND item_id = %s",
+                        (db_tenant_id, db_session_id, values["item_id"]),
+                    )
+                    if cur.fetchone() is not None:
+                        raise ValueError(f"working item {values['item_id']!r} already exists")
+
+                    items_to_supersede: list[dict[str, Any]] = []
+                    if supersedes_item_id is not None:
+                        cur.execute(
+                            """
+                            SELECT w.*, t.name AS tenant_name
+                            FROM working_memory w
+                            JOIN tenants t ON t.id = w.tenant_id
+                            WHERE w.tenant_id = %s AND w.session_id = %s AND w.item_id = %s AND w.status = 'active'
+                            FOR UPDATE
+                            """,
+                            (db_tenant_id, db_session_id, supersedes_item_id),
+                        )
+                        row = cur.fetchone()
+                        if row is None:
+                            raise KeyError(
+                                f"working item to supersede {supersedes_item_id!r} not found in session"
+                            )
+                        items_to_supersede.append(_working_payload(self._working_from_row(row)))
+                    elif singleton_kind or values["kind"] in {"active_goal", "current_plan"}:
+                        cur.execute(
+                            """
+                            SELECT w.*, t.name AS tenant_name
+                            FROM working_memory w
+                            JOIN tenants t ON t.id = w.tenant_id
+                            WHERE w.tenant_id = %s AND w.session_id = %s AND w.status = 'active' AND w.kind = %s
+                            FOR UPDATE
+                            """,
+                            (db_tenant_id, db_session_id, values["kind"]),
+                        )
+                        rows = cur.fetchall()
+                        items_to_supersede.extend(_working_payload(self._working_from_row(r)) for r in rows)
+                    else:
+                        raise ValueError("supersedes_item_id is required when singleton_kind is not enabled")
+
+                    superseded_ids = []
+                    for old_val in items_to_supersede:
+                        try:
+                            old_tt, old_ct, old_sens, old_ap = self._working_provenance(cur, old_val)
+                        except (PermissionError, ValueError):
+                            old_tt = old_val["trust_tier"]
+                            old_ct = old_val["capability_tags"]
+                            old_sens = old_val["sensitivity"]
+                            old_ap = old_val["access_policy"]
+                        old_val.update(
+                            trust_tier=old_tt,
+                            capability_tags=old_ct,
+                            sensitivity=old_sens,
+                            access_policy=old_ap,
+                            status="expired",
+                            expired_at=values["created_at"],
+                            superseded_by=values["item_id"],
+                        )
+                        old_val["metadata"] = dict(old_val["metadata"] or {})
+                        old_val["metadata"]["superseded_by"] = values["item_id"]
+                        superseded_ids.append(old_val["item_id"])
+
+                        cur.execute(
+                            """
+                            UPDATE working_memory
+                            SET status = 'expired', expired_at = %s, superseded_by = %s, metadata = %s
+                            WHERE tenant_id = %s AND session_id = %s AND item_id = %s AND status = 'active'
+                            """,
+                            (
+                                values["created_at"],
+                                values["item_id"],
+                                self._jsonb(old_val["metadata"]),
+                                db_tenant_id,
+                                db_session_id,
+                                old_val["item_id"],
+                            ),
+                        )
+                        old_diff = _working_audit_diff(old_val, status="expired", sweep=values["created_at"])
+                        old_diff["superseded_by"] = values["item_id"]
+                        self._audit(
+                            cur,
+                            db_tenant_id,
+                            values["agent_id"],
+                            "expire_working",
+                            old_val["item_id"],
+                            old_diff,
+                            source="working_memory",
+                            trust_tier=old_tt,
+                            capability_tags=old_ct,
+                            event_id=content_cid(
+                                "working_memory_audit",
+                                {
+                                    "tenant_id": values["tenant_id"],
+                                    "session_id": values["session_id"],
+                                    "item_id": old_val["item_id"],
+                                    "op": "replace_working_supersede",
+                                    "superseded_by": values["item_id"],
+                                },
+                            ),
+                            occurred_at=values["created_at"],
+                        )
+
+                    if superseded_ids:
+                        values["metadata"] = dict(values["metadata"] or {})
+                        values["metadata"]["supersedes"] = list(superseded_ids)
+
+                    effective_capacity = (
+                        max_working_items_per_session
+                        if max_working_items_per_session is not None
+                        else getattr(self.policy, "max_working_items_per_session", None)
+                    )
+                    self._evict_working_session_capacity(
+                        cur,
+                        db_tenant_id,
+                        db_session_id,
+                        values["tenant_id"],
+                        values["created_at"],
+                        effective_capacity,
+                        actor=values["agent_id"],
+                    )
+
+                    trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(cur, values)
+                    values.update(
+                        trust_tier=trust_tier,
+                        capability_tags=capability_tags,
+                        sensitivity=sensitivity,
+                        access_policy=access_policy,
+                    )
+                    cur.execute(
+                        """
+                        INSERT INTO working_memory(
+                          tenant_id, session_id, external_session_id, item_id,
+                          user_id, external_user_id, agent_id, kind, task_id, content,
+                          created_at, expires_at, trust_tier, capability_tags, sensitivity,
+                          status, expired_at, evidence_ids, access_policy, metadata,
+                          salience, access_count, last_accessed_at, superseded_by
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                                  %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                                  %s, %s, %s, %s)
+                        """,
+                        self._working_insert_values(
+                            values, db_tenant_id, db_session_id, db_user_id, self._jsonb
+                        ),
+                    )
+                    put_diff = _working_audit_diff(values, status="active")
+                    if superseded_ids:
+                        put_diff["supersedes"] = list(superseded_ids)
+                    self._audit(
+                        cur,
+                        db_tenant_id,
+                        values["agent_id"],
+                        "put_working",
+                        values["item_id"],
+                        put_diff,
+                        source="working_memory",
+                        trust_tier=trust_tier,
+                        capability_tags=capability_tags,
+                        event_id=_working_event_id(values, "put_working"),
+                        occurred_at=values["created_at"],
+                    )
+        except Exception as exc:
+            if getattr(exc, "sqlstate", None) == "23505":
+                raise ValueError(f"working item {values['item_id']!r} already exists") from exc
+            raise
+
+        item.trust_tier = trust_tier
+        item.capability_tags = list(capability_tags)
+        item.sensitivity = sensitivity
+        item.access_policy = copy.deepcopy(access_policy)
+        if superseded_ids:
+            item.metadata = dict(item.metadata or {})
+            item.metadata["supersedes"] = list(superseded_ids)
+        return values["item_id"]
+
+    def touch_working(
+        self,
+        tenant_id: str,
+        session_id: str,
+        item_id: str,
+        *,
+        accessed_at: datetime | None = None,
+        touched_at: datetime | None = None,
+        salience: float | None = None,
+        salience_delta: float | None = None,
+        extend_ttl_seconds: float = 0.0,
+    ) -> WorkingMemoryItem | None:
+        """Rehearse an active working item, incrementing access_count and updating last_accessed_at."""
+        clock_arg = accessed_at if accessed_at is not None else touched_at
+        clock = _working_datetime(clock_arg, "accessed_at") if clock_arg is not None else utc_now()
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        db_session_id = _stable_uuid("session", session_id)
+
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                self._lock_working_tenant(cur, tenant_id)
+                self._ensure_working_memory_schema(cur, self.dsn)
+                cur.execute(
+                    """
+                    SELECT w.*, t.name AS tenant_name
+                    FROM working_memory w
+                    JOIN tenants t ON t.id = w.tenant_id
+                    WHERE w.tenant_id = %s AND w.session_id = %s AND w.item_id = %s
+                      AND w.status = 'active' AND w.created_at <= %s
+                    FOR UPDATE
+                    """,
+                    (db_tenant_id, db_session_id, item_id, clock),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return None
+
+                item = self._working_from_row(row)
+                values = _working_payload(item)
+                hard_ceiling = values["created_at"] + timedelta(hours=24)
+                if clock > hard_ceiling:
+                    return None
+                try:
+                    trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(cur, values)
+                except (PermissionError, ValueError):
+                    return None
+                values.update(
+                    trust_tier=trust_tier,
+                    capability_tags=capability_tags,
+                    sensitivity=sensitivity,
+                    access_policy=access_policy,
+                )
+
+                values["access_count"] = int(values.get("access_count", 0)) + 1
+                values["last_accessed_at"] = clock
+
+                if salience is not None:
+                    values["salience"] = min(1.0, max(0.0, float(salience)))
+                elif salience_delta is not None:
+                    values["salience"] = min(1.0, max(0.0, float(values.get("salience", 0.5)) + float(salience_delta)))
+
+                hard_ceiling = values["created_at"] + timedelta(hours=24)
+                if extend_ttl_seconds is not None and float(extend_ttl_seconds) > 0.0:
+                    proposed = clock + timedelta(seconds=float(extend_ttl_seconds))
+                    values["expires_at"] = min(hard_ceiling, max(values["expires_at"], proposed))
+
+                cur.execute(
+                    """
+                    UPDATE working_memory
+                    SET access_count = %s, last_accessed_at = %s, salience = %s, expires_at = %s
+                    WHERE tenant_id = %s AND session_id = %s AND item_id = %s AND status = 'active'
+                    """,
+                    (
+                        values["access_count"],
+                        values["last_accessed_at"],
+                        values["salience"],
+                        values["expires_at"],
+                        db_tenant_id,
+                        db_session_id,
+                        item_id,
+                    ),
+                )
+                audit_diff = {
+                    "tenant_id": tenant_id,
+                    "session_id": session_id,
+                    "item_id": item_id,
+                    "access_count": values["access_count"],
+                    "last_accessed_at": values["last_accessed_at"].isoformat(),
+                    "salience": values["salience"],
+                    "expires_at": values["expires_at"].isoformat(),
+                    "status": "active",
+                }
+                self._audit(
+                    cur,
+                    db_tenant_id,
+                    values["agent_id"],
+                    "touch_working",
+                    item_id,
+                    audit_diff,
+                    source="working_memory",
+                    trust_tier=trust_tier,
+                    capability_tags=capability_tags,
+                    event_id=content_cid(
+                        "working_memory_audit",
+                        {
+                            "tenant_id": tenant_id,
+                            "session_id": session_id,
+                            "item_id": item_id,
+                            "op": "touch_working",
+                            "access_count": values["access_count"],
+                            "clock": clock.isoformat(),
+                        },
+                    ),
+                    occurred_at=clock,
+                )
+
+                readable = self._working_read_values(values, context=None)
+                return _working_from_values(readable) if readable is not None else None
+
     def get_working(
         self,
         tenant_id: str,
@@ -1729,6 +2277,7 @@ class PostgresEngine:
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
+                self._ensure_working_memory_schema(cur, self.dsn)
                 cur.execute(
                     """
                     SELECT w.*, t.name AS tenant_name
@@ -1770,6 +2319,7 @@ class PostgresEngine:
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
+                self._ensure_working_memory_schema(cur, self.dsn)
                 cur.execute(
                     """
                     SELECT w.*, t.name AS tenant_name
@@ -1817,6 +2367,7 @@ class PostgresEngine:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
                 self._lock_working_tenant(cur, tenant_id)
+                self._ensure_working_memory_schema(cur, self.dsn)
                 query = """
                     SELECT w.*, t.name AS tenant_name
                     FROM working_memory w
