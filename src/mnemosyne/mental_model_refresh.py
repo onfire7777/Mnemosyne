@@ -9,7 +9,7 @@ from __future__ import annotations
 import copy
 from datetime import UTC, datetime, timedelta
 from time import monotonic
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Sequence
 from uuid import uuid4
 
 from mnemosyne.answering import AnswerReadContext
@@ -308,3 +308,135 @@ class MentalModelRefreshWorker:
             report[outcome] += 1
             report["models"].append({"model_id": model_id, "outcome": outcome})
         return report
+
+    def trigger_on_consolidation(
+        self,
+        new_evidence_cids: Sequence[str] = (),
+        *,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """Trigger targeted delta refresh of affected models in this worker's scope."""
+        self._authorize()
+        return trigger_on_consolidation(
+            self.service,
+            self.context,
+            new_evidence_cids,
+            force=force,
+        )
+
+
+def trigger_on_consolidation(
+    service: MentalModelService | Any,
+    context: AnswerReadContext | Sequence[Any] | None = None,
+    new_evidence_cids: Sequence[Any] = (),
+    *,
+    tenant_id: str | None = None,
+    user_id: str | None = None,
+    branch: str = "main",
+    new_evidence: Sequence[Any] | None = None,
+    consolidated_evidence: Sequence[Any] | None = None,
+    refresh_now: bool = True,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Run targeted delta refresh for all models affected by consolidation output CIDs."""
+    from mnemosyne.mental_models import MentalModelService, _scope
+
+    if not isinstance(service, MentalModelService):
+        service = MentalModelService(service)
+
+    resolved_context: AnswerReadContext | None = None
+    items: list[Any] = []
+    if isinstance(context, AnswerReadContext):
+        resolved_context = context
+        items.extend(new_evidence_cids or ())
+    elif isinstance(context, Sequence) and not isinstance(context, (str, bytes)):
+        items.extend(context)
+        items.extend(new_evidence_cids or ())
+    else:
+        items.extend(new_evidence_cids or ())
+
+    if new_evidence is not None:
+        items.extend(new_evidence)
+    if consolidated_evidence is not None:
+        items.extend(consolidated_evidence)
+
+    if resolved_context is None and tenant_id and user_id:
+        resolved_context = AnswerReadContext(
+            tenant_id=tenant_id,
+            branch=branch,
+            user_id=user_id,
+            role="agent",
+        )
+
+    records: list[dict[str, Any]] = []
+    if resolved_context is not None:
+        service._write(resolved_context)
+        scope = _scope(resolved_context)
+        records = [
+            rec
+            for rec in service.engine.list_mental_model_records(
+                resolved_context.tenant_id, resolved_context.branch
+            )
+            if rec.get("owner_id") == resolved_context.user_id and rec.get("scope") == scope
+        ]
+    else:
+        mm_store = getattr(service.engine, "mental_models", None)
+        if isinstance(mm_store, dict):
+            records = [rec for rec in mm_store.values() if isinstance(rec, dict)]
+
+    report: dict[str, Any] = {
+        "processed": 0,
+        "refreshed": 0,
+        "skipped": 0,
+        "unchanged": 0,
+        "failed": 0,
+        "affected_count": 0,
+        "refreshed_count": 0,
+        "skipped_count": 0,
+        "affected_model_ids": [],
+        "skipped_model_ids": [],
+        "models": [],
+    }
+    for record in records:
+        model_id = record.get("model_id")
+        if not isinstance(model_id, str) or not model_id:
+            continue
+        model_ctx = resolved_context or service._context_from_record(record)
+        report["processed"] += 1
+        res = service.delta_refresh(
+            model_ctx,
+            model_id,
+            items,
+            refresh_now=refresh_now,
+            force=force,
+        )
+        if res.get("skipped"):
+            report["skipped"] += 1
+            report["skipped_count"] += 1
+            report["unchanged"] += 1
+            report["skipped_model_ids"].append(model_id)
+            outcome = "skipped"
+        elif res.get("refreshed"):
+            report["refreshed"] += 1
+            report["refreshed_count"] += 1
+            report["affected_count"] += 1
+            report["affected_model_ids"].append(model_id)
+            outcome = "refreshed"
+        else:
+            report["affected_count"] += 1
+            if refresh_now:
+                report["failed"] += 1
+                outcome = "preserved" if res.get("preserved_previous_answer") else "failed"
+            else:
+                outcome = "affected"
+            report["affected_model_ids"].append(model_id)
+        report["models"].append({
+            "model_id": model_id,
+            "outcome": outcome,
+            "affected": bool(res.get("affected")),
+            "refreshed": bool(res.get("refreshed")),
+            "skipped": bool(res.get("skipped")),
+            "preserved_previous_answer": bool(res.get("preserved_previous_answer")),
+            "status": res.get("status"),
+        })
+    return report

@@ -268,6 +268,7 @@ QUERY_SUPPORT_QUESTION_STOPWORDS = {
     "after",
     "ago",
     "also",
+    "average",
     "before",
     "between",
     "book",
@@ -281,6 +282,7 @@ QUERY_SUPPORT_QUESTION_STOPWORDS = {
     "day",
     "days",
     "describe",
+    "earliest",
     "explain",
     "film",
     "films",
@@ -300,6 +302,7 @@ QUERY_SUPPORT_QUESTION_STOPWORDS = {
     "instead",
     "just",
     "last",
+    "latest",
     "list",
     "long",
     "many",
@@ -312,17 +315,22 @@ QUERY_SUPPORT_QUESTION_STOPWORDS = {
     "name",
     "number",
     "often",
+    "older",
     "one",
+    "order",
     "passed",
     "past",
     "previously",
     "recall",
     "recently",
+    "related",
     "search",
     "show",
     "since",
+    "six",
     "song",
     "songs",
+    "spent",
     "there",
     "three",
     "time",
@@ -336,6 +344,7 @@ QUERY_SUPPORT_QUESTION_STOPWORDS = {
     "would",
     "year",
     "years",
+    "younger",
 }
 
 QUERY_SUPPORT_STOPWORDS = set(QUERY_SUPPORT_STOPWORDS) | QUERY_SUPPORT_QUESTION_STOPWORDS
@@ -1137,6 +1146,7 @@ _LOW_WEIGHT_PREDICATES = frozenset({
     "approximate", "approximately", "related", "relat", "exceed", "exce",
     "relocation", "relocat", "earliest", "latest", "previously", "frequently",
     "downloaded", "download", "listening", "listen", "six", "five", "four", "three",
+    "event", "events", "activity", "activities", "mention", "mentioned", "money",
 })
 
 _FOCAL_OBJECT_TERMS = frozenset({
@@ -1475,7 +1485,7 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
                     tokens = [normalise_query_term(t) for t in tokenize(text)]
                     p_e = [idx for idx, tok in enumerate(tokens) if similar_query_terms(en, tok)]
                     p_l = [idx for idx, tok in enumerate(tokens) if similar_query_terms(ln, tok)]
-                    if any(abs(i - j) <= 15 for i in p_e for j in p_l):
+                    if any(abs(i - j) <= 25 for i in p_e for j in p_l):
                         found_loc = True
                         break
                 if not found_loc:
@@ -1527,7 +1537,7 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
             missing_arguments.append(f"{subjects[0]} + {focal_objects[0]}")
 
     # Age-of-person grounding: "How old is/was <ProperNoun>" requires an age indicator in a hit mentioning <ProperNoun>
-    age_person_match = re.search(r"\bhow\s+old\s+(?:is|was|will)\s+([A-Z][a-z]+)\b", query)
+    age_person_match = re.search(r"\b[Hh]ow\s+old\s+(?:is|was|will)\s+([A-Z][a-z]+)\b", query)
     if age_person_match:
         person_norm = normalise_query_term(age_person_match.group(1).lower())
         age_indicator_re = re.compile(
@@ -1561,8 +1571,8 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
         re.I,
     )
     for m in conj_matches:
-        prefix, c1, c2 = m.group(1), m.group(2), m.group(3)
-        if prefix:
+        prefix, c1, c2 = m.group(1), m.group(2).strip("'-"), m.group(3).strip("'-")
+        if prefix or not c1 or not c2:
             continue
         start_idx = m.start()
         preceding = query[:start_idx].strip().lower()
@@ -1709,6 +1719,117 @@ def hit_recency_for_unit(
     sec = max(0.0, (now_utc - effective).total_seconds())
     days_ago = 0.0 if sec < 60.0 else sec / 86400.0
     return compute_recency_decay(days_ago, function, linear_window_days, halflife_days)
+
+
+def precision_aware_recency_score(
+    days_ago: float,
+    precision: str = "day",
+    span_days: float = 0.0,
+    halflife_days: float = 30.0,
+) -> float:
+    """Compute precision-aware recency score without inventing fake day-level age for coarse intervals."""
+    if not math.isfinite(days_ago) or days_ago < 0:
+        return 0.5
+    raw = compute_recency_decay(days_ago, function="exponential", halflife_days=halflife_days)
+    prec = (precision or "day").lower()
+    if prec in {"year", "quarter", "season", "month"} or span_days >= 28.0:
+        # Coarse calendar intervals should not dominate point-event freshness or suffer artificial day aging
+        return max(0.35, min(0.50, raw))
+    return raw
+
+
+def spread_temporal_buckets(
+    hits: Sequence[Hit],
+    k: int = 5,
+    bucket_granularity: str = "auto",
+) -> list[Hit]:
+    """Select temporal candidates spread across adaptive time buckets balanced by relevance."""
+    if not hits or k <= 0:
+        return []
+    if len(hits) <= k:
+        return list(hits)
+
+    def _hit_dt(h: Hit) -> datetime | None:
+        for key in ("event_start", "occurred_start", "_candidate_created_at", "created_at"):
+            val = h.metadata.get(key)
+            if val is not None:
+                try:
+                    dt = val if isinstance(val, datetime) else parse_dt(val)
+                    if dt is not None:
+                        return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
+                except Exception:
+                    pass
+        return None
+
+    dated = [(h, _hit_dt(h)) for h in hits]
+    valid_dts = [dt for _h, dt in dated if dt is not None]
+    if len(valid_dts) < 2:
+        return list(hits[:k])
+
+    span_days = (max(valid_dts) - min(valid_dts)).total_seconds() / 86400.0
+    gran = bucket_granularity.lower()
+    if gran == "auto":
+        if span_days > 365.0:
+            gran = "year"
+        elif span_days > 45.0:
+            gran = "month"
+        elif span_days > 7.0:
+            gran = "week"
+        else:
+            gran = "day"
+
+    buckets: dict[str, list[Hit]] = {}
+    undated: list[Hit] = []
+    for h, dt in dated:
+        if dt is None:
+            undated.append(h)
+            continue
+        if gran == "year":
+            bkey = f"{dt.year}"
+        elif gran == "month":
+            bkey = f"{dt.year}-{dt.month:02d}"
+        elif gran == "week":
+            iso = dt.isocalendar()
+            bkey = f"{iso[0]}-W{iso[1]:02d}"
+        else:
+            bkey = f"{dt.year}-{dt.month:02d}-{dt.day:02d}"
+        buckets.setdefault(bkey, []).append(h)
+
+    for bkey in buckets:
+        buckets[bkey].sort(key=lambda item: float(item.score or 0.0), reverse=True)
+
+    # Sort bucket keys by their highest-scoring candidate so top relevance is preserved first
+    ordered_keys = sorted(
+        buckets.keys(),
+        key=lambda b: float(buckets[b][0].score or 0.0),
+        reverse=True,
+    )
+    selected: list[Hit] = []
+    seen_ids: set[str] = set()
+    round_idx = 0
+    while len(selected) < k:
+        added_in_round = False
+        for bkey in ordered_keys:
+            blist = buckets[bkey]
+            if round_idx < len(blist):
+                cand = blist[round_idx]
+                if cand.id not in seen_ids:
+                    selected.append(cand)
+                    seen_ids.add(cand.id)
+                    added_in_round = True
+                    if len(selected) >= k:
+                        break
+        if not added_in_round:
+            break
+        round_idx += 1
+
+    for cand in undated:
+        if len(selected) >= k:
+            break
+        if cand.id not in seen_ids:
+            selected.append(cand)
+            seen_ids.add(cand.id)
+    return selected
 
 
 def schema_fast_path_rerank(

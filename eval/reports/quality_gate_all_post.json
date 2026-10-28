@@ -1,30 +1,30 @@
 {
   "categories": {
     "abstention": {
-      "balanced_accuracy": 0.9535,
+      "balanced_accuracy": 1.0,
       "ci_95": [
         0.0,
         0.0
       ],
-      "f1": 0.918,
-      "false_retrieval_rate": 0.0667,
+      "f1": 1.0,
+      "false_retrieval_rate": 0.0,
       "n_cases": 30,
       "ndcg_at_5": 0.0,
-      "precision": 0.9032,
-      "recall": 0.9333,
+      "precision": 1.0,
+      "recall": 1.0,
       "recall_at_5": 0.0,
-      "specificity": 0.9737
+      "specificity": 1.0
     },
     "knowledge_updates_supersession": {
       "ci_95": [
-        1.0,
+        0.95,
         1.0
       ],
       "n_cases": 30,
-      "ndcg_at_5": 0.9777,
-      "recall_at_5": 1.0,
-      "superseded_exclusion_rate": 0.9333,
-      "supersession_accuracy": 0.9333
+      "ndcg_at_5": 0.9715,
+      "recall_at_5": 0.9833,
+      "superseded_exclusion_rate": 1.0,
+      "supersession_accuracy": 1.0
     },
     "multi_hop": {
       "ci_95": [
@@ -38,21 +38,21 @@
     },
     "multi_session_aggregation": {
       "ci_95": [
-        0.8522,
-        0.9683
+        0.9583,
+        1.0
       ],
       "n_cases": 30,
-      "ndcg_at_5": 0.891,
-      "recall_at_5": 0.9156
+      "ndcg_at_5": 0.9483,
+      "recall_at_5": 0.9833
     },
     "temporal_reasoning": {
       "ci_95": [
-        0.8778,
-        0.9944
+        0.9556,
+        1.0
       ],
       "n_cases": 30,
-      "ndcg_at_5": 0.895,
-      "recall_at_5": 0.9444
+      "ndcg_at_5": 0.9219,
+      "recall_at_5": 0.9833
     }
   },
   "meta": {
@@ -63,28 +63,28 @@
       "quality_gate_dev.json": "1252ba4911d8e9276a1dc77bc9beaf26ac158bc555b9a7ca11ca2f1b86652df2",
       "quality_gate_heldout.json": "c74b494a481ca7ddb7b2b781d866cd3d747cc2999637ee8804459bfd3438c95f"
     },
-    "generated_at": "2026-10-28T12:20:20.212932+00:00",
-    "git_commit": "4e032267e90139b59e53cc9d4e496bee88d3a648",
+    "generated_at": "2026-10-28T14:55:18.830759+00:00",
+    "git_commit": "dc384cc6eab84e909414fa8939ffba81d93d8d81",
     "k": 5,
     "offline": true,
     "platform": {
       "os": "Darwin",
       "python_version": "3.14.7"
     },
-    "runtime_seconds": 96.2,
+    "runtime_seconds": 144.42,
     "seed": 42,
     "split": "all"
   },
   "query_details": [
     {
       "category": "temporal_reasoning",
-      "confidence": 0.8708,
+      "confidence": 0.9658,
       "correct": true,
       "gold_references": [
         "answer_6ea1541e_2",
         "answer_6ea1541e_1"
       ],
-      "latency_ms": 533.17,
+      "latency_ms": 869.73,
       "ndcg_at_5": 1.0,
       "qid": "08f4fc43",
       "query": "How many days had passed between the Sunday mass at St. Mary's Church and the Ash Wednesday service at the cathedral?",
@@ -93,19 +93,19 @@
         "answer_6ea1541e_2",
         "answer_6ea1541e_1",
         "ultrachat_292416",
-        "sharegpt_wXqtiUe_0",
-        "sharegpt_DM8Y1dw_0"
+        "sharegpt_DM8Y1dw_0",
+        "sharegpt_wXqtiUe_0"
       ],
       "split": "dev"
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.9498,
+      "confidence": 0.98,
       "correct": true,
       "gold_references": [
         "answer_f6d6e33f_1"
       ],
-      "latency_ms": 430.72,
+      "latency_ms": 772.51,
       "ndcg_at_5": 1.0,
       "qid": "gpt4_a2d1d1f6",
       "query": "How many days ago did I harvest my first batch of fresh herbs from the herb garden kit?",
@@ -121,13 +121,13 @@
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.913,
-      "correct": false,
+      "confidence": 0.98,
+      "correct": true,
       "gold_references": [
         "answer_ab603dd5_1",
         "answer_ab603dd5_2"
       ],
-      "latency_ms": 394.88,
+      "latency_ms": 652.99,
       "ndcg_at_5": 1.0,
       "qid": "982b5123",
       "query": "How many months ago did I book the Airbnb in San Francisco?",
@@ -143,7 +143,7 @@
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.8888,
+      "confidence": 0.9585,
       "correct": false,
       "gold_references": [
         "answer_e9ad5914_1",
@@ -153,7 +153,7 @@
         "answer_e9ad5914_5",
         "answer_e9ad5914_6"
       ],
-      "latency_ms": 525.79,
+      "latency_ms": 816.08,
       "ndcg_at_5": 1.0,
       "qid": "gpt4_a1b77f9c",
       "query": "How many weeks in total do I spent on reading 'The Nightingale' and listening to 'Sapiens: A Brief History of Humankind' and 'The Power'?",
@@ -169,36 +169,36 @@
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.8687,
-      "correct": false,
+      "confidence": 0.9621,
+      "correct": true,
       "gold_references": [
         "answer_8c64ce26_2",
         "answer_8c64ce26_1",
         "answer_8c64ce26_3"
       ],
-      "latency_ms": 327.39,
-      "ndcg_at_5": 0.4693,
+      "latency_ms": 568.08,
+      "ndcg_at_5": 0.906,
       "qid": "gpt4_e061b84g",
       "query": "I mentioned participating in a sports event two weeks ago. What was the event?",
-      "recall_at_5": 0.3333,
+      "recall_at_5": 1.0,
       "retrieved_ids": [
         "answer_8c64ce26_3",
-        "9dac9e37_1",
         "sharegpt_cUXo8S0_0",
-        "68705467_1",
+        "answer_8c64ce26_1",
+        "answer_8c64ce26_2",
         "ce584ba0"
       ],
       "split": "dev"
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.8836,
+      "confidence": 0.98,
       "correct": true,
       "gold_references": [
         "answer_e28c1f0e_1",
         "answer_e28c1f0e_2"
       ],
-      "latency_ms": 454.52,
+      "latency_ms": 716.63,
       "ndcg_at_5": 1.0,
       "qid": "gpt4_e414231f",
       "query": "Which bike did I fixed or serviced the past weekend?",
@@ -207,19 +207,19 @@
         "answer_e28c1f0e_1",
         "answer_e28c1f0e_2",
         "752c438c_3",
-        "07a26dfa_5",
-        "deb5bb60"
+        "deb5bb60",
+        "07a26dfa_5"
       ],
       "split": "dev"
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.8641,
+      "confidence": 0.9629,
       "correct": true,
       "gold_references": [
         "answer_b51b6115_1"
       ],
-      "latency_ms": 470.36,
+      "latency_ms": 751.59,
       "ndcg_at_5": 1.0,
       "qid": "af082822",
       "query": "How many weeks ago did I attend the friends and family sale at Nordstrom?",
@@ -235,13 +235,13 @@
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.8469,
+      "confidence": 0.9435,
       "correct": true,
       "gold_references": [
         "answer_d39b7977_1",
         "answer_d39b7977_2"
       ],
-      "latency_ms": 392.08,
+      "latency_ms": 678.55,
       "ndcg_at_5": 1.0,
       "qid": "2c63a862",
       "query": "How many days did it take for me to find a house I loved after starting to work with Rachel?",
@@ -257,19 +257,19 @@
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.8112,
+      "confidence": 0.9105,
       "correct": true,
       "gold_references": [
         "answer_0a00c163_1",
         "answer_0a00c163_2"
       ],
-      "latency_ms": 402.71,
+      "latency_ms": 687.13,
       "ndcg_at_5": 0.6241,
       "qid": "gpt4_4edbafa2",
       "query": "What was the date on which I attended the first BBQ event in June?",
       "recall_at_5": 1.0,
       "retrieved_ids": [
-        "sharegpt_TQNHiIB_12",
+        "2ba7fdd0_2",
         "answer_0a00c163_2",
         "sharegpt_jZOf9E5_21",
         "18c0af9c",
@@ -279,99 +279,99 @@
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.8503,
+      "confidence": 0.9543,
       "correct": true,
       "gold_references": [
         "answer_1c6b85ea_2",
         "answer_1c6b85ea_1"
       ],
-      "latency_ms": 506.63,
-      "ndcg_at_5": 0.9197,
+      "latency_ms": 799.04,
+      "ndcg_at_5": 0.8772,
       "qid": "gpt4_2487a7cb",
       "query": "Which event did I attend first, the 'Effective Time Management' workshop or the 'Data Analysis using Python' webinar?",
       "recall_at_5": 1.0,
       "retrieved_ids": [
         "answer_1c6b85ea_2",
         "4f5880c6_6",
+        "sharegpt_CHaU4ax_10",
         "answer_1c6b85ea_1",
-        "sharegpt_QN26oUg_0",
-        "b10c041b_2"
+        "sharegpt_QN26oUg_0"
       ],
       "split": "dev"
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.895,
+      "confidence": 0.98,
       "correct": true,
       "gold_references": [
         "answer_56521e66_1"
       ],
-      "latency_ms": 358.49,
+      "latency_ms": 600.31,
       "ndcg_at_5": 1.0,
       "qid": "gpt4_8279ba03",
       "query": "What kitchen appliance did I buy 10 days ago?",
       "recall_at_5": 1.0,
       "retrieved_ids": [
         "answer_56521e66_1",
-        "bb107057_2",
         "864a563d_5",
-        "bd00a24d_2",
-        "2ef55f49_3"
+        "bb107057_2",
+        "652c0717_3",
+        "ba9f938b_1"
       ],
       "split": "dev"
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.8636,
+      "confidence": 0.9633,
       "correct": true,
       "gold_references": [
         "answer_550bb2d1_1"
       ],
-      "latency_ms": 377.13,
-      "ndcg_at_5": 0.5,
+      "latency_ms": 665.29,
+      "ndcg_at_5": 0.6309,
       "qid": "gpt4_b0863698",
       "query": "How many days ago did I participate in the 5K charity run?",
       "recall_at_5": 1.0,
       "retrieved_ids": [
         "91e581ad_3",
-        "4a79d078_2",
         "answer_550bb2d1_1",
-        "5b014f9b_1",
-        "710833f3"
+        "4a79d078_2",
+        "710833f3",
+        "65f6f130_1"
       ],
       "split": "dev"
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.8567,
+      "confidence": 0.954,
       "correct": true,
       "gold_references": [
         "answer_016f6bd4_2",
         "answer_016f6bd4_1"
       ],
-      "latency_ms": 397.51,
+      "latency_ms": 657.99,
       "ndcg_at_5": 1.0,
       "qid": "a3045048",
       "query": "How many days before my best friend's birthday party did I order her gift?",
       "recall_at_5": 1.0,
       "retrieved_ids": [
-        "answer_016f6bd4_1",
         "answer_016f6bd4_2",
+        "answer_016f6bd4_1",
         "aaf71ce2_2",
         "5cb58cc6",
-        "sharegpt_asoSnhq_0"
+        "2def525b_1"
       ],
       "split": "dev"
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.7857,
+      "confidence": 0.8754,
       "correct": true,
       "gold_references": [
         "answer_72d9aa58_1",
         "answer_72d9aa58_2"
       ],
-      "latency_ms": 504.51,
+      "latency_ms": 836.65,
       "ndcg_at_5": 0.5438,
       "qid": "gpt4_8c8961ae",
       "query": "Which trip did I take first, the one to Europe with family or the solo trip to Thailand?",
@@ -387,13 +387,13 @@
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.8557,
+      "confidence": 0.954,
       "correct": true,
       "gold_references": [
         "answer_4bebc782_1",
         "answer_4bebc782_2"
       ],
-      "latency_ms": 513.86,
+      "latency_ms": 845.73,
       "ndcg_at_5": 1.0,
       "qid": "4dfccbf7",
       "query": "How many days had passed since I started taking ukulele lessons when I decided to take my acoustic guitar to the guitar tech for servicing?",
@@ -402,20 +402,20 @@
         "answer_4bebc782_1",
         "answer_4bebc782_2",
         "a5e69b52_1",
-        "36f8b380_1",
-        "aa71db11_2"
+        "aa71db11_2",
+        "36f8b380_1"
       ],
       "split": "dev"
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.8614,
+      "confidence": 0.9565,
       "correct": true,
       "gold_references": [
         "answer_4cb841a8_1",
         "answer_4cb841a8_2"
       ],
-      "latency_ms": 476.45,
+      "latency_ms": 764.69,
       "ndcg_at_5": 1.0,
       "qid": "1c549ce4",
       "query": "What is the total cost of the car cover and detailing spray I purchased?",
@@ -424,20 +424,20 @@
         "answer_4cb841a8_2",
         "answer_4cb841a8_1",
         "sharegpt_miOKGt1_13",
-        "f1e4daa8_2",
-        "d743153b_2"
+        "d743153b_2",
+        "f1e4daa8_2"
       ],
       "split": "dev"
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.8987,
+      "confidence": 0.98,
       "correct": true,
       "gold_references": [
         "answer_f9de4602_2",
         "answer_f9de4602_1"
       ],
-      "latency_ms": 397.73,
+      "latency_ms": 665.42,
       "ndcg_at_5": 0.9197,
       "qid": "dd2973ad",
       "query": "What time did I go to bed on the day before I had a doctor's appointment?",
@@ -453,13 +453,13 @@
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.8609,
+      "confidence": 0.9634,
       "correct": true,
       "gold_references": [
         "answer_688f9a3f_1",
         "answer_688f9a3f_2"
       ],
-      "latency_ms": 406.53,
+      "latency_ms": 679.11,
       "ndcg_at_5": 1.0,
       "qid": "5025383b",
       "query": "What are the two hobbies that led me to join online communities?",
@@ -468,43 +468,43 @@
         "answer_688f9a3f_2",
         "answer_688f9a3f_1",
         "ultrachat_50563",
-        "ultrachat_150500",
-        "0e349efa"
+        "0e349efa",
+        "2b8fe437_1"
       ],
       "split": "dev"
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.8608,
-      "correct": false,
+      "confidence": 0.9769,
+      "correct": true,
       "gold_references": [
         "answer_2504635e_3",
         "answer_2504635e_2",
         "answer_2504635e_1"
       ],
-      "latency_ms": 461.82,
-      "ndcg_at_5": 0.7654,
+      "latency_ms": 712.55,
+      "ndcg_at_5": 0.9675,
       "qid": "gpt4_d12ceb0e",
       "query": "What is the average age of me, my parents, and my grandparents?",
-      "recall_at_5": 0.6667,
+      "recall_at_5": 1.0,
       "retrieved_ids": [
         "answer_2504635e_2",
         "answer_2504635e_3",
         "73f4798f",
-        "ee28793c",
-        "2fe5510e_3"
+        "answer_2504635e_1",
+        "ee28793c"
       ],
       "split": "dev"
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.8636,
+      "confidence": 0.9766,
       "correct": true,
       "gold_references": [
         "answer_87e3a1cb_1",
         "answer_87e3a1cb_2"
       ],
-      "latency_ms": 376.01,
+      "latency_ms": 660.71,
       "ndcg_at_5": 1.0,
       "qid": "ef9cf60a",
       "query": "How much did I spend on gifts for my sister?",
@@ -514,13 +514,13 @@
         "answer_87e3a1cb_1",
         "12dd7681_4",
         "0babf5b6_2",
-        "sharegpt_6fU0WOe_56"
+        "b330d6b1"
       ],
       "split": "dev"
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.8503,
+      "confidence": 0.9442,
       "correct": true,
       "gold_references": [
         "answer_5a0d28f8_4",
@@ -528,8 +528,8 @@
         "answer_5a0d28f8_3",
         "answer_5a0d28f8_1"
       ],
-      "latency_ms": 448.85,
-      "ndcg_at_5": 0.9829,
+      "latency_ms": 751.16,
+      "ndcg_at_5": 1.0,
       "qid": "d23cf73b",
       "query": "How many different cuisines have I learned to cook or tried out in the past few months?",
       "recall_at_5": 1.0,
@@ -537,21 +537,21 @@
         "answer_5a0d28f8_3",
         "answer_5a0d28f8_2",
         "answer_5a0d28f8_4",
-        "ultrachat_456819",
-        "answer_5a0d28f8_1"
+        "answer_5a0d28f8_1",
+        "ultrachat_456819"
       ],
       "split": "dev"
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.8669,
+      "confidence": 0.9632,
       "correct": true,
       "gold_references": [
         "answer_7726e7e9_1",
         "answer_7726e7e9_3",
         "answer_7726e7e9_2"
       ],
-      "latency_ms": 461.78,
+      "latency_ms": 726.5,
       "ndcg_at_5": 0.906,
       "qid": "bf659f65",
       "query": "How many music albums or EPs have I purchased or downloaded?",
@@ -567,35 +567,35 @@
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.8685,
-      "correct": false,
+      "confidence": 0.9715,
+      "correct": true,
       "gold_references": [
         "answer_8de18468_2",
         "answer_8de18468_1"
       ],
-      "latency_ms": 392.55,
-      "ndcg_at_5": 0.6131,
+      "latency_ms": 670.66,
+      "ndcg_at_5": 0.9197,
       "qid": "157a136e",
       "query": "How many years older is my grandma than me?",
-      "recall_at_5": 0.5,
+      "recall_at_5": 1.0,
       "retrieved_ids": [
         "answer_8de18468_2",
-        "ultrachat_255132",
+        "ultrachat_58612",
+        "answer_8de18468_1",
         "ultrachat_174427",
-        "ultrachat_264419",
-        "07a26dfa_1"
+        "sharegpt_8qFtl50_0"
       ],
       "split": "dev"
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.8709,
+      "confidence": 0.9714,
       "correct": true,
       "gold_references": [
         "answer_35e36341_1",
         "answer_35e36341_2"
       ],
-      "latency_ms": 446.93,
+      "latency_ms": 763.51,
       "ndcg_at_5": 1.0,
       "qid": "8979f9ec",
       "query": "What is the total number of lunch meals I got from the chicken fajitas and lentil soup?",
@@ -611,13 +611,13 @@
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.8526,
+      "confidence": 0.9509,
       "correct": true,
       "gold_references": [
         "answer_d8454588_1",
         "answer_d8454588_2"
       ],
-      "latency_ms": 537.7,
+      "latency_ms": 849.61,
       "ndcg_at_5": 1.0,
       "qid": "1f2b8d4f",
       "query": "What is the difference in price between my luxury boots and the similar pair found at the budget store?",
@@ -633,7 +633,7 @@
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.8913,
+      "confidence": 0.9586,
       "correct": false,
       "gold_references": [
         "answer_2bd23659_3",
@@ -641,29 +641,29 @@
         "answer_2bd23659_4",
         "answer_2bd23659_1"
       ],
-      "latency_ms": 392.13,
-      "ndcg_at_5": 0.8048,
+      "latency_ms": 660.59,
+      "ndcg_at_5": 0.8319,
       "qid": "1a8a66a6",
       "query": "How many magazine subscriptions do I currently have?",
       "recall_at_5": 0.75,
       "retrieved_ids": [
         "answer_2bd23659_1",
         "answer_2bd23659_3",
-        "54aa4875",
-        "answer_2bd23659_2",
-        "ebb5d262"
+        "answer_2bd23659_4",
+        "ebb5d262",
+        "54aa4875"
       ],
       "split": "dev"
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.8794,
+      "confidence": 0.9769,
       "correct": true,
       "gold_references": [
         "answer_dc5e537d_1",
         "answer_dc5e537d_2"
       ],
-      "latency_ms": 417.73,
+      "latency_ms": 720.34,
       "ndcg_at_5": 1.0,
       "qid": "0ea62687",
       "query": "How much more miles per gallon was my car getting a few months ago compared to now?",
@@ -679,13 +679,13 @@
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.8587,
+      "confidence": 0.9567,
       "correct": true,
       "gold_references": [
         "answer_923c0221_1",
         "answer_923c0221_2"
       ],
-      "latency_ms": 400.0,
+      "latency_ms": 665.56,
       "ndcg_at_5": 1.0,
       "qid": "c2ac3c61",
       "query": "How many online courses have I completed in total?",
@@ -694,14 +694,14 @@
         "answer_923c0221_2",
         "answer_923c0221_1",
         "0c483a3c",
-        "6009ba4e_5",
+        "sharegpt_2BSHRQc_25",
         "ed0dd360_2"
       ],
       "split": "dev"
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.8637,
+      "confidence": 0.9557,
       "correct": true,
       "gold_references": [
         "answer_8f6b938d_1",
@@ -709,15 +709,15 @@
         "answer_8f6b938d_4",
         "answer_8f6b938d_2"
       ],
-      "latency_ms": 388.67,
+      "latency_ms": 615.47,
       "ndcg_at_5": 0.9829,
       "qid": "2788b940",
       "query": "How many fitness classes do I attend in a typical week?",
       "recall_at_5": 1.0,
       "retrieved_ids": [
         "answer_8f6b938d_2",
-        "answer_8f6b938d_4",
         "answer_8f6b938d_1",
+        "answer_8f6b938d_4",
         "ultrachat_410014",
         "answer_8f6b938d_3"
       ],
@@ -725,37 +725,37 @@
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.8477,
-      "correct": true,
+      "confidence": 0.9485,
+      "correct": false,
       "gold_references": [
         "answer_6350aa4f_1",
         "answer_6350aa4f_2",
         "answer_6350aa4f_3",
         "answer_6350aa4f_4"
       ],
-      "latency_ms": 434.93,
-      "ndcg_at_5": 0.9829,
+      "latency_ms": 750.39,
+      "ndcg_at_5": 0.8319,
       "qid": "gpt4_e05b82a6",
       "query": "How many times did I ride rollercoasters across all the events I attended from July to October?",
-      "recall_at_5": 1.0,
+      "recall_at_5": 0.75,
       "retrieved_ids": [
         "answer_6350aa4f_4",
         "answer_6350aa4f_2",
         "answer_6350aa4f_1",
         "b405d3d8_1",
-        "answer_6350aa4f_3"
+        "a5ed0cb8"
       ],
       "split": "dev"
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.8825,
+      "confidence": 0.98,
       "correct": true,
       "gold_references": [
         "answer_25df025b_1",
         "answer_25df025b_2"
       ],
-      "latency_ms": 375.0,
+      "latency_ms": 672.18,
       "ndcg_at_5": 1.0,
       "qid": "f685340e",
       "query": "How often do I play tennis with my friends at the local park previously? How often do I play now?",
@@ -771,13 +771,13 @@
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.9049,
+      "confidence": 0.98,
       "correct": true,
       "gold_references": [
         "answer_babbaccb_1",
         "answer_babbaccb_2"
       ],
-      "latency_ms": 426.23,
+      "latency_ms": 735.93,
       "ndcg_at_5": 1.0,
       "qid": "ed4ddc30",
       "query": "How many dozen eggs do we currently have stocked up in our refrigerator?",
@@ -785,21 +785,21 @@
       "retrieved_ids": [
         "answer_babbaccb_2",
         "answer_babbaccb_1",
+        "8b726b64_1",
         "499652a0_3",
-        "d2f4a309",
-        "8b726b64_1"
+        "d2f4a309"
       ],
       "split": "dev"
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.8793,
+      "confidence": 0.98,
       "correct": true,
       "gold_references": [
         "answer_b28f2c7a_1",
         "answer_b28f2c7a_2"
       ],
-      "latency_ms": 366.65,
+      "latency_ms": 599.26,
       "ndcg_at_5": 1.0,
       "qid": "59524333",
       "query": "What time do I usually go to the gym?",
@@ -815,13 +815,13 @@
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.8613,
+      "confidence": 0.9612,
       "correct": true,
       "gold_references": [
         "answer_d6d2eba8_1",
         "answer_d6d2eba8_2"
       ],
-      "latency_ms": 395.75,
+      "latency_ms": 692.09,
       "ndcg_at_5": 1.0,
       "qid": "0f05491a",
       "query": "How many stars do I need to reach the gold level on my Starbucks Rewards app?",
@@ -837,13 +837,13 @@
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.8743,
+      "confidence": 0.976,
       "correct": true,
       "gold_references": [
         "answer_d08a934d_1",
         "answer_d08a934d_2"
       ],
-      "latency_ms": 397.46,
+      "latency_ms": 857.31,
       "ndcg_at_5": 1.0,
       "qid": "7a87bd0c",
       "query": "How long have I been sticking to my daily tidying routine?",
@@ -859,13 +859,13 @@
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.8737,
+      "confidence": 0.9706,
       "correct": true,
       "gold_references": [
         "answer_f762ad8d_1",
         "answer_f762ad8d_2"
       ],
-      "latency_ms": 409.72,
+      "latency_ms": 707.69,
       "ndcg_at_5": 1.0,
       "qid": "26bdc477",
       "query": "How many trips have I taken my Canon EOS 80D camera on?",
@@ -881,13 +881,13 @@
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.8553,
+      "confidence": 0.9524,
       "correct": true,
       "gold_references": [
         "answer_8a791264_1",
         "answer_8a791264_2"
       ],
-      "latency_ms": 420.26,
+      "latency_ms": 677.67,
       "ndcg_at_5": 1.0,
       "qid": "eace081b",
       "query": "Where am I planning to stay for my birthday trip to Hawaii?",
@@ -903,13 +903,13 @@
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.9012,
+      "confidence": 0.98,
       "correct": true,
       "gold_references": [
         "answer_77f32504_1",
         "answer_77f32504_2"
       ],
-      "latency_ms": 432.86,
+      "latency_ms": 703.1,
       "ndcg_at_5": 1.0,
       "qid": "6a27ffc2",
       "query": "How many videos of Corey Schafer's Python programming series have I completed so far?",
@@ -917,21 +917,21 @@
       "retrieved_ids": [
         "answer_77f32504_2",
         "answer_77f32504_1",
-        "sharegpt_kkqlRlo_13",
         "sharegpt_5clkQjb_12",
-        "ab483540"
+        "sharegpt_kkqlRlo_13",
+        "sharegpt_KSCqghj_0"
       ],
       "split": "dev"
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.8581,
+      "confidence": 0.9495,
       "correct": true,
       "gold_references": [
         "answer_73540165_1",
         "answer_73540165_2"
       ],
-      "latency_ms": 376.19,
+      "latency_ms": 642.82,
       "ndcg_at_5": 1.0,
       "qid": "ce6d2d27",
       "query": "What day of the week do I take a cocktail-making class?",
@@ -947,13 +947,13 @@
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.8823,
+      "confidence": 0.98,
       "correct": true,
       "gold_references": [
         "answer_b0f3dfff_1",
         "answer_b0f3dfff_2"
       ],
-      "latency_ms": 470.92,
+      "latency_ms": 766.17,
       "ndcg_at_5": 1.0,
       "qid": "5a4f22c0",
       "query": "What company is Rachel, an old colleague from my previous company, currently working at?",
@@ -969,13 +969,13 @@
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.8815,
+      "confidence": 0.98,
       "correct": true,
       "gold_references": [
         "answer_8748f791_1",
         "answer_8748f791_2"
       ],
-      "latency_ms": 402.4,
+      "latency_ms": 730.85,
       "ndcg_at_5": 1.0,
       "qid": "031748ae",
       "query": "How many engineers do I lead when I just started my new role as Senior Software Engineer? How many engineers do I lead now?",
@@ -991,13 +991,13 @@
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.9185,
+      "confidence": 0.98,
       "correct": true,
       "gold_references": [
         "answer_5126c02d_1",
         "answer_5126c02d_2"
       ],
-      "latency_ms": 354.59,
+      "latency_ms": 648.6,
       "ndcg_at_5": 1.0,
       "qid": "a2f3aa27",
       "query": "How many followers do I have on Instagram now?",
@@ -1007,41 +1007,41 @@
         "answer_5126c02d_1",
         "b65f51fb_5",
         "ultrachat_475462",
-        "a8028ce7_2"
+        "ultrachat_460868"
       ],
       "split": "dev"
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.845,
-      "correct": false,
+      "confidence": 0.937,
+      "correct": true,
       "gold_references": [
         "answer_d3bf812b_1",
         "answer_d3bf812b_2"
       ],
-      "latency_ms": 367.47,
+      "latency_ms": 643.29,
       "ndcg_at_5": 1.0,
       "qid": "c4ea545c",
       "query": "Do I go to the gym more frequently than I did previously?",
       "recall_at_5": 1.0,
       "retrieved_ids": [
-        "answer_d3bf812b_1",
         "answer_d3bf812b_2",
+        "answer_d3bf812b_1",
         "sharegpt_I0uNTjm_16",
-        "60fdb334_2",
-        "a2a8e2c9"
+        "sharegpt_CpVLHnZ_62",
+        "9f9b402a_5"
       ],
       "split": "dev"
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.9012,
+      "confidence": 0.98,
       "correct": true,
       "gold_references": [
         "answer_79c395a9_1",
         "answer_79c395a9_2"
       ],
-      "latency_ms": 424.0,
+      "latency_ms": 699.84,
       "ndcg_at_5": 1.0,
       "qid": "1cea1afa",
       "query": "How many Instagram followers do I currently have?",
@@ -1057,13 +1057,13 @@
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.8665,
+      "confidence": 0.9664,
       "correct": true,
       "gold_references": [
         "answer_c44b9df4_1",
         "answer_c44b9df4_2"
       ],
-      "latency_ms": 389.9,
+      "latency_ms": 677.95,
       "ndcg_at_5": 1.0,
       "qid": "71315a70",
       "query": "How many hours have I spent on my abstract ocean sculpture?",
@@ -1079,12 +1079,12 @@
     },
     {
       "category": "abstention",
-      "confidence": 0.9151,
+      "confidence": 0.9183,
       "correct": true,
       "gold_references": [
         "answer_586de428_abs"
       ],
-      "latency_ms": 356.05,
+      "latency_ms": 608.12,
       "ndcg_at_5": 1.0,
       "qid": "15745da0_abs",
       "query": "How long have I been collecting vintage films?",
@@ -1100,12 +1100,12 @@
     },
     {
       "category": "abstention",
-      "confidence": 0.7953,
+      "confidence": 0.7943,
       "correct": true,
       "gold_references": [
         "answer_c6fd8ebd_abs"
       ],
-      "latency_ms": 370.08,
+      "latency_ms": 626.84,
       "ndcg_at_5": 0.6309,
       "qid": "0862e8bf_abs",
       "query": "What is the name of my hamster?",
@@ -1121,29 +1121,29 @@
     },
     {
       "category": "abstention",
-      "confidence": 0.844,
+      "confidence": 0.8814,
       "correct": true,
       "gold_references": [
         "answer_e0956e0a_abs_2",
         "answer_e0956e0a_abs_1"
       ],
-      "latency_ms": 459.21,
-      "ndcg_at_5": 0.2372,
+      "latency_ms": 753.25,
+      "ndcg_at_5": 0.0,
       "qid": "60bf93ed_abs",
       "query": "How many days did it take for my iPad case to arrive after I bought it?",
-      "recall_at_5": 0.5,
+      "recall_at_5": 0.0,
       "retrieved_ids": [
         "1e91cdf0",
-        "841da171_2",
-        "9ef698bc_2",
         "0944933f_1",
-        "answer_e0956e0a_abs_1"
+        "f550a835_2",
+        "841da171_2",
+        "6cd203f7_2"
       ],
       "split": "dev"
     },
     {
       "category": "abstention",
-      "confidence": 0.9006,
+      "confidence": 0.8978,
       "correct": true,
       "gold_references": [
         "answer_733e443a_abs_1",
@@ -1151,8 +1151,8 @@
         "answer_733e443a_abs_2",
         "answer_733e443a_abs_4"
       ],
-      "latency_ms": 294.57,
-      "ndcg_at_5": 0.7366,
+      "latency_ms": 524.02,
+      "ndcg_at_5": 0.7537,
       "qid": "88432d0a_abs",
       "query": "How many times did I bake egg tarts in the past two weeks?",
       "recall_at_5": 0.75,
@@ -1160,27 +1160,27 @@
         "answer_733e443a_abs_1",
         "0c636f88_3",
         "answer_733e443a_abs_2",
-        "31ca5871_1",
-        "answer_733e443a_abs_4"
+        "answer_733e443a_abs_4",
+        "31ca5871_1"
       ],
       "split": "dev"
     },
     {
       "category": "abstention",
-      "confidence": 0.9012,
+      "confidence": 0.9035,
       "correct": true,
       "gold_references": [
         "answer_e6143162_abs"
       ],
-      "latency_ms": 394.42,
+      "latency_ms": 699.15,
       "ndcg_at_5": 1.0,
       "qid": "bc8a6e93_abs",
       "query": "What did I bake for my uncle's birthday party?",
       "recall_at_5": 1.0,
       "retrieved_ids": [
         "answer_e6143162_abs",
-        "sharegpt_SF6KWw1_9",
         "375354d1_2",
+        "sharegpt_SF6KWw1_9",
         "sharegpt_hn3IS1q_0",
         "9c68c22f"
       ],
@@ -1188,13 +1188,13 @@
     },
     {
       "category": "abstention",
-      "confidence": 0.8986,
+      "confidence": 0.9267,
       "correct": true,
       "gold_references": [
         "answer_60e8941a_abs_1",
         "answer_60e8941a_abs_2"
       ],
-      "latency_ms": 526.32,
+      "latency_ms": 747.13,
       "ndcg_at_5": 1.0,
       "qid": "edced276_abs",
       "query": "How many days did I spend in total traveling in Hawaii and in Seattle?",
@@ -1210,13 +1210,13 @@
     },
     {
       "category": "abstention",
-      "confidence": 0.8991,
+      "confidence": 0.9033,
       "correct": true,
       "gold_references": [
         "answer_8748f791_abs_1",
         "answer_8748f791_abs_2"
       ],
-      "latency_ms": 437.55,
+      "latency_ms": 722.3,
       "ndcg_at_5": 1.0,
       "qid": "031748ae_abs",
       "query": "How many engineers do I lead when I just started my new role as Software Engineer Manager?",
@@ -1226,19 +1226,19 @@
         "answer_8748f791_abs_2",
         "sharegpt_EX0p0tj_19",
         "ca8286f2",
-        "169cd54f"
+        "ultrachat_341706"
       ],
       "split": "dev"
     },
     {
       "category": "abstention",
-      "confidence": 0.9169,
+      "confidence": 0.9179,
       "correct": true,
       "gold_references": [
         "answer_3e5fea0e_abs_2",
         "answer_3e5fea0e_abs_1"
       ],
-      "latency_ms": 398.21,
+      "latency_ms": 663.45,
       "ndcg_at_5": 1.0,
       "qid": "eeda8a6d_abs",
       "query": "How many fish are there in my 30-gallon tank?",
@@ -1248,64 +1248,64 @@
         "answer_3e5fea0e_abs_2",
         "sharegpt_2TxYMX9_0",
         "a58c0f8d_1",
-        "9530353d_2"
+        "4a9eb139_3"
       ],
       "split": "dev"
     },
     {
       "category": "abstention",
-      "confidence": 0.8844,
+      "confidence": 0.8926,
       "correct": true,
       "gold_references": [
         "answer_3f9693b7_abs_1",
         "answer_3f9693b7_abs_2"
       ],
-      "latency_ms": 399.5,
-      "ndcg_at_5": 1.0,
+      "latency_ms": 679.59,
+      "ndcg_at_5": 0.9197,
       "qid": "6aeb4375_abs",
       "query": "How many Italian restaurants have I tried in my city?",
       "recall_at_5": 1.0,
       "retrieved_ids": [
         "answer_3f9693b7_abs_2",
-        "answer_3f9693b7_abs_1",
         "ultrachat_181672",
+        "answer_3f9693b7_abs_1",
         "a5286353_1",
-        "24cb335f"
+        "ultrachat_133121"
       ],
       "split": "dev"
     },
     {
       "category": "abstention",
-      "confidence": 0.8583,
-      "correct": false,
+      "confidence": 0.8985,
+      "correct": true,
       "gold_references": [
         "answer_990c8992_abs_2",
         "answer_990c8992_abs_3",
         "answer_990c8992_abs_1"
       ],
-      "latency_ms": 365.97,
+      "latency_ms": 662.94,
       "ndcg_at_5": 1.0,
       "qid": "80ec1f4f_abs",
       "query": "How many different museums or galleries did I visit in December?",
       "recall_at_5": 1.0,
       "retrieved_ids": [
-        "answer_990c8992_abs_1",
         "answer_990c8992_abs_3",
+        "answer_990c8992_abs_1",
         "answer_990c8992_abs_2",
-        "cd6be104_3",
-        "ultrachat_169512"
+        "ultrachat_169512",
+        "cd6be104_3"
       ],
       "split": "dev"
     },
     {
       "category": "abstention",
-      "confidence": 0.8967,
+      "confidence": 0.8975,
       "correct": true,
       "gold_references": [
         "answer_96c743d0_abs_1",
         "answer_96c743d0_abs_2"
       ],
-      "latency_ms": 397.51,
+      "latency_ms": 677.72,
       "ndcg_at_5": 1.0,
       "qid": "09ba9854_abs",
       "query": "How much will I save by taking the bus from the airport to my hotel instead of a taxi?",
@@ -1321,14 +1321,14 @@
     },
     {
       "category": "abstention",
-      "confidence": 0.877,
+      "confidence": 0.8854,
       "correct": true,
       "gold_references": [
         "answer_35c5419d_abs_3",
         "answer_35c5419d_abs_1",
         "answer_35c5419d_abs_2"
       ],
-      "latency_ms": 447.22,
+      "latency_ms": 772.37,
       "ndcg_at_5": 0.7039,
       "qid": "gpt4_372c3eed_abs",
       "query": "How many years in total did I spend in formal education from high school to the completion of my Master's degree?",
@@ -1337,20 +1337,20 @@
         "answer_35c5419d_abs_1",
         "85dec0b4_1",
         "answer_35c5419d_abs_3",
-        "31e254b5",
+        "3214139b_1",
         "sharegpt_J410gdS_30"
       ],
       "split": "dev"
     },
     {
       "category": "abstention",
-      "confidence": 0.914,
+      "confidence": 0.9187,
       "correct": true,
       "gold_references": [
         "answer_65600ff6_abs_1",
         "answer_65600ff6_abs_2"
       ],
-      "latency_ms": 453.3,
+      "latency_ms": 773.92,
       "ndcg_at_5": 0.6131,
       "qid": "gpt4_fe651585_abs",
       "query": "Who became a parent first, Tom or Alex?",
@@ -1358,28 +1358,28 @@
       "retrieved_ids": [
         "answer_65600ff6_abs_2",
         "sharegpt_kTBVvbN_0",
-        "sharegpt_7PLgNll_0",
         "sharegpt_v6ZRge5_0",
+        "sharegpt_7PLgNll_0",
         "d9bce149_2"
       ],
       "split": "dev"
     },
     {
       "category": "abstention",
-      "confidence": 0.8435,
+      "confidence": 0.8402,
       "correct": true,
       "gold_references": [
         "answer_d8e33f5c_abs_1",
         "answer_d8e33f5c_abs_2"
       ],
-      "latency_ms": 500.6,
+      "latency_ms": 803.18,
       "ndcg_at_5": 0.8503,
       "qid": "gpt4_c27434e8_abs",
       "query": "Which project did I start first, the Ferrari model or the Porsche 991 Turbo S model?",
       "recall_at_5": 1.0,
       "retrieved_ids": [
         "answer_d8e33f5c_abs_2",
-        "sharegpt_hGtkNGL_12",
+        "25d1830a_1",
         "fccc9400",
         "5c184f9f_5",
         "answer_d8e33f5c_abs_1"
@@ -1388,35 +1388,35 @@
     },
     {
       "category": "abstention",
-      "confidence": 0.8937,
+      "confidence": 0.8918,
       "correct": true,
       "gold_references": [
         "answer_e5131a1b_abs_1",
         "answer_e5131a1b_abs_2"
       ],
-      "latency_ms": 443.95,
+      "latency_ms": 783.07,
       "ndcg_at_5": 0.2372,
       "qid": "gpt4_93159ced_abs",
       "query": "How long have I been working before I started my current job at Google?",
       "recall_at_5": 0.5,
       "retrieved_ids": [
         "2f097fba_1",
+        "sharegpt_CyJ3dal_43",
         "76385c25",
-        "156988fe",
-        "ultrachat_195762",
-        "answer_e5131a1b_abs_1"
+        "d850eba6_1",
+        "answer_e5131a1b_abs_2"
       ],
       "split": "dev"
     },
     {
       "category": "multi_hop",
-      "confidence": 0.6571,
+      "confidence": 0.9726,
       "correct": true,
       "gold_references": [
         "doc_mara_helios",
         "doc_helios_deadline"
       ],
-      "latency_ms": 1.47,
+      "latency_ms": 1.73,
       "ndcg_at_5": 1.0,
       "qid": "mh_01_mara_helios",
       "query": "When does Mara's project ship?",
@@ -1429,13 +1429,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.6571,
+      "confidence": 0.9726,
       "correct": true,
       "gold_references": [
         "doc_daniel_sirius",
         "doc_sirius_deadline"
       ],
-      "latency_ms": 1.22,
+      "latency_ms": 1.26,
       "ndcg_at_5": 1.0,
       "qid": "mh_15_daniel_sirius",
       "query": "When does Daniel's project ship?",
@@ -1448,13 +1448,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.6571,
+      "confidence": 0.9726,
       "correct": true,
       "gold_references": [
         "doc_hanna_pollux",
         "doc_pollux_deadline"
       ],
-      "latency_ms": 1.11,
+      "latency_ms": 1.52,
       "ndcg_at_5": 1.0,
       "qid": "mh_18_hanna_pollux",
       "query": "When does Hanna's project ship?",
@@ -1467,13 +1467,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.6571,
+      "confidence": 0.9726,
       "correct": true,
       "gold_references": [
         "doc_chloe_vega",
         "doc_vega_deadline"
       ],
-      "latency_ms": 1.1,
+      "latency_ms": 1.2,
       "ndcg_at_5": 1.0,
       "qid": "mh_14_chloe_vega",
       "query": "When does Chloe's project ship?",
@@ -1486,13 +1486,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.6571,
+      "confidence": 0.9726,
       "correct": true,
       "gold_references": [
         "doc_fatima_altair",
         "doc_altair_deadline"
       ],
-      "latency_ms": 1.04,
+      "latency_ms": 1.16,
       "ndcg_at_5": 1.0,
       "qid": "mh_16_fatima_altair",
       "query": "When does Fatima's project ship?",
@@ -1505,13 +1505,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.6571,
+      "confidence": 0.9726,
       "correct": true,
       "gold_references": [
         "doc_sora_polaris",
         "doc_polaris_deadline"
       ],
-      "latency_ms": 0.91,
+      "latency_ms": 1.15,
       "ndcg_at_5": 1.0,
       "qid": "mh_06_sora_polaris",
       "query": "When does Sora's project ship?",
@@ -1524,13 +1524,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.6571,
+      "confidence": 0.9726,
       "correct": true,
       "gold_references": [
         "doc_liam_antares",
         "doc_antares_deadline"
       ],
-      "latency_ms": 0.93,
+      "latency_ms": 1.49,
       "ndcg_at_5": 1.0,
       "qid": "mh_21_liam_antares",
       "query": "When does Liam's project ship?",
@@ -1543,13 +1543,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.6571,
+      "confidence": 0.9726,
       "correct": true,
       "gold_references": [
         "doc_leo_pegasus",
         "doc_pegasus_deadline"
       ],
-      "latency_ms": 0.95,
+      "latency_ms": 1.28,
       "ndcg_at_5": 1.0,
       "qid": "mh_10_leo_pegasus",
       "query": "When does Leo's project ship?",
@@ -1562,13 +1562,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.6571,
+      "confidence": 0.9726,
       "correct": true,
       "gold_references": [
         "doc_kiran_lyra",
         "doc_lyra_deadline"
       ],
-      "latency_ms": 1.36,
+      "latency_ms": 1.2,
       "ndcg_at_5": 1.0,
       "qid": "mh_08_kiran_lyra",
       "query": "When does Kiran's project ship?",
@@ -1581,13 +1581,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.6571,
+      "confidence": 0.9726,
       "correct": true,
       "gold_references": [
         "doc_olivia_aldebaran",
         "doc_aldebaran_deadline"
       ],
-      "latency_ms": 1.1,
+      "latency_ms": 1.36,
       "ndcg_at_5": 1.0,
       "qid": "mh_24_olivia_aldebaran",
       "query": "When does Olivia's project ship?",
@@ -1600,13 +1600,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.6571,
+      "confidence": 0.9726,
       "correct": true,
       "gold_references": [
         "doc_owen_borealis",
         "doc_borealis_deadline"
       ],
-      "latency_ms": 1.12,
+      "latency_ms": 1.53,
       "ndcg_at_5": 1.0,
       "qid": "mh_02_owen_borealis",
       "query": "When does Owen's project ship?",
@@ -1619,13 +1619,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.6571,
+      "confidence": 0.9726,
       "correct": true,
       "gold_references": [
         "doc_reza_aurora",
         "doc_aurora_deadline"
       ],
-      "latency_ms": 1.13,
+      "latency_ms": 1.46,
       "ndcg_at_5": 1.0,
       "qid": "mh_03_reza_aurora",
       "query": "When does Reza's project ship?",
@@ -1638,22 +1638,22 @@
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.8147,
+      "confidence": 0.8823,
       "correct": true,
       "gold_references": [
         "answer_5d8c99d3_1",
         "answer_5d8c99d3_2",
         "answer_5d8c99d3_3"
       ],
-      "latency_ms": 296.45,
-      "ndcg_at_5": 0.6797,
+      "latency_ms": 532.86,
+      "ndcg_at_5": 0.6183,
       "qid": "gpt4_7f6b06db",
       "query": "What is the order of the three trips I took in the past three months, from earliest to latest?",
       "recall_at_5": 1.0,
       "retrieved_ids": [
-        "928890e4_3",
+        "2d79c1c3_2",
+        "631e4016",
         "answer_5d8c99d3_1",
-        "252715f8_2",
         "answer_5d8c99d3_2",
         "answer_5d8c99d3_3"
       ],
@@ -1661,7 +1661,7 @@
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.8911,
+      "confidence": 0.9448,
       "correct": false,
       "gold_references": [
         "answer_7093d898_1",
@@ -1671,53 +1671,53 @@
         "answer_7093d898_5",
         "answer_7093d898_6"
       ],
-      "latency_ms": 423.4,
-      "ndcg_at_5": 0.8539,
+      "latency_ms": 638.44,
+      "ndcg_at_5": 0.8304,
       "qid": "gpt4_7abb270c",
       "query": "What is the order of the six museums I visited from earliest to latest?",
       "recall_at_5": 0.6667,
       "retrieved_ids": [
         "answer_7093d898_1",
-        "answer_7093d898_2",
+        "answer_7093d898_3",
+        "1bfd5a8b_2",
         "answer_7093d898_5",
-        "087d2b0a_2",
         "answer_7093d898_6"
       ],
       "split": "held-out"
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.8539,
+      "confidence": 0.9517,
       "correct": true,
       "gold_references": [
         "answer_b535969f_1",
         "answer_b535969f_2"
       ],
-      "latency_ms": 411.93,
+      "latency_ms": 694.2,
       "ndcg_at_5": 1.0,
       "qid": "gpt4_76048e76",
       "query": "Which vehicle did I take care of first in February, the bike or the car?",
       "recall_at_5": 1.0,
       "retrieved_ids": [
-        "answer_b535969f_1",
         "answer_b535969f_2",
+        "answer_b535969f_1",
         "6a78e959_2",
         "88e01130_1",
-        "33630c9e_2"
+        "907b6ed7_1"
       ],
       "split": "held-out"
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.8097,
+      "confidence": 0.9455,
       "correct": true,
       "gold_references": [
         "answer_8c64ce25_2",
         "answer_8c64ce25_1",
         "answer_8c64ce25_3"
       ],
-      "latency_ms": 346.97,
-      "ndcg_at_5": 0.9675,
+      "latency_ms": 535.01,
+      "ndcg_at_5": 0.9469,
       "qid": "gpt4_e061b84f",
       "query": "What is the order of the three sports events I participated in during the past month, from earliest to latest?",
       "recall_at_5": 1.0,
@@ -1725,20 +1725,20 @@
         "answer_8c64ce25_2",
         "answer_8c64ce25_1",
         "sharegpt_8ns7j9U_0",
-        "answer_8c64ce25_3",
-        "0a6bf5e4_1"
+        "sharegpt_5jHUxvs_80",
+        "answer_8c64ce25_3"
       ],
       "split": "held-out"
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.8649,
+      "confidence": 0.9622,
       "correct": true,
       "gold_references": [
         "answer_cf425855_1",
         "answer_cf425855_2"
       ],
-      "latency_ms": 402.9,
+      "latency_ms": 681.04,
       "ndcg_at_5": 1.0,
       "qid": "e4e14d04",
       "query": "How long had I been a member of 'Book Lovers Unite' when I attended the meetup?",
@@ -1747,63 +1747,63 @@
         "answer_cf425855_1",
         "answer_cf425855_2",
         "5944b36a_1",
-        "ultrachat_325291",
+        "a92165a5",
         "0f013a55"
       ],
       "split": "held-out"
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.908,
-      "correct": false,
+      "confidence": 0.9573,
+      "correct": true,
       "gold_references": [
         "answer_9793daa4_2",
         "answer_9793daa4_1"
       ],
-      "latency_ms": 316.24,
-      "ndcg_at_5": 0.6131,
+      "latency_ms": 621.86,
+      "ndcg_at_5": 1.0,
       "qid": "gpt4_68e94288",
       "query": "What was the social media activity I participated 5 days ago?",
-      "recall_at_5": 0.5,
+      "recall_at_5": 1.0,
       "retrieved_ids": [
         "answer_9793daa4_1",
-        "813ebecd_1",
-        "4d4df0e0_2",
-        "sharegpt_8HDT3fb_0",
-        "ultrachat_347414"
+        "answer_9793daa4_2",
+        "c99dcd81",
+        "ultrachat_396489",
+        "4d4df0e0_2"
       ],
       "split": "held-out"
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.8503,
+      "confidence": 0.9467,
       "correct": true,
       "gold_references": [
         "answer_70dc7d08_2",
         "answer_70dc7d08_1"
       ],
-      "latency_ms": 413.01,
+      "latency_ms": 717.97,
       "ndcg_at_5": 1.0,
       "qid": "c8090214",
       "query": "How many days before I bought the iPhone 13 Pro did I attend the Holiday Market?",
       "recall_at_5": 1.0,
       "retrieved_ids": [
-        "answer_70dc7d08_2",
         "answer_70dc7d08_1",
+        "answer_70dc7d08_2",
         "162ad3bf_1",
-        "78c3d7ab",
-        "ultrachat_345992"
+        "ultrachat_345992",
+        "78c3d7ab"
       ],
       "split": "held-out"
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.9017,
+      "confidence": 0.98,
       "correct": true,
       "gold_references": [
         "answer_0b4a8adc_1"
       ],
-      "latency_ms": 431.1,
+      "latency_ms": 738.25,
       "ndcg_at_5": 1.0,
       "qid": "71017276",
       "query": "How many weeks ago did I meet up with my aunt and receive the crystal chandelier?",
@@ -1813,20 +1813,20 @@
         "398f23e7",
         "sharegpt_tCLMKZY_0",
         "sharegpt_tmFunkX_20",
-        "44e4ae7e"
+        "sharegpt_jZOf9E5_21"
       ],
       "split": "held-out"
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.8135,
+      "confidence": 0.9111,
       "correct": true,
       "gold_references": [
         "answer_c862f65a_2",
         "answer_c862f65a_3",
         "answer_c862f65a_1"
       ],
-      "latency_ms": 639.13,
+      "latency_ms": 982.74,
       "ndcg_at_5": 0.6797,
       "qid": "gpt4_18c2b244",
       "query": "What is the order of the three events: 'I signed up for the rewards program at ShopRite', 'I used a Buy One Get One Free coupon on Luvs diapers at Walmart', and 'I redeemed $12 cashback for a $10 Amazon gift card from Ibotta'?",
@@ -1842,13 +1842,13 @@
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.8745,
+      "confidence": 0.9724,
       "correct": true,
       "gold_references": [
         "answer_be07688f_1",
         "answer_be07688f_2"
       ],
-      "latency_ms": 555.03,
+      "latency_ms": 833.5,
       "ndcg_at_5": 1.0,
       "qid": "gpt4_4fc4f797",
       "query": "How many days passed between the day I received feedback about my car's suspension and the day I tested my new suspension setup?",
@@ -1857,20 +1857,20 @@
         "answer_be07688f_1",
         "answer_be07688f_2",
         "39566615_1",
-        "86298245_2",
-        "47c5482a"
+        "sharegpt_V2PULWC_13",
+        "86298245_2"
       ],
       "split": "held-out"
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.8651,
+      "confidence": 0.9592,
       "correct": true,
       "gold_references": [
         "answer_991d55e5_1",
         "answer_991d55e5_2"
       ],
-      "latency_ms": 405.03,
+      "latency_ms": 740.01,
       "ndcg_at_5": 1.0,
       "qid": "d01c6aa8",
       "query": "How old was I when I moved to the United States?",
@@ -1878,21 +1878,21 @@
       "retrieved_ids": [
         "answer_991d55e5_2",
         "answer_991d55e5_1",
-        "2adf224b_2",
+        "1a1116cd_1",
         "64460e9d_1",
-        "f2fa97f5_1"
+        "2adf224b_2"
       ],
       "split": "held-out"
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.8568,
+      "confidence": 0.9538,
       "correct": true,
       "gold_references": [
         "answer_54f0d6f9_1",
         "answer_54f0d6f9_2"
       ],
-      "latency_ms": 399.18,
+      "latency_ms": 678.89,
       "ndcg_at_5": 1.0,
       "qid": "993da5e2",
       "query": "How long had I been using the new area rug when I rearranged my living room furniture?",
@@ -1908,13 +1908,13 @@
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.8606,
+      "confidence": 0.9509,
       "correct": true,
       "gold_references": [
         "answer_5fcca8bc_2",
         "answer_5fcca8bc_1"
       ],
-      "latency_ms": 482.19,
+      "latency_ms": 825.38,
       "ndcg_at_5": 1.0,
       "qid": "gpt4_4cd9eba1",
       "query": "How many weeks have I been accepted into the exchange program when I started attending the pre-departure orientation sessions?",
@@ -1923,20 +1923,20 @@
         "answer_5fcca8bc_2",
         "answer_5fcca8bc_1",
         "2ef53f61_4",
-        "8242fa3f_1",
-        "ultrachat_218377"
+        "ultrachat_218377",
+        "8242fa3f_1"
       ],
       "split": "held-out"
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.8483,
+      "confidence": 0.9452,
       "correct": true,
       "gold_references": [
         "answer_447052a5_2",
         "answer_447052a5_1"
       ],
-      "latency_ms": 552.48,
+      "latency_ms": 866.5,
       "ndcg_at_5": 1.0,
       "qid": "gpt4_1916e0ea",
       "query": "How many days passed between the day I cancelled my FarmFresh subscription and the day I did my online grocery shopping from Instacart?",
@@ -1952,12 +1952,12 @@
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.9282,
+      "confidence": 0.98,
       "correct": true,
       "gold_references": [
         "answer_c4df007f_1"
       ],
-      "latency_ms": 374.07,
+      "latency_ms": 677.94,
       "ndcg_at_5": 1.0,
       "qid": "gpt4_6dc9b45b",
       "query": "How many months ago did I attend the Seattle International Film Festival?",
@@ -1965,21 +1965,21 @@
       "retrieved_ids": [
         "answer_c4df007f_1",
         "56911dc5_2",
-        "9adc81d7_2",
         "sharegpt_jyynvvk_0",
+        "9adc81d7_2",
         "ultrachat_35147"
       ],
       "split": "held-out"
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.8558,
+      "confidence": 0.9555,
       "correct": true,
       "gold_references": [
         "answer_e184e4c3_2",
         "answer_e184e4c3_1"
       ],
-      "latency_ms": 437.53,
+      "latency_ms": 720.53,
       "ndcg_at_5": 1.0,
       "qid": "1192316e",
       "query": "What is the total time it takes I to get ready and commute to work?",
@@ -1995,13 +1995,13 @@
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.862,
+      "confidence": 0.9632,
       "correct": true,
       "gold_references": [
         "answer_4eb6d671_2",
         "answer_4eb6d671_1"
       ],
-      "latency_ms": 415.84,
+      "latency_ms": 714.54,
       "ndcg_at_5": 1.0,
       "qid": "e6041065",
       "query": "What percentage of packed shoes did I wear on my last trip?",
@@ -2017,13 +2017,13 @@
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.8999,
+      "confidence": 0.98,
       "correct": true,
       "gold_references": [
         "answer_e2278b24_1",
         "answer_e2278b24_2"
       ],
-      "latency_ms": 431.36,
+      "latency_ms": 743.22,
       "ndcg_at_5": 1.0,
       "qid": "8cf4d046",
       "query": "What is the average GPA of my undergraduate and graduate studies?",
@@ -2031,21 +2031,21 @@
       "retrieved_ids": [
         "answer_e2278b24_2",
         "answer_e2278b24_1",
-        "sharegpt_WjpyexI_15",
         "sharegpt_6DlPq48_0",
-        "sharegpt_P1Okivz_9"
+        "sharegpt_P1Okivz_9",
+        "7a5c32b0_3"
       ],
       "split": "held-out"
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.8538,
+      "confidence": 0.9496,
       "correct": true,
       "gold_references": [
         "answer_05d808e6_1",
         "answer_05d808e6_2"
       ],
-      "latency_ms": 408.76,
+      "latency_ms": 659.48,
       "ndcg_at_5": 1.0,
       "qid": "b3c15d39",
       "query": "How many days did it take for me to receive the new remote shutter release after I ordered it?",
@@ -2054,38 +2054,38 @@
         "answer_05d808e6_1",
         "answer_05d808e6_2",
         "a16a4158",
-        "d298714d_1",
-        "6be23caa"
+        "6be23caa",
+        "d298714d_1"
       ],
       "split": "held-out"
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.861,
-      "correct": false,
+      "confidence": 0.976,
+      "correct": true,
       "gold_references": [
         "answer_2880eb6c_2",
         "answer_2880eb6c_4",
         "answer_2880eb6c_1",
         "answer_2880eb6c_3"
       ],
-      "latency_ms": 353.93,
-      "ndcg_at_5": 0.5414,
+      "latency_ms": 881.64,
+      "ndcg_at_5": 1.0,
       "qid": "gpt4_d84a3211",
       "query": "How much total money have I spent on bike-related expenses since the start of the year?",
-      "recall_at_5": 0.5,
+      "recall_at_5": 1.0,
       "retrieved_ids": [
         "answer_2880eb6c_4",
-        "sharegpt_OHd1RQ7_37",
-        "13c55c69_1",
-        "ultrachat_83526",
-        "answer_2880eb6c_1"
+        "answer_2880eb6c_1",
+        "answer_2880eb6c_3",
+        "answer_2880eb6c_2",
+        "fd29aa98_1"
       ],
       "split": "held-out"
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.8785,
+      "confidence": 0.98,
       "correct": true,
       "gold_references": [
         "answer_5cdf9bd2_2",
@@ -2093,7 +2093,7 @@
         "answer_5cdf9bd2_3",
         "answer_5cdf9bd2_4"
       ],
-      "latency_ms": 403.51,
+      "latency_ms": 751.0,
       "ndcg_at_5": 1.0,
       "qid": "d851d5ba",
       "query": "How much money did I raise for charity in total?",
@@ -2103,38 +2103,38 @@
         "answer_5cdf9bd2_4",
         "answer_5cdf9bd2_1",
         "answer_5cdf9bd2_2",
-        "2a28999b"
+        "d77d4ac9_1"
       ],
       "split": "held-out"
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.8601,
-      "correct": false,
+      "confidence": 0.9675,
+      "correct": true,
       "gold_references": [
         "answer_593bdffd_4",
         "answer_593bdffd_1",
         "answer_593bdffd_3",
         "answer_593bdffd_2"
       ],
-      "latency_ms": 420.3,
-      "ndcg_at_5": 0.5925,
+      "latency_ms": 719.34,
+      "ndcg_at_5": 0.9047,
       "qid": "gpt4_59c863d7",
       "query": "How many model kits have I worked on or bought?",
-      "recall_at_5": 0.75,
+      "recall_at_5": 1.0,
       "retrieved_ids": [
-        "9ef698bc_2",
         "answer_593bdffd_1",
-        "answer_593bdffd_4",
-        "eb47739f_2",
-        "answer_593bdffd_2"
+        "9ef698bc_2",
+        "answer_593bdffd_3",
+        "answer_593bdffd_2",
+        "answer_593bdffd_4"
       ],
       "split": "held-out"
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.8564,
-      "correct": false,
+      "confidence": 0.959,
+      "correct": true,
       "gold_references": [
         "answer_02b63d04_1",
         "answer_02b63d04_5",
@@ -2142,67 +2142,67 @@
         "answer_02b63d04_3",
         "answer_02b63d04_4"
       ],
-      "latency_ms": 387.05,
-      "ndcg_at_5": 0.8304,
+      "latency_ms": 717.07,
+      "ndcg_at_5": 1.0,
       "qid": "gpt4_31ff4165",
       "query": "How many health-related devices do I use in a day?",
-      "recall_at_5": 0.8,
+      "recall_at_5": 1.0,
       "retrieved_ids": [
-        "answer_02b63d04_3",
         "answer_02b63d04_1",
-        "6aa87dc3",
-        "answer_02b63d04_4",
-        "answer_02b63d04_2"
+        "answer_02b63d04_5",
+        "answer_02b63d04_3",
+        "answer_02b63d04_2",
+        "answer_02b63d04_4"
       ],
       "split": "held-out"
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.895,
-      "correct": false,
+      "confidence": 0.9735,
+      "correct": true,
       "gold_references": [
         "answer_17dc2f5b_2",
         "answer_17dc2f5b_1"
       ],
-      "latency_ms": 378.57,
-      "ndcg_at_5": 0.6131,
+      "latency_ms": 698.97,
+      "ndcg_at_5": 0.9197,
       "qid": "a1cc6108",
       "query": "How old was I when Alex was born?",
-      "recall_at_5": 0.5,
+      "recall_at_5": 1.0,
       "retrieved_ids": [
         "answer_17dc2f5b_2",
+        "fb328ace_1",
+        "answer_17dc2f5b_1",
         "298a07de_5",
-        "7285299a_4",
-        "001cefa7_2",
-        "fb328ace_1"
+        "7285299a_4"
       ],
       "split": "held-out"
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.8678,
+      "confidence": 0.9625,
       "correct": true,
       "gold_references": [
         "answer_477ae455_1",
         "answer_477ae455_2"
       ],
-      "latency_ms": 389.25,
-      "ndcg_at_5": 0.5013,
+      "latency_ms": 609.0,
+      "ndcg_at_5": 0.5706,
       "qid": "8e91e7d9",
       "query": "What is the total number of siblings I have?",
       "recall_at_5": 1.0,
       "retrieved_ids": [
         "c96fac82_3",
         "b8b49175",
-        "2f980ae0_2",
         "answer_477ae455_1",
-        "answer_477ae455_2"
+        "answer_477ae455_2",
+        "2f980ae0_2"
       ],
       "split": "held-out"
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.8687,
+      "confidence": 0.9661,
       "correct": true,
       "gold_references": [
         "answer_56d02cab_3",
@@ -2210,7 +2210,7 @@
         "answer_56d02cab_2",
         "answer_56d02cab_1"
       ],
-      "latency_ms": 375.94,
+      "latency_ms": 704.65,
       "ndcg_at_5": 1.0,
       "qid": "c4a1ceb8",
       "query": "How many different types of citrus fruits have I used in my cocktail recipes?",
@@ -2226,13 +2226,13 @@
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.8867,
+      "confidence": 0.98,
       "correct": true,
       "gold_references": [
         "answer_f7fd1029_2",
         "answer_f7fd1029_1"
       ],
-      "latency_ms": 399.35,
+      "latency_ms": 782.18,
       "ndcg_at_5": 1.0,
       "qid": "ef66a6e5",
       "query": "How many sports have I played competitively in the past?",
@@ -2240,21 +2240,21 @@
       "retrieved_ids": [
         "answer_f7fd1029_1",
         "answer_f7fd1029_2",
-        "74c2d3a1_1",
         "sharegpt_4kVFs3Y_0",
-        "ultrachat_393184"
+        "74c2d3a1_1",
+        "4c08398b_1"
       ],
       "split": "held-out"
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.8595,
+      "confidence": 0.9574,
       "correct": true,
       "gold_references": [
         "answer_c69ee1f9_2",
         "answer_c69ee1f9_1"
       ],
-      "latency_ms": 407.03,
+      "latency_ms": 683.78,
       "ndcg_at_5": 1.0,
       "qid": "a11281a2",
       "query": "What was the approximate increase in Instagram followers I experienced in two weeks?",
@@ -2270,14 +2270,14 @@
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.857,
+      "confidence": 0.9528,
       "correct": true,
       "gold_references": [
         "answer_669318cf_2",
         "answer_669318cf_1",
         "answer_669318cf_3"
       ],
-      "latency_ms": 574.55,
+      "latency_ms": 873.89,
       "ndcg_at_5": 1.0,
       "qid": "gpt4_2f91af09",
       "query": "How many total pieces of writing have I completed since I started writing again three weeks ago, including short stories, poems, and pieces for the writing challenge?",
@@ -2286,20 +2286,20 @@
         "answer_669318cf_3",
         "answer_669318cf_1",
         "answer_669318cf_2",
-        "f4038906_2",
-        "sharegpt_kuYqYGw_87"
+        "sharegpt_YmzANeT_0",
+        "f4038906_2"
       ],
       "split": "held-out"
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.848,
+      "confidence": 0.9461,
       "correct": true,
       "gold_references": [
         "answer_4934b2d7_2",
         "answer_4934b2d7_1"
       ],
-      "latency_ms": 370.83,
+      "latency_ms": 686.61,
       "ndcg_at_5": 0.6934,
       "qid": "a346bb18",
       "query": "How many minutes did I exceed my target time by in the marathon?",
@@ -2308,20 +2308,20 @@
         "771ba1d5",
         "answer_4934b2d7_2",
         "answer_4934b2d7_1",
-        "sharegpt_ooEuxDg_0",
-        "ultrachat_370695"
+        "ultrachat_370695",
+        "sharegpt_ooEuxDg_0"
       ],
       "split": "held-out"
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.8607,
+      "confidence": 0.9622,
       "correct": true,
       "gold_references": [
         "answer_ac0140ce_1",
         "answer_ac0140ce_2"
       ],
-      "latency_ms": 383.14,
+      "latency_ms": 655.69,
       "ndcg_at_5": 1.0,
       "qid": "e66b632c",
       "query": "What was my previous personal best time for the charity 5K run?",
@@ -2337,13 +2337,13 @@
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.8715,
+      "confidence": 0.9716,
       "correct": true,
       "gold_references": [
         "answer_a5b68517_1",
         "answer_a5b68517_2"
       ],
-      "latency_ms": 387.43,
+      "latency_ms": 642.28,
       "ndcg_at_5": 1.0,
       "qid": "cc5ded98",
       "query": "How much time do I dedicate to coding exercises each day?",
@@ -2351,21 +2351,21 @@
       "retrieved_ids": [
         "answer_a5b68517_2",
         "answer_a5b68517_1",
-        "f14a4532_1",
+        "sharegpt_lnO6o1z_0",
         "d973fa59_1",
-        "sharegpt_lnO6o1z_0"
+        "f14a4532_1"
       ],
       "split": "held-out"
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.8708,
+      "confidence": 0.964,
       "correct": true,
       "gold_references": [
         "answer_3a6f1e82_1",
         "answer_3a6f1e82_2"
       ],
-      "latency_ms": 427.81,
+      "latency_ms": 779.86,
       "ndcg_at_5": 1.0,
       "qid": "852ce960",
       "query": "What was the amount I was pre-approved for when I got my mortgage from Wells Fargo?",
@@ -2375,19 +2375,19 @@
         "answer_3a6f1e82_1",
         "a110c4dc_1",
         "ultrachat_218093",
-        "010a28ab_3"
+        "0840765f_2"
       ],
       "split": "held-out"
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.8791,
+      "confidence": 0.9792,
       "correct": true,
       "gold_references": [
         "answer_7e9ad7b4_1",
         "answer_7e9ad7b4_2"
       ],
-      "latency_ms": 381.36,
+      "latency_ms": 640.59,
       "ndcg_at_5": 0.9197,
       "qid": "07741c45",
       "query": "Where do I currently keep my old sneakers?",
@@ -2397,19 +2397,19 @@
         "af4a2fd1",
         "answer_7e9ad7b4_1",
         "eb8195a6_2",
-        "df846730"
+        "d0fc2426"
       ],
       "split": "held-out"
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.8783,
+      "confidence": 0.98,
       "correct": true,
       "gold_references": [
         "answer_a22b654d_1",
         "answer_a22b654d_2"
       ],
-      "latency_ms": 378.61,
+      "latency_ms": 679.08,
       "ndcg_at_5": 1.0,
       "qid": "0ddfec37",
       "query": "How many autographed baseballs have I added to my collection in the first three months of collection?",
@@ -2425,13 +2425,13 @@
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.8861,
+      "confidence": 0.98,
       "correct": true,
       "gold_references": [
         "answer_e3892371_1",
         "answer_e3892371_2"
       ],
-      "latency_ms": 423.78,
+      "latency_ms": 692.71,
       "ndcg_at_5": 1.0,
       "qid": "42ec0761",
       "query": "Do I have a spare screwdriver for opening up my laptop?",
@@ -2440,20 +2440,20 @@
         "answer_e3892371_2",
         "answer_e3892371_1",
         "493bd421_2",
-        "4fb01417_2",
-        "27d0d3e7"
+        "7746ba1b_2",
+        "4fb01417_2"
       ],
       "split": "held-out"
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.882,
+      "confidence": 0.98,
       "correct": true,
       "gold_references": [
         "answer_8afdebac_1",
         "answer_8afdebac_2"
       ],
-      "latency_ms": 407.31,
+      "latency_ms": 697.56,
       "ndcg_at_5": 1.0,
       "qid": "603deb26",
       "query": "How many times have I tried making a Negroni at home since my friend Emma showed me how to make it?",
@@ -2463,19 +2463,19 @@
         "answer_8afdebac_1",
         "7b0dea50_1",
         "88611fff",
-        "f379d356_3"
+        "ede65c84_2"
       ],
       "split": "held-out"
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.8539,
+      "confidence": 0.9496,
       "correct": true,
       "gold_references": [
         "answer_c6a0c6c2_1",
         "answer_c6a0c6c2_2"
       ],
-      "latency_ms": 395.84,
+      "latency_ms": 712.24,
       "ndcg_at_5": 1.0,
       "qid": "9bbe84a2",
       "query": "What was my previous goal for my Apex Legends level before I updated my goal?",
@@ -2491,13 +2491,13 @@
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.8535,
+      "confidence": 0.9493,
       "correct": true,
       "gold_references": [
         "answer_07664d43_1",
         "answer_07664d43_2"
       ],
-      "latency_ms": 369.43,
+      "latency_ms": 724.19,
       "ndcg_at_5": 1.0,
       "qid": "45dc21b6",
       "query": "How many of Emma's recipes have I tried out?",
@@ -2513,21 +2513,21 @@
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.8541,
-      "correct": false,
+      "confidence": 0.9543,
+      "correct": true,
       "gold_references": [
         "answer_0b1a0942_1",
         "answer_0b1a0942_2"
       ],
-      "latency_ms": 433.03,
-      "ndcg_at_5": 0.9197,
+      "latency_ms": 693.68,
+      "ndcg_at_5": 1.0,
       "qid": "830ce83f",
       "query": "Where did Rachel move to after her recent relocation?",
       "recall_at_5": 1.0,
       "retrieved_ids": [
+        "answer_0b1a0942_2",
         "answer_0b1a0942_1",
         "47c5482a",
-        "answer_0b1a0942_2",
         "ultrachat_288747",
         "020149a5_1"
       ],
@@ -2535,13 +2535,13 @@
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.8708,
+      "confidence": 0.967,
       "correct": true,
       "gold_references": [
         "answer_e1403127_1",
         "answer_e1403127_2"
       ],
-      "latency_ms": 502.9,
+      "latency_ms": 883.15,
       "ndcg_at_5": 1.0,
       "qid": "89941a94",
       "query": "Before I purchased the gravel bike, do I have other bikes in addition to my mountain bike and my commuter bike?",
@@ -2557,13 +2557,13 @@
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.8509,
+      "confidence": 0.9507,
       "correct": true,
       "gold_references": [
         "answer_4dac77cb_1",
         "answer_4dac77cb_2"
       ],
-      "latency_ms": 517.6,
+      "latency_ms": 878.08,
       "ndcg_at_5": 0.9197,
       "qid": "6071bd76",
       "query": "For the coffee-to-water ratio in my French press, did I switch to more water per tablespoon of coffee, or less?",
@@ -2579,13 +2579,13 @@
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.87,
+      "confidence": 0.9696,
       "correct": true,
       "gold_references": [
         "answer_d6028d6e_1",
         "answer_d6028d6e_2"
       ],
-      "latency_ms": 444.52,
+      "latency_ms": 678.52,
       "ndcg_at_5": 1.0,
       "qid": "69fee5aa",
       "query": "How many pre-1920 American coins do I have in my collection?",
@@ -2601,13 +2601,13 @@
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.8884,
+      "confidence": 0.98,
       "correct": true,
       "gold_references": [
         "answer_f2f998c7_1",
         "answer_f2f998c7_2"
       ],
-      "latency_ms": 447.25,
+      "latency_ms": 780.79,
       "ndcg_at_5": 1.0,
       "qid": "0e4e4c46",
       "query": "What is my current highest score in Ticket to Ride?",
@@ -2616,30 +2616,30 @@
         "answer_f2f998c7_2",
         "answer_f2f998c7_1",
         "60876def_2",
-        "b42cbaf0_1",
-        "ultrachat_280826"
+        "ultrachat_280826",
+        "17822471"
       ],
       "split": "held-out"
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.861,
+      "confidence": 0.9684,
       "correct": true,
       "gold_references": [
         "answer_02e66dec_1",
         "answer_02e66dec_2"
       ],
-      "latency_ms": 369.15,
-      "ndcg_at_5": 0.5706,
+      "latency_ms": 718.3,
+      "ndcg_at_5": 0.3066,
       "qid": "9ea5eabc",
       "query": "Where did I go on my most recent family trip?",
-      "recall_at_5": 1.0,
+      "recall_at_5": 0.5,
       "retrieved_ids": [
         "9bf5da2d",
-        "418c27fa",
+        "29695e1c_2",
         "answer_02e66dec_2",
-        "answer_02e66dec_1",
-        "6df6fff4"
+        "418c27fa",
+        "d1f30ac6_5"
       ],
       "split": "held-out"
     },
@@ -2651,7 +2651,7 @@
         "answer_ab603dd5_abs_1",
         "answer_ab603dd5_abs_2"
       ],
-      "latency_ms": 368.57,
+      "latency_ms": 642.73,
       "ndcg_at_5": 0.6131,
       "qid": "982b5123_abs",
       "query": "When did I book the Airbnb in Sacramento?",
@@ -2659,21 +2659,21 @@
       "retrieved_ids": [
         "answer_ab603dd5_abs_1",
         "4f3b0353_2",
-        "ultrachat_359846",
         "ultrachat_280342",
-        "bd00a24d_1"
+        "ultrachat_359846",
+        "3fc2244f"
       ],
       "split": "held-out"
     },
     {
       "category": "abstention",
-      "confidence": 0.8943,
+      "confidence": 0.8967,
       "correct": true,
       "gold_references": [
         "answer_a22b654d_abs_1",
         "answer_a22b654d_abs_2"
       ],
-      "latency_ms": 430.64,
+      "latency_ms": 711.29,
       "ndcg_at_5": 1.0,
       "qid": "0ddfec37_abs",
       "query": "How many autographed football have I added to my collection in the first three months of collection?",
@@ -2689,13 +2689,13 @@
     },
     {
       "category": "abstention",
-      "confidence": 0.8965,
+      "confidence": 0.8856,
       "correct": true,
       "gold_references": [
         "answer_9282283d_abs_1",
         "answer_9282283d_abs_2"
       ],
-      "latency_ms": 354.77,
+      "latency_ms": 659.81,
       "ndcg_at_5": 0.3066,
       "qid": "2698e78f_abs",
       "query": "How often do I see Dr. Johnson?",
@@ -2704,19 +2704,19 @@
         "sharegpt_IsRvBnc_11",
         "cdba3d9f_1",
         "answer_9282283d_abs_2",
-        "9bd6beaa_1",
-        "ultrachat_204773"
+        "ultrachat_204773",
+        "ultrachat_182084"
       ],
       "split": "held-out"
     },
     {
       "category": "abstention",
-      "confidence": 0.8888,
+      "confidence": 0.886,
       "correct": true,
       "gold_references": [
         "answer_f5b33470_abs"
       ],
-      "latency_ms": 403.28,
+      "latency_ms": 741.19,
       "ndcg_at_5": 1.0,
       "qid": "f4f1d8a4_abs",
       "query": "What did my dad gave me as a birthday gift?",
@@ -2732,33 +2732,33 @@
     },
     {
       "category": "abstention",
-      "confidence": 0.8676,
+      "confidence": 0.8701,
       "correct": true,
       "gold_references": [
         "answer_7cc5362f_abs"
       ],
-      "latency_ms": 445.8,
-      "ndcg_at_5": 0.5,
+      "latency_ms": 788.42,
+      "ndcg_at_5": 0.4307,
       "qid": "29f2956b_abs",
       "query": "How much time do I dedicate to practicing violin every day?",
       "recall_at_5": 1.0,
       "retrieved_ids": [
         "ultrachat_70054",
         "01ecd4fa_3",
+        "cc50c6a9",
         "answer_7cc5362f_abs",
-        "ultrachat_441324",
-        "cc50c6a9"
+        "64b7d9cc_2"
       ],
       "split": "held-out"
     },
     {
       "category": "abstention",
-      "confidence": 0.9584,
+      "confidence": 0.96,
       "correct": true,
       "gold_references": [
         "answer_5ff494b9_abs"
       ],
-      "latency_ms": 362.48,
+      "latency_ms": 653.0,
       "ndcg_at_5": 1.0,
       "qid": "19b5f2b3_abs",
       "query": "How long was I in Korea for?",
@@ -2768,19 +2768,19 @@
         "e44a5733_1",
         "sharegpt_G9RAbBH_0",
         "3e59ee68_1",
-        "d10f0307_3"
+        "sharegpt_d0i4rE2_0"
       ],
       "split": "held-out"
     },
     {
       "category": "abstention",
-      "confidence": 0.8902,
+      "confidence": 0.9,
       "correct": true,
       "gold_references": [
         "answer_70dc7d08_abs_1",
         "answer_70dc7d08_abs_2"
       ],
-      "latency_ms": 402.27,
+      "latency_ms": 733.21,
       "ndcg_at_5": 0.6131,
       "qid": "c8090214_abs",
       "query": "How many days before I bought my iPad did I attend the Holiday Market?",
@@ -2789,20 +2789,20 @@
         "answer_70dc7d08_abs_1",
         "ca3aa07f_1",
         "ultrachat_129606",
-        "cad5dca8_2",
-        "ultrachat_155329"
+        "ultrachat_155329",
+        "042c55a5"
       ],
       "split": "held-out"
     },
     {
       "category": "abstention",
-      "confidence": 0.882,
+      "confidence": 0.8827,
       "correct": true,
       "gold_references": [
         "answer_ef84b994_abs_1",
         "answer_ef84b994_abs_2"
       ],
-      "latency_ms": 415.2,
+      "latency_ms": 702.78,
       "ndcg_at_5": 1.0,
       "qid": "a96c20ee_abs",
       "query": "At which university did I present a poster for my undergrad course research project?",
@@ -2818,13 +2818,13 @@
     },
     {
       "category": "abstention",
-      "confidence": 0.9134,
-      "correct": false,
+      "confidence": 0.9562,
+      "correct": true,
       "gold_references": [
         "answer_cbd08e3c_abs_1",
         "answer_cbd08e3c_abs_2"
       ],
-      "latency_ms": 395.06,
+      "latency_ms": 678.7,
       "ndcg_at_5": 0.6131,
       "qid": "ba358f49_abs",
       "query": "How old will Rachel be when I get married?",
@@ -2840,20 +2840,20 @@
     },
     {
       "category": "abstention",
-      "confidence": 0.8936,
+      "confidence": 0.9104,
       "correct": true,
       "gold_references": [
         "answer_52382508_abs_1",
         "answer_52382508_abs_2"
       ],
-      "latency_ms": 439.06,
-      "ndcg_at_5": 0.9197,
+      "latency_ms": 799.72,
+      "ndcg_at_5": 0.6934,
       "qid": "2133c1b5_abs",
       "query": "How long have I been living in my current apartment in Shinjuku?",
       "recall_at_5": 1.0,
       "retrieved_ids": [
-        "answer_52382508_abs_1",
         "a864e7aa_5",
+        "answer_52382508_abs_1",
         "answer_52382508_abs_2",
         "d0cfe938_1",
         "sharegpt_vboNC2U_0"
@@ -2862,13 +2862,13 @@
     },
     {
       "category": "abstention",
-      "confidence": 0.9028,
+      "confidence": 0.9067,
       "correct": true,
       "gold_references": [
         "answer_743f03a1_abs_1",
         "answer_743f03a1_abs_2"
       ],
-      "latency_ms": 433.41,
+      "latency_ms": 690.98,
       "ndcg_at_5": 0.8503,
       "qid": "6456829e_abs",
       "query": "How many plants did I initially plant for tomatoes and chili peppers?",
@@ -2884,13 +2884,13 @@
     },
     {
       "category": "abstention",
-      "confidence": 0.8999,
+      "confidence": 0.9022,
       "correct": true,
       "gold_references": [
         "answer_e49ed9d3_abs_1",
         "answer_e49ed9d3_abs_2"
       ],
-      "latency_ms": 444.67,
+      "latency_ms": 802.3,
       "ndcg_at_5": 1.0,
       "qid": "e5ba910e_abs",
       "query": "What is the total cost of my recently purchased headphones and the iPad?",
@@ -2898,21 +2898,21 @@
       "retrieved_ids": [
         "answer_e49ed9d3_abs_1",
         "answer_e49ed9d3_abs_2",
-        "bd8a4fcb_2",
         "6339aa1d_2",
-        "sharegpt_3LFnGjR_11"
+        "bd8a4fcb_2",
+        "f2f0a36b_1"
       ],
       "split": "held-out"
     },
     {
       "category": "abstention",
-      "confidence": 0.8785,
+      "confidence": 0.8811,
       "correct": true,
       "gold_references": [
         "answer_25df025b_abs_1",
         "answer_25df025b_abs_2"
       ],
-      "latency_ms": 445.17,
+      "latency_ms": 687.83,
       "ndcg_at_5": 1.0,
       "qid": "f685340e_abs",
       "query": "How often do I play table tennis with my friends at the local park?",
@@ -2928,13 +2928,13 @@
     },
     {
       "category": "abstention",
-      "confidence": 0.8922,
+      "confidence": 0.8943,
       "correct": true,
       "gold_references": [
         "answer_bf633415_abs_1",
         "answer_bf633415_abs_2"
       ],
-      "latency_ms": 374.44,
+      "latency_ms": 680.03,
       "ndcg_at_5": 1.0,
       "qid": "2311e44b_abs",
       "query": "How many pages do I have left to read in 'Sapiens'?",
@@ -2950,20 +2950,20 @@
     },
     {
       "category": "abstention",
-      "confidence": 0.8487,
+      "confidence": 0.8619,
       "correct": true,
       "gold_references": [
         "answer_b3070ec4_abs_2",
         "answer_b3070ec4_abs_1"
       ],
-      "latency_ms": 542.33,
+      "latency_ms": 854.5,
       "ndcg_at_5": 0.5438,
       "qid": "gpt4_70e84552_abs",
       "query": "Which task did I complete first, fixing the fence or purchasing three cows from Peter?",
       "recall_at_5": 1.0,
       "retrieved_ids": [
         "e2cd250e_2",
-        "1572cf8a",
+        "sharegpt_9ddQ0kX_0",
         "answer_b3070ec4_abs_2",
         "59264d33_2",
         "answer_b3070ec4_abs_1"
@@ -2972,13 +2972,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.6571,
+      "confidence": 0.9726,
       "correct": true,
       "gold_references": [
         "doc_alex_nova",
         "doc_nova_deadline"
       ],
-      "latency_ms": 1.17,
+      "latency_ms": 1.54,
       "ndcg_at_5": 1.0,
       "qid": "mh_13_alex_nova",
       "query": "When does Alex's project ship?",
@@ -2991,13 +2991,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.6571,
+      "confidence": 0.9726,
       "correct": true,
       "gold_references": [
         "doc_priya_zephyr",
         "doc_zephyr_deadline"
       ],
-      "latency_ms": 1.31,
+      "latency_ms": 1.24,
       "ndcg_at_5": 1.0,
       "qid": "mh_04_priya_zephyr",
       "query": "When does Priya's project ship?",
@@ -3010,13 +3010,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.6571,
+      "confidence": 0.9726,
       "correct": true,
       "gold_references": [
         "doc_kai_titan",
         "doc_titan_deadline"
       ],
-      "latency_ms": 1.36,
+      "latency_ms": 1.61,
       "ndcg_at_5": 1.0,
       "qid": "mh_12_kai_titan",
       "query": "When does Kai's project ship?",
@@ -3029,13 +3029,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.6571,
+      "confidence": 0.9726,
       "correct": true,
       "gold_references": [
         "doc_julia_betelgeuse",
         "doc_betelgeuse_deadline"
       ],
-      "latency_ms": 0.98,
+      "latency_ms": 1.44,
       "ndcg_at_5": 1.0,
       "qid": "mh_20_julia_betelgeuse",
       "query": "When does Julia's project ship?",
@@ -3048,13 +3048,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.6571,
+      "confidence": 0.9726,
       "correct": true,
       "gold_references": [
         "doc_nadia_phoenix",
         "doc_phoenix_deadline"
       ],
-      "latency_ms": 0.89,
+      "latency_ms": 1.32,
       "ndcg_at_5": 1.0,
       "qid": "mh_11_nadia_phoenix",
       "query": "When does Nadia's project ship?",
@@ -3067,13 +3067,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.6571,
+      "confidence": 0.9726,
       "correct": true,
       "gold_references": [
         "doc_gabriel_castor",
         "doc_castor_deadline"
       ],
-      "latency_ms": 0.89,
+      "latency_ms": 1.41,
       "ndcg_at_5": 1.0,
       "qid": "mh_17_gabriel_castor",
       "query": "When does Gabriel's project ship?",
@@ -3086,13 +3086,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.6571,
+      "confidence": 0.9726,
       "correct": true,
       "gold_references": [
         "doc_elena_cygnus",
         "doc_cygnus_deadline"
       ],
-      "latency_ms": 0.87,
+      "latency_ms": 1.33,
       "ndcg_at_5": 1.0,
       "qid": "mh_07_elena_cygnus",
       "query": "When does Elena's project ship?",
@@ -3105,13 +3105,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.6571,
+      "confidence": 0.9726,
       "correct": true,
       "gold_references": [
         "doc_mia_spica",
         "doc_spica_deadline"
       ],
-      "latency_ms": 0.87,
+      "latency_ms": 1.42,
       "ndcg_at_5": 1.0,
       "qid": "mh_22_mia_spica",
       "query": "When does Mia's project ship?",
@@ -3124,13 +3124,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.6571,
+      "confidence": 0.9726,
       "correct": true,
       "gold_references": [
         "doc_maya_orion",
         "doc_orion_deadline"
       ],
-      "latency_ms": 0.93,
+      "latency_ms": 1.57,
       "ndcg_at_5": 1.0,
       "qid": "mh_09_maya_orion",
       "query": "When does Maya's project ship?",
@@ -3143,13 +3143,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.6571,
+      "confidence": 0.9726,
       "correct": true,
       "gold_references": [
         "doc_isaac_rigel",
         "doc_rigel_deadline"
       ],
-      "latency_ms": 0.88,
+      "latency_ms": 1.27,
       "ndcg_at_5": 1.0,
       "qid": "mh_19_isaac_rigel",
       "query": "When does Isaac's project ship?",
@@ -3162,13 +3162,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.6571,
+      "confidence": 0.9726,
       "correct": true,
       "gold_references": [
         "doc_tomas_eclipse",
         "doc_eclipse_deadline"
       ],
-      "latency_ms": 1.22,
+      "latency_ms": 1.24,
       "ndcg_at_5": 1.0,
       "qid": "mh_05_tomas_eclipse",
       "query": "When does Tomas's project ship?",
@@ -3181,13 +3181,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.6571,
+      "confidence": 0.9726,
       "correct": true,
       "gold_references": [
         "doc_noah_regulus",
         "doc_regulus_deadline"
       ],
-      "latency_ms": 1.23,
+      "latency_ms": 1.19,
       "ndcg_at_5": 1.0,
       "qid": "mh_23_noah_regulus",
       "query": "When does Noah's project ship?",
@@ -3238,37 +3238,37 @@
   "schema_version": "1.0.0",
   "split_breakdown": {
     "dev": {
-      "abstention_balanced_acc": 0.9491,
-      "composite_score": 0.9509,
-      "ece": 0.0747,
+      "abstention_balanced_acc": 1.0,
+      "composite_score": 0.9911,
+      "ece": 0.0258,
       "n_queries": 72,
-      "ndcg_at_5": 0.9476,
-      "recall_at_5": 0.9664,
-      "supersession_accuracy": 0.9333
+      "ndcg_at_5": 0.9639,
+      "recall_at_5": 0.9883,
+      "supersession_accuracy": 1.0
     },
     "held_out": {
-      "abstention_balanced_acc": 0.9579,
-      "composite_score": 0.9478,
-      "ece": 0.0914,
+      "abstention_balanced_acc": 1.0,
+      "composite_score": 0.9956,
+      "ece": 0.0359,
       "n_queries": 72,
-      "ndcg_at_5": 0.928,
-      "recall_at_5": 0.9599,
-      "supersession_accuracy": 0.9333
+      "ndcg_at_5": 0.9528,
+      "recall_at_5": 0.9854,
+      "supersession_accuracy": 1.0
     }
   },
   "summary": {
-    "abstention_balanced_acc": 0.9535,
-    "abstention_f1": 0.918,
-    "abstention_rate": 0.9333,
+    "abstention_balanced_acc": 1.0,
+    "abstention_f1": 1.0,
+    "abstention_rate": 1.0,
     "benign_false_positive_rate": 0.0,
     "cognitive_integrity_pass_rate": 1.0,
-    "composite_score": 0.9494,
-    "ece": 0.0718,
+    "composite_score": 0.9933,
+    "ece": 0.0223,
     "g2_answer_quality_lift": 0.4167,
     "ndcg_at_5": {
-      "ci_95_high": 0.9627,
-      "ci_95_low": 0.9104,
-      "mean": 0.9378,
+      "ci_95_high": 0.9782,
+      "ci_95_low": 0.9346,
+      "mean": 0.9583,
       "method": "bootstrap"
     },
     "non_saturation_verified": false,
@@ -3279,9 +3279,9 @@
       "point": 1.0
     },
     "recall_at_5": {
-      "ci_95_high": 0.9839,
-      "ci_95_low": 0.9392,
-      "mean": 0.9632,
+      "ci_95_high": 0.9971,
+      "ci_95_low": 0.9737,
+      "mean": 0.9868,
       "method": "bootstrap"
     },
     "untrusted_instruction_containment": 1.0
@@ -3293,7 +3293,7 @@
       "operator": "<",
       "passed": false,
       "target": 1.0,
-      "value": 0.9632
+      "value": 0.9868
     },
     {
       "check": "poison_block_rate",

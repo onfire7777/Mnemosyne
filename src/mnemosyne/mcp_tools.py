@@ -1889,6 +1889,9 @@ class MemoryTools:
         lawful_basis: list[str] | None = None,
         break_glass: bool = False,
         as_of: str | None = None,
+        disposition: dict[str, Any] | None = None,
+        mission: str | None = None,
+        hierarchy_first: bool = False,
     ) -> dict[str, Any]:
         """Produce an ephemeral, source-grounded answer within the caller's scope."""
         from mnemosyne.answering import (
@@ -1896,6 +1899,7 @@ class MemoryTools:
             AnswerReadContext,
             AnswerRequest,
             GroundedAnswerOrchestrator,
+            coerce_disposition,
             public_grounded_answer,
         )
         from mnemosyne.providers.grounded_reader import CommandGroundedProvider
@@ -1910,6 +1914,9 @@ class MemoryTools:
             raise ValueError("reflect question exceeds the query limit")
         if not isinstance(break_glass, bool):
             raise ValueError("break_glass must be a boolean")
+        if not isinstance(hierarchy_first, bool):
+            raise ValueError("hierarchy_first must be a boolean")
+        resolved_disposition = coerce_disposition(disposition, mission=mission)
         context = AnswerReadContext(
             tenant_id=tenant_id, branch=branch, role=role, user_id=user_id,
             source_trust_tier=source_trust_tier, max_trust_tier=max_trust_tier,
@@ -1928,7 +1935,11 @@ class MemoryTools:
         except Exception as exc:
             raise ValueError("reflect grounded provider is not configured or is invalid") from exc
         result = GroundedAnswerOrchestrator(self.engine, provider, limits=limits).answer(
-            AnswerRequest(question=question, context=context), provider,
+            AnswerRequest(question=question, context=context),
+            provider,
+            disposition=resolved_disposition,
+            mission=mission,
+            hierarchy_first=hierarchy_first,
         )
         try:
             disclosure = provider.disclosure
@@ -2465,6 +2476,46 @@ class MemoryTools:
             "content": view.content,
             "segment_cids": list(view.segment_cids),
         }
+
+    def document_reconcile_branch(
+        self,
+        tenant_id: str,
+        user_id: str,
+        source_branch: str,
+        target_branch: str = "main",
+        document_id: str | None = None,
+        branch: str = "main",
+        role: WriteRole = "agent",
+        source_trust_tier: int | None = None,
+        max_trust_tier: int | None = None,
+        max_sensitivity: int | None = None,
+        capability_tags: list[str] | None = None,
+        purpose: list[str] | None = None,
+        residency: str | None = None,
+        region: str | None = None,
+        lawful_basis: list[str] | None = None,
+        session_identity: SessionIdentity | None = None,
+    ) -> dict[str, Any]:
+        _require_text(source_branch, field="source_branch")
+        _require_text(target_branch, field="target_branch")
+        if document_id is not None:
+            _require_text(document_id, field="document_id")
+        context = self._document_context(
+            tenant_id, user_id, target_branch or branch, role, source_trust_tier, max_trust_tier,
+            max_sensitivity, capability_tags, purpose, residency, region,
+            lawful_basis, session_identity,
+        )
+        self._authorize("document_replace", role=context.role,
+                        source_trust_tier=(context.source_trust_tier if context.source_trust_tier is not None
+                                           else int(TrustTier.DIRECT_USER)),
+                        target_sink="evidence")
+        return self._document_service().reconcile_branch_manifests(
+            context,
+            source_branch=source_branch,
+            target_branch=target_branch,
+            user_id=user_id,
+            document_id=document_id,
+        )
 
     def search(
         self,

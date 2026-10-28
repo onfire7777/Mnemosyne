@@ -8365,7 +8365,11 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             return 0.0
         query_support_score = support_score if support_score is not None else query_support(query, hits)["score"]
         query_support_score = _bounded_float(query_support_score, default=0.0)
-        if len(hits) in (2, 3) and all(h.trust_tier == 0 for h in hits) and any(h.metadata.get("score_scale") == "bm25" for h in hits):
+        if (
+            len(hits) in (2, 3)
+            and all(h.trust_tier == 0 for h in hits)
+            and any(h.metadata.get("score_scale") in ("bm25", "reciprocal_rank") or "bm25" in h.channel for h in hits)
+        ):
             return max(0.0, min(0.98, evidence_quality * 1.48))
         if len(hits) < 4:
             if query_support_score < QUERY_SUPPORT_THRESHOLD:
@@ -8379,7 +8383,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     evidence_quality * (0.85 + 0.15 * (query_support_score / QUERY_SUPPORT_THRESHOLD)) * 1.48,
                 ),
             )
-        return max(0.0, min(0.96, evidence_quality * 1.33))
+        return max(0.0, min(0.98, evidence_quality * 1.48))
 
     @staticmethod
     def _prediction_set_size(hits: list[Hit], threshold: float) -> int:

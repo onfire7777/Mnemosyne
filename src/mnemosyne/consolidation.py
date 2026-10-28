@@ -4372,6 +4372,625 @@ class DeterministicEntityResolver:
         }
 
 
+class _MergeNotFoundError(KeyError, ValueError):
+    """Raised when an unmerge target is not found in merge_history."""
+
+
+class MergeHistoryLedger(list[dict[str, Any]]):
+    """Merge lineage ledger supporting both list iteration/indexing and dict-like key lookup."""
+
+    def __getitem__(self, index_or_key: int | slice | str) -> Any:  # type: ignore[override]
+        if isinstance(index_or_key, (int, slice)):
+            return super().__getitem__(index_or_key)
+        key = str(index_or_key)
+        for record in reversed(self):
+            if (
+                record.get("merged_entity_id") == key
+                or record.get("entity_key") == key
+                or record.get("id") == key
+                or key in record.get("source_keys", ())
+            ):
+                return record
+        raise _MergeNotFoundError(f"No merge history record found for {key!r}")
+
+    def __contains__(self, item: object) -> bool:
+        if isinstance(item, str):
+            return any(
+                r.get("merged_entity_id") == item
+                or r.get("entity_key") == item
+                or r.get("id") == item
+                or item in r.get("source_keys", ())
+                for r in self
+            )
+        return super().__contains__(item)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+    def keys(self) -> list[str]:
+        return [str(r.get("merged_entity_id") or r.get("id") or "") for r in self]
+
+    def values(self) -> list[dict[str, Any]]:
+        return list(self)
+
+    def items(self) -> list[tuple[str, dict[str, Any]]]:
+        return [(str(r.get("merged_entity_id") or r.get("id") or ""), r) for r in self]
+
+
+_NICKNAME_GROUPS: dict[str, str] = {
+    "bob": "robert",
+    "bobby": "robert",
+    "rob": "robert",
+    "robbie": "robert",
+    "robert": "robert",
+    "bill": "william",
+    "billy": "william",
+    "will": "william",
+    "willy": "william",
+    "liam": "william",
+    "william": "william",
+    "alex": "alexander",
+    "al": "alexander",
+    "sasha": "alexander",
+    "lex": "alexander",
+    "alexander": "alexander",
+    "alexandra": "alexander",
+    "liz": "elizabeth",
+    "beth": "elizabeth",
+    "bess": "elizabeth",
+    "eliza": "elizabeth",
+    "betty": "elizabeth",
+    "elizabeth": "elizabeth",
+    "mike": "michael",
+    "mikey": "michael",
+    "mick": "michael",
+    "michael": "michael",
+    "jim": "james",
+    "jimmy": "james",
+    "jamie": "james",
+    "james": "james",
+    "dick": "richard",
+    "rick": "richard",
+    "ricky": "richard",
+    "rich": "richard",
+    "richard": "richard",
+    "dave": "david",
+    "davy": "david",
+    "david": "david",
+    "dan": "daniel",
+    "danny": "daniel",
+    "daniel": "daniel",
+    "tom": "thomas",
+    "tommy": "thomas",
+    "thomas": "thomas",
+    "chris": "christopher",
+    "christopher": "christopher",
+    "matt": "matthew",
+    "matty": "matthew",
+    "matthew": "matthew",
+    "joe": "joseph",
+    "joey": "joseph",
+    "joseph": "joseph",
+    "tony": "anthony",
+    "anthony": "anthony",
+    "sam": "samuel",
+    "sammy": "samuel",
+    "samuel": "samuel",
+    "ben": "benjamin",
+    "benny": "benjamin",
+    "benjamin": "benjamin",
+    "nick": "nicholas",
+    "nicky": "nicholas",
+    "nicholas": "nicholas",
+    "jen": "jennifer",
+    "jenny": "jennifer",
+    "jennifer": "jennifer",
+    "kate": "katherine",
+    "katie": "katherine",
+    "kathy": "katherine",
+    "cathy": "katherine",
+    "katherine": "katherine",
+    "catherine": "katherine",
+    "meg": "margaret",
+    "maggie": "margaret",
+    "peggy": "margaret",
+    "margaret": "margaret",
+    "sue": "susan",
+    "susie": "susan",
+    "suzy": "susan",
+    "susan": "susan",
+    "vicky": "victoria",
+    "tori": "victoria",
+    "victoria": "victoria",
+    "becky": "rebecca",
+    "rebecca": "rebecca",
+    "debbie": "deborah",
+    "deb": "deborah",
+    "deborah": "deborah",
+}
+
+
+def _parse_surface_and_disambiguators(candidate: Mapping[str, Any]) -> dict[str, Any]:
+    raw_surface = str(
+        candidate.get("candidate_subject")
+        or candidate.get("subject")
+        or candidate.get("name")
+        or candidate.get("surface")
+        or candidate.get("label")
+        or candidate.get("mention")
+        or ""
+    ).strip()
+
+    # Extract inline parenthetical or bracketed qualifiers, e.g. "Alex (Engineering, NYC)"
+    inline_parts: list[str] = []
+    for m in re.finditer(r"\(([^)]+)\)|\[([^\]]+)\]", raw_surface):
+        inner = (m.group(1) or m.group(2) or "").strip()
+        if inner:
+            inline_parts.append(inner)
+    base_surface = re.sub(r"\s*(?:\([^)]*\)|\[[^\]]*\])\s*", " ", raw_surface).strip()
+    if not base_surface:
+        base_surface = raw_surface
+
+    # Extract numeric / version tags from surface (e.g. "Project v1" vs "Project v2", "Server 01" vs "Server 02")
+    numeric_tags: list[str] = []
+    for m_num in re.finditer(r"(?i)\b(v\d+(?:\.\d+)*|#\d+|\d+(?:\.\d+)*)\b", base_surface):
+        numeric_tags.append(m_num.group(1).lower())
+    if candidate.get("version") is not None:
+        numeric_tags.append(f"v{str(candidate['version']).lstrip('vV').lower()}")
+
+    # Extract base name without trailing version/number tag for grouping check
+    name_without_num = re.sub(r"(?i)\s+\b(?:v\d+(?:\.\d+)*|#\d+|\d+(?:\.\d+)*)\b", "", base_surface).strip()
+    if not name_without_num:
+        name_without_num = base_surface
+
+    inline_tokens: list[str] = []
+    for part in inline_parts:
+        for tok in re.findall(r"[A-Za-z0-9]+", part.lower()):
+            if tok and tok not in _FUNCTION_WORDS and tok not in inline_tokens:
+                inline_tokens.append(tok)
+
+    # Collect explicit context / attribute / role disambiguators from candidate dict
+    context_tokens: list[str] = list(inline_tokens)
+    structured_attrs: dict[str, str] = {}
+    for attr_key in ("role", "department", "dept", "team", "location", "city", "org", "company", "domain", "title", "version"):
+        val = candidate.get(attr_key)
+        if val is not None and str(val).strip():
+            norm_val = _entity_key(str(val))
+            structured_attrs[attr_key] = norm_val
+            for tok in re.findall(r"[A-Za-z0-9]+", str(val).lower()):
+                if tok not in _FUNCTION_WORDS and tok not in context_tokens:
+                    context_tokens.append(tok)
+
+    for mapping_key in ("attributes", "scope", "qualifiers", "disambiguators", "metadata"):
+        mapping_val = candidate.get(mapping_key)
+        if isinstance(mapping_val, Mapping):
+            for k, v in mapping_val.items():
+                if v is not None and str(v).strip() and str(k) not in {"tenant", "branch", "epistemic_class", "speaker_role"}:
+                    structured_attrs[str(k).lower()] = _entity_key(str(v))
+                    for tok in re.findall(r"[A-Za-z0-9]+", str(v).lower()):
+                        if tok not in _FUNCTION_WORDS and tok not in context_tokens:
+                            context_tokens.append(tok)
+        elif isinstance(mapping_val, (list, tuple, set)):
+            for item in mapping_val:
+                for tok in re.findall(r"[A-Za-z0-9]+", str(item).lower()):
+                    if tok not in _FUNCTION_WORDS and tok not in context_tokens:
+                        context_tokens.append(tok)
+        elif isinstance(mapping_val, str) and mapping_val.strip():
+            for tok in re.findall(r"[A-Za-z0-9]+", mapping_val.lower()):
+                if tok not in _FUNCTION_WORDS and tok not in context_tokens:
+                    context_tokens.append(tok)
+
+    raw_context = candidate.get("context")
+    if isinstance(raw_context, str) and raw_context.strip():
+        for tok in re.findall(r"[A-Za-z0-9]+", raw_context.lower()):
+            if len(tok) >= 2 and tok not in _FUNCTION_WORDS and tok not in context_tokens:
+                context_tokens.append(tok)
+    elif isinstance(raw_context, Mapping):
+        for k, v in raw_context.items():
+            if v is not None and str(v).strip():
+                structured_attrs[str(k).lower()] = _entity_key(str(v))
+                for tok in re.findall(r"[A-Za-z0-9]+", str(v).lower()):
+                    if len(tok) >= 2 and tok not in _FUNCTION_WORDS and tok not in context_tokens:
+                        context_tokens.append(tok)
+    elif isinstance(raw_context, (list, tuple, set)):
+        for item in raw_context:
+            for tok in re.findall(r"[A-Za-z0-9]+", str(item).lower()):
+                if len(tok) >= 2 and tok not in _FUNCTION_WORDS and tok not in context_tokens:
+                    context_tokens.append(tok)
+
+    raw_cids = (
+        candidate.get("source_evidence_cids")
+        or candidate.get("evidence_cids")
+        or candidate.get("cids")
+        or ([candidate["cid"]] if candidate.get("cid") else [])
+    )
+    cids = [str(c) for c in (raw_cids or []) if c]
+    pred = str(candidate.get("candidate_predicate") or candidate.get("predicate") or "").strip()
+    obj = str(candidate.get("candidate_object") or candidate.get("object") or "").strip()
+    sig = str(candidate.get("signature") or f"{raw_surface} {pred} {obj}".strip().lower())
+
+    return {
+        "surface": raw_surface,
+        "base_surface": base_surface,
+        "name_without_num": name_without_num,
+        "base_key": _entity_key(base_surface),
+        "raw_key": _entity_key(raw_surface),
+        "inline_tokens": inline_tokens,
+        "context_tokens": context_tokens,
+        "structured_attrs": structured_attrs,
+        "numeric_tags": numeric_tags,
+        "cids": cids,
+        "signature": sig,
+    }
+
+
+def _mentions_have_conflicting_context(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
+    # 1. Conflicting numeric or version tags (e.g. "Project v1" vs "Project v2")
+    if left["numeric_tags"] and right["numeric_tags"] and left["numeric_tags"] != right["numeric_tags"]:
+        return True
+
+    # 2. Conflicting inline parenthetical/bracketed disambiguators (e.g. "Alex (Engineering, NYC)" vs "Alex (Finance, London)")
+    if left["inline_tokens"] and right["inline_tokens"]:
+        if set(left["inline_tokens"]).isdisjoint(set(right["inline_tokens"])):
+            return True
+
+    # 3. Conflicting structured attributes (e.g. role/department/location/city)
+    if left["structured_attrs"] and right["structured_attrs"]:
+        shared_keys = set(left["structured_attrs"]) & set(right["structured_attrs"])
+        if any(left["structured_attrs"][k] != right["structured_attrs"][k] for k in shared_keys):
+            return True
+
+    # 4. Conflicting context token sets when both mentions carry explicit context tokens
+    if left["context_tokens"] and right["context_tokens"]:
+        if set(left["context_tokens"]).isdisjoint(set(right["context_tokens"])):
+            return True
+
+    return False
+
+
+class ContextualEntityResolver(DeterministicEntityResolver):
+    """Contextual entity resolver with disambiguation, exact_name escape hatch, and reversible merge ledger."""
+
+    strategy = "contextual_entity_resolver"
+
+    def __init__(
+        self,
+        *,
+        exact_name: bool = False,
+        tenant_id: str = "default",
+        engine: Any | None = None,
+        aliases: Mapping[str, str] | None = None,
+    ) -> None:
+        self.exact_name = bool(exact_name)
+        self.tenant_id = str(tenant_id or "default")
+        self.engine = engine
+        self.custom_aliases: dict[str, str] = {
+            _entity_key(str(k)): _entity_key(str(v))
+            for k, v in (aliases or {}).items()
+        }
+        self.merge_history: MergeHistoryLedger = MergeHistoryLedger()
+        self._entities_by_key: dict[str, dict[str, Any]] = {}
+        self._unmerged_pairs: set[tuple[str, str]] = set()
+        self._forced_key_overrides: dict[str, str] = {}
+
+    def _group_key_for_mention(self, parsed: Mapping[str, Any], *, use_exact_name: bool) -> str:
+        # If there are numeric tags, check if base name without numeric tag is same, but numeric conflict
+        # will keep them separate anyway.
+        base_key = str(parsed["base_key"])
+        if use_exact_name:
+            return base_key
+        if base_key in self.custom_aliases:
+            return self.custom_aliases[base_key]
+        parts = base_key.split("-")
+        if parts and parts[0] in _NICKNAME_GROUPS:
+            canonical_first = _NICKNAME_GROUPS[parts[0]]
+            return "-".join([canonical_first, *parts[1:]])
+        return base_key
+
+    @staticmethod
+    def _namespaced_key(base_key: str, parsed: Mapping[str, Any], cluster_index: int = 0) -> str:
+        tokens = list(parsed["inline_tokens"] or parsed["context_tokens"])
+        if tokens:
+            slug = "-".join(tokens[:3])
+            return f"{base_key}:{slug}"
+        if parsed["raw_key"] != base_key:
+            return str(parsed["raw_key"])
+        if cluster_index > 0:
+            return f"{base_key}:context-{cluster_index + 1}"
+        return base_key
+
+    def resolve(
+        self,
+        tenant_id: str | Sequence[dict[str, Any]] = "default",
+        candidates: Sequence[dict[str, Any]] | None = None,
+        *,
+        exact_name: bool | None = None,
+    ) -> dict[str, Any]:
+        if candidates is None and not isinstance(tenant_id, str):
+            candidates = tenant_id
+            tenant_id = "default"
+        tenant_str = str(tenant_id or "default")
+        candidate_list = list(candidates or [])
+        use_exact = self.exact_name if exact_name is None else bool(exact_name)
+
+        parsed_mentions: list[dict[str, Any]] = []
+        for idx, cand in enumerate(candidate_list):
+            info = _parse_surface_and_disambiguators(cand)
+            info["index"] = idx
+            info["candidate"] = dict(cand)
+            if cand.get("exact_name") is True:
+                info["force_exact"] = True
+            else:
+                info["force_exact"] = False
+            cand_aliases = cand.get("aliases")
+            if isinstance(cand_aliases, (list, tuple, set)) and not (use_exact or info["force_exact"]):
+                for alias_item in cand_aliases:
+                    if alias_item and str(alias_item).strip():
+                        alias_key = _entity_key(str(alias_item))
+                        if alias_key and alias_key != info["base_key"]:
+                            self.custom_aliases[alias_key] = str(info["base_key"])
+            parsed_mentions.append(info)
+
+        # Group mentions by canonical group key (respecting exact_name escape hatch)
+        groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for info in parsed_mentions:
+            eff_exact = use_exact or bool(info.get("force_exact"))
+            gkey = self._group_key_for_mention(info, use_exact_name=eff_exact)
+            groups[gkey].append(info)
+
+        resolved_candidates: list[dict[str, Any]] = [{} for _ in candidate_list]
+        disambiguated_keys: list[str] = []
+        new_merges: list[dict[str, Any]] = []
+
+        for gkey, members in groups.items():
+            # Partition members into mutually compatible sub-clusters
+            subclusters: list[list[dict[str, Any]]] = []
+            had_conflict = False
+            for m in members:
+                placed = False
+                for cluster in subclusters:
+                    conflict = False
+                    for existing in cluster:
+                        pair = (str(existing["raw_key"]), str(m["raw_key"]))
+                        rev_pair = (pair[1], pair[0])
+                        if pair in self._unmerged_pairs or rev_pair in self._unmerged_pairs:
+                            conflict = True
+                            break
+                        if _mentions_have_conflicting_context(existing, m):
+                            conflict = True
+                            break
+                    if not conflict:
+                        cluster.append(m)
+                        placed = True
+                        break
+                if not placed:
+                    if subclusters:
+                        had_conflict = True
+                    subclusters.append([m])
+
+            for c_idx, cluster in enumerate(subclusters):
+                # Choose canonical base key for this subcluster
+                base_keys_in_cluster = [str(m["base_key"]) for m in cluster]
+                if gkey in base_keys_in_cluster:
+                    chosen_base = gkey
+                else:
+                    # Pick the longest / most formal base_key actually present in cluster
+                    chosen_base = max(base_keys_in_cluster, key=lambda k: (len(k), k))
+
+                if had_conflict or any(m["inline_tokens"] for m in cluster) and len(subclusters) > 1:
+                    representative = next(
+                        (m for m in cluster if m["inline_tokens"] or m["context_tokens"]),
+                        cluster[0],
+                    )
+                    canonical_key = self._namespaced_key(chosen_base, representative, c_idx)
+                    disambiguated_keys.append(canonical_key)
+                else:
+                    canonical_key = chosen_base
+
+                # Check if any member has a forced override from a prior unmerge
+                for m in cluster:
+                    comp_id = f"{m['raw_key']}::{','.join(m['cids'])}"
+                    if comp_id in self._forced_key_overrides:
+                        canonical_key = self._forced_key_overrides[comp_id]
+                    elif m["raw_key"] in self._forced_key_overrides and len(cluster) == 1:
+                        canonical_key = self._forced_key_overrides[m["raw_key"]]
+
+                for m in cluster:
+                    cand_copy = dict(m["candidate"])
+                    cand_copy["entity_key"] = canonical_key
+                    if "candidate_subject" not in cand_copy:
+                        cand_copy["candidate_subject"] = m["surface"]
+                    if "signature" not in cand_copy:
+                        cand_copy["signature"] = m["signature"]
+                    if "source_evidence_cids" not in cand_copy and m["cids"]:
+                        cand_copy["source_evidence_cids"] = list(m["cids"])
+                    resolved_candidates[m["index"]] = cand_copy
+
+                # Record merge lineage whenever 2+ mentions or distinct aliases/keys merge into canonical_key
+                distinct_raw_keys = list(dict.fromkeys(str(m["raw_key"]) for m in cluster))
+                distinct_surfaces = list(dict.fromkeys(str(m["surface"]) for m in cluster))
+                if len(cluster) > 1 or len(distinct_raw_keys) > 1 or canonical_key != cluster[0]["raw_key"]:
+                    provenance_by_key: dict[str, list[str]] = {}
+                    components: list[dict[str, Any]] = []
+                    for m_idx, m in enumerate(cluster):
+                        comp_key = str(m["raw_key"])
+                        if comp_key in provenance_by_key and comp_key == canonical_key:
+                            comp_key = f"{comp_key}:{m_idx + 1}"
+                        cids_for_m = list(dict.fromkeys(m["cids"]))
+                        provenance_by_key.setdefault(comp_key, [])
+                        for cid in cids_for_m:
+                            if cid not in provenance_by_key[comp_key]:
+                                provenance_by_key[comp_key].append(cid)
+                        components.append(
+                            {
+                                "original_key": comp_key,
+                                "raw_key": str(m["raw_key"]),
+                                "label": str(m["surface"]),
+                                "aliases": [str(m["surface"])],
+                                "source_evidence_cids": cids_for_m,
+                                "candidate_signatures": [str(m["signature"])] if m["signature"] else [],
+                                "candidate_index": m["index"],
+                            }
+                        )
+                    all_cids = list(dict.fromkeys(cid for m in cluster for cid in m["cids"]))
+                    merge_rec: dict[str, Any] = {
+                        "id": f"merge:{tenant_str}:{canonical_key}:{len(self.merge_history) + 1}",
+                        "tenant_id": tenant_str,
+                        "merged_entity_id": canonical_key,
+                        "entity_key": canonical_key,
+                        "canonical_key": canonical_key,
+                        "source_keys": distinct_raw_keys,
+                        "component_keys": list(provenance_by_key.keys()),
+                        "aliases": distinct_surfaces,
+                        "source_evidence_cids": all_cids,
+                        "provenance_by_key": provenance_by_key,
+                        "components": components,
+                        "status": "merged",
+                        "unmerged": False,
+                    }
+                    self.merge_history.append(merge_rec)
+                    new_merges.append(merge_rec)
+
+        resolved_entities = _resolved_entities_with_provenance(resolved_candidates)
+        for ent in resolved_entities:
+            self._entities_by_key[str(ent["key"])] = dict(ent)
+
+        return {
+            "candidates": resolved_candidates,
+            "entities": resolved_entities,
+            "merge_history": list(self.merge_history),
+            "details": {
+                "strategy": self.strategy,
+                "exact_name": use_exact,
+                "resolved_entities": resolved_entities,
+                "disambiguated_keys": disambiguated_keys,
+                "merge_count": len(new_merges),
+                "merge_history": list(self.merge_history),
+            },
+        }
+
+    resolve_entities = resolve
+    resolve_mentions = resolve
+
+    def unmerge_entity(
+        self,
+        merged_entity_id: str,
+        split_canonical_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Reverse a prior entity merge and restore each component's original provenance CIDs."""
+        record = self.merge_history[merged_entity_id]
+        components: list[dict[str, Any]] = list(record.get("components") or [])
+        if not components:
+            raise _MergeNotFoundError(f"Merge record for {merged_entity_id!r} has no components to unmerge")
+
+        target_merged_key = str(record.get("merged_entity_id") or merged_entity_id)
+        restored_list: list[dict[str, Any]] = []
+
+        if split_canonical_key is not None:
+            split_key = str(split_canonical_key).strip()
+            # Identify which component(s) split out vs remain
+            split_comps = [
+                c
+                for c in components
+                if c.get("original_key") == split_key
+                or c.get("raw_key") == split_key
+                or _entity_key(str(c.get("label", ""))) == split_key
+            ]
+            if not split_comps:
+                # Default to splitting out the last merged component under the requested split_canonical_key
+                split_comps = [components[-1]]
+            remaining_comps = [c for c in components if c not in split_comps]
+            if not remaining_comps and len(components) > 1:
+                remaining_comps = components[:-1]
+                split_comps = [components[-1]]
+
+            if remaining_comps:
+                rem_cids = list(dict.fromkeys(cid for c in remaining_comps for cid in c.get("source_evidence_cids", [])))
+                rem_aliases = list(dict.fromkeys(alias for c in remaining_comps for alias in c.get("aliases", [])))
+                rem_sigs = list(dict.fromkeys(sig for c in remaining_comps for sig in c.get("candidate_signatures", [])))
+                rem_entity = {
+                    "key": target_merged_key,
+                    "entity_key": target_merged_key,
+                    "label": rem_aliases[0] if rem_aliases else target_merged_key,
+                    "aliases": rem_aliases,
+                    "source_evidence_cids": rem_cids,
+                    "candidate_signatures": rem_sigs,
+                }
+                restored_list.append(rem_entity)
+                self._entities_by_key[target_merged_key] = rem_entity
+
+            sp_cids = list(dict.fromkeys(cid for c in split_comps for cid in c.get("source_evidence_cids", [])))
+            sp_aliases = list(dict.fromkeys(alias for c in split_comps for alias in c.get("aliases", [])))
+            sp_sigs = list(dict.fromkeys(sig for c in split_comps for sig in c.get("candidate_signatures", [])))
+            sp_entity = {
+                "key": split_key,
+                "entity_key": split_key,
+                "label": sp_aliases[0] if sp_aliases else split_key,
+                "aliases": sp_aliases,
+                "source_evidence_cids": sp_cids,
+                "candidate_signatures": sp_sigs,
+            }
+            restored_list.append(sp_entity)
+            self._entities_by_key[split_key] = sp_entity
+
+            for c in split_comps:
+                comp_id = f"{c.get('raw_key')}::{','.join(c.get('source_evidence_cids', []))}"
+                self._forced_key_overrides[comp_id] = split_key
+                self._forced_key_overrides[str(c.get("raw_key"))] = split_key
+                for rc in remaining_comps:
+                    self._unmerged_pairs.add((str(rc.get("raw_key")), str(c.get("raw_key"))))
+        else:
+            used_keys: set[str] = set()
+            for idx, c in enumerate(components):
+                ckey = str(c.get("original_key") or c.get("raw_key") or f"{target_merged_key}:part-{idx + 1}")
+                if ckey in used_keys:
+                    ckey = f"{ckey}:{idx + 1}"
+                used_keys.add(ckey)
+                c_cids = list(dict.fromkeys(c.get("source_evidence_cids", [])))
+                c_aliases = list(dict.fromkeys(c.get("aliases", [c.get("label", ckey)])))
+                c_sigs = list(dict.fromkeys(c.get("candidate_signatures", [])))
+                ent = {
+                    "key": ckey,
+                    "entity_key": ckey,
+                    "label": c_aliases[0] if c_aliases else ckey,
+                    "aliases": c_aliases,
+                    "source_evidence_cids": c_cids,
+                    "candidate_signatures": c_sigs,
+                }
+                restored_list.append(ent)
+                self._entities_by_key[ckey] = ent
+                comp_id = f"{c.get('raw_key')}::{','.join(c_cids)}"
+                self._forced_key_overrides[comp_id] = ckey
+            for i in range(len(components)):
+                for j in range(i + 1, len(components)):
+                    self._unmerged_pairs.add((str(components[i].get("raw_key")), str(components[j].get("raw_key"))))
+
+        record["status"] = "unmerged"
+        record["unmerged"] = True
+        record["restored_entities"] = restored_list
+
+        restored_provenance = {e["key"]: list(e["source_evidence_cids"]) for e in restored_list}
+        restored_ledger = MergeHistoryLedger()
+        for e in restored_list:
+            restored_ledger.append({**e, "merged_entity_id": e["key"]})
+
+        return {
+            "unmerged": True,
+            "status": "unmerged",
+            "merged_entity_id": target_merged_key,
+            "split_canonical_key": split_canonical_key or (restored_list[-1]["key"] if restored_list else None),
+            "entities": restored_list,
+            "restored_entities": restored_ledger,
+            "restored_provenance": restored_provenance,
+            "source_evidence_cids_by_entity": restored_provenance,
+            "remaining_entity": restored_list[0] if restored_list else None,
+            "split_entity": restored_list[-1] if restored_list else None,
+        }
+
+
 class CommandEntityResolver(_CommandRoleTransport):
     """Shell-free entity resolver adapter for production resolver services."""
 
@@ -4786,6 +5405,55 @@ def _resolved_entities(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]
         if signature not in entity["candidate_signatures"]:
             entity["candidate_signatures"].append(signature)
     return list(entities.values())
+
+
+def _resolved_entities_with_provenance(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    entities: dict[str, dict[str, Any]] = {}
+    for candidate in candidates:
+        subject = str(
+            candidate.get("candidate_subject")
+            or candidate.get("subject")
+            or candidate.get("name")
+            or candidate.get("label")
+            or ""
+        )
+        key = str(candidate.get("entity_key") or _entity_key(subject))
+        entity = entities.setdefault(
+            key,
+            {
+                "key": key,
+                "entity_key": key,
+                "label": subject or key,
+                "aliases": [],
+                "candidate_signatures": [],
+                "source_evidence_cids": [],
+            },
+        )
+        if subject and subject not in entity["aliases"]:
+            entity["aliases"].append(subject)
+        signature = str(candidate.get("signature") or "")
+        if signature and signature not in entity["candidate_signatures"]:
+            entity["candidate_signatures"].append(signature)
+        for cid in candidate.get("source_evidence_cids") or []:
+            if cid and str(cid) not in entity["source_evidence_cids"]:
+                entity["source_evidence_cids"].append(str(cid))
+    return list(entities.values())
+
+
+def unmerge_entity(
+    resolver_or_merged_id: ContextualEntityResolver | str,
+    merged_entity_id_or_split_key: str | None = None,
+    split_canonical_key: str | None = None,
+) -> dict[str, Any]:
+    """Module-level convenience wrapper for ContextualEntityResolver.unmerge_entity."""
+    if isinstance(resolver_or_merged_id, ContextualEntityResolver):
+        if merged_entity_id_or_split_key is None:
+            raise ValueError("merged_entity_id is required")
+        return resolver_or_merged_id.unmerge_entity(
+            merged_entity_id_or_split_key,
+            split_canonical_key=split_canonical_key,
+        )
+    raise ValueError("unmerge_entity requires a ContextualEntityResolver instance or call resolver.unmerge_entity(...)")
 
 
 def _apply_resolver_response(candidates: Sequence[dict[str, Any]], response: dict[str, Any]) -> dict[str, Any]:

@@ -2492,6 +2492,9 @@ def cmd_reflect(args: argparse.Namespace) -> None:
             lawful_basis=args.lawful_basis,
             break_glass=args.break_glass,
             as_of=args.as_of,
+            disposition=_json_object_arg(getattr(args, "disposition", None), "--disposition"),
+            mission=getattr(args, "mission", None),
+            hierarchy_first=bool(getattr(args, "hierarchy_first", False)),
         )
     )
 
@@ -2791,10 +2794,26 @@ def cmd_document_get(args: argparse.Namespace) -> None:
     ))
 
 
+def cmd_document_reconcile_branch(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.document_reconcile_branch(
+        **_document_scope_args(args),
+        source_branch=args.source_branch,
+        target_branch=args.target_branch,
+        document_id=args.document_id,
+        session_identity=getattr(args, "session_identity", None),
+    ))
+
+
 def _add_document_args(parser: argparse.ArgumentParser, operation: str) -> None:
     parser.add_argument("--tenant", required=True)
     parser.add_argument("--user", required=True)
-    parser.add_argument("--document-id", required=True)
+    if operation == "reconcile-branch":
+        parser.add_argument("--document-id")
+        parser.add_argument("--source-branch", required=True)
+        parser.add_argument("--target-branch", default="main")
+    else:
+        parser.add_argument("--document-id", required=True)
     parser.add_argument("--branch", default="main")
     parser.add_argument("--role", default="agent", choices=["reader", "agent", "consolidator", "operator"])
     parser.add_argument("--source-trust-tier", type=int)
@@ -20467,6 +20486,9 @@ def build_parser() -> argparse.ArgumentParser:
     reflect.add_argument("--region")
     reflect.add_argument("--break-glass", action="store_true")
     reflect.add_argument("--as-of", help="Only use evidence visible at this timezone-aware ISO 8601 instant")
+    reflect.add_argument("--disposition", help="JSON object of reflect disposition traits")
+    reflect.add_argument("--mission", help="Advisory mission string for reflection prioritization")
+    reflect.add_argument("--hierarchy-first", action="store_true", help="Prioritize hierarchical knowledge pages and observations before raw evidence")
     reflect.set_defaults(func=cmd_reflect)
 
     mental_model = sub.add_parser("mental-model", help="Manage private saved grounded answers")
@@ -20502,6 +20524,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("replace", cmd_document_replace),
         ("append", cmd_document_append),
         ("get", cmd_document_get),
+        ("reconcile-branch", cmd_document_reconcile_branch),
     ):
         command = document_sub.add_parser(operation)
         _add_document_args(command, operation)
