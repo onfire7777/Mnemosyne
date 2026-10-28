@@ -5842,7 +5842,7 @@ class SqliteEngine:
             if row is not None:
                 existing = _observation_from_row(row)
                 version = existing.version + 1
-                created_at = existing.created_at
+                created_at = dt_to_json(existing.created_at) or now_iso
                 updated_at = now_iso
                 conn.execute(
                     """
@@ -5865,12 +5865,12 @@ class SqliteEngine:
                         obs.independent_source_count,
                         obs.corroboration_velocity,
                         json_text([c.to_dict() for c in obs.contradiction_history]),
-                        obs.freshness_watermark,
+                        dt_to_json(obs.freshness_watermark),
                         obs.standing,
                         obs.salience,
                         obs.access_velocity,
                         obs.access_count,
-                        obs.last_accessed_at,
+                        dt_to_json(obs.last_accessed_at),
                         obs.status,
                         obs.superseded_by,
                         version,
@@ -5897,8 +5897,8 @@ class SqliteEngine:
                 obs.created_at = created_at
                 obs.updated_at = updated_at
             else:
-                created_at = obs.created_at or now_iso
-                updated_at = obs.updated_at or now_iso
+                created_at = dt_to_json(obs.created_at) or now_iso
+                updated_at = dt_to_json(obs.updated_at) or now_iso
                 version = obs.version or 1
                 conn.execute(
                     """
@@ -5924,12 +5924,12 @@ class SqliteEngine:
                         obs.independent_source_count,
                         obs.corroboration_velocity,
                         json_text([c.to_dict() for c in obs.contradiction_history]),
-                        obs.freshness_watermark,
+                        dt_to_json(obs.freshness_watermark),
                         obs.standing,
                         obs.salience,
                         obs.access_velocity,
                         obs.access_count,
-                        obs.last_accessed_at,
+                        dt_to_json(obs.last_accessed_at),
                         obs.status,
                         obs.superseded_by,
                         version,
@@ -6186,8 +6186,8 @@ class SqliteEngine:
             if row_id is not None:
                 raise KnowledgePageConflict(f"KnowledgePage already exists with page_id '{kp.page_id}'")
             now_iso = dt_to_json(utc_now())
-            created_at = kp.created_at or now_iso
-            updated_at = kp.updated_at or now_iso
+            created_at = dt_to_json(kp.created_at) or now_iso
+            updated_at = dt_to_json(kp.updated_at) or now_iso
             conn.execute(
                 """
                 INSERT INTO knowledge_pages (

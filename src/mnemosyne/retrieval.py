@@ -801,6 +801,8 @@ def normalise_query_term(token: str) -> str:
         return "notify"
     if token == "co2":
         return "carbon"
+    if token == "eps":
+        return "ep"
     for suffix in ("ingly", "edly", "ing", "ied", "ies", "ed", "es", "s"):
         if len(token) > len(suffix) + 3 and token.endswith(suffix):
             if suffix == "ies":
@@ -808,6 +810,12 @@ def normalise_query_term(token: str) -> str:
             if suffix == "ied":
                 return token[: -len(suffix)] + "y"
             return token[: -len(suffix)]
+    if (
+        len(token) == 4
+        and token.endswith("s")
+        and not token.endswith(("ss", "us", "is", "as", "os", "yes", "was", "has", "his"))
+    ):
+        return token[:-1]
     return token
 
 
@@ -826,10 +834,10 @@ def similar_query_terms(left: str, right: str) -> bool:
         return True
     if any(left in s and right in s for s in _SYNONYM_SETS):
         return True
-    for hyp_key, hyponyms in TAXONOMIC_EXPANSIONS.items():
-        if left == hyp_key or right == hyp_key:
-            target = right if left == hyp_key else left
-            if any(target == h or target in tokenize(h) for h in hyponyms if len(target) > 2):
+    for l_key in (left, normalise_query_term(left)):
+        hyponyms = TAXONOMIC_EXPANSIONS.get(l_key)
+        if hyponyms and len(right) > 2:
+            if any(right == h or right in tokenize(h) for h in hyponyms):
                 return True
     shorter, longer = (left, right) if len(left) <= len(right) else (right, left)
     if len(shorter) >= 4 and longer.startswith(shorter):
@@ -1117,20 +1125,23 @@ _LOW_WEIGHT_PREDICATES = frozenset({
     "visit", "visited", "visiting", "added", "add", "adding", "read", "reading",
     "living", "live", "lived", "current", "currently", "name", "named", "every",
     "left", "became", "become", "initially", "initial", "complete", "completed",
-    "purchased", "purchase", "purchasing", "gave", "give", "given", "dedicate",
-    "dedicated", "booking", "book", "booked", "attend", "attended", "attending",
-    "receive", "received", "receiving", "make", "made", "making", "find",
-    "found", "finding", "get", "getting", "got", "gotten", "see", "seeing",
+    "completion", "purchased", "purchase", "purchasing", "gave", "give", "given",
+    "dedicate", "dedicated", "booking", "book", "booked", "attend", "attended",
+    "attending", "receive", "received", "receiving", "make", "made", "making",
+    "find", "found", "finding", "get", "getting", "got", "gotten", "see", "seeing",
     "saw", "seen", "play", "played", "playing", "lead", "leading", "learn",
     "learned", "learning", "call", "called", "calling", "practice", "practicing",
     "practiced", "decide", "decided", "plant", "planted", "planting",
     "buy", "bought", "locate", "located", "eat", "ate", "sell", "sold",
     "own", "owned", "open", "close", "stay", "watch", "watched",
+    "approximate", "approximately", "related", "relat", "exceed", "exce",
+    "relocation", "relocat", "earliest", "latest", "previously", "frequently",
+    "downloaded", "download", "listening", "listen", "six", "five", "four", "three",
 })
 
 _FOCAL_OBJECT_TERMS = frozenset({
     "hamster", "football", "footballs", "violin", "uncle", "dad", "father",
-    "taxi", "cows", "cow", "fence", "tart", "tarts", "pepper", "peppers",
+    "taxi", "bus", "cows", "cow", "fence", "tart", "tarts", "pepper", "peppers",
     "porsche", "ferrari", "sapiens", "cucumbers", "cucumber", "guitar",
     "airbnbs", "airbnb", "passport", "salary", "anniversary", "birthday",
     "saxophone", "piano", "flute", "drums", "trumpet", "clarinet",
@@ -1183,13 +1194,46 @@ _RECOGNIZED_COMPOUND_ANCHORS = (
     ("birthday", "parties"),
     ("birthday", "gift"),
     ("birthday", "gifts"),
+    ("formal", "education"),
+    ("autographed", "football"),
+    ("italian", "restaurant"),
+    ("italian", "restaurants"),
+    ("undergrad", "course"),
 )
+
+
+def _extract_user_grounding_text(text: str, allow_assistant: bool = False) -> str:
+    if allow_assistant:
+        return text
+    lines = text.splitlines()
+    has_dialogue_tags = any(
+        line.strip().lower().startswith(("user:", "assistant:")) for line in lines
+    )
+    if not has_dialogue_tags:
+        return text
+    user_lines: list[str] = []
+    in_assistant = False
+    for line in lines:
+        sl = line.strip().lower()
+        if sl.startswith("user:"):
+            in_assistant = False
+            user_lines.append(line)
+        elif sl.startswith("assistant:"):
+            in_assistant = True
+        elif not in_assistant:
+            user_lines.append(line)
+    extracted = "\n".join(user_lines).strip()
+    return extracted if extracted else text
 
 
 def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = ()) -> dict[str, Any]:
     """Specificity-weighted query support with proper-noun, compound-noun, and focal-object grounding."""
     words = re.findall(r"[A-Za-z0-9]+(?:[\x27\x2D][A-Za-z0-9]+)*", query)
-    hit_texts = [hit.text for hit in hits[:8]] + list(extra_texts)
+    hit_texts = [hit.text for hit in hits[:5]] + list(extra_texts)
+    allow_assistant = bool(
+        re.search(r"\b(?:you|assistant)\s+(?:recommend|recommended|suggest|suggested|mention|mentioned|say|said|tell|told|give|gave|provide|provided)\b", query, re.I)
+    )
+    user_hit_texts = [_extract_user_grounding_text(t, allow_assistant=allow_assistant) for t in hit_texts]
 
     # 1. Extract proper nouns and multi-word proper nouns
     proper_nouns: list[str] = []
@@ -1226,7 +1270,7 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
     for pn in proper_nouns:
         pn_norm = normalise_query_term(re.sub(r"['’]s$", "", pn).lower())
         found = False
-        for text in hit_texts:
+        for text in user_hit_texts:
             tokens = [normalise_query_term(t) for t in tokenize(text)]
             if any(similar_query_terms(pn_norm, t) for t in tokens) or pn_norm in text.lower():
                 found = True
@@ -1239,7 +1283,7 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
         mw_norms = [normalise_query_term(w.lower()) for w in mw]
         mw_name = " ".join(mw)
         found_mw = False
-        for text in hit_texts:
+        for text in user_hit_texts:
             tokens = [normalise_query_term(t) for t in tokenize(text)]
             positions = []
             for mwn in mw_norms:
@@ -1276,7 +1320,7 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
         o_norm = normalise_query_term(owner.lower())
         d_norm = normalise_query_term(owned.lower())
         pair_found = False
-        for text in hit_texts:
+        for text in user_hit_texts:
             tokens = [normalise_query_term(t) for t in tokenize(text)]
             has_o = any(similar_query_terms(o_norm, tok) for tok in tokens)
             has_d = any(similar_query_terms(d_norm, tok) for tok in tokens)
@@ -1292,12 +1336,12 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
     q_lower = query.lower()
     missing_compounds: list[str] = []
 
-    # A. Explicit recognized compound anchors
+    # A. Explicit recognized compound anchors (require contiguous word-boundary phrase in query)
     for w1, w2 in _RECOGNIZED_COMPOUND_ANCHORS:
-        if w1 in q_lower and w2 in q_lower:
+        if re.search(rf"\b{re.escape(w1)}(?:['’]s)?[\s-]+{re.escape(w2)}\b", q_lower):
             t1, t2 = normalise_query_term(w1), normalise_query_term(w2)
             found = False
-            for text in hit_texts:
+            for text in user_hit_texts:
                 tokens = [normalise_query_term(t) for t in tokenize(text)]
                 p1 = [idx for idx, tok in enumerate(tokens) if similar_query_terms(t1, tok)]
                 p2 = [idx for idx, tok in enumerate(tokens) if similar_query_terms(t2, tok)]
@@ -1329,7 +1373,7 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
         norm = normalise_query_term(clean_w.lower())
         if norm in _FOCAL_OBJECT_TERMS and clean_w not in proper_nouns:
             found = False
-            for text in hit_texts:
+            for text in user_hit_texts:
                 tokens = [normalise_query_term(t) for t in tokenize(text)]
                 if any(similar_query_terms(norm, t) for t in tokens):
                     found = True
@@ -1352,14 +1396,19 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
         elif norm in _FOCAL_OBJECT_TERMS:
             base_w = 3.0
         elif norm in _LOW_WEIGHT_PREDICATES:
-            base_w = 0.6
+            base_w = 0.35
         else:
             base_w = 1.5
 
-        # Dynamic corpus IDF: log((N + 1) / (df + 0.5))
+        # Dynamic corpus IDF: log((N + 1) / (df + 0.5)), keeping matched terms at >= 1.0
         df = sum(1 for text in hit_texts if any(similar_query_terms(norm, normalise_query_term(t)) for t in tokenize(text)))
         corpus_idf = math.log((n_docs + 1.0) / (df + 0.5))
-        dynamic_factor = max(0.5, min(2.5, corpus_idf / 1.5))
+        if n_docs <= 2 or df > 0:
+            dynamic_factor = 1.0
+        elif norm in _LOW_WEIGHT_PREDICATES:
+            dynamic_factor = 0.5
+        else:
+            dynamic_factor = max(1.0, min(2.0, corpus_idf / 1.5))
         term_weights[term] = base_w * dynamic_factor
 
     if not query_terms:
@@ -1406,26 +1455,36 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
 
     # Locative prepositional phrase binding (e.g., "apartment in Shinjuku", "sale at Nordstrom")
     missing_locatives: list[str] = []
-    locative_pairs = re.findall(r"\b([A-Za-z]+)\s+(?:in|at)\s+([A-Z][A-Za-z]+)\b", query)
-    for entity, loc in locative_pairs:
-        en = normalise_query_term(entity.lower())
-        ln = normalise_query_term(loc.lower())
-        if en not in QUERY_SUPPORT_STOPWORDS and ln not in QUERY_SUPPORT_STOPWORDS and len(en) > 2 and len(ln) > 2:
-            found_loc = False
-            for text in hit_texts[:5]:
-                tokens = [normalise_query_term(t) for t in tokenize(text)]
-                p_e = [idx for idx, tok in enumerate(tokens) if similar_query_terms(en, tok)]
-                p_l = [idx for idx, tok in enumerate(tokens) if similar_query_terms(ln, tok)]
-                if any(abs(i - j) <= 15 for i in p_e for j in p_l):
-                    found_loc = True
-                    break
-            if not found_loc:
-                missing_locatives.append(f"{entity} in {loc}")
+    is_ordering_query = bool(re.search(r"\b(?:order of|chronological)\b", q_lower))
+    if not is_ordering_query:
+        locative_pairs = re.findall(r"\b([A-Za-z]+)\s+(?:in|at)\s+([A-Z][A-Za-z]+)\b", query)
+        for entity, loc in locative_pairs:
+            if loc.lower() in _MONTHS or loc.lower() in _WEEKDAYS:
+                continue
+            en = normalise_query_term(entity.lower())
+            ln = normalise_query_term(loc.lower())
+            if (
+                en not in QUERY_SUPPORT_STOPWORDS
+                and en not in _LOW_WEIGHT_PREDICATES
+                and ln not in QUERY_SUPPORT_STOPWORDS
+                and len(en) > 2
+                and len(ln) > 2
+            ):
+                found_loc = False
+                for text in user_hit_texts[:5]:
+                    tokens = [normalise_query_term(t) for t in tokenize(text)]
+                    p_e = [idx for idx, tok in enumerate(tokens) if similar_query_terms(en, tok)]
+                    p_l = [idx for idx, tok in enumerate(tokens) if similar_query_terms(ln, tok)]
+                    if any(abs(i - j) <= 15 for i in p_e for j in p_l):
+                        found_loc = True
+                        break
+                if not found_loc:
+                    missing_locatives.append(f"{entity} in {loc}")
 
     # Duration grounding: "how long [was/have/stayed] ... in [Location]"
     if re.search(r"\bhow\s+long\b", query, re.I):
         loc_match = re.search(r"\b(?:in|at)\s+([A-Z][A-Za-z]+)\b", query)
-        if loc_match:
+        if loc_match and loc_match.group(1).lower() not in _MONTHS and loc_match.group(1).lower() not in _WEEKDAYS:
             loc_target = normalise_query_term(loc_match.group(1).lower())
             if loc_target not in QUERY_SUPPORT_STOPWORDS and len(loc_target) > 2:
                 dur_regex = re.compile(
@@ -1457,7 +1516,7 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
     focal_objects = [t for t in query_terms if t in _FOCAL_OBJECT_TERMS and t not in subjects]
     if subjects and focal_objects:
         has_joint_hit = False
-        for text in hit_texts[:5]:
+        for text in user_hit_texts[:5]:
             tokens = [normalise_query_term(tok) for tok in tokenize(text)]
             subj_in_hit = any(any(similar_query_terms(s.lower(), tok) for tok in tokens) for s in subjects)
             obj_in_hit = any(any(similar_query_terms(fo, tok) for tok in tokens) for fo in focal_objects)
@@ -1467,11 +1526,37 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
         if not has_joint_hit:
             missing_arguments.append(f"{subjects[0]} + {focal_objects[0]}")
 
+    # Age-of-person grounding: "How old is/was <ProperNoun>" requires an age indicator in a hit mentioning <ProperNoun>
+    age_person_match = re.search(r"\bhow\s+old\s+(?:is|was|will)\s+([A-Z][a-z]+)\b", query)
+    if age_person_match:
+        person_norm = normalise_query_term(age_person_match.group(1).lower())
+        age_indicator_re = re.compile(
+            r"\b(?:\d+\s*(?:years?\s*old|yo|y/o|months?\s*old)|age\s+of\s+\d+|aged\s+\d+|turned\s+\d+|born\s+in\s+\d{4})\b",
+            re.I,
+        )
+        has_person_age = False
+        for text in user_hit_texts[:5]:
+            tokens = [normalise_query_term(tok) for tok in tokenize(text)]
+            if any(similar_query_terms(person_norm, tok) for tok in tokens) and age_indicator_re.search(text):
+                has_person_age = True
+                break
+        if not has_person_age:
+            missing_arguments.append(f"age of {age_person_match.group(1)}")
+
+    # Remaining-quantity grounding: "How many pages do I have left..." requires 'left' or 'remaining' in user hit text
+    if re.search(r"\bhow\s+many\s+pages\s+do\s+i\s+have\s+left\b", q_lower):
+        has_remaining_pages = any(
+            re.search(r"\b(?:left|remaining)\b", text, re.I) and re.search(r"\bpages?\b", text, re.I)
+            for text in user_hit_texts[:5]
+        )
+        if not has_remaining_pages:
+            missing_arguments.append("pages left")
+
     # Conjunctive Noun-Phrase Grounding: "X and Y", "both X and Y"
     missing_conjunctions: list[str] = []
     conjunction_pairs: list[tuple[str, str]] = []
     conj_matches = re.finditer(
-        r"(?:\b(between|from)\s+)?\b([A-Za-z0-9'-]+)\s+and\s+(?:the\s+)?([A-Za-z0-9'-]+)\b",
+        r"(?:\b(between|from)\s+)?(?<![\x27\x22])\b([A-Za-z0-9'-]+)\s+and\s+(?:the\s+)?([A-Za-z0-9'-]+)\b(?![\x27\x22])",
         query,
         re.I,
     )
@@ -1481,12 +1566,14 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
             continue
         start_idx = m.start()
         preceding = query[:start_idx].strip().lower()
-        if preceding.endswith("between") or preceding.endswith("from"):
+        if preceding.endswith(("between", "from", "'", '"')):
             continue
         n1, n2 = normalise_query_term(c1.lower()), normalise_query_term(c2.lower())
         if (
             n1 not in QUERY_SUPPORT_STOPWORDS
             and n2 not in QUERY_SUPPORT_STOPWORDS
+            and n1 not in _LOW_WEIGHT_PREDICATES
+            and n2 not in _LOW_WEIGHT_PREDICATES
             and len(n1) > 2
             and len(n2) > 2
             and not (c1.isdigit() and c2.isdigit())
@@ -1495,8 +1582,8 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
 
     for c1, c2 in conjunction_pairs:
         n1, n2 = normalise_query_term(c1.lower()), normalise_query_term(c2.lower())
-        found_c1 = any(any(similar_query_terms(n1, tok) for tok in tokenize(text)) for text in hit_texts)
-        found_c2 = any(any(similar_query_terms(n2, tok) for tok in tokenize(text)) for text in hit_texts)
+        found_c1 = any(any(similar_query_terms(n1, normalise_query_term(tok)) for tok in tokenize(text)) for text in user_hit_texts)
+        found_c2 = any(any(similar_query_terms(n2, normalise_query_term(tok)) for tok in tokenize(text)) for text in user_hit_texts)
         if not found_c1 and not found_c2:
             missing_conjunctions.append(f"conjunction({c1} and {c2}) missing {c1} and {c2}")
         elif not found_c1:

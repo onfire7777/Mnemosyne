@@ -41,9 +41,11 @@ def parse_dt(value: str | date | datetime | None) -> datetime | None:
     return parsed.astimezone(UTC)
 
 
-def dt_to_json(value: datetime | None) -> str | None:
+def dt_to_json(value: datetime | str | None) -> str | None:
     if value is None:
         return None
+    if isinstance(value, str):
+        return value
     return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 

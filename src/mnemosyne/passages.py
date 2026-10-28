@@ -165,6 +165,66 @@ class PassageGraph:
         return False
 
 
+_IRREGULAR_VERB_MAP = {
+    "bought": "buy",
+    "went": "go",
+    "took": "take",
+    "taken": "take",
+    "spent": "spend",
+    "made": "make",
+    "gave": "give",
+    "given": "give",
+    "ate": "eat",
+    "eaten": "eat",
+    "saw": "see",
+    "seen": "see",
+    "got": "get",
+    "gotten": "get",
+    "sold": "sell",
+    "ran": "run",
+    "drove": "drive",
+    "driven": "drive",
+    "flew": "fly",
+    "flown": "fly",
+    "met": "meet",
+    "paid": "pay",
+    "wore": "wear",
+    "worn": "wear",
+    "eps": "ep",
+}
+
+
+def _stem_passage_token(tok: str) -> str:
+    from mnemosyne.retrieval import normalise_query_term
+
+    t = normalise_query_term(tok)
+    if t in _IRREGULAR_VERB_MAP:
+        return _IRREGULAR_VERB_MAP[t]
+    if len(t) == 4 and t.endswith("s") and not t.endswith(("ss", "us", "is", "as", "os", "yes", "was", "has", "his")):
+        return t[:-1]
+    return t
+
+
+def _extract_user_lines(text: str) -> str:
+    lines = text.splitlines()
+    has_tags = any(line.strip().lower().startswith(("user:", "assistant:")) for line in lines)
+    if not has_tags:
+        return text
+    out: list[str] = []
+    in_assistant = False
+    for line in lines:
+        sl = line.strip().lower()
+        if sl.startswith("user:"):
+            in_assistant = False
+            out.append(line)
+        elif sl.startswith("assistant:"):
+            in_assistant = True
+        elif not in_assistant:
+            out.append(line)
+    extracted = "\n".join(out).strip()
+    return extracted if extracted else text
+
+
 class PassageIndex:
     """BM25 with positive IDF, scoped to the caller's readable corpus.
 
@@ -176,15 +236,35 @@ class PassageIndex:
         self._texts: list[str] = list(texts)
         self._texts_tuple: tuple[str, ...] | None = tuple(texts) if isinstance(texts, tuple) else None
         self.lengths: list[int] = []
+        self.user_lengths: list[int] = []
         self.postings: dict[str, list[tuple[int, int]]] = defaultdict(list)
+        self.stem_postings: dict[str, list[tuple[int, int]]] = defaultdict(list)
+        self.user_stem_postings: dict[str, list[tuple[int, int]]] = defaultdict(list)
         for index, text in enumerate(self._texts):
-            counts = Counter(tokenize(text))
-            self.lengths.append(sum(counts.values()))
-            for term, count in counts.items():
-                self.postings[term].append((index, count))
+            self._index_single_text(index, text)
         self.total_length = sum(self.lengths)
         self.average_length = self.total_length / max(len(self._texts), 1) or 1.0
+        self.total_user_length = sum(self.user_lengths)
+        self.average_user_length = self.total_user_length / max(len(self._texts), 1) or 1.0
         self._graph: PassageGraph | None = None
+
+    def _index_single_text(self, index: int, text: str) -> tuple[int, int]:
+        tokens = tokenize(text)
+        counts = Counter(tokens)
+        t_len = sum(counts.values())
+        self.lengths.append(t_len)
+        for term, count in counts.items():
+            self.postings[term].append((index, count))
+        stem_counts = Counter(_stem_passage_token(t) for t in tokens)
+        for st, count in stem_counts.items():
+            self.stem_postings[st].append((index, count))
+        u_tokens = tokenize(_extract_user_lines(text))
+        u_stem_counts = Counter(_stem_passage_token(t) for t in u_tokens)
+        u_len = sum(u_stem_counts.values()) or 1
+        self.user_lengths.append(u_len)
+        for st, count in u_stem_counts.items():
+            self.user_stem_postings[st].append((index, count))
+        return t_len, u_len
 
     @property
     def texts(self) -> tuple[str, ...]:
@@ -211,38 +291,84 @@ class PassageIndex:
     def add_text(self, text: str) -> None:
         """Appends a new text in O(L) amortized time without full rebuild."""
         index = len(self._texts)
-        counts = Counter(tokenize(text))
-        t_len = sum(counts.values())
-        self.lengths.append(t_len)
+        t_len, u_len = self._index_single_text(index, text)
         self.total_length = getattr(self, "total_length", sum(self.lengths[:-1])) + t_len
+        self.total_user_length = getattr(self, "total_user_length", sum(self.user_lengths[:-1])) + u_len
         self._texts.append(text)
         self._texts_tuple = None
-        self.average_length = self.total_length / len(self._texts)
-        for term, count in counts.items():
-            self.postings[term].append((index, count))
+        self.average_length = self.total_length / len(self._texts) or 1.0
+        self.average_user_length = self.total_user_length / len(self._texts) or 1.0
         if self._graph is not None:
             self._graph.add_passage(PassageRecord(passage_id=str(index), text=text, tenant_id="", branch=""))
 
     def scores(self, query: str) -> dict[int, float]:
-        scores = defaultdict(float)
-        query_counts = Counter(tokenize(query))
+        from mnemosyne.retrieval import QUERY_SUPPORT_STOPWORDS
+
+        scores: dict[int, float] = defaultdict(float)
+        raw_query_counts = Counter(tokenize(query))
+        proper_tokens = {
+            w.lower()
+            for idx_w, w in enumerate(re.findall(r"[A-Za-z0-9]+", query))
+            if w and w[0].isupper() and (idx_w > 0 or w.lower() not in QUERY_SUPPORT_STOPWORDS)
+        }
+        content_counts = {
+            t: (float(c) * 1.45 if t in proper_tokens else float(c))
+            for t, c in raw_query_counts.items()
+            if t not in QUERY_SUPPORT_STOPWORDS and len(t) > 2
+        }
+        if content_counts:
+            query_counts = {
+                t: (content_counts[t] if t in content_counts else float(c) * 0.05)
+                for t, c in raw_query_counts.items()
+            }
+        else:
+            query_counts = {t: float(c) for t, c in raw_query_counts.items()}
+
         expanded_counts = dict(query_counts)
-        for term, query_count in query_counts.items():
-            syns = TAXONOMIC_EXPANSIONS.get(term)
-            if syns:
-                for syn in syns:
-                    for syn_tok in tokenize(syn):
-                        if syn_tok not in expanded_counts:
-                            expanded_counts[syn_tok] = query_count * 0.85
+        noisy_syn_tokens = {"air", "stand", "food", "years", "old"}
+        for term, query_count in list(content_counts.items()):
+            for lookup_term in (term, _stem_passage_token(term)):
+                syns = TAXONOMIC_EXPANSIONS.get(lookup_term)
+                if syns:
+                    for syn in syns:
+                        for syn_tok in tokenize(syn):
+                            if syn_tok in noisy_syn_tokens:
+                                continue
+                            if syn_tok not in expanded_counts and syn_tok not in QUERY_SUPPORT_STOPWORDS:
+                                expanded_counts[syn_tok] = query_count * 0.70
+
         n_texts = len(self._texts)
+        if n_texts == 0:
+            return {}
+
         for term, query_count in expanded_counts.items():
             postings = self.postings.get(term, ())
-            if not postings:
-                continue
-            idf = log(1.0 + (n_texts - len(postings) + 0.5) / (len(postings) + 0.5))
-            for index, count in postings:
-                norm = 1.2 * (0.25 + 0.75 * self.lengths[index] / self.average_length)
-                scores[index] += query_count * idf * count * 2.2 / (count + norm)
+            if postings:
+                idf = log(1.0 + (n_texts - len(postings) + 0.5) / (len(postings) + 0.5))
+                for index, count in postings:
+                    norm = 1.2 * (0.25 + 0.75 * self.lengths[index] / self.average_length)
+                    scores[index] += 0.40 * query_count * idf * count * 2.2 / (count + norm)
+
+        stem_expanded: dict[str, float] = defaultdict(float)
+        for term, qc in expanded_counts.items():
+            st = _stem_passage_token(term)
+            stem_expanded[st] = max(stem_expanded[st], qc)
+
+        for st, query_count in stem_expanded.items():
+            postings = self.stem_postings.get(st, ())
+            if postings:
+                idf = log(1.0 + (n_texts - len(postings) + 0.5) / (len(postings) + 0.5))
+                for index, count in postings:
+                    norm = 1.2 * (0.25 + 0.75 * self.lengths[index] / self.average_length)
+                    scores[index] += 0.25 * query_count * idf * count * 2.2 / (count + norm)
+
+            u_postings = self.user_stem_postings.get(st, ())
+            if u_postings:
+                u_idf = log(1.0 + (n_texts - len(u_postings) + 0.5) / (len(u_postings) + 0.5))
+                for index, count in u_postings:
+                    u_norm = 1.2 * (0.25 + 0.75 * self.user_lengths[index] / self.average_user_length)
+                    scores[index] += 0.55 * query_count * u_idf * count * 2.2 / (count + u_norm)
+
         return dict(scores)
 
 
@@ -320,9 +446,16 @@ def rank_passages(owner: object, query: str, candidates: Sequence[Hit], k: int) 
             re.IGNORECASE,
         )
     ) and not is_current_intent
+    is_multi_event_comparison = bool(
+        re.search(
+            r"\b(between\b.+\band|how many (?:days|weeks|months|years|hours)|order of|chronological|more frequently|less frequently)\b",
+            query,
+            re.IGNORECASE,
+        )
+    )
 
     final_scores: dict[int, float] = {}
-    if is_earliest_intent:
+    if is_earliest_intent or is_multi_event_comparison:
         boost_weight = 0.0
         half_life = 90.0
     elif is_currency_kw or is_update_intent or is_current_intent:
@@ -341,26 +474,35 @@ def rank_passages(owner: object, query: str, candidates: Sequence[Hit], k: int) 
             final_scores[i] = sc
 
     # Topic-Cluster Currency Tie-Breaking (bounded, non-compounding)
-    if final_scores and time_span > 3600.0 and not is_earliest_intent:
+    if final_scores and time_span > 3600.0 and not is_earliest_intent and not is_multi_event_comparison:
         top_sc = max(final_scores.values())
         if top_sc > 0.0:
+            tie_ratio = 0.55 if (is_currency_kw or is_update_intent or is_current_intent) else 0.72
             q_tokens = {
-                t for t in tokenize(query.lower())
+                _stem_passage_token(t)
+                for t in tokenize(query.lower())
                 if t not in QUERY_SUPPORT_STOPWORDS and len(t) > 2
             }
             base_scores = dict(final_scores)
             comp_indices = [
                 i
                 for i, sc in base_scores.items()
-                if sc >= top_sc * 0.40 and i in dts
+                if sc >= top_sc * tie_ratio and i in dts
             ]
             if len(comp_indices) >= 2:
-                cand_tokens = {i: set(tokenize(passages[i].text.lower())) & q_tokens for i in comp_indices}
+                cand_tokens = {
+                    i: {_stem_passage_token(t) for t in tokenize(passages[i].text.lower())} & q_tokens
+                    for i in comp_indices
+                }
                 comp_indices_sorted = sorted(comp_indices, key=lambda i: dts[i])
                 for idx_i, b in enumerate(comp_indices_sorted):
                     for a in comp_indices_sorted[idx_i + 1 :]:
                         overlap = cand_tokens[a] & cand_tokens[b]
-                        if len(overlap) >= 2 and dts[a] > dts[b] and (base_scores[a] >= base_scores[b] * 0.40 or (len(overlap) >= 3 and base_scores[a] >= base_scores[b] * 0.35)):
+                        if (
+                            len(overlap) >= 2
+                            and dts[a] > dts[b]
+                            and base_scores[a] >= base_scores[b] * tie_ratio
+                        ):
                             final_scores[a] = max(final_scores[a], base_scores[b] * 1.05)
 
     ranked = sorted(scores, key=lambda i: (-final_scores.get(i, scores[i]), passages[i].id))[: max(k, 0)]
