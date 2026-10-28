@@ -1189,6 +1189,7 @@ def _probe_postgres_role_connection(
         "group_exists": bool(group_row and group_row[0]),
         "group_member": bool(group_row and group_row[1]),
         "table_count": len(table_names),
+        "table_names": table_names,
         "delete_tables": [str(row[0]) for row in table_rows if row[1]],
         "truncate_tables": [str(row[0]) for row in table_rows if row[2]],
         "audit_table_present": audit_table in table_names,
@@ -1349,15 +1350,30 @@ def cmd_postgres_role_check(args: argparse.Namespace) -> None:
             f"consolidator role must be a member of {args.expected_consolidator_group}",
             expected_group=args.expected_consolidator_group,
         )
+        zero_delete_tables = {
+            name.strip()
+            for name in str(getattr(args, "zero_delete_tables", "observations,knowledge_pages") or "").split(",")
+            if name.strip()
+        }
+        table_names = set(consolidator.get("table_names", []))
+        zero_delete_present = zero_delete_tables.intersection(table_names)
         deletable = set(consolidator["delete_tables"])
+        zero_delete_leaks = deletable.intersection(zero_delete_tables)
+        expected_deletable_min = (
+            consolidator["table_count"]
+            - (1 if consolidator["audit_table_present"] else 0)
+            - len(zero_delete_present)
+        )
         check(
             "consolidator_sole_write",
             consolidator["table_count"] > 0
             and args.audit_table not in deletable
-            and len(deletable) >= consolidator["table_count"] - (1 if consolidator["audit_table_present"] else 0),
-            "consolidator role must hold DELETE on every public table except the audit log",
+            and not zero_delete_leaks
+            and len(deletable) >= expected_deletable_min,
+            "consolidator role must hold DELETE on every public table except the audit log and zero-delete tables",
             delete_table_count=len(deletable),
             table_count=consolidator["table_count"],
+            zero_delete_tables=sorted(zero_delete_present),
         )
         check(
             "audit_log_append_only_consolidator",
@@ -2801,6 +2817,220 @@ def _add_document_args(parser: argparse.ArgumentParser, operation: str) -> None:
         parser.add_argument("--chunk-chars", type=int, default=2048)
         parser.add_argument("--sensitivity", type=int, default=0)
         parser.add_argument("--access-policy", help="JSON object stored as the document access policy")
+
+
+def _observation_scope_args(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "tenant_id": args.tenant,
+        "user_id": args.user,
+        "branch": args.branch,
+    }
+
+
+def cmd_observation(args: argparse.Namespace) -> None:
+    raise SystemExit("observation requires a subcommand (upsert, get, list, reconcile)")
+
+
+def cmd_observation_upsert(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.observation_upsert(
+        **_observation_scope_args(args),
+        subject=args.subject,
+        topic=args.topic,
+        content=args.content,
+        proof_quotes=_json_array_arg(args.proof_quotes, "--proof-quotes"),
+        source_evidence_cids=args.source_evidence_cids,
+        observation_id=args.observation_id,
+        session_identity=getattr(args, "session_identity", None),
+    ))
+
+
+def cmd_observation_get(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.observation_get(
+        **_observation_scope_args(args),
+        observation_id=args.observation_id,
+        session_identity=getattr(args, "session_identity", None),
+    ))
+
+
+def cmd_observation_list(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.observation_list(
+        **_observation_scope_args(args),
+        subject=args.subject,
+        topic=args.topic,
+        status=args.status,
+        limit=args.limit,
+        session_identity=getattr(args, "session_identity", None),
+    ))
+
+
+def cmd_observation_reconcile(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.observation_reconcile(
+        **_observation_scope_args(args),
+        subject=args.subject,
+        topic=args.topic,
+        content=args.content,
+        proof_quotes=_json_array_arg(args.proof_quotes, "--proof-quotes"),
+        source_evidence_cids=args.source_evidence_cids,
+        session_identity=getattr(args, "session_identity", None),
+    ))
+
+
+def _add_observation_args(parser: argparse.ArgumentParser, operation: str) -> None:
+    parser.add_argument("--tenant", required=True)
+    parser.add_argument("--user", required=True)
+    parser.add_argument("--branch", default="main")
+    if operation == "upsert":
+        parser.add_argument("--subject", required=True)
+        parser.add_argument("--topic", required=True)
+        parser.add_argument("--content", required=True)
+        parser.add_argument("--proof-quotes")
+        parser.add_argument("--source-evidence-cid", dest="source_evidence_cids", action="append", default=[])
+        parser.add_argument("--observation-id")
+    elif operation == "get":
+        parser.add_argument("--observation-id", required=True)
+    elif operation == "list":
+        parser.add_argument("--subject")
+        parser.add_argument("--topic")
+        parser.add_argument("--status", default="active")
+        parser.add_argument("--limit", type=int, default=100)
+    elif operation == "reconcile":
+        parser.add_argument("--subject", required=True)
+        parser.add_argument("--topic", required=True)
+        parser.add_argument("--content", default="")
+        parser.add_argument("--proof-quotes")
+        parser.add_argument("--source-evidence-cid", dest="source_evidence_cids", action="append", default=[])
+
+
+def _knowledge_page_scope_args(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "tenant_id": args.tenant,
+        "user_id": args.user,
+        "branch": args.branch,
+    }
+
+
+def cmd_knowledge_page(args: argparse.Namespace) -> None:
+    raise SystemExit("knowledge-page requires a subcommand (create, update, get, list, refresh, render-markdown)")
+
+
+def cmd_knowledge_page_create(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.knowledge_page_create(
+        **_knowledge_page_scope_args(args),
+        path=args.path,
+        title=args.title,
+        content_markdown=args.content_markdown,
+        source_observation_ids=args.source_observation_ids,
+        source_evidence_cids=args.source_evidence_cids,
+        tags=args.tags,
+        page_id=args.page_id,
+        session_identity=getattr(args, "session_identity", None),
+    ))
+
+
+def cmd_knowledge_page_update(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.knowledge_page_update(
+        **_knowledge_page_scope_args(args),
+        page_id=args.page_id,
+        path=args.path,
+        title=args.title,
+        content_markdown=args.content_markdown,
+        source_observation_ids=args.source_observation_ids,
+        source_evidence_cids=args.source_evidence_cids,
+        tags=args.tags,
+        expected_version=args.expected_version,
+        session_identity=getattr(args, "session_identity", None),
+    ))
+
+
+def cmd_knowledge_page_get(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.knowledge_page_get(
+        **_knowledge_page_scope_args(args),
+        page_id=args.page_id,
+        path=args.path,
+        session_identity=getattr(args, "session_identity", None),
+    ))
+
+
+def cmd_knowledge_page_list(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.knowledge_page_list(
+        **_knowledge_page_scope_args(args),
+        path_prefix=args.path_prefix,
+        folder=args.folder,
+        tags=args.tags,
+        status=args.status,
+        limit=args.limit,
+        session_identity=getattr(args, "session_identity", None),
+    ))
+
+
+def cmd_knowledge_page_refresh(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.knowledge_page_refresh(
+        **_knowledge_page_scope_args(args),
+        page_id=args.page_id,
+        path=args.path,
+        session_identity=getattr(args, "session_identity", None),
+    ))
+
+
+def cmd_knowledge_page_render_markdown(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.knowledge_page_render_markdown(
+        **_knowledge_page_scope_args(args),
+        page_id=args.page_id,
+        path=args.path,
+        include_frontmatter=not args.no_frontmatter,
+        include_citations_ledger=not args.no_citations_ledger,
+        session_identity=getattr(args, "session_identity", None),
+    ))
+
+
+def _add_knowledge_page_args(parser: argparse.ArgumentParser, operation: str) -> None:
+    parser.add_argument("--tenant", required=True)
+    parser.add_argument("--user", required=True)
+    parser.add_argument("--branch", default="main")
+    if operation == "create":
+        parser.add_argument("--path", required=True)
+        parser.add_argument("--title", required=True)
+        parser.add_argument("--content-markdown", required=True)
+        parser.add_argument("--source-observation-id", dest="source_observation_ids", action="append", default=[])
+        parser.add_argument("--source-evidence-cid", dest="source_evidence_cids", action="append", default=[])
+        parser.add_argument("--tag", dest="tags", action="append", default=[])
+        parser.add_argument("--page-id")
+    elif operation == "update":
+        parser.add_argument("--page-id")
+        parser.add_argument("--path")
+        parser.add_argument("--title")
+        parser.add_argument("--content-markdown")
+        parser.add_argument("--source-observation-id", dest="source_observation_ids", action="append", default=[])
+        parser.add_argument("--source-evidence-cid", dest="source_evidence_cids", action="append", default=[])
+        parser.add_argument("--tag", dest="tags", action="append", default=[])
+        parser.add_argument("--expected-version", type=int)
+    elif operation == "get":
+        parser.add_argument("--page-id")
+        parser.add_argument("--path")
+    elif operation == "list":
+        parser.add_argument("--path-prefix")
+        parser.add_argument("--folder")
+        parser.add_argument("--tag", dest="tags", action="append", default=[])
+        parser.add_argument("--status", default="active")
+        parser.add_argument("--limit", type=int, default=100)
+    elif operation == "refresh":
+        parser.add_argument("--page-id")
+        parser.add_argument("--path")
+    elif operation == "render-markdown":
+        parser.add_argument("--page-id")
+        parser.add_argument("--path")
+        parser.add_argument("--no-frontmatter", action="store_true")
+        parser.add_argument("--no-citations-ledger", action="store_true")
 
 
 def cmd_search(args: argparse.Namespace) -> None:
@@ -19930,6 +20160,17 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     postgres_role_check.add_argument(
+        "--zero-delete-tables",
+        default=os.environ.get(
+            "MNEMOSYNE_POSTGRES_ZERO_DELETE_TABLES",
+            "observations,knowledge_pages",
+        ),
+        help=(
+            "Comma-separated public tables enforcing Zero-DELETE where DELETE is revoked "
+            "from all roles including consolidator. See infra/postgres/roles.sql."
+        ),
+    )
+    postgres_role_check.add_argument(
         "--connect-timeout",
         type=int,
         default=int(os.environ.get("MNEMOSYNE_POSTGRES_CONNECT_TIMEOUT", "10")),
@@ -20268,6 +20509,42 @@ def build_parser() -> argparse.ArgumentParser:
         # Keep the canonical MCP-name route alongside the grouped CLI.
         alias = sub.add_parser(f"document-{operation}", help=argparse.SUPPRESS)
         _add_document_args(alias, operation)
+        alias.set_defaults(func=handler)
+
+    observation = sub.add_parser("observation", help="Manage evolving observations")
+    observation.set_defaults(func=cmd_observation)
+    observation_sub = observation.add_subparsers(dest="observation_command", required=True)
+    for operation, handler in (
+        ("upsert", cmd_observation_upsert),
+        ("get", cmd_observation_get),
+        ("list", cmd_observation_list),
+        ("reconcile", cmd_observation_reconcile),
+    ):
+        command = observation_sub.add_parser(operation)
+        _add_observation_args(command, operation)
+        command.set_defaults(func=handler)
+        # Keep the canonical MCP-name route alongside the grouped CLI.
+        alias = sub.add_parser(f"observation-{operation}", help=argparse.SUPPRESS)
+        _add_observation_args(alias, operation)
+        alias.set_defaults(func=handler)
+
+    knowledge_page = sub.add_parser("knowledge-page", help="Manage living knowledge pages")
+    knowledge_page.set_defaults(func=cmd_knowledge_page)
+    kp_sub = knowledge_page.add_subparsers(dest="knowledge_page_command", required=True)
+    for operation, handler in (
+        ("create", cmd_knowledge_page_create),
+        ("update", cmd_knowledge_page_update),
+        ("get", cmd_knowledge_page_get),
+        ("list", cmd_knowledge_page_list),
+        ("refresh", cmd_knowledge_page_refresh),
+        ("render-markdown", cmd_knowledge_page_render_markdown),
+    ):
+        command = kp_sub.add_parser(operation)
+        _add_knowledge_page_args(command, operation)
+        command.set_defaults(func=handler)
+        # Keep the canonical MCP-name route alongside the grouped CLI.
+        alias = sub.add_parser(f"knowledge-page-{operation}", help=argparse.SUPPRESS)
+        _add_knowledge_page_args(alias, operation)
         alias.set_defaults(func=handler)
 
     search = sub.add_parser("search")

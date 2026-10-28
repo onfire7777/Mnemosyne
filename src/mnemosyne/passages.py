@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Any
 
 from mnemosyne.models import Hit, parse_dt
-from mnemosyne.text import tokenize
+from mnemosyne.text import TAXONOMIC_EXPANSIONS, tokenize
 
 
 def is_passage(hit: Hit) -> bool:
@@ -50,10 +50,119 @@ def is_passage(hit: Hit) -> bool:
     )
 
 
-_COUNTING_SYNONYMS: dict[str, tuple[str, ...]] = {
-    "sibling": ("brother", "sister", "brothers", "sisters"),
-    "siblings": ("brother", "sister", "brothers", "sisters"),
-}
+@dataclass(slots=True)
+class PassageRecord:
+    passage_id: str
+    text: str
+    tenant_id: str = "default"
+    branch: str = "main"
+    metadata: dict[str, Any] = field(default_factory=dict)
+    sensitivity: int = 0
+    disclosable: bool = True
+    created_at: datetime | None = None
+
+
+class PassageGraph:
+    """Incremental O(1) amortized PassageGraph maintenance wrapper with live IDF and adaptive compaction."""
+
+    def __init__(self, index: PassageGraphIndex | None = None) -> None:
+        self._index = index
+        self._passage_records: dict[str, PassageRecord] = {}
+        self._branch_watermarks: dict[tuple[str, str], int] = {}
+        self._doc_frequencies: Counter[str] = Counter()
+        self._total_passages: int = 0
+        self._mutations_since_compaction: int = 0
+        self._cooccurrences: dict[str, Counter[str]] = defaultdict(Counter)
+
+    def add_passage(self, passage: PassageRecord) -> None:
+        """Incrementally appends a passage into the active graph and updates live statistics."""
+        if passage.passage_id in self._passage_records:
+            self.remove_passage(passage.passage_id)
+
+        self._passage_records[passage.passage_id] = passage
+        key = (passage.tenant_id, passage.branch)
+        self._branch_watermarks[key] = self._branch_watermarks.get(key, 0) + 1
+
+        # Live DF/IDF tracking
+        toks = set(tokenize(passage.text))
+        for t in toks:
+            self._doc_frequencies[t] += 1
+        self._total_passages += 1
+        self._mutations_since_compaction += 1
+
+        # Track co-occurrences for dynamic concept induction
+        tok_list = [t for t in toks if len(t) > 2]
+        for i, t1 in enumerate(tok_list):
+            for t2 in tok_list[i + 1 : i + 6]:
+                self._cooccurrences[t1][t2] += 1
+                self._cooccurrences[t2][t1] += 1
+
+        if self._index is not None:
+            self._index.incremental_add_passage(passage)
+
+    def remove_passage(self, passage_id: str) -> None:
+        """Removes or tombstones a passage and marks affected branch dirty."""
+        rec = self._passage_records.pop(passage_id, None)
+        if rec is not None:
+            key = (rec.tenant_id, rec.branch)
+            self._branch_watermarks[key] = self._branch_watermarks.get(key, 0) + 1
+            toks = set(tokenize(rec.text))
+            for t in toks:
+                if self._doc_frequencies[t] > 1:
+                    self._doc_frequencies[t] -= 1
+                else:
+                    self._doc_frequencies.pop(t, None)
+            if self._total_passages > 0:
+                self._total_passages -= 1
+            self._mutations_since_compaction += 1
+
+            tok_list = [t for t in toks if len(t) > 2]
+            for i, t1 in enumerate(tok_list):
+                for t2 in tok_list[i + 1 : i + 6]:
+                    if self._cooccurrences[t1][t2] > 1:
+                        self._cooccurrences[t1][t2] -= 1
+                    else:
+                        self._cooccurrences[t1].pop(t2, None)
+                    if self._cooccurrences[t2][t1] > 1:
+                        self._cooccurrences[t2][t1] -= 1
+                    else:
+                        self._cooccurrences[t2].pop(t1, None)
+
+            if self._index is not None:
+                self._index.invalidate_for_mutation(rec.tenant_id, rec.branch)
+
+    def invalidate_for_mutation(self, tenant_id: str, branch: str) -> None:
+        """Invalidates graph cache upon retractions, erasures, or policy updates."""
+        key = (tenant_id, branch)
+        self._branch_watermarks[key] = self._branch_watermarks.get(key, 0) + 1
+        if self._index is not None:
+            self._index.invalidate_for_mutation(tenant_id, branch)
+
+    def get_live_idf(self, term: str) -> float:
+        """Dynamic corpus IDF log((N + 1) / (df + 0.5))."""
+        df = self._doc_frequencies.get(term.lower(), 0)
+        n = max(self._total_passages, 1)
+        return log((n + 1.0) / (df + 0.5))
+
+    def get_corpus_cooccurrences(self, term: str, top_n: int = 5) -> list[str]:
+        """Corpus-learned co-occurring terms for dynamic concept induction."""
+        counts = self._cooccurrences.get(term.lower())
+        if not counts:
+            return []
+        return [t for t, _ in counts.most_common(top_n)]
+
+    def check_and_compact(self, drift_threshold: float = 0.25) -> bool:
+        """Dynamically compacts graph when mutation drift exceeds drift_threshold."""
+        if self._total_passages == 0:
+            return False
+        drift = self._mutations_since_compaction / max(self._total_passages, 1)
+        if drift >= drift_threshold:
+            self._mutations_since_compaction = 0
+            if self._index is not None:
+                for tenant_id, branch in list(self._branch_watermarks):
+                    self._index.invalidate_for_mutation(tenant_id, branch)
+            return True
+        return False
 
 
 class PassageIndex:
@@ -63,32 +172,74 @@ class PassageIndex:
     Candidates are reauthorized before every lookup, including cache hits.
     """
 
-    def __init__(self, texts: tuple[str, ...]):
-        self.texts = texts
-        self.lengths = []
-        self.postings = defaultdict(list)
-        for index, text in enumerate(texts):
+    def __init__(self, texts: Sequence[str] | tuple[str, ...]):
+        self._texts: list[str] = list(texts)
+        self._texts_tuple: tuple[str, ...] | None = tuple(texts) if isinstance(texts, tuple) else None
+        self.lengths: list[int] = []
+        self.postings: dict[str, list[tuple[int, int]]] = defaultdict(list)
+        for index, text in enumerate(self._texts):
             counts = Counter(tokenize(text))
             self.lengths.append(sum(counts.values()))
             for term, count in counts.items():
                 self.postings[term].append((index, count))
-        self.average_length = sum(self.lengths) / max(len(texts), 1) or 1.0
+        self.total_length = sum(self.lengths)
+        self.average_length = self.total_length / max(len(self._texts), 1) or 1.0
+        self._graph: PassageGraph | None = None
+
+    @property
+    def texts(self) -> tuple[str, ...]:
+        if self._texts_tuple is None or len(self._texts_tuple) != len(self._texts):
+            self._texts_tuple = tuple(self._texts)
+        return self._texts_tuple
+
+    @texts.setter
+    def texts(self, val: Sequence[str]) -> None:
+        self._texts = list(val)
+        self._texts_tuple = tuple(val) if isinstance(val, tuple) else None
+
+    def __len__(self) -> int:
+        return len(self._texts)
+
+    @property
+    def passage_graph(self) -> PassageGraph:
+        if self._graph is None:
+            self._graph = PassageGraph()
+            for idx, txt in enumerate(self._texts):
+                self._graph.add_passage(PassageRecord(passage_id=str(idx), text=txt, tenant_id="", branch=""))
+        return self._graph
+
+    def add_text(self, text: str) -> None:
+        """Appends a new text in O(L) amortized time without full rebuild."""
+        index = len(self._texts)
+        counts = Counter(tokenize(text))
+        t_len = sum(counts.values())
+        self.lengths.append(t_len)
+        self.total_length = getattr(self, "total_length", sum(self.lengths[:-1])) + t_len
+        self._texts.append(text)
+        self._texts_tuple = None
+        self.average_length = self.total_length / len(self._texts)
+        for term, count in counts.items():
+            self.postings[term].append((index, count))
+        if self._graph is not None:
+            self._graph.add_passage(PassageRecord(passage_id=str(index), text=text, tenant_id="", branch=""))
 
     def scores(self, query: str) -> dict[int, float]:
         scores = defaultdict(float)
         query_counts = Counter(tokenize(query))
         expanded_counts = dict(query_counts)
         for term, query_count in query_counts.items():
-            syns = _COUNTING_SYNONYMS.get(term)
+            syns = TAXONOMIC_EXPANSIONS.get(term)
             if syns:
                 for syn in syns:
-                    if syn not in expanded_counts:
-                        expanded_counts[syn] = query_count * 0.8
+                    for syn_tok in tokenize(syn):
+                        if syn_tok not in expanded_counts:
+                            expanded_counts[syn_tok] = query_count * 0.85
+        n_texts = len(self._texts)
         for term, query_count in expanded_counts.items():
             postings = self.postings.get(term, ())
             if not postings:
                 continue
-            idf = log(1.0 + (len(self.texts) - len(postings) + 0.5) / (len(postings) + 0.5))
+            idf = log(1.0 + (n_texts - len(postings) + 0.5) / (len(postings) + 0.5))
             for index, count in postings:
                 norm = 1.2 * (0.25 + 0.75 * self.lengths[index] / self.average_length)
                 scores[index] += query_count * idf * count * 2.2 / (count + norm)
@@ -102,15 +253,31 @@ _CURRENCY_RE = re.compile(
 
 
 def rank_passages(owner: object, query: str, candidates: Sequence[Hit], k: int) -> list[Hit]:
+    from mnemosyne.retrieval import QUERY_SUPPORT_STOPWORDS
+
     passages = [hit for hit in candidates if is_passage(hit)]
+    if not passages:
+        return []
     texts = tuple(hit.text for hit in passages)
     index = getattr(owner, "_passage_bm25_index", None)
-    if index is None or index.texts != texts:
+    if index is None:
         index = PassageIndex(texts)
         try:
             owner._passage_bm25_index = index
+            owner._passage_graph = index.passage_graph
         except (AttributeError, TypeError):
             pass
+    elif len(index.texts) < len(texts) and texts[: len(index.texts)] == index.texts:
+        for t in texts[len(index.texts) :]:
+            index.add_text(t)
+    elif index.texts != texts:
+        index = PassageIndex(texts)
+        try:
+            owner._passage_bm25_index = index
+            owner._passage_graph = index.passage_graph
+        except (AttributeError, TypeError):
+            pass
+
     scores = index.scores(query)
 
     dts: dict[int, datetime] = {}
@@ -128,30 +295,75 @@ def rank_passages(owner: object, query: str, candidates: Sequence[Hit], k: int) 
             except (ValueError, TypeError, OverflowError):
                 pass
     max_dt = max(dts.values()) if dts else None
+    min_dt = min(dts.values()) if dts else None
+    time_span = (max_dt - min_dt).total_seconds() if (max_dt and min_dt) else 0.0
 
-    is_currency = bool(_CURRENCY_RE.search(query))
-    boost = 0.40 if is_currency else 0.25
-    half_life = 30.0 if is_currency else 60.0
+    is_currency_kw = bool(_CURRENCY_RE.search(query))
+    is_update_intent = bool(
+        re.search(
+            r"\b(switch|switched|switching|change|changed|changing|update|updated|updating|replace|replaced|replacing|swap|swapped|swapping|transition|transitioned|relocat(e|ed|ion)|became|become|no longer|no more|ended up|turned into|since)\b",
+            query,
+            re.IGNORECASE,
+        )
+    )
+    is_current_intent = bool(
+        re.search(
+            r"\b(now|currently|current|present|presently|today|latest|recent|recently|most recent|so far|to date|as of now|right now)\b",
+            query,
+            re.IGNORECASE,
+        )
+    )
+    is_earliest_intent = bool(
+        re.search(
+            r"\b(earliest|first|originally|initial|initially|begin|began|at the start|in the beginning)\b",
+            query,
+            re.IGNORECASE,
+        )
+    ) and not is_current_intent
 
     final_scores: dict[int, float] = {}
+    if is_earliest_intent:
+        boost_weight = 0.0
+        half_life = 90.0
+    elif is_currency_kw or is_update_intent or is_current_intent:
+        boost_weight = 0.45
+        half_life = 30.0
+    else:
+        boost_weight = 0.20
+        half_life = 90.0
+
     for i, sc in scores.items():
-        if max_dt and i in dts:
+        if max_dt and i in dts and boost_weight > 0.0:
             days_ago = max(0.0, (max_dt - dts[i]).total_seconds() / 86400.0)
             rec_decay = 1.0 / (1.0 + days_ago / half_life)
-            final_scores[i] = sc * (1.0 + boost * rec_decay)
+            final_scores[i] = sc * (1.0 + boost_weight * rec_decay)
         else:
             final_scores[i] = sc
 
-    if is_currency and final_scores:
+    # Topic-Cluster Currency Tie-Breaking (bounded, non-compounding)
+    if final_scores and time_span > 3600.0 and not is_earliest_intent:
         top_sc = max(final_scores.values())
         if top_sc > 0.0:
-            thresh = top_sc * 0.85
-            top_cands = [i for i, sc in final_scores.items() if sc >= thresh and i in dts]
-            if top_cands:
-                latest = max(top_cands, key=lambda idx: dts[idx])
-                final_scores[latest] *= 1.15
+            q_tokens = {
+                t for t in tokenize(query.lower())
+                if t not in QUERY_SUPPORT_STOPWORDS and len(t) > 2
+            }
+            base_scores = dict(final_scores)
+            comp_indices = [
+                i
+                for i, sc in base_scores.items()
+                if sc >= top_sc * 0.40 and i in dts
+            ]
+            if len(comp_indices) >= 2:
+                cand_tokens = {i: set(tokenize(passages[i].text.lower())) & q_tokens for i in comp_indices}
+                comp_indices_sorted = sorted(comp_indices, key=lambda i: dts[i])
+                for idx_i, b in enumerate(comp_indices_sorted):
+                    for a in comp_indices_sorted[idx_i + 1 :]:
+                        overlap = cand_tokens[a] & cand_tokens[b]
+                        if len(overlap) >= 2 and dts[a] > dts[b] and (base_scores[a] >= base_scores[b] * 0.40 or (len(overlap) >= 3 and base_scores[a] >= base_scores[b] * 0.35)):
+                            final_scores[a] = max(final_scores[a], base_scores[b] * 1.05)
 
-    ranked = sorted(scores, key=lambda i: (-final_scores.get(i, scores[i]), passages[i].id))[:max(k, 0)]
+    ranked = sorted(scores, key=lambda i: (-final_scores.get(i, scores[i]), passages[i].id))[: max(k, 0)]
     return [replace(passages[i], score=final_scores.get(i, scores[i]), channel="lexical_bm25") for i in ranked]
 
 
@@ -727,6 +939,26 @@ class PassageGraphIndex:
             and int(hit.sensitivity) <= self.max_disclosed_sensitivity
             and hit.metadata.get("embedding_partition") != "none"
         )
+
+    @property
+    def passage_graph(self) -> PassageGraph:
+        if not hasattr(self, "_passage_graph_obj") or self._passage_graph_obj is None:
+            self._passage_graph_obj = PassageGraph(self)
+        return self._passage_graph_obj
+
+    def incremental_add_passage(self, passage: PassageRecord) -> None:
+        """Incrementally update or invalidate cache for newly added passage."""
+        with self._cache_lock:
+            self._cache = None
+        if hasattr(self, "_passage_graph_obj") and self._passage_graph_obj is not None:
+            self._passage_graph_obj.add_passage(passage)
+
+    def invalidate_for_mutation(self, tenant_id: str, branch: str) -> None:
+        """Invalidate cache on retractions/erasures/policy updates."""
+        with self._cache_lock:
+            self._cache = None
+        if hasattr(self, "_passage_graph_obj") and self._passage_graph_obj is not None:
+            self._passage_graph_obj.invalidate_for_mutation(tenant_id, branch)
 
     # -- indexing (write path) --------------------------------------------------------------
 

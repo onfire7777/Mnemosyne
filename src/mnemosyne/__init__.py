@@ -15,6 +15,8 @@ from typing import Any
 # Every public export mapped to the module that provides it. Keep in sync
 # with __all__ (tests/test_import_time.py asserts every name resolves).
 _EXPORTS: dict[str, str] = {
+    "AutoMemorySession": "mnemosyne.frameworks",
+    "wrap_chat_callable": "mnemosyne.frameworks",
     "LocalMemoryEngine": "mnemosyne.engine",
     "MemoryEngine": "mnemosyne.engine",
     "RoutePlan": "mnemosyne.engine",
@@ -77,6 +79,7 @@ _EXPORTS: dict[str, str] = {
 __all__ = [
     "Assertion",
     "AnticipatoryPrefetcher",
+    "AutoMemorySession",
     "BeliefRevisionCore",
     "CalibrationSet",
     "CALIBRATE_JOB",
@@ -132,6 +135,7 @@ __all__ = [
     "UserModelEntry",
     "route",
     "semantic_entropy",
+    "wrap_chat_callable",
 ]
 
 

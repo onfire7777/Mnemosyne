@@ -821,3 +821,118 @@ ALTER TABLE working_memory ADD COLUMN IF NOT EXISTS superseded_by TEXT;
 CREATE INDEX IF NOT EXISTS working_memory_eviction_idx
   ON working_memory(tenant_id, session_id, status, salience, created_at)
   WHERE status = 'active';
+
+-- ===========================================================================
+-- Observations: First-class evolving observations with proof quotes and Zero-DELETE
+-- ===========================================================================
+CREATE TABLE IF NOT EXISTS observations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  observation_id TEXT NOT NULL,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  branch TEXT NOT NULL DEFAULT 'main',
+  user_id TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  topic TEXT NOT NULL,
+  content TEXT NOT NULL,
+  proof_quotes JSONB NOT NULL DEFAULT '[]'::jsonb,
+  source_evidence_cids TEXT[] NOT NULL DEFAULT '{}',
+  independent_source_count INT NOT NULL DEFAULT 1 CHECK (independent_source_count >= 0),
+  corroboration_velocity REAL NOT NULL DEFAULT 0.0,
+  contradiction_history JSONB NOT NULL DEFAULT '[]'::jsonb,
+  freshness_watermark TIMESTAMPTZ,
+  standing REAL NOT NULL DEFAULT 0.51 CHECK (standing >= 0.0 AND standing <= 1.0),
+  salience REAL NOT NULL DEFAULT 0.5 CHECK (salience >= 0.0 AND salience <= 1.0),
+  access_velocity REAL NOT NULL DEFAULT 0.0,
+  access_count INT NOT NULL DEFAULT 0 CHECK (access_count >= 0),
+  last_accessed_at TIMESTAMPTZ,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'superseded', 'retracted', 'quarantined', 'contested')),
+  superseded_by TEXT,
+  version INT NOT NULL DEFAULT 1 CHECK (version > 0),
+  trust_tier SMALLINT NOT NULL DEFAULT 0,
+  sensitivity SMALLINT NOT NULL DEFAULT 0,
+  access_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  FOREIGN KEY (tenant_id, branch) REFERENCES branches(tenant_id, name)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS observations_tenant_branch_obs_id_unique
+  ON observations (tenant_id, branch, observation_id);
+CREATE INDEX IF NOT EXISTS observations_tenant_subject_idx
+  ON observations (tenant_id, branch, subject, status);
+CREATE INDEX IF NOT EXISTS observations_tenant_topic_idx
+  ON observations (tenant_id, branch, topic, status);
+
+-- ===========================================================================
+-- Knowledge Pages: Living wiki-style projections with markdown and inline citations
+-- ===========================================================================
+CREATE TABLE IF NOT EXISTS knowledge_pages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  page_id TEXT NOT NULL,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  branch TEXT NOT NULL DEFAULT 'main',
+  user_id TEXT NOT NULL DEFAULT '',
+  path TEXT NOT NULL,
+  title TEXT NOT NULL,
+  content_markdown TEXT NOT NULL,
+  source_observation_ids TEXT[] NOT NULL DEFAULT '{}',
+  source_assertion_ids TEXT[] NOT NULL DEFAULT '{}',
+  source_evidence_cids TEXT[] NOT NULL DEFAULT '{}',
+  tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+  version INT NOT NULL DEFAULT 1 CHECK (version > 0),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'stale', 'retired', 'archived', 'draft')),
+  trust_tier SMALLINT NOT NULL DEFAULT 0,
+  sensitivity SMALLINT NOT NULL DEFAULT 0,
+  access_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  FOREIGN KEY (tenant_id, branch) REFERENCES branches(tenant_id, name)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS knowledge_pages_tenant_branch_path_unique
+  ON knowledge_pages (tenant_id, branch, path) WHERE status != 'retired' AND status != 'archived';
+CREATE UNIQUE INDEX IF NOT EXISTS knowledge_pages_tenant_branch_page_id_unique
+  ON knowledge_pages (tenant_id, branch, page_id);
+
+-- Zero-DELETE Enforcement Triggers
+CREATE OR REPLACE FUNCTION mnemosyne_observations_zero_delete()
+RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'observations table enforces Zero-DELETE; records must be retracted or superseded via UPDATE, not deleted'
+    USING ERRCODE = '42501';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS observations_zero_delete ON observations;
+CREATE TRIGGER observations_zero_delete
+  BEFORE DELETE ON observations
+  FOR EACH ROW EXECUTE FUNCTION mnemosyne_observations_zero_delete();
+
+CREATE OR REPLACE FUNCTION mnemosyne_knowledge_pages_zero_delete()
+RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'knowledge_pages table enforces Zero-DELETE; records must be archived or retracted via UPDATE, not deleted'
+    USING ERRCODE = '42501';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS knowledge_pages_zero_delete ON knowledge_pages;
+CREATE TRIGGER knowledge_pages_zero_delete
+  BEFORE DELETE ON knowledge_pages
+  FOR EACH ROW EXECUTE FUNCTION mnemosyne_knowledge_pages_zero_delete();
+
+-- RLS Enforcement
+ALTER TABLE observations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE observations FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS observations_tenant_isolation ON observations;
+CREATE POLICY observations_tenant_isolation ON observations
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
+ALTER TABLE knowledge_pages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE knowledge_pages FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS knowledge_pages_tenant_isolation ON knowledge_pages;
+CREATE POLICY knowledge_pages_tenant_isolation ON knowledge_pages
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+

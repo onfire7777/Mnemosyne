@@ -18,7 +18,7 @@ from collections import Counter
 from collections.abc import Sequence
 from functools import lru_cache
 from hashlib import blake2b
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Mapping
 
 try:
     if os.environ.get("MNEMOSYNE_PURE") == "1":
@@ -212,3 +212,97 @@ def cosine(a: Sequence[float], b: Sequence[float]) -> float:
 
 def approx_tokens(text: str) -> int:
     return max(1, math.ceil(len(text) / 4))
+
+
+TAXONOMIC_EXPANSIONS: dict[str, tuple[str, ...]] = {
+    # Kinship
+    "sibling": ("brother", "sister", "brothers", "sisters"),
+    "siblings": ("brother", "sister", "brothers", "sisters"),
+    "brother": ("sibling", "brother"),
+    "brothers": ("siblings", "brothers"),
+    "sister": ("sibling", "sister"),
+    "sisters": ("siblings", "sisters"),
+    "grandma": ("grandmother", "grandparent", "grandparents"),
+    "grandpa": ("grandfather", "grandparent", "grandparents"),
+    "grandmother": ("grandma", "grandmother", "grandparent"),
+    "grandfather": ("grandpa", "grandfather", "grandparent"),
+    "parent": ("mother", "father", "mom", "dad"),
+    "parents": ("mother", "father", "mom", "dad"),
+    "mother": ("parent", "mother", "mom"),
+    "father": ("parent", "father", "dad"),
+    # Age & Birth
+    "age": ("years old", "born", "birthday", "turned", "birth"),
+    "older": ("years old", "born", "age", "birthday"),
+    "younger": ("years old", "born", "age", "birthday"),
+    # Appliances & Devices
+    "appliance": (
+        "espresso machine", "air fryer", "blender", "toaster", "stand mixer",
+        "microwave", "coffee maker", "food processor",
+    ),
+    "appliances": (
+        "espresso machine", "air fryer", "blender", "toaster", "stand mixer",
+        "microwave", "coffee maker", "food processor",
+    ),
+    "device": (
+        "fitness tracker", "smartwatch", "blood pressure monitor", "scale",
+        "thermometer", "glucometer", "pulse oximeter", "wearable",
+    ),
+    "devices": (
+        "fitness tracker", "smartwatch", "blood pressure monitor", "scale",
+        "thermometer", "glucometer", "pulse oximeter", "wearable",
+    ),
+    # Cuisines
+    "cuisine": (
+        "italian", "mexican", "japanese", "chinese", "thai", "indian",
+        "french", "korean", "greek", "spanish", "vietnamese",
+    ),
+    "cuisines": (
+        "italian", "mexican", "japanese", "chinese", "thai", "indian",
+        "french", "korean", "greek", "spanish", "vietnamese",
+    ),
+    # Sports & Vehicles
+    "sport": (
+        "football", "soccer", "basketball", "baseball", "tennis",
+        "golf", "running", "swimming", "cycling",
+    ),
+    "sports": (
+        "football", "soccer", "basketball", "baseball", "tennis",
+        "golf", "running", "swimming", "cycling",
+    ),
+    "vehicle": ("car", "truck", "suv", "motorcycle", "bicycle", "bike", "van"),
+    "vehicles": ("car", "truck", "suv", "motorcycle", "bicycle", "bike", "van"),
+}
+
+
+def expand_taxonomic_concepts(terms: Iterable[str]) -> list[str]:
+    """Expands category hypernyms to concrete hyponyms."""
+    expanded: list[str] = []
+    seen: set[str] = set()
+    for term in terms:
+        norm = term.lower()
+        if norm not in seen:
+            expanded.append(term)
+            seen.add(norm)
+        hyponyms = TAXONOMIC_EXPANSIONS.get(norm)
+        if hyponyms:
+            for h in hyponyms:
+                if h not in seen:
+                    expanded.append(h)
+                    seen.add(h)
+    return expanded
+
+
+def dynamic_concept_bridge(
+    term: str,
+    corpus_cooccurrences: Mapping[str, Iterable[str]] | None = None,
+) -> list[str]:
+    """Combines taxonomic concept expansion with dynamic corpus co-occurrence bridging."""
+    norm = term.lower()
+    results = list(TAXONOMIC_EXPANSIONS.get(norm, ()))
+    seen = set(results)
+    if corpus_cooccurrences:
+        for co in corpus_cooccurrences.get(norm, ()):
+            if co not in seen:
+                results.append(co)
+                seen.add(co)
+    return results

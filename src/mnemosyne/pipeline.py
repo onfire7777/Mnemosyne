@@ -679,7 +679,8 @@ def _fit_budget(hits: Sequence[Hit], budget: int, min_distinct_hits: int = 5, qu
     if len(kept) >= target_distinct:
         return kept
 
-    per_hit_budget = max(350, budget // max(target_distinct, 1))
+    needed = max(target_distinct, 1)
+    per_hit_budget = max(200, min(600, budget // needed))
     packed: list[Hit] = []
     for hit in raw_hits:
         if approx_tokens(hit.text) > per_hit_budget:
@@ -702,7 +703,8 @@ def _fit_budget_packed(
     if len(kept) >= target_distinct:
         return kept, used
 
-    per_hit_budget = max(350, budget // max(target_distinct, 1))
+    needed = max(target_distinct, 1)
+    per_hit_budget = max(200, min(600, budget // needed))
     packed: list[Hit] = []
     for hit in hits:
         if approx_tokens(hit.text) > per_hit_budget:
@@ -2059,7 +2061,47 @@ def run_retrieval_pipeline(
         window_support_query(window) if window is not None else query, budgeted, linked_facts
     )
     support_score = support_report["score"]
-    if cosine_ranked:
+
+    # Temporal-Bound Premise Grounding
+    temporal_bound_ungrounded = False
+    if window is not None and getattr(window, "label", None):
+        has_temporal_overlap = False
+        win_start = window.start.astimezone(timezone.utc) if window.start.tzinfo is not None else window.start.replace(tzinfo=timezone.utc)
+        win_end = window.end.astimezone(timezone.utc) if window.end.tzinfo is not None else window.end.replace(tzinfo=timezone.utc)
+        is_event_axis = getattr(window, "axis", "event") == "event"
+        for hit in budgeted[:5]:
+            if is_event_axis:
+                interval = _event_time_interval(hit)
+                if interval is not None:
+                    cand_start, cand_end = interval
+                    cand_start_utc = cand_start.astimezone(timezone.utc) if cand_start.tzinfo is not None else cand_start.replace(tzinfo=timezone.utc)
+                    cand_end_utc = cand_end.astimezone(timezone.utc) if cand_end.tzinfo is not None else cand_end.replace(tzinfo=timezone.utc)
+                    if cand_start_utc < win_end and cand_end_utc >= win_start:
+                        has_temporal_overlap = True
+                        break
+                else:
+                    cand_dt = hit.metadata.get("_candidate_created_at") or hit.metadata.get("created_at")
+                    if cand_dt:
+                        dt_obj = cand_dt if isinstance(cand_dt, datetime) else parse_dt(cand_dt)
+                        if dt_obj:
+                            dt_utc = dt_obj.astimezone(timezone.utc) if dt_obj.tzinfo is not None else dt_obj.replace(tzinfo=timezone.utc)
+                            if win_start <= dt_utc < win_end:
+                                has_temporal_overlap = True
+                                break
+            else:
+                cand_dt = hit.metadata.get("_candidate_created_at") or hit.metadata.get("created_at")
+                if cand_dt:
+                    dt_obj = cand_dt if isinstance(cand_dt, datetime) else parse_dt(cand_dt)
+                    if dt_obj:
+                        dt_utc = dt_obj.astimezone(timezone.utc) if dt_obj.tzinfo is not None else dt_obj.replace(tzinfo=timezone.utc)
+                        if win_start <= dt_utc < win_end:
+                            has_temporal_overlap = True
+                            break
+        if not has_temporal_overlap and len(budgeted) > 0:
+            temporal_bound_ungrounded = True
+            support_score = min(support_score, 0.20)
+
+    if cosine_ranked and not temporal_bound_ungrounded:
         # Found by meaning: a best cosine at or above the index's floor supports the answer
         # only when no explicit proper-noun, number, or compound-noun anchor is contradicted
         # or completely absent from the retrieved evidence.
@@ -2075,7 +2117,7 @@ def run_retrieval_pipeline(
         }
         if semantic_supported:
             support_score = 1.0
-    insufficient_support = support_score < QUERY_SUPPORT_THRESHOLD
+    insufficient_support = (support_score < QUERY_SUPPORT_THRESHOLD) or temporal_bound_ungrounded
     confidence = ops._confidence(query, budgeted, support_score=support_score)
     prediction_set_size = ops._prediction_set_size(budgeted, threshold)
     entropy = semantic_entropy([hit.text for hit in budgeted])

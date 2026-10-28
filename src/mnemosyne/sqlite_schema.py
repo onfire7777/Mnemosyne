@@ -397,6 +397,80 @@ ENSURE_STATEMENTS: list[str] = [
     CREATE INDEX IF NOT EXISTS working_memory_eviction_idx
         ON working_memory(tenant_id, session_id, status, salience, created_at)
     """,
+    # observations — First-class evolving observations with proof quotes
+    """
+    CREATE TABLE IF NOT EXISTS observations (
+        tenant_id TEXT NOT NULL,
+        branch TEXT NOT NULL DEFAULT 'main',
+        observation_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        topic TEXT NOT NULL,
+        content TEXT NOT NULL,
+        proof_quotes TEXT NOT NULL DEFAULT '[]',
+        source_evidence_cids TEXT NOT NULL DEFAULT '[]',
+        independent_source_count INTEGER NOT NULL DEFAULT 1 CHECK (independent_source_count >= 0),
+        corroboration_velocity REAL NOT NULL DEFAULT 0.0,
+        contradiction_history TEXT NOT NULL DEFAULT '[]',
+        freshness_watermark TEXT,
+        standing REAL NOT NULL DEFAULT 0.51 CHECK (standing >= 0.0 AND standing <= 1.0),
+        salience REAL NOT NULL DEFAULT 0.5 CHECK (salience >= 0.0 AND salience <= 1.0),
+        access_velocity REAL NOT NULL DEFAULT 0.0,
+        access_count INTEGER NOT NULL DEFAULT 0 CHECK (access_count >= 0),
+        last_accessed_at TEXT,
+        status TEXT NOT NULL DEFAULT 'active' CHECK (
+            status IN ('active', 'superseded', 'retracted', 'quarantined', 'contested')
+        ),
+        superseded_by TEXT,
+        version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+        trust_tier INTEGER NOT NULL DEFAULT 0,
+        sensitivity INTEGER NOT NULL DEFAULT 0,
+        access_policy TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (tenant_id, branch, observation_id),
+        FOREIGN KEY (tenant_id, branch) REFERENCES branches(tenant_id, name)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS observations_tenant_branch_subject_idx
+        ON observations(tenant_id, branch, subject, status)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS observations_tenant_branch_topic_idx
+        ON observations(tenant_id, branch, topic, status)
+    """,
+    # knowledge_pages — Living wiki-style projections with markdown and inline citations
+    """
+    CREATE TABLE IF NOT EXISTS knowledge_pages (
+        tenant_id TEXT NOT NULL,
+        branch TEXT NOT NULL DEFAULT 'main',
+        page_id TEXT NOT NULL,
+        user_id TEXT NOT NULL DEFAULT '',
+        path TEXT NOT NULL,
+        title TEXT NOT NULL,
+        content_markdown TEXT NOT NULL,
+        source_observation_ids TEXT NOT NULL DEFAULT '[]',
+        source_assertion_ids TEXT NOT NULL DEFAULT '[]',
+        source_evidence_cids TEXT NOT NULL DEFAULT '[]',
+        tags TEXT NOT NULL DEFAULT '[]',
+        version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+        status TEXT NOT NULL DEFAULT 'active' CHECK (
+            status IN ('active', 'stale', 'retired', 'archived', 'draft')
+        ),
+        trust_tier INTEGER NOT NULL DEFAULT 0,
+        sensitivity INTEGER NOT NULL DEFAULT 0,
+        access_policy TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (tenant_id, branch, page_id),
+        FOREIGN KEY (tenant_id, branch) REFERENCES branches(tenant_id, name)
+    )
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS knowledge_pages_tenant_branch_path_idx
+        ON knowledge_pages(tenant_id, branch, path) WHERE status != 'retired' AND status != 'archived'
+    """,
     # evidence_fts (Task 4) — FTS5 candidate-recall index over evidence.content.
     #
     # The unicode61 tokenizer is configured with ``tokenchars '_'`` so an
