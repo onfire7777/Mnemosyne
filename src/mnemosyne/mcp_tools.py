@@ -38,6 +38,7 @@ from mnemosyne.engine import (
     validate_intention_idempotency_key,
     select_working_items,
 )
+from mnemosyne.episodic_facts import extract_episodic_facts
 from mnemosyne.ids import canonical_json, evidence_cid, new_id
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.gate import Candidate, GATING_CASE_ORIGINS, GateResult, PromotionGate, RegressionCase
@@ -1031,6 +1032,7 @@ class MemoryTools:
 
         assertions: list[Assertion] = []
         preferences: list[Preference] = []
+        relations: list[Relation] = []
         consolidated_ids: list[str] = []
 
         for item in target_items:
@@ -1079,11 +1081,32 @@ class MemoryTools:
                 self.engine.upsert_assertion(assertion, branch=branch)
                 assertions.append(assertion)
                 consolidated_ids.append(item.item_id)
+            else:
+                if item.content:
+                    extracted = extract_episodic_facts(
+                        item.content,
+                        tenant_id=item.tenant_id,
+                        user_id=item.user_id,
+                        branch=branch,
+                        evidence_ids=item.evidence_ids,
+                        trust_tier=item.trust_tier,
+                        access_policy=dict(item.access_policy),
+                        created_at=getattr(item, "created_at", None) or clock,
+                    )
+                    for a in extracted.assertions:
+                        self.engine.upsert_assertion(a, branch=branch)
+                        assertions.append(a)
+                    for r in extracted.relations:
+                        self.engine.add_relation(r, branch=branch)
+                        relations.append(r)
+                    if (extracted.assertions or extracted.relations) and item.item_id not in consolidated_ids:
+                        consolidated_ids.append(item.item_id)
 
         return {
-            "consolidated_count": len(assertions) + len(preferences),
+            "consolidated_count": len(assertions) + len(preferences) + len(relations),
             "assertions": [a.to_dict() for a in assertions],
             "preferences": [p.to_dict() for p in preferences],
+            "relations": [r.to_dict() for r in relations],
             "item_ids": consolidated_ids,
             "security": security,
         }
@@ -1122,6 +1145,7 @@ class MemoryTools:
         if consolidate:
             assertions: list[Assertion] = []
             preferences: list[Preference] = []
+            relations: list[Relation] = []
             for item in expired:
                 if item.kind in {"active_constraint", "constraint"}:
                     pref = Preference(
@@ -1165,9 +1189,28 @@ class MemoryTools:
                     )
                     self.engine.upsert_assertion(assertion, branch=branch)
                     assertions.append(assertion)
+                else:
+                    if item.content:
+                        extracted = extract_episodic_facts(
+                            item.content,
+                            tenant_id=item.tenant_id,
+                            user_id=item.user_id,
+                            branch=branch,
+                            evidence_ids=item.evidence_ids,
+                            trust_tier=item.trust_tier,
+                            access_policy=dict(item.access_policy),
+                            created_at=getattr(item, "created_at", None) or clock,
+                        )
+                        for a in extracted.assertions:
+                            self.engine.upsert_assertion(a, branch=branch)
+                            assertions.append(a)
+                        for r in extracted.relations:
+                            self.engine.add_relation(r, branch=branch)
+                            relations.append(r)
             res["consolidated"] = {
                 "assertions": [a.to_dict() for a in assertions],
                 "preferences": [p.to_dict() for p in preferences],
+                "relations": [r.to_dict() for r in relations],
             }
         return res
 

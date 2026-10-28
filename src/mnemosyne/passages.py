@@ -50,6 +50,12 @@ def is_passage(hit: Hit) -> bool:
     )
 
 
+_COUNTING_SYNONYMS: dict[str, tuple[str, ...]] = {
+    "sibling": ("brother", "sister", "brothers", "sisters"),
+    "siblings": ("brother", "sister", "brothers", "sisters"),
+}
+
+
 class PassageIndex:
     """BM25 with positive IDF, scoped to the caller's readable corpus.
 
@@ -70,8 +76,18 @@ class PassageIndex:
 
     def scores(self, query: str) -> dict[int, float]:
         scores = defaultdict(float)
-        for term, query_count in Counter(tokenize(query)).items():
+        query_counts = Counter(tokenize(query))
+        expanded_counts = dict(query_counts)
+        for term, query_count in query_counts.items():
+            syns = _COUNTING_SYNONYMS.get(term)
+            if syns:
+                for syn in syns:
+                    if syn not in expanded_counts:
+                        expanded_counts[syn] = query_count * 0.8
+        for term, query_count in expanded_counts.items():
             postings = self.postings.get(term, ())
+            if not postings:
+                continue
             idf = log(1.0 + (len(self.texts) - len(postings) + 0.5) / (len(postings) + 0.5))
             for index, count in postings:
                 norm = 1.2 * (0.25 + 0.75 * self.lengths[index] / self.average_length)

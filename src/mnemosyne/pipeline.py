@@ -37,6 +37,7 @@ import re
 import threading
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any, Mapping, Protocol, Sequence
 
@@ -60,6 +61,7 @@ from mnemosyne.retrieval import (
     apply_workspace_retrieval_advisory,
     gist_support_report,
     global_sensemaking_projection,
+    normalise_query_term,
     TimeWindow,
     query_mode_from_filter,
     query_support,
@@ -578,6 +580,231 @@ def _event_time_interval(hit: Hit) -> tuple[datetime, datetime] | None:
     return start, end
 
 
+_SEQUENCE_ORDER_RE = re.compile(
+    r"\b(order of (?:the|all)|from earliest to latest|from latest to earliest|earliest to latest|latest to earliest|earliest first|latest first|which .{1,25} first|which .{1,25} second)\b",
+    re.IGNORECASE,
+)
+
+
+def _trim_hit_window(hit: Hit, query: str = "", max_tokens: int = 600) -> Hit:
+    """Trim an oversized multi-turn session text to its highest-scoring passage window (~600 tokens),
+    preserving hit ID, kind, score, metadata, provenance, and channel."""
+    cost = approx_tokens(hit.text)
+    if cost <= max_tokens:
+        return hit
+
+    # Split by \n\n, then by \n, then by sentence boundaries if paragraphs are oversized
+    raw_paragraphs = [p for p in hit.text.split("\n\n") if p.strip()]
+    if len(raw_paragraphs) <= 1:
+        raw_paragraphs = [p for p in hit.text.split("\n") if p.strip()]
+
+    # Subdivide any paragraph exceeding max_tokens // 2 into sentences/word chunks
+    paragraphs: list[str] = []
+    chunk_limit = max(80, max_tokens // 2)
+    for p in raw_paragraphs:
+        if approx_tokens(p) > chunk_limit:
+            sentences = re.split(r"(?<=[.!?])\s+", p)
+            for s in sentences:
+                s = s.strip()
+                if not s:
+                    continue
+                if approx_tokens(s) > chunk_limit:
+                    words = s.split()
+                    words_per_chunk = max(40, int(chunk_limit * 0.75))
+                    for w_idx in range(0, len(words), words_per_chunk):
+                        paragraphs.append(" ".join(words[w_idx : w_idx + words_per_chunk]))
+                else:
+                    if paragraphs and approx_tokens(paragraphs[-1] + " " + s) <= chunk_limit:
+                        paragraphs[-1] = paragraphs[-1] + " " + s
+                    else:
+                        paragraphs.append(s)
+        else:
+            paragraphs.append(p)
+
+    if not paragraphs:
+        paragraphs = [hit.text]
+
+    q_terms = set(tokenize(query)) - QUERY_SUPPORT_STOPWORDS
+    best_start = 0
+    best_score = -1.0
+    target_tokens = max(80, max_tokens - 20)
+
+    for i in range(len(paragraphs)):
+        window_text = ""
+        current_score = 0.0
+        j = i
+        while j < len(paragraphs):
+            cand_p = paragraphs[j]
+            cand_tokens = tokenize(cand_p)
+            overlap = sum(1 for t in cand_tokens if t in q_terms)
+            test_text = (window_text + "\n\n" + cand_p).strip() if window_text else cand_p
+            if approx_tokens(test_text) > target_tokens and window_text:
+                break
+            window_text = test_text
+            current_score += overlap
+            j += 1
+        if current_score > best_score:
+            best_score = current_score
+            best_start = i
+
+    trimmed_parts: list[str] = []
+    accum_tokens = 0
+    for idx in range(best_start, len(paragraphs)):
+        p = paragraphs[idx]
+        p_cost = approx_tokens(p)
+        if accum_tokens + p_cost > target_tokens and trimmed_parts:
+            break
+        trimmed_parts.append(p)
+        accum_tokens += p_cost
+
+    prefix = "[... truncated for budget ...]\n\n" if best_start > 0 else ""
+    suffix = "\n\n[... truncated for budget ...]" if (best_start + len(trimmed_parts)) < len(paragraphs) else ""
+    trimmed_text = prefix + "\n\n".join(trimmed_parts) + suffix
+
+    if approx_tokens(trimmed_text) > max_tokens:
+        words = trimmed_text.split()
+        target_words = max(40, int((max_tokens - 30) * 0.75))
+        trimmed_text = " ".join(words[:target_words]) + "\n\n[... truncated for budget ...]"
+
+    return replace(hit, text=trimmed_text)
+
+
+def _fit_budget(hits: Sequence[Hit], budget: int, min_distinct_hits: int = 5, query: str = "") -> list[Hit]:
+    """Fit hits into token budget, dynamically trimming oversized sessions to top-scoring passage
+    windows (~600 tokens) so at least min(len(hits), min_distinct_hits) distinct hits fit."""
+    from mnemosyne.algorithms import fit_budget
+    raw_hits = list(hits)
+    kept, _ = fit_budget(raw_hits, budget)
+    target_distinct = min(len(raw_hits), min_distinct_hits)
+    if len(kept) >= target_distinct:
+        return kept
+
+    per_hit_budget = max(350, budget // max(target_distinct, 1))
+    packed: list[Hit] = []
+    for hit in raw_hits:
+        if approx_tokens(hit.text) > per_hit_budget:
+            packed.append(_trim_hit_window(hit, query, max_tokens=per_hit_budget))
+        else:
+            packed.append(hit)
+    trimmed_kept, _ = fit_budget(packed, budget)
+    return trimmed_kept
+
+
+def _fit_budget_packed(
+    ops: RetrievalPipelineOps,
+    hits: list[Hit],
+    budget: int,
+    query: str = "",
+    min_distinct_hits: int = 5,
+) -> tuple[list[Hit], int]:
+    kept, used = ops._fit_budget(hits, budget)
+    target_distinct = min(len(hits), min_distinct_hits)
+    if len(kept) >= target_distinct:
+        return kept, used
+
+    per_hit_budget = max(350, budget // max(target_distinct, 1))
+    packed: list[Hit] = []
+    for hit in hits:
+        if approx_tokens(hit.text) > per_hit_budget:
+            packed.append(_trim_hit_window(hit, query, max_tokens=per_hit_budget))
+        else:
+            packed.append(hit)
+    return ops._fit_budget(packed, budget)
+
+
+def _extract_query_facets(query: str) -> list[set[str]]:
+    """Extract distinct non-overlapping noun-phrase facet term sets for conjunction / aggregation queries."""
+    if not re.search(r"\b(and|or|both|as well as|between)\b", query, re.I):
+        return []
+
+    cleaned = re.sub(
+        r"^(?:(?:what|which)\s+(?:is|are|was|were)\s+(?:the\s+)?|(?:tell\s+me\s+about\s+(?:the\s+)?)|(?:how\s+(?:many|much)\s+(?:total\s+)?))",
+        "",
+        query,
+        flags=re.I,
+    ).strip()
+    cleaned = re.sub(
+        r"^(?:(?:average|total|sum|count|median|mean|hobbies|hobby|interests|names|ages|details)\s+(?:age|cost|money|amount|score|time|number|price)?\s*(?:of|for|spent\s+on)?\s*)",
+        "",
+        cleaned,
+        flags=re.I,
+    ).strip()
+
+    chunks = re.split(r"\s*(?:,|;|\band\b|\bor\b|\bboth\b|\bas well as\b|\bbetween\b)\s*", cleaned, flags=re.I)
+    facets: list[set[str]] = []
+    for chunk in chunks:
+        terms = {
+            normalise_query_term(t)
+            for t in tokenize(chunk)
+            if len(t) > 2 and t not in QUERY_SUPPORT_STOPWORDS
+        }
+        # If the chunk has no other substantive terms but refers to user, mark as user_self
+        if not terms and re.search(r"\b(me|my|myself|i)\b", chunk, re.I):
+            terms.add("user_self")
+        if terms and terms not in facets:
+            facets.append(terms)
+
+    return facets if len(facets) >= 2 else []
+
+
+def _norm_stem(w: str) -> str:
+    w = w.lower().strip()
+    if len(w) >= 4 and w.endswith("ies"):
+        return w[:-3] + "y"
+    if len(w) >= 4 and w.endswith("es") and not w.endswith("ies"):
+        return w[:-2]
+    if len(w) >= 3 and w.endswith("s") and not w.endswith("ss"):
+        return w[:-1]
+    return w
+
+
+def _diversify_facets(query: str, hits: list[Hit], k: int) -> list[Hit]:
+    facets = _extract_query_facets(query)
+    if not facets or len(hits) <= 1:
+        return hits
+
+    hit_facets: list[set[int]] = []
+    for hit in hits:
+        text_terms = {normalise_query_term(t) for t in tokenize(hit.text) if len(t) > 2}
+        stemmed_text_terms = {_norm_stem(t) for t in text_terms}
+        covered: set[int] = set()
+        for f_idx, f_terms in enumerate(facets):
+            if f_terms == {"user_self"}:
+                if re.search(r"\b(i|my|me|myself)\b", hit.text, re.I):
+                    covered.add(f_idx)
+            else:
+                content_terms = {_norm_stem(t) for t in f_terms if t != "user_self"}
+                if any(t in stemmed_text_terms for t in content_terms):
+                    covered.add(f_idx)
+        hit_facets.append(covered)
+
+    selected: list[Hit] = []
+    selected_indices: set[int] = set()
+    covered_facets: set[int] = set()
+
+    candidate_indices = list(range(len(hits)))
+    while candidate_indices and len(selected) < k:
+        uncovered = set(range(len(facets))) - covered_facets
+        best_idx: int | None = None
+
+        if uncovered:
+            for idx in candidate_indices[:25]:
+                if hit_facets[idx] & uncovered:
+                    best_idx = idx
+                    break
+
+        if best_idx is None:
+            best_idx = candidate_indices[0]
+
+        selected.append(hits[best_idx])
+        selected_indices.add(best_idx)
+        covered_facets.update(hit_facets[best_idx])
+        candidate_indices.remove(best_idx)
+
+    remaining_hits = [hits[i] for i in range(len(hits)) if i not in selected_indices]
+    return selected + remaining_hits
+
+
 def _time_window_route(
     ops: RetrievalPipelineOps,
     window: TimeWindow,
@@ -616,17 +843,22 @@ def _time_window_route(
     seen = {hit.id for hit in ranked}
     # Passages the ranking did not score still belong to the window, in stored order.
     ranked = list(ranked) + [replace(hit, metadata=dict(hit.metadata)) for hit in candidates if hit.id not in seen]
-    times = (ops.evidence_created_at_many(tenant_id, [hit.id for hit in ranked], branch)
-             if window.axis == "source" else {})
+    times = ops.evidence_created_at_many(tenant_id, [hit.id for hit in ranked], branch)
     inside: list[tuple[datetime, Hit]] = []
     start, end = window.start.astimezone(timezone.utc), window.end.astimezone(timezone.utc)
     unknown = 0
+    is_happen_to = bool(re.search(r"\bhappen(?:ed|s)?\s+(?:to|with)\b", question, re.I))
+    bare_happen = bool(re.search(r"\bhappen(?:ed|s)?\b", question, re.I)) and not is_happen_to
     for hit in ranked:
         if window.axis == "event":
             interval = _event_time_interval(hit)
             if interval is None:
-                unknown += 1
-                continue
+                source_created = times.get(hit.id) if not bare_happen else None
+                if source_created is not None:
+                    interval = (source_created, source_created)
+                else:
+                    unknown += 1
+                    continue
             moment, until = interval
         else:
             moment = times.get(hit.id)
@@ -657,7 +889,62 @@ def _time_window_route(
     elif re.search(r"\b(last|latest|most recent|recently)\b", question):
         inside.sort(key=lambda item: item[0], reverse=True)
         explain["order"] = "latest_first"
-    hits = [hit for _moment, hit in inside]
+    allow_soft_fallback = (window.axis == "event") or (effective_filter.get("query_mode") == "passages")
+    if not inside and not date_only and not bare_happen and allow_soft_fallback:
+        # Soft Temporal Fallback: when 0 hits match the hard window, retain top semantic/lexical
+        # candidates with continuous temporal proximity boosting toward [window.start, window.end].
+        explain["fallback"] = "soft_temporal_proximity"
+        fallback_scored: list[tuple[float, Hit]] = []
+        for hit in ranked:
+            if window.axis == "event":
+                interval = _event_time_interval(hit)
+                if interval is not None:
+                    cand_time = interval[0]
+                else:
+                    cand_time = times.get(hit.id) if not bare_happen else None
+            else:
+                cand_time = times.get(hit.id)
+            if cand_time is None and (window.axis != "event" or not bare_happen):
+                cand_val = hit.metadata.get("_candidate_created_at") or hit.metadata.get("created_at")
+                if isinstance(cand_val, datetime):
+                    cand_time = cand_val
+                elif isinstance(cand_val, str):
+                    try:
+                        cand_time = parse_dt(cand_val)
+                    except Exception:
+                        pass
+            if cand_time is not None:
+                if cand_time.tzinfo is None:
+                    cand_time = cand_time.replace(tzinfo=timezone.utc)
+                cand_time = cand_time.astimezone(timezone.utc)
+                if cand_time < start:
+                    dist_sec = (start - cand_time).total_seconds()
+                elif cand_time > end:
+                    dist_sec = (cand_time - end).total_seconds()
+                else:
+                    dist_sec = 0.0
+                proximity = 1.0 / (1.0 + dist_sec / (7.0 * 86400.0))
+            else:
+                proximity = 0.5
+
+            base_score = float(hit.score or 1.0)
+            boosted_score = base_score * (0.6 + 0.4 * proximity)
+            fb_hit = replace(hit, score=boosted_score, metadata={
+                **hit.metadata,
+                "temporal_fallback": True,
+                "temporal_proximity": proximity,
+                "temporal_match": {
+                    "axis": window.axis,
+                    "start": (cand_time or start).isoformat(),
+                    "end": (cand_time or end).isoformat(),
+                },
+            })
+            fallback_scored.append((boosted_score, fb_hit))
+
+        fallback_scored.sort(key=lambda item: -item[0])
+        hits = [hit for _s, hit in fallback_scored]
+    else:
+        hits = [hit for _moment, hit in inside]
     if speaker is not None:
         said = [hit for hit in hits if hit.metadata.get("actor") == speaker]
         hits = said + [hit for hit in hits if hit not in said]
@@ -1358,6 +1645,7 @@ def run_retrieval_pipeline(
         else None
     )
     window_explain: dict[str, Any] | None = None
+    window_hits: list[Hit] = []
     if window is not None:
         window_hits, window_explain = _time_window_route(
             ops, window, effective_filter, tenant_id=tenant_id, branch=branch, passage_graph=passage_graph
@@ -1526,6 +1814,11 @@ def run_retrieval_pipeline(
         relational_query = bool(re.search(
             r"\b(\w+('s|’s)|of the|assigned to|reports to|led by)\b", query, re.I
         ))
+        is_phrase_or_agg = bool(re.search(
+            r"\b(total|average|how many|how much|sum of|cost of|price of|different|all the)\b", query, re.I
+        ))
+        if not explicit_bridge and is_phrase_or_agg:
+            relational_query = False
         salient = {t for t in tokenize(query) if t not in QUERY_SUPPORT_STOPWORDS and len(t) > 2}
         uncovered = bool(sources and salient - set(tokenize(sources[0].text)))
         if sources and k > 1 and (explicit_bridge or (relational_query and uncovered)):
@@ -1596,11 +1889,21 @@ def run_retrieval_pipeline(
     # Passage and graph-ranked search keep their relevance order: the local hashing
     # reranker and MMR would re-sort it by surface tokens.
     relevance_order = passage_mode or semantic or window is not None or source_ranked is not None
-    chronological_window = bool(window_explain and window_explain.get("order"))
+    seq_order_match = _SEQUENCE_ORDER_RE.search(query)
+    chronological_order: str | None = None
+    if window_explain and window_explain.get("order"):
+        chronological_order = window_explain.get("order")
+    elif seq_order_match:
+        if re.search(r"\b(last|latest|latest to earliest|latest first)\b", query, re.I) and not re.search(r"\bearliest to latest\b", query, re.I):
+            chronological_order = "latest_first"
+        else:
+            chronological_order = "earliest_first"
+    chronological_window = bool(chronological_order)
     reranked = (
         fused if chronological_window or (relevance_order and ops.adapters.reranker.name == "local-similarity")
         else ops.adapters.reranker.rerank(query, fused, k=max(k * 2, k))
     )
+    reranked = _diversify_facets(query, reranked, k=max(k, 5))
     if chronological_window:
         # "First/last said" is an ordering constraint on source timestamps,
         # not a relevance hint that a learned or schema reranker may replace.
@@ -1638,7 +1941,6 @@ def run_retrieval_pipeline(
     else:
         ordered, schema_fast_path_final = schema_fast_path_rerank(query, ordered, policy)
     schema_fast_path = ops._merge_schema_fast_path_reports(schema_fast_path, schema_fast_path_final)
-    temporal_positions = {(hit.kind, hit.id): index for index, hit in enumerate(ordered)} if chronological_window else {}
     ordered, workspace_retrieval_advisory = apply_workspace_retrieval_advisory(
         ordered,
         filt,
@@ -1646,8 +1948,37 @@ def run_retrieval_pipeline(
         branch=branch,
         policy=policy,
     )
-    if chronological_window:
-        ordered.sort(key=lambda hit: temporal_positions[(hit.kind, hit.id)])
+    if window_explain and window_explain.get("order"):
+        temporal_positions = {(hit.kind, hit.id): index for index, hit in enumerate(window_hits)}
+        ordered.sort(key=lambda hit: temporal_positions.get((hit.kind, hit.id), 999))
+        if workspace_retrieval_advisory.get("status") == "applied":
+            workspace_retrieval_advisory["used_for_ranking"] = False
+            workspace_retrieval_advisory["ranking_preserved"] = "explicit_temporal_order"
+    elif chronological_order:
+        times_map = ops.evidence_created_at_many(tenant_id, [hit.id for hit in ordered], branch)
+        order_axis = window.axis if window is not None else "event"
+
+        def _get_hit_time(h: Hit) -> datetime:
+            val = None
+            if order_axis == "event":
+                interval = _event_time_interval(h)
+                if interval is not None:
+                    val = interval[0]
+            if val is None:
+                val = times_map.get(h.id) or h.metadata.get("_candidate_created_at") or h.metadata.get("created_at")
+            if isinstance(val, datetime):
+                return val.astimezone(timezone.utc) if val.tzinfo is not None else val.replace(tzinfo=timezone.utc)
+            if isinstance(val, str):
+                try:
+                    dt = parse_dt(val)
+                    if dt is not None:
+                        return dt.astimezone(timezone.utc) if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+                except Exception:
+                    pass
+            return datetime.min.replace(tzinfo=timezone.utc)
+
+        reverse = (chronological_order == "latest_first")
+        ordered.sort(key=lambda hit: (_get_hit_time(hit), hit.id), reverse=reverse)
         if workspace_retrieval_advisory.get("status") == "applied":
             workspace_retrieval_advisory["used_for_ranking"] = False
             workspace_retrieval_advisory["ranking_preserved"] = "explicit_temporal_order"
@@ -1668,13 +1999,13 @@ def run_retrieval_pipeline(
         priority_sub_budget = reserved_sub_budget
         kept_priority, used_priority = ops._fit_budget(priority_candidates, reserved_sub_budget)
         remaining_budget = max(0, token_budget - used_priority)
-        kept_general, used_general = ops._fit_budget(general_candidates, remaining_budget)
+        kept_general, used_general = _fit_budget_packed(ops, general_candidates, remaining_budget, query=query)
         leftover_budget = max(0, remaining_budget - used_general)
         if leftover_budget > 0:
             kept_priority_set = {id(h) for h in kept_priority}
             unfitted_priority = [h for h in priority_candidates if id(h) not in kept_priority_set]
             if unfitted_priority:
-                extra_priority, used_extra = ops._fit_budget(unfitted_priority, leftover_budget)
+                extra_priority, used_extra = _fit_budget_packed(ops, unfitted_priority, leftover_budget, query=query)
                 kept_priority.extend(extra_priority)
                 used_priority += used_extra
         priority_tokens_used = used_priority
@@ -1683,7 +2014,7 @@ def run_retrieval_pipeline(
         used = sum(approx_tokens(hit.text) for hit in budgeted)
         priority_items_retained = len(kept_priority)
     else:
-        budgeted, used = ops._fit_budget(ordered, token_budget)
+        budgeted, used = _fit_budget_packed(ops, ordered, token_budget, query=query)
     budgeted = ops._mark_retrieved_text_as_data(budgeted)
     _stamp_hit_origin(ops, budgeted, tenant_id=tenant_id, branch=branch)
     if working_requested:
@@ -1715,11 +2046,19 @@ def run_retrieval_pipeline(
     support_score = support_report["score"]
     if cosine_ranked:
         # Found by meaning: a best cosine at or above the index's floor supports the answer
-        # even when it shares no word with the question.
+        # only when no explicit proper-noun, number, or compound-noun anchor is contradicted
+        # or completely absent from the retrieved evidence.
         top_score = float(graph_explain.get("top_score") or 0.0)
         floor = float(getattr(passage_graph, "support_floor", 1.0))
-        support_report["semantic"] = {"top_score": top_score, "floor": floor, "supported": top_score >= floor}
-        if top_score >= floor:
+        anchor_ok = bool(support_report.get("anchor_grounding", {}).get("satisfied", True))
+        semantic_supported = (top_score >= floor) and anchor_ok
+        support_report["semantic"] = {
+            "top_score": top_score,
+            "floor": floor,
+            "supported": semantic_supported,
+            "anchor_ok": anchor_ok,
+        }
+        if semantic_supported:
             support_score = 1.0
     insufficient_support = support_score < QUERY_SUPPORT_THRESHOLD
     confidence = ops._confidence(query, budgeted, support_score=support_score)

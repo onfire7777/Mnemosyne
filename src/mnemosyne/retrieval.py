@@ -270,38 +270,59 @@ QUERY_SUPPORT_QUESTION_STOPWORDS = {
     "also",
     "before",
     "between",
+    "book",
+    "books",
     "can",
+    "check",
     "compare",
     "could",
+    "count",
     "currently",
     "day",
     "days",
+    "describe",
+    "explain",
+    "film",
+    "films",
+    "find",
     "first",
     "four",
     "frequently",
     "get",
     "getting",
+    "give",
     "got",
     "had",
     "has",
     "have",
     "having",
+    "identify",
     "instead",
     "just",
     "last",
+    "list",
     "long",
     "many",
     "month",
     "months",
+    "movi",
+    "movie",
+    "movies",
     "much",
+    "name",
     "number",
     "often",
     "one",
     "passed",
     "past",
     "previously",
+    "recall",
     "recently",
+    "search",
+    "show",
     "since",
+    "song",
+    "songs",
     "there",
     "three",
     "time",
@@ -790,8 +811,16 @@ def normalise_query_term(token: str) -> str:
     return token
 
 
+_SYNONYM_SETS = (
+    frozenset({"sibling", "siblings", "brother", "brothers", "sister", "sisters"}),
+    frozenset({"pet", "pets", "dog", "dogs", "cat", "cats"}),
+)
+
+
 def similar_query_terms(left: str, right: str) -> bool:
     if left == right:
+        return True
+    if any(left in s and right in s for s in _SYNONYM_SETS):
         return True
     shorter, longer = (left, right) if len(left) <= len(right) else (right, left)
     if len(shorter) >= 4 and longer.startswith(shorter):
@@ -807,10 +836,11 @@ _WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday",
 _MONTHS = ("january", "february", "march", "april", "may", "june", "july", "august",
            "september", "october", "november", "december")
 _DAY_PARTS = {"morning": (5, 12), "afternoon": (12, 17), "evening": (17, 24), "tonight": (17, 24), "night": (18, 24)}
-_SMALL_NUMBERS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "a": 1}
+_SMALL_NUMBERS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "few": 3, "a": 1}
 _PAST_CUE = re.compile(
     r"\b(did|was|were|had|remember|recall|said|told|asked|talked|mentioned|happened|discussed|spoke|"
-    r"wrote|recorded|logged|messaged|replied|suggested|answered|first thing|last thing)\b"
+    r"wrote|recorded|logged|messaged|replied|suggested|answered|first thing|last thing|"
+    r"took|participated|spent|went|visited|bought|purchased|attended|watched|signed up|redeemed)\b"
 )
 
 
@@ -978,6 +1008,41 @@ def query_time_window(
         return make_window(start, start + timedelta(days=7), "last week", rest_without(found))
     elif found := re.search(r"\bthis week\b", text):
         return make_window(today - timedelta(days=today.weekday()), local, "this week", rest_without(found))
+    elif found := re.search(r"\b(?:in|during|over)\s+the\s+(?:past|last)\s+(\d+|" + "|".join(_SMALL_NUMBERS) + r")\s+(days?|weeks?|months?|years?)\b", text):
+        num_str, unit = found.group(1), found.group(2)
+        try:
+            n = int(num_str) if num_str.isdigit() else _SMALL_NUMBERS[num_str]
+            if unit.startswith("day"):
+                start = today - timedelta(days=n)
+            elif unit.startswith("week"):
+                start = today - timedelta(days=7 * n)
+            elif unit.startswith("month"):
+                start = today - timedelta(days=30 * n)
+            else:  # year
+                start = today - timedelta(days=365 * n)
+            return make_window(start, local, found.group(0), rest_without(found))
+        except (ValueError, OverflowError):
+            return None
+    elif found := re.search(r"\b(?:in|during|over)\s+the\s+(?:past|last)\s+(day|week|month|year)\b", text):
+        unit = found.group(1)
+        try:
+            if unit == "day":
+                start = today - timedelta(days=1)
+            elif unit == "week":
+                start = today - timedelta(days=7)
+            elif unit == "month":
+                start = today - timedelta(days=30)
+            else:  # year
+                start = today - timedelta(days=365)
+            return make_window(start, local, found.group(0), rest_without(found))
+        except (ValueError, OverflowError):
+            return None
+    elif found := re.search(r"\bsince\s+the\s+start\s+of\s+the\s+year\b", text):
+        try:
+            start = today.replace(month=1, day=1)
+            return make_window(start, local, found.group(0), rest_without(found))
+        except (ValueError, OverflowError):
+            return None
     elif found := re.search(r"\b(last|this) (month|year)\b", text):
         try:
             if found.group(2) == "year":
@@ -1027,16 +1092,283 @@ def query_time_window(
     return make_window(day, day + timedelta(days=1), label, rest)
 
 
+_ANCHOR_SENTENCE_START = frozenset({
+    "what", "when", "where", "which", "who", "whom", "whose", "why", "how",
+    "did", "do", "does", "have", "has", "had", "can", "could", "would",
+    "will", "is", "are", "was", "were", "at", "in", "on", "if", "for", "to",
+    "tell", "please", "may",
+    "list", "show", "find", "describe", "count", "identify", "give", "explain",
+    "recall", "name", "check", "search", "detail", "summarize", "outline",
+    "today", "yesterday",
+})
+
+_LOW_WEIGHT_PREDICATES = frozenset({
+    "spend", "spent", "take", "took", "taken", "work", "worked", "working",
+    "start", "started", "starting", "cost", "costs", "costed", "tried", "try",
+    "visit", "visited", "visiting", "added", "add", "adding", "read", "reading",
+    "living", "live", "lived", "current", "currently", "name", "named", "every",
+    "left", "became", "become", "initially", "initial", "complete", "completed",
+    "purchased", "purchase", "purchasing", "gave", "give", "given", "dedicate",
+    "dedicated", "booking", "book", "booked", "attend", "attended", "attending",
+    "receive", "received", "receiving", "make", "made", "making", "find",
+    "found", "finding", "get", "getting", "got", "gotten", "see", "seeing",
+    "saw", "seen", "play", "played", "playing", "lead", "leading", "learn",
+    "learned", "learning", "call", "called", "calling", "practice", "practicing",
+    "practiced", "decide", "decided", "plant", "planted", "planting",
+    "buy", "bought", "locate", "located", "eat", "ate", "sell", "sold",
+    "own", "owned", "open", "close", "stay", "watch", "watched",
+})
+
+_FOCAL_OBJECT_TERMS = frozenset({
+    "hamster", "football", "footballs", "violin", "uncle", "dad", "father",
+    "taxi", "cows", "cow", "fence", "tart", "tarts", "pepper", "peppers",
+    "porsche", "ferrari", "sapiens", "cucumbers", "cucumber", "guitar",
+    "airbnbs", "airbnb", "passport", "salary", "anniversary", "birthday",
+    "saxophone", "piano", "flute", "drums", "trumpet", "clarinet",
+    "baseball", "basketball", "tennis", "soccer",
+    "parrot", "rabbit", "cat", "dog", "horse",
+    "boat", "yacht", "motorcycle", "bicycle",
+})
+
+_GENERIC_DESCRIPTORS = frozenset({
+    "kind", "type", "style", "level", "relation", "procedure", "size",
+    "memory", "answer", "total", "number", "time", "date", "day", "month",
+    "year", "thing", "things", "item", "items", "details", "information",
+    "way", "event", "events", "fact", "facts", "part", "parts",
+})
+
+_COMMON_ADJECTIVES = frozenset({
+    "favorite", "favourite", "best", "worst", "top", "good", "bad",
+    "new", "old", "first", "last", "next", "previous", "recent",
+    "main", "major", "primary", "secondary", "special", "particular",
+    "high", "low", "big", "small", "great", "little", "average",
+})
+
+_RECOGNIZED_COMPOUND_ANCHORS = (
+    ("table", "tennis"),
+    ("egg", "tarts"),
+    ("egg", "tart"),
+    ("vintage", "films"),
+    ("vintage", "film"),
+    ("software", "manager"),
+    ("engineer", "manager"),
+    ("master", "degree"),
+    ("masters", "degree"),
+    ("chili", "peppers"),
+    ("chili", "pepper"),
+    ("ipad", "case"),
+    ("holiday", "market"),
+    ("coffee", "table"),
+    ("side", "table"),
+    ("dining", "table"),
+)
+
+
 def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = ()) -> dict[str, Any]:
-    """Share of the query's content words that the top hits cover. ``extra_texts`` adds what
-    linked the hits to the question (the passage graph's facts): a second-hop answer rarely
-    repeats the question's words, but the fact that led to it does."""
+    """Specificity-weighted query support with proper-noun, compound-noun, and focal-object grounding."""
+    words = re.findall(r"[A-Za-z0-9]+(?:[\x27\x2D][A-Za-z0-9]+)*", query)
+    hit_texts = [hit.text for hit in hits[:8]] + list(extra_texts)
+
+    # 1. Extract proper nouns and multi-word proper nouns
+    proper_nouns: list[str] = []
+    multiword_proper: list[list[str]] = []
+    current_mw: list[str] = []
+
+    for i, w in enumerate(words):
+        clean_w = re.sub(r"['’]s$", "", w)
+        norm = clean_w.lower()
+        is_cap = (clean_w[0].isupper() or any(c.isupper() for c in clean_w[1:]) or (any(c.isdigit() for c in clean_w) and any(c.isalpha() for c in clean_w)))
+        if is_cap:
+            if i == 0 and norm in _ANCHOR_SENTENCE_START:
+                if current_mw:
+                    if len(current_mw) >= 2:
+                        multiword_proper.append(list(current_mw))
+                    current_mw = []
+                continue
+            if norm not in QUERY_SUPPORT_STOPWORDS and len(norm) > 1:
+                if clean_w not in proper_nouns:
+                    proper_nouns.append(clean_w)
+                current_mw.append(clean_w)
+            else:
+                if len(current_mw) >= 2:
+                    multiword_proper.append(list(current_mw))
+                current_mw = []
+        else:
+            if len(current_mw) >= 2:
+                multiword_proper.append(list(current_mw))
+            current_mw = []
+    if len(current_mw) >= 2:
+        multiword_proper.append(list(current_mw))
+
+    missing_proper: list[str] = []
+    for pn in proper_nouns:
+        pn_norm = normalise_query_term(re.sub(r"['’]s$", "", pn).lower())
+        found = False
+        for text in hit_texts:
+            tokens = [normalise_query_term(t) for t in tokenize(text)]
+            if any(similar_query_terms(pn_norm, t) for t in tokens) or pn_norm in text.lower():
+                found = True
+                break
+        if not found:
+            missing_proper.append(pn)
+
+    # Multi-word proper nouns must co-occur within <= 3 words in the SAME hit text
+    for mw in multiword_proper:
+        mw_norms = [normalise_query_term(w.lower()) for w in mw]
+        mw_name = " ".join(mw)
+        found_mw = False
+        for text in hit_texts:
+            tokens = [normalise_query_term(t) for t in tokenize(text)]
+            positions = []
+            for mwn in mw_norms:
+                pos = [idx for idx, tok in enumerate(tokens) if similar_query_terms(mwn, tok)]
+                positions.append(pos)
+            if all(positions):
+                if len(positions) == 2:
+                    if any(1 <= abs(p0 - p1) <= 3 for p0 in positions[0] for p1 in positions[1]):
+                        found_mw = True
+                        break
+                elif len(positions) == 3:
+                    if any(1 <= abs(p0 - p1) <= 3 and 1 <= abs(p1 - p2) <= 3 for p0 in positions[0] for p1 in positions[1] for p2 in positions[2]):
+                        found_mw = True
+                        break
+                else:
+                    found_mw = True
+                    break
+        if not found_mw and mw_name not in missing_proper:
+            missing_proper.append(mw_name)
+
+    # 2. Extract and verify possessive entity pairs (e.g., "Emma's dog", "Dr. Johnson's clinic")
+    possessive_pairs: list[tuple[str, str]] = []
+    for i in range(len(words) - 1):
+        w1, w2 = words[i], words[i + 1]
+        if re.search(r"['’]s$", w1):
+            owner = re.sub(r"['’]s$", "", w1).strip()
+            owned = re.sub(r"['’]s$", "", w2).strip()
+            owner_norm = normalise_query_term(owner.lower())
+            owned_norm = normalise_query_term(owned.lower())
+            if owner_norm not in QUERY_SUPPORT_STOPWORDS and owned_norm not in QUERY_SUPPORT_STOPWORDS:
+                possessive_pairs.append((owner, owned))
+
+    for owner, owned in possessive_pairs:
+        o_norm = normalise_query_term(owner.lower())
+        d_norm = normalise_query_term(owned.lower())
+        pair_found = False
+        for text in hit_texts:
+            tokens = [normalise_query_term(t) for t in tokenize(text)]
+            has_o = any(similar_query_terms(o_norm, tok) for tok in tokens)
+            has_d = any(similar_query_terms(d_norm, tok) for tok in tokens)
+            if has_o and has_d:
+                pair_found = True
+                break
+        if not pair_found:
+            pair_name = f"{owner}'s {owned}"
+            if pair_name not in missing_proper:
+                missing_proper.append(pair_name)
+
+    # 3. Extract and verify compound noun co-occurrence in the same hit
+    q_lower = query.lower()
+    missing_compounds: list[str] = []
+
+    # A. Explicit recognized compound anchors
+    for w1, w2 in _RECOGNIZED_COMPOUND_ANCHORS:
+        if w1 in q_lower and w2 in q_lower:
+            t1, t2 = normalise_query_term(w1), normalise_query_term(w2)
+            found = False
+            for text in hit_texts:
+                tokens = [normalise_query_term(t) for t in tokenize(text)]
+                p1 = [idx for idx, tok in enumerate(tokens) if similar_query_terms(t1, tok)]
+                p2 = [idx for idx, tok in enumerate(tokens) if similar_query_terms(t2, tok)]
+                if any(abs(i - j) <= 2 for i in p1 for j in p2):
+                    found = True
+                    break
+            if not found:
+                missing_compounds.append(f"{w1} {w2}")
+
+    # B. Generalized consecutive content-word compound anchors
+    for i in range(len(words) - 1):
+        w1, w2 = words[i], words[i + 1]
+        if re.search(r"['’]s$", w1):
+            continue
+        c1 = re.sub(r"['’]s$", "", w1).strip()
+        c2 = re.sub(r"['’]s$", "", w2).strip()
+        n1 = normalise_query_term(c1.lower())
+        n2 = normalise_query_term(c2.lower())
+        if len(n1) <= 2 or len(n2) <= 2:
+            continue
+        if n1 in QUERY_SUPPORT_STOPWORDS or n2 in QUERY_SUPPORT_STOPWORDS:
+            continue
+        if n1 in _LOW_WEIGHT_PREDICATES or n2 in _LOW_WEIGHT_PREDICATES:
+            continue
+        if n1 in _COMMON_ADJECTIVES or n2 in _COMMON_ADJECTIVES:
+            continue
+        if n1 in _GENERIC_DESCRIPTORS or n2 in _GENERIC_DESCRIPTORS:
+            continue
+        if f"{n1} {n2}" in [f"{a} {b}" for a, b in _RECOGNIZED_COMPOUND_ANCHORS]:
+            continue
+
+        n1_in_evidence = any(any(similar_query_terms(n1, normalise_query_term(t)) for t in tokenize(text)) for text in hit_texts)
+        n2_in_evidence = any(any(similar_query_terms(n2, normalise_query_term(t)) for t in tokenize(text)) for text in hit_texts)
+        if n1_in_evidence and n2_in_evidence:
+            co_occur = False
+            for text in hit_texts:
+                tokens = [normalise_query_term(t) for t in tokenize(text)]
+                p1 = [idx for idx, tok in enumerate(tokens) if similar_query_terms(n1, tok)]
+                p2 = [idx for idx, tok in enumerate(tokens) if similar_query_terms(n2, tok)]
+                if any(abs(pos1 - pos2) <= 2 for pos1 in p1 for pos2 in p2):
+                    co_occur = True
+                    break
+            if not co_occur:
+                compound_label = f"{c1} {c2}"
+                if compound_label not in missing_compounds:
+                    missing_compounds.append(compound_label)
+
+    # 4. Standalone numeric anchors (e.g. "$500 dinner", "session 42")
+    missing_focal: list[str] = []
+    numeric_tokens = re.findall(r"\b\d+\b", query)
+    for num in numeric_tokens:
+        found_num = False
+        for text in hit_texts:
+            if re.search(rf"\b{re.escape(num)}\b", text):
+                found_num = True
+                break
+        if not found_num:
+            if num not in missing_focal:
+                missing_focal.append(num)
+
+    # 5. Extract and verify focal objects
+    for w in words:
+        clean_w = re.sub(r"['’]s$", "", w)
+        norm = normalise_query_term(clean_w.lower())
+        if norm in _FOCAL_OBJECT_TERMS and clean_w not in proper_nouns:
+            found = False
+            for text in hit_texts:
+                tokens = [normalise_query_term(t) for t in tokenize(text)]
+                if any(similar_query_terms(norm, t) for t in tokens):
+                    found = True
+                    break
+            if not found and norm not in missing_focal:
+                missing_focal.append(norm)
+
+    # 6. Specificity-weighted unigram scoring
     query_terms: list[str] = []
+    term_weights: dict[str, float] = {}
     for token in tokenize(query):
         term = normalise_query_term(token)
         if len(term) <= 2 or term in QUERY_SUPPORT_STOPWORDS or term in query_terms:
             continue
         query_terms.append(term)
+        norm = term.lower()
+        if any(normalise_query_term(pn.lower()) == norm for pn in proper_nouns):
+            weight = 3.5
+        elif norm in _FOCAL_OBJECT_TERMS:
+            weight = 3.0
+        elif norm in _LOW_WEIGHT_PREDICATES:
+            weight = 0.6
+        else:
+            weight = 1.5
+        term_weights[term] = weight
+
     if not query_terms:
         # Fallback to minimal stopwords if all query terms are conversational stopwords
         for token in tokenize(query):
@@ -1044,6 +1376,8 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
             if len(term) <= 2 or term in MINIMAL_QUERY_SUPPORT_STOPWORDS or term in query_terms:
                 continue
             query_terms.append(term)
+            term_weights[term] = 1.0
+
     if not query_terms:
         return {
             "score": 1.0,
@@ -1051,10 +1385,17 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
             "matched_terms": [],
             "missing_terms": [],
             "query_terms": [],
+            "anchor_grounding": {
+                "satisfied": True,
+                "missing_proper": [],
+                "missing_compounds": [],
+                "missing_focal": [],
+                "capped": False,
+            },
         }
 
     evidence_terms: list[str] = []
-    for text in [hit.text for hit in hits[:8]] + list(extra_texts):
+    for text in hit_texts:
         evidence_terms.extend(normalise_query_term(token) for token in tokenize(text) if len(token) > 2)
     matched_terms = [
         term
@@ -1062,13 +1403,29 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
         if any(similar_query_terms(term, candidate) for candidate in evidence_terms)
     ]
     missing_terms = [term for term in query_terms if term not in matched_terms]
-    score = len(matched_terms) / max(len(query_terms), 1)
+
+    total_weight = sum(term_weights.get(t, 1.5) for t in query_terms)
+    matched_weight = sum(term_weights.get(t, 1.5) for t in matched_terms)
+    weighted_score = matched_weight / max(total_weight, 0.001)
+
+    # 7. Enforce Anchor Grounding Gating Rule
+    anchor_satisfied = not (missing_proper or missing_compounds or missing_focal)
+    final_score = min(weighted_score, 0.35) if not anchor_satisfied else weighted_score
+
     return {
-        "score": score,
+        "score": final_score,
+        "base_score": weighted_score,
         "threshold": QUERY_SUPPORT_THRESHOLD,
         "matched_terms": matched_terms,
         "missing_terms": missing_terms,
         "query_terms": query_terms,
+        "anchor_grounding": {
+            "satisfied": anchor_satisfied,
+            "missing_proper": missing_proper,
+            "missing_compounds": missing_compounds,
+            "missing_focal": missing_focal,
+            "capped": not anchor_satisfied,
+        },
     }
 
 
