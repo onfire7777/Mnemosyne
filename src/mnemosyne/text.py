@@ -215,43 +215,46 @@ def approx_tokens(text: str) -> int:
 
 
 TAXONOMIC_EXPANSIONS: dict[str, tuple[str, ...]] = {
-    # Kinship
+    # Kinship hypernyms -> hyponyms
     "sibling": ("brother", "sister", "brothers", "sisters"),
     "siblings": ("brother", "sister", "brothers", "sisters"),
-    "brother": ("sibling", "brother"),
-    "brothers": ("siblings", "brothers"),
-    "sister": ("sibling", "sister"),
-    "sisters": ("siblings", "sisters"),
     "grandma": ("grandmother", "grandparent", "grandparents"),
     "grandpa": ("grandfather", "grandparent", "grandparents"),
     "grandmother": ("grandma", "grandmother", "grandparent"),
     "grandfather": ("grandpa", "grandfather", "grandparent"),
     "parent": ("mother", "father", "mom", "dad"),
     "parents": ("mother", "father", "mom", "dad"),
-    "mother": ("parent", "mother", "mom"),
-    "father": ("parent", "father", "dad"),
-    # Age & Birth
-    "age": ("years old", "born", "birthday", "turned", "birth"),
-    "older": ("years old", "born", "age", "birthday"),
-    "younger": ("years old", "born", "age", "birthday"),
-    # Appliances & Devices
+    # Appliances & Devices (hypernyms -> concrete hyponyms)
     "appliance": (
         "espresso machine", "air fryer", "blender", "toaster", "stand mixer",
-        "microwave", "coffee maker", "food processor",
+        "microwave", "coffee maker", "food processor", "dishwasher", "kettle",
+        "juicer", "cooker", "smoker", "grill",
     ),
     "appliances": (
         "espresso machine", "air fryer", "blender", "toaster", "stand mixer",
-        "microwave", "coffee maker", "food processor",
+        "microwave", "coffee maker", "food processor", "dishwasher", "kettle",
+        "juicer", "cooker", "smoker", "grill",
+    ),
+    # Sports & athletic events (hypernyms -> concrete hyponyms)
+    "sport": (
+        "soccer", "basketball", "tennis", "baseball", "marathon", "triathlon",
+        "5k", "running", "cycling", "swimming", "volleyball", "golf",
+        "hockey", "badminton", "tournament",
+    ),
+    "sports": (
+        "soccer", "basketball", "tennis", "baseball", "marathon", "triathlon",
+        "5k", "running", "cycling", "swimming", "volleyball", "golf",
+        "hockey", "badminton", "tournament",
     ),
     "device": (
         "fitness tracker", "smartwatch", "blood pressure monitor", "scale",
-        "thermometer", "glucometer", "pulse oximeter", "wearable",
+        "thermometer", "glucometer", "pulse oximeter", "wearable", "fitbit", "garmin",
     ),
     "devices": (
         "fitness tracker", "smartwatch", "blood pressure monitor", "scale",
-        "thermometer", "glucometer", "pulse oximeter", "wearable",
+        "thermometer", "glucometer", "pulse oximeter", "wearable", "fitbit", "garmin",
     ),
-    # Cuisines
+    # Cuisines (hypernyms -> concrete hyponyms)
     "cuisine": (
         "italian", "mexican", "japanese", "chinese", "thai", "indian",
         "french", "korean", "greek", "spanish", "vietnamese",
@@ -260,15 +263,7 @@ TAXONOMIC_EXPANSIONS: dict[str, tuple[str, ...]] = {
         "italian", "mexican", "japanese", "chinese", "thai", "indian",
         "french", "korean", "greek", "spanish", "vietnamese",
     ),
-    # Sports & Vehicles
-    "sport": (
-        "football", "soccer", "basketball", "baseball", "tennis",
-        "golf", "running", "swimming", "cycling",
-    ),
-    "sports": (
-        "football", "soccer", "basketball", "baseball", "tennis",
-        "golf", "running", "swimming", "cycling",
-    ),
+    # Vehicles (hypernyms -> concrete hyponyms)
     "vehicle": ("car", "truck", "suv", "motorcycle", "bicycle", "bike", "van"),
     "vehicles": ("car", "truck", "suv", "motorcycle", "bicycle", "bike", "van"),
 }

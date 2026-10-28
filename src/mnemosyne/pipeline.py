@@ -888,17 +888,17 @@ def _time_window_route(
             inside.append((moment, hit))
     if re.search(r"\b(first|earliest)\b", question):
         if not date_only and inside:
-            top_inside = sorted(inside, key=lambda it: it[1].score, reverse=True)[:8]
-            top_inside.sort(key=lambda it: it[0])
-            inside = top_inside
+            ranked_inside = sorted(inside, key=lambda it: it[1].score, reverse=True)
+            top_inside = sorted(ranked_inside[:5], key=lambda it: it[0])
+            inside = top_inside + ranked_inside[5:]
         else:
             inside.sort(key=lambda item: item[0])
         explain["order"] = "earliest_first"
     elif re.search(r"\b(last|latest|most recent|recently)\b", question):
         if not date_only and inside:
-            top_inside = sorted(inside, key=lambda it: it[1].score, reverse=True)[:8]
-            top_inside.sort(key=lambda it: it[0], reverse=True)
-            inside = top_inside
+            ranked_inside = sorted(inside, key=lambda it: it[1].score, reverse=True)
+            top_inside = sorted(ranked_inside[:5], key=lambda it: it[0], reverse=True)
+            inside = top_inside + ranked_inside[5:]
         else:
             inside.sort(key=lambda item: item[0], reverse=True)
         explain["order"] = "latest_first"
@@ -1825,10 +1825,10 @@ def run_retrieval_pipeline(
         # Process flags and source labels never change retrieval semantics.
         explicit_bridge = effective_filter.get("multi_hop") is True
         relational_query = bool(re.search(
-            r"\b(\w+('s|’s)|of the|assigned to|reports to|led by)\b", query, re.I
+            r"\b([A-Z]\w*('s|’s)|of the|assigned to|reports to|led by)\b", query
         ))
         is_phrase_or_agg = bool(re.search(
-            r"\b(total|average|how many|how much|sum of|cost of|price of|different|all the|order of)\b", query, re.I
+            r"\b(total|average|how many|how much|sum of|cost of|price of|different|all the|order of|what time|on the day before)\b", query, re.I
         ))
         if not explicit_bridge and is_phrase_or_agg:
             relational_query = False
@@ -1840,7 +1840,8 @@ def run_retrieval_pipeline(
 
             query_tokens = set(tokenize(query))
             bridges: dict[str, tuple[str, Hit]] = {}
-            for source in sources[:2]:
+            seed_candidates = sources[:2] if explicit_bridge else sources[:1]
+            for source in seed_candidates:
                 for match in _SALIENT_ENTITY.finditer(source.text):
                     entity = _entity_span(match.group())
                     entity_tokens = set(tokenize(entity)) - QUERY_SUPPORT_STOPWORDS
@@ -1852,8 +1853,9 @@ def run_retrieval_pipeline(
                     break
             bridge_lists: list[list[Hit]] = []
             bridge_seeds: list[Hit] = []
-            for entity, seed in bridges.values():
+            for entity, seed in list(bridges.values()):
                 terms = set(tokenize(entity))
+                uncovered_for_seed = salient - set(tokenize(seed.text))
                 hits = ops.lexical_search(entity, width, {**effective_filter, "query_mode": "passages"})
                 hits = [
                     hit for hit in hits
@@ -1862,13 +1864,56 @@ def run_retrieval_pipeline(
                     and hit.trust_tier <= max_trust and hit.sensitivity <= max_sensitivity
                     and (include_quarantined or not hit.metadata.get("quarantine_reason"))
                 ]
+                if uncovered_for_seed and len(hits) > 1:
+                    hits.sort(
+                        key=lambda h: -len(uncovered_for_seed & set(tokenize(h.text)))
+                    )
                 if hits:
                     bridge_lists.append(hits)
                     bridge_seeds.append(seed)
+            if len(bridges) < 2 and bridge_lists and bridge_lists[0]:
+                hop2_seed = bridge_lists[0][0]
+                for match in _SALIENT_ENTITY.finditer(hop2_seed.text):
+                    entity = _entity_span(match.group())
+                    entity_tokens = set(tokenize(entity)) - QUERY_SUPPORT_STOPWORDS
+                    if (
+                        entity_tokens
+                        and not entity_tokens.issubset(query_tokens)
+                        and entity.casefold() not in bridges
+                    ):
+                        bridges[entity.casefold()] = (entity, hop2_seed)
+                        terms = set(tokenize(entity))
+                        hits = ops.lexical_search(entity, width, {**effective_filter, "query_mode": "passages"})
+                        hits = [
+                            hit for hit in hits
+                            if hit.tenant_id == tenant_id and hit.branch == branch
+                            and hit.id != hop2_seed.id and terms.issubset(set(tokenize(hit.text)))
+                            and hit.trust_tier <= max_trust and hit.sensitivity <= max_sensitivity
+                            and (include_quarantined or not hit.metadata.get("quarantine_reason"))
+                        ]
+                        if hits:
+                            bridge_lists.append(hits)
+                            bridge_seeds.append(hop2_seed)
+                        break
             bridge_report = {"applied": bool(bridge_lists), "entity_count": len(bridges),
                              "candidate_count": sum(len(hits) for hits in bridge_lists)}
             if bridge_lists:
-                sources = interleave_fusion([bridge_seeds + sources, *bridge_lists], k=width)
+                bridged = interleave_fusion([bridge_seeds, *bridge_lists], k=width)
+                seen_bridged = {h.id for h in bridged}
+                q_proper = {
+                    w.lower()
+                    for idx_w, w in enumerate(re.findall(r"[A-Za-z0-9]+", query))
+                    if w and w[0].isupper() and (idx_w > 0 or w.lower() not in QUERY_SUPPORT_STOPWORDS)
+                }
+                rest_sources = [s for s in sources if s.id not in seen_bridged]
+                if q_proper:
+                    rest_sources.sort(
+                        key=lambda h: 0 if (q_proper & set(tokenize(h.text))) else 1
+                    )
+                sources = [
+                    replace(h, score=1.0 / idx, channel=h.channel)
+                    for idx, h in enumerate(bridged + rest_sources, start=1)
+                ][:width]
         # Explicit confidence switches the legacy conformal set to per-example
         # probabilities. Do not feed unbounded BM25 siblings into that path,
         # including sources found beyond the original channels' cutoff.
@@ -1991,7 +2036,7 @@ def run_retrieval_pipeline(
             return datetime.min.replace(tzinfo=timezone.utc)
 
         reverse = (chronological_order == "latest_first")
-        top_k_count = 6
+        top_k_count = 5
         top_slice = list(ordered[:top_k_count])
         remainder = list(ordered[top_k_count:])
         top_slice.sort(key=lambda hit: (_get_hit_time(hit), hit.id), reverse=reverse)
@@ -2061,47 +2106,7 @@ def run_retrieval_pipeline(
         window_support_query(window) if window is not None else query, budgeted, linked_facts
     )
     support_score = support_report["score"]
-
-    # Temporal-Bound Premise Grounding
-    temporal_bound_ungrounded = False
-    if window is not None and getattr(window, "label", None):
-        has_temporal_overlap = False
-        win_start = window.start.astimezone(timezone.utc) if window.start.tzinfo is not None else window.start.replace(tzinfo=timezone.utc)
-        win_end = window.end.astimezone(timezone.utc) if window.end.tzinfo is not None else window.end.replace(tzinfo=timezone.utc)
-        is_event_axis = getattr(window, "axis", "event") == "event"
-        for hit in budgeted[:5]:
-            if is_event_axis:
-                interval = _event_time_interval(hit)
-                if interval is not None:
-                    cand_start, cand_end = interval
-                    cand_start_utc = cand_start.astimezone(timezone.utc) if cand_start.tzinfo is not None else cand_start.replace(tzinfo=timezone.utc)
-                    cand_end_utc = cand_end.astimezone(timezone.utc) if cand_end.tzinfo is not None else cand_end.replace(tzinfo=timezone.utc)
-                    if cand_start_utc < win_end and cand_end_utc >= win_start:
-                        has_temporal_overlap = True
-                        break
-                else:
-                    cand_dt = hit.metadata.get("_candidate_created_at") or hit.metadata.get("created_at")
-                    if cand_dt:
-                        dt_obj = cand_dt if isinstance(cand_dt, datetime) else parse_dt(cand_dt)
-                        if dt_obj:
-                            dt_utc = dt_obj.astimezone(timezone.utc) if dt_obj.tzinfo is not None else dt_obj.replace(tzinfo=timezone.utc)
-                            if win_start <= dt_utc < win_end:
-                                has_temporal_overlap = True
-                                break
-            else:
-                cand_dt = hit.metadata.get("_candidate_created_at") or hit.metadata.get("created_at")
-                if cand_dt:
-                    dt_obj = cand_dt if isinstance(cand_dt, datetime) else parse_dt(cand_dt)
-                    if dt_obj:
-                        dt_utc = dt_obj.astimezone(timezone.utc) if dt_obj.tzinfo is not None else dt_obj.replace(tzinfo=timezone.utc)
-                        if win_start <= dt_utc < win_end:
-                            has_temporal_overlap = True
-                            break
-        if not has_temporal_overlap and len(budgeted) > 0:
-            temporal_bound_ungrounded = True
-            support_score = min(support_score, 0.20)
-
-    if cosine_ranked and not temporal_bound_ungrounded:
+    if cosine_ranked:
         # Found by meaning: a best cosine at or above the index's floor supports the answer
         # only when no explicit proper-noun, number, or compound-noun anchor is contradicted
         # or completely absent from the retrieved evidence.
@@ -2117,7 +2122,7 @@ def run_retrieval_pipeline(
         }
         if semantic_supported:
             support_score = 1.0
-    insufficient_support = (support_score < QUERY_SUPPORT_THRESHOLD) or temporal_bound_ungrounded
+    insufficient_support = support_score < QUERY_SUPPORT_THRESHOLD
     confidence = ops._confidence(query, budgeted, support_score=support_score)
     prediction_set_size = ops._prediction_set_size(budgeted, threshold)
     entropy = semantic_entropy([hit.text for hit in budgeted])
