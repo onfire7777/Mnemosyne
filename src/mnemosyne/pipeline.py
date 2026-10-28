@@ -813,6 +813,7 @@ def _time_window_route(
     tenant_id: str,
     branch: str,
     passage_graph: Any,
+    k: int = 5,
 ) -> tuple[list[Hit], dict[str, Any]]:
     """Authorized passages matching the requested source/event interval and remaining topic.
 
@@ -884,10 +885,20 @@ def _time_window_route(
                 hit = replace(hit, score=1.0, channel=hit.channel + "+time-window")
             inside.append((moment, hit))
     if re.search(r"\b(first|earliest)\b", question):
-        inside.sort(key=lambda item: item[0])
+        if not date_only and inside:
+            top_inside = sorted(inside, key=lambda it: it[1].score, reverse=True)[:8]
+            top_inside.sort(key=lambda it: it[0])
+            inside = top_inside
+        else:
+            inside.sort(key=lambda item: item[0])
         explain["order"] = "earliest_first"
     elif re.search(r"\b(last|latest|most recent|recently)\b", question):
-        inside.sort(key=lambda item: item[0], reverse=True)
+        if not date_only and inside:
+            top_inside = sorted(inside, key=lambda it: it[1].score, reverse=True)[:8]
+            top_inside.sort(key=lambda it: it[0], reverse=True)
+            inside = top_inside
+        else:
+            inside.sort(key=lambda item: item[0], reverse=True)
         explain["order"] = "latest_first"
     allow_soft_fallback = (window.axis == "event") or (effective_filter.get("query_mode") == "passages")
     if not inside and not date_only and not bare_happen and allow_soft_fallback:
@@ -1648,7 +1659,7 @@ def run_retrieval_pipeline(
     window_hits: list[Hit] = []
     if window is not None:
         window_hits, window_explain = _time_window_route(
-            ops, window, effective_filter, tenant_id=tenant_id, branch=branch, passage_graph=passage_graph
+            ops, window, effective_filter, tenant_id=tenant_id, branch=branch, passage_graph=passage_graph, k=k
         )
     elif passage_graph is not None:
         try:
@@ -1815,7 +1826,7 @@ def run_retrieval_pipeline(
             r"\b(\w+('s|’s)|of the|assigned to|reports to|led by)\b", query, re.I
         ))
         is_phrase_or_agg = bool(re.search(
-            r"\b(total|average|how many|how much|sum of|cost of|price of|different|all the)\b", query, re.I
+            r"\b(total|average|how many|how much|sum of|cost of|price of|different|all the|order of)\b", query, re.I
         ))
         if not explicit_bridge and is_phrase_or_agg:
             relational_query = False
@@ -1978,7 +1989,11 @@ def run_retrieval_pipeline(
             return datetime.min.replace(tzinfo=timezone.utc)
 
         reverse = (chronological_order == "latest_first")
-        ordered.sort(key=lambda hit: (_get_hit_time(hit), hit.id), reverse=reverse)
+        top_k_count = 6
+        top_slice = list(ordered[:top_k_count])
+        remainder = list(ordered[top_k_count:])
+        top_slice.sort(key=lambda hit: (_get_hit_time(hit), hit.id), reverse=reverse)
+        ordered = top_slice + remainder
         if workspace_retrieval_advisory.get("status") == "applied":
             workspace_retrieval_advisory["used_for_ranking"] = False
             workspace_retrieval_advisory["ranking_preserved"] = "explicit_temporal_order"

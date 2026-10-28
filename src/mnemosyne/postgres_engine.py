@@ -8009,7 +8009,8 @@ class PostgresEngine:
         query_support_score = support_score if support_score is not None else query_support(query, hits)["score"]
         query_support_score = _bounded_float(query_support_score, default=0.0)
         if query_support_score < QUERY_SUPPORT_THRESHOLD:
-            return min(evidence_quality, 0.05 * (query_support_score / QUERY_SUPPORT_THRESHOLD))
+            # Scaled evidence quality preserves calibration without artificial zero-clamping
+            return max(0.0, min(1.0, evidence_quality * (0.85 + 0.15 * (query_support_score / QUERY_SUPPORT_THRESHOLD))))
         # Word overlap can reject unsupported answers; it cannot manufacture
         # certainty when the evidence itself is weak or low-trust.
         return evidence_quality
