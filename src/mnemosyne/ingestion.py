@@ -9,23 +9,113 @@ from typing import Any, Literal
 
 from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, DEFAULT_CONSOLIDATION_PASSES
 from mnemosyne.engine import LocalMemoryEngine
+from mnemosyne.evidence_redaction import SECRET_PATTERNS
 from mnemosyne.ids import evidence_cid
 from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES, enforce_byte_limit, validate_byte_limit
 from mnemosyne.media import MEDIA_EXTRACT_JOB, extract_derived_text
 from mnemosyne.models import Assertion, Evidence, Resource
 from mnemosyne.privacy import (
+    DOB_RE,
+    EMAIL_RE,
+    IPV4_RE,
+    PASSPORT_RE,
+    PHONE_RE,
+    SSN_RE,
+    STREET_ADDRESS_RE,
     classify_privacy,
     detect_pii_tags,
     enforce_residency,
     enforce_residency_transfer,
     normalize_residency,
     normalize_residency_transfers,
+    redact_pii_text,
 )
 from mnemosyne.provenance import SignedProvenanceVerifier
 from mnemosyne.queue import InProcessQueue, QueueJob
 from mnemosyne.retrieval import MediaEmbeddingProvider
 from mnemosyne.security import TrustTier
 from mnemosyne.storage import LocalObjectStore
+
+
+_FULL_PRIVATE_KEY_BLOCK_RE = re.compile(
+    r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----"
+)
+_STANDALONE_BEARER_RE = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{8,}")
+_GENERIC_API_KEY_RE = re.compile(
+    r"(?i)\b(?:api[_-]?key|secret[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret)\s*[:=]\s*['\"]?[A-Za-z0-9._-]{8,}['\"]?"
+)
+_SK_KEY_RE = re.compile(r"\bsk-(?:ant-|proj-|live-|test-)?[A-Za-z0-9_-]{12,}\b")
+_CREDIT_CARD_FALLBACK_RE = re.compile(r"\b(?:\d{4}[ -]?){3}\d{1,7}\b")
+
+
+def scrub_secrets_and_pii(text: str) -> tuple[str, dict[str, Any]]:
+    """Scrub secrets and PII from text prior to embedding, indexing, or persistence."""
+    if not text:
+        return text, {
+            "redaction_counts": {},
+            "secret_redaction_count": 0,
+            "pii_redaction_count": 0,
+            "total_redactions": 0,
+        }
+
+    scrubbed = text
+    counts: dict[str, int] = {}
+    secret_total = 0
+
+    def _apply_secret_pattern(label: str, pattern: re.Pattern[str], replacement: str) -> None:
+        nonlocal scrubbed, secret_total
+        matches = list(pattern.finditer(scrubbed))
+        if matches:
+            count = len(matches)
+            counts[label] = counts.get(label, 0) + count
+            secret_total += count
+            scrubbed = pattern.sub(replacement, scrubbed)
+
+    _apply_secret_pattern("private_key_block", _FULL_PRIVATE_KEY_BLOCK_RE, "[REDACTED:private_key_block]")
+    for label, pattern in SECRET_PATTERNS:
+        _apply_secret_pattern(label, pattern, f"[REDACTED:{label}]")
+    _apply_secret_pattern("bearer_token", _STANDALONE_BEARER_RE, "[REDACTED:bearer_token]")
+    _apply_secret_pattern("api_key", _GENERIC_API_KEY_RE, "[REDACTED:api_key]")
+    _apply_secret_pattern("api_key", _SK_KEY_RE, "[REDACTED:api_key]")
+
+    pii_total = 0
+    pii_patterns: tuple[tuple[str, re.Pattern[str]], ...] = (
+        ("email", EMAIL_RE),
+        ("ssn", SSN_RE),
+        ("phone", PHONE_RE),
+        ("dob", DOB_RE),
+        ("passport", PASSPORT_RE),
+        ("ipv4", IPV4_RE),
+        ("street_address", STREET_ADDRESS_RE),
+    )
+    for label, pattern in pii_patterns:
+        matches = list(pattern.finditer(scrubbed))
+        if matches:
+            counts[label] = counts.get(label, 0) + len(matches)
+            pii_total += len(matches)
+
+    before_pii = scrubbed
+    scrubbed = redact_pii_text(scrubbed)
+    if "[REDACTED:payment_card]" in scrubbed:
+        card_hits = scrubbed.count("[REDACTED:payment_card]") - before_pii.count("[REDACTED:payment_card]")
+        if card_hits > 0:
+            counts["payment_card"] = counts.get("payment_card", 0) + card_hits
+            pii_total += card_hits
+
+    # Fallback credit card pattern for formatted test card numbers
+    extra_cards = list(_CREDIT_CARD_FALLBACK_RE.finditer(scrubbed))
+    if extra_cards:
+        counts["payment_card"] = counts.get("payment_card", 0) + len(extra_cards)
+        pii_total += len(extra_cards)
+        scrubbed = _CREDIT_CARD_FALLBACK_RE.sub("[REDACTED:payment_card]", scrubbed)
+
+    total = secret_total + pii_total
+    return scrubbed, {
+        "redaction_counts": counts,
+        "secret_redaction_count": secret_total,
+        "pii_redaction_count": pii_total,
+        "total_redactions": total,
+    }
 
 
 Modality = Literal["text", "image", "audio", "video", "binary", "multimodal"]
@@ -80,9 +170,10 @@ def residency_policy_report(
 class IngestRequest:
     tenant_id: str
     user_id: str
-    actor: str
-    source_type: str
+    actor: str = "user"
+    source_type: str = "conversation"
     content: str | None = None
+    text: str | None = None
     data: bytes | None = None
     source_identity: str | None = None
     media_type: str = "text/plain"
@@ -93,6 +184,13 @@ class IngestRequest:
     capability_tags: list[str] = field(default_factory=list)
     sensitivity: int = 0
     correction: dict[str, Any] | None = None
+    pre_persistence_scrub: bool = False
+
+    def __post_init__(self) -> None:
+        if self.content is None and self.text is not None:
+            self.content = self.text
+        elif self.content is not None and self.text is None:
+            self.text = self.content
 
     def payload_bytes(self) -> bytes:
         if self.data is not None:
@@ -117,6 +215,10 @@ class IngestResult:
     created: bool = False
     idempotent: bool = False
 
+    @property
+    def accepted(self) -> bool:
+        return not self.quarantined
+
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["resource"] = self.resource.to_dict() if self.resource else None
@@ -139,6 +241,7 @@ class IngestionPipeline:
         require_runtime_residency: bool = False,
         media_embedding_provider: MediaEmbeddingProvider | None = None,
         max_ingest_bytes: int = DEFAULT_MAX_INGEST_BYTES,
+        pre_persistence_scrub: bool = False,
     ):
         self.engine = engine
         self.object_store = object_store or LocalObjectStore(Path(".mnemosyne/objects"))
@@ -151,11 +254,97 @@ class IngestionPipeline:
         self.require_runtime_residency = require_runtime_residency
         self.media_embedding_provider = media_embedding_provider
         self.max_ingest_bytes = validate_byte_limit(max_ingest_bytes, name="max_ingest_bytes")
+        self.pre_persistence_scrub = bool(pre_persistence_scrub)
 
-    def ingest(self, request: IngestRequest, branch: str = "main") -> IngestResult:
-        payload = request.payload_bytes()
-        enforce_byte_limit(payload, limit=self.max_ingest_bytes, label="ingest payload")
-        provenance = self.provenance_verifier.verify(payload, _provenance_manifest_for_request(request))
+    def ingest(
+        self,
+        request: IngestRequest,
+        branch: str = "main",
+        *,
+        pre_persistence_scrub: bool | None = None,
+    ) -> IngestResult:
+        raw_payload = request.payload_bytes()
+        enforce_byte_limit(raw_payload, limit=self.max_ingest_bytes, label="ingest payload")
+        provenance = self.provenance_verifier.verify(raw_payload, _provenance_manifest_for_request(request))
+
+        req_meta = dict(request.metadata) if isinstance(request.metadata, dict) else {}
+        effective_scrub = (
+            bool(pre_persistence_scrub)
+            if pre_persistence_scrub is not None
+            else (
+                self.pre_persistence_scrub
+                or bool(request.pre_persistence_scrub)
+                or bool(req_meta.get("pre_persistence_scrub"))
+            )
+        )
+        scrub_report: dict[str, Any] | None = None
+        scrubbed_content = request.content
+        payload = raw_payload
+        if effective_scrub:
+            combined_counts: dict[str, int] = {}
+            secret_total = 0
+            pii_total = 0
+
+            def _merge_scrub(report: dict[str, Any]) -> None:
+                nonlocal secret_total, pii_total
+                for k, v in report.get("redaction_counts", {}).items():
+                    combined_counts[k] = combined_counts.get(k, 0) + int(v)
+                secret_total += int(report.get("secret_redaction_count", 0))
+                pii_total += int(report.get("pii_redaction_count", 0))
+
+            if isinstance(scrubbed_content, str) and scrubbed_content:
+                scrubbed_content, rep = scrub_secrets_and_pii(scrubbed_content)
+                _merge_scrub(rep)
+                if request.data is None:
+                    payload = scrubbed_content.encode("utf-8")
+            elif request.data is not None and (
+                request.modality == "text" or str(request.media_type).startswith("text/")
+            ):
+                try:
+                    decoded = request.data.decode("utf-8")
+                except UnicodeDecodeError:
+                    decoded = None
+                if decoded is not None:
+                    scrubbed_decoded, rep = scrub_secrets_and_pii(decoded)
+                    _merge_scrub(rep)
+                    payload = scrubbed_decoded.encode("utf-8")
+                    if scrubbed_content is None:
+                        scrubbed_content = scrubbed_decoded
+
+            for meta_key in ("description", "alt_text", "caption", "transcript", "ocr_text"):
+                val = req_meta.get(meta_key)
+                if isinstance(val, str) and val:
+                    scrubbed_val, rep = scrub_secrets_and_pii(val)
+                    req_meta[meta_key] = scrubbed_val
+                    _merge_scrub(rep)
+
+            scrub_report = {
+                "pre_persistence_scrubbed": True,
+                "redaction_counts": combined_counts,
+                "secret_redaction_count": secret_total,
+                "pii_redaction_count": pii_total,
+                "total_redactions": secret_total + pii_total,
+                "redaction_total": secret_total + pii_total,
+            }
+            request = IngestRequest(
+                tenant_id=request.tenant_id,
+                user_id=request.user_id,
+                actor=request.actor,
+                source_type=request.source_type,
+                content=scrubbed_content,
+                data=payload if request.data is not None else None,
+                source_identity=request.source_identity,
+                media_type=request.media_type,
+                modality=request.modality,
+                metadata=req_meta,
+                signed_provenance=request.signed_provenance,
+                trust_tier=request.trust_tier,
+                capability_tags=list(request.capability_tags),
+                sensitivity=request.sensitivity,
+                correction=request.correction,
+                pre_persistence_scrub=True,
+            )
+
         classification = classify_request(request, payload)
         residency = normalize_residency(
             request.metadata.get("residency") or request.metadata.get("data_residency")
@@ -198,6 +387,14 @@ class IngestionPipeline:
             "ingest_classification": classification,
             "privacy": privacy_metadata,
         }
+        if scrub_report is not None:
+            metadata["pre_persistence_scrubbed"] = True
+            metadata["redaction_counts"] = dict(scrub_report["redaction_counts"])
+            metadata["secret_redaction_count"] = scrub_report["secret_redaction_count"]
+            metadata["pii_redaction_count"] = scrub_report["pii_redaction_count"]
+            metadata["total_redactions"] = scrub_report["total_redactions"]
+            metadata["redaction_total"] = scrub_report["total_redactions"]
+            capability_tags.append("pre-persistence-scrubbed")
         if provenance.quarantine:
             trust_tier = int(TrustTier.UNTRUSTED_EXTERNAL)
             metadata["quarantine_reason"] = provenance.reason

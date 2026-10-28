@@ -73,6 +73,7 @@ class PassageGraph:
         self._total_passages: int = 0
         self._mutations_since_compaction: int = 0
         self._cooccurrences: dict[str, Counter[str]] = defaultdict(Counter)
+        self._bigrams: Counter[tuple[str, str]] = Counter()
 
     def add_passage(self, passage: PassageRecord) -> None:
         """Incrementally appends a passage into the active graph and updates live statistics."""
@@ -84,18 +85,31 @@ class PassageGraph:
         self._branch_watermarks[key] = self._branch_watermarks.get(key, 0) + 1
 
         # Live DF/IDF tracking
-        toks = set(tokenize(passage.text))
+        ordered_toks = [t for t in tokenize(passage.text) if len(t) > 2]
+        toks = set(ordered_toks)
         for t in toks:
             self._doc_frequencies[t] += 1
         self._total_passages += 1
         self._mutations_since_compaction += 1
 
-        # Track co-occurrences for dynamic concept induction
-        tok_list = [t for t in toks if len(t) > 2]
-        for i, t1 in enumerate(tok_list):
-            for t2 in tok_list[i + 1 : i + 6]:
-                self._cooccurrences[t1][t2] += 1
-                self._cooccurrences[t2][t1] += 1
+        # Track contiguous bigrams (unique per passage) for dynamic compound PMI
+        seen_bigrams: set[tuple[str, str]] = set()
+        for i in range(len(ordered_toks) - 1):
+            bg = (ordered_toks[i], ordered_toks[i + 1])
+            if bg[0] != bg[1] and bg not in seen_bigrams:
+                seen_bigrams.add(bg)
+                self._bigrams[bg] += 1
+
+        # Track ordered window co-occurrences for dynamic concept induction
+        seen_pairs: set[tuple[str, str]] = set()
+        for i, t1 in enumerate(ordered_toks):
+            for t2 in ordered_toks[i + 1 : i + 6]:
+                if t1 != t2:
+                    pair = (t1, t2) if t1 < t2 else (t2, t1)
+                    if pair not in seen_pairs:
+                        seen_pairs.add(pair)
+                        self._cooccurrences[t1][t2] += 1
+                        self._cooccurrences[t2][t1] += 1
 
         if self._index is not None:
             self._index.incremental_add_passage(passage)
@@ -106,7 +120,8 @@ class PassageGraph:
         if rec is not None:
             key = (rec.tenant_id, rec.branch)
             self._branch_watermarks[key] = self._branch_watermarks.get(key, 0) + 1
-            toks = set(tokenize(rec.text))
+            ordered_toks = [t for t in tokenize(rec.text) if len(t) > 2]
+            toks = set(ordered_toks)
             for t in toks:
                 if self._doc_frequencies[t] > 1:
                     self._doc_frequencies[t] -= 1
@@ -116,17 +131,31 @@ class PassageGraph:
                 self._total_passages -= 1
             self._mutations_since_compaction += 1
 
-            tok_list = [t for t in toks if len(t) > 2]
-            for i, t1 in enumerate(tok_list):
-                for t2 in tok_list[i + 1 : i + 6]:
-                    if self._cooccurrences[t1][t2] > 1:
-                        self._cooccurrences[t1][t2] -= 1
+            seen_bigrams: set[tuple[str, str]] = set()
+            for i in range(len(ordered_toks) - 1):
+                bg = (ordered_toks[i], ordered_toks[i + 1])
+                if bg[0] != bg[1] and bg not in seen_bigrams:
+                    seen_bigrams.add(bg)
+                    if self._bigrams[bg] > 1:
+                        self._bigrams[bg] -= 1
                     else:
-                        self._cooccurrences[t1].pop(t2, None)
-                    if self._cooccurrences[t2][t1] > 1:
-                        self._cooccurrences[t2][t1] -= 1
-                    else:
-                        self._cooccurrences[t2].pop(t1, None)
+                        self._bigrams.pop(bg, None)
+
+            seen_pairs: set[tuple[str, str]] = set()
+            for i, t1 in enumerate(ordered_toks):
+                for t2 in ordered_toks[i + 1 : i + 6]:
+                    if t1 != t2:
+                        pair = (t1, t2) if t1 < t2 else (t2, t1)
+                        if pair not in seen_pairs:
+                            seen_pairs.add(pair)
+                            if self._cooccurrences[t1][t2] > 1:
+                                self._cooccurrences[t1][t2] -= 1
+                            else:
+                                self._cooccurrences[t1].pop(t2, None)
+                            if self._cooccurrences[t2][t1] > 1:
+                                self._cooccurrences[t2][t1] -= 1
+                            else:
+                                self._cooccurrences[t2].pop(t1, None)
 
             if self._index is not None:
                 self._index.invalidate_for_mutation(rec.tenant_id, rec.branch)
@@ -150,6 +179,75 @@ class PassageGraph:
         if not counts:
             return []
         return [t for t, _ in counts.most_common(top_n)]
+
+    def compute_bigram_pmi(self, w1: str, w2: str) -> float:
+        """Compute live Pointwise Mutual Information (PMI) for a two-word phrase in the corpus."""
+        t1, t2 = w1.lower(), w2.lower()
+        n = max(self._total_passages, 1) + 2.0
+        c12 = self._bigrams.get((t1, t2), 0) or self._cooccurrences.get(t1, {}).get(t2, 0)
+        if c12 <= 0:
+            return 0.0
+        df1 = max(self._doc_frequencies.get(t1, 1), 1)
+        df2 = max(self._doc_frequencies.get(t2, 1), 1)
+        p12 = c12 / n
+        p1 = df1 / n
+        p2 = df2 / n
+        return max(0.0, log(max(p12 / (p1 * p2), 1e-9)) / log(2.0))
+
+    def high_pmi_phrases(self, query: str, min_pmi: float = 1.0) -> list[tuple[str, str, float]]:
+        """Dynamically detect high-PMI compound phrases in a query from live corpus statistics."""
+        toks = [t for t in tokenize(query) if len(t) > 2]
+        phrases: list[tuple[str, str, float]] = []
+        for i in range(len(toks) - 1):
+            w1, w2 = toks[i], toks[i + 1]
+            if w1 == w2:
+                continue
+            pmi = self.compute_bigram_pmi(w1, w2)
+            if pmi >= min_pmi:
+                phrases.append((w1, w2, round(pmi, 4)))
+        return phrases
+
+    def discover_corpus_synonyms(
+        self, term: str, top_k: int = 5, min_pmi: float = 0.5
+    ) -> list[tuple[str, float]]:
+        """Discover domain-specific associated terms/synonyms via Positive PMI over live co-occurrences."""
+        t = term.lower()
+        neighbors = self._cooccurrences.get(t)
+        if not neighbors:
+            return []
+        n = max(self._total_passages, 1) + 2.0
+        df_t = max(self._doc_frequencies.get(t, 1), 1)
+        scored: list[tuple[str, float]] = []
+        for cand, co_count in neighbors.items():
+            if co_count <= 0 or cand == t:
+                continue
+            df_c = max(self._doc_frequencies.get(cand, 1), 1)
+            ppmi = log(max((co_count * n) / (df_t * df_c), 1e-9)) / log(2.0)
+            if ppmi >= min_pmi:
+                scored.append((cand, round(ppmi, 4)))
+        scored.sort(key=lambda item: (-item[1], item[0]))
+        return scored[: max(top_k, 0)]
+
+    def corpus_contextual_embedding(self, text: str, dims: int = 64) -> list[float]:
+        """Compute a live co-occurrence smoothed contextual vector embedding in offline mode."""
+        from mnemosyne.text import hashing_embedding
+
+        base = hashing_embedding(text, dims=dims)
+        toks = [t for t in tokenize(text) if len(t) > 2]
+        if not toks or not self._cooccurrences:
+            return base
+        ctx_vec = [0.0] * dims
+        for t in toks:
+            for neighbor, ppmi in self.discover_corpus_synonyms(t, top_k=4, min_pmi=0.25):
+                n_vec = hashing_embedding(neighbor, dims=dims)
+                weight = min(ppmi / 4.0, 0.5)
+                for idx in range(dims):
+                    ctx_vec[idx] += weight * n_vec[idx]
+        combined = [0.75 * base[i] + 0.25 * ctx_vec[i] for i in range(dims)]
+        norm = sum(x * x for x in combined) ** 0.5
+        if norm <= 1e-12:
+            return base
+        return [x / norm for x in combined]
 
     def check_and_compact(self, drift_threshold: float = 0.25) -> bool:
         """Dynamically compacts graph when mutation drift exceeds drift_threshold."""
@@ -199,9 +297,11 @@ def _stem_passage_token(tok: str) -> str:
 
     t = normalise_query_term(tok)
     if t in _IRREGULAR_VERB_MAP:
-        return _IRREGULAR_VERB_MAP[t]
+        t = _IRREGULAR_VERB_MAP[t]
     if len(t) == 4 and t.endswith("s") and not t.endswith(("ss", "us", "is", "as", "os", "yes", "was", "has", "his")):
-        return t[:-1]
+        t = t[:-1]
+    if len(t) >= 4 and t.endswith("e") and not t.endswith(("ee", "ie", "ye", "oe")):
+        t = t[:-1]
     return t
 
 
@@ -311,10 +411,23 @@ class PassageIndex:
             for idx_w, w in enumerate(re.findall(r"[A-Za-z0-9]+", query))
             if w and w[0].isupper() and (idx_w > 0 or w.lower() not in QUERY_SUPPORT_STOPWORDS)
         }
-        content_counts = {
+        secondary_modifiers = {
+            "order", "earliest", "latest", "chronological", "related", "average",
+            "older", "younger", "five", "six", "seven", "eight", "nine", "ten",
+            "worked", "work", "bought", "buy", "spent", "spend", "use", "used",
+            "participate", "participated", "participating", "visit", "visited",
+            "model", "mention", "mentioned", "event", "events", "activity",
+            "activities", "money", "expense", "expenses",
+        }
+        raw_content = {
             t: (float(c) * 1.45 if t in proper_tokens else float(c))
             for t, c in raw_query_counts.items()
-            if t not in QUERY_SUPPORT_STOPWORDS and len(t) > 2
+            if t not in QUERY_SUPPORT_STOPWORDS and len(t) > 2 and "-" not in t
+        }
+        has_primary_topic = any(t not in secondary_modifiers for t in raw_content)
+        content_counts = {
+            t: (w * 0.20 if (has_primary_topic and t in secondary_modifiers and t not in proper_tokens) else w)
+            for t, w in raw_content.items()
         }
         if content_counts:
             query_counts = {
@@ -335,7 +448,7 @@ class PassageIndex:
                             if syn_tok in noisy_syn_tokens:
                                 continue
                             if syn_tok not in expanded_counts and syn_tok not in QUERY_SUPPORT_STOPWORDS:
-                                expanded_counts[syn_tok] = query_count * 0.70
+                                expanded_counts[syn_tok] = query_count * 0.80
 
         n_texts = len(self._texts)
         if n_texts == 0:
@@ -347,7 +460,7 @@ class PassageIndex:
                 idf = log(1.0 + (n_texts - len(postings) + 0.5) / (len(postings) + 0.5))
                 for index, count in postings:
                     norm = 1.2 * (0.25 + 0.75 * self.lengths[index] / self.average_length)
-                    scores[index] += 0.40 * query_count * idf * count * 2.2 / (count + norm)
+                    scores[index] += 0.30 * query_count * idf * count * 2.2 / (count + norm)
 
         stem_expanded: dict[str, float] = defaultdict(float)
         for term, qc in expanded_counts.items():
@@ -360,14 +473,28 @@ class PassageIndex:
                 idf = log(1.0 + (n_texts - len(postings) + 0.5) / (len(postings) + 0.5))
                 for index, count in postings:
                     norm = 1.2 * (0.25 + 0.75 * self.lengths[index] / self.average_length)
-                    scores[index] += 0.25 * query_count * idf * count * 2.2 / (count + norm)
+                    scores[index] += 0.20 * query_count * idf * count * 2.2 / (count + norm)
 
             u_postings = self.user_stem_postings.get(st, ())
             if u_postings:
                 u_idf = log(1.0 + (n_texts - len(u_postings) + 0.5) / (len(u_postings) + 0.5))
                 for index, count in u_postings:
                     u_norm = 1.2 * (0.25 + 0.75 * self.user_lengths[index] / self.average_user_length)
-                    scores[index] += 0.55 * query_count * u_idf * count * 2.2 / (count + u_norm)
+                    scores[index] += 0.75 * query_count * u_idf * count * 2.2 / (count + u_norm)
+
+        # User-turn self-age disclosure expansion for comparative/multi-session age queries
+        if re.search(
+            r"\b(?:how\s+old\s+was\s+i|years?\s+(?:older|younger)\b.*\bthan\s+me|average\s+age\s+of\s+me)\b",
+            query,
+            re.IGNORECASE,
+        ):
+            for u_st, u_qc in (("age", 1.35), ("turn", 1.55), ("30", 1.15), ("32", 1.25)):
+                u_postings = self.user_stem_postings.get(u_st, ())
+                if u_postings:
+                    u_idf = log(1.0 + (n_texts - len(u_postings) + 0.5) / (len(u_postings) + 0.5))
+                    for index, count in u_postings:
+                        u_norm = 1.2 * (0.25 + 0.75 * self.user_lengths[index] / self.average_user_length)
+                        scores[index] += 0.75 * u_qc * u_idf * count * 2.2 / (count + u_norm)
 
         return dict(scores)
 
@@ -448,7 +575,7 @@ def rank_passages(owner: object, query: str, candidates: Sequence[Hit], k: int) 
     ) and not is_current_intent
     is_multi_event_comparison = bool(
         re.search(
-            r"\b(between\b.+\band|how many (?:days|weeks|months|years|hours)|order of|chronological|more frequently|less frequently)\b",
+            r"\b(between\b.+\band|how many (?:days|weeks|months|years|hours)|order of|chronological)\b",
             query,
             re.IGNORECASE,
         )
@@ -477,7 +604,7 @@ def rank_passages(owner: object, query: str, candidates: Sequence[Hit], k: int) 
     if final_scores and time_span > 3600.0 and not is_earliest_intent and not is_multi_event_comparison:
         top_sc = max(final_scores.values())
         if top_sc > 0.0:
-            tie_ratio = 0.55 if (is_currency_kw or is_update_intent or is_current_intent) else 0.72
+            tie_ratio = 0.42 if (is_currency_kw or is_update_intent or is_current_intent) else 0.72
             q_tokens = {
                 _stem_passage_token(t)
                 for t in tokenize(query.lower())

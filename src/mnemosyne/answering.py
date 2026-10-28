@@ -381,6 +381,99 @@ class AnswerReadContext:
 
 
 @dataclass(frozen=True, slots=True)
+class ReflectDisposition:
+    """Bounded 5-trait disposition and scoped mission directive for reflection."""
+
+    skepticism: float = 0.5
+    abstraction: float = 0.5
+    conciseness: float = 0.5
+    empathy: float = 0.5
+    literalism: float = 0.5
+    mission: str | None = None
+
+    def __post_init__(self) -> None:
+        for trait in ("skepticism", "abstraction", "conciseness", "empathy", "literalism"):
+            val = getattr(self, trait)
+            if isinstance(val, bool) or not isinstance(val, (int, float)):
+                raise ValueError(f"disposition {trait} must be a number between 0.0 and 1.0")
+            fval = float(val)
+            if not (0.0 <= fval <= 1.0):
+                raise ValueError(f"disposition {trait} must be between 0.0 and 1.0")
+            object.__setattr__(self, trait, fval)
+        if self.mission is not None:
+            if not isinstance(self.mission, str) or not self.mission.strip():
+                raise ValueError("disposition mission must be a non-empty string")
+            if len(self.mission) > 500:
+                raise ValueError("disposition mission exceeds maximum length of 500 characters")
+            cleaned = self.mission.strip()
+            normalized = unicodedata.normalize("NFKC", cleaned)
+            if _contains_control_label(cleaned) or _contains_control_label(normalized):
+                raise ValueError("disposition mission contains forbidden control labels (I11 violation)")
+            tokens = set(_anchor_tokens(cleaned))
+            if _FALLBACK_DENY_TERMS.intersection(tokens):
+                raise ValueError("disposition mission contains denied instruction terms (I11 violation)")
+            object.__setattr__(self, "mission", cleaned)
+
+    def max_claims(self, default_max: int = 20) -> int:
+        if self.conciseness <= 0.5:
+            return default_max
+        # Scale down from default_max at 0.5 to 1..3 at 1.0
+        ratio = (self.conciseness - 0.5) / 0.5
+        return max(1, int(round(default_max * (1.0 - 0.85 * ratio))))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "skepticism": self.skepticism,
+            "abstraction": self.abstraction,
+            "conciseness": self.conciseness,
+            "empathy": self.empathy,
+            "literalism": self.literalism,
+            "mission": self.mission,
+        }
+
+    @classmethod
+    def from_dict(
+        cls,
+        data: Mapping[str, Any] | ReflectDisposition,
+        *,
+        mission: str | None = None,
+    ) -> ReflectDisposition:
+        if isinstance(data, ReflectDisposition):
+            if mission is not None and mission != data.mission:
+                return cls(
+                    skepticism=data.skepticism,
+                    abstraction=data.abstraction,
+                    conciseness=data.conciseness,
+                    empathy=data.empathy,
+                    literalism=data.literalism,
+                    mission=mission,
+                )
+            return data
+        if not isinstance(data, Mapping):
+            raise ValueError("disposition must be a mapping or ReflectDisposition")
+        allowed = {"skepticism", "abstraction", "conciseness", "empathy", "literalism", "mission"}
+        unknown = set(data.keys()) - allowed
+        if unknown:
+            raise ValueError(f"disposition has unknown fields: {', '.join(sorted(unknown))}")
+        kwargs: dict[str, Any] = {k: data[k] for k in allowed if k in data}
+        if mission is not None:
+            kwargs["mission"] = mission
+        return cls(**kwargs)
+
+
+def coerce_disposition(
+    disposition: ReflectDisposition | Mapping[str, Any] | None = None,
+    *,
+    mission: str | None = None,
+) -> ReflectDisposition | None:
+    if disposition is None and mission is None:
+        return None
+    if disposition is None:
+        return ReflectDisposition(mission=mission)
+    return ReflectDisposition.from_dict(disposition, mission=mission)
+
+
+@dataclass(frozen=True, slots=True)
 class AnswerLimits:
     max_hops: int = 3
     max_queries_per_hop: int = 4
@@ -568,8 +661,48 @@ class GroundedAnswerOrchestrator:
             # BaseExceptions still propagate.
             return self._abstain("assembly_error")
 
-    def answer(self, request: AnswerRequest, reader: GroundedReader) -> GroundedAnswer:
+    def answer(
+        self,
+        request: AnswerRequest,
+        reader: GroundedReader,
+        *,
+        disposition: ReflectDisposition | Mapping[str, Any] | None = None,
+        mission: str | None = None,
+        hierarchy_first: bool = False,
+    ) -> GroundedAnswer:
         """Validate model-proposed atomic claims against freshly replayed evidence."""
+        disp = coerce_disposition(disposition, mission=mission)
+        use_hierarchy = bool(hierarchy_first or (disp is not None and disp.abstraction > 0.6 and disp.literalism <= 0.7))
+        if use_hierarchy:
+            hierarchical = resolve_hierarchical_evidence(
+                self.engine,
+                request.question,
+                request.context,
+                disposition=disp,
+                mission=disp.mission if disp is not None else mission,
+            )
+            if hierarchical["resolved_layer"] in {"mental_model", "observation", "knowledge_page"} and hierarchical["claims"]:
+                h_claims: tuple[AnswerClaim, ...] = tuple(hierarchical["claims"])
+                if disp is not None:
+                    h_claims = h_claims[: disp.max_claims(len(h_claims))]
+                h_evidence: tuple[AnswerEvidence, ...] = tuple(hierarchical["answer_evidence"])
+                if h_claims and h_evidence:
+                    h_hop = AnswerHop(
+                        index=0,
+                        queries=(request.question,),
+                        retrieved_cids=tuple(row.cid for row in h_evidence),
+                        channels=(f"hierarchy:{hierarchical['resolved_layer']}",),
+                        evidence_fingerprint=hierarchical["evidence_fingerprint"],
+                        context=request.context,
+                    )
+                    return GroundedAnswer(
+                        answer="\n".join(claim.text for claim in h_claims),
+                        claims=h_claims,
+                        evidence=h_evidence,
+                        episodes=_episodes(h_evidence),
+                        trace=AnswerTrace((h_hop,), hierarchical["evidence_fingerprint"]),
+                        abstained=False,
+                    )
         assembled = self.assemble(request)
         if assembled.abstained:
             return assembled
@@ -597,6 +730,8 @@ class GroundedAnswerOrchestrator:
             return self._abstain("replay_drift")
         try:
             claims = self._claims(proposal, {row.cid: row.content for row in replayed.evidence})
+            if disp is not None and claims:
+                claims = _apply_disposition_to_claims(claims, disp, replayed.evidence)
             if not claims:
                 return self._reader_abstain(replayed)
             return GroundedAnswer(
@@ -1115,3 +1250,770 @@ def _bounded_int(value: object, name: str, *, maximum: int) -> None:
         or value > maximum
     ):
         raise ValueError(f"answer read context has invalid {name}")
+
+
+def _query_substantive_terms(text: str) -> set[str]:
+    terms = {
+        normalise_query_term(token)
+        for token in tokenize(text)
+        if len(normalise_query_term(token)) > 2 and normalise_query_term(token) not in QUERY_SUPPORT_STOPWORDS
+    }
+    if not terms:
+        terms = {normalise_query_term(token) for token in tokenize(text) if normalise_query_term(token)}
+    return terms
+
+
+def _apply_disposition_to_claims(
+    claims: tuple[AnswerClaim, ...],
+    disp: ReflectDisposition,
+    evidence: Sequence[AnswerEvidence],
+) -> tuple[AnswerClaim, ...]:
+    if not claims:
+        return claims
+    selected = list(claims)
+    if disp.literalism > 0.7:
+        literal_only = [c for c in selected if c.synthesis_operation is None]
+        if literal_only:
+            selected = literal_only
+    if disp.mission:
+        mission_terms = _query_substantive_terms(disp.mission)
+        if mission_terms:
+            ev_map = {row.cid: row.content for row in evidence}
+            scored = []
+            for idx, claim in enumerate(selected):
+                claim_text = claim.text + " " + " ".join(ev_map.get(cid, "") for cid in claim.evidence_cids)
+                overlap = len(_query_substantive_terms(claim_text) & mission_terms)
+                scored.append((-overlap, idx, claim))
+            scored.sort()
+            if any(item[0] < 0 for item in scored):
+                selected = [item[2] for item in scored if item[0] < 0] or [item[2] for item in scored]
+    max_count = disp.max_claims(len(selected))
+    return tuple(selected[:max_count])
+
+
+def _verify_live_authorized_evidence(
+    engine: Any,
+    context: AnswerReadContext,
+    cids: Sequence[str],
+    *,
+    disposition: ReflectDisposition | None = None,
+) -> dict[str, dict[str, Any]]:
+    if not cids:
+        return {}
+    unique_cids = list(dict.fromkeys(str(c) for c in cids if isinstance(c, str) and c))
+    if not unique_cids:
+        return {}
+    exported_map: dict[str, Mapping[str, Any]] = {}
+    if callable(getattr(engine, "export_tenant_filtered", None)):
+        try:
+            exported = engine.export_tenant_filtered(context.tenant_id, context.to_filter())
+            for row in exported.get("evidence", []) or []:
+                if isinstance(row, Mapping) and isinstance(row.get("cid"), str):
+                    exported_map[row["cid"]] = row
+        except Exception:
+            exported_map = {}
+
+    verified: dict[str, dict[str, Any]] = {}
+    for cid in unique_cids:
+        raw = engine.get_evidence(context.tenant_id, cid, context.branch) if callable(getattr(engine, "get_evidence", None)) else None
+        if (
+            raw is None
+            or getattr(raw, "cid", None) != cid
+            or getattr(raw, "tenant_id", context.tenant_id) != context.tenant_id
+            or getattr(raw, "branch", context.branch) != context.branch
+            or bool(getattr(raw, "erased", False))
+            or getattr(raw, "retired_at", None) is not None
+        ):
+            continue
+        created_at = getattr(raw, "created_at", None)
+        if context.as_of is not None and isinstance(created_at, datetime) and created_at > context.as_of:
+            continue
+        if exported_map and cid not in exported_map:
+            continue
+        exp_row = exported_map.get(cid, {})
+        if exp_row and (bool(exp_row.get("erased")) or _quarantined(exp_row)):
+            continue
+        trust_tier = getattr(raw, "trust_tier", exp_row.get("trust_tier", 0))
+        if disposition is not None and disposition.skepticism > 0.8 and isinstance(trust_tier, int) and trust_tier >= 4:
+            continue
+        content = getattr(raw, "content", None) or (exp_row.get("content") if isinstance(exp_row, Mapping) else None)
+        if not isinstance(content, str) or not content:
+            continue
+        row_dict = dict(exp_row) if isinstance(exp_row, Mapping) and exp_row else {
+            "cid": cid,
+            "content": content,
+            "tenant_id": context.tenant_id,
+            "branch": context.branch,
+            "erased": False,
+            "sensitivity": getattr(raw, "sensitivity", 0),
+            "trust_tier": trust_tier,
+            "source_identity": getattr(raw, "source_identity", None),
+            "session_id": getattr(raw, "session_id", None),
+            "metadata": getattr(raw, "metadata", {}) or {},
+        }
+        row_dict["content"] = content
+        row_dict["_access_policy_sha256"] = hashlib.sha256(
+            json.dumps(
+                getattr(raw, "access_policy", {}) or {},
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ).encode()
+        ).hexdigest()
+        verified[cid] = row_dict
+    return verified
+
+
+def resolve_hierarchical_evidence(
+    engine: Any,
+    question: str = "",
+    context: AnswerReadContext | None = None,
+    *,
+    tenant_id: str | None = None,
+    user_id: str | None = None,
+    branch: str = "main",
+    disposition: ReflectDisposition | Mapping[str, Any] | None = None,
+    mission: str | None = None,
+) -> dict[str, Any]:
+    """Resolve evidence hierarchically: MentalModels -> Observations/KnowledgePages -> Raw Evidence."""
+    if context is None:
+        context = AnswerReadContext(
+            tenant_id=str(tenant_id or "default"),
+            branch=str(branch or "main"),
+            user_id=user_id,
+        )
+    disp = coerce_disposition(disposition, mission=mission)
+    q_terms = _query_substantive_terms(question)
+    mission_terms = _query_substantive_terms(disp.mission) if disp and disp.mission else set()
+
+    layers_checked: list[str] = []
+    matched_models: list[dict[str, Any]] = []
+    matched_observations: list[dict[str, Any]] = []
+    matched_pages: list[dict[str, Any]] = []
+    contested_caveats: list[str] = []
+    resolved_layer = "none"
+    claims: list[AnswerClaim] = []
+    verified_rows: dict[str, dict[str, Any]] = {}
+
+    # Layer 1: Ready, non-stale MentalModels
+    layers_checked.append("mental_model")
+    if context.user_id and not context.break_glass:
+        try:
+            from mnemosyne.mental_models import MentalModelService
+
+            mm_service = MentalModelService(engine)
+            models = mm_service.list(context)
+        except Exception:
+            models = []
+        for model in models:
+            if not isinstance(model, Mapping):
+                continue
+            if model.get("status") != "ready" or bool(model.get("stale", False)):
+                continue
+            m_text = f"{model.get('name', '')} {model.get('question', '')} {model.get('answer', '')}"
+            m_terms = _query_substantive_terms(m_text)
+            if _comparison(str(model.get("question", ""))) != _comparison(question) and not (q_terms & m_terms):
+                continue
+            cids = list(model.get("source_evidence_cids") or [])
+            if not cids:
+                continue
+            live_map = _verify_live_authorized_evidence(engine, context, cids, disposition=disp)
+            if len(live_map) != len(set(cids)):
+                continue
+            # Build verified AnswerClaims from model claims or live evidence spans
+            model_claims: list[AnswerClaim] = []
+            for raw_claim in model.get("claims") or []:
+                if not isinstance(raw_claim, Mapping):
+                    continue
+                c_text = str(raw_claim.get("text") or "").strip()
+                c_spans: list[AnswerSpan] = []
+                for raw_span in raw_claim.get("spans") or []:
+                    if not isinstance(raw_span, Mapping):
+                        continue
+                    scid = str(raw_span.get("cid") or "")
+                    start = raw_span.get("start")
+                    end = raw_span.get("end")
+                    sha = raw_span.get("slice_sha256")
+                    if (
+                        scid in live_map
+                        and isinstance(start, int)
+                        and isinstance(end, int)
+                        and 0 <= start < end <= len(live_map[scid]["content"])
+                    ):
+                        actual_slice = live_map[scid]["content"][start:end]
+                        actual_sha = hashlib.sha256(actual_slice.encode("utf-8")).hexdigest()
+                        if sha is None or sha == actual_sha:
+                            c_spans.append(AnswerSpan(scid, start, end, actual_sha))
+                if c_text and c_spans:
+                    deriv = raw_claim.get("derivation")
+                    op = deriv.get("operation") if isinstance(deriv, Mapping) else None
+                    model_claims.append(
+                        AnswerClaim(
+                            text=c_text,
+                            evidence_cids=tuple(dict.fromkeys(s.cid for s in c_spans)),
+                            spans=tuple(c_spans),
+                            synthesis_operation=op if isinstance(op, str) else None,
+                        )
+                    )
+            if model_claims:
+                matched_models.append(dict(model))
+                verified_rows.update(live_map)
+                claims.extend(model_claims)
+        if matched_models and claims:
+            resolved_layer = "mental_model"
+
+    # Layer 2: Active corroborated Observations & KnowledgePages
+    if resolved_layer == "none":
+        layers_checked.append("observation")
+        raw_obs_list: list[Any] = []
+        for method_name in ("list_observations", "observation_list"):
+            fn = getattr(engine, method_name, None)
+            if callable(fn):
+                try:
+                    raw_obs_list = list(
+                        fn(
+                            context.tenant_id,
+                            branch=context.branch,
+                            user_id=context.user_id,
+                            status="active",
+                        )
+                    )
+                    break
+                except TypeError:
+                    try:
+                        raw_obs_list = list(fn(context.tenant_id, branch=context.branch))
+                        break
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+
+        from mnemosyne.observations import ProofQuote, verify_proof_quote
+
+        scored_obs: list[tuple[int, float, dict[str, Any], list[AnswerClaim], dict[str, dict[str, Any]]]] = []
+        for item in raw_obs_list:
+            obs_dict = item.to_dict() if hasattr(item, "to_dict") else (dict(item) if isinstance(item, Mapping) else None)
+            if not isinstance(obs_dict, dict):
+                continue
+            if obs_dict.get("status", "active") != "active":
+                continue
+            if context.user_id and obs_dict.get("user_id") and obs_dict.get("user_id") != context.user_id:
+                continue
+            indep_sources = int(obs_dict.get("independent_source_count", 1) or 1)
+            standing = float(obs_dict.get("standing", 0.51) or 0.51)
+            if disp is not None and disp.skepticism > 0.7 and (indep_sources < 2 and standing < 0.6):
+                continue
+            obs_text = f"{obs_dict.get('subject', '')} {obs_dict.get('topic', '')} {obs_dict.get('content', '')}"
+            obs_terms = _query_substantive_terms(obs_text)
+            overlap = len(q_terms & obs_terms)
+            if mission_terms:
+                overlap += 2 * len(mission_terms & obs_terms)
+            if overlap == 0 and q_terms:
+                continue
+            raw_quotes = [ProofQuote.from_dict(q) for q in (obs_dict.get("proof_quotes") or [])]
+            # Preserve multimodal block_index ordering
+            raw_quotes.sort(key=lambda q: (0, q.block_index) if q.block_index is not None else (1, 0))
+            obs_cids = list(
+                dict.fromkeys(
+                    [*(obs_dict.get("source_evidence_cids") or []), *(q.cid for q in raw_quotes if q.cid)]
+                )
+            )
+            if not obs_cids:
+                continue
+            live_map = _verify_live_authorized_evidence(engine, context, obs_cids, disposition=disp)
+            if len(live_map) != len(set(obs_cids)):
+                continue
+            valid_spans: list[AnswerSpan] = []
+            quotes_valid = True
+            for pq in raw_quotes:
+                if pq.cid not in live_map:
+                    quotes_valid = False
+                    break
+                ev_content = live_map[pq.cid]["content"]
+                try:
+                    verify_proof_quote(pq, ev_content, is_erased=False, is_retired=False)
+                except Exception:
+                    quotes_valid = False
+                    break
+                start = pq.start if pq.start is not None else ev_content.find(pq.quote)
+                end = pq.end if pq.end is not None else (start + len(pq.quote))
+                if 0 <= start < end <= len(ev_content):
+                    slice_text = ev_content[start:end]
+                    valid_spans.append(
+                        AnswerSpan(
+                            pq.cid,
+                            start,
+                            end,
+                            hashlib.sha256(slice_text.encode("utf-8")).hexdigest(),
+                        )
+                    )
+            if not quotes_valid:
+                continue
+            if not valid_spans:
+                # Fallback span from first source_evidence_cid
+                first_cid = obs_cids[0]
+                ev_content = live_map[first_cid]["content"]
+                quote_text = ev_content.strip() or ev_content
+                start = ev_content.find(quote_text)
+                end = start + len(quote_text)
+                valid_spans.append(
+                    AnswerSpan(
+                        first_cid,
+                        start,
+                        end,
+                        hashlib.sha256(quote_text.encode("utf-8")).hexdigest(),
+                    )
+                )
+            contradictions = obs_dict.get("contradiction_history") or []
+            if contradictions and (disp is None or disp.skepticism >= 0.5):
+                for c in contradictions:
+                    if isinstance(c, Mapping) and c.get("content"):
+                        contested_caveats.append(f"Supersedes prior observation: {c['content']}")
+            claim_text = " ".join(
+                live_map[s.cid]["content"][s.start : s.end] for s in valid_spans
+            ).strip() or str(obs_dict.get("content") or "").strip()
+            obs_claim = AnswerClaim(
+                text=claim_text,
+                evidence_cids=tuple(dict.fromkeys(s.cid for s in valid_spans)),
+                spans=tuple(valid_spans),
+                synthesis_operation=None,
+            )
+            scored_obs.append((-overlap, -standing, obs_dict, [obs_claim], live_map))
+
+        scored_obs.sort(key=lambda item: (item[0], item[1]))
+        for _, _, obs_dict, obs_claims, live_map in scored_obs:
+            matched_observations.append(obs_dict)
+            verified_rows.update(live_map)
+            claims.extend(obs_claims)
+        if matched_observations and claims:
+            resolved_layer = "observation"
+
+    if resolved_layer == "none":
+        layers_checked.append("knowledge_page")
+        raw_pages: list[Any] = []
+        for method_name in ("list_knowledge_pages", "knowledge_page_list"):
+            fn = getattr(engine, method_name, None)
+            if callable(fn):
+                try:
+                    raw_pages = list(fn(context.tenant_id, branch=context.branch, status="active"))
+                    break
+                except TypeError:
+                    try:
+                        raw_pages = list(fn(context.tenant_id, branch=context.branch))
+                        break
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+        for page in raw_pages:
+            page_dict = page.to_dict() if hasattr(page, "to_dict") else (dict(page) if isinstance(page, Mapping) else None)
+            if not isinstance(page_dict, dict):
+                continue
+            if page_dict.get("status", "active") != "active" or bool(page_dict.get("stale", False)):
+                continue
+            if context.user_id and page_dict.get("user_id") and page_dict.get("user_id") != context.user_id:
+                continue
+            p_text = f"{page_dict.get('path', '')} {page_dict.get('title', '')} {page_dict.get('content_markdown', '')}"
+            p_terms = _query_substantive_terms(p_text)
+            if not (q_terms & p_terms):
+                continue
+            p_cids = list(page_dict.get("source_evidence_cids") or [])
+            if not p_cids:
+                continue
+            live_map = _verify_live_authorized_evidence(engine, context, p_cids, disposition=disp)
+            if len(live_map) != len(set(p_cids)):
+                continue
+            page_spans: list[AnswerSpan] = []
+            for cid in p_cids:
+                ev_content = live_map[cid]["content"]
+                quote_text = ev_content.strip() or ev_content
+                start = ev_content.find(quote_text)
+                end = start + len(quote_text)
+                page_spans.append(
+                    AnswerSpan(
+                        cid,
+                        start,
+                        end,
+                        hashlib.sha256(quote_text.encode("utf-8")).hexdigest(),
+                    )
+                )
+            if page_spans:
+                matched_pages.append(page_dict)
+                verified_rows.update(live_map)
+                claims.append(
+                    AnswerClaim(
+                        text=" ".join(live_map[s.cid]["content"][s.start : s.end] for s in page_spans),
+                        evidence_cids=tuple(dict.fromkeys(s.cid for s in page_spans)),
+                        spans=tuple(page_spans),
+                        synthesis_operation=None,
+                    )
+                )
+        if matched_pages and claims:
+            resolved_layer = "knowledge_page"
+
+    # Layer 3: Raw Evidence / Assertion fallback
+    if resolved_layer == "none":
+        layers_checked.append("evidence")
+        try:
+            retrieved = engine.retrieve(
+                question,
+                tenant_id=context.tenant_id,
+                branch=context.branch,
+                deep=True,
+                filt=context.to_filter(),
+                record_access=False,
+            )
+            fallback_cids: list[str] = []
+            for hit in getattr(retrieved, "hits", []) or []:
+                if getattr(hit, "kind", None) == "evidence":
+                    fallback_cids.append(str(hit.id))
+                else:
+                    fallback_cids.extend(
+                        str(c) for c in (getattr(hit, "metadata", {}) or {}).get("source_evidence_cids", []) if c
+                    )
+            live_map = _verify_live_authorized_evidence(engine, context, fallback_cids, disposition=disp)
+            if live_map:
+                verified_rows.update(live_map)
+                resolved_layer = "evidence"
+        except Exception:
+            pass
+
+    answer_evidence = tuple(
+        GroundedAnswerOrchestrator._evidence(cid, row, 0)
+        for cid, row in sorted(verified_rows.items(), key=lambda item: _episode_key(item[1], item[0]))
+    )
+    fingerprint = _fingerprint(verified_rows) if verified_rows else ""
+
+    return {
+        "resolved_layer": resolved_layer,
+        "layers_checked": layers_checked,
+        "mental_models": matched_models,
+        "observations": matched_observations,
+        "knowledge_pages": matched_pages,
+        "evidence_cids": [row.cid for row in answer_evidence],
+        "evidence_rows": [{"cid": row.cid, "content": row.content} for row in answer_evidence],
+        "answer_evidence": answer_evidence,
+        "evidence_fingerprint": fingerprint,
+        "claims": claims,
+        "contested_caveats": contested_caveats,
+        "mission_applied": disp.mission if disp is not None else None,
+        "disposition": disp.to_dict() if disp is not None else None,
+    }
+
+
+_COUNT_INTENT_RE = re.compile(
+    r"\b(?:how many|count\b|total number|number of|how often|frequency of)\b",
+    re.IGNORECASE,
+)
+_TIMELINE_INTENT_RE = re.compile(
+    r"\b(?:timeline|chronolog(?:y|ical|ically)|order of events|sequence of events|when did .* happen|history of|progression of|over time|step[- ]by[- ]step history)\b",
+    re.IGNORECASE,
+)
+_STATE_DIFF_INTENT_RE = re.compile(
+    r"\b(?:how did .* change|what changed|state change|state transition|before (?:and|vs\.?|versus) after|changed? from .* to|evolve[d]?|shift(?:ed)? from|used to .* now|previous(?:ly)? vs\.? current)\b",
+    re.IGNORECASE,
+)
+_COMPARISON_INTENT_RE = re.compile(
+    r"\b(?:compare|comparison|comparing|difference[s]? between|differ(?:s|ed)? from|versus|\bvs\.?\b|contrast|similarit(?:y|ies) and difference[s]?)\b",
+    re.IGNORECASE,
+)
+_ISO_DATE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})?)?)\b")
+_YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2})\b")
+_TRANSITION_INLINE_RE = re.compile(
+    r"(?:changed\s+from|moved\s+from|migrated\s+from|switched\s+from|from)\s+([^.,;]+?)\s+to\s+([^.,;]+)",
+    re.IGNORECASE,
+)
+
+
+def detect_synthesis_intent(question: str) -> str:
+    """Classify the synthesis intent of a question."""
+    if not isinstance(question, str) or not question.strip():
+        return "fact"
+    normalized = _comparison(question)
+    if _COUNT_INTENT_RE.search(normalized):
+        return "count"
+    if _TIMELINE_INTENT_RE.search(normalized):
+        return "timeline"
+    if _STATE_DIFF_INTENT_RE.search(normalized):
+        return "state_diff"
+    if _COMPARISON_INTENT_RE.search(normalized):
+        return "comparison"
+    return "fact"
+
+
+def _extract_temporal_sort_key(content: str, row: Mapping[str, Any], index: int) -> tuple[int, str, int]:
+    iso_match = _ISO_DATE_RE.search(content)
+    if iso_match:
+        return (0, iso_match.group(1), index)
+    created_at = row.get("created_at") or row.get("valid_from")
+    if isinstance(created_at, datetime):
+        return (0, created_at.isoformat(), index)
+    if isinstance(created_at, str) and created_at:
+        return (0, created_at, index)
+    year_match = _YEAR_RE.search(content)
+    if year_match:
+        return (1, year_match.group(1), index)
+    turn_index = row.get("turn_index")
+    if isinstance(turn_index, int) and not isinstance(turn_index, bool):
+        return (2, f"{turn_index:09d}", index)
+    return (3, f"{index:09d}", index)
+
+
+def adaptive_synthesize(
+    question: str,
+    evidence_rows: Sequence[Mapping[str, Any] | AnswerEvidence],
+    disposition: ReflectDisposition | Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Produce provenance-verified multi-evidence derivations adapted to question intent."""
+    disp = coerce_disposition(disposition)
+    intent = detect_synthesis_intent(question)
+    mission_terms = _query_substantive_terms(disp.mission) if disp and disp.mission else set()
+
+    normalized_rows: list[dict[str, Any]] = []
+    for idx, item in enumerate(evidence_rows):
+        if isinstance(item, AnswerEvidence):
+            row_dict: dict[str, Any] = {
+                "cid": item.cid,
+                "content": item.content,
+                "source_identity": item.source_identity,
+                "session_id": item.session_id,
+                "turn_index": item.turn_index,
+                "hop": item.hop,
+            }
+        elif isinstance(item, Mapping):
+            row_dict = dict(item)
+        else:
+            row_dict = {
+                "cid": getattr(item, "cid", ""),
+                "content": getattr(item, "content", ""),
+                "created_at": getattr(item, "created_at", None),
+                "turn_index": getattr(item, "turn_index", None),
+                "trust_tier": getattr(item, "trust_tier", None),
+            }
+        cid = str(row_dict.get("cid") or "").strip()
+        content = str(row_dict.get("content") or "")
+        if not cid or not content.strip() or _contains_control_label(content):
+            continue
+        if disp is not None and disp.skepticism > 0.8:
+            trust_tier = row_dict.get("trust_tier")
+            if isinstance(trust_tier, int) and trust_tier >= 4:
+                continue
+        quote = content.strip()
+        start = content.find(quote)
+        end = start + len(quote)
+        slice_sha256 = hashlib.sha256(quote.encode("utf-8")).hexdigest()
+        span_dict = {
+            "cid": cid,
+            "start": start,
+            "end": end,
+            "slice_sha256": slice_sha256,
+            "quote": quote,
+        }
+        mission_overlap = len(_query_substantive_terms(content) & mission_terms) if mission_terms else 0
+        normalized_rows.append(
+            {
+                **row_dict,
+                "cid": cid,
+                "content": content,
+                "quote": quote,
+                "span": span_dict,
+                "_index": idx,
+                "_mission_overlap": mission_overlap,
+            }
+        )
+
+    if mission_terms and any(r["_mission_overlap"] > 0 for r in normalized_rows):
+        normalized_rows = [r for r in normalized_rows if r["_mission_overlap"] > 0]
+
+    timeline_events: list[dict[str, Any]] = []
+    state_transitions: list[dict[str, Any]] = []
+    comparisons: list[dict[str, Any]] = []
+    claims: list[dict[str, Any]] = []
+    count_value: int | None = None
+
+    ordered_for_time = sorted(
+        normalized_rows,
+        key=lambda r: _extract_temporal_sort_key(r["content"], r, r["_index"]),
+    )
+    for r in ordered_for_time:
+        sort_key = _extract_temporal_sort_key(r["content"], r, r["_index"])
+        timestamp_label = sort_key[1] if sort_key[0] in (0, 1) else None
+        timeline_events.append(
+            {
+                "cid": r["cid"],
+                "timestamp": timestamp_label,
+                "turn_index": r.get("turn_index"),
+                "summary": r["quote"],
+                "span": r["span"],
+            }
+        )
+
+    # Extract state transitions across consecutive temporal events and inline transition phrases
+    for r in ordered_for_time:
+        inline_match = _TRANSITION_INLINE_RE.search(r["quote"])
+        if inline_match:
+            from_state = inline_match.group(1).strip()
+            to_state = inline_match.group(2).strip()
+            state_transitions.append(
+                {
+                    "from_state": from_state,
+                    "to_state": to_state,
+                    "from_cid": r["cid"],
+                    "to_cid": r["cid"],
+                    "evidence_cids": [r["cid"]],
+                    "spans": [r["span"]],
+                }
+            )
+    if len(ordered_for_time) >= 2:
+        for prev_row, curr_row in zip(ordered_for_time[:-1], ordered_for_time[1:]):
+            if prev_row["quote"] != curr_row["quote"]:
+                state_transitions.append(
+                    {
+                        "from_state": prev_row["quote"],
+                        "to_state": curr_row["quote"],
+                        "from_cid": prev_row["cid"],
+                        "to_cid": curr_row["cid"],
+                        "evidence_cids": list(dict.fromkeys([prev_row["cid"], curr_row["cid"]])),
+                        "spans": [prev_row["span"], curr_row["span"]],
+                    }
+                )
+
+    is_literal = bool(disp is not None and disp.literalism > 0.7)
+
+    if intent == "count":
+        count_value = len(normalized_rows)
+        if normalized_rows:
+            spans = [r["span"] for r in normalized_rows[:16]]
+            cids = list(dict.fromkeys(r["cid"] for r in normalized_rows[:16]))
+            text = (
+                " ".join(r["quote"] for r in normalized_rows[:3])
+                if is_literal
+                else f"Count: {count_value} ({'; '.join(r['quote'] for r in normalized_rows[:5])})"
+            )
+            claims.append(
+                {
+                    "text": text,
+                    "evidence_cids": cids,
+                    "spans": spans,
+                    "derivation": {
+                        "schema_version": "mnemosyne.claim-derivation/v1",
+                        "kind": "quotation" if is_literal else "synthesis",
+                        "operation": None if is_literal else "count",
+                    },
+                }
+            )
+    elif intent == "timeline":
+        for ev in timeline_events:
+            prefix = f"[{ev['timestamp']}] " if ev["timestamp"] and not is_literal else ""
+            claims.append(
+                {
+                    "text": f"{prefix}{ev['summary']}",
+                    "evidence_cids": [ev["cid"]],
+                    "spans": [ev["span"]],
+                    "derivation": {
+                        "schema_version": "mnemosyne.claim-derivation/v1",
+                        "kind": "quotation" if is_literal else "synthesis",
+                        "operation": None if is_literal else "timeline",
+                    },
+                }
+            )
+    elif intent == "state_diff":
+        if state_transitions:
+            for tr in state_transitions:
+                text = (
+                    " -> ".join(s["quote"] for s in tr["spans"])
+                    if is_literal
+                    else f"Transition from {tr['from_state']} to {tr['to_state']}"
+                )
+                claims.append(
+                    {
+                        "text": text,
+                        "evidence_cids": tr["evidence_cids"],
+                        "spans": tr["spans"],
+                        "derivation": {
+                            "schema_version": "mnemosyne.claim-derivation/v1",
+                            "kind": "quotation" if is_literal else "synthesis",
+                            "operation": None if is_literal else "state_diff",
+                        },
+                    }
+                )
+        else:
+            for r in ordered_for_time:
+                claims.append(
+                    {
+                        "text": r["quote"],
+                        "evidence_cids": [r["cid"]],
+                        "spans": [r["span"]],
+                        "derivation": {
+                            "schema_version": "mnemosyne.claim-derivation/v1",
+                            "kind": "quotation",
+                            "operation": None,
+                        },
+                    }
+                )
+    elif intent == "comparison":
+        for r in normalized_rows:
+            comparisons.append({"cid": r["cid"], "point": r["quote"], "span": r["span"]})
+        if len(normalized_rows) >= 2 and not is_literal:
+            spans = [r["span"] for r in normalized_rows[:16]]
+            cids = list(dict.fromkeys(r["cid"] for r in normalized_rows[:16]))
+            claims.append(
+                {
+                    "text": " vs. ".join(r["quote"] for r in normalized_rows[:4]),
+                    "evidence_cids": cids,
+                    "spans": spans,
+                    "derivation": {
+                        "schema_version": "mnemosyne.claim-derivation/v1",
+                        "kind": "synthesis",
+                        "operation": "comparison",
+                    },
+                }
+            )
+        else:
+            for r in normalized_rows:
+                claims.append(
+                    {
+                        "text": r["quote"],
+                        "evidence_cids": [r["cid"]],
+                        "spans": [r["span"]],
+                        "derivation": {
+                            "schema_version": "mnemosyne.claim-derivation/v1",
+                            "kind": "quotation",
+                            "operation": None,
+                        },
+                    }
+                )
+    else:
+        for r in normalized_rows:
+            claims.append(
+                {
+                    "text": r["quote"],
+                    "evidence_cids": [r["cid"]],
+                    "spans": [r["span"]],
+                    "derivation": {
+                        "schema_version": "mnemosyne.claim-derivation/v1",
+                        "kind": "quotation",
+                        "operation": None,
+                    },
+                }
+            )
+
+    if disp is not None and claims:
+        claims = claims[: disp.max_claims(len(claims))]
+
+    cited_cids = list(
+        dict.fromkeys(cid for claim in claims for cid in claim["evidence_cids"])
+    )
+
+    return {
+        "intent": intent,
+        "answer": "\n".join(c["text"] for c in claims),
+        "abstained": not bool(claims),
+        "claims": claims,
+        "timeline_events": timeline_events,
+        "state_transitions": state_transitions,
+        "comparisons": comparisons,
+        "count": count_value if intent == "count" else len(normalized_rows),
+        "cited_cids": cited_cids,
+        "disposition": disp.to_dict() if disp is not None else None,
+    }

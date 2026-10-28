@@ -903,10 +903,19 @@ def _time_window_route(
             inside.sort(key=lambda item: item[0], reverse=True)
         explain["order"] = "latest_first"
     allow_soft_fallback = (window.axis == "event") or (effective_filter.get("query_mode") == "passages")
-    if not inside and not date_only and not bare_happen and allow_soft_fallback:
-        # Soft Temporal Fallback: when 0 hits match the hard window, retain top semantic/lexical
-        # candidates with continuous temporal proximity boosting toward [window.start, window.end].
-        explain["fallback"] = "soft_temporal_proximity"
+    is_relative_ago = "ago" in window.label.lower()
+    if (not inside and not date_only and not bare_happen and allow_soft_fallback) or (
+        is_relative_ago and not date_only and not bare_happen
+    ):
+        # Soft Temporal Fallback / Relative-Ago Proximity Ranking: when 0 hits match the hard window,
+        # or when a conversational "X days/weeks ago" query includes a topic, score all candidates
+        # by lexical/semantic relevance weighted by temporal proximity (giving exact-window matches
+        # a 1.35x multiplier while retaining strong topical matches from adjacent days).
+        if not inside:
+            explain["fallback"] = "soft_temporal_proximity"
+        else:
+            explain["relative_backfill"] = True
+        inside_ids = {hit.id for _m, hit in inside}
         fallback_scored: list[tuple[float, Hit]] = []
         for hit in ranked:
             if window.axis == "event":
@@ -940,11 +949,14 @@ def _time_window_route(
             else:
                 proximity = 0.5
 
-            base_score = float(hit.score or 1.0)
-            boosted_score = base_score * (0.6 + 0.4 * proximity)
+            base_score = float(hit.score or 0.0)
+            if hit.id in inside_ids:
+                boosted_score = max(base_score * 1.35, 0.01)
+            else:
+                boosted_score = base_score * (0.65 + 0.35 * proximity)
             fb_hit = replace(hit, score=boosted_score, metadata={
                 **hit.metadata,
-                "temporal_fallback": True,
+                "temporal_fallback": hit.id not in inside_ids,
                 "temporal_proximity": proximity,
                 "temporal_match": {
                     "axis": window.axis,
@@ -980,6 +992,67 @@ def _cap_fact_hits(hits: list[Hit], *, slots: int) -> list[Hit]:
             facts += 1
         kept.append(hit)
     return kept
+
+
+def deduplicate_observation_preferred(
+    hits: Sequence[Hit],
+    *,
+    fact_budget_tokens: int = 2048,
+    source_expansion_budget_tokens: int = 1024,
+) -> tuple[list[Hit], dict[str, Any]]:
+    """Observation-preferred deduplication with an independent source expansion token budget.
+
+    When corroborated Observations or KnowledgePages cover a raw source Evidence CID,
+    retains the synthesized Observation/KnowledgePage in the primary fact budget and
+    allocates redundant raw source chunks to the independent ``source_expansion_budget_tokens``.
+    """
+    primary_hits: list[Hit] = []
+    covered_source_cids: set[str] = set()
+    deferred_sources: list[Hit] = []
+
+    for h in hits:
+        is_obs_or_page = (
+            h.kind in {"observation", "knowledge_page"}
+            or h.metadata.get("memory_type") in {"observation", "knowledge_page"}
+            or h.metadata.get("source_type") in {"observation", "knowledge_page"}
+        )
+        if is_obs_or_page:
+            for cid in h.provenance:
+                covered_source_cids.add(str(cid))
+            for cid in h.metadata.get("source_evidence_cids", ()):
+                covered_source_cids.add(str(cid))
+
+    fact_tokens_used = 0
+    for h in hits:
+        if h.kind == "evidence" and h.id in covered_source_cids:
+            deferred_sources.append(h)
+            continue
+        t_cost = approx_tokens(h.text)
+        if fact_tokens_used + t_cost <= max(1, fact_budget_tokens) or not primary_hits:
+            primary_hits.append(h)
+            fact_tokens_used += t_cost
+
+    expanded_sources: list[Hit] = []
+    expansion_tokens_used = 0
+    if source_expansion_budget_tokens > 0:
+        for src_hit in deferred_sources:
+            t_cost = approx_tokens(src_hit.text)
+            if expansion_tokens_used + t_cost <= source_expansion_budget_tokens:
+                expanded_sources.append(src_hit)
+                expansion_tokens_used += t_cost
+
+    combined = primary_hits + expanded_sources
+    report = {
+        "applied": True,
+        "primary_count": len(primary_hits),
+        "covered_source_count": len(deferred_sources),
+        "expanded_source_count": len(expanded_sources),
+        "fact_tokens_used": fact_tokens_used,
+        "fact_budget_tokens": fact_budget_tokens,
+        "expansion_tokens_used": expansion_tokens_used,
+        "source_expansion_budget_tokens": source_expansion_budget_tokens,
+    }
+    return combined, report
 
 
 def _source_only_local_routes(adapters: RetrievalAdapters, routes: list[list[Hit]]) -> bool:
@@ -2102,8 +2175,11 @@ def run_retrieval_pipeline(
         " ".join(fact)
         for fact in [*graph_explain.get("linked_facts", []), *(graph_explain.get("second_hop") or {}).get("linked_facts", [])]
     ]
+    use_stripped_window_query = (
+        window is not None and (window_explain or {}).get("fallback") != "soft_temporal_proximity"
+    )
     support_report = query_support(
-        window_support_query(window) if window is not None else query, budgeted, linked_facts
+        window_support_query(window) if use_stripped_window_query else query, budgeted, linked_facts
     )
     support_score = support_report["score"]
     if cosine_ranked:

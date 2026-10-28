@@ -176,8 +176,16 @@ class MnemosyneMcpServer:
         self._enforce_production_profile()
         from mnemosyne.mcp_tools import TOOL_SPEC
 
-        self.tool_names = {item["name"] for item in TOOL_SPEC}
-        self.tool_specs = [_to_mcp_tool_spec(item) for item in TOOL_SPEC]
+        extra_specs = [
+            {
+                "name": "document_reconcile_branch",
+                "description": "Reconcile branch-level document manifests from a source branch into a target branch.",
+                "arguments": ["tenant_id", "user_id", "source_branch", "target_branch"],
+            },
+        ]
+        all_specs = [*TOOL_SPEC, *(s for s in extra_specs if not any(t["name"] == s["name"] for t in TOOL_SPEC))]
+        self.tool_names = {item["name"] for item in all_specs}
+        self.tool_specs = [_to_mcp_tool_spec(item) for item in all_specs]
         self.tool_schemas_by_name = {item["name"]: item["inputSchema"] for item in self.tool_specs}
         self._stateless_tools_cache: dict[tuple[Any, ...], tuple[Any, Any, Any, Any]] = {}
         self._stateless_tools_cache_lock = threading.Lock()

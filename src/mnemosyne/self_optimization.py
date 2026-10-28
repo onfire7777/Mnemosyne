@@ -1187,3 +1187,71 @@ def validate_policy_ops_bundle(
         },
         "findings": findings,
     }
+
+
+class AdaptiveRouteWeighter:
+    """Online Multiplicative Weights Update (MWU) route weighter for 4-way TEMPR + Working/Prospective routes.
+
+    Dynamically adapts per-tenant route weights (`lexical`, `vector`, `graph`, `temporal`, `working`)
+    based on grounding and citation outcomes while enforcing minimum exploration floors so no route
+    is ever starved.
+    """
+
+    DEFAULT_ROUTES: tuple[str, ...] = ("lexical", "vector", "graph", "temporal", "working")
+
+    def __init__(
+        self,
+        *,
+        learning_rate: float = 0.15,
+        min_weight: float = 0.05,
+        max_weight: float = 0.65,
+    ) -> None:
+        self.learning_rate = max(0.01, min(0.5, float(learning_rate)))
+        self.min_weight = max(0.01, min(0.20, float(min_weight)))
+        self.max_weight = max(0.30, min(0.90, float(max_weight)))
+        self._weights: dict[str, dict[str, float]] = {}
+        self._counts: dict[str, dict[str, int]] = {}
+
+    def get_weights(self, tenant_id: str, query_intent: str | None = None) -> dict[str, float]:
+        base = dict(
+            self._weights.get(
+                tenant_id,
+                {r: 1.0 / len(self.DEFAULT_ROUTES) for r in self.DEFAULT_ROUTES},
+            )
+        )
+        if query_intent == "temporal":
+            base["temporal"] = min(self.max_weight, base.get("temporal", 0.2) * 1.45)
+        elif query_intent == "multi_hop":
+            base["graph"] = min(self.max_weight, base.get("graph", 0.2) * 1.45)
+        elif query_intent == "lexical":
+            base["lexical"] = min(self.max_weight, base.get("lexical", 0.2) * 1.35)
+        total = sum(base.values()) or 1.0
+        return {k: round(v / total, 4) for k, v in base.items()}
+
+    def record_outcome(
+        self,
+        tenant_id: str,
+        route_rewards: Mapping[str, float],
+    ) -> dict[str, float]:
+        current = dict(
+            self._weights.get(
+                tenant_id,
+                {r: 1.0 / len(self.DEFAULT_ROUTES) for r in self.DEFAULT_ROUTES},
+            )
+        )
+        counts = self._counts.setdefault(tenant_id, {r: 0 for r in self.DEFAULT_ROUTES})
+        for route, reward in route_rewards.items():
+            if route not in current:
+                current[route] = 1.0 / len(self.DEFAULT_ROUTES)
+                counts[route] = 0
+            bounded_reward = max(-1.0, min(1.0, float(reward)))
+            updated = current[route] * math.exp(self.learning_rate * bounded_reward)
+            current[route] = max(self.min_weight, min(self.max_weight, updated))
+            counts[route] = counts.get(route, 0) + 1
+        total = sum(current.values()) or 1.0
+        normalized = {k: max(self.min_weight, min(self.max_weight, v / total)) for k, v in current.items()}
+        norm_sum = sum(normalized.values()) or 1.0
+        final_weights = {k: round(v / norm_sum, 4) for k, v in normalized.items()}
+        self._weights[tenant_id] = final_weights
+        return dict(final_weights)
+

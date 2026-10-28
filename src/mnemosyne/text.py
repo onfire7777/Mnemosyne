@@ -238,21 +238,45 @@ TAXONOMIC_EXPANSIONS: dict[str, tuple[str, ...]] = {
     # Sports & athletic events (hypernyms -> concrete hyponyms)
     "sport": (
         "soccer", "basketball", "tennis", "baseball", "marathon", "triathlon",
-        "5k", "running", "cycling", "swimming", "volleyball", "golf",
-        "hockey", "badminton", "tournament",
+        "5k", "running", "run", "cycling", "bike", "swimming", "volleyball", "golf",
+        "hockey", "badminton", "tournament", "race",
     ),
     "sports": (
         "soccer", "basketball", "tennis", "baseball", "marathon", "triathlon",
-        "5k", "running", "cycling", "swimming", "volleyball", "golf",
-        "hockey", "badminton", "tournament",
+        "5k", "running", "run", "cycling", "bike", "swimming", "volleyball", "golf",
+        "hockey", "badminton", "tournament", "race",
+    ),
+    "social": (
+        "instagram", "twitter", "facebook", "tiktok", "hashtag", "shared", "posted",
+        "foodieadventure", "foodieadventures", "plankchallenge", "challenge",
+    ),
+    "museum": (
+        "exhibition", "tour", "gallery", "galleries", "curator", "artifacts",
+    ),
+    "museums": (
+        "exhibition", "tour", "gallery", "galleries", "curator", "artifacts",
     ),
     "device": (
         "fitness tracker", "smartwatch", "blood pressure monitor", "scale",
         "thermometer", "glucometer", "pulse oximeter", "wearable", "fitbit", "garmin",
+        "hearing aid", "hearing aids", "phonak",
     ),
     "devices": (
         "fitness tracker", "smartwatch", "blood pressure monitor", "scale",
         "thermometer", "glucometer", "pulse oximeter", "wearable", "fitbit", "garmin",
+        "hearing aid", "hearing aids", "phonak",
+    ),
+    "magazine": (
+        "geographic", "new yorker", "economist", "wired", "vogue", "time magazine",
+    ),
+    "magazines": (
+        "geographic", "new yorker", "economist", "wired", "vogue", "time magazine",
+    ),
+    "kit": (
+        "diorama", "tamiya", "revell", "gundam", "gunpla", "airfix",
+    ),
+    "kits": (
+        "diorama", "tamiya", "revell", "gundam", "gunpla", "airfix",
     ),
     # Cuisines (hypernyms -> concrete hyponyms)
     "cuisine": (

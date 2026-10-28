@@ -47,15 +47,27 @@ class ProofQuote:
     end: int | None = None
     sha256: str | None = None
     source_evidence_cid: str | None = None
+    source_cid: str | None = None
+    slice_sha256: str | None = None
     exact_quote: str | None = None
     byte_start: int | None = None
     byte_end: int | None = None
+    block_index: int | None = None
+    modality: str = "text"
+    attachment_cid: str | None = None
 
     def __post_init__(self) -> None:
-        if not self.cid and self.source_evidence_cid:
-            self.cid = self.source_evidence_cid
-        elif self.cid and not self.source_evidence_cid:
+        if not self.cid and (self.source_evidence_cid or self.source_cid):
+            self.cid = str(self.source_evidence_cid or self.source_cid)
+        if self.cid and not self.source_evidence_cid:
             self.source_evidence_cid = self.cid
+        if self.cid and not self.source_cid:
+            self.source_cid = self.cid
+
+        if not self.sha256 and self.slice_sha256:
+            self.sha256 = self.slice_sha256
+        elif self.sha256 and not self.slice_sha256:
+            self.slice_sha256 = self.sha256
 
         if not self.quote and self.exact_quote:
             self.quote = self.exact_quote
@@ -72,12 +84,18 @@ class ProofQuote:
         elif self.end is not None and self.byte_end is None:
             self.byte_end = self.end
 
+        if not self.modality or not isinstance(self.modality, str):
+            self.modality = "text"
+        if self.block_index is not None and not isinstance(self.block_index, bool):
+            self.block_index = int(self.block_index)
+
     def to_dict(self) -> dict[str, Any]:
         res: dict[str, Any] = {
             "cid": self.cid,
             "quote": self.quote,
             "source_evidence_cid": self.cid,
             "exact_quote": self.quote,
+            "modality": self.modality or "text",
         }
         if self.start is not None:
             res["start"] = self.start
@@ -87,6 +105,10 @@ class ProofQuote:
             res["byte_end"] = self.end
         if self.sha256 is not None:
             res["sha256"] = self.sha256
+        if self.block_index is not None:
+            res["block_index"] = self.block_index
+        if self.attachment_cid is not None:
+            res["attachment_cid"] = self.attachment_cid
         return res
 
     @classmethod
@@ -97,6 +119,15 @@ class ProofQuote:
         quote = str(data.get("quote") or data.get("exact_quote") or "")
         start = data.get("start") if data.get("start") is not None else data.get("byte_start")
         end = data.get("end") if data.get("end") is not None else data.get("byte_end")
+        raw_block_idx = data.get("block_index")
+        block_index = (
+            int(raw_block_idx)
+            if raw_block_idx is not None and not isinstance(raw_block_idx, bool)
+            else None
+        )
+        modality = str(data.get("modality") or "text")
+        raw_attachment = data.get("attachment_cid")
+        attachment_cid = str(raw_attachment) if raw_attachment else None
         return cls(
             cid=cid,
             quote=quote,
@@ -107,6 +138,9 @@ class ProofQuote:
             exact_quote=quote,
             byte_start=start,
             byte_end=end,
+            block_index=block_index,
+            modality=modality,
+            attachment_cid=attachment_cid,
         )
 
 
@@ -407,10 +441,20 @@ def reconcile_observation(
     if existing.content.strip().lower() == incoming.content.strip().lower():
         # Reinforcement / corroboration
         all_cids = list(dict.fromkeys(list(existing.source_evidence_cids) + list(incoming.source_evidence_cids)))
-        existing_quotes = {q.cid: q for q in existing.proof_quotes}
+        existing_quotes: dict[tuple[str, int | None, str], ProofQuote] = {
+            (q.cid, q.block_index, q.quote): q for q in existing.proof_quotes
+        }
         for q in incoming.proof_quotes:
-            existing_quotes[q.cid] = q
-        merged_quotes = list(existing_quotes.values())
+            # Replace if same cid and block_index (or both None), else preserve ordered multimodal blocks
+            if q.block_index is None:
+                existing_quotes = {
+                    k: v for k, v in existing_quotes.items() if not (k[0] == q.cid and k[1] is None)
+                }
+            existing_quotes[(q.cid, q.block_index, q.quote)] = q
+        merged_quotes = sorted(
+            existing_quotes.values(),
+            key=lambda q: (0, q.block_index) if q.block_index is not None else (1, 0),
+        )
 
         old_sources = existing.independent_source_count
         new_sources = max(old_sources, incoming.independent_source_count, len(all_cids))
