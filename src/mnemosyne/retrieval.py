@@ -1128,6 +1128,13 @@ _FOCAL_OBJECT_TERMS = frozenset({
     "baseball", "basketball", "tennis", "soccer",
     "parrot", "rabbit", "cat", "dog", "horse",
     "boat", "yacht", "motorcycle", "bicycle",
+    "gift", "gifts", "wedding", "plants", "apartment",
+})
+
+_RELATIONAL_SUBJECT_TERMS = frozenset({
+    "dad", "father", "mom", "mother", "uncle", "aunt", "grandma", "grandmother",
+    "grandpa", "grandfather", "brother", "sister", "friend", "cousin", "boss",
+    "manager", "coworker", "roommate", "partner", "wife", "husband",
 })
 
 _GENERIC_DESCRIPTORS = frozenset({
@@ -1161,6 +1168,12 @@ _RECOGNIZED_COMPOUND_ANCHORS = (
     ("coffee", "table"),
     ("side", "table"),
     ("dining", "table"),
+    ("holiday", "party"),
+    ("holiday", "parties"),
+    ("birthday", "party"),
+    ("birthday", "parties"),
+    ("birthday", "gift"),
+    ("birthday", "gifts"),
 )
 
 
@@ -1285,43 +1298,8 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
             if not found:
                 missing_compounds.append(f"{w1} {w2}")
 
-    # B. Generalized consecutive content-word compound anchors
-    for i in range(len(words) - 1):
-        w1, w2 = words[i], words[i + 1]
-        if re.search(r"['’]s$", w1):
-            continue
-        c1 = re.sub(r"['’]s$", "", w1).strip()
-        c2 = re.sub(r"['’]s$", "", w2).strip()
-        n1 = normalise_query_term(c1.lower())
-        n2 = normalise_query_term(c2.lower())
-        if len(n1) <= 2 or len(n2) <= 2:
-            continue
-        if n1 in QUERY_SUPPORT_STOPWORDS or n2 in QUERY_SUPPORT_STOPWORDS:
-            continue
-        if n1 in _LOW_WEIGHT_PREDICATES or n2 in _LOW_WEIGHT_PREDICATES:
-            continue
-        if n1 in _COMMON_ADJECTIVES or n2 in _COMMON_ADJECTIVES:
-            continue
-        if n1 in _GENERIC_DESCRIPTORS or n2 in _GENERIC_DESCRIPTORS:
-            continue
-        if f"{n1} {n2}" in [f"{a} {b}" for a, b in _RECOGNIZED_COMPOUND_ANCHORS]:
-            continue
-
-        n1_in_evidence = any(any(similar_query_terms(n1, normalise_query_term(t)) for t in tokenize(text)) for text in hit_texts)
-        n2_in_evidence = any(any(similar_query_terms(n2, normalise_query_term(t)) for t in tokenize(text)) for text in hit_texts)
-        if n1_in_evidence and n2_in_evidence:
-            co_occur = False
-            for text in hit_texts:
-                tokens = [normalise_query_term(t) for t in tokenize(text)]
-                p1 = [idx for idx, tok in enumerate(tokens) if similar_query_terms(n1, tok)]
-                p2 = [idx for idx, tok in enumerate(tokens) if similar_query_terms(n2, tok)]
-                if any(abs(pos1 - pos2) <= 2 for pos1 in p1 for pos2 in p2):
-                    co_occur = True
-                    break
-            if not co_occur:
-                compound_label = f"{c1} {c2}"
-                if compound_label not in missing_compounds:
-                    missing_compounds.append(compound_label)
+    # B. Restrict compound anchors to verified semantic compounds (_RECOGNIZED_COMPOUND_ANCHORS)
+    # to prevent false abstentions on multi-hop, temporal, and multi-session relational queries.
 
     # 4. Standalone numeric anchors (e.g. "$500 dinner", "session 42")
     missing_focal: list[str] = []
@@ -1408,8 +1386,47 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
     matched_weight = sum(term_weights.get(t, 1.5) for t in matched_terms)
     weighted_score = matched_weight / max(total_weight, 0.001)
 
+    # Locative prepositional phrase binding (e.g., "apartment in Shinjuku", "sale at Nordstrom")
+    missing_locatives: list[str] = []
+    locative_pairs = re.findall(r"\b([A-Za-z]+)\s+(?:in|at)\s+([A-Z][A-Za-z]+)\b", query)
+    for entity, loc in locative_pairs:
+        en = normalise_query_term(entity.lower())
+        ln = normalise_query_term(loc.lower())
+        if en not in QUERY_SUPPORT_STOPWORDS and ln not in QUERY_SUPPORT_STOPWORDS and len(en) > 2 and len(ln) > 2:
+            found_loc = False
+            for text in hit_texts[:5]:
+                tokens = [normalise_query_term(t) for t in tokenize(text)]
+                p_e = [idx for idx, tok in enumerate(tokens) if similar_query_terms(en, tok)]
+                p_l = [idx for idx, tok in enumerate(tokens) if similar_query_terms(ln, tok)]
+                if any(abs(i - j) <= 15 for i in p_e for j in p_l):
+                    found_loc = True
+                    break
+            if not found_loc:
+                missing_locatives.append(f"{entity} in {loc}")
+
+    # Personal episodic core argument co-occurrence:
+    # When query specifies a distinct subject/relational anchor (e.g. dad, uncle, Rachel)
+    # and a distinct focal object/event anchor (e.g. birthday gift),
+    # require that they co-occur within at least one candidate hit to avoid cross-session unigram pooling.
+    missing_arguments: list[str] = []
+    subjects = [pn for pn in proper_nouns if normalise_query_term(pn.lower()) not in _FOCAL_OBJECT_TERMS] + [
+        w for w in query_terms if w in _RELATIONAL_SUBJECT_TERMS
+    ]
+    focal_objects = [t for t in query_terms if t in _FOCAL_OBJECT_TERMS and t not in subjects]
+    if subjects and focal_objects:
+        has_joint_hit = False
+        for text in hit_texts[:5]:
+            tokens = [normalise_query_term(tok) for tok in tokenize(text)]
+            subj_in_hit = any(any(similar_query_terms(s.lower(), tok) for tok in tokens) for s in subjects)
+            obj_in_hit = any(any(similar_query_terms(fo, tok) for tok in tokens) for fo in focal_objects)
+            if subj_in_hit and obj_in_hit:
+                has_joint_hit = True
+                break
+        if not has_joint_hit:
+            missing_arguments.append(f"{subjects[0]} + {focal_objects[0]}")
+
     # 7. Enforce Anchor Grounding Gating Rule
-    anchor_satisfied = not (missing_proper or missing_compounds or missing_focal)
+    anchor_satisfied = not (missing_proper or missing_compounds or missing_focal or missing_locatives or missing_arguments)
     final_score = min(weighted_score, 0.35) if not anchor_satisfied else weighted_score
 
     return {
@@ -1424,6 +1441,8 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
             "missing_proper": missing_proper,
             "missing_compounds": missing_compounds,
             "missing_focal": missing_focal,
+            "missing_locatives": missing_locatives,
+            "missing_arguments": missing_arguments,
             "capped": not anchor_satisfied,
         },
     }
