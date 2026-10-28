@@ -45,11 +45,27 @@ def _tokenize_pure(text: str) -> list[str]:
         token = match.group(0).lower().strip("./:+-")
         if token:
             tokens.append(token)
+            if "-" in token:
+                for part in token.split("-"):
+                    cleaned = part.strip("./:+-")
+                    if cleaned and cleaned != token:
+                        tokens.append(cleaned)
     return tokens
 
 
 def tokenize(text: str) -> list[str]:
-    return NATIVE.tokenize(text) if NATIVE is not None else _tokenize_pure(text)
+    if NATIVE is not None:
+        raw = NATIVE.tokenize(text)
+        tokens: list[str] = []
+        for t in raw:
+            tokens.append(t)
+            if "-" in t:
+                for part in t.split("-"):
+                    cleaned = part.strip("./:+-")
+                    if cleaned and cleaned != t:
+                        tokens.append(cleaned)
+        return tokens
+    return _tokenize_pure(text)
 
 
 def term_counts(text: str) -> Counter[str]:
