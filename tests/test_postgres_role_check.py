@@ -427,3 +427,66 @@ def test_cmd_postgres_role_check_records_probe_failures(
     codes = {finding["code"] for finding in report["findings"]}
     assert "postgres_role_probe_failed" in codes
     assert "postgres_role_app_probe_missing" in codes
+
+
+def test_cmd_postgres_role_check_accounts_for_zero_delete_tables(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Zero-DELETE tables (observations, knowledge_pages) have DELETE revoked from
+    # consolidator per infra/postgres/roles.sql. The probe must account for them
+    # and pass when consolidator holds DELETE on all other tables.
+    table_rows = [
+        ("audit_log", False, False, False),
+        ("observations", False, False, True),
+        ("knowledge_pages", False, False, True),
+        ("memories", True, False, True),
+        ("entities", True, False, True),
+    ]
+    consolidator = role_script(
+        current_user="consolidator_user",
+        table_rows=table_rows,
+    )
+    install_fake_psycopg(
+        monkeypatch,
+        {"app_user": role_script(), "consolidator_user": consolidator},
+    )
+
+    cmd_postgres_role_check(make_args())
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["ok"] is True
+    assert report["findings"] == []
+    sole_write = next(c for c in report["checks"] if c["name"] == "consolidator_sole_write")
+    assert sole_write["ok"] is True
+    assert sole_write["delete_table_count"] == 2
+    assert sole_write["table_count"] == 5
+    assert sole_write["zero_delete_tables"] == ["knowledge_pages", "observations"]
+
+
+def test_cmd_postgres_role_check_fails_on_zero_delete_leak_to_consolidator(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # If consolidator holds DELETE on a Zero-DELETE table, it must fail closed.
+    table_rows = [
+        ("audit_log", False, False, False),
+        ("observations", True, False, True),  # leak: consolidator should not have DELETE
+        ("knowledge_pages", False, False, True),
+        ("memories", True, False, True),
+    ]
+    consolidator = role_script(
+        current_user="consolidator_user",
+        table_rows=table_rows,
+    )
+    install_fake_psycopg(
+        monkeypatch,
+        {"app_user": role_script(), "consolidator_user": consolidator},
+    )
+
+    with pytest.raises(SystemExit):
+        cmd_postgres_role_check(make_args())
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["ok"] is False
+    codes = {finding["code"] for finding in report["findings"]}
+    assert "consolidator_sole_write_failed" in codes
+

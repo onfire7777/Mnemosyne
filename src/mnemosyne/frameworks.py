@@ -29,8 +29,9 @@ import unicodedata
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from contextvars import ContextVar
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Callable
+from uuid import uuid4
 
 log = logging.getLogger(__name__)
 
@@ -2035,3 +2036,667 @@ def ask(fw: dict[str, Any], units: list[str], question: str, numbers: list[int] 
     user = f"{fw.get('document', '')}\n\nSOURCE UNITS:\n{_units_block(units)}\n\nQUESTION: {question}"
     data = chat_json(system, user, 4096, "ask")
     return _answer_result(data, set(supplied))
+
+
+# ===========================================================================
+# 1-Line AutoMemorySession Middleware SDK & Adaptive Memory Coordination
+# ===========================================================================
+
+_CONSTRAINT_KEYWORDS = frozenset({
+    "always", "never", "must", "prefer", "preference", "preferring", "prefers",
+    "don't", "dont", "do not", "rule", "constraint", "mandatory", "forbidden",
+    "require", "requires", "requirement", "restrict", "restriction", "cannot",
+    "can't", "cant", "should not", "shouldn't",
+})
+
+_GOAL_KEYWORDS = frozenset({
+    "goal", "plan", "planning", "want to", "aim to", "need to", "objective",
+    "decided", "decision", "will do", "intend to", "intention", "milestone",
+    "target", "try to", "trying to", "going to",
+})
+
+_FIRST_PERSON_PATTERNS = [
+    re.compile(r"\b(?:i am|i'm|i live|i work|i have|i own|i bought|my name|my email|my dog|my cat|my brother|my sister|my wife|my husband)\b", re.IGNORECASE),
+]
+
+_ACKNOWLEDGMENT_PATTERNS = [
+    re.compile(r"^(?:ok|okay|thanks|thank you|thx|got it|cool|sure|yes|no|yep|nope|bye|hello|hi|hey|good morning|good evening)\.?$", re.IGNORECASE),
+]
+
+
+def score_turn_novelty(turn_text: str, prior_turns: list[str] | None = None) -> float:
+    """Compute dynamic turn novelty and salience score in [0.0, 1.0].
+
+    High salience (0.80 - 0.95): explicit constraints, user directives, goals, and decisions.
+    Medium salience (0.50 - 0.75): factual claims, first-person statements, informative queries.
+    Low salience (0.20 - 0.30): conversational acknowledgments, chit-chat, boilerplate.
+    """
+    if not isinstance(turn_text, str) or not turn_text.strip():
+        return 0.0
+
+    cleaned = turn_text.strip()
+    lower = cleaned.lower()
+    words = set(re.findall(r"\b\w+\b", lower))
+    if not words:
+        return 0.0
+
+    # Routine conversational acknowledgments
+    for pat in _ACKNOWLEDGMENT_PATTERNS:
+        if pat.match(lower):
+            return 0.25
+
+    # Check for constraint keywords
+    has_constraint = bool(words & _CONSTRAINT_KEYWORDS)
+
+    # Check for goal / decision keywords
+    has_goal = bool(words & _GOAL_KEYWORDS)
+
+    # Base novelty score
+    if has_constraint:
+        base_score = 0.90
+    elif has_goal:
+        base_score = 0.85
+    else:
+        # Check for first-person declarative patterns
+        has_fp = any(pat.search(lower) for pat in _FIRST_PERSON_PATTERNS)
+        if has_fp:
+            base_score = 0.75
+        else:
+            # Check for factual/metrics patterns (e.g. status codes, numerical metrics, technical terms)
+            has_metrics = bool(re.search(r"\b\d+\b", lower))
+            # Information density scaling based on distinct words and length
+            word_count = len(words)
+            density = min(1.0, word_count / 20.0)
+            base_score = round(min(0.70, max(0.35, 0.40 + 0.30 * density + (0.10 if has_metrics else 0.0))), 4)
+
+    # Repetition check against prior turns
+    if prior_turns:
+        prior_words: set[str] = set()
+        for p in prior_turns:
+            prior_words.update(re.findall(r"\b\w+\b", p.lower()))
+        if words and prior_words:
+            overlap = len(words & prior_words) / len(words)
+            if overlap > 0.8:
+                base_score = max(0.1, base_score * (1.0 - overlap * 0.8))
+
+    return round(base_score, 4)
+
+
+def adaptive_context_budget(
+    confidence: float = 0.5,
+    query_complexity: int = 1,
+    max_budget: int = 4096,
+    *,
+    total_budget: int | None = None,
+    active_goal_count: int = 0,
+    history_turn_count: int = 0,
+    turn_novelty: float = 0.5,
+) -> dict[str, int]:
+    """Dynamically calibrate and partition the token context sub-budgets.
+
+    Partitions the context window across:
+    - goals: active goals and constraints
+    - knowledge: living knowledge pages and verified observations
+    - evidence: episodic/semantic memory retrieval hits
+    """
+    effective_total = total_budget if total_budget is not None else max_budget
+    if effective_total <= 0:
+        return {"goals": 0, "knowledge": 0, "evidence": 0}
+
+    # Dynamic ratio computation
+    goal_ratio = 0.15 + (0.05 * min(4, active_goal_count))
+    if turn_novelty > 0.7:
+        evidence_ratio = 0.55 + 0.15 * (turn_novelty - 0.7) / 0.3
+        knowledge_ratio = max(0.15, 1.0 - goal_ratio - evidence_ratio)
+    else:
+        evidence_ratio = 0.50
+        knowledge_ratio = max(0.20, 1.0 - goal_ratio - evidence_ratio)
+
+    total_ratio = goal_ratio + knowledge_ratio + evidence_ratio
+    goal_ratio /= total_ratio
+    knowledge_ratio /= total_ratio
+    evidence_ratio /= total_ratio
+
+    goals_tokens = int(effective_total * goal_ratio)
+    knowledge_tokens = int(effective_total * knowledge_ratio)
+    evidence_tokens = effective_total - (goals_tokens + knowledge_tokens)
+
+    return {
+        "goals": max(0, goals_tokens),
+        "knowledge": max(0, knowledge_tokens),
+        "evidence": max(0, evidence_tokens),
+    }
+
+
+def _extract_text_content(val: Any) -> str:
+    """Extract string content from diverse LLM/chat message or response representations."""
+    if isinstance(val, str):
+        return val
+    if isinstance(val, dict):
+        if "content" in val and isinstance(val["content"], str):
+            return val["content"]
+        if "choices" in val and isinstance(val["choices"], list) and val["choices"]:
+            c0 = val["choices"][0]
+            if isinstance(c0, dict):
+                msg = c0.get("message")
+                if isinstance(msg, dict) and "content" in msg:
+                    return str(msg["content"])
+                if "text" in c0:
+                    return str(c0["text"])
+    if hasattr(val, "content") and isinstance(val.content, str):
+        return val.content
+    return str(val) if val is not None else ""
+
+
+class AutoMemorySession:
+    """1-Line drop-in memory session middleware for any chat callable.
+
+    Automatically coordinates:
+    1. Pre-turn: dynamic turn-velocity & goal-stability context retrieval with calibrated sub-budgets.
+    2. Turn invocation: ContextVar isolation preventing thread state leaks.
+    3. Post-turn: dynamic novelty scoring, dual episodic+working turn capture, and active goal detection.
+    4. Session exit / close: automatic consolidation into durable observations and assertions.
+    """
+
+    def __init__(
+        self,
+        engine: Any,
+        tenant_id: str,
+        user_id: str,
+        session_id: str | None = None,
+        branch: str = "main",
+        role: str = "agent",
+        agent_id: str = "assistant",
+        task_id: str = "chat",
+        token_budget: int = 4096,
+        max_working_turns: int = 10,
+        auto_consolidate: bool = True,
+        cache: str | None = None,
+        model: str | None = None,
+    ) -> None:
+        if not tenant_id or not user_id:
+            raise ValueError("tenant_id and user_id must be non-empty strings")
+        self.engine = engine
+        self.tenant_id = tenant_id
+        self.user_id = user_id
+        self.session_id = session_id or f"sess-{uuid4().hex[:12]}"
+        self.branch = branch
+        self.role = role
+        self.agent_id = agent_id
+        self.task_id = task_id
+        self.token_budget = token_budget
+        self.max_working_turns = max_working_turns
+        self.auto_consolidate = auto_consolidate
+        self.cache = cache
+        self.model = model
+
+        self._turn_timestamps: list[float] = []
+        self._recent_goal_changes: list[int] = []
+        self._turn_count: int = 0
+        self._session_evidence_cids: list[str] = []
+        self._active_goals: list[str] = []
+        self._active_constraints: list[str] = []
+        self._last_user_turn_text: str = ""
+        self._last_user_evidence_cid: str = ""
+        self._closed: bool = False
+
+    def pre_turn_retrieve(self, query: str) -> dict[str, Any]:
+        """Perform adaptive context retrieval with dynamic sub-budget partitioning."""
+        now = time.monotonic()
+        delta_t = (now - self._turn_timestamps[-1]) if self._turn_timestamps else 999.0
+        self._turn_timestamps.append(now)
+
+        recent_goal_churn = bool(
+            self._recent_goal_changes and (self._turn_count - self._recent_goal_changes[-1] <= 2)
+        )
+
+        if recent_goal_churn:
+            goals_pct = 0.30
+            evidence_pct = 0.45
+            knowledge_pct = 0.25
+        else:
+            goals_pct = 0.15
+            knowledge_pct = 0.25
+            evidence_pct = 0.60
+
+        turn_window = 6 if delta_t < 10.0 else 3
+
+        active_goals: list[str] = list(self._active_goals)
+        active_constraints: list[str] = list(self._active_constraints)
+        recent_turns: list[str] = []
+
+        if hasattr(self.engine, "list_working"):
+            try:
+                items = self.engine.list_working(self.tenant_id, self.session_id)
+                for it in items:
+                    status = getattr(it, "status", "active")
+                    if status != "active":
+                        continue
+                    k = getattr(it, "kind", "")
+                    content = getattr(it, "content", "")
+                    if k == "active_goal" and content not in active_goals:
+                        active_goals.append(content)
+                    elif k in ("active_constraint", "constraint") and content not in active_constraints:
+                        active_constraints.append(content)
+                    elif k == "conversation_turn":
+                        recent_turns.append(content)
+            except Exception as exc:
+                log.debug("AutoMemorySession list_working error: %s", exc)
+
+        kp_snippets: list[str] = []
+        if hasattr(self.engine, "knowledge_page_list"):
+            try:
+                kps = self.engine.knowledge_page_list(self.tenant_id, branch=self.branch, limit=3)
+                for p in kps:
+                    kp_snippets.append(f"[{p.path}]: {p.title}\n{p.content_markdown[:250]}")
+            except Exception as exc:
+                log.debug("AutoMemorySession knowledge_page_list error: %s", exc)
+
+        obs_snippets: list[str] = []
+        if hasattr(self.engine, "observation_list"):
+            try:
+                obs_list = self.engine.observation_list(self.tenant_id, branch=self.branch, status="active", limit=3)
+                for o in obs_list:
+                    obs_snippets.append(f"({o.subject} / {o.topic}): {o.content}")
+            except Exception as exc:
+                log.debug("AutoMemorySession observation_list error: %s", exc)
+
+        evidence_hits: list[str] = []
+        if query and hasattr(self.engine, "retrieve"):
+            try:
+                evidence_budget = int(self.token_budget * evidence_pct)
+                ret = self.engine.retrieve(
+                    self.tenant_id,
+                    query=query,
+                    branch=self.branch,
+                    token_budget=evidence_budget,
+                )
+                for h in getattr(ret, "hits", [])[:5]:
+                    c = getattr(h, "content", getattr(h, "text", ""))
+                    if c:
+                        evidence_hits.append(f"[cid:{getattr(h, 'cid', '')}] {c[:250]}")
+            except Exception as exc:
+                log.debug("AutoMemorySession retrieve error: %s", exc)
+
+        sections: list[str] = []
+        if active_goals or active_constraints:
+            g_lines: list[str] = []
+            if active_goals:
+                g_lines.append("Active Goals:\n" + "\n".join(f"- {g}" for g in active_goals))
+            if active_constraints:
+                g_lines.append("Active Constraints:\n" + "\n".join(f"- {c}" for c in active_constraints))
+            sections.append("### Active Goals & Constraints\n" + "\n".join(g_lines))
+
+        if kp_snippets or obs_snippets:
+            k_lines: list[str] = []
+            if kp_snippets:
+                k_lines.append("Living Knowledge Pages:\n" + "\n".join(kp_snippets))
+            if obs_snippets:
+                k_lines.append("Verified Observations:\n" + "\n".join(obs_snippets))
+            sections.append("### Living Knowledge & Observations\n" + "\n".join(k_lines))
+
+        if evidence_hits:
+            sections.append("### Relevant Memory Evidence\n" + "\n".join(evidence_hits))
+
+        if recent_turns:
+            selected_turns = recent_turns[-turn_window:]
+            sections.append("### Recent Conversation Context\n" + "\n".join(f"- {t}" for t in selected_turns))
+
+        context_str = "\n\n".join(sections)
+        if context_str:
+            context_str = f"<memory_context>\n{context_str}\n</memory_context>"
+
+        return {
+            "context_text": context_str,
+            "sub_budgets": {
+                "goals": goals_pct,
+                "knowledge": knowledge_pct,
+                "evidence": evidence_pct,
+            },
+            "active_goals": active_goals,
+            "active_constraints": active_constraints,
+            "turn_window": turn_window,
+        }
+
+    def post_turn_capture(self, user_text: str, assistant_text: str) -> dict[str, Any]:
+        """Atomically record user and assistant turns into working memory and durable evidence."""
+        from mnemosyne.engine import WorkingMemoryItem
+        from mnemosyne.ids import evidence_cid
+        from mnemosyne.models import Evidence, utc_now
+
+        self._turn_count += 1
+        now = utc_now()
+        expires = now + timedelta(hours=12)
+        user_salience = score_turn_novelty(user_text)
+
+        # 1. Mirror User Turn to durable Evidence
+        cid_user = evidence_cid(
+            user_text,
+            tenant_id=self.tenant_id,
+            user_id=self.user_id,
+            source_type="chat",
+            content_pointer=None,
+            modality="text",
+            sensitivity=0,
+        )
+        ev_user = Evidence(
+            tenant_id=self.tenant_id,
+            user_id=self.user_id,
+            session_id=self.session_id,
+            actor="user",
+            source_type="chat",
+            content=user_text,
+            branch=self.branch,
+            cid=cid_user,
+            created_at=now,
+        )
+        if hasattr(self.engine, "append_evidence"):
+            self.engine.append_evidence(ev_user, branch=self.branch)
+        self._session_evidence_cids.append(cid_user)
+        self._last_user_turn_text = user_text
+        self._last_user_evidence_cid = cid_user
+
+        # 2. Store User Turn in Working Memory
+        item_user = WorkingMemoryItem(
+            item_id=f"turn-user-{uuid4().hex[:8]}",
+            tenant_id=self.tenant_id,
+            session_id=self.session_id,
+            user_id=self.user_id,
+            agent_id=self.agent_id,
+            kind="conversation_turn",
+            task_id=self.task_id,
+            content=user_text,
+            created_at=now,
+            expires_at=expires,
+            evidence_ids=[cid_user],
+            salience=user_salience,
+        )
+        if hasattr(self.engine, "put_working"):
+            try:
+                self.engine.put_working(item_user)
+            except Exception as exc:
+                log.debug("AutoMemorySession put_working user turn error: %s", exc)
+
+        # 3. Mirror Assistant Turn to durable Evidence
+        cid_asst = evidence_cid(
+            assistant_text,
+            tenant_id=self.tenant_id,
+            user_id=self.user_id,
+            source_type="chat",
+            content_pointer=None,
+            modality="text",
+            sensitivity=0,
+        )
+        ev_asst = Evidence(
+            tenant_id=self.tenant_id,
+            user_id=self.user_id,
+            session_id=self.session_id,
+            actor="assistant",
+            source_type="chat",
+            content=assistant_text,
+            branch=self.branch,
+            cid=cid_asst,
+            created_at=now,
+        )
+        if hasattr(self.engine, "append_evidence"):
+            self.engine.append_evidence(ev_asst, branch=self.branch)
+        self._session_evidence_cids.append(cid_asst)
+
+        # 4. Store Assistant Turn in Working Memory
+        item_asst = WorkingMemoryItem(
+            item_id=f"turn-asst-{uuid4().hex[:8]}",
+            tenant_id=self.tenant_id,
+            session_id=self.session_id,
+            user_id=self.user_id,
+            agent_id=self.agent_id,
+            kind="conversation_turn",
+            task_id=self.task_id,
+            content=assistant_text,
+            created_at=now,
+            expires_at=expires,
+            evidence_ids=[cid_asst],
+            salience=0.50,
+        )
+        if hasattr(self.engine, "put_working"):
+            try:
+                self.engine.put_working(item_asst)
+            except Exception as exc:
+                log.debug("AutoMemorySession put_working asst turn error: %s", exc)
+
+        # 5. Extract Active Goals & Constraints from User Turn
+        goal_match = re.search(r"(?:my goal is|i want to|aim to|need to|objective is)\s+([^.!?\n]+)", user_text, re.IGNORECASE)
+        if goal_match:
+            goal_text = goal_match.group(0).strip()
+            if goal_text not in self._active_goals:
+                self._active_goals.append(goal_text)
+                self._recent_goal_changes.append(self._turn_count)
+                g_item = WorkingMemoryItem(
+                    item_id=f"goal-{uuid4().hex[:8]}",
+                    tenant_id=self.tenant_id,
+                    session_id=self.session_id,
+                    user_id=self.user_id,
+                    agent_id=self.agent_id,
+                    kind="active_goal",
+                    task_id=self.task_id,
+                    content=goal_text,
+                    created_at=now,
+                    expires_at=expires,
+                    evidence_ids=[cid_user],
+                    salience=0.90,
+                )
+                if hasattr(self.engine, "put_working"):
+                    try:
+                        self.engine.put_working(g_item)
+                    except Exception as exc:
+                        log.debug("AutoMemorySession put_working goal error: %s", exc)
+
+        constraint_match = re.search(r"(?:always|never|must|prefer)\s+([^.!?\n]+)", user_text, re.IGNORECASE)
+        if constraint_match:
+            constraint_text = constraint_match.group(0).strip()
+            if constraint_text not in self._active_constraints:
+                self._active_constraints.append(constraint_text)
+                self._recent_goal_changes.append(self._turn_count)
+                c_item = WorkingMemoryItem(
+                    item_id=f"constraint-{uuid4().hex[:8]}",
+                    tenant_id=self.tenant_id,
+                    session_id=self.session_id,
+                    user_id=self.user_id,
+                    agent_id=self.agent_id,
+                    kind="active_constraint",
+                    task_id=self.task_id,
+                    content=constraint_text,
+                    created_at=now,
+                    expires_at=expires,
+                    evidence_ids=[cid_user],
+                    salience=0.92,
+                )
+                if hasattr(self.engine, "put_working"):
+                    try:
+                        self.engine.put_working(c_item)
+                    except Exception as exc:
+                        log.debug("AutoMemorySession put_working constraint error: %s", exc)
+
+        return {
+            "turn": self._turn_count,
+            "salience": user_salience,
+            "user_cid": cid_user,
+            "assistant_cid": cid_asst,
+            "active_goals": list(self._active_goals),
+            "active_constraints": list(self._active_constraints),
+        }
+
+    def wrap(self, chat_fn: Callable[[Any], Any]) -> Callable[[Any], Any]:
+        """Wrap a chat callable with transparent, bidirectional memory coordination."""
+
+        def _wrapped(messages: Any, *args: Any, **kwargs: Any) -> Any:
+            query = ""
+            if isinstance(messages, str):
+                query = messages
+            elif isinstance(messages, list) and messages:
+                last_msg = messages[-1]
+                if isinstance(last_msg, dict):
+                    query = str(last_msg.get("content", ""))
+                elif hasattr(last_msg, "content"):
+                    query = str(last_msg.content)
+
+            # 1. Pre-turn retrieval
+            retrieval = self.pre_turn_retrieve(query)
+            context_text = retrieval["context_text"]
+
+            # 2. Inject context into prompt
+            if context_text:
+                if isinstance(messages, str):
+                    augmented_messages: Any = f"{context_text}\n\n{messages}"
+                elif isinstance(messages, list):
+                    augmented_messages = list(messages)
+                    if augmented_messages and isinstance(augmented_messages[0], dict) and augmented_messages[0].get("role") == "system":
+                        sys_copy = dict(augmented_messages[0])
+                        sys_copy["content"] = f"{context_text}\n\n{sys_copy['content']}"
+                        augmented_messages[0] = sys_copy
+                    else:
+                        augmented_messages.insert(0, {"role": "system", "content": context_text})
+                else:
+                    augmented_messages = messages
+            else:
+                augmented_messages = messages
+
+            # 3. Invoke chat callable within safe ContextVar scope
+            with framework_context(cache=self.cache, model=self.model):
+                response = chat_fn(augmented_messages, *args, **kwargs)
+
+            # 4. Post-turn turn capture
+            asst_text = _extract_text_content(response)
+            self.post_turn_capture(query, asst_text)
+
+            return response
+
+        setattr(_wrapped, "session", self)
+        return _wrapped
+
+    def step(self, user_input: str | dict[str, Any], chat_fn: Callable[[Any], Any]) -> Any:
+        """Execute a single interactive conversation turn with automatic memory coordination."""
+        wrapped = self.wrap(chat_fn)
+        return wrapped(user_input)
+
+    def consolidate(self) -> dict[str, Any]:
+        """Consolidate session working memory and active directives into durable observations."""
+        from mnemosyne.observations import Observation, ProofQuote
+
+        consolidated_obs: list[str] = []
+        user_cid = self._last_user_evidence_cid
+        user_text = self._last_user_turn_text
+
+        # Consolidate active goals
+        for goal in self._active_goals:
+            pq = None
+            if user_cid and user_text and goal in user_text:
+                start = user_text.find(goal)
+                end = start + len(goal)
+                sha = hashlib.sha256(goal.encode("utf-8")).hexdigest()
+                pq = ProofQuote(cid=user_cid, quote=goal, start=start, end=end, sha256=sha)
+            elif user_cid and user_text:
+                sha = hashlib.sha256(user_text.encode("utf-8")).hexdigest()
+                pq = ProofQuote(cid=user_cid, quote=user_text, start=0, end=len(user_text), sha256=sha)
+
+            obs = Observation(
+                tenant_id=self.tenant_id,
+                observation_id=f"obs-goal-{uuid4().hex[:8]}",
+                user_id=self.user_id,
+                subject="UserGoal",
+                topic="Goal",
+                content=f"User stated active goal: {goal}",
+                proof_quotes=[pq] if pq is not None else [],
+                source_evidence_cids=[user_cid] if user_cid else [],
+                branch=self.branch,
+            )
+            if hasattr(self.engine, "observation_upsert"):
+                try:
+                    self.engine.observation_upsert(obs, branch=self.branch)
+                    consolidated_obs.append(obs.observation_id)
+                except Exception as exc:
+                    log.debug("AutoMemorySession consolidate goal observation error: %s", exc)
+
+        # Consolidate active constraints
+        for constraint in self._active_constraints:
+            pq = None
+            if user_cid and user_text and constraint in user_text:
+                start = user_text.find(constraint)
+                end = start + len(constraint)
+                sha = hashlib.sha256(constraint.encode("utf-8")).hexdigest()
+                pq = ProofQuote(cid=user_cid, quote=constraint, start=start, end=end, sha256=sha)
+            elif user_cid and user_text:
+                sha = hashlib.sha256(user_text.encode("utf-8")).hexdigest()
+                pq = ProofQuote(cid=user_cid, quote=user_text, start=0, end=len(user_text), sha256=sha)
+
+            obs = Observation(
+                tenant_id=self.tenant_id,
+                observation_id=f"obs-constraint-{uuid4().hex[:8]}",
+                user_id=self.user_id,
+                subject="UserPreference",
+                topic="Constraint",
+                content=f"User stated constraint: {constraint}",
+                proof_quotes=[pq] if pq is not None else [],
+                source_evidence_cids=[user_cid] if user_cid else [],
+                branch=self.branch,
+            )
+            if hasattr(self.engine, "observation_upsert"):
+                try:
+                    self.engine.observation_upsert(obs, branch=self.branch)
+                    consolidated_obs.append(obs.observation_id)
+                except Exception as exc:
+                    log.debug("AutoMemorySession consolidate constraint observation error: %s", exc)
+
+        return {
+            "consolidated": True,
+            "observations_created": consolidated_obs,
+            "turns_processed": self._turn_count,
+            "evidence_count": len(self._session_evidence_cids),
+        }
+
+    def close(self) -> dict[str, Any]:
+        """Close the session and trigger auto-consolidation if enabled."""
+        if not self._closed:
+            self._closed = True
+            if self.auto_consolidate:
+                return self.consolidate()
+        return {"closed": True}
+
+    def __enter__(self) -> AutoMemorySession:
+        return self
+
+    def __exit__(self, _exc_type: Any, _exc_val: Any, _exc_tb: Any) -> None:
+        self.close()
+
+
+def wrap_chat_callable(
+    chat_fn: Callable[[Any], Any],
+    engine: Any,
+    tenant_id: str,
+    user_id: str,
+    session_id: str | None = None,
+    branch: str = "main",
+    role: str = "agent",
+    token_budget: int = 4096,
+    max_working_turns: int = 10,
+    auto_consolidate: bool = True,
+    cache: str | None = None,
+    model: str | None = None,
+    **kwargs: Any,
+) -> Callable[[Any], Any]:
+    """1-Line factory helper wrapping any chat callable with AutoMemorySession middleware."""
+    session = AutoMemorySession(
+        engine=engine,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        session_id=session_id,
+        branch=branch,
+        role=role,
+        token_budget=token_budget,
+        max_working_turns=max_working_turns,
+        auto_consolidate=auto_consolidate,
+        cache=cache,
+        model=model,
+        **kwargs,
+    )
+    return session.wrap(chat_fn)
+

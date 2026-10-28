@@ -31,7 +31,7 @@ from mnemosyne.models import Hit, iso_utc, parse_dt, utc_now
 from mnemosyne.network_safety import safe_urlopen, validate_fetch_url
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.security import TrustTier, sanitize_retrieved_text, trust_weight
-from mnemosyne.text import cosine, hashing_embedding, lexical_score, tokenize
+from mnemosyne.text import TAXONOMIC_EXPANSIONS, cosine, hashing_embedding, lexical_score, tokenize
 
 
 QUERY_SUPPORT_THRESHOLD = 2.0 / 3.0
@@ -812,8 +812,12 @@ def normalise_query_term(token: str) -> str:
 
 
 _SYNONYM_SETS = (
-    frozenset({"sibling", "siblings", "brother", "brothers", "sister", "sisters"}),
-    frozenset({"pet", "pets", "dog", "dogs", "cat", "cats"}),
+    frozenset({"mom", "mother", "mama"}),
+    frozenset({"dad", "father", "papa"}),
+    frozenset({"grandma", "grandmother"}),
+    frozenset({"grandpa", "grandfather"}),
+    frozenset({"kid", "child"}),
+    frozenset({"kids", "children"}),
 )
 
 
@@ -822,6 +826,11 @@ def similar_query_terms(left: str, right: str) -> bool:
         return True
     if any(left in s and right in s for s in _SYNONYM_SETS):
         return True
+    for hyp_key, hyponyms in TAXONOMIC_EXPANSIONS.items():
+        if left == hyp_key or right == hyp_key:
+            target = right if left == hyp_key else left
+            if any(target == h or target in tokenize(h) for h in hyponyms if len(target) > 2):
+                return True
     shorter, longer = (left, right) if len(left) <= len(right) else (right, left)
     if len(shorter) >= 4 and longer.startswith(shorter):
         suffix = longer[len(shorter):]
@@ -1328,9 +1337,10 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
             if not found and norm not in missing_focal:
                 missing_focal.append(norm)
 
-    # 6. Specificity-weighted unigram scoring
+    # 6. Specificity-weighted unigram scoring with dynamic corpus IDF
     query_terms: list[str] = []
     term_weights: dict[str, float] = {}
+    n_docs = max(len(hit_texts), 1)
     for token in tokenize(query):
         term = normalise_query_term(token)
         if len(term) <= 2 or term in QUERY_SUPPORT_STOPWORDS or term in query_terms:
@@ -1338,14 +1348,19 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
         query_terms.append(term)
         norm = term.lower()
         if any(normalise_query_term(pn.lower()) == norm for pn in proper_nouns):
-            weight = 3.5
+            base_w = 3.5
         elif norm in _FOCAL_OBJECT_TERMS:
-            weight = 3.0
+            base_w = 3.0
         elif norm in _LOW_WEIGHT_PREDICATES:
-            weight = 0.6
+            base_w = 0.6
         else:
-            weight = 1.5
-        term_weights[term] = weight
+            base_w = 1.5
+
+        # Dynamic corpus IDF: log((N + 1) / (df + 0.5))
+        df = sum(1 for text in hit_texts if any(similar_query_terms(norm, normalise_query_term(t)) for t in tokenize(text)))
+        corpus_idf = math.log((n_docs + 1.0) / (df + 0.5))
+        dynamic_factor = max(0.5, min(2.5, corpus_idf / 1.5))
+        term_weights[term] = base_w * dynamic_factor
 
     if not query_terms:
         # Fallback to minimal stopwords if all query terms are conversational stopwords
@@ -1368,6 +1383,9 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
                 "missing_proper": [],
                 "missing_compounds": [],
                 "missing_focal": [],
+                "missing_locatives": [],
+                "missing_arguments": [],
+                "missing_conjunctions": [],
                 "capped": False,
             },
         }
@@ -1404,6 +1422,30 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
             if not found_loc:
                 missing_locatives.append(f"{entity} in {loc}")
 
+    # Duration grounding: "how long [was/have/stayed] ... in [Location]"
+    if re.search(r"\bhow\s+long\b", query, re.I):
+        loc_match = re.search(r"\b(?:in|at)\s+([A-Z][A-Za-z]+)\b", query)
+        if loc_match:
+            loc_target = normalise_query_term(loc_match.group(1).lower())
+            if loc_target not in QUERY_SUPPORT_STOPWORDS and len(loc_target) > 2:
+                dur_regex = re.compile(
+                    r"\b(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|several|a\s+few|a\s+couple(?:\s+of)?|half\s+a?)\s+(?:days?|weeks?|months?|years?|hours?)(?!\s+old)\b",
+                    re.IGNORECASE,
+                )
+                has_loc_duration = False
+                for text in hit_texts[:5]:
+                    sentences = re.split(r"[.!?\n]+", text)
+                    for sent in sentences:
+                        sent_tokens = [normalise_query_term(t) for t in tokenize(sent)]
+                        has_loc_in_sent = any(similar_query_terms(loc_target, tok) for tok in sent_tokens)
+                        if has_loc_in_sent and dur_regex.search(sent):
+                            has_loc_duration = True
+                            break
+                    if has_loc_duration:
+                        break
+                if not has_loc_duration:
+                    missing_locatives.append(f"how long in {loc_match.group(1)}")
+
     # Personal episodic core argument co-occurrence:
     # When query specifies a distinct subject/relational anchor (e.g. dad, uncle, Rachel)
     # and a distinct focal object/event anchor (e.g. birthday gift),
@@ -1425,8 +1467,52 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
         if not has_joint_hit:
             missing_arguments.append(f"{subjects[0]} + {focal_objects[0]}")
 
+    # Conjunctive Noun-Phrase Grounding: "X and Y", "both X and Y"
+    missing_conjunctions: list[str] = []
+    conjunction_pairs: list[tuple[str, str]] = []
+    conj_matches = re.finditer(
+        r"(?:\b(between|from)\s+)?\b([A-Za-z0-9'-]+)\s+and\s+(?:the\s+)?([A-Za-z0-9'-]+)\b",
+        query,
+        re.I,
+    )
+    for m in conj_matches:
+        prefix, c1, c2 = m.group(1), m.group(2), m.group(3)
+        if prefix:
+            continue
+        start_idx = m.start()
+        preceding = query[:start_idx].strip().lower()
+        if preceding.endswith("between") or preceding.endswith("from"):
+            continue
+        n1, n2 = normalise_query_term(c1.lower()), normalise_query_term(c2.lower())
+        if (
+            n1 not in QUERY_SUPPORT_STOPWORDS
+            and n2 not in QUERY_SUPPORT_STOPWORDS
+            and len(n1) > 2
+            and len(n2) > 2
+            and not (c1.isdigit() and c2.isdigit())
+        ):
+            conjunction_pairs.append((c1, c2))
+
+    for c1, c2 in conjunction_pairs:
+        n1, n2 = normalise_query_term(c1.lower()), normalise_query_term(c2.lower())
+        found_c1 = any(any(similar_query_terms(n1, tok) for tok in tokenize(text)) for text in hit_texts)
+        found_c2 = any(any(similar_query_terms(n2, tok) for tok in tokenize(text)) for text in hit_texts)
+        if not found_c1 and not found_c2:
+            missing_conjunctions.append(f"conjunction({c1} and {c2}) missing {c1} and {c2}")
+        elif not found_c1:
+            missing_conjunctions.append(f"conjunction({c1} and {c2}) missing {c1}")
+        elif not found_c2:
+            missing_conjunctions.append(f"conjunction({c1} and {c2}) missing {c2}")
+
     # 7. Enforce Anchor Grounding Gating Rule
-    anchor_satisfied = not (missing_proper or missing_compounds or missing_focal or missing_locatives or missing_arguments)
+    anchor_satisfied = not (
+        missing_proper
+        or missing_compounds
+        or missing_focal
+        or missing_locatives
+        or missing_arguments
+        or missing_conjunctions
+    )
     final_score = min(weighted_score, 0.35) if not anchor_satisfied else weighted_score
 
     return {
@@ -1443,6 +1529,7 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
             "missing_focal": missing_focal,
             "missing_locatives": missing_locatives,
             "missing_arguments": missing_arguments,
+            "missing_conjunctions": missing_conjunctions,
             "capped": not anchor_satisfied,
         },
     }

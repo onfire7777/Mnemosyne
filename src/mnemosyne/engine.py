@@ -89,6 +89,22 @@ from mnemosyne.models import (
     parse_dt,
     utc_now,
 )
+from mnemosyne.observations import (
+    Observation,
+    ObservationConflict,
+    compute_dynamic_standing,
+    compute_independent_source_count,
+    reconcile_observation,
+    verify_observation_proof_quotes,
+)
+from mnemosyne.knowledge_pages import (
+    CustodyNotFoundError,
+    KnowledgePage,
+    KnowledgePageConflict,
+    render_knowledge_page_markdown,
+    validate_knowledge_page_path,
+    verify_knowledge_page_acyclic_custody,
+)
 from mnemosyne.pipeline import run_retrieval_pipeline
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.privacy import ErasureMode
@@ -133,6 +149,7 @@ from mnemosyne.erasure_ids import (
     redact_erased_cids,
 )
 from mnemosyne.standing import (
+    SELF_GENERATED_CEILING,
     standing,
     standing_abstention_report,
     standing_erasure_cascade_report,
@@ -2505,6 +2522,145 @@ class MemoryEngine(Protocol):
     def list_intentions(self, tenant_id: str) -> list[Intention]:
         raise NotImplementedError
 
+    # --- Observations ---
+    def observation_upsert(self, observation: Any, branch: str = "main") -> str:
+        raise NotImplementedError
+
+    def observation_get(
+        self, tenant_id: str, observation_id: str, branch: str = "main", *, validate_custody: bool = True
+    ) -> Any | None:
+        raise NotImplementedError
+
+    def observation_list(
+        self,
+        tenant_id: str,
+        branch: str = "main",
+        *,
+        subject: str | None = None,
+        topic: str | None = None,
+        user_id: str | None = None,
+        status: str = "active",
+        limit: int = 100,
+    ) -> list[Any]:
+        raise NotImplementedError
+
+    def observation_reconcile(
+        self, tenant_id: str, branch: str = "main", *, observation: Any
+    ) -> tuple[Any, bool]:
+        raise NotImplementedError
+
+    def observation_retract(
+        self, tenant_id: str, observation_id: str, branch: str = "main", *, reason: str = "user_retraction"
+    ) -> bool:
+        raise NotImplementedError
+
+    def get_observation_record(self, tenant_id: str, observation_id: str, branch: str = "main") -> dict[str, Any] | None:
+        raise NotImplementedError
+
+    def list_observation_records(
+        self, tenant_id: str, branch: str = "main", *, subject: str | None = None, topic: str | None = None, status: str | None = None
+    ) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
+    def save_observation_record(
+        self, tenant_id: str, observation_id: str, record: dict[str, Any], *, branch: str = "main", expected_version: int | None = None
+    ) -> dict[str, Any]:
+        raise NotImplementedError
+
+    # --- Knowledge Pages ---
+    def knowledge_page_create(
+        self,
+        page_or_tenant: Any,
+        page: Any = None,
+        branch: str = "main",
+    ) -> str:
+        raise NotImplementedError
+
+    def knowledge_page_update(
+        self,
+        page_or_tenant: Any,
+        page: Any = None,
+        branch: str = "main",
+        *,
+        expected_version: int | None = None,
+    ) -> Any:
+        raise NotImplementedError
+
+    def knowledge_page_get(
+        self,
+        tenant_id: str,
+        page_id_or_path_or_branch: str | None = None,
+        branch: str = "main",
+        *,
+        page_id: str | None = None,
+        path: str | None = None,
+        validate_custody: bool = True,
+    ) -> Any | None:
+        raise NotImplementedError
+
+    def knowledge_page_list(
+        self,
+        tenant_id: str,
+        branch: str = "main",
+        *,
+        path_prefix: str | None = None,
+        folder: str | None = None,
+        tags: list[str] | None = None,
+        status: str = "active",
+        limit: int = 100,
+    ) -> list[Any]:
+        raise NotImplementedError
+
+    def knowledge_page_render_markdown(
+        self,
+        tenant_id: str,
+        page_id_or_path_or_branch: str | None = None,
+        branch: str = "main",
+        *,
+        page_id: str | None = None,
+        path: str | None = None,
+        include_frontmatter: bool = True,
+        include_citations_ledger: bool = True,
+    ) -> str:
+        raise NotImplementedError
+
+    def knowledge_page_archive(
+        self,
+        tenant_id: str,
+        page_id_or_path_or_branch: str | None = None,
+        branch: str = "main",
+        *,
+        page_id: str | None = None,
+        path: str | None = None,
+        reason: str = "archived",
+        actor: str = "system",
+    ) -> bool:
+        raise NotImplementedError
+
+    def knowledge_page_refresh(
+        self,
+        tenant_id: str,
+        page_id_or_path_or_branch: str | None = None,
+        branch: str = "main",
+        *,
+        page_id: str | None = None,
+        path: str | None = None,
+    ) -> Any:
+        raise NotImplementedError
+
+    def get_knowledge_page_record(self, tenant_id: str, page_id_or_path: str, branch: str = "main") -> dict[str, Any] | None:
+        raise NotImplementedError
+
+    def list_knowledge_page_records(
+        self, tenant_id: str, branch: str = "main", *, path_prefix: str | None = None, tags: list[str] | None = None
+    ) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
+    def save_knowledge_page_record(
+        self, tenant_id: str, page_id: str, record: dict[str, Any], *, branch: str = "main", expected_revision: int | None = None
+    ) -> dict[str, Any]:
+        raise NotImplementedError
+
 
 #: Kill-switch for the candidate-scan memo (default ON — byte-parity-proven in
 #: tests/test_engine_perf_lanes.py; registered in CONFIG-DRIFT-CHECKS.md).
@@ -2682,6 +2838,8 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         self.mental_models: dict[tuple[str, str, str], dict[str, Any]] = {}
         self.document_records: dict[tuple[str, str, str, str], dict[str, Any]] = {}
         self.working_memory: dict[tuple[str, str, str], WorkingMemoryItem] = {}
+        self.observations: dict[tuple[str, str, str], dict[str, Any]] = {}
+        self.knowledge_pages: dict[tuple[str, str, str], dict[str, Any]] = {}
         self.audit_log: list[dict[str, Any]] = []
         self.deletion_log: list[dict[str, Any]] = []
         self.merge_log: list[dict[str, Any]] = []
@@ -3803,6 +3961,10 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             data["mental_models"] = list(self.mental_models.values())
         if self.document_records:
             data["documents"] = list(self.document_records.values())
+        if self.observations:
+            data["observations"] = list(self.observations.values())
+        if self.knowledge_pages:
+            data["knowledge_pages"] = list(self.knowledge_pages.values())
         if encoder.lists or encoder.maps:
             # Large shared source lists and per-source maps are written once (see
             # _SharedValueEncoder); a store without any keeps the exact former layout.
@@ -3855,6 +4017,8 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         # arbitrary scope/answer keys out of the core ledger's marker decoder.
         mental_models = data.pop("mental_models", [])
         documents = data.pop("documents", [])
+        observations = data.pop("observations", [])
+        knowledge_pages = data.pop("knowledge_pages", [])
         # Always decoded, even with no shared table: a store with no large shared value can
         # still carry an escaped user dict that merely looks like a reference (see encode).
         data = _decode_shared_values(data, shared if isinstance(shared, dict) else {})
@@ -3930,6 +4094,16 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 for row in data.get("working_memory", [])
             )
         }
+        self.observations = {
+            (str(row["tenant_id"]), str(row["observation_id"]), str(row.get("branch", "main"))): dict(row)
+            for row in observations
+            if isinstance(row, dict) and "tenant_id" in row and "observation_id" in row
+        }
+        self.knowledge_pages = {
+            (str(row["tenant_id"]), str(row["page_id"]), str(row.get("branch", "main"))): dict(row)
+            for row in knowledge_pages
+            if isinstance(row, dict) and "tenant_id" in row and "page_id" in row
+        }
         self.audit_log = list(data.get("audit_log", []))
         self.deletion_log = list(data.get("deletion_log", []))
         self.merge_log = list(data.get("merge_log", []))
@@ -3968,7 +4142,8 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             self._overlay_settle(reset=True)
             names = (
                 "evidence", "assertions", "relations", "preferences", "entities",
-                "intentions", "mental_models", "document_records", "working_memory", "audit_log",
+                "intentions", "mental_models", "document_records", "working_memory",
+                "observations", "knowledge_pages", "audit_log",
                 "deletion_log", "merge_log", "branches", "justifications",
                 "contradictions", "calibrations", "_store_version",
                 "policy", "overlay_stats",
@@ -4189,6 +4364,530 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 self._store_version = before_version
                 raise
             return True
+
+    # ---------------------------------------------------------------------------
+    # Observations & Living Knowledge Pages (Milestone 2)
+    # ---------------------------------------------------------------------------
+
+    def observation_upsert(self, observation: Observation | dict[str, Any], branch: str = "main") -> str:
+        obs = Observation.from_dict(observation) if isinstance(observation, dict) else observation
+        with self._lock:
+            if self._read_only:
+                raise PermissionError("observation storage is read-only")
+            self._require_branch(branch)
+            verify_observation_proof_quotes(obs, self, branch=branch)
+            ev_rows = [self.get_evidence(obs.tenant_id, cid, branch=branch) for cid in obs.source_evidence_cids]
+            obs.independent_source_count = compute_independent_source_count(r for r in ev_rows if r is not None)
+            obs.standing = compute_dynamic_standing(
+                independent_source_count=obs.independent_source_count,
+                corroboration_velocity=obs.corroboration_velocity,
+                contradiction_count=len(obs.contradiction_history),
+                access_velocity=obs.access_velocity,
+            )
+            key = (obs.tenant_id, obs.observation_id, branch)
+            self.observations[key] = obs.to_dict()
+            self.audit_log.append({
+                "op": "observation_upsert",
+                "tenant_id": obs.tenant_id,
+                "branch": branch,
+                "observation_id": obs.observation_id,
+                "subject": obs.subject,
+                "topic": obs.topic,
+                "standing": obs.standing,
+                "at": dt_to_json(utc_now()),
+            })
+            self._persist()
+            return obs.observation_id
+
+    def observation_get(
+        self, tenant_id: str, observation_id: str, branch: str = "main", *, validate_custody: bool = True
+    ) -> Observation | None:
+        key = (tenant_id, observation_id, branch)
+        with self._lock:
+            row = self.observations.get(key)
+            if row is None:
+                return None
+            obs = Observation.from_dict(row)
+            if validate_custody and obs.status == "active":
+                erased_any = False
+                for cid in obs.source_evidence_cids:
+                    ev = self.get_evidence(tenant_id, cid, branch=branch)
+                    if ev is None or getattr(ev, "erased", False) or getattr(ev, "retired_at", None) is not None:
+                        erased_any = True
+                        break
+                if erased_any:
+                    obs.status = "retracted"
+                    obs.standing = min(SELF_GENERATED_CEILING, 0.20)
+                    obs.updated_at = utc_now()
+                    self.observations[key] = obs.to_dict()
+                    self.audit_log.append({
+                        "op": "observation_retract",
+                        "tenant_id": tenant_id,
+                        "branch": branch,
+                        "observation_id": observation_id,
+                        "reason": "transitive_custody_erasure",
+                        "status": "retracted",
+                        "standing": obs.standing,
+                        "at": dt_to_json(utc_now()),
+                    })
+                    self._persist()
+            return obs
+
+    def observation_list(
+        self,
+        tenant_id: str,
+        branch: str = "main",
+        *,
+        subject: str | None = None,
+        topic: str | None = None,
+        user_id: str | None = None,
+        status: str = "active",
+        limit: int = 100,
+    ) -> list[Observation]:
+        with self._lock:
+            items: list[Observation] = []
+            for (t, _, b), row in self.observations.items():
+                if t != tenant_id or b != branch:
+                    continue
+                if subject is not None and row.get("subject") != subject:
+                    continue
+                if topic is not None and row.get("topic") != topic:
+                    continue
+                if user_id is not None and row.get("user_id") != user_id:
+                    continue
+                if status != "all" and row.get("status") != status:
+                    continue
+                items.append(Observation.from_dict(row))
+            items.sort(key=lambda item: item.created_at, reverse=True)
+            return items[:limit]
+
+    def observation_reconcile(
+        self, tenant_id: str, branch: str = "main", *, observation: Observation | dict[str, Any]
+    ) -> tuple[Observation, bool]:
+        obs = Observation.from_dict(observation) if isinstance(observation, dict) else observation
+        with self._lock:
+            if self._read_only:
+                raise PermissionError("observation storage is read-only")
+            self._require_branch(branch)
+            existing_row = None
+            for (t, _, b), row in self.observations.items():
+                if t == tenant_id and b == branch and row.get("subject") == obs.subject and row.get("topic") == obs.topic and row.get("status") == "active":
+                    existing_row = row
+                    break
+
+            if existing_row is not None:
+                existing_obs = Observation.from_dict(existing_row)
+                reconciled, is_contradiction = reconcile_observation(existing_obs, obs)
+                if is_contradiction:
+                    existing_obs.status = "superseded"
+                    existing_obs.superseded_by = reconciled.observation_id
+                    existing_obs.updated_at = utc_now()
+                    self.observation_upsert(existing_obs, branch=branch)
+                    self.observation_upsert(reconciled, branch=branch)
+                else:
+                    self.observation_upsert(reconciled, branch=branch)
+                self.audit_log.append({
+                    "op": "observation_reconcile",
+                    "tenant_id": tenant_id,
+                    "branch": branch,
+                    "observation_id": reconciled.observation_id,
+                    "is_contradiction": is_contradiction,
+                    "at": dt_to_json(utc_now()),
+                })
+                self._persist()
+                return reconciled, is_contradiction
+            else:
+                self.observation_upsert(obs, branch=branch)
+                return obs, False
+
+    def observation_retract(
+        self, tenant_id: str, observation_id: str, branch: str = "main", *, reason: str = "user_retraction"
+    ) -> bool:
+        key = (tenant_id, observation_id, branch)
+        with self._lock:
+            if self._read_only:
+                raise PermissionError("observation storage is read-only")
+            row = self.observations.get(key)
+            if row is None:
+                return False
+            obs = Observation.from_dict(row)
+            obs.status = "retracted"
+            obs.updated_at = utc_now()
+            self.observations[key] = obs.to_dict()
+            self.audit_log.append({
+                "op": "observation_retract",
+                "tenant_id": tenant_id,
+                "branch": branch,
+                "observation_id": observation_id,
+                "reason": reason,
+                "at": dt_to_json(utc_now()),
+            })
+            self._persist()
+            return True
+
+    def get_observation_record(self, tenant_id: str, observation_id: str, branch: str = "main") -> dict[str, Any] | None:
+        with self._lock:
+            row = self.observations.get((tenant_id, observation_id, branch))
+            return copy.deepcopy(row) if row is not None else None
+
+    def list_observation_records(
+        self, tenant_id: str, branch: str = "main", *, subject: str | None = None, topic: str | None = None, status: str | None = None
+    ) -> list[dict[str, Any]]:
+        with self._lock:
+            records = []
+            for (t, _, b), row in self.observations.items():
+                if t != tenant_id or b != branch:
+                    continue
+                if subject is not None and row.get("subject") != subject:
+                    continue
+                if topic is not None and row.get("topic") != topic:
+                    continue
+                if status is not None and status != "all" and row.get("status") != status:
+                    continue
+                records.append(copy.deepcopy(row))
+            records.sort(key=lambda r: str(r.get("created_at", "")), reverse=True)
+            return records
+
+    def save_observation_record(
+        self, tenant_id: str, observation_id: str, record: dict[str, Any], *, branch: str = "main", expected_version: int | None = None
+    ) -> dict[str, Any]:
+        key = (tenant_id, observation_id, branch)
+        with self._lock:
+            if self._read_only:
+                raise PermissionError("observation storage is read-only")
+            self._require_branch(branch)
+            current = self.observations.get(key)
+            if expected_version is not None:
+                if current is None:
+                    if expected_version != 0:
+                        raise ObservationConflict("observation not found for version check")
+                elif current.get("version", 1) != expected_version:
+                    raise ObservationConflict(f"observation version conflict: expected {expected_version}, found {current.get('version')}")
+            rec = dict(record)
+            rec["tenant_id"] = tenant_id
+            rec["observation_id"] = observation_id
+            rec["branch"] = branch
+            rec["version"] = (current.get("version", 1) + 1) if current else 1
+            rec["updated_at"] = dt_to_json(utc_now())
+            self.observations[key] = rec
+            self._persist()
+            return copy.deepcopy(rec)
+
+    def knowledge_page_create(
+        self,
+        page_or_tenant: KnowledgePage | dict[str, Any] | str,
+        page: KnowledgePage | dict[str, Any] | None = None,
+        branch: str = "main",
+    ) -> str:
+        if isinstance(page_or_tenant, str) and page is not None:
+            tenant_id = page_or_tenant
+            kp = KnowledgePage.from_dict(page) if isinstance(page, dict) else page
+        else:
+            kp = KnowledgePage.from_dict(page_or_tenant) if isinstance(page_or_tenant, dict) else page_or_tenant
+            tenant_id = kp.tenant_id
+        if branch == "main" and getattr(kp, "branch", None):
+            branch = kp.branch
+        else:
+            kp.branch = branch
+
+        with self._lock:
+            if self._read_only:
+                raise PermissionError("knowledge page storage is read-only")
+            self._require_branch(branch)
+            norm_path = validate_knowledge_page_path(kp.path)
+            for (t, _, b), existing in self.knowledge_pages.items():
+                if t == tenant_id and b == branch and existing.get("path") == norm_path and existing.get("status") not in ("retired", "archived"):
+                    raise KnowledgePageConflict(f"KnowledgePage path {kp.path!r} already exists on branch {branch!r}")
+            key = (tenant_id, kp.page_id, branch)
+            if key in self.knowledge_pages:
+                raise KnowledgePageConflict(f"KnowledgePage already exists with page_id {kp.page_id!r}")
+            verify_knowledge_page_acyclic_custody(
+                kp,
+                get_observation=lambda oid: self.observation_get(tenant_id, oid, branch=branch, validate_custody=False),
+                get_evidence=lambda cid: self.get_evidence(tenant_id, cid, branch=branch),
+            )
+            self.knowledge_pages[key] = kp.to_dict()
+            self.audit_log.append({
+                "op": "knowledge_page_create",
+                "tenant_id": tenant_id,
+                "branch": branch,
+                "page_id": kp.page_id,
+                "path": kp.path,
+                "at": dt_to_json(utc_now()),
+            })
+            self._persist()
+            return kp.page_id
+
+    def knowledge_page_update(
+        self,
+        page_or_tenant: KnowledgePage | dict[str, Any] | str,
+        page: KnowledgePage | dict[str, Any] | None = None,
+        branch: str = "main",
+        *,
+        expected_version: int | None = None,
+    ) -> KnowledgePage:
+        if isinstance(page_or_tenant, str) and page is not None:
+            tenant_id = page_or_tenant
+            kp = KnowledgePage.from_dict(page) if isinstance(page, dict) else page
+        else:
+            kp = KnowledgePage.from_dict(page_or_tenant) if isinstance(page_or_tenant, dict) else page_or_tenant
+            tenant_id = kp.tenant_id
+        if branch == "main" and getattr(kp, "branch", None):
+            branch = kp.branch
+        else:
+            kp.branch = branch
+
+        with self._lock:
+            if self._read_only:
+                raise PermissionError("knowledge page storage is read-only")
+            self._require_branch(branch)
+            norm_path = validate_knowledge_page_path(kp.path)
+            key = (tenant_id, kp.page_id, branch)
+            current = self.knowledge_pages.get(key)
+            if current is None:
+                raise CustodyNotFoundError(f"KnowledgePage {kp.page_id} not found")
+            if expected_version is not None and current.get("version", 1) != expected_version:
+                raise KnowledgePageConflict(f"KnowledgePage revision conflict: expected {expected_version}, found {current.get('version')}")
+            for (t, pid, b), existing in self.knowledge_pages.items():
+                if t == tenant_id and b == branch and pid != kp.page_id and existing.get("path") == norm_path and existing.get("status") not in ("retired", "archived"):
+                    raise KnowledgePageConflict(f"KnowledgePage path {kp.path!r} already exists on branch {branch!r}")
+            verify_knowledge_page_acyclic_custody(
+                kp,
+                get_observation=lambda oid: self.observation_get(tenant_id, oid, branch=branch, validate_custody=False),
+                get_evidence=lambda cid: self.get_evidence(tenant_id, cid, branch=branch),
+            )
+            kp.version = current.get("version", 1) + 1
+            kp.updated_at = utc_now()
+            self.knowledge_pages[key] = kp.to_dict()
+            self.audit_log.append({
+                "op": "knowledge_page_update",
+                "tenant_id": tenant_id,
+                "branch": branch,
+                "page_id": kp.page_id,
+                "version": kp.version,
+                "at": dt_to_json(utc_now()),
+            })
+            self._persist()
+            return kp
+
+    def knowledge_page_get(
+        self,
+        tenant_id: str,
+        page_id_or_path_or_branch: str | None = None,
+        branch: str = "main",
+        *,
+        page_id: str | None = None,
+        path: str | None = None,
+        validate_custody: bool = True,
+    ) -> KnowledgePage | None:
+        actual_branch = branch
+        actual_page_id = page_id
+        actual_path = path
+
+        if page_id_or_path_or_branch is not None:
+            if page_id is not None or path is not None:
+                actual_branch = page_id_or_path_or_branch
+            else:
+                if "/" in page_id_or_path_or_branch:
+                    actual_path = page_id_or_path_or_branch
+                else:
+                    actual_page_id = page_id_or_path_or_branch
+
+        with self._lock:
+            row = None
+            if actual_page_id is not None:
+                row = self.knowledge_pages.get((tenant_id, actual_page_id, actual_branch))
+            elif actual_path is not None:
+                norm = validate_knowledge_page_path(actual_path)
+                for (t, _, b), r in self.knowledge_pages.items():
+                    if t == tenant_id and b == actual_branch and r.get("path") == norm and r.get("status") not in ("retired", "archived"):
+                        row = r
+                        break
+            if row is None:
+                return None
+            kp = KnowledgePage.from_dict(row)
+            if validate_custody:
+                try:
+                    verify_knowledge_page_acyclic_custody(
+                        kp,
+                        get_observation=lambda oid: self.observation_get(tenant_id, oid, branch=actual_branch, validate_custody=False),
+                        get_evidence=lambda cid: self.get_evidence(tenant_id, cid, branch=actual_branch),
+                    )
+                except Exception:
+                    kp.status = "stale"
+                    kp.updated_at = utc_now()
+                    self.knowledge_pages[(tenant_id, kp.page_id, actual_branch)] = kp.to_dict()
+                    self._persist()
+            return kp
+
+    def knowledge_page_list(
+        self,
+        tenant_id: str,
+        branch: str = "main",
+        *,
+        path_prefix: str | None = None,
+        folder: str | None = None,
+        tags: list[str] | None = None,
+        status: str = "active",
+        limit: int = 100,
+    ) -> list[KnowledgePage]:
+        with self._lock:
+            items: list[KnowledgePage] = []
+            prefix = (folder or path_prefix or "").strip().lower()
+            if prefix and not prefix.endswith("/"):
+                prefix_with_slash = prefix + "/"
+            else:
+                prefix_with_slash = prefix
+            for (t, _, b), row in self.knowledge_pages.items():
+                if t != tenant_id or b != branch:
+                    continue
+                if status != "all" and row.get("status") != status:
+                    continue
+                row_path = str(row.get("path", "")).lower()
+                if prefix:
+                    if not (row_path.startswith(prefix_with_slash) or row_path == prefix):
+                        continue
+                if tags:
+                    row_tags = set(row.get("tags") or [])
+                    if not set(tags).issubset(row_tags):
+                        continue
+                items.append(KnowledgePage.from_dict(row))
+            items.sort(key=lambda p: p.path)
+            return items[:limit]
+
+    def knowledge_page_render_markdown(
+        self,
+        tenant_id: str,
+        page_id_or_path_or_branch: str | None = None,
+        branch: str = "main",
+        *,
+        page_id: str | None = None,
+        path: str | None = None,
+        include_frontmatter: bool = True,
+        include_citations_ledger: bool = True,
+    ) -> str:
+        kp = self.knowledge_page_get(
+            tenant_id,
+            page_id_or_path_or_branch,
+            branch=branch,
+            page_id=page_id,
+            path=path,
+            validate_custody=False,
+        )
+        if kp is None:
+            ident = page_id or path or page_id_or_path_or_branch
+            raise CustodyNotFoundError(f"KnowledgePage '{ident}' not found")
+        return render_knowledge_page_markdown(
+            kp,
+            self,
+            branch=branch,
+            include_frontmatter=include_frontmatter,
+            include_citations_ledger=include_citations_ledger,
+        )
+
+    def knowledge_page_archive(
+        self,
+        tenant_id: str,
+        page_id_or_path_or_branch: str | None = None,
+        branch: str = "main",
+        *,
+        page_id: str | None = None,
+        path: str | None = None,
+        reason: str = "archived",
+        actor: str = "system",
+    ) -> bool:
+        kp = self.knowledge_page_get(
+            tenant_id,
+            page_id_or_path_or_branch,
+            branch=branch,
+            page_id=page_id,
+            path=path,
+            validate_custody=False,
+        )
+        if kp is None:
+            return False
+        key = (tenant_id, kp.page_id, branch)
+        with self._lock:
+            if self._read_only:
+                raise PermissionError("knowledge page storage is read-only")
+            row = self.knowledge_pages.get(key)
+            if row is None:
+                return False
+            archived_kp = KnowledgePage.from_dict(row)
+            archived_kp.status = "archived"
+            archived_kp.version = archived_kp.version + 1
+            archived_kp.updated_at = utc_now()
+            self.knowledge_pages[key] = archived_kp.to_dict()
+            self.audit_log.append({
+                "op": "knowledge_page_archive",
+                "tenant_id": tenant_id,
+                "branch": branch,
+                "page_id": archived_kp.page_id,
+                "version": archived_kp.version,
+                "reason": reason,
+                "actor": actor,
+                "at": dt_to_json(utc_now()),
+            })
+            self._persist()
+            return True
+
+    def knowledge_page_refresh(
+        self,
+        tenant_id: str,
+        page_id_or_path_or_branch: str | None = None,
+        branch: str = "main",
+        *,
+        page_id: str | None = None,
+        path: str | None = None,
+    ) -> KnowledgePage | None:
+        kp = self.knowledge_page_get(
+            tenant_id,
+            page_id_or_path_or_branch,
+            branch=branch,
+            page_id=page_id,
+            path=path,
+            validate_custody=True,
+        )
+        if kp is None:
+            ident = page_id or path or page_id_or_path_or_branch
+            raise CustodyNotFoundError(f"KnowledgePage '{ident}' not found")
+        return kp
+
+    def get_knowledge_page_record(self, tenant_id: str, page_id_or_path: str, branch: str = "main") -> dict[str, Any] | None:
+        kp = self.knowledge_page_get(tenant_id, branch, page_id=page_id_or_path, validate_custody=False)
+        if kp is None:
+            kp = self.knowledge_page_get(tenant_id, branch, path=page_id_or_path, validate_custody=False)
+        return kp.to_dict() if kp is not None else None
+
+    def list_knowledge_page_records(
+        self, tenant_id: str, branch: str = "main", *, path_prefix: str | None = None, tags: list[str] | None = None
+    ) -> list[dict[str, Any]]:
+        return [kp.to_dict() for kp in self.knowledge_page_list(tenant_id, branch, path_prefix=path_prefix, tags=tags, status="all")]
+
+    def save_knowledge_page_record(
+        self, tenant_id: str, page_id: str, record: dict[str, Any], *, branch: str = "main", expected_revision: int | None = None
+    ) -> dict[str, Any]:
+        key = (tenant_id, page_id, branch)
+        with self._lock:
+            if self._read_only:
+                raise PermissionError("knowledge page storage is read-only")
+            self._require_branch(branch)
+            current = self.knowledge_pages.get(key)
+            if expected_revision is not None:
+                if current is None:
+                    if expected_revision != 0:
+                        raise KnowledgePageConflict("knowledge page not found for revision check")
+                elif current.get("version", 1) != expected_revision:
+                    raise KnowledgePageConflict(f"knowledge page revision conflict: expected {expected_revision}, found {current.get('version')}")
+            rec = dict(record)
+            rec["tenant_id"] = tenant_id
+            rec["page_id"] = page_id
+            rec["branch"] = branch
+            rec["version"] = (current.get("version", 1) + 1) if current else 1
+            rec["updated_at"] = dt_to_json(utc_now())
+            self.knowledge_pages[key] = rec
+            self._persist()
+            return copy.deepcopy(rec)
 
     @contextmanager
     def _evidence_mutation_guard(self, key: str):
@@ -6971,6 +7670,16 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 for item in self.working_memory.values()
                 if item.tenant_id == tenant_id
             ],
+            "observations": [
+                copy.deepcopy(item)
+                for item in self.observations.values()
+                if item.get("tenant_id") == tenant_id
+            ],
+            "knowledge_pages": [
+                copy.deepcopy(item)
+                for item in self.knowledge_pages.values()
+                if item.get("tenant_id") == tenant_id
+            ],
             "audit_log": [item for item in self.audit_log if item.get("tenant_id") == tenant_id],
             "deletion_log": [item for item in self.deletion_log if item.get("tenant_id") == tenant_id],
             "merge_log": [item for item in self.merge_log if merged_here(item)],
@@ -7827,5 +8536,15 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 item
                 for tenant_export in tenant_exports
                 for item in tenant_export["working_memory"]
+            ],
+            "observations": [
+                item
+                for tenant_export in tenant_exports
+                for item in tenant_export.get("observations", [])
+            ],
+            "knowledge_pages": [
+                item
+                for tenant_export in tenant_exports
+                for item in tenant_export.get("knowledge_pages", [])
             ],
         }

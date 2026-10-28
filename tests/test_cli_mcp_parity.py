@@ -363,3 +363,109 @@ def test_propose_and_record_commands_run_end_to_end(tmp_path: Path, capsys: pyte
     procedure = _run(capsys, store, "procedure-propose", "--lesson-id", lesson["id"])
 
     assert trajectory["id"] and lesson["id"] and procedure["id"]
+
+
+def test_observation_commands_run_end_to_end(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    store = tmp_path / "store.json"
+
+    # Flat alias
+    upserted = _run(
+        capsys, store, "observation-upsert",
+        "--tenant", TENANT, "--user", USER,
+        "--subject", "python", "--topic", "typing",
+        "--content", "Python 3.12 supports PEP 695 type parameter syntax.",
+    )
+    assert upserted["observation_id"]
+    obs_id = upserted["observation_id"]
+
+    got = _run(
+        capsys, store, "observation-get",
+        "--tenant", TENANT, "--user", USER,
+        "--observation-id", obs_id,
+    )
+    assert got["observation_id"] == obs_id
+    assert got["subject"] == "python"
+
+    listed = _run(
+        capsys, store, "observation-list",
+        "--tenant", TENANT, "--user", USER,
+    )
+    assert len(listed) >= 1
+    assert any(o["observation_id"] == obs_id for o in listed)
+
+    reconciled = _run(
+        capsys, store, "observation-reconcile",
+        "--tenant", TENANT, "--user", USER,
+        "--subject", "python", "--topic", "typing",
+        "--content", "Python 3.12 supports PEP 695 and PEP 698.",
+    )
+    assert "observation" in reconciled
+    assert "is_contradiction" in reconciled
+
+    # Grouped command
+    grouped_listed = _run(
+        capsys, store, "observation", "list",
+        "--tenant", TENANT, "--user", USER,
+    )
+    assert len(grouped_listed) >= 1
+
+
+def test_knowledge_page_commands_run_end_to_end(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    store = tmp_path / "store.json"
+
+    # Flat alias
+    created = _run(
+        capsys, store, "knowledge-page-create",
+        "--tenant", TENANT, "--user", USER,
+        "--path", "languages/python",
+        "--title", "Python Language Guide",
+        "--content-markdown", "# Python\n\nPython is a versatile programming language.",
+    )
+    assert created["page_id"]
+    page_id = created["page_id"]
+
+    got = _run(
+        capsys, store, "knowledge-page-get",
+        "--tenant", TENANT, "--user", USER,
+        "--page-id", page_id,
+    )
+    assert got["page_id"] == page_id
+    assert got["title"] == "Python Language Guide"
+
+    listed = _run(
+        capsys, store, "knowledge-page-list",
+        "--tenant", TENANT, "--user", USER,
+    )
+    assert len(listed) >= 1
+    assert any(p["page_id"] == page_id for p in listed)
+
+    updated = _run(
+        capsys, store, "knowledge-page-update",
+        "--tenant", TENANT, "--user", USER,
+        "--page-id", page_id,
+        "--title", "Python 3 Guide",
+    )
+    assert updated["title"] == "Python 3 Guide"
+
+    refreshed = _run(
+        capsys, store, "knowledge-page-refresh",
+        "--tenant", TENANT, "--user", USER,
+        "--page-id", page_id,
+    )
+    assert refreshed["page_id"] == page_id
+
+    rendered = _run(
+        capsys, store, "knowledge-page-render-markdown",
+        "--tenant", TENANT, "--user", USER,
+        "--page-id", page_id,
+    )
+    assert "markdown" in rendered
+    assert "Python 3 Guide" in rendered["markdown"]
+
+    # Grouped command
+    grouped_listed = _run(
+        capsys, store, "knowledge-page", "list",
+        "--tenant", TENANT, "--user", USER,
+    )
+    assert len(grouped_listed) >= 1
+

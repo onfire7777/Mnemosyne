@@ -698,6 +698,56 @@ TOOL_SPEC: list[dict[str, Any]] = [
         "description": "Read the current revision of a private text document with custody and scope validation.",
         "arguments": ["tenant_id", "user_id", "document_id"],
     },
+    {
+        "name": "observation_upsert",
+        "description": "Create or update an evolving observation grounded in source evidence and proof quotes.",
+        "arguments": ["tenant_id", "user_id", "subject", "topic", "content", "proof_quotes", "source_evidence_cids"],
+    },
+    {
+        "name": "observation_get",
+        "description": "Read an observation by its unique identifier with custody validation.",
+        "arguments": ["tenant_id", "user_id", "observation_id"],
+    },
+    {
+        "name": "observation_list",
+        "description": "List active or filtered observations for a tenant and user scope.",
+        "arguments": ["tenant_id", "user_id"],
+    },
+    {
+        "name": "observation_reconcile",
+        "description": "Reconcile an observation candidate against existing active observations on subject and topic.",
+        "arguments": ["tenant_id", "user_id", "subject", "topic"],
+    },
+    {
+        "name": "knowledge_page_create",
+        "description": "Create a living wiki-style knowledge page with hierarchical path and acyclic custody checking.",
+        "arguments": ["tenant_id", "user_id", "path", "title", "content_markdown"],
+    },
+    {
+        "name": "knowledge_page_update",
+        "description": "Update a living knowledge page with revision CAS, markdown synthesis, and custody verification.",
+        "arguments": ["tenant_id", "user_id", "page_id"],
+    },
+    {
+        "name": "knowledge_page_get",
+        "description": "Retrieve a knowledge page by page_id or path with live custody validation.",
+        "arguments": ["tenant_id", "user_id"],
+    },
+    {
+        "name": "knowledge_page_list",
+        "description": "List knowledge pages in the tenant/user scope with path prefix and tag filtering.",
+        "arguments": ["tenant_id", "user_id"],
+    },
+    {
+        "name": "knowledge_page_refresh",
+        "description": "Re-verify live custody of all cited sources for a knowledge page, marking stale if custody is lost.",
+        "arguments": ["tenant_id", "user_id", "page_id"],
+    },
+    {
+        "name": "knowledge_page_render_markdown",
+        "description": "Render a knowledge page to markdown with frontmatter and citations ledger.",
+        "arguments": ["tenant_id", "user_id"],
+    },
 ]
 
 
@@ -4234,3 +4284,274 @@ class MemoryTools:
         if not decision.allowed:
             raise PermissionError(f"{operation} denied: {decision.reason}")
         return decision.to_dict()
+
+    def observation_upsert(
+        self,
+        tenant_id: str,
+        user_id: str,
+        subject: str,
+        topic: str,
+        content: str,
+        proof_quotes: list[dict[str, Any]] | None = None,
+        source_evidence_cids: list[str] | None = None,
+        branch: str = "main",
+        observation_id: str | None = None,
+        session_identity: SessionIdentity | None = None,
+    ) -> dict[str, Any]:
+        _require_text(tenant_id, field="tenant_id")
+        _require_text(user_id, field="user_id")
+        _require_text(subject, field="subject")
+        _require_text(topic, field="topic")
+        _require_text(content, field="content")
+        from mnemosyne.observations import Observation, ProofQuote
+        quotes = [ProofQuote.from_dict(q) for q in (proof_quotes or [])]
+        obs = Observation(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            subject=subject,
+            topic=topic,
+            content=content,
+            branch=branch,
+            proof_quotes=quotes,
+            source_evidence_cids=list(source_evidence_cids or []),
+        )
+        if observation_id:
+            obs.observation_id = observation_id
+        obs_id = self.engine.observation_upsert(obs, branch=branch)
+        stored = self.engine.observation_get(tenant_id, obs_id, branch=branch)
+        return stored.to_dict() if hasattr(stored, "to_dict") else (stored or obs.to_dict())
+
+    def observation_get(
+        self,
+        tenant_id: str,
+        user_id: str,
+        observation_id: str,
+        branch: str = "main",
+        session_identity: SessionIdentity | None = None,
+    ) -> dict[str, Any] | None:
+        _require_text(tenant_id, field="tenant_id")
+        _require_text(user_id, field="user_id")
+        _require_text(observation_id, field="observation_id")
+        stored = self.engine.observation_get(tenant_id, observation_id, branch=branch)
+        if stored is None:
+            return None
+        return stored.to_dict() if hasattr(stored, "to_dict") else stored
+
+    def observation_list(
+        self,
+        tenant_id: str,
+        user_id: str,
+        branch: str = "main",
+        subject: str | None = None,
+        topic: str | None = None,
+        status: str = "active",
+        limit: int = 100,
+        session_identity: SessionIdentity | None = None,
+    ) -> list[dict[str, Any]]:
+        _require_text(tenant_id, field="tenant_id")
+        _require_text(user_id, field="user_id")
+        items = self.engine.observation_list(
+            tenant_id,
+            branch=branch,
+            subject=subject,
+            topic=topic,
+            user_id=user_id,
+            status=status,
+            limit=limit,
+        )
+        return [item.to_dict() if hasattr(item, "to_dict") else item for item in items]
+
+    def observation_reconcile(
+        self,
+        tenant_id: str,
+        user_id: str,
+        subject: str,
+        topic: str,
+        content: str = "",
+        proof_quotes: list[dict[str, Any]] | None = None,
+        source_evidence_cids: list[str] | None = None,
+        branch: str = "main",
+        session_identity: SessionIdentity | None = None,
+    ) -> dict[str, Any]:
+        _require_text(tenant_id, field="tenant_id")
+        _require_text(user_id, field="user_id")
+        _require_text(subject, field="subject")
+        _require_text(topic, field="topic")
+        from mnemosyne.observations import Observation, ProofQuote
+        quotes = [ProofQuote.from_dict(q) for q in (proof_quotes or [])]
+        obs = Observation(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            subject=subject,
+            topic=topic,
+            content=content,
+            branch=branch,
+            proof_quotes=quotes,
+            source_evidence_cids=list(source_evidence_cids or []),
+        )
+        reconciled, is_contradiction = self.engine.observation_reconcile(tenant_id, branch=branch, observation=obs)
+        return {
+            "observation": reconciled.to_dict() if hasattr(reconciled, "to_dict") else reconciled,
+            "is_contradiction": is_contradiction,
+        }
+
+    def knowledge_page_create(
+        self,
+        tenant_id: str,
+        user_id: str,
+        path: str,
+        title: str,
+        content_markdown: str,
+        source_observation_ids: list[str] | None = None,
+        source_evidence_cids: list[str] | None = None,
+        tags: list[str] | None = None,
+        branch: str = "main",
+        page_id: str | None = None,
+        session_identity: SessionIdentity | None = None,
+    ) -> dict[str, Any]:
+        _require_text(tenant_id, field="tenant_id")
+        _require_text(user_id, field="user_id")
+        _require_text(path, field="path")
+        _require_text(title, field="title")
+        from mnemosyne.knowledge_pages import KnowledgePage
+        page = KnowledgePage(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            path=path,
+            title=title,
+            content_markdown=content_markdown,
+            branch=branch,
+            source_observation_ids=list(source_observation_ids or []),
+            source_evidence_cids=list(source_evidence_cids or []),
+            tags=list(tags or []),
+        )
+        if page_id:
+            page.page_id = page_id
+        created_id = self.engine.knowledge_page_create(page, branch=branch)
+        stored = self.engine.knowledge_page_get(tenant_id, page_id=created_id, branch=branch)
+        return stored.to_dict() if hasattr(stored, "to_dict") else (stored or page.to_dict())
+
+    def knowledge_page_update(
+        self,
+        tenant_id: str,
+        user_id: str,
+        page_id: str | None = None,
+        path: str | None = None,
+        title: str | None = None,
+        content_markdown: str | None = None,
+        source_observation_ids: list[str] | None = None,
+        source_evidence_cids: list[str] | None = None,
+        tags: list[str] | None = None,
+        expected_version: int | None = None,
+        branch: str = "main",
+        session_identity: SessionIdentity | None = None,
+    ) -> dict[str, Any]:
+        _require_text(tenant_id, field="tenant_id")
+        _require_text(user_id, field="user_id")
+        if not page_id and not path:
+            raise ValueError("Either page_id or path must be provided")
+        from mnemosyne.knowledge_pages import KnowledgePage
+        existing = self.engine.knowledge_page_get(tenant_id, page_id=page_id, path=path, branch=branch)
+        if existing is None:
+            raise ValueError(f"KnowledgePage not found for {page_id or path}")
+        if isinstance(existing, dict):
+            existing = KnowledgePage.from_dict(existing)
+        if path is not None:
+            existing.path = path
+        if title is not None:
+            existing.title = title
+        if content_markdown is not None:
+            existing.content_markdown = content_markdown
+        if source_observation_ids is not None:
+            existing.source_observation_ids = list(source_observation_ids)
+        if source_evidence_cids is not None:
+            existing.source_evidence_cids = list(source_evidence_cids)
+        if tags is not None:
+            existing.tags = list(tags)
+        updated = self.engine.knowledge_page_update(existing, branch=branch, expected_version=expected_version)
+        return updated.to_dict() if hasattr(updated, "to_dict") else updated
+
+    def knowledge_page_get(
+        self,
+        tenant_id: str,
+        user_id: str,
+        page_id: str | None = None,
+        path: str | None = None,
+        branch: str = "main",
+        session_identity: SessionIdentity | None = None,
+    ) -> dict[str, Any] | None:
+        _require_text(tenant_id, field="tenant_id")
+        _require_text(user_id, field="user_id")
+        if not page_id and not path:
+            raise ValueError("Either page_id or path must be provided")
+        stored = self.engine.knowledge_page_get(tenant_id, page_id=page_id, path=path, branch=branch)
+        if stored is None:
+            return None
+        return stored.to_dict() if hasattr(stored, "to_dict") else stored
+
+    def knowledge_page_list(
+        self,
+        tenant_id: str,
+        user_id: str,
+        branch: str = "main",
+        path_prefix: str | None = None,
+        folder: str | None = None,
+        tags: list[str] | None = None,
+        status: str = "active",
+        limit: int = 100,
+        session_identity: SessionIdentity | None = None,
+    ) -> list[dict[str, Any]]:
+        _require_text(tenant_id, field="tenant_id")
+        _require_text(user_id, field="user_id")
+        items = self.engine.knowledge_page_list(
+            tenant_id,
+            branch=branch,
+            path_prefix=path_prefix,
+            folder=folder,
+            tags=tags,
+            status=status,
+            limit=limit,
+        )
+        return [item.to_dict() if hasattr(item, "to_dict") else item for item in items]
+
+    def knowledge_page_refresh(
+        self,
+        tenant_id: str,
+        user_id: str,
+        page_id: str | None = None,
+        path: str | None = None,
+        branch: str = "main",
+        session_identity: SessionIdentity | None = None,
+    ) -> dict[str, Any]:
+        _require_text(tenant_id, field="tenant_id")
+        _require_text(user_id, field="user_id")
+        if not page_id and not path:
+            raise ValueError("Either page_id or path must be provided")
+        refreshed = self.engine.knowledge_page_refresh(tenant_id, page_id=page_id, path=path, branch=branch)
+        return refreshed.to_dict() if hasattr(refreshed, "to_dict") else refreshed
+
+    def knowledge_page_render_markdown(
+        self,
+        tenant_id: str,
+        user_id: str,
+        page_id: str | None = None,
+        path: str | None = None,
+        include_frontmatter: bool = True,
+        include_citations_ledger: bool = True,
+        branch: str = "main",
+        session_identity: SessionIdentity | None = None,
+    ) -> dict[str, Any]:
+        _require_text(tenant_id, field="tenant_id")
+        _require_text(user_id, field="user_id")
+        if not page_id and not path:
+            raise ValueError("Either page_id or path must be provided")
+        rendered = self.engine.knowledge_page_render_markdown(
+            tenant_id,
+            page_id=page_id,
+            path=path,
+            include_frontmatter=include_frontmatter,
+            include_citations_ledger=include_citations_ledger,
+            branch=branch,
+        )
+        return {"markdown": rendered, "page_id": page_id, "path": path}
+

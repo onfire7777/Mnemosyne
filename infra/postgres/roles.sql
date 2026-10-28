@@ -83,6 +83,12 @@ GRANT DELETE ON entity_aliases TO mnemosyne_app;
 REVOKE UPDATE, DELETE, TRUNCATE ON audit_log FROM mnemosyne_app, mnemosyne_consolidator;
 GRANT SELECT, INSERT ON audit_log TO mnemosyne_app, mnemosyne_consolidator;
 
+-- Zero-DELETE enforcement on observations and knowledge_pages:
+-- Neither mnemosyne_app nor mnemosyne_consolidator has DELETE privileges.
+REVOKE DELETE, TRUNCATE ON observations, knowledge_pages FROM mnemosyne_app, mnemosyne_consolidator;
+GRANT SELECT, INSERT, UPDATE ON observations, knowledge_pages TO mnemosyne_app, mnemosyne_consolidator;
+GRANT SELECT ON observations, knowledge_pages TO mnemosyne_readonly;
+
 -- Read-only settings visibility so the ops-report audit-retention probe can
 -- prove pgaudit enablement (shared_preload_libraries is a superuser-only GUC).
 -- This is the standard monitoring role; it grants no data or write authority.

@@ -101,6 +101,23 @@ from mnemosyne.models import (
     parse_dt,
     utc_now,
 )
+from mnemosyne.observations import (
+    ContradictionSnapshot,
+    Observation,
+    ProofQuote,
+    compute_dynamic_standing,
+    compute_independent_source_count,
+    reconcile_observation,
+    verify_observation_proof_quotes,
+)
+from mnemosyne.knowledge_pages import (
+    CustodyNotFoundError,
+    KnowledgePage,
+    KnowledgePageConflict,
+    render_knowledge_page_markdown,
+    validate_knowledge_page_path,
+    verify_knowledge_page_acyclic_custody,
+)
 from mnemosyne.pipeline import run_retrieval_pipeline
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.postgres_security import assert_postgres_safe_role, env_flag, postgres_safe_role_required
@@ -125,6 +142,7 @@ from mnemosyne.retrieval import (
 )
 from mnemosyne.security import TrustTier, is_write_tainted, sanitize_retrieved_text, trust_weight
 from mnemosyne.standing import (
+    SELF_GENERATED_CEILING,
     standing,
     standing_abstention_report,
     standing_erasure_cascade_report,
@@ -6529,6 +6547,30 @@ class PostgresEngine:
                 mental_models = [copy_model_json(row["record"]) for row in cur.fetchall()]
                 cur.execute("SELECT record FROM documents WHERE tenant_id = %s ORDER BY branch, owner_id, document_id", (db_tenant_id,))
                 documents = [copy.deepcopy(row["record"]) for row in cur.fetchall()]
+                self._ensure_observations_schema(cur)
+                self._ensure_knowledge_pages_schema(cur)
+                cur.execute(
+                    """
+                    SELECT o.*, t.name AS tenant_name
+                    FROM observations o
+                    JOIN tenants t ON t.id = o.tenant_id
+                    WHERE o.tenant_id = %s
+                    ORDER BY o.created_at, o.observation_id
+                    """,
+                    (db_tenant_id,),
+                )
+                observations = [_row_to_observation(row, tenant_id).to_dict() for row in cur.fetchall()]
+                cur.execute(
+                    """
+                    SELECT kp.*, t.name AS tenant_name
+                    FROM knowledge_pages kp
+                    JOIN tenants t ON t.id = kp.tenant_id
+                    WHERE kp.tenant_id = %s
+                    ORDER BY kp.path
+                    """,
+                    (db_tenant_id,),
+                )
+                knowledge_pages = [_row_to_knowledge_page(row, tenant_id).to_dict() for row in cur.fetchall()]
                 cur.execute(
                     """
                     SELECT w.*, t.name AS tenant_name
@@ -6554,6 +6596,8 @@ class PostgresEngine:
             "intentions": intentions,
             "mental_models": mental_models,
             "documents": documents,
+            "observations": observations,
+            "knowledge_pages": knowledge_pages,
             "working_memory": working_memory,
             "audit_log": audit,
             "deletion_log": deletion,
@@ -6631,6 +6675,8 @@ class PostgresEngine:
             "entities": [item for exported in tenant_exports for item in exported["entities"]],
             "mental_models": [item for exported in tenant_exports for item in exported["mental_models"]],
             "documents": [item for exported in tenant_exports for item in exported.get("documents", [])],
+            "observations": [item for exported in tenant_exports for item in exported.get("observations", [])],
+            "knowledge_pages": [item for exported in tenant_exports for item in exported.get("knowledge_pages", [])],
             "audit_log": [item for exported in tenant_exports for item in exported["audit_log"]],
             "deletion_log": [item for exported in tenant_exports for item in exported["deletion_log"]],
             "merge_log": merge_log,
@@ -8020,12 +8066,852 @@ class PostgresEngine:
         """Per-example conformal set size (I8 / §7 #12) — not packet-relative."""
         return conformal_prediction_set_size_for_hits(hits, threshold=threshold)
 
+    # --- observations & knowledge pages (Milestone 2) ------------------------
+
+    @classmethod
+    def _ensure_observations_schema(cls, cur: Any) -> None:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS observations (
+              id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+              observation_id TEXT NOT NULL,
+              tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+              branch TEXT NOT NULL DEFAULT 'main',
+              user_id TEXT NOT NULL,
+              subject TEXT NOT NULL,
+              topic TEXT NOT NULL,
+              content TEXT NOT NULL,
+              proof_quotes JSONB NOT NULL DEFAULT '[]'::jsonb,
+              source_evidence_cids TEXT[] NOT NULL DEFAULT '{}',
+              independent_source_count INT NOT NULL DEFAULT 1 CHECK (independent_source_count >= 0),
+              corroboration_velocity REAL NOT NULL DEFAULT 0.0,
+              contradiction_history JSONB NOT NULL DEFAULT '[]'::jsonb,
+              freshness_watermark TIMESTAMPTZ,
+              standing REAL NOT NULL DEFAULT 0.51 CHECK (standing >= 0.0 AND standing <= 1.0),
+              salience REAL NOT NULL DEFAULT 0.5 CHECK (salience >= 0.0 AND salience <= 1.0),
+              access_velocity REAL NOT NULL DEFAULT 0.0,
+              access_count INT NOT NULL DEFAULT 0 CHECK (access_count >= 0),
+              last_accessed_at TIMESTAMPTZ,
+              status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'superseded', 'retracted', 'quarantined', 'contested')),
+              superseded_by TEXT,
+              version INT NOT NULL DEFAULT 1 CHECK (version > 0),
+              trust_tier SMALLINT NOT NULL DEFAULT 0,
+              sensitivity SMALLINT NOT NULL DEFAULT 0,
+              access_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+              updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+              FOREIGN KEY (tenant_id, branch) REFERENCES branches(tenant_id, name)
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS observations_tenant_branch_obs_id_unique
+              ON observations (tenant_id, branch, observation_id)
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS observations_tenant_subject_idx
+              ON observations (tenant_id, branch, subject, status)
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS observations_tenant_topic_idx
+              ON observations (tenant_id, branch, topic, status)
+            """
+        )
+
+    @classmethod
+    def _ensure_knowledge_pages_schema(cls, cur: Any) -> None:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS knowledge_pages (
+              id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+              page_id TEXT NOT NULL,
+              tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+              branch TEXT NOT NULL DEFAULT 'main',
+              user_id TEXT NOT NULL DEFAULT '',
+              path TEXT NOT NULL,
+              title TEXT NOT NULL,
+              content_markdown TEXT NOT NULL,
+              source_observation_ids TEXT[] NOT NULL DEFAULT '{}',
+              source_assertion_ids TEXT[] NOT NULL DEFAULT '{}',
+              source_evidence_cids TEXT[] NOT NULL DEFAULT '{}',
+              tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+              version INT NOT NULL DEFAULT 1 CHECK (version > 0),
+              status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'stale', 'retired', 'archived', 'draft')),
+              trust_tier SMALLINT NOT NULL DEFAULT 0,
+              sensitivity SMALLINT NOT NULL DEFAULT 0,
+              access_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+              updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+              FOREIGN KEY (tenant_id, branch) REFERENCES branches(tenant_id, name)
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS knowledge_pages_tenant_branch_path_unique
+              ON knowledge_pages (tenant_id, branch, path) WHERE status != 'retired' AND status != 'archived'
+            """
+        )
+        cur.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS knowledge_pages_tenant_branch_page_id_unique
+              ON knowledge_pages (tenant_id, branch, page_id)
+            """
+        )
+
+    def observation_upsert(
+        self,
+        observation_or_tenant: Observation | dict[str, Any] | str,
+        observation: Observation | dict[str, Any] | None = None,
+        branch: str = "main",
+    ) -> str:
+        if isinstance(observation_or_tenant, str) and observation is not None:
+            tenant_id = observation_or_tenant
+            obs = Observation.from_dict(observation) if isinstance(observation, dict) else observation
+        else:
+            obs = Observation.from_dict(observation_or_tenant) if isinstance(observation_or_tenant, dict) else observation_or_tenant
+            tenant_id = obs.tenant_id
+        if branch == "main" and getattr(obs, "branch", None):
+            branch = obs.branch
+        else:
+            obs.branch = branch
+
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        verify_observation_proof_quotes(
+            obs,
+            lambda cid: self.get_evidence(tenant_id, cid, branch=branch),
+        )
+        ev_rows = [self.get_evidence(tenant_id, cid, branch=branch) for cid in obs.source_evidence_cids]
+        obs.independent_source_count = compute_independent_source_count(r for r in ev_rows if r is not None)
+        obs.standing = compute_dynamic_standing(
+            independent_source_count=obs.independent_source_count,
+            corroboration_velocity=obs.corroboration_velocity,
+            contradiction_count=len(obs.contradiction_history),
+            access_velocity=obs.access_velocity,
+        )
+
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                self._ensure_tenant_and_branch_cursor(cur, tenant_id, branch, "protected")
+                self._ensure_observations_schema(cur)
+                cur.execute(
+                    "SELECT * FROM observations WHERE tenant_id = %s AND branch = %s AND observation_id = %s",
+                    (db_tenant_id, branch, obs.observation_id),
+                )
+                row = cur.fetchone()
+                if row is not None:
+                    version = row["version"] + 1
+                    cur.execute(
+                        """
+                        UPDATE observations SET
+                            user_id = %s, subject = %s, topic = %s, content = %s,
+                            proof_quotes = %s, source_evidence_cids = %s, independent_source_count = %s,
+                            corroboration_velocity = %s, contradiction_history = %s, freshness_watermark = %s,
+                            standing = %s, salience = %s, access_velocity = %s, access_count = %s,
+                            last_accessed_at = %s, status = %s, superseded_by = %s, version = %s,
+                            trust_tier = %s, sensitivity = %s, access_policy = %s, updated_at = now()
+                        WHERE tenant_id = %s AND branch = %s AND observation_id = %s
+                        RETURNING *
+                        """,
+                        (
+                            obs.user_id,
+                            obs.subject,
+                            obs.topic,
+                            obs.content,
+                            self._jsonb([q.to_dict() for q in obs.proof_quotes]),
+                            list(obs.source_evidence_cids),
+                            obs.independent_source_count,
+                            obs.corroboration_velocity,
+                            self._jsonb([c.to_dict() for c in obs.contradiction_history]),
+                            parse_dt(obs.freshness_watermark) if obs.freshness_watermark else None,
+                            obs.standing,
+                            obs.salience,
+                            obs.access_velocity,
+                            obs.access_count,
+                            parse_dt(obs.last_accessed_at) if obs.last_accessed_at else None,
+                            obs.status,
+                            obs.superseded_by,
+                            version,
+                            obs.trust_tier,
+                            obs.sensitivity,
+                            self._jsonb(obs.access_policy),
+                            db_tenant_id,
+                            branch,
+                            obs.observation_id,
+                        ),
+                    )
+                    saved_row = cur.fetchone()
+                    self._audit(
+                        cur,
+                        db_tenant_id,
+                        obs.user_id,
+                        "upsert_observation",
+                        obs.observation_id,
+                        {"op": "update", "version": version, "subject": obs.subject, "topic": obs.topic},
+                        source=obs.user_id,
+                        trust_tier=obs.trust_tier,
+                    )
+                else:
+                    version = obs.version or 1
+                    cur.execute(
+                        """
+                        INSERT INTO observations (
+                            tenant_id, branch, observation_id, user_id, subject, topic, content,
+                            proof_quotes, source_evidence_cids, independent_source_count,
+                            corroboration_velocity, contradiction_history, freshness_watermark,
+                            standing, salience, access_velocity, access_count, last_accessed_at,
+                            status, superseded_by, version, trust_tier, sensitivity, access_policy
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING *
+                        """,
+                        (
+                            db_tenant_id,
+                            branch,
+                            obs.observation_id,
+                            obs.user_id,
+                            obs.subject,
+                            obs.topic,
+                            obs.content,
+                            self._jsonb([q.to_dict() for q in obs.proof_quotes]),
+                            list(obs.source_evidence_cids),
+                            obs.independent_source_count,
+                            obs.corroboration_velocity,
+                            self._jsonb([c.to_dict() for c in obs.contradiction_history]),
+                            parse_dt(obs.freshness_watermark) if obs.freshness_watermark else None,
+                            obs.standing,
+                            obs.salience,
+                            obs.access_velocity,
+                            obs.access_count,
+                            parse_dt(obs.last_accessed_at) if obs.last_accessed_at else None,
+                            obs.status,
+                            obs.superseded_by,
+                            version,
+                            obs.trust_tier,
+                            obs.sensitivity,
+                            self._jsonb(obs.access_policy),
+                        ),
+                    )
+                    saved_row = cur.fetchone()
+                    self._audit(
+                        cur,
+                        db_tenant_id,
+                        obs.user_id,
+                        "upsert_observation",
+                        obs.observation_id,
+                        {"op": "create", "version": version, "subject": obs.subject, "topic": obs.topic},
+                        source=obs.user_id,
+                        trust_tier=obs.trust_tier,
+                    )
+                saved_obs = _row_to_observation(saved_row, tenant_id)
+                return saved_obs.observation_id
+
+    def observation_get(
+        self,
+        tenant_id: str,
+        observation_id: str,
+        branch: str = "main",
+        *,
+        validate_custody: bool = True,
+    ) -> Observation | None:
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                self._ensure_observations_schema(cur)
+                cur.execute(
+                    "SELECT * FROM observations WHERE tenant_id = %s AND branch = %s AND observation_id = %s",
+                    (db_tenant_id, branch, observation_id),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return None
+                obs = _row_to_observation(row, tenant_id)
+                if validate_custody and obs.status == "active":
+                    erased_any = False
+                    for cid in obs.source_evidence_cids:
+                        ev = self.get_evidence(tenant_id, cid, branch=branch)
+                        if ev is None or getattr(ev, "erased", False) or getattr(ev, "retired_at", None) is not None:
+                            erased_any = True
+                            break
+                    if erased_any:
+                        obs.status = "retracted"
+                        obs.standing = min(SELF_GENERATED_CEILING, 0.20)
+                        obs.updated_at = dt_to_json(utc_now())
+                        cur.execute(
+                            "UPDATE observations SET status = 'retracted', standing = %s, updated_at = now() "
+                            "WHERE tenant_id = %s AND branch = %s AND observation_id = %s",
+                            (obs.standing, db_tenant_id, branch, observation_id),
+                        )
+                        self._audit(
+                            cur,
+                            db_tenant_id,
+                            "system",
+                            "retract_observation",
+                            observation_id,
+                            {"reason": "transitive_custody_erasure", "status": "retracted", "standing": obs.standing},
+                            source="transitive_custody",
+                        )
+                return obs
+
+    def observation_list(
+        self,
+        tenant_id: str,
+        branch: str = "main",
+        *,
+        subject: str | None = None,
+        topic: str | None = None,
+        user_id: str | None = None,
+        status: str = "active",
+        limit: int = 100,
+    ) -> list[Observation]:
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                self._ensure_observations_schema(cur)
+                query = "SELECT * FROM observations WHERE tenant_id = %s AND branch = %s"
+                params: list[Any] = [db_tenant_id, branch]
+                if subject is not None:
+                    query += " AND subject = %s"
+                    params.append(subject)
+                if topic is not None:
+                    query += " AND topic = %s"
+                    params.append(topic)
+                if user_id is not None:
+                    query += " AND user_id = %s"
+                    params.append(user_id)
+                if status != "all":
+                    query += " AND status = %s"
+                    params.append(status)
+                query += " ORDER BY created_at DESC LIMIT %s"
+                params.append(limit)
+                cur.execute(query, tuple(params))
+                return [_row_to_observation(r, tenant_id) for r in cur.fetchall()]
+
+    def observation_reconcile(
+        self,
+        tenant_id: str,
+        branch: str = "main",
+        *,
+        observation: Observation | dict[str, Any],
+    ) -> tuple[Observation, bool]:
+        obs = Observation.from_dict(observation) if isinstance(observation, dict) else observation
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                self._ensure_tenant_and_branch_cursor(cur, tenant_id, branch, "protected")
+                self._ensure_observations_schema(cur)
+                cur.execute(
+                    "SELECT * FROM observations WHERE tenant_id = %s AND branch = %s AND subject = %s AND topic = %s AND status = 'active'",
+                    (db_tenant_id, branch, obs.subject, obs.topic),
+                )
+                row = cur.fetchone()
+                if row is not None:
+                    existing_obs = _row_to_observation(row, tenant_id)
+                    reconciled, is_contradiction = reconcile_observation(existing_obs, obs)
+                    if is_contradiction:
+                        existing_obs.status = "superseded"
+                        existing_obs.superseded_by = reconciled.observation_id
+                        self.observation_upsert(existing_obs, branch=branch)
+                        self.observation_upsert(reconciled, branch=branch)
+                    else:
+                        self.observation_upsert(reconciled, branch=branch)
+                    self._audit(
+                        cur,
+                        db_tenant_id,
+                        obs.user_id or "system",
+                        "observation_reconcile",
+                        reconciled.observation_id,
+                        {"is_contradiction": is_contradiction, "status": reconciled.status},
+                        source="reconcile",
+                    )
+                    return reconciled, is_contradiction
+                else:
+                    self.observation_upsert(obs, branch=branch)
+                    return obs, False
+
+    def observation_retract(
+        self,
+        tenant_id: str,
+        observation_id: str,
+        branch: str = "main",
+        *,
+        reason: str = "user_retraction",
+        actor: str = "system",
+    ) -> bool:
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                self._ensure_observations_schema(cur)
+                cur.execute(
+                    "SELECT * FROM observations WHERE tenant_id = %s AND branch = %s AND observation_id = %s",
+                    (db_tenant_id, branch, observation_id),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return False
+                version = row["version"] + 1
+                cur.execute(
+                    """
+                    UPDATE observations SET status = 'retracted', standing = 0.0, version = %s, updated_at = now()
+                    WHERE tenant_id = %s AND branch = %s AND observation_id = %s
+                    """,
+                    (version, db_tenant_id, branch, observation_id),
+                )
+                self._audit(
+                    cur,
+                    db_tenant_id,
+                    actor,
+                    "retract_observation",
+                    observation_id,
+                    {"reason": reason, "status": "retracted", "version": version},
+                    source=actor,
+                )
+                return True
+
+    def get_observation_record(
+        self, tenant_id: str, observation_id: str, branch: str = "main"
+    ) -> dict[str, Any] | None:
+        obs = self.observation_get(tenant_id, observation_id, branch=branch)
+        return obs.to_dict() if obs is not None else None
+
+    def list_observation_records(
+        self, tenant_id: str, branch: str = "main", *, subject: str | None = None, topic: str | None = None, status: str | None = None
+    ) -> list[dict[str, Any]]:
+        return [obs.to_dict() for obs in self.observation_list(tenant_id, branch=branch, subject=subject, topic=topic, status=status or "all")]
+
+    def save_observation_record(
+        self,
+        tenant_id: str,
+        observation_id: str,
+        record: dict[str, Any],
+        *,
+        branch: str = "main",
+        expected_version: int | None = None,
+    ) -> dict[str, Any]:
+        existing = self.observation_get(tenant_id, observation_id, branch=branch)
+        if expected_version is not None:
+            current_ver = existing.version if existing is not None else 0
+            if current_ver != expected_version:
+                raise ValueError(f"Version conflict: expected {expected_version}, got {current_ver}")
+        data = dict(record)
+        data["tenant_id"] = tenant_id
+        data["branch"] = branch
+        data["observation_id"] = observation_id
+        obs = Observation.from_dict(data)
+        self.observation_upsert(obs, branch=branch)
+        saved = self.observation_get(tenant_id, observation_id, branch=branch)
+        return saved.to_dict() if saved is not None else record
+
+    def knowledge_page_create(
+        self,
+        page_or_tenant: KnowledgePage | dict[str, Any] | str,
+        page: KnowledgePage | dict[str, Any] | None = None,
+        branch: str = "main",
+    ) -> str:
+        if isinstance(page_or_tenant, str) and page is not None:
+            tenant_id = page_or_tenant
+            kp = KnowledgePage.from_dict(page) if isinstance(page, dict) else page
+        else:
+            kp = KnowledgePage.from_dict(page_or_tenant) if isinstance(page_or_tenant, dict) else page_or_tenant
+            tenant_id = kp.tenant_id
+        if branch == "main" and getattr(kp, "branch", None):
+            branch = kp.branch
+        else:
+            kp.branch = branch
+
+        validate_knowledge_page_path(kp.path)
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        verify_knowledge_page_acyclic_custody(
+            kp,
+            get_observation=lambda oid: self.observation_get(tenant_id, oid, branch=branch, validate_custody=False),
+            get_evidence=lambda cid: self.get_evidence(tenant_id, cid, branch=branch),
+        )
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                self._ensure_tenant_and_branch_cursor(cur, tenant_id, branch, "protected")
+                self._ensure_knowledge_pages_schema(cur)
+                cur.execute(
+                    "SELECT page_id FROM knowledge_pages WHERE tenant_id = %s AND branch = %s AND path = %s "
+                    "AND status NOT IN ('retired', 'archived')",
+                    (db_tenant_id, branch, kp.path),
+                )
+                if cur.fetchone() is not None:
+                    raise KnowledgePageConflict(f"KnowledgePage already exists at path '{kp.path}'")
+                cur.execute(
+                    "SELECT page_id FROM knowledge_pages WHERE tenant_id = %s AND branch = %s AND page_id = %s",
+                    (db_tenant_id, branch, kp.page_id),
+                )
+                if cur.fetchone() is not None:
+                    raise KnowledgePageConflict(f"KnowledgePage already exists with page_id '{kp.page_id}'")
+                cur.execute(
+                    """
+                    INSERT INTO knowledge_pages (
+                        tenant_id, branch, page_id, user_id, path, title, content_markdown,
+                        source_observation_ids, source_assertion_ids, source_evidence_cids,
+                        tags, version, status, trust_tier, sensitivity, access_policy
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        db_tenant_id,
+                        branch,
+                        kp.page_id,
+                        kp.user_id,
+                        kp.path,
+                        kp.title,
+                        kp.content_markdown,
+                        list(kp.source_observation_ids),
+                        list(kp.source_assertion_ids),
+                        list(kp.source_evidence_cids),
+                        self._jsonb(kp.tags),
+                        kp.version,
+                        kp.status,
+                        kp.trust_tier,
+                        kp.sensitivity,
+                        self._jsonb(kp.access_policy),
+                    ),
+                )
+                self._audit(
+                    cur,
+                    db_tenant_id,
+                    kp.user_id or "system",
+                    "create_knowledge_page",
+                    kp.page_id,
+                    {"path": kp.path, "title": kp.title, "version": kp.version},
+                    source=kp.user_id or "system",
+                    trust_tier=kp.trust_tier,
+                )
+                return kp.page_id
+
+    def knowledge_page_update(
+        self,
+        page_or_tenant: KnowledgePage | dict[str, Any] | str,
+        page: KnowledgePage | dict[str, Any] | None = None,
+        branch: str = "main",
+        *,
+        expected_version: int | None = None,
+    ) -> KnowledgePage:
+        if isinstance(page_or_tenant, str) and page is not None:
+            tenant_id = page_or_tenant
+            kp = KnowledgePage.from_dict(page) if isinstance(page, dict) else page
+        else:
+            kp = KnowledgePage.from_dict(page_or_tenant) if isinstance(page_or_tenant, dict) else page_or_tenant
+            tenant_id = kp.tenant_id
+        if branch == "main" and getattr(kp, "branch", None):
+            branch = kp.branch
+        else:
+            kp.branch = branch
+
+        validate_knowledge_page_path(kp.path)
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        verify_knowledge_page_acyclic_custody(
+            kp,
+            get_observation=lambda oid: self.observation_get(tenant_id, oid, branch=branch, validate_custody=False),
+            get_evidence=lambda cid: self.get_evidence(tenant_id, cid, branch=branch),
+        )
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                self._ensure_tenant_and_branch_cursor(cur, tenant_id, branch, "protected")
+                self._ensure_knowledge_pages_schema(cur)
+                cur.execute(
+                    "SELECT * FROM knowledge_pages WHERE tenant_id = %s AND branch = %s AND page_id = %s FOR UPDATE",
+                    (db_tenant_id, branch, kp.page_id),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    raise CustodyNotFoundError(f"KnowledgePage '{kp.page_id}' not found")
+                current = _row_to_knowledge_page(row, tenant_id)
+                if expected_version is not None and current.version != expected_version:
+                    raise KnowledgePageConflict(f"Version conflict: expected {expected_version}, got {current.version}")
+                if kp.path != current.path:
+                    cur.execute(
+                        "SELECT page_id FROM knowledge_pages WHERE tenant_id = %s AND branch = %s AND path = %s "
+                        "AND page_id != %s AND status NOT IN ('retired', 'archived')",
+                        (db_tenant_id, branch, kp.path, kp.page_id),
+                    )
+                    if cur.fetchone() is not None:
+                        raise KnowledgePageConflict(f"KnowledgePage already exists at path '{kp.path}'")
+                new_version = current.version + 1
+                cur.execute(
+                    """
+                    UPDATE knowledge_pages SET
+                        user_id = %s, path = %s, title = %s, content_markdown = %s,
+                        source_observation_ids = %s, source_assertion_ids = %s, source_evidence_cids = %s,
+                        tags = %s, version = %s, status = %s, trust_tier = %s, sensitivity = %s,
+                        access_policy = %s, updated_at = now()
+                    WHERE tenant_id = %s AND branch = %s AND page_id = %s
+                    RETURNING *
+                    """,
+                    (
+                        kp.user_id,
+                        kp.path,
+                        kp.title,
+                        kp.content_markdown,
+                        list(kp.source_observation_ids),
+                        list(kp.source_assertion_ids),
+                        list(kp.source_evidence_cids),
+                        self._jsonb(kp.tags),
+                        new_version,
+                        kp.status,
+                        kp.trust_tier,
+                        kp.sensitivity,
+                        self._jsonb(kp.access_policy),
+                        db_tenant_id,
+                        branch,
+                        kp.page_id,
+                    ),
+                )
+                updated_row = cur.fetchone()
+                self._audit(
+                    cur,
+                    db_tenant_id,
+                    kp.user_id or "system",
+                    "update_knowledge_page",
+                    kp.page_id,
+                    {"path": kp.path, "title": kp.title, "version": new_version},
+                    source=kp.user_id or "system",
+                    trust_tier=kp.trust_tier,
+                )
+                return _row_to_knowledge_page(updated_row, tenant_id)
+
+    def knowledge_page_get(
+        self,
+        tenant_id: str,
+        page_id_or_path_or_branch: str | None = None,
+        branch: str = "main",
+        *,
+        page_id: str | None = None,
+        path: str | None = None,
+        validate_custody: bool = True,
+    ) -> KnowledgePage | None:
+        actual_branch = branch
+        actual_page_id = page_id
+        actual_path = path
+
+        if page_id_or_path_or_branch is not None:
+            if page_id is not None or path is not None:
+                actual_branch = page_id_or_path_or_branch
+            else:
+                if "/" in page_id_or_path_or_branch:
+                    actual_path = page_id_or_path_or_branch
+                else:
+                    actual_page_id = page_id_or_path_or_branch
+
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                self._ensure_knowledge_pages_schema(cur)
+                row = None
+                if actual_page_id is not None:
+                    cur.execute(
+                        "SELECT * FROM knowledge_pages WHERE tenant_id = %s AND branch = %s AND page_id = %s",
+                        (db_tenant_id, actual_branch, actual_page_id),
+                    )
+                    row = cur.fetchone()
+                elif actual_path is not None:
+                    norm = validate_knowledge_page_path(actual_path)
+                    cur.execute(
+                        "SELECT * FROM knowledge_pages WHERE tenant_id = %s AND branch = %s AND path = %s "
+                        "AND status NOT IN ('retired', 'archived')",
+                        (db_tenant_id, actual_branch, norm),
+                    )
+                    row = cur.fetchone()
+                if row is None:
+                    return None
+                page = _row_to_knowledge_page(row, tenant_id)
+                if validate_custody:
+                    try:
+                        verify_knowledge_page_acyclic_custody(
+                            page,
+                            get_observation=lambda oid: self.observation_get(tenant_id, oid, branch=actual_branch, validate_custody=False),
+                            get_evidence=lambda cid: self.get_evidence(tenant_id, cid, branch=actual_branch),
+                        )
+                    except Exception:
+                        page.status = "stale"
+                        cur.execute(
+                            "UPDATE knowledge_pages SET status = 'stale', updated_at = now() WHERE tenant_id = %s AND branch = %s AND page_id = %s",
+                            (db_tenant_id, actual_branch, page.page_id),
+                        )
+                return page
+
+    def knowledge_page_list(
+        self,
+        tenant_id: str,
+        branch: str = "main",
+        *,
+        path_prefix: str | None = None,
+        folder: str | None = None,
+        tags: list[str] | None = None,
+        status: str = "active",
+        limit: int = 100,
+    ) -> list[KnowledgePage]:
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                self._ensure_knowledge_pages_schema(cur)
+                query = "SELECT * FROM knowledge_pages WHERE tenant_id = %s AND branch = %s"
+                params: list[Any] = [db_tenant_id, branch]
+                if status != "all":
+                    query += " AND status = %s"
+                    params.append(status)
+                query += " ORDER BY path ASC LIMIT %s"
+                params.append(limit)
+                cur.execute(query, tuple(params))
+                pages = [_row_to_knowledge_page(r, tenant_id) for r in cur.fetchall()]
+                prefix = folder or path_prefix
+                if prefix is not None:
+                    norm_prefix = prefix.strip().lower().rstrip("/") + "/"
+                    pages = [p for p in pages if p.path.startswith(norm_prefix) or p.path == prefix.strip().lower()]
+                if tags:
+                    tag_set = set(tags)
+                    pages = [p for p in pages if tag_set.issubset(set(p.tags))]
+                return pages
+
+    def knowledge_page_render_markdown(
+        self,
+        tenant_id: str,
+        page_id_or_path_or_branch: str | None = None,
+        branch: str = "main",
+        *,
+        page_id: str | None = None,
+        path: str | None = None,
+        include_frontmatter: bool = True,
+        include_citations_ledger: bool = True,
+    ) -> str:
+        page = self.knowledge_page_get(
+            tenant_id,
+            page_id_or_path_or_branch,
+            branch=branch,
+            page_id=page_id,
+            path=path,
+            validate_custody=False,
+        )
+        if page is None:
+            ident = page_id or path or page_id_or_path_or_branch
+            raise CustodyNotFoundError(f"KnowledgePage '{ident}' not found")
+        return render_knowledge_page_markdown(
+            page,
+            get_observation=lambda oid: self.observation_get(tenant_id, oid, branch=branch, validate_custody=False),
+            get_evidence=lambda cid: self.get_evidence(tenant_id, cid, branch=branch),
+            include_frontmatter=include_frontmatter,
+            include_citations_ledger=include_citations_ledger,
+        )
+
+    def knowledge_page_archive(
+        self,
+        tenant_id: str,
+        page_id_or_path_or_branch: str | None = None,
+        branch: str = "main",
+        *,
+        page_id: str | None = None,
+        path: str | None = None,
+        reason: str = "archived",
+        actor: str = "system",
+    ) -> bool:
+        page = self.knowledge_page_get(
+            tenant_id,
+            page_id_or_path_or_branch,
+            branch=branch,
+            page_id=page_id,
+            path=path,
+            validate_custody=False,
+        )
+        if page is None:
+            return False
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                self._ensure_knowledge_pages_schema(cur)
+                new_version = page.version + 1
+                cur.execute(
+                    "UPDATE knowledge_pages SET status = 'archived', version = %s, updated_at = now() "
+                    "WHERE tenant_id = %s AND branch = %s AND page_id = %s",
+                    (new_version, db_tenant_id, branch, page.page_id),
+                )
+                self._audit(
+                    cur,
+                    db_tenant_id,
+                    actor,
+                    "archive_knowledge_page",
+                    page.page_id,
+                    {"status": "archived", "version": new_version, "reason": reason},
+                    source=actor,
+                )
+                return True
+
+    def knowledge_page_refresh(
+        self,
+        tenant_id: str,
+        page_id_or_path_or_branch: str | None = None,
+        branch: str = "main",
+        *,
+        page_id: str | None = None,
+        path: str | None = None,
+    ) -> KnowledgePage | None:
+        return self.knowledge_page_get(
+            tenant_id,
+            page_id_or_path_or_branch,
+            branch=branch,
+            page_id=page_id,
+            path=path,
+            validate_custody=True,
+        )
+
+    def get_knowledge_page_record(
+        self, tenant_id: str, page_id_or_path: str, branch: str = "main"
+    ) -> dict[str, Any] | None:
+        page = self.knowledge_page_get(tenant_id, page_id_or_path, branch=branch, validate_custody=False)
+        return page.to_dict() if page is not None else None
+
+    def list_knowledge_page_records(
+        self, tenant_id: str, branch: str = "main"
+    ) -> list[dict[str, Any]]:
+        return [p.to_dict() for p in self.knowledge_page_list(tenant_id, branch=branch, status="all")]
+
+    def save_knowledge_page_record(
+        self,
+        tenant_id: str,
+        page_id: str,
+        record: dict[str, Any],
+        *,
+        branch: str = "main",
+        expected_version: int | None = None,
+    ) -> dict[str, Any]:
+        existing = self.knowledge_page_get(tenant_id, page_id, branch=branch, validate_custody=False)
+        data = dict(record)
+        data["tenant_id"] = tenant_id
+        data["branch"] = branch
+        data["page_id"] = page_id
+        page = KnowledgePage.from_dict(data)
+        if existing is None:
+            self.knowledge_page_create(page, branch=branch)
+            saved = self.knowledge_page_get(tenant_id, page_id, branch=branch, validate_custody=False)
+            return saved.to_dict() if saved is not None else record
+        else:
+            saved = self.knowledge_page_update(page, branch=branch, expected_version=expected_version)
+            return saved.to_dict()
+
 
 def _cid_to_bytes(cid: str) -> bytes:
     return bytes.fromhex(cid.removeprefix("cidv1:"))
 
 
-def _cid_bytes_or_none(cid: str) -> bytes | None:
+def _cid_bytes_or_none(cid: str | None) -> bytes | None:
+    if not cid or not isinstance(cid, str):
+        return None
     value = cid.removeprefix("cidv1:")
     try:
         return bytes.fromhex(value)
@@ -8330,4 +9216,84 @@ def _row_to_preference(row: dict[str, Any], tenant_id: str) -> Preference:
         valid_from=parse_dt(row["valid_from"]) or utc_now(),
         valid_to=parse_dt(row["valid_to"]),
         status=row["status"],
+    )
+
+
+def _row_to_observation(row: dict[str, Any], tenant_id: str | None = None) -> Observation:
+    tid = tenant_id or str(row.get("tenant_name") or row["tenant_id"])
+    proof_quotes_raw = row.get("proof_quotes") or []
+    if isinstance(proof_quotes_raw, str):
+        proof_quotes_raw = json.loads(proof_quotes_raw)
+    proof_quotes = [ProofQuote.from_dict(q) if isinstance(q, dict) else q for q in proof_quotes_raw]
+
+    contradiction_history_raw = row.get("contradiction_history") or []
+    if isinstance(contradiction_history_raw, str):
+        contradiction_history_raw = json.loads(contradiction_history_raw)
+    contradiction_history = [
+        ContradictionSnapshot.from_dict(c) if isinstance(c, dict) else c for c in contradiction_history_raw
+    ]
+
+    source_cids = list(row.get("source_evidence_cids") or [])
+    policy = row.get("access_policy") or {}
+    if isinstance(policy, str):
+        policy = json.loads(policy)
+
+    return Observation(
+        tenant_id=tid,
+        branch=row["branch"],
+        observation_id=row["observation_id"],
+        user_id=str(row["user_id"]),
+        subject=row["subject"],
+        topic=row["topic"],
+        content=row["content"],
+        proof_quotes=proof_quotes,
+        source_evidence_cids=source_cids,
+        independent_source_count=int(row["independent_source_count"]),
+        corroboration_velocity=float(row["corroboration_velocity"]),
+        contradiction_history=contradiction_history,
+        freshness_watermark=dt_to_json(row["freshness_watermark"]) if row.get("freshness_watermark") else None,
+        standing=float(row["standing"]),
+        salience=float(row["salience"]),
+        access_velocity=float(row["access_velocity"]),
+        access_count=int(row["access_count"]),
+        last_accessed_at=parse_dt(row.get("last_accessed_at")),
+        status=row["status"],
+        superseded_by=row.get("superseded_by"),
+        version=int(row["version"]),
+        trust_tier=int(row["trust_tier"]),
+        sensitivity=int(row["sensitivity"]),
+        access_policy=dict(policy),
+        created_at=parse_dt(row.get("created_at")) or utc_now(),
+        updated_at=parse_dt(row.get("updated_at")) or utc_now(),
+    )
+
+
+def _row_to_knowledge_page(row: dict[str, Any], tenant_id: str | None = None) -> KnowledgePage:
+    tid = tenant_id or str(row.get("tenant_name") or row["tenant_id"])
+    tags_raw = row.get("tags") or []
+    if isinstance(tags_raw, str):
+        tags_raw = json.loads(tags_raw)
+    policy = row.get("access_policy") or {}
+    if isinstance(policy, str):
+        policy = json.loads(policy)
+
+    return KnowledgePage(
+        tenant_id=tid,
+        branch=row["branch"],
+        page_id=row["page_id"],
+        user_id=str(row.get("user_id") or ""),
+        path=row["path"],
+        title=row["title"],
+        content_markdown=row["content_markdown"],
+        source_observation_ids=list(row.get("source_observation_ids") or []),
+        source_assertion_ids=list(row.get("source_assertion_ids") or []),
+        source_evidence_cids=list(row.get("source_evidence_cids") or []),
+        tags=list(tags_raw),
+        version=int(row["version"]),
+        status=row["status"],
+        trust_tier=int(row["trust_tier"]),
+        sensitivity=int(row["sensitivity"]),
+        access_policy=dict(policy),
+        created_at=parse_dt(row.get("created_at")) or utc_now(),
+        updated_at=parse_dt(row.get("updated_at")) or utc_now(),
     )
