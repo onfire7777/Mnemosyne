@@ -33,7 +33,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from math import log
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from mnemosyne.models import Hit, parse_dt
 from mnemosyne.text import TAXONOMIC_EXPANSIONS, tokenize
@@ -42,8 +42,11 @@ from mnemosyne.text import TAXONOMIC_EXPANSIONS, tokenize
 def is_passage(hit: Hit) -> bool:
     return (
         hit.kind == "evidence"
-        and hit.metadata.get("source_type") not in {
-            "consolidation-summary", "statistical-trace", "provider-proposal",
+        and hit.metadata.get("source_type")
+        not in {
+            "consolidation-summary",
+            "statistical-trace",
+            "provider-proposal",
         }
         and not hit.metadata.get("summary")
         and hit.metadata.get("reality_class") not in {"self_generated", "simulated"}
@@ -60,6 +63,281 @@ class PassageRecord:
     sensitivity: int = 0
     disclosable: bool = True
     created_at: datetime | None = None
+
+
+@dataclass(slots=True)
+class SubPassage:
+    parent_id: str
+    sub_id: str
+    granularity: Literal["session", "round", "turn"]
+    text: str
+    round_index: int = 0
+    turn_index: int = 0
+    speaker: str = "user"
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+_SPEAKER_PREFIX_RE = re.compile(
+    r"^\s*(?:(?:\*{1,2}|\[)\s*(user|human|assistant|agent|ai|system)\s*:?\s*(?:\*{1,2}|\])\s*:?|(user|human|assistant|agent|ai|system)\s*[:\-])\s*(.*)$",
+    re.IGNORECASE,
+)
+
+
+def extract_session_subpassages(
+    session_id: str,
+    text: str,
+    *,
+    metadata: Mapping[str, Any] | None = None,
+) -> list[SubPassage]:
+    """Extract conversational rounds (user + immediate assistant reply) and standalone user statements.
+
+    Falls back to paragraph or sentence-window chunking for untagged text.
+    Preserves parent session reference and emits fine-grained subpassages.
+    """
+    subpassages: list[SubPassage] = []
+    base_meta = dict(metadata) if metadata else {}
+
+    # Macro session-level subpassage
+    subpassages.append(
+        SubPassage(
+            parent_id=session_id,
+            sub_id=session_id,
+            granularity="session",
+            text=text,
+            round_index=0,
+            turn_index=0,
+            speaker="user",
+            metadata=dict(base_meta),
+        )
+    )
+
+    lines = text.splitlines()
+    has_speaker_tags = any(_SPEAKER_PREFIX_RE.match(line) is not None for line in lines)
+
+    if has_speaker_tags:
+        turns: list[dict[str, Any]] = []
+        current_speaker: str | None = None
+        current_lines: list[str] = []
+
+        for line in lines:
+            m = _SPEAKER_PREFIX_RE.match(line)
+            if m:
+                speaker_raw = None
+                for g in m.groups()[:-1]:
+                    if g is not None:
+                        speaker_raw = g.lower()
+                        break
+                speaker = "user" if speaker_raw in ("user", "human") else "assistant"
+                content = m.group(len(m.groups()))
+                if current_speaker is not None:
+                    t_text = "\n".join(current_lines).strip()
+                    if t_text:
+                        turns.append({"speaker": current_speaker, "text": t_text})
+                current_speaker = speaker
+                prefix_label = "User" if speaker == "user" else "Assistant"
+                current_lines = (
+                    [f"{prefix_label}: {content}".strip()]
+                    if content
+                    else [f"{prefix_label}:"]
+                )
+            else:
+                if current_speaker is not None:
+                    current_lines.append(line)
+                elif line.strip():
+                    current_lines.append(line)
+
+        if current_speaker is not None:
+            t_text = "\n".join(current_lines).strip()
+            if t_text:
+                turns.append({"speaker": current_speaker, "text": t_text})
+
+        round_idx = 0
+        turn_idx = 0
+        t_i = 0
+        while t_i < len(turns):
+            curr_turn = turns[t_i]
+            if curr_turn["speaker"] == "user":
+                turn_sub_id = f"{session_id}:turn:{turn_idx}"
+                subpassages.append(
+                    SubPassage(
+                        parent_id=session_id,
+                        sub_id=turn_sub_id,
+                        granularity="turn",
+                        text=curr_turn["text"],
+                        round_index=round_idx,
+                        turn_index=turn_idx,
+                        speaker="user",
+                        metadata={
+                            **base_meta,
+                            "turn_index": turn_idx,
+                            "round_index": round_idx,
+                        },
+                    )
+                )
+                if t_i + 1 < len(turns) and turns[t_i + 1]["speaker"] == "assistant":
+                    asst_turn = turns[t_i + 1]
+                    round_text = f"{curr_turn['text']}\n{asst_turn['text']}"
+                    round_sub_id = f"{session_id}:round:{round_idx}"
+                    subpassages.append(
+                        SubPassage(
+                            parent_id=session_id,
+                            sub_id=round_sub_id,
+                            granularity="round",
+                            text=round_text,
+                            round_index=round_idx,
+                            turn_index=turn_idx,
+                            speaker="user",
+                            metadata={**base_meta, "round_index": round_idx},
+                        )
+                    )
+                    turn_idx += 1
+                    t_i += 2
+                else:
+                    round_sub_id = f"{session_id}:round:{round_idx}"
+                    subpassages.append(
+                        SubPassage(
+                            parent_id=session_id,
+                            sub_id=round_sub_id,
+                            granularity="round",
+                            text=curr_turn["text"],
+                            round_index=round_idx,
+                            turn_index=turn_idx,
+                            speaker="user",
+                            metadata={**base_meta, "round_index": round_idx},
+                        )
+                    )
+                    turn_idx += 1
+                    t_i += 1
+                round_idx += 1
+            else:
+                round_sub_id = f"{session_id}:round:{round_idx}"
+                subpassages.append(
+                    SubPassage(
+                        parent_id=session_id,
+                        sub_id=round_sub_id,
+                        granularity="round",
+                        text=curr_turn["text"],
+                        round_index=round_idx,
+                        turn_index=turn_idx,
+                        speaker="assistant",
+                        metadata={**base_meta, "round_index": round_idx},
+                    )
+                )
+                round_idx += 1
+                turn_idx += 1
+                t_i += 1
+    else:
+        # Non-dialogue prose/document: paragraph or sentence chunking
+        paragraphs = [p.strip() for p in re.split(r"\n\s*\n+", text) if p.strip()]
+        if len(paragraphs) > 1:
+            for p_idx, p in enumerate(paragraphs):
+                round_sub_id = f"{session_id}:round:{p_idx}"
+                turn_sub_id = f"{session_id}:turn:{p_idx}"
+                subpassages.append(
+                    SubPassage(
+                        parent_id=session_id,
+                        sub_id=round_sub_id,
+                        granularity="round",
+                        text=p,
+                        round_index=p_idx,
+                        turn_index=p_idx,
+                        speaker="user",
+                        metadata={
+                            **base_meta,
+                            "round_index": p_idx,
+                            "paragraph_index": p_idx,
+                        },
+                    )
+                )
+                subpassages.append(
+                    SubPassage(
+                        parent_id=session_id,
+                        sub_id=turn_sub_id,
+                        granularity="turn",
+                        text=p,
+                        round_index=p_idx,
+                        turn_index=p_idx,
+                        speaker="user",
+                        metadata={
+                            **base_meta,
+                            "turn_index": p_idx,
+                            "paragraph_index": p_idx,
+                        },
+                    )
+                )
+        else:
+            sentences = [
+                s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()
+            ]
+            if len(sentences) > 3:
+                window_size = 3
+                stride = 2
+                w_counter = 0
+                for start_idx in range(0, len(sentences), stride):
+                    w_sents = sentences[start_idx : start_idx + window_size]
+                    w_text = " ".join(w_sents)
+                    round_sub_id = f"{session_id}:round:{w_counter}"
+                    turn_sub_id = f"{session_id}:turn:{w_counter}"
+                    subpassages.append(
+                        SubPassage(
+                            parent_id=session_id,
+                            sub_id=round_sub_id,
+                            granularity="round",
+                            text=w_text,
+                            round_index=w_counter,
+                            turn_index=w_counter,
+                            speaker="user",
+                            metadata={
+                                **base_meta,
+                                "round_index": w_counter,
+                                "window_index": w_counter,
+                            },
+                        )
+                    )
+                    subpassages.append(
+                        SubPassage(
+                            parent_id=session_id,
+                            sub_id=turn_sub_id,
+                            granularity="turn",
+                            text=w_text,
+                            round_index=w_counter,
+                            turn_index=w_counter,
+                            speaker="user",
+                            metadata={
+                                **base_meta,
+                                "turn_index": w_counter,
+                                "window_index": w_counter,
+                            },
+                        )
+                    )
+                    w_counter += 1
+            else:
+                subpassages.append(
+                    SubPassage(
+                        parent_id=session_id,
+                        sub_id=f"{session_id}:round:0",
+                        granularity="round",
+                        text=text,
+                        round_index=0,
+                        turn_index=0,
+                        speaker="user",
+                        metadata={**base_meta, "round_index": 0},
+                    )
+                )
+                subpassages.append(
+                    SubPassage(
+                        parent_id=session_id,
+                        sub_id=f"{session_id}:turn:0",
+                        granularity="turn",
+                        text=text,
+                        round_index=0,
+                        turn_index=0,
+                        speaker="user",
+                        metadata={**base_meta, "turn_index": 0},
+                    )
+                )
+
+    return subpassages
 
 
 class PassageGraph:
@@ -184,7 +462,9 @@ class PassageGraph:
         """Compute live Pointwise Mutual Information (PMI) for a two-word phrase in the corpus."""
         t1, t2 = w1.lower(), w2.lower()
         n = max(self._total_passages, 1) + 2.0
-        c12 = self._bigrams.get((t1, t2), 0) or self._cooccurrences.get(t1, {}).get(t2, 0)
+        c12 = self._bigrams.get((t1, t2), 0) or self._cooccurrences.get(t1, {}).get(
+            t2, 0
+        )
         if c12 <= 0:
             return 0.0
         df1 = max(self._doc_frequencies.get(t1, 1), 1)
@@ -194,7 +474,9 @@ class PassageGraph:
         p2 = df2 / n
         return max(0.0, log(max(p12 / (p1 * p2), 1e-9)) / log(2.0))
 
-    def high_pmi_phrases(self, query: str, min_pmi: float = 1.0) -> list[tuple[str, str, float]]:
+    def high_pmi_phrases(
+        self, query: str, min_pmi: float = 1.0
+    ) -> list[tuple[str, str, float]]:
         """Dynamically detect high-PMI compound phrases in a query from live corpus statistics."""
         toks = [t for t in tokenize(query) if len(t) > 2]
         phrases: list[tuple[str, str, float]] = []
@@ -238,7 +520,9 @@ class PassageGraph:
             return base
         ctx_vec = [0.0] * dims
         for t in toks:
-            for neighbor, ppmi in self.discover_corpus_synonyms(t, top_k=4, min_pmi=0.25):
+            for neighbor, ppmi in self.discover_corpus_synonyms(
+                t, top_k=4, min_pmi=0.25
+            ):
                 n_vec = hashing_embedding(neighbor, dims=dims)
                 weight = min(ppmi / 4.0, 0.5)
                 for idx in range(dims):
@@ -298,7 +582,11 @@ def _stem_passage_token(tok: str) -> str:
     t = normalise_query_term(tok)
     if t in _IRREGULAR_VERB_MAP:
         t = _IRREGULAR_VERB_MAP[t]
-    if len(t) == 4 and t.endswith("s") and not t.endswith(("ss", "us", "is", "as", "os", "yes", "was", "has", "his")):
+    if (
+        len(t) == 4
+        and t.endswith("s")
+        and not t.endswith(("ss", "us", "is", "as", "os", "yes", "was", "has", "his"))
+    ):
         t = t[:-1]
     if len(t) >= 4 and t.endswith("e") and not t.endswith(("ee", "ie", "ye", "oe")):
         t = t[:-1]
@@ -307,7 +595,9 @@ def _stem_passage_token(tok: str) -> str:
 
 def _extract_user_lines(text: str) -> str:
     lines = text.splitlines()
-    has_tags = any(line.strip().lower().startswith(("user:", "assistant:")) for line in lines)
+    has_tags = any(
+        line.strip().lower().startswith(("user:", "assistant:")) for line in lines
+    )
     if not has_tags:
         return text
     out: list[str] = []
@@ -332,23 +622,71 @@ class PassageIndex:
     Candidates are reauthorized before every lookup, including cache hits.
     """
 
-    def __init__(self, texts: Sequence[str] | tuple[str, ...]):
+    def __init__(
+        self,
+        texts: Sequence[str] | tuple[str, ...],
+        session_ids: Sequence[str] | None = None,
+    ):
         self._texts: list[str] = list(texts)
-        self._texts_tuple: tuple[str, ...] | None = tuple(texts) if isinstance(texts, tuple) else None
+        self._texts_tuple: tuple[str, ...] | None = (
+            tuple(texts) if isinstance(texts, tuple) else None
+        )
+        self._session_ids: list[str] = (
+            list(session_ids)
+            if session_ids is not None
+            else [str(i) for i in range(len(self._texts))]
+        )
         self.lengths: list[int] = []
         self.user_lengths: list[int] = []
         self.postings: dict[str, list[tuple[int, int]]] = defaultdict(list)
         self.stem_postings: dict[str, list[tuple[int, int]]] = defaultdict(list)
         self.user_stem_postings: dict[str, list[tuple[int, int]]] = defaultdict(list)
+
+        # Multi-granularity subpassage structures
+        self.subpassages: list[SubPassage] = []
+        self.session_subpassages: list[list[SubPassage]] = []
+        self.round_postings: dict[str, list[tuple[int, int, int]]] = defaultdict(list)
+        self.round_stem_postings: dict[str, list[tuple[int, int, int]]] = defaultdict(
+            list
+        )
+        self.turn_postings: dict[str, list[tuple[int, int, int]]] = defaultdict(list)
+        self.turn_stem_postings: dict[str, list[tuple[int, int, int]]] = defaultdict(
+            list
+        )
+        self.round_lengths: list[list[int]] = []
+        self.turn_lengths: list[list[int]] = []
+        self.total_round_length: int = 0
+        self.total_rounds: int = 0
+        self.total_turn_length: int = 0
+        self.total_turns: int = 0
+
         for index, text in enumerate(self._texts):
-            self._index_single_text(index, text)
+            sess_id = (
+                self._session_ids[index]
+                if index < len(self._session_ids)
+                else str(index)
+            )
+            self._index_single_text(index, text, session_id=sess_id)
+
         self.total_length = sum(self.lengths)
         self.average_length = self.total_length / max(len(self._texts), 1) or 1.0
         self.total_user_length = sum(self.user_lengths)
-        self.average_user_length = self.total_user_length / max(len(self._texts), 1) or 1.0
+        self.average_user_length = (
+            self.total_user_length / max(len(self._texts), 1) or 1.0
+        )
+        self.average_round_length = (
+            self.total_round_length / max(self.total_rounds, 1) or 1.0
+        )
+        self.average_turn_length = (
+            self.total_turn_length / max(self.total_turns, 1) or 1.0
+        )
         self._graph: PassageGraph | None = None
 
-    def _index_single_text(self, index: int, text: str) -> tuple[int, int]:
+    def _index_single_text(
+        self, index: int, text: str, session_id: str | None = None
+    ) -> tuple[int, int]:
+        if session_id is None:
+            session_id = str(index)
         tokens = tokenize(text)
         counts = Counter(tokens)
         t_len = sum(counts.values())
@@ -364,6 +702,45 @@ class PassageIndex:
         self.user_lengths.append(u_len)
         for st, count in u_stem_counts.items():
             self.user_stem_postings[st].append((index, count))
+
+        # Index multi-granularity subpassages
+        subs = extract_session_subpassages(session_id, text)
+        self.subpassages.extend(subs)
+        self.session_subpassages.append(subs)
+
+        rounds = [sp for sp in subs if sp.granularity == "round"]
+        turns = [sp for sp in subs if sp.granularity == "turn"]
+
+        sess_round_lens: list[int] = []
+        for r_idx, r in enumerate(rounds):
+            r_toks = tokenize(r.text)
+            r_counts = Counter(r_toks)
+            r_len = sum(r_counts.values()) or 1
+            sess_round_lens.append(r_len)
+            self.total_round_length += r_len
+            self.total_rounds += 1
+            for term, count in r_counts.items():
+                self.round_postings[term].append((index, r_idx, count))
+            r_stem_counts = Counter(_stem_passage_token(t) for t in r_toks)
+            for st, count in r_stem_counts.items():
+                self.round_stem_postings[st].append((index, r_idx, count))
+        self.round_lengths.append(sess_round_lens)
+
+        sess_turn_lens: list[int] = []
+        for t_idx, t in enumerate(turns):
+            t_toks = tokenize(t.text)
+            t_counts = Counter(t_toks)
+            tn_len = sum(t_counts.values()) or 1
+            sess_turn_lens.append(tn_len)
+            self.total_turn_length += tn_len
+            self.total_turns += 1
+            for term, count in t_counts.items():
+                self.turn_postings[term].append((index, t_idx, count))
+            t_stem_counts = Counter(_stem_passage_token(tok) for tok in t_toks)
+            for st, count in t_stem_counts.items():
+                self.turn_stem_postings[st].append((index, t_idx, count))
+        self.turn_lengths.append(sess_turn_lens)
+
         return t_len, u_len
 
     @property
@@ -385,39 +762,98 @@ class PassageIndex:
         if self._graph is None:
             self._graph = PassageGraph()
             for idx, txt in enumerate(self._texts):
-                self._graph.add_passage(PassageRecord(passage_id=str(idx), text=txt, tenant_id="", branch=""))
+                self._graph.add_passage(
+                    PassageRecord(
+                        passage_id=str(idx), text=txt, tenant_id="", branch=""
+                    )
+                )
         return self._graph
 
-    def add_text(self, text: str) -> None:
+    def add_text(self, text: str, session_id: str | None = None) -> None:
         """Appends a new text in O(L) amortized time without full rebuild."""
         index = len(self._texts)
-        t_len, u_len = self._index_single_text(index, text)
-        self.total_length = getattr(self, "total_length", sum(self.lengths[:-1])) + t_len
-        self.total_user_length = getattr(self, "total_user_length", sum(self.user_lengths[:-1])) + u_len
+        if session_id is None:
+            session_id = str(index)
+        if not hasattr(self, "_session_ids"):
+            self._session_ids = [str(i) for i in range(len(self._texts))]
+        self._session_ids.append(session_id)
+        t_len, u_len = self._index_single_text(index, text, session_id=session_id)
+        self.total_length = (
+            getattr(self, "total_length", sum(self.lengths[:-1])) + t_len
+        )
+        self.total_user_length = (
+            getattr(self, "total_user_length", sum(self.user_lengths[:-1])) + u_len
+        )
         self._texts.append(text)
         self._texts_tuple = None
         self.average_length = self.total_length / len(self._texts) or 1.0
         self.average_user_length = self.total_user_length / len(self._texts) or 1.0
+        self.average_round_length = (
+            getattr(self, "total_round_length", 1)
+            / max(getattr(self, "total_rounds", 1), 1)
+            or 1.0
+        )
+        self.average_turn_length = (
+            getattr(self, "total_turn_length", 1)
+            / max(getattr(self, "total_turns", 1), 1)
+            or 1.0
+        )
         if self._graph is not None:
-            self._graph.add_passage(PassageRecord(passage_id=str(index), text=text, tenant_id="", branch=""))
+            self._graph.add_passage(
+                PassageRecord(passage_id=str(index), text=text, tenant_id="", branch="")
+            )
 
-    def scores(self, query: str) -> dict[int, float]:
+    def _prepare_query_weights(
+        self, query: str
+    ) -> tuple[dict[str, float], dict[str, float]]:
         from mnemosyne.retrieval import QUERY_SUPPORT_STOPWORDS
 
-        scores: dict[int, float] = defaultdict(float)
         raw_query_counts = Counter(tokenize(query))
         proper_tokens = {
             w.lower()
             for idx_w, w in enumerate(re.findall(r"[A-Za-z0-9]+", query))
-            if w and w[0].isupper() and (idx_w > 0 or w.lower() not in QUERY_SUPPORT_STOPWORDS)
+            if w
+            and w[0].isupper()
+            and (idx_w > 0 or w.lower() not in QUERY_SUPPORT_STOPWORDS)
         }
         secondary_modifiers = {
-            "order", "earliest", "latest", "chronological", "related", "average",
-            "older", "younger", "five", "six", "seven", "eight", "nine", "ten",
-            "worked", "work", "bought", "buy", "spent", "spend", "use", "used",
-            "participate", "participated", "participating", "visit", "visited",
-            "model", "mention", "mentioned", "event", "events", "activity",
-            "activities", "money", "expense", "expenses",
+            "order",
+            "earliest",
+            "latest",
+            "chronological",
+            "related",
+            "average",
+            "older",
+            "younger",
+            "five",
+            "six",
+            "seven",
+            "eight",
+            "nine",
+            "ten",
+            "worked",
+            "work",
+            "bought",
+            "buy",
+            "spent",
+            "spend",
+            "use",
+            "used",
+            "participate",
+            "participated",
+            "participating",
+            "visit",
+            "visited",
+            "model",
+            "mention",
+            "mentioned",
+            "event",
+            "events",
+            "activity",
+            "activities",
+            "money",
+            "expense",
+            "expenses",
         }
         raw_content = {
             t: (float(c) * 1.45 if t in proper_tokens else float(c))
@@ -426,7 +862,15 @@ class PassageIndex:
         }
         has_primary_topic = any(t not in secondary_modifiers for t in raw_content)
         content_counts = {
-            t: (w * 0.20 if (has_primary_topic and t in secondary_modifiers and t not in proper_tokens) else w)
+            t: (
+                w * 0.20
+                if (
+                    has_primary_topic
+                    and t in secondary_modifiers
+                    and t not in proper_tokens
+                )
+                else w
+            )
             for t, w in raw_content.items()
         }
         if content_counts:
@@ -447,40 +891,64 @@ class PassageIndex:
                         for syn_tok in tokenize(syn):
                             if syn_tok in noisy_syn_tokens:
                                 continue
-                            if syn_tok not in expanded_counts and syn_tok not in QUERY_SUPPORT_STOPWORDS:
+                            if (
+                                syn_tok not in expanded_counts
+                                and syn_tok not in QUERY_SUPPORT_STOPWORDS
+                            ):
                                 expanded_counts[syn_tok] = query_count * 0.80
-
-        n_texts = len(self._texts)
-        if n_texts == 0:
-            return {}
-
-        for term, query_count in expanded_counts.items():
-            postings = self.postings.get(term, ())
-            if postings:
-                idf = log(1.0 + (n_texts - len(postings) + 0.5) / (len(postings) + 0.5))
-                for index, count in postings:
-                    norm = 1.2 * (0.25 + 0.75 * self.lengths[index] / self.average_length)
-                    scores[index] += 0.30 * query_count * idf * count * 2.2 / (count + norm)
 
         stem_expanded: dict[str, float] = defaultdict(float)
         for term, qc in expanded_counts.items():
             st = _stem_passage_token(term)
             stem_expanded[st] = max(stem_expanded[st], qc)
 
+        return expanded_counts, dict(stem_expanded)
+
+    def scores(self, query: str) -> dict[int, float]:
+        n_texts = len(self._texts)
+        if n_texts == 0:
+            return {}
+
+        scores: dict[int, float] = defaultdict(float)
+        expanded_counts, stem_expanded = self._prepare_query_weights(query)
+
+        for term, query_count in expanded_counts.items():
+            postings = self.postings.get(term, ())
+            if postings:
+                idf = log(1.0 + (n_texts - len(postings) + 0.5) / (len(postings) + 0.5))
+                for index, count in postings:
+                    norm = 1.2 * (
+                        0.25 + 0.75 * self.lengths[index] / self.average_length
+                    )
+                    scores[index] += (
+                        0.30 * query_count * idf * count * 2.2 / (count + norm)
+                    )
+
         for st, query_count in stem_expanded.items():
             postings = self.stem_postings.get(st, ())
             if postings:
                 idf = log(1.0 + (n_texts - len(postings) + 0.5) / (len(postings) + 0.5))
                 for index, count in postings:
-                    norm = 1.2 * (0.25 + 0.75 * self.lengths[index] / self.average_length)
-                    scores[index] += 0.20 * query_count * idf * count * 2.2 / (count + norm)
+                    norm = 1.2 * (
+                        0.25 + 0.75 * self.lengths[index] / self.average_length
+                    )
+                    scores[index] += (
+                        0.20 * query_count * idf * count * 2.2 / (count + norm)
+                    )
 
             u_postings = self.user_stem_postings.get(st, ())
             if u_postings:
-                u_idf = log(1.0 + (n_texts - len(u_postings) + 0.5) / (len(u_postings) + 0.5))
+                u_idf = log(
+                    1.0 + (n_texts - len(u_postings) + 0.5) / (len(u_postings) + 0.5)
+                )
                 for index, count in u_postings:
-                    u_norm = 1.2 * (0.25 + 0.75 * self.user_lengths[index] / self.average_user_length)
-                    scores[index] += 0.75 * query_count * u_idf * count * 2.2 / (count + u_norm)
+                    u_norm = 1.2 * (
+                        0.25
+                        + 0.75 * self.user_lengths[index] / self.average_user_length
+                    )
+                    scores[index] += (
+                        0.75 * query_count * u_idf * count * 2.2 / (count + u_norm)
+                    )
 
         # User-turn self-age disclosure expansion for comparative/multi-session age queries
         if re.search(
@@ -488,15 +956,197 @@ class PassageIndex:
             query,
             re.IGNORECASE,
         ):
-            for u_st, u_qc in (("age", 1.35), ("turn", 1.55), ("30", 1.15), ("32", 1.25)):
+            for u_st, u_qc in (
+                ("age", 1.35),
+                ("turn", 1.55),
+                ("30", 1.15),
+                ("32", 1.25),
+            ):
                 u_postings = self.user_stem_postings.get(u_st, ())
                 if u_postings:
-                    u_idf = log(1.0 + (n_texts - len(u_postings) + 0.5) / (len(u_postings) + 0.5))
+                    u_idf = log(
+                        1.0
+                        + (n_texts - len(u_postings) + 0.5) / (len(u_postings) + 0.5)
+                    )
                     for index, count in u_postings:
-                        u_norm = 1.2 * (0.25 + 0.75 * self.user_lengths[index] / self.average_user_length)
-                        scores[index] += 0.75 * u_qc * u_idf * count * 2.2 / (count + u_norm)
+                        u_norm = 1.2 * (
+                            0.25
+                            + 0.75 * self.user_lengths[index] / self.average_user_length
+                        )
+                        scores[index] += (
+                            0.75 * u_qc * u_idf * count * 2.2 / (count + u_norm)
+                        )
 
         return dict(scores)
+
+    def multi_granularity_scores(
+        self,
+        query: str,
+        *,
+        alpha: float = 0.5,
+        beta: float = 0.5,
+    ) -> dict[int, dict[str, Any]]:
+        """Return fused scores per session:
+        Score_fused = Score_session + alpha * max(Score_round) + beta * max(Score_turn)
+        along with best round/turn indices, text, and sub-passage receipts.
+        """
+        n_texts = len(self._texts)
+        if n_texts == 0:
+            return {}
+
+        session_scores = self.scores(query)
+        expanded_counts, stem_expanded = self._prepare_query_weights(query)
+
+        round_scores: dict[int, dict[int, float]] = defaultdict(
+            lambda: defaultdict(float)
+        )
+        turn_scores: dict[int, dict[int, float]] = defaultdict(
+            lambda: defaultdict(float)
+        )
+
+        avg_round_len = getattr(self, "average_round_length", 60.0) or 60.0
+        avg_turn_len = getattr(self, "average_turn_length", 25.0) or 25.0
+
+        # Score rounds
+        for term, query_count in expanded_counts.items():
+            postings = self.round_postings.get(term, ())
+            if postings:
+                idf = log(
+                    1.0
+                    + (n_texts - len(self.postings.get(term, ())) + 0.5)
+                    / (len(self.postings.get(term, ())) + 0.5)
+                )
+                for sess_idx, r_idx, count in postings:
+                    r_len = (
+                        self.round_lengths[sess_idx][r_idx]
+                        if sess_idx < len(self.round_lengths)
+                        and r_idx < len(self.round_lengths[sess_idx])
+                        else avg_round_len
+                    )
+                    norm = 1.2 * (0.25 + 0.75 * r_len / avg_round_len)
+                    round_scores[sess_idx][r_idx] += (
+                        0.35 * query_count * idf * count * 2.2 / (count + norm)
+                    )
+
+        for st, query_count in stem_expanded.items():
+            s_postings = self.round_stem_postings.get(st, ())
+            if s_postings:
+                idf = log(
+                    1.0
+                    + (n_texts - len(self.stem_postings.get(st, ())) + 0.5)
+                    / (len(self.stem_postings.get(st, ())) + 0.5)
+                )
+                for sess_idx, r_idx, count in s_postings:
+                    r_len = (
+                        self.round_lengths[sess_idx][r_idx]
+                        if sess_idx < len(self.round_lengths)
+                        and r_idx < len(self.round_lengths[sess_idx])
+                        else avg_round_len
+                    )
+                    norm = 1.2 * (0.25 + 0.75 * r_len / avg_round_len)
+                    round_scores[sess_idx][r_idx] += (
+                        0.65 * query_count * idf * count * 2.2 / (count + norm)
+                    )
+
+        # Score turns
+        for term, query_count in expanded_counts.items():
+            postings = self.turn_postings.get(term, ())
+            if postings:
+                idf = log(
+                    1.0
+                    + (n_texts - len(self.postings.get(term, ())) + 0.5)
+                    / (len(self.postings.get(term, ())) + 0.5)
+                )
+                for sess_idx, t_idx, count in postings:
+                    tn_len = (
+                        self.turn_lengths[sess_idx][t_idx]
+                        if sess_idx < len(self.turn_lengths)
+                        and t_idx < len(self.turn_lengths[sess_idx])
+                        else avg_turn_len
+                    )
+                    norm = 1.2 * (0.25 + 0.75 * tn_len / avg_turn_len)
+                    turn_scores[sess_idx][t_idx] += (
+                        0.35 * query_count * idf * count * 2.2 / (count + norm)
+                    )
+
+        for st, query_count in stem_expanded.items():
+            s_postings = self.turn_stem_postings.get(st, ())
+            if s_postings:
+                idf = log(
+                    1.0
+                    + (n_texts - len(self.stem_postings.get(st, ())) + 0.5)
+                    / (len(self.stem_postings.get(st, ())) + 0.5)
+                )
+                for sess_idx, t_idx, count in s_postings:
+                    tn_len = (
+                        self.turn_lengths[sess_idx][t_idx]
+                        if sess_idx < len(self.turn_lengths)
+                        and t_idx < len(self.turn_lengths[sess_idx])
+                        else avg_turn_len
+                    )
+                    norm = 1.2 * (0.25 + 0.75 * tn_len / avg_turn_len)
+                    turn_scores[sess_idx][t_idx] += (
+                        0.65 * query_count * idf * count * 2.2 / (count + norm)
+                    )
+
+        # Build fused receipts per session
+        results: dict[int, dict[str, Any]] = {}
+        for i in range(n_texts):
+            session_sc = session_scores.get(i, 0.0)
+            subs = (
+                self.session_subpassages[i] if i < len(self.session_subpassages) else []
+            )
+            rounds = [sp for sp in subs if sp.granularity == "round"]
+            turns = [sp for sp in subs if sp.granularity == "turn"]
+
+            r_map = round_scores.get(i, {})
+            if r_map:
+                max_round_sc = max(r_map.values())
+                best_r_idx = max(r_map, key=r_map.get)
+            else:
+                max_round_sc = 0.0
+                best_r_idx = 0
+
+            best_r_text = (
+                rounds[best_r_idx].text if (rounds and best_r_idx < len(rounds)) else ""
+            )
+            best_r_id = (
+                rounds[best_r_idx].sub_id
+                if (rounds and best_r_idx < len(rounds))
+                else ""
+            )
+
+            t_map = turn_scores.get(i, {})
+            if t_map:
+                max_turn_sc = max(t_map.values())
+                best_t_idx = max(t_map, key=t_map.get)
+            else:
+                max_turn_sc = 0.0
+                best_t_idx = 0
+
+            best_t_text = (
+                turns[best_t_idx].text if (turns and best_t_idx < len(turns)) else ""
+            )
+            best_t_id = (
+                turns[best_t_idx].sub_id if (turns and best_t_idx < len(turns)) else ""
+            )
+
+            fused_sc = session_sc + alpha * max_round_sc + beta * max_turn_sc
+
+            results[i] = {
+                "fused_score": fused_sc,
+                "session_score": session_sc,
+                "max_round_score": max_round_sc,
+                "max_turn_score": max_turn_sc,
+                "best_round_index": best_r_idx,
+                "best_round_id": best_r_id,
+                "best_round_text": best_r_text,
+                "best_turn_index": best_t_idx,
+                "best_turn_id": best_t_id,
+                "best_turn_text": best_t_text,
+            }
+
+        return results
 
 
 _CURRENCY_RE = re.compile(
@@ -505,33 +1155,58 @@ _CURRENCY_RE = re.compile(
 )
 
 
-def rank_passages(owner: object, query: str, candidates: Sequence[Hit], k: int) -> list[Hit]:
+def rank_passages(
+    owner: object,
+    query: str,
+    candidates: Sequence[Hit],
+    k: int,
+    *,
+    alpha: float = 0.5,
+    beta: float = 0.5,
+) -> list[Hit]:
     from mnemosyne.retrieval import QUERY_SUPPORT_STOPWORDS
 
     passages = [hit for hit in candidates if is_passage(hit)]
     if not passages:
         return []
     texts = tuple(hit.text for hit in passages)
+    session_ids = tuple(hit.id for hit in passages)
     index = getattr(owner, "_passage_bm25_index", None)
-    if index is None:
-        index = PassageIndex(texts)
-        try:
-            owner._passage_bm25_index = index
-            owner._passage_graph = index.passage_graph
-        except (AttributeError, TypeError):
-            pass
-    elif len(index.texts) < len(texts) and texts[: len(index.texts)] == index.texts:
-        for t in texts[len(index.texts) :]:
-            index.add_text(t)
-    elif index.texts != texts:
-        index = PassageIndex(texts)
-        try:
-            owner._passage_bm25_index = index
-            owner._passage_graph = index.passage_graph
-        except (AttributeError, TypeError):
-            pass
+    cached_session_ids = (
+        tuple(getattr(index, "_session_ids", ())) if index is not None else ()
+    )
 
-    scores = index.scores(query)
+    can_append = (
+        index is not None
+        and len(index.texts) < len(texts)
+        and texts[: len(index.texts)] == index.texts
+        and cached_session_ids == session_ids[: len(index.texts)]
+    )
+    texts_and_ids_match = (
+        index is not None and index.texts == texts and cached_session_ids == session_ids
+    )
+
+    if index is None or (not can_append and not texts_and_ids_match):
+        index = PassageIndex(texts, session_ids=session_ids)
+        try:
+            owner._passage_bm25_index = index
+            owner._passage_graph = index.passage_graph
+        except (AttributeError, TypeError):
+            pass
+    elif can_append:
+        for offset, t in enumerate(texts[len(index.texts) :]):
+            idx = len(index.texts)
+            s_id = session_ids[idx] if idx < len(session_ids) else str(idx)
+            index.add_text(t, session_id=s_id)
+
+    multi_granularity_receipts = index.multi_granularity_scores(
+        query, alpha=alpha, beta=beta
+    )
+    scores = {
+        i: multi_granularity_receipts[i]["fused_score"]
+        for i in range(len(passages))
+        if multi_granularity_receipts[i]["fused_score"] > 0.0
+    }
 
     dts: dict[int, datetime] = {}
     for i, h in enumerate(passages):
@@ -544,7 +1219,9 @@ def rank_passages(owner: object, query: str, candidates: Sequence[Hit], k: int) 
             try:
                 dt = val if isinstance(val, datetime) else parse_dt(val)
                 if dt is not None:
-                    dts[i] = dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+                    dts[i] = (
+                        dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+                    )
             except (ValueError, TypeError, OverflowError):
                 pass
     max_dt = max(dts.values()) if dts else None
@@ -566,13 +1243,16 @@ def rank_passages(owner: object, query: str, candidates: Sequence[Hit], k: int) 
             re.IGNORECASE,
         )
     )
-    is_earliest_intent = bool(
-        re.search(
-            r"\b(earliest|first|originally|initial|initially|begin|began|at the start|in the beginning)\b",
-            query,
-            re.IGNORECASE,
+    is_earliest_intent = (
+        bool(
+            re.search(
+                r"\b(earliest|first|originally|initial|initially|begin|began|at the start|in the beginning)\b",
+                query,
+                re.IGNORECASE,
+            )
         )
-    ) and not is_current_intent
+        and not is_current_intent
+    )
     is_multi_event_comparison = bool(
         re.search(
             r"\b(between\b.+\band|how many (?:days|weeks|months|years|hours)|order of|chronological)\b",
@@ -601,10 +1281,19 @@ def rank_passages(owner: object, query: str, candidates: Sequence[Hit], k: int) 
             final_scores[i] = sc
 
     # Topic-Cluster Currency Tie-Breaking (bounded, non-compounding)
-    if final_scores and time_span > 3600.0 and not is_earliest_intent and not is_multi_event_comparison:
+    if (
+        final_scores
+        and time_span > 3600.0
+        and not is_earliest_intent
+        and not is_multi_event_comparison
+    ):
         top_sc = max(final_scores.values())
         if top_sc > 0.0:
-            tie_ratio = 0.42 if (is_currency_kw or is_update_intent or is_current_intent) else 0.72
+            tie_ratio = (
+                0.42
+                if (is_currency_kw or is_update_intent or is_current_intent)
+                else 0.72
+            )
             q_tokens = {
                 _stem_passage_token(t)
                 for t in tokenize(query.lower())
@@ -618,7 +1307,11 @@ def rank_passages(owner: object, query: str, candidates: Sequence[Hit], k: int) 
             ]
             if len(comp_indices) >= 2:
                 cand_tokens = {
-                    i: {_stem_passage_token(t) for t in tokenize(passages[i].text.lower())} & q_tokens
+                    i: {
+                        _stem_passage_token(t)
+                        for t in tokenize(passages[i].text.lower())
+                    }
+                    & q_tokens
                     for i in comp_indices
                 }
                 comp_indices_sorted = sorted(comp_indices, key=lambda i: dts[i])
@@ -630,10 +1323,26 @@ def rank_passages(owner: object, query: str, candidates: Sequence[Hit], k: int) 
                             and dts[a] > dts[b]
                             and base_scores[a] >= base_scores[b] * tie_ratio
                         ):
-                            final_scores[a] = max(final_scores[a], base_scores[b] * 1.05)
+                            final_scores[a] = max(
+                                final_scores[a], base_scores[b] * 1.05
+                            )
 
-    ranked = sorted(scores, key=lambda i: (-final_scores.get(i, scores[i]), passages[i].id))[: max(k, 0)]
-    return [replace(passages[i], score=final_scores.get(i, scores[i]), channel="lexical_bm25") for i in ranked]
+    ranked = sorted(
+        scores, key=lambda i: (-final_scores.get(i, scores[i]), passages[i].id)
+    )[: max(k, 0)]
+    out_hits: list[Hit] = []
+    for i in ranked:
+        meta = dict(passages[i].metadata)
+        meta["multi_granularity"] = multi_granularity_receipts.get(i, {})
+        out_hits.append(
+            replace(
+                passages[i],
+                score=final_scores.get(i, scores[i]),
+                channel="lexical_bm25",
+                metadata=meta,
+            )
+        )
+    return out_hits
 
 
 # --------------------------------------------------------------------------------------------
@@ -700,8 +1409,12 @@ Select every candidate fact that helps answer the question, including facts abou
 """
 
 # Qwen3-Embedding / NV-Embed style query instructions; documents are embedded bare.
-PASSAGE_TASK = "Given a question, retrieve relevant documents that best answer the question."
-FACT_TASK = "Given a question, retrieve relevant triplet facts that matches this question."
+PASSAGE_TASK = (
+    "Given a question, retrieve relevant documents that best answer the question."
+)
+FACT_TASK = (
+    "Given a question, retrieve relevant triplet facts that matches this question."
+)
 _MAX_TRIPLES = 64
 _MAX_FIELD_CHARS = 200
 
@@ -716,7 +1429,9 @@ def phrase_key(text: str) -> str:
 
 
 def fact_text(subject: str, predicate: str, obj: str) -> str:
-    return f"{phrase_key(subject)} {' '.join(predicate.lower().split())} {phrase_key(obj)}"
+    return (
+        f"{phrase_key(subject)} {' '.join(predicate.lower().split())} {phrase_key(obj)}"
+    )
 
 
 def clean_triples(raw: object) -> list[list[str]]:
@@ -724,9 +1439,15 @@ def clean_triples(raw: object) -> list[list[str]]:
     triples: list[list[str]] = []
     seen: set[tuple[str, str, str]] = set()
     for item in raw if isinstance(raw, list) else []:
-        if not isinstance(item, list) or len(item) != 3 or not all(isinstance(part, str) for part in item):
+        if (
+            not isinstance(item, list)
+            or len(item) != 3
+            or not all(isinstance(part, str) for part in item)
+        ):
             continue
-        subject, predicate, obj = (" ".join(part.split())[:_MAX_FIELD_CHARS] for part in item)
+        subject, predicate, obj = (
+            " ".join(part.split())[:_MAX_FIELD_CHARS] for part in item
+        )
         if not phrase_key(subject) or not phrase_key(obj) or not predicate:
             continue
         key = (phrase_key(subject), predicate.lower(), phrase_key(obj))
@@ -796,11 +1517,14 @@ CREATE TABLE IF NOT EXISTS vectors (
 # two tenants, or under two source identities, was extracted twice. Its rows are carried over
 # keyed by the CID and re-keyed to the text hash the next time the passage is indexed, so nothing
 # already extracted is extracted again.
-_MIGRATE_V1 = """
+_MIGRATE_V1 = (
+    """
 BEGIN;
 ALTER TABLE openie RENAME TO openie_v1;
 ALTER TABLE vectors RENAME TO vectors_v1;
-""" + _SCHEMA + """
+"""
+    + _SCHEMA
+    + """
 INSERT OR IGNORE INTO openie (sha, model, triples) SELECT sha, model, triples FROM openie_v1;
 INSERT OR IGNORE INTO vectors (sha, kind, model, vec) SELECT sha, kind, model, vec FROM vectors_v1;
 INSERT OR IGNORE INTO passages (scope, cid, sha) SELECT scope, sha, sha FROM openie_v1;
@@ -809,6 +1533,7 @@ DROP TABLE openie_v1;
 DROP TABLE vectors_v1;
 COMMIT;
 """
+)
 
 
 def _chunks(values: Sequence[Any], size: int) -> Iterable[Sequence[Any]]:
@@ -826,13 +1551,21 @@ class PassageIndexStore:
     reads stay per scope, and a purge drops only what no scope still derives.
     """
 
-    def __init__(self, path: str | os.PathLike[str], *, read_only: bool = False) -> None:
+    def __init__(
+        self, path: str | os.PathLike[str], *, read_only: bool = False
+    ) -> None:
         self.path = Path(path)
         self.read_only = read_only
         if read_only:
-            self._conn = sqlite3.connect(f"{self.path.resolve().as_uri()}?mode=ro", uri=True, check_same_thread=False)
+            self._conn = sqlite3.connect(
+                f"{self.path.resolve().as_uri()}?mode=ro",
+                uri=True,
+                check_same_thread=False,
+            )
             if "scope" in self._columns("openie"):
-                raise ValueError("the passage index has the old per-tenant layout; open it writable once to migrate it")
+                raise ValueError(
+                    "the passage index has the old per-tenant layout; open it writable once to migrate it"
+                )
         else:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
@@ -850,13 +1583,19 @@ class PassageIndexStore:
     def close(self) -> None:
         self._conn.close()
 
-    def _select(self, sql: str, params: tuple[Any, ...], keys: Iterable[str]) -> list[tuple[Any, ...]]:
+    def _select(
+        self, sql: str, params: tuple[Any, ...], keys: Iterable[str]
+    ) -> list[tuple[Any, ...]]:
         rows: list[tuple[Any, ...]] = []
         wanted = list(dict.fromkeys(keys))
         with self._lock:
             for chunk in _chunks(wanted, 900):
                 marks = ",".join("?" * len(chunk))
-                rows.extend(self._conn.execute(sql.format(marks=marks), (*params, *chunk)).fetchall())
+                rows.extend(
+                    self._conn.execute(
+                        sql.format(marks=marks), (*params, *chunk)
+                    ).fetchall()
+                )
         return rows
 
     def register(self, scope: str, shas: Mapping[str, str]) -> None:
@@ -867,28 +1606,49 @@ class PassageIndexStore:
         """
         with self._lock, self._conn:
             for cid, sha in shas.items():
-                if self._conn.execute("SELECT 1 FROM passages WHERE sha = ? LIMIT 1", (cid,)).fetchone() is not None:
-                    self._conn.execute("UPDATE OR IGNORE openie SET sha = ? WHERE sha = ?", (sha, cid))
+                if (
+                    self._conn.execute(
+                        "SELECT 1 FROM passages WHERE sha = ? LIMIT 1", (cid,)
+                    ).fetchone()
+                    is not None
+                ):
+                    self._conn.execute(
+                        "UPDATE OR IGNORE openie SET sha = ? WHERE sha = ?", (sha, cid)
+                    )
                     self._conn.execute("DELETE FROM openie WHERE sha = ?", (cid,))
-                    self._conn.execute("UPDATE OR IGNORE vectors SET sha = ? WHERE sha = ? AND kind = 'passage'", (sha, cid))
-                    self._conn.execute("DELETE FROM vectors WHERE sha = ? AND kind = 'passage'", (cid,))
-                    self._conn.execute("UPDATE passages SET sha = ? WHERE sha = ?", (sha, cid))
+                    self._conn.execute(
+                        "UPDATE OR IGNORE vectors SET sha = ? WHERE sha = ? AND kind = 'passage'",
+                        (sha, cid),
+                    )
+                    self._conn.execute(
+                        "DELETE FROM vectors WHERE sha = ? AND kind = 'passage'", (cid,)
+                    )
+                    self._conn.execute(
+                        "UPDATE passages SET sha = ? WHERE sha = ?", (sha, cid)
+                    )
                 self._conn.execute(
-                    "INSERT OR REPLACE INTO passages (scope, cid, sha) VALUES (?, ?, ?)", (scope, cid, sha)
+                    "INSERT OR REPLACE INTO passages (scope, cid, sha) VALUES (?, ?, ?)",
+                    (scope, cid, sha),
                 )
 
     def openie(
-        self, scope: str, model: str, cids: Iterable[str], *,
+        self,
+        scope: str,
+        model: str,
+        cids: Iterable[str],
+        *,
         expected_text_shas: Mapping[str, str] | None = None,
     ) -> dict[str, list[list[str]]]:
         """Triples by CID, optionally bound to the caller's current readable text."""
         rows = self._select(
             "SELECT p.cid, p.sha, o.triples FROM passages p JOIN openie o ON o.sha = p.sha "
             "WHERE p.scope = ? AND o.model = ? AND p.cid IN ({marks})",
-            (scope, model), cids,
+            (scope, model),
+            cids,
         )
         return {
-            cid: json.loads(triples) for cid, sha, triples in rows
+            cid: json.loads(triples)
+            for cid, sha, triples in rows
             if expected_text_shas is None or expected_text_shas.get(cid) == sha
         }
 
@@ -900,7 +1660,12 @@ class PassageIndexStore:
             )
 
     def vectors(
-        self, scope: str, kind: str, model: str, keys: Iterable[str], *,
+        self,
+        scope: str,
+        kind: str,
+        model: str,
+        keys: Iterable[str],
+        *,
         expected_text_shas: Mapping[str, str] | None = None,
     ) -> dict[str, bytes]:
         """Passage vectors by evidence CID (through the scope's registrations); fact and entity
@@ -909,23 +1674,32 @@ class PassageIndexStore:
             rows = self._select(
                 "SELECT p.cid, p.sha, v.vec FROM passages p JOIN vectors v ON v.sha = p.sha "
                 "WHERE p.scope = ? AND v.kind = 'passage' AND v.model = ? AND p.cid IN ({marks})",
-                (scope, model), keys,
+                (scope, model),
+                keys,
             )
             return {
-                cid: bytes(vec) for cid, sha, vec in rows
+                cid: bytes(vec)
+                for cid, sha, vec in rows
                 if expected_text_shas is None or expected_text_shas.get(cid) == sha
             }
         else:
             rows = self._select(
-                "SELECT sha, vec FROM vectors WHERE kind = ? AND model = ? AND sha IN ({marks})", (kind, model), keys
+                "SELECT sha, vec FROM vectors WHERE kind = ? AND model = ? AND sha IN ({marks})",
+                (kind, model),
+                keys,
             )
         return {key: bytes(vec) for key, vec in rows}
 
-    def put_vectors(self, kind: str, model: str, items: Sequence[tuple[str, list[float]]]) -> None:
+    def put_vectors(
+        self, kind: str, model: str, items: Sequence[tuple[str, list[float]]]
+    ) -> None:
         with self._lock, self._conn:
             self._conn.executemany(
                 "INSERT OR REPLACE INTO vectors (sha, kind, model, vec) VALUES (?, ?, ?, ?)",
-                [(sha, kind, model, array("f", vector).tobytes()) for sha, vector in items],
+                [
+                    (sha, kind, model, array("f", vector).tobytes())
+                    for sha, vector in items
+                ],
             )
 
     def purge(self, scope: str, passage_cids: Iterable[str]) -> dict[str, int]:
@@ -938,28 +1712,50 @@ class PassageIndexStore:
             for chunk in _chunks(cids, 900):
                 marks = ",".join("?" * len(chunk))
                 released.update(
-                    sha for (sha,) in self._conn.execute(
-                        f"SELECT sha FROM passages WHERE scope = ? AND cid IN ({marks})", (scope, *chunk)
+                    sha
+                    for (sha,) in self._conn.execute(
+                        f"SELECT sha FROM passages WHERE scope = ? AND cid IN ({marks})",
+                        (scope, *chunk),
                     )
                 )
-                self._conn.execute(f"DELETE FROM passages WHERE scope = ? AND cid IN ({marks})", (scope, *chunk))
+                self._conn.execute(
+                    f"DELETE FROM passages WHERE scope = ? AND cid IN ({marks})",
+                    (scope, *chunk),
+                )
             removed = 0
             for sha in released:
-                if self._conn.execute("SELECT 1 FROM passages WHERE sha = ? LIMIT 1", (sha,)).fetchone() is None:
-                    removed += self._conn.execute("DELETE FROM openie WHERE sha = ?", (sha,)).rowcount
-                    self._conn.execute("DELETE FROM vectors WHERE sha = ? AND kind = 'passage'", (sha,))
+                if (
+                    self._conn.execute(
+                        "SELECT 1 FROM passages WHERE sha = ? LIMIT 1", (sha,)
+                    ).fetchone()
+                    is None
+                ):
+                    removed += self._conn.execute(
+                        "DELETE FROM openie WHERE sha = ?", (sha,)
+                    ).rowcount
+                    self._conn.execute(
+                        "DELETE FROM vectors WHERE sha = ? AND kind = 'passage'", (sha,)
+                    )
             live: set[str] = set()
             for (triples,) in self._conn.execute("SELECT triples FROM openie"):
                 for subject, predicate, obj in json.loads(triples):
                     live.update(
-                        (text_sha(fact_text(subject, predicate, obj)), text_sha(phrase_key(subject)), text_sha(phrase_key(obj)))
+                        (
+                            text_sha(fact_text(subject, predicate, obj)),
+                            text_sha(phrase_key(subject)),
+                            text_sha(phrase_key(obj)),
+                        )
                     )
             orphans = [
                 (sha, kind)
-                for sha, kind in self._conn.execute("SELECT sha, kind FROM vectors WHERE kind IN ('fact', 'entity')")
+                for sha, kind in self._conn.execute(
+                    "SELECT sha, kind FROM vectors WHERE kind IN ('fact', 'entity')"
+                )
                 if sha not in live
             ]
-            self._conn.executemany("DELETE FROM vectors WHERE sha = ? AND kind = ?", orphans)
+            self._conn.executemany(
+                "DELETE FROM vectors WHERE sha = ? AND kind = ?", orphans
+            )
         return {"passages": removed, "derived_vectors": len(orphans)}
 
 
@@ -997,22 +1793,44 @@ def build_passage_graph(
     try:
         import numpy  # noqa: F401
     except ImportError as exc:
-        raise ValueError("the passage graph needs numpy: install mnemosyne-memory[graph]") from exc
+        raise ValueError(
+            "the passage graph needs numpy: install mnemosyne-memory[graph]"
+        ) from exc
     chat = (
-        ChatModel(url=chat_url, model=extractor, api_key=chat_api_key, reasoning_effort=reasoning_effort)
-        if chat_url else None
+        ChatModel(
+            url=chat_url,
+            model=extractor,
+            api_key=chat_api_key,
+            reasoning_effort=reasoning_effort,
+        )
+        if chat_url
+        else None
     )
     # A separate (larger) local model may rerank and write second-hop searches; OpenIE and the
     # index keep the extractor, so changing it never invalidates the stored triples.
     rerank_chat = (
-        ChatModel(url=chat_url, model=rerank_model, api_key=chat_api_key, reasoning_effort=rerank_reasoning_effort)
-        if chat_url and rerank_model else None
+        ChatModel(
+            url=chat_url,
+            model=rerank_model,
+            api_key=chat_api_key,
+            reasoning_effort=rerank_reasoning_effort,
+        )
+        if chat_url and rerank_model
+        else None
     )
     embedder = (
-        HttpEmbeddingProvider(url=embedding_url, model=embedding_model, api_key=embedding_api_key,
-                              dims=int(embedding_dims), timeout_seconds=120.0, query_prefix="", cache_size=0,
-                              extra_body_json=embedding_body or None)
-        if embedding_url else None
+        HttpEmbeddingProvider(
+            url=embedding_url,
+            model=embedding_model,
+            api_key=embedding_api_key,
+            dims=int(embedding_dims),
+            timeout_seconds=120.0,
+            query_prefix="",
+            cache_size=0,
+            extra_body_json=embedding_body or None,
+        )
+        if embedding_url
+        else None
     )
     tuned: dict[str, Any] = {}
     if query_task:
@@ -1032,7 +1850,9 @@ def build_passage_graph(
     )
 
 
-def passage_graph_from_env(environ: Mapping[str, str] | None = None, *, read_only: bool = False) -> PassageGraphIndex | None:
+def passage_graph_from_env(
+    environ: Mapping[str, str] | None = None, *, read_only: bool = False
+) -> PassageGraphIndex | None:
     """The passage graph MNEMOSYNE_PASSAGE_* configure, or None when no index is set."""
     env = os.environ if environ is None else environ
     index = env.get("MNEMOSYNE_PASSAGE_INDEX")
@@ -1058,12 +1878,15 @@ def passage_graph_from_env(environ: Mapping[str, str] | None = None, *, read_onl
         embedding_api_key=env.get(embedding_key_env) if embedding_key_env else None,
         embedding_dims=int(env.get("MNEMOSYNE_PASSAGE_EMBEDDING_DIMS", "1024")),
         query_task=env.get("MNEMOSYNE_PASSAGE_QUERY_TASK") or None,
-        query_timeout_seconds=float(env.get("MNEMOSYNE_PASSAGE_QUERY_TIMEOUT") or 0) or None,
+        query_timeout_seconds=float(env.get("MNEMOSYNE_PASSAGE_QUERY_TIMEOUT") or 0)
+        or None,
         embedding_body=env.get("MNEMOSYNE_PASSAGE_EMBEDDING_BODY") or None,
-        recognition_filter=env.get("MNEMOSYNE_PASSAGE_RECOGNITION_FILTER", "").lower() in _TRUE,
+        recognition_filter=env.get("MNEMOSYNE_PASSAGE_RECOGNITION_FILTER", "").lower()
+        in _TRUE,
         rerank_top=int(env.get("MNEMOSYNE_PASSAGE_RERANK_TOP", "0")),
         rerank_model=env.get("MNEMOSYNE_PASSAGE_RERANK_MODEL") or None,
-        rerank_reasoning_effort=env.get("MNEMOSYNE_PASSAGE_RERANK_REASONING_EFFORT") or None,
+        rerank_reasoning_effort=env.get("MNEMOSYNE_PASSAGE_RERANK_REASONING_EFFORT")
+        or None,
         second_hop=env.get("MNEMOSYNE_PASSAGE_SECOND_HOP", "").lower() in _TRUE,
         read_only=read_only,
     )
@@ -1077,10 +1900,16 @@ def _embed(embedder: Any, texts: Sequence[str]) -> list[list[float]]:
     from mnemosyne.retrieval import _coerce_vector
 
     embed_many = getattr(embedder, "embed_many", None)
-    vectors = list(embed_many(list(texts))) if callable(embed_many) else [embedder.embed(text) for text in texts]
+    vectors = (
+        list(embed_many(list(texts)))
+        if callable(embed_many)
+        else [embedder.embed(text) for text in texts]
+    )
     if len(vectors) != len(texts):
         raise ValueError("embedding provider must return one vector per text")
-    validated = [_coerce_vector(vector, field="passage embedding") for vector in vectors]
+    validated = [
+        _coerce_vector(vector, field="passage embedding") for vector in vectors
+    ]
     if any(len(vector) != int(embedder.dims) for vector in validated):
         raise ValueError("passage embedding dimensions must match the provider")
     return validated
@@ -1088,7 +1917,9 @@ def _embed(embedder: Any, texts: Sequence[str]) -> list[list[float]]:
 
 def _require_semantic(embedder: Any) -> None:
     if getattr(embedder, "name", "") == "local-hashing":
-        raise ValueError("the passage graph needs a semantic embedding provider (--embedding-provider http)")
+        raise ValueError(
+            "the passage graph needs a semantic embedding provider (--embedding-provider http)"
+        )
 
 
 @dataclass(slots=True)
@@ -1188,9 +2019,13 @@ class PassageGraphIndex:
     _erased: set[str] = field(default_factory=set, repr=False)
     _live_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
     _live_wake: threading.Event = field(default_factory=threading.Event, repr=False)
-    _live_jobs: dict[str, tuple[Callable[[], Sequence[Hit]], Any]] = field(default_factory=dict, repr=False)
+    _live_jobs: dict[str, tuple[Callable[[], Sequence[Hit]], Any]] = field(
+        default_factory=dict, repr=False
+    )
     _live_worker: threading.Thread | None = field(default=None, repr=False)
-    _live_status: dict[str, Any] = field(default_factory=lambda: {"running": False, "failures": 0}, repr=False)
+    _live_status: dict[str, Any] = field(
+        default_factory=lambda: {"running": False, "failures": 0}, repr=False
+    )
 
     @property
     def openie_model(self) -> str:
@@ -1267,16 +2102,28 @@ class PassageGraphIndex:
         for cid, sha in shas.items():
             cids_by_sha[sha].append(cid)
         self.store.register(scope, shas)
-        extracted = {} if self.embeddings_only else self.store.openie(scope, model, texts)
-        todo = [] if self.embeddings_only else list(
-            {shas[cid]: text for cid, text in texts.items() if cid not in extracted}.items()
+        extracted = (
+            {} if self.embeddings_only else self.store.openie(scope, model, texts)
+        )
+        todo = (
+            []
+            if self.embeddings_only
+            else list(
+                {
+                    shas[cid]: text
+                    for cid, text in texts.items()
+                    if cid not in extracted
+                }.items()
+            )
         )
         failures: list[str] = []
         chat = self.chat
 
         def extract(item: tuple[str, str]) -> tuple[str, list[list[str]]]:
             sha, text = item
-            return sha, clean_triples(chat.json(OPENIE_PROMPT.replace("{passage}", text)).get("triples"))
+            return sha, clean_triples(
+                chat.json(OPENIE_PROMPT.replace("{passage}", text)).get("triples")
+            )
 
         with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
             futures = [pool.submit(extract, item) for item in todo]
@@ -1290,8 +2137,14 @@ class PassageGraphIndex:
                 for cid in cids_by_sha[sha]:
                     extracted[cid] = triples
                 if progress is not None and (done % 100 == 0 or done == len(futures)):
-                    progress(f"openie {done}/{len(futures)} ({time.perf_counter() - started:.0f}s)")
-        kinds: dict[str, dict[str, str]] = {"passage": {shas[cid]: text for cid, text in texts.items()}, "fact": {}, "entity": {}}
+                    progress(
+                        f"openie {done}/{len(futures)} ({time.perf_counter() - started:.0f}s)"
+                    )
+        kinds: dict[str, dict[str, str]] = {
+            "passage": {shas[cid]: text for cid, text in texts.items()},
+            "fact": {},
+            "entity": {},
+        }
         for triples in extracted.values():
             for subject, predicate, obj in triples:
                 fact = fact_text(subject, predicate, obj)
@@ -1302,16 +2155,26 @@ class PassageGraphIndex:
         embedded: dict[str, int] = {}
         for kind, items in kinds.items():
             if kind == "passage":
-                present = {shas[cid] for cid in self.store.vectors(scope, kind, embed_model, texts)}
+                present = {
+                    shas[cid]
+                    for cid in self.store.vectors(scope, kind, embed_model, texts)
+                }
             else:
                 present = set(self.store.vectors(scope, kind, embed_model, items))
             missing = [(sha, text) for sha, text in items.items() if sha not in present]
             chunks = list(_chunks(missing, batch_size))
             # Several batches in flight keep a server's parallel slots busy; map keeps the order.
             with ThreadPoolExecutor(max_workers=max(1, min(workers, 4))) as pool:
-                batches = pool.map(lambda chunk: _embed(embedder, [text for _sha, text in chunk]), chunks)
+                batches = pool.map(
+                    lambda chunk: _embed(embedder, [text for _sha, text in chunk]),
+                    chunks,
+                )
                 for number, (chunk, vectors) in enumerate(zip(chunks, batches), 1):
-                    self.store.put_vectors(kind, embed_model, [(sha, vec) for (sha, _t), vec in zip(chunk, vectors)])
+                    self.store.put_vectors(
+                        kind,
+                        embed_model,
+                        [(sha, vec) for (sha, _t), vec in zip(chunk, vectors)],
+                    )
                     if progress is not None and number % 20 == 0:
                         progress(f"embed {kind} {number * batch_size}/{len(missing)}")
             embedded[kind] = len(missing)
@@ -1345,7 +2208,9 @@ class PassageGraphIndex:
 
     # -- live indexing (a long-running server) ----------------------------------------------
 
-    def schedule(self, scope: str, collect: Callable[[], Sequence[Hit]], embedder: Any) -> bool:
+    def schedule(
+        self, scope: str, collect: Callable[[], Sequence[Hit]], embedder: Any
+    ) -> bool:
         """Index ``scope`` soon, in a background thread; returns at once.
 
         ``collect`` returns the passages a reader of the scope may see. Calls within the
@@ -1354,12 +2219,18 @@ class PassageGraphIndex:
         :meth:`health`, and the next capture (or ``index-passages``) catches up. Until a
         passage is indexed, search still finds it by BM25.
         """
-        if not self.live_index or self.store.read_only or (self.chat is None and not self.embeddings_only):
+        if (
+            not self.live_index
+            or self.store.read_only
+            or (self.chat is None and not self.embeddings_only)
+        ):
             return False
         with self._live_lock:
             self._live_jobs[scope] = (collect, embedder)
             if self._live_worker is None or not self._live_worker.is_alive():
-                self._live_worker = threading.Thread(target=self._live_loop, name="passage-index", daemon=True)
+                self._live_worker = threading.Thread(
+                    target=self._live_loop, name="passage-index", daemon=True
+                )
                 self._live_worker.start()
             self._live_wake.set()
         return True
@@ -1376,13 +2247,27 @@ class PassageGraphIndex:
             for scope, (collect, embedder) in jobs.items():
                 try:
                     report = self.index(scope, collect(), embedder, workers=4)
-                    summary = {key: report[key] for key in ("passages", "openie_new", "openie_failures", "embedded", "seconds")}
+                    summary = {
+                        key: report[key]
+                        for key in (
+                            "passages",
+                            "openie_new",
+                            "openie_failures",
+                            "embedded",
+                            "seconds",
+                        )
+                    }
                     with self._live_lock:
-                        self._live_status.update(last_report=summary, last_error=None,
-                                                 last_indexed_at=time.strftime("%Y-%m-%dT%H:%M:%S%z"))
+                        self._live_status.update(
+                            last_report=summary,
+                            last_error=None,
+                            last_indexed_at=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                        )
                 except Exception as exc:  # noqa: BLE001 - a model that is down must not stop the worker
                     with self._live_lock:
-                        self._live_status["last_error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
+                        self._live_status["last_error"] = (
+                            f"{type(exc).__name__}: {str(exc)[:200]}"
+                        )
                         self._live_status["failures"] += 1
             with self._live_lock:
                 self._live_status["running"] = False
@@ -1392,7 +2277,11 @@ class PassageGraphIndex:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             with self._live_lock:
-                idle = not self._live_jobs and not self._live_wake.is_set() and not self._live_status["running"]
+                idle = (
+                    not self._live_jobs
+                    and not self._live_wake.is_set()
+                    and not self._live_status["running"]
+                )
             if idle:
                 return True
             time.sleep(0.05)
@@ -1425,7 +2314,9 @@ class PassageGraphIndex:
         # A CID survives role-dependent redaction and disclosure-policy changes. Bind
         # cached graphs and persisted derivatives to exactly what this caller may see.
         passage_ids = tuple(hit.id for hit in passages)
-        readable = tuple((hit.id, text_sha(hit.text), self.disclosable(hit)) for hit in passages)
+        readable = tuple(
+            (hit.id, text_sha(hit.text), self.disclosable(hit)) for hit in passages
+        )
         key = (scope, self.openie_model, _embedding_model_key(embedder), readable)
         with self._cache_lock:
             if self._cache is not None and self._cache[0] == key:
@@ -1436,7 +2327,9 @@ class PassageGraphIndex:
             shas = [cid if allowed else "" for cid, _sha, allowed in readable]
             expected_text_shas = {cid: sha for cid, sha, allowed in readable if allowed}
             triples_by_sha = self.store.openie(
-                scope, self.openie_model, expected_text_shas,
+                scope,
+                self.openie_model,
+                expected_text_shas,
                 expected_text_shas=expected_text_shas,
             )
             entities: dict[str, int] = {}
@@ -1453,7 +2346,11 @@ class PassageGraphIndex:
                             entities[phrase] = len(entities)
                             entity_passages.append(set())
                         ends.append(entities[phrase])
-                    fact = (phrase_key(subject), " ".join(predicate.lower().split()), phrase_key(obj))
+                    fact = (
+                        phrase_key(subject),
+                        " ".join(predicate.lower().split()),
+                        phrase_key(obj),
+                    )
                     if fact not in facts:
                         facts[fact] = len(facts)
                         fact_entities.append(tuple(dict.fromkeys(ends)))
@@ -1466,15 +2363,31 @@ class PassageGraphIndex:
             entity_list = list(entities)
             fact_list = list(facts)
             passage_vectors = _matrix(
-                np, self.store.vectors(
-                    scope, "passage", embed_model, expected_text_shas,
+                np,
+                self.store.vectors(
+                    scope,
+                    "passage",
+                    embed_model,
+                    expected_text_shas,
                     expected_text_shas=expected_text_shas,
-                ), shas, dims,
+                ),
+                shas,
+                dims,
             )
             entity_shas = [text_sha(phrase) for phrase in entity_list]
-            entity_vectors = _matrix(np, self.store.vectors(scope, "entity", embed_model, entity_shas), entity_shas, dims)
+            entity_vectors = _matrix(
+                np,
+                self.store.vectors(scope, "entity", embed_model, entity_shas),
+                entity_shas,
+                dims,
+            )
             fact_shas = [text_sha(fact_text(*fact)) for fact in fact_list]
-            fact_vectors = _matrix(np, self.store.vectors(scope, "fact", embed_model, fact_shas), fact_shas, dims)
+            fact_vectors = _matrix(
+                np,
+                self.store.vectors(scope, "fact", embed_model, fact_shas),
+                fact_shas,
+                dims,
+            )
             synonym: set[tuple[int, int]] = set()
             synonym_weight: dict[tuple[int, int], float] = {}
             for start in range(0, n_entities, 1024):
@@ -1487,7 +2400,9 @@ class PassageGraphIndex:
                     per_row[r].append(c)
                 for r, cols_of_row in per_row.items():
                     if len(cols_of_row) > self.synonym_top_k:
-                        cols_of_row = sorted(cols_of_row, key=lambda c: -sims[r, c])[: self.synonym_top_k]
+                        cols_of_row = sorted(cols_of_row, key=lambda c: -sims[r, c])[
+                            : self.synonym_top_k
+                        ]
                     for c in cols_of_row:
                         pair = (min(start + r, c), max(start + r, c))
                         if pair not in synonym:
@@ -1512,7 +2427,11 @@ class PassageGraphIndex:
             src_a = np.asarray(src, dtype=np.int64)
             dst_a = np.asarray(dst, dtype=np.int64)
             weight_a = np.asarray(weight, dtype=np.float64)
-            out = np.bincount(src_a, weights=weight_a, minlength=size) if size else np.zeros(0)
+            out = (
+                np.bincount(src_a, weights=weight_a, minlength=size)
+                if size
+                else np.zeros(0)
+            )
             transition = weight_a / out[src_a] if len(src_a) else weight_a
             graph = _Graph(
                 passage_ids=passage_ids,
@@ -1545,7 +2464,9 @@ class PassageGraphIndex:
 
         x = reset
         for _ in range(100):
-            moved = np.bincount(graph.dst, weights=x[graph.src] * graph.transition, minlength=graph.size)
+            moved = np.bincount(
+                graph.dst, weights=x[graph.src] * graph.transition, minlength=graph.size
+            )
             moved += x[graph.dangling].sum() * reset
             nxt = (1.0 - self.damping) * reset + self.damping * moved
             if np.abs(nxt - x).sum() < 1e-10:
@@ -1557,34 +2478,51 @@ class PassageGraphIndex:
         """Positions in ``head`` the chat model picked, most useful first; [] on any failure."""
         chat = self.rerank_chat or self.chat
         share = max(160, min(600, int(self.rerank_chars) // max(len(head), 1)))
-        listed = "\n".join(f"[{n}] {' '.join(hit.text.split())[:share]}" for n, hit in enumerate(head, 1))
-        prompt = RERANK_PROMPT.replace("{question}", question).replace("{passages}", listed)
+        listed = "\n".join(
+            f"[{n}] {' '.join(hit.text.split())[:share]}"
+            for n, hit in enumerate(head, 1)
+        )
+        prompt = RERANK_PROMPT.replace("{question}", question).replace(
+            "{passages}", listed
+        )
         try:
             picked = chat.json(prompt).get("passages") if chat else None
         except (ValueError, OSError):
             return []
         chosen: list[int] = []
         for value in picked if isinstance(picked, list) else []:
-            if isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= len(head):
+            if (
+                isinstance(value, int)
+                and not isinstance(value, bool)
+                and 1 <= value <= len(head)
+            ):
                 if value - 1 not in chosen:
                     chosen.append(value - 1)
         return chosen
 
-    def _recognize(self, question: str, graph: _Graph, ranked_facts: list[int]) -> list[int]:
+    def _recognize(
+        self, question: str, graph: _Graph, ranked_facts: list[int]
+    ) -> list[int]:
         if self.chat is None or not ranked_facts:
             return ranked_facts
         listed = [list(graph.facts[index]) for index in ranked_facts]
         prompt = RECOGNITION_PROMPT.replace("{question}", question).replace(
-            "{facts}", "\n".join(json.dumps(fact, ensure_ascii=False) for fact in listed)
+            "{facts}",
+            "\n".join(json.dumps(fact, ensure_ascii=False) for fact in listed),
         )
         try:
             chosen = clean_triples(self.chat.json(prompt).get("facts"))
         except (ValueError, OSError):
             return ranked_facts
-        keys = {(phrase_key(s), " ".join(p.lower().split()), phrase_key(o)) for s, p, o in chosen}
+        keys = {
+            (phrase_key(s), " ".join(p.lower().split()), phrase_key(o))
+            for s, p, o in chosen
+        }
         return [index for index in ranked_facts if graph.facts[index] in keys]
 
-    def prepare(self, queries: Sequence[str], embedder: Any, *, batch_size: int = 64) -> None:
+    def prepare(
+        self, queries: Sequence[str], embedder: Any, *, batch_size: int = 64
+    ) -> None:
         """Embed a batch of queries up front (in memory, this process only).
 
         A batch evaluation that also calls the chat model per query would otherwise make a
@@ -1596,7 +2534,11 @@ class PassageGraphIndex:
             for text in dict.fromkeys(
                 self.query_template.format(task=task, query=query)
                 for query in queries
-                for task in ((self.passage_task,) if self.embeddings_only else (FACT_TASK, self.passage_task))
+                for task in (
+                    (self.passage_task,)
+                    if self.embeddings_only
+                    else (FACT_TASK, self.passage_task)
+                )
             )
             if text not in self._query_vectors
         ]
@@ -1609,19 +2551,32 @@ class PassageGraphIndex:
         vector = self._query_vectors.get(text)
         if vector is not None:
             return vector
-        if hasattr(embedder, "timeout_seconds") and hasattr(embedder, "__dataclass_fields__"):
-            embedder = replace(embedder, timeout_seconds=min(float(embedder.timeout_seconds), self.query_timeout_seconds))
+        if hasattr(embedder, "timeout_seconds") and hasattr(
+            embedder, "__dataclass_fields__"
+        ):
+            embedder = replace(
+                embedder,
+                timeout_seconds=min(
+                    float(embedder.timeout_seconds), self.query_timeout_seconds
+                ),
+            )
         return _embed(embedder, [text])[0]
 
-    def _walk(self, graph: _Graph, query: str, embedder: Any) -> tuple[Any, dict[str, Any]]:
+    def _walk(
+        self, graph: _Graph, query: str, embedder: Any
+    ) -> tuple[Any, dict[str, Any]]:
         """HippoRAG 2 scores of every graph passage for one query: fact-seeded PPR, else dense."""
         import numpy as np
 
         # An index without facts has nothing to link: one query embedding, not two.
         query_fact = (
-            np.asarray(self._query_vector(FACT_TASK, query, embedder), dtype=np.float32) if len(graph.facts) else None
+            np.asarray(self._query_vector(FACT_TASK, query, embedder), dtype=np.float32)
+            if len(graph.facts)
+            else None
         )
-        query_passage = np.asarray(self._query_vector(self.passage_task, query, embedder), dtype=np.float32)
+        query_passage = np.asarray(
+            self._query_vector(self.passage_task, query, embedder), dtype=np.float32
+        )
         dense = graph.passage_vectors @ query_passage
         if graph.indexed.any():
             dense = np.where(graph.indexed, dense, float(dense[graph.indexed].min()))
@@ -1631,7 +2586,11 @@ class PassageGraphIndex:
         if len(graph.facts):
             fact_scores = graph.fact_vectors @ query_fact
             ranked_facts = [int(i) for i in np.argsort(-fact_scores)[: self.link_top_k]]
-            linked = self._recognize(query, graph, ranked_facts) if self.recognition_filter else ranked_facts
+            linked = (
+                self._recognize(query, graph, ranked_facts)
+                if self.recognition_filter
+                else ranked_facts
+            )
             explain["candidate_facts"] = [list(graph.facts[i]) for i in ranked_facts]
             explain["linked_facts"] = [list(graph.facts[i]) for i in linked]
             if linked:
@@ -1642,19 +2601,29 @@ class PassageGraphIndex:
                 for index in linked:
                     normalized = (float(fact_scores[index]) - low) / spread
                     for entity in graph.fact_entities[index]:
-                        entity_weight[entity] += normalized / max(graph.entity_passages[entity], 1)
+                        entity_weight[entity] += normalized / max(
+                            graph.entity_passages[entity], 1
+                        )
                         occurrences[entity] += 1
                 seen = occurrences > 0
                 entity_weight[seen] /= occurrences[seen]
                 d_low, d_high = float(dense.min()), float(dense.max())
-                passage_weight = (dense - d_low) / ((d_high - d_low) or 1.0) * self.passage_node_weight
-                reset = np.concatenate([passage_weight.astype(np.float64), entity_weight])
+                passage_weight = (
+                    (dense - d_low)
+                    / ((d_high - d_low) or 1.0)
+                    * self.passage_node_weight
+                )
+                reset = np.concatenate(
+                    [passage_weight.astype(np.float64), entity_weight]
+                )
                 if reset.sum() > 0:
                     reset /= reset.sum()
                     scores = self._ppr(graph, reset)[: graph.n_passages]
                     if self.dense_mix > 0:
                         p_low, p_high = float(scores.min()), float(scores.max())
-                        scores = (scores - p_low) / ((p_high - p_low) or 1.0) + self.dense_mix * (
+                        scores = (scores - p_low) / (
+                            (p_high - p_low) or 1.0
+                        ) + self.dense_mix * (
                             (dense - d_low) / ((d_high - d_low) or 1.0)
                         )
         explain["route"] = "ppr" if linked else "dense"
@@ -1664,15 +2633,21 @@ class PassageGraphIndex:
     def _order(graph: _Graph, scores: Any) -> list[int]:
         import numpy as np
 
-        return [i for i in np.argsort(-scores, kind="stable").tolist() if graph.indexed[i]]
+        return [
+            i for i in np.argsort(-scores, kind="stable").tolist() if graph.indexed[i]
+        ]
 
     def _follow_up(self, question: str, head: Sequence[Hit]) -> str | None:
         """The chat model's search for the missing step of a two-step question; None if none."""
         chat = self.rerank_chat or self.chat
         if chat is None or not head:
             return None
-        listed = "\n".join(f"[{n}] {' '.join(hit.text.split())[:500]}" for n, hit in enumerate(head, 1))
-        prompt = SECOND_HOP_PROMPT.replace("{question}", question).replace("{passages}", listed)
+        listed = "\n".join(
+            f"[{n}] {' '.join(hit.text.split())[:500]}" for n, hit in enumerate(head, 1)
+        )
+        prompt = SECOND_HOP_PROMPT.replace("{question}", question).replace(
+            "{passages}", listed
+        )
         try:
             value = chat.json(prompt).get("query")
         except (ValueError, OSError):
@@ -1682,10 +2657,17 @@ class PassageGraphIndex:
         return " ".join(value.split())[:300] or None
 
     def _second_hop(
-        self, query: str, graph: _Graph, passages: Sequence[Hit], ranked: list[int], embedder: Any
+        self,
+        query: str,
+        graph: _Graph,
+        passages: Sequence[Hit],
+        ranked: list[int],
+        embedder: Any,
     ) -> tuple[list[int], dict[int, float] | None, dict[str, Any]]:
         """The first-hop order fused (reciprocal rank) with a walk from the follow-up search."""
-        follow = self._follow_up(query, [passages[i] for i in ranked[: self.second_hop_top]])
+        follow = self._follow_up(
+            query, [passages[i] for i in ranked[: self.second_hop_top]]
+        )
         explain: dict[str, Any] = {"query": follow, "applied": False}
         if not follow or follow.casefold() == query.casefold():
             return ranked, None, explain
@@ -1694,14 +2676,25 @@ class PassageGraphIndex:
         except (ValueError, OSError) as exc:
             explain["error"] = f"{type(exc).__name__}: {exc}"[:200]
             return ranked, None, explain
-        explain.update(applied=True, route=walked["route"], linked_facts=walked.get("linked_facts", []))
+        explain.update(
+            applied=True,
+            route=walked["route"],
+            linked_facts=walked.get("linked_facts", []),
+        )
         fused: dict[int, float] = {}
-        for order, weight in ((ranked, 1.0), (self._order(graph, scores), self.second_hop_weight)):
+        for order, weight in (
+            (ranked, 1.0),
+            (self._order(graph, scores), self.second_hop_weight),
+        ):
             for position, i in enumerate(order, 1):
-                fused[i] = fused.get(i, 0.0) + weight / (self.second_hop_rrf_k + position)
+                fused[i] = fused.get(i, 0.0) + weight / (
+                    self.second_hop_rrf_k + position
+                )
         return sorted(fused, key=lambda i: -fused[i]), fused, explain
 
-    def rank(self, query: str, passages: Sequence[Hit], embedder: Any, k: int) -> tuple[list[Hit], dict[str, Any]]:
+    def rank(
+        self, query: str, passages: Sequence[Hit], embedder: Any, k: int
+    ) -> tuple[list[Hit], dict[str, Any]]:
         """The caller's passages in HippoRAG 2 order, best first, at most ``k``."""
         import numpy as np
 
@@ -1725,7 +2718,9 @@ class PassageGraphIndex:
             explain["top_score"] = round(final[ranked[0]], 4)
         reranker = self.rerank_chat or self.chat
         if self.second_hop and reranker is not None and ranked:
-            ranked, fused, explain["second_hop"] = self._second_hop(query, graph, passages, ranked, embedder)
+            ranked, fused, explain["second_hop"] = self._second_hop(
+                query, graph, passages, ranked, embedder
+            )
             if fused is not None:
                 final = fused
                 cosine = False
@@ -1744,7 +2739,9 @@ class PassageGraphIndex:
         unindexed = np.flatnonzero(~graph.indexed).tolist()
         if unindexed:
             # Reciprocal-rank merge with BM25 over the passages the graph cannot see.
-            lexical = PassageIndex(tuple(passages[i].text for i in unindexed)).scores(query)
+            lexical = PassageIndex(tuple(passages[i].text for i in unindexed)).scores(
+                query
+            )
             others = [unindexed[j] for j in sorted(lexical, key=lambda j: -lexical[j])]
             fused = {i: 1.0 / (60 + rank) for rank, i in enumerate(ranked, 1)}
             for rank, i in enumerate(others, 1):
@@ -1768,7 +2765,40 @@ class PassageGraphIndex:
             explain["score_scale"] = transformed_scale
         explain["seconds"] = round(time.perf_counter() - started, 4)
         hits = [
-            replace(passages[i], score=final[i], channel="passage_graph", metadata=dict(passages[i].metadata))
+            replace(
+                passages[i],
+                score=final[i],
+                channel="passage_graph",
+                metadata=dict(passages[i].metadata),
+            )
             for i in ranked[: max(k, 0)]
         ]
         return hits, explain
+
+
+def retrieve_passages(
+    ops: Any,
+    query: str,
+    candidates: Sequence[Hit],
+    k: int,
+    *,
+    alpha: float = 0.5,
+    beta: float = 0.5,
+    granularity: str = "session",
+    reference_date: datetime | str | None = None,
+) -> list[Hit]:
+    """Retrieve and rank passages using multi-granularity score fusion,
+    recency decay, and structured calendar delta indexing.
+    """
+    from mnemosyne.retrieval import retrieve_passages as _retrieve_passages
+
+    return _retrieve_passages(
+        ops,
+        query,
+        candidates,
+        k,
+        alpha=alpha,
+        beta=beta,
+        granularity=granularity,
+        reference_date=reference_date,
+    )

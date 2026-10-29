@@ -11,6 +11,8 @@ from datetime import UTC, datetime
 from typing import Any, Literal, Mapping, Protocol, Sequence
 
 from mnemosyne.engine import MemoryEngine
+from mnemosyne.event_ledger import EventLedger, _TAXONOMY
+from mnemosyne.premise_verifier import PremiseConsistencyVerifier
 from mnemosyne.providers.deterministic_synthesis import DeterministicSynthesizer
 from mnemosyne.retrieval import QUERY_SUPPORT_STOPWORDS, normalise_query_term
 from mnemosyne.text import tokenize
@@ -26,7 +28,53 @@ _CONTROL_LABELS = (
     re.compile(r"filter(?:[\s_-]*fields?)\b", re.IGNORECASE),
     re.compile(r"policy(?:[\s_-]*fields?)\b", re.IGNORECASE),
 )
-_FALLBACK_DENY_TERMS = {"command", "commands", "ignore", "instruction", "instructions", "policy"}
+_FALLBACK_DENY_TERMS = {
+    "command",
+    "commands",
+    "ignore",
+    "instruction",
+    "instructions",
+    "policy",
+}
+
+_HEDGING_PATTERNS = (
+    re.compile(
+        r"^(?:Based on (?:the )?(?:provided |retrieved |relevant |authorized )?(?:chats?|conversations?|history|records?|context|transcripts?|documents?)[^,\n]*,\s*)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^(?:According to (?:the )?(?:provided |retrieved |relevant |authorized )?(?:chats?|conversations?|history|records?|context|transcripts?|documents?)[^,\n]*,\s*)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^(?:It appears that|It seems that|From what I can tell|As far as I can tell|To the best of my knowledge)(?:,\s*|\s+)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^(?:As an AI(?:\s+assistant)?|As a language model)(?:[^,\n]*,\s*|\s+)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^(?:Please note that|Note that)(?:,\s*|\s+)",
+        re.IGNORECASE,
+    ),
+)
+
+
+def _clean_hedging_headers(text: str) -> str:
+    """Strip conversational fluff and self-defeating hedging headers for decisive direct answers."""
+    cleaned = text.strip()
+    changed = True
+    while changed:
+        changed = False
+        for pattern in _HEDGING_PATTERNS:
+            new_text = pattern.sub("", cleaned).strip()
+            if new_text != cleaned:
+                cleaned = new_text
+                changed = True
+    if cleaned and cleaned[0].islower():
+        cleaned = cleaned[0].upper() + cleaned[1:]
+    return cleaned
 
 
 def _comparison(value: str) -> str:
@@ -130,7 +178,10 @@ def _authorized_literal_tokens(source: str) -> tuple[str, ...]:
     control_ranges = _control_ranges(source)
     selected: list[str] = []
     for match in reversed(list(_ANCHOR_TOKEN.finditer(source))):
-        if any(left < match.end() and match.start() < right for left, right in control_ranges):
+        if any(
+            left < match.end() and match.start() < right
+            for left, right in control_ranges
+        ):
             continue
         raw = match.group(0)
         tokens = _anchor_tokens(raw)
@@ -158,19 +209,31 @@ def _entity_spans(source: str) -> tuple[str, ...]:
         base = re.sub(r"(?:['’]s)$", "", raw, flags=re.IGNORECASE)
         letters = "".join(character for character in base if character.isalpha())
         base_terms = [normalise_query_term(token) for token in tokenize(base)]
-        entity_like = bool(letters) and any(
-            len(term) > 2 and term not in QUERY_SUPPORT_STOPWORDS
-            for term in base_terms
-        ) and (
-            base[0].isupper()
-            or letters.isupper()
-            or (any(character.isupper() for character in letters[1:]) and any(character.islower() for character in letters))
-            or (any(character.isdigit() for character in base) and any(character.isalpha() for character in base))
+        entity_like = (
+            bool(letters)
+            and any(
+                len(term) > 2 and term not in QUERY_SUPPORT_STOPWORDS
+                for term in base_terms
+            )
+            and (
+                base[0].isupper()
+                or letters.isupper()
+                or (
+                    any(character.isupper() for character in letters[1:])
+                    and any(character.islower() for character in letters)
+                )
+                or (
+                    any(character.isdigit() for character in base)
+                    and any(character.isalpha() for character in base)
+                )
+            )
         )
-        adjacent = start is not None and not source[end:match.start()].strip()
+        adjacent = start is not None and not source[end : match.start()].strip()
         if not entity_like or (start is not None and not adjacent):
             if start is not None:
-                if not any(left < end and start < right for left, right in control_ranges):
+                if not any(
+                    left < end and start < right for left, right in control_ranges
+                ):
                     spans.append(source[start:end])
             start = None
         if entity_like:
@@ -185,10 +248,7 @@ def _entity_spans(source: str) -> tuple[str, ...]:
         if not any(left < end and start < right for left, right in control_ranges):
             spans.append(source[start:end])
     return tuple(
-        anchor.strip()
-        for anchor in spans
-        if anchor.strip()
-        and _substantive(anchor)
+        anchor.strip() for anchor in spans if anchor.strip() and _substantive(anchor)
     )
 
 
@@ -303,9 +363,13 @@ class AnswerReadContext:
         )
         object.__setattr__(self, "min_trust_tier", None)
         object.__setattr__(self, "max_trust_tier", effective_max_trust)
-        object.__setattr__(self, "capability_tags", _strings(self.capability_tags, "capability_tags"))
+        object.__setattr__(
+            self, "capability_tags", _strings(self.capability_tags, "capability_tags")
+        )
         object.__setattr__(self, "purpose", _strings(self.purpose, "purpose"))
-        object.__setattr__(self, "lawful_basis", _strings(self.lawful_basis, "lawful_basis"))
+        object.__setattr__(
+            self, "lawful_basis", _strings(self.lawful_basis, "lawful_basis")
+        )
         object.__setattr__(self, "as_of", _as_of(self.as_of))
 
     def to_filter(self) -> dict[str, Any]:
@@ -355,8 +419,14 @@ class AnswerReadContext:
             raise ValueError("answer read context cannot add fields")
         current = asdict(self)
         for key in (
-            "tenant_id", "branch", "user_id", "role", "source_identity",
-            "residency", "region", "as_of",
+            "tenant_id",
+            "branch",
+            "user_id",
+            "role",
+            "source_identity",
+            "residency",
+            "region",
+            "as_of",
         ):
             if key in changes and changes[key] != current[key]:
                 raise ValueError(f"answer read context cannot widen or replace {key}")
@@ -392,10 +462,18 @@ class ReflectDisposition:
     mission: str | None = None
 
     def __post_init__(self) -> None:
-        for trait in ("skepticism", "abstraction", "conciseness", "empathy", "literalism"):
+        for trait in (
+            "skepticism",
+            "abstraction",
+            "conciseness",
+            "empathy",
+            "literalism",
+        ):
             val = getattr(self, trait)
             if isinstance(val, bool) or not isinstance(val, (int, float)):
-                raise ValueError(f"disposition {trait} must be a number between 0.0 and 1.0")
+                raise ValueError(
+                    f"disposition {trait} must be a number between 0.0 and 1.0"
+                )
             fval = float(val)
             if not (0.0 <= fval <= 1.0):
                 raise ValueError(f"disposition {trait} must be between 0.0 and 1.0")
@@ -404,14 +482,20 @@ class ReflectDisposition:
             if not isinstance(self.mission, str) or not self.mission.strip():
                 raise ValueError("disposition mission must be a non-empty string")
             if len(self.mission) > 500:
-                raise ValueError("disposition mission exceeds maximum length of 500 characters")
+                raise ValueError(
+                    "disposition mission exceeds maximum length of 500 characters"
+                )
             cleaned = self.mission.strip()
             normalized = unicodedata.normalize("NFKC", cleaned)
             if _contains_control_label(cleaned) or _contains_control_label(normalized):
-                raise ValueError("disposition mission contains forbidden control labels (I11 violation)")
+                raise ValueError(
+                    "disposition mission contains forbidden control labels (I11 violation)"
+                )
             tokens = set(_anchor_tokens(cleaned))
             if _FALLBACK_DENY_TERMS.intersection(tokens):
-                raise ValueError("disposition mission contains denied instruction terms (I11 violation)")
+                raise ValueError(
+                    "disposition mission contains denied instruction terms (I11 violation)"
+                )
             object.__setattr__(self, "mission", cleaned)
 
     def max_claims(self, default_max: int = 20) -> int:
@@ -451,10 +535,19 @@ class ReflectDisposition:
             return data
         if not isinstance(data, Mapping):
             raise ValueError("disposition must be a mapping or ReflectDisposition")
-        allowed = {"skepticism", "abstraction", "conciseness", "empathy", "literalism", "mission"}
+        allowed = {
+            "skepticism",
+            "abstraction",
+            "conciseness",
+            "empathy",
+            "literalism",
+            "mission",
+        }
         unknown = set(data.keys()) - allowed
         if unknown:
-            raise ValueError(f"disposition has unknown fields: {', '.join(sorted(unknown))}")
+            raise ValueError(
+                f"disposition has unknown fields: {', '.join(sorted(unknown))}"
+            )
         kwargs: dict[str, Any] = {k: data[k] for k in allowed if k in data}
         if mission is not None:
             kwargs["mission"] = mission
@@ -546,7 +639,11 @@ class AnswerSpan:
 
 
 GroundedFailureKind = Literal[
-    "assembly_error", "reader_error", "replay_error", "replay_drift", "invalid_reader_proposal"
+    "assembly_error",
+    "reader_error",
+    "replay_error",
+    "replay_drift",
+    "invalid_reader_proposal",
 ]
 
 
@@ -600,11 +697,19 @@ def public_grounded_answer(
         "claims": [
             {
                 "text": claim.text,
-                **({"derivation": {
-                    "schema_version": "mnemosyne.claim-derivation/v1",
-                    "kind": "synthesis" if claim.synthesis_operation is not None else "quotation",
-                    "operation": claim.synthesis_operation,
-                }} if include_derivation else {}),
+                **(
+                    {
+                        "derivation": {
+                            "schema_version": "mnemosyne.claim-derivation/v1",
+                            "kind": "synthesis"
+                            if claim.synthesis_operation is not None
+                            else "quotation",
+                            "operation": claim.synthesis_operation,
+                        }
+                    }
+                    if include_derivation
+                    else {}
+                ),
                 "evidence_cids": list(claim.evidence_cids),
                 "spans": [
                     {
@@ -672,7 +777,10 @@ class GroundedAnswerOrchestrator:
     ) -> GroundedAnswer:
         """Validate model-proposed atomic claims against freshly replayed evidence."""
         disp = coerce_disposition(disposition, mission=mission)
-        use_hierarchy = bool(hierarchy_first or (disp is not None and disp.abstraction > 0.6 and disp.literalism <= 0.7))
+        use_hierarchy = bool(
+            hierarchy_first
+            or (disp is not None and disp.abstraction > 0.6 and disp.literalism <= 0.7)
+        )
         if use_hierarchy:
             hierarchical = resolve_hierarchical_evidence(
                 self.engine,
@@ -681,11 +789,17 @@ class GroundedAnswerOrchestrator:
                 disposition=disp,
                 mission=disp.mission if disp is not None else mission,
             )
-            if hierarchical["resolved_layer"] in {"mental_model", "observation", "knowledge_page"} and hierarchical["claims"]:
+            if (
+                hierarchical["resolved_layer"]
+                in {"mental_model", "observation", "knowledge_page"}
+                and hierarchical["claims"]
+            ):
                 h_claims: tuple[AnswerClaim, ...] = tuple(hierarchical["claims"])
                 if disp is not None:
                     h_claims = h_claims[: disp.max_claims(len(h_claims))]
-                h_evidence: tuple[AnswerEvidence, ...] = tuple(hierarchical["answer_evidence"])
+                h_evidence: tuple[AnswerEvidence, ...] = tuple(
+                    hierarchical["answer_evidence"]
+                )
                 if h_claims and h_evidence:
                     h_hop = AnswerHop(
                         index=0,
@@ -700,12 +814,63 @@ class GroundedAnswerOrchestrator:
                         claims=h_claims,
                         evidence=h_evidence,
                         episodes=_episodes(h_evidence),
-                        trace=AnswerTrace((h_hop,), hierarchical["evidence_fingerprint"]),
+                        trace=AnswerTrace(
+                            (h_hop,), hierarchical["evidence_fingerprint"]
+                        ),
                         abstained=False,
                     )
         assembled = self.assemble(request)
         if assembled.abstained:
+            verifier = PremiseConsistencyVerifier()
+            evidence_pool = assembled.evidence
+            if not evidence_pool and hasattr(self.engine, "export_all"):
+                try:
+                    all_records = self.engine.export_all()
+                    evidence_pool = tuple(
+                        AnswerEvidence(
+                            cid=str(rec.get("cid") or ""),
+                            content=str(rec.get("content") or ""),
+                            source_identity=rec.get("source_identity"),
+                            session_id=rec.get("session_id"),
+                            turn_index=rec.get("turn_index"),
+                            hop=0,
+                        )
+                        for rec in all_records.get("evidence", [])
+                    )
+                except Exception:
+                    evidence_pool = ()
+            if evidence_pool:
+                premise_check = verifier.verify(
+                    request.question, evidence_rows=evidence_pool
+                )
+                if (
+                    premise_check.abstention_recommended
+                    and premise_check.clean_abstention_text
+                ):
+                    return GroundedAnswer(
+                        answer=premise_check.clean_abstention_text,
+                        claims=(),
+                        evidence=evidence_pool,
+                        episodes=_episodes(evidence_pool),
+                        trace=assembled.trace,
+                        abstained=True,
+                        public_reason="premise_mismatch",
+                    )
             return assembled
+        verifier = PremiseConsistencyVerifier()
+        premise_check = verifier.verify(
+            request.question, evidence_rows=assembled.evidence
+        )
+        if premise_check.abstention_recommended and premise_check.clean_abstention_text:
+            return GroundedAnswer(
+                answer=premise_check.clean_abstention_text,
+                claims=(),
+                evidence=assembled.evidence,
+                episodes=assembled.episodes,
+                trace=assembled.trace,
+                abstained=True,
+                public_reason="premise_mismatch",
+            )
         try:
             proposal = reader.read(
                 {
@@ -720,23 +885,38 @@ class GroundedAnswerOrchestrator:
             return self._abstain("reader_error")
         replayed = self.assemble(request)
         if replayed.failure_kind is not None:
-            return self._abstain("replay_drift" if replayed.failure_kind == "replay_drift" else "replay_error")
+            return self._abstain(
+                "replay_drift"
+                if replayed.failure_kind == "replay_drift"
+                else "replay_error"
+            )
         if replayed.abstained or (
-            replayed.trace.evidence_fingerprint
-            != assembled.trace.evidence_fingerprint
+            replayed.trace.evidence_fingerprint != assembled.trace.evidence_fingerprint
             or replayed.evidence != assembled.evidence
             or replayed.trace.hops != assembled.trace.hops
         ):
             return self._abstain("replay_drift")
         try:
-            claims = self._claims(proposal, {row.cid: row.content for row in replayed.evidence})
+            claims = self._claims(
+                proposal, {row.cid: row.content for row in replayed.evidence}
+            )
             if disp is not None and claims:
                 claims = _apply_disposition_to_claims(claims, disp, replayed.evidence)
             if not claims:
                 return self._reader_abstain(replayed)
+            cleaned_claims = tuple(
+                AnswerClaim(
+                    text=_clean_hedging_headers(claim.text),
+                    evidence_cids=claim.evidence_cids,
+                    spans=claim.spans,
+                    synthesis_operation=claim.synthesis_operation,
+                )
+                for claim in claims
+            )
+            raw_answer = "\n".join(claim.text for claim in cleaned_claims)
             return GroundedAnswer(
-                answer="\n".join(claim.text for claim in claims),
-                claims=claims,
+                answer=_clean_hedging_headers(raw_answer),
+                claims=cleaned_claims,
                 evidence=replayed.evidence,
                 episodes=replayed.episodes,
                 trace=replayed.trace,
@@ -747,12 +927,17 @@ class GroundedAnswerOrchestrator:
 
     @staticmethod
     def _reader_abstain(
-        assembled: GroundedAnswer, failure_kind: GroundedFailureKind | None = None,
+        assembled: GroundedAnswer,
+        failure_kind: GroundedFailureKind | None = None,
     ) -> GroundedAnswer:
         """Preserve authorized retrieval custody when only the reader abstains."""
         return GroundedAnswer(
-            answer="", claims=(), evidence=assembled.evidence,
-            episodes=assembled.episodes, trace=assembled.trace, abstained=True,
+            answer="",
+            claims=(),
+            evidence=assembled.evidence,
+            episodes=assembled.episodes,
+            trace=assembled.trace,
+            abstained=True,
             failure_kind=failure_kind,
         )
 
@@ -769,7 +954,9 @@ class GroundedAnswerOrchestrator:
         cid_hop: dict[str, int] = {}
         hops: list[AnswerHop] = []
         for hop_index in range(self.limits.max_hops):
-            fresh_queries = tuple(query for query in queries if _comparison(query) not in seen_queries)
+            fresh_queries = tuple(
+                query for query in queries if _comparison(query) not in seen_queries
+            )
             if not fresh_queries:
                 break
             if len(fresh_queries) > self.limits.max_queries_per_hop:
@@ -788,7 +975,10 @@ class GroundedAnswerOrchestrator:
                 cid_hop.setdefault(cid, hop_index)
             if len(authorized) > self.limits.max_evidence:
                 raise ValueError("evidence budget exceeded")
-            if sum(len(row["content"]) for row in authorized.values()) > self.limits.max_characters:
+            if (
+                sum(len(row["content"]) for row in authorized.values())
+                > self.limits.max_characters
+            ):
                 raise ValueError("character budget exceeded")
             hops.append(
                 AnswerHop(
@@ -812,9 +1002,7 @@ class GroundedAnswerOrchestrator:
             response = self.decomposer.decompose(payload)
             sources = tuple(row["content"] for row in payload["evidence"])
             proposals = self._query_proposals(response)
-            queries = _later_hop_anchors(
-                proposals, sources, seen_queries, self.limits
-            )
+            queries = _later_hop_anchors(proposals, sources, seen_queries, self.limits)
             if not queries:
                 break
         if not authorized:
@@ -834,7 +1022,10 @@ class GroundedAnswerOrchestrator:
                 ):
                     raise _EvidenceReplayDrift("authorized evidence changed")
                 replayed.update(replayed_hop_map)
-            if set(replayed) != set(authorized) or _fingerprint(replayed) != fingerprint:
+            if (
+                set(replayed) != set(authorized)
+                or _fingerprint(replayed) != fingerprint
+            ):
                 raise _EvidenceReplayDrift("authorized evidence changed")
         except _NoAuthorizedEvidence as exc:
             raise _EvidenceReplayDrift("authorized evidence changed") from exc
@@ -844,7 +1035,9 @@ class GroundedAnswerOrchestrator:
             raise _EvidenceReplayError("authorized evidence replay failed") from exc
         evidence = tuple(
             self._evidence(cid, row, cid_hop[cid])
-            for cid, row in sorted(replayed.items(), key=lambda item: _episode_key(item[1], item[0]))
+            for cid, row in sorted(
+                replayed.items(), key=lambda item: _episode_key(item[1], item[0])
+            )
         )
         episodes = _episodes(evidence)
         return GroundedAnswer(
@@ -861,7 +1054,9 @@ class GroundedAnswerOrchestrator:
     ) -> dict[str, dict[str, Any]]:
         if not referenced:
             return {}
-        exported = self.engine.export_tenant_filtered(context.tenant_id, context.to_filter())
+        exported = self.engine.export_tenant_filtered(
+            context.tenant_id, context.to_filter()
+        )
         rows = exported.get("evidence")
         if not isinstance(rows, list):
             raise ValueError("authorized export has invalid evidence")
@@ -879,7 +1074,9 @@ class GroundedAnswerOrchestrator:
             ):
                 content = row.get("content")
                 if not isinstance(content, str) or not content:
-                    raise ValueError("authorized evidence content must be a non-empty string")
+                    raise ValueError(
+                        "authorized evidence content must be a non-empty string"
+                    )
                 raw = self.engine.get_evidence(context.tenant_id, cid, context.branch)
                 if (
                     raw is None
@@ -958,7 +1155,11 @@ class GroundedAnswerOrchestrator:
         proposals: list[str] = []
         seen: set[str] = set()
         for item in raw:
-            if not isinstance(item, str) or not item.strip() or len(item) > self.limits.max_query_characters:
+            if (
+                not isinstance(item, str)
+                or not item.strip()
+                or len(item) > self.limits.max_query_characters
+            ):
                 raise ValueError("invalid decomposer query")
             proposal = item.strip()
             key = _comparison(proposal)
@@ -970,7 +1171,10 @@ class GroundedAnswerOrchestrator:
     @staticmethod
     def _claims(value: object, evidence: dict[str, str]) -> tuple[AnswerClaim, ...]:
         if not evidence or any(
-            not isinstance(cid, str) or not cid or not isinstance(content, str) or not content
+            not isinstance(cid, str)
+            or not cid
+            or not isinstance(content, str)
+            or not content
             for cid, content in evidence.items()
         ):
             raise ValueError("reader evidence must contain exact non-empty strings")
@@ -992,14 +1196,21 @@ class GroundedAnswerOrchestrator:
                 raise ValueError("invalid claim schema")
             synthesis = row["synthesis"] if "synthesis" in row else None
             if "synthesis" in row:
-                if not isinstance(synthesis, dict) or set(synthesis) != {"operation", "spans"}:
+                if not isinstance(synthesis, dict) or set(synthesis) != {
+                    "operation",
+                    "spans",
+                }:
                     raise ValueError("invalid synthesis schema")
                 raw_spans = synthesis["spans"]
                 max_spans = 16
             else:
                 raw_spans = row["spans"]
                 max_spans = 3
-            if not isinstance(raw_spans, list) or not raw_spans or len(raw_spans) > max_spans:
+            if (
+                not isinstance(raw_spans, list)
+                or not raw_spans
+                or len(raw_spans) > max_spans
+            ):
                 raise ValueError("claim spans are invalid")
             spans: list[AnswerSpan] = []
             occupied: dict[str, list[tuple[int, int]]] = {}
@@ -1007,7 +1218,13 @@ class GroundedAnswerOrchestrator:
                 if not isinstance(raw, dict) or set(raw) != {"cid", "quote"}:
                     raise ValueError("claim span schema is invalid")
                 cid, quote = raw["cid"], raw["quote"]
-                if not isinstance(cid, str) or cid not in evidence or not isinstance(quote, str) or not quote or len(quote) > 2_000:
+                if (
+                    not isinstance(cid, str)
+                    or cid not in evidence
+                    or not isinstance(quote, str)
+                    or not quote
+                    or len(quote) > 2_000
+                ):
                     raise ValueError("claim quote is invalid")
                 start = evidence[cid].find(quote)
                 if start < 0:
@@ -1015,10 +1232,20 @@ class GroundedAnswerOrchestrator:
                 if synthesis is not None and evidence[cid].find(quote, start + 1) >= 0:
                     raise ValueError("synthesis claim quote is ambiguous")
                 end = start + len(quote)
-                if any(start < right and left < end for left, right in occupied.setdefault(cid, [])):
+                if any(
+                    start < right and left < end
+                    for left, right in occupied.setdefault(cid, [])
+                ):
                     raise ValueError("claim spans overlap")
                 occupied[cid].append((start, end))
-                spans.append(AnswerSpan(cid, start, end, hashlib.sha256(quote.encode("utf-8")).hexdigest()))
+                spans.append(
+                    AnswerSpan(
+                        cid,
+                        start,
+                        end,
+                        hashlib.sha256(quote.encode("utf-8")).hexdigest(),
+                    )
+                )
             if synthesis is not None:
                 try:
                     result = DeterministicSynthesizer().synthesize(synthesis)
@@ -1033,17 +1260,35 @@ class GroundedAnswerOrchestrator:
                     raise ValueError("invalid synthesis result")
                 rendered = result["answer"]
             else:
-                rendered = " ".join(evidence[span.cid][span.start:span.end] for span in spans)
-            if not isinstance(rendered, str) or not rendered.strip() or len(rendered) > 2_000:
+                rendered = " ".join(
+                    evidence[span.cid][span.start : span.end] for span in spans
+                )
+            if (
+                not isinstance(rendered, str)
+                or not rendered.strip()
+                or len(rendered) > 2_000
+            ):
                 raise ValueError("claim span rendering is invalid")
-            claims.append(AnswerClaim(rendered, tuple(dict.fromkeys(span.cid for span in spans)), tuple(spans),
-                                      synthesis["operation"] if synthesis is not None else None))
+            claims.append(
+                AnswerClaim(
+                    rendered,
+                    tuple(dict.fromkeys(span.cid for span in spans)),
+                    tuple(spans),
+                    synthesis["operation"] if synthesis is not None else None,
+                )
+            )
         return tuple(claims)
 
     @staticmethod
     def _evidence(cid: str, row: Mapping[str, Any], hop: int) -> AnswerEvidence:
-        metadata = row.get("metadata") if isinstance(row.get("metadata"), Mapping) else {}
-        episode = metadata.get("episode") if isinstance(metadata.get("episode"), Mapping) else {}
+        metadata = (
+            row.get("metadata") if isinstance(row.get("metadata"), Mapping) else {}
+        )
+        episode = (
+            metadata.get("episode")
+            if isinstance(metadata.get("episode"), Mapping)
+            else {}
+        )
         if episode:
             _validate_episode(episode, row)
         source_identity = episode.get("source_identity", row.get("source_identity"))
@@ -1054,7 +1299,9 @@ class GroundedAnswerOrchestrator:
             content=_required_content(row),
             source_identity=str(source_identity) if source_identity else None,
             session_id=str(session_id) if session_id else None,
-            turn_index=turn_index if isinstance(turn_index, int) and not isinstance(turn_index, bool) else None,
+            turn_index=turn_index
+            if isinstance(turn_index, int) and not isinstance(turn_index, bool)
+            else None,
             hop=hop,
         )
 
@@ -1078,7 +1325,11 @@ def episode_metadata(
     """Validate the only non-oracle metadata admitted for episode adjacency."""
     if not session_id or not source_identity:
         raise ValueError("episode metadata requires session and source identity")
-    if not isinstance(turn_index, int) or isinstance(turn_index, bool) or turn_index < 0:
+    if (
+        not isinstance(turn_index, int)
+        or isinstance(turn_index, bool)
+        or turn_index < 0
+    ):
         raise ValueError("episode turn index must be a non-negative integer")
     return {
         "episode": {
@@ -1093,14 +1344,18 @@ def _fingerprint(rows: Mapping[str, Mapping[str, Any]]) -> str:
     payload = []
     for cid in sorted(rows):
         row = rows[cid]
-        metadata = row.get("metadata") if isinstance(row.get("metadata"), Mapping) else {}
+        metadata = (
+            row.get("metadata") if isinstance(row.get("metadata"), Mapping) else {}
+        )
         payload.append(
             {
                 "authorization": _authorization_metadata(row),
                 "access_policy_sha256": row.get("_access_policy_sha256"),
                 "branch": row.get("branch", "main"),
                 "cid": cid,
-                "content_sha256": hashlib.sha256(str(row.get("content") or "").encode()).hexdigest(),
+                "content_sha256": hashlib.sha256(
+                    str(row.get("content") or "").encode()
+                ).hexdigest(),
                 "erased": bool(row.get("erased")),
                 "sensitivity": row.get("sensitivity"),
                 "source_evidence_cids": _source_cids(row.get("source_evidence_cids")),
@@ -1122,7 +1377,9 @@ def _fingerprint(rows: Mapping[str, Mapping[str, Any]]) -> str:
 
 def _episode_key(row: Mapping[str, Any], cid: str) -> tuple[str, str, int, str]:
     metadata = row.get("metadata") if isinstance(row.get("metadata"), Mapping) else {}
-    episode = metadata.get("episode") if isinstance(metadata.get("episode"), Mapping) else {}
+    episode = (
+        metadata.get("episode") if isinstance(metadata.get("episode"), Mapping) else {}
+    )
     turn = episode.get("turn_index")
     return (
         str(episode.get("source_identity") or row.get("source_identity") or ""),
@@ -1202,7 +1459,9 @@ def _as_of(value: datetime | str | None) -> datetime | None:
     if value is None:
         return None
     if isinstance(value, str):
-        if not value or ("Z" not in value and "+" not in value[10:] and "-" not in value[10:]):
+        if not value or (
+            "Z" not in value and "+" not in value[10:] and "-" not in value[10:]
+        ):
             raise ValueError("answer as_of must include a timezone")
         try:
             value = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -1231,7 +1490,9 @@ def _validate_episode(episode: Mapping[str, Any], row: Mapping[str, Any]) -> Non
 
 
 def _strings(value: Sequence[str], field: str) -> tuple[str, ...]:
-    if isinstance(value, (str, bytes)) or any(not isinstance(item, str) or not item for item in value):
+    if isinstance(value, (str, bytes)) or any(
+        not isinstance(item, str) or not item for item in value
+    ):
         raise ValueError(f"{field} must contain non-empty strings")
     return tuple(dict.fromkeys(value))
 
@@ -1256,10 +1517,15 @@ def _query_substantive_terms(text: str) -> set[str]:
     terms = {
         normalise_query_term(token)
         for token in tokenize(text)
-        if len(normalise_query_term(token)) > 2 and normalise_query_term(token) not in QUERY_SUPPORT_STOPWORDS
+        if len(normalise_query_term(token)) > 2
+        and normalise_query_term(token) not in QUERY_SUPPORT_STOPWORDS
     }
     if not terms:
-        terms = {normalise_query_term(token) for token in tokenize(text) if normalise_query_term(token)}
+        terms = {
+            normalise_query_term(token)
+            for token in tokenize(text)
+            if normalise_query_term(token)
+        }
     return terms
 
 
@@ -1281,12 +1547,18 @@ def _apply_disposition_to_claims(
             ev_map = {row.cid: row.content for row in evidence}
             scored = []
             for idx, claim in enumerate(selected):
-                claim_text = claim.text + " " + " ".join(ev_map.get(cid, "") for cid in claim.evidence_cids)
+                claim_text = (
+                    claim.text
+                    + " "
+                    + " ".join(ev_map.get(cid, "") for cid in claim.evidence_cids)
+                )
                 overlap = len(_query_substantive_terms(claim_text) & mission_terms)
                 scored.append((-overlap, idx, claim))
             scored.sort()
             if any(item[0] < 0 for item in scored):
-                selected = [item[2] for item in scored if item[0] < 0] or [item[2] for item in scored]
+                selected = [item[2] for item in scored if item[0] < 0] or [
+                    item[2] for item in scored
+                ]
     max_count = disp.max_claims(len(selected))
     return tuple(selected[:max_count])
 
@@ -1306,7 +1578,9 @@ def _verify_live_authorized_evidence(
     exported_map: dict[str, Mapping[str, Any]] = {}
     if callable(getattr(engine, "export_tenant_filtered", None)):
         try:
-            exported = engine.export_tenant_filtered(context.tenant_id, context.to_filter())
+            exported = engine.export_tenant_filtered(
+                context.tenant_id, context.to_filter()
+            )
             for row in exported.get("evidence", []) or []:
                 if isinstance(row, Mapping) and isinstance(row.get("cid"), str):
                     exported_map[row["cid"]] = row
@@ -1315,7 +1589,11 @@ def _verify_live_authorized_evidence(
 
     verified: dict[str, dict[str, Any]] = {}
     for cid in unique_cids:
-        raw = engine.get_evidence(context.tenant_id, cid, context.branch) if callable(getattr(engine, "get_evidence", None)) else None
+        raw = (
+            engine.get_evidence(context.tenant_id, cid, context.branch)
+            if callable(getattr(engine, "get_evidence", None))
+            else None
+        )
         if (
             raw is None
             or getattr(raw, "cid", None) != cid
@@ -1326,7 +1604,11 @@ def _verify_live_authorized_evidence(
         ):
             continue
         created_at = getattr(raw, "created_at", None)
-        if context.as_of is not None and isinstance(created_at, datetime) and created_at > context.as_of:
+        if (
+            context.as_of is not None
+            and isinstance(created_at, datetime)
+            and created_at > context.as_of
+        ):
             continue
         if exported_map and cid not in exported_map:
             continue
@@ -1334,23 +1616,34 @@ def _verify_live_authorized_evidence(
         if exp_row and (bool(exp_row.get("erased")) or _quarantined(exp_row)):
             continue
         trust_tier = getattr(raw, "trust_tier", exp_row.get("trust_tier", 0))
-        if disposition is not None and disposition.skepticism > 0.8 and isinstance(trust_tier, int) and trust_tier >= 4:
+        if (
+            disposition is not None
+            and disposition.skepticism > 0.8
+            and isinstance(trust_tier, int)
+            and trust_tier >= 4
+        ):
             continue
-        content = getattr(raw, "content", None) or (exp_row.get("content") if isinstance(exp_row, Mapping) else None)
+        content = getattr(raw, "content", None) or (
+            exp_row.get("content") if isinstance(exp_row, Mapping) else None
+        )
         if not isinstance(content, str) or not content:
             continue
-        row_dict = dict(exp_row) if isinstance(exp_row, Mapping) and exp_row else {
-            "cid": cid,
-            "content": content,
-            "tenant_id": context.tenant_id,
-            "branch": context.branch,
-            "erased": False,
-            "sensitivity": getattr(raw, "sensitivity", 0),
-            "trust_tier": trust_tier,
-            "source_identity": getattr(raw, "source_identity", None),
-            "session_id": getattr(raw, "session_id", None),
-            "metadata": getattr(raw, "metadata", {}) or {},
-        }
+        row_dict = (
+            dict(exp_row)
+            if isinstance(exp_row, Mapping) and exp_row
+            else {
+                "cid": cid,
+                "content": content,
+                "tenant_id": context.tenant_id,
+                "branch": context.branch,
+                "erased": False,
+                "sensitivity": getattr(raw, "sensitivity", 0),
+                "trust_tier": trust_tier,
+                "source_identity": getattr(raw, "source_identity", None),
+                "session_id": getattr(raw, "session_id", None),
+                "metadata": getattr(raw, "metadata", {}) or {},
+            }
+        )
         row_dict["content"] = content
         row_dict["_access_policy_sha256"] = hashlib.sha256(
             json.dumps(
@@ -1384,7 +1677,9 @@ def resolve_hierarchical_evidence(
         )
     disp = coerce_disposition(disposition, mission=mission)
     q_terms = _query_substantive_terms(question)
-    mission_terms = _query_substantive_terms(disp.mission) if disp and disp.mission else set()
+    mission_terms = (
+        _query_substantive_terms(disp.mission) if disp and disp.mission else set()
+    )
 
     layers_checked: list[str] = []
     matched_models: list[dict[str, Any]] = []
@@ -1412,12 +1707,16 @@ def resolve_hierarchical_evidence(
                 continue
             m_text = f"{model.get('name', '')} {model.get('question', '')} {model.get('answer', '')}"
             m_terms = _query_substantive_terms(m_text)
-            if _comparison(str(model.get("question", ""))) != _comparison(question) and not (q_terms & m_terms):
+            if _comparison(str(model.get("question", ""))) != _comparison(
+                question
+            ) and not (q_terms & m_terms):
                 continue
             cids = list(model.get("source_evidence_cids") or [])
             if not cids:
                 continue
-            live_map = _verify_live_authorized_evidence(engine, context, cids, disposition=disp)
+            live_map = _verify_live_authorized_evidence(
+                engine, context, cids, disposition=disp
+            )
             if len(live_map) != len(set(cids)):
                 continue
             # Build verified AnswerClaims from model claims or live evidence spans
@@ -1441,7 +1740,9 @@ def resolve_hierarchical_evidence(
                         and 0 <= start < end <= len(live_map[scid]["content"])
                     ):
                         actual_slice = live_map[scid]["content"][start:end]
-                        actual_sha = hashlib.sha256(actual_slice.encode("utf-8")).hexdigest()
+                        actual_sha = hashlib.sha256(
+                            actual_slice.encode("utf-8")
+                        ).hexdigest()
                         if sha is None or sha == actual_sha:
                             c_spans.append(AnswerSpan(scid, start, end, actual_sha))
                 if c_text and c_spans:
@@ -1481,7 +1782,9 @@ def resolve_hierarchical_evidence(
                     break
                 except TypeError:
                     try:
-                        raw_obs_list = list(fn(context.tenant_id, branch=context.branch))
+                        raw_obs_list = list(
+                            fn(context.tenant_id, branch=context.branch)
+                        )
                         break
                     except Exception:
                         pass
@@ -1490,18 +1793,34 @@ def resolve_hierarchical_evidence(
 
         from mnemosyne.observations import ProofQuote, verify_proof_quote
 
-        scored_obs: list[tuple[int, float, dict[str, Any], list[AnswerClaim], dict[str, dict[str, Any]]]] = []
+        scored_obs: list[
+            tuple[
+                int, float, dict[str, Any], list[AnswerClaim], dict[str, dict[str, Any]]
+            ]
+        ] = []
         for item in raw_obs_list:
-            obs_dict = item.to_dict() if hasattr(item, "to_dict") else (dict(item) if isinstance(item, Mapping) else None)
+            obs_dict = (
+                item.to_dict()
+                if hasattr(item, "to_dict")
+                else (dict(item) if isinstance(item, Mapping) else None)
+            )
             if not isinstance(obs_dict, dict):
                 continue
             if obs_dict.get("status", "active") != "active":
                 continue
-            if context.user_id and obs_dict.get("user_id") and obs_dict.get("user_id") != context.user_id:
+            if (
+                context.user_id
+                and obs_dict.get("user_id")
+                and obs_dict.get("user_id") != context.user_id
+            ):
                 continue
             indep_sources = int(obs_dict.get("independent_source_count", 1) or 1)
             standing = float(obs_dict.get("standing", 0.51) or 0.51)
-            if disp is not None and disp.skepticism > 0.7 and (indep_sources < 2 and standing < 0.6):
+            if (
+                disp is not None
+                and disp.skepticism > 0.7
+                and (indep_sources < 2 and standing < 0.6)
+            ):
                 continue
             obs_text = f"{obs_dict.get('subject', '')} {obs_dict.get('topic', '')} {obs_dict.get('content', '')}"
             obs_terms = _query_substantive_terms(obs_text)
@@ -1510,17 +1829,28 @@ def resolve_hierarchical_evidence(
                 overlap += 2 * len(mission_terms & obs_terms)
             if overlap == 0 and q_terms:
                 continue
-            raw_quotes = [ProofQuote.from_dict(q) for q in (obs_dict.get("proof_quotes") or [])]
+            raw_quotes = [
+                ProofQuote.from_dict(q) for q in (obs_dict.get("proof_quotes") or [])
+            ]
             # Preserve multimodal block_index ordering
-            raw_quotes.sort(key=lambda q: (0, q.block_index) if q.block_index is not None else (1, 0))
+            raw_quotes.sort(
+                key=lambda q: (
+                    (0, q.block_index) if q.block_index is not None else (1, 0)
+                )
+            )
             obs_cids = list(
                 dict.fromkeys(
-                    [*(obs_dict.get("source_evidence_cids") or []), *(q.cid for q in raw_quotes if q.cid)]
+                    [
+                        *(obs_dict.get("source_evidence_cids") or []),
+                        *(q.cid for q in raw_quotes if q.cid),
+                    ]
                 )
             )
             if not obs_cids:
                 continue
-            live_map = _verify_live_authorized_evidence(engine, context, obs_cids, disposition=disp)
+            live_map = _verify_live_authorized_evidence(
+                engine, context, obs_cids, disposition=disp
+            )
             if len(live_map) != len(set(obs_cids)):
                 continue
             valid_spans: list[AnswerSpan] = []
@@ -1531,7 +1861,9 @@ def resolve_hierarchical_evidence(
                     break
                 ev_content = live_map[pq.cid]["content"]
                 try:
-                    verify_proof_quote(pq, ev_content, is_erased=False, is_retired=False)
+                    verify_proof_quote(
+                        pq, ev_content, is_erased=False, is_retired=False
+                    )
                 except Exception:
                     quotes_valid = False
                     break
@@ -1568,10 +1900,15 @@ def resolve_hierarchical_evidence(
             if contradictions and (disp is None or disp.skepticism >= 0.5):
                 for c in contradictions:
                     if isinstance(c, Mapping) and c.get("content"):
-                        contested_caveats.append(f"Supersedes prior observation: {c['content']}")
-            claim_text = " ".join(
-                live_map[s.cid]["content"][s.start : s.end] for s in valid_spans
-            ).strip() or str(obs_dict.get("content") or "").strip()
+                        contested_caveats.append(
+                            f"Supersedes prior observation: {c['content']}"
+                        )
+            claim_text = (
+                " ".join(
+                    live_map[s.cid]["content"][s.start : s.end] for s in valid_spans
+                ).strip()
+                or str(obs_dict.get("content") or "").strip()
+            )
             obs_claim = AnswerClaim(
                 text=claim_text,
                 evidence_cids=tuple(dict.fromkeys(s.cid for s in valid_spans)),
@@ -1595,7 +1932,9 @@ def resolve_hierarchical_evidence(
             fn = getattr(engine, method_name, None)
             if callable(fn):
                 try:
-                    raw_pages = list(fn(context.tenant_id, branch=context.branch, status="active"))
+                    raw_pages = list(
+                        fn(context.tenant_id, branch=context.branch, status="active")
+                    )
                     break
                 except TypeError:
                     try:
@@ -1606,12 +1945,22 @@ def resolve_hierarchical_evidence(
                 except Exception:
                     pass
         for page in raw_pages:
-            page_dict = page.to_dict() if hasattr(page, "to_dict") else (dict(page) if isinstance(page, Mapping) else None)
+            page_dict = (
+                page.to_dict()
+                if hasattr(page, "to_dict")
+                else (dict(page) if isinstance(page, Mapping) else None)
+            )
             if not isinstance(page_dict, dict):
                 continue
-            if page_dict.get("status", "active") != "active" or bool(page_dict.get("stale", False)):
+            if page_dict.get("status", "active") != "active" or bool(
+                page_dict.get("stale", False)
+            ):
                 continue
-            if context.user_id and page_dict.get("user_id") and page_dict.get("user_id") != context.user_id:
+            if (
+                context.user_id
+                and page_dict.get("user_id")
+                and page_dict.get("user_id") != context.user_id
+            ):
                 continue
             p_text = f"{page_dict.get('path', '')} {page_dict.get('title', '')} {page_dict.get('content_markdown', '')}"
             p_terms = _query_substantive_terms(p_text)
@@ -1620,7 +1969,9 @@ def resolve_hierarchical_evidence(
             p_cids = list(page_dict.get("source_evidence_cids") or [])
             if not p_cids:
                 continue
-            live_map = _verify_live_authorized_evidence(engine, context, p_cids, disposition=disp)
+            live_map = _verify_live_authorized_evidence(
+                engine, context, p_cids, disposition=disp
+            )
             if len(live_map) != len(set(p_cids)):
                 continue
             page_spans: list[AnswerSpan] = []
@@ -1642,7 +1993,10 @@ def resolve_hierarchical_evidence(
                 verified_rows.update(live_map)
                 claims.append(
                     AnswerClaim(
-                        text=" ".join(live_map[s.cid]["content"][s.start : s.end] for s in page_spans),
+                        text=" ".join(
+                            live_map[s.cid]["content"][s.start : s.end]
+                            for s in page_spans
+                        ),
                         evidence_cids=tuple(dict.fromkeys(s.cid for s in page_spans)),
                         spans=tuple(page_spans),
                         synthesis_operation=None,
@@ -1669,9 +2023,15 @@ def resolve_hierarchical_evidence(
                     fallback_cids.append(str(hit.id))
                 else:
                     fallback_cids.extend(
-                        str(c) for c in (getattr(hit, "metadata", {}) or {}).get("source_evidence_cids", []) if c
+                        str(c)
+                        for c in (getattr(hit, "metadata", {}) or {}).get(
+                            "source_evidence_cids", []
+                        )
+                        if c
                     )
-            live_map = _verify_live_authorized_evidence(engine, context, fallback_cids, disposition=disp)
+            live_map = _verify_live_authorized_evidence(
+                engine, context, fallback_cids, disposition=disp
+            )
             if live_map:
                 verified_rows.update(live_map)
                 resolved_layer = "evidence"
@@ -1680,7 +2040,9 @@ def resolve_hierarchical_evidence(
 
     answer_evidence = tuple(
         GroundedAnswerOrchestrator._evidence(cid, row, 0)
-        for cid, row in sorted(verified_rows.items(), key=lambda item: _episode_key(item[1], item[0]))
+        for cid, row in sorted(
+            verified_rows.items(), key=lambda item: _episode_key(item[1], item[0])
+        )
     )
     fingerprint = _fingerprint(verified_rows) if verified_rows else ""
 
@@ -1691,7 +2053,9 @@ def resolve_hierarchical_evidence(
         "observations": matched_observations,
         "knowledge_pages": matched_pages,
         "evidence_cids": [row.cid for row in answer_evidence],
-        "evidence_rows": [{"cid": row.cid, "content": row.content} for row in answer_evidence],
+        "evidence_rows": [
+            {"cid": row.cid, "content": row.content} for row in answer_evidence
+        ],
         "answer_evidence": answer_evidence,
         "evidence_fingerprint": fingerprint,
         "claims": claims,
@@ -1702,7 +2066,21 @@ def resolve_hierarchical_evidence(
 
 
 _COUNT_INTENT_RE = re.compile(
-    r"\b(?:how many|count\b|total number|number of|how often|frequency of)\b",
+    r"\b(?:"
+    r"how many|"
+    r"count\b|"
+    r"total number|"
+    r"number of|"
+    r"how often|"
+    r"frequency of|"
+    r"(?:how much|what)\s+(?:money\s+)?"
+    r"(?:did\s+(?:i|we|you|they)\s+(?:spend|pay)|was\s+spent|did\s+(?:it|the\b[^\n?]+?|a\b[^\n?]+?|an\b[^\n?]+?|my\b[^\n?]+?)\s+cost|does\s+(?:it|the\b[^\n?]+?|a\b[^\n?]+?|an\b[^\n?]+?|my\b[^\n?]+?)\s+cost|spent|cost)|"
+    r"how much\s+(?:did\s+(?:i|we|you|they)\s+spend|did\s+(?:the\b[^\n?]+?|a\b[^\n?]+?|an\b[^\n?]+?|my\b[^\n?]+?|it)\s+cost|was\s+spent)|"
+    r"total\s+(?:cost|spending|spent|expenses?|expenditure)|"
+    r"spending\s+on|"
+    r"spent\s+on|"
+    r"cost\s+of"
+    r")\b",
     re.IGNORECASE,
 )
 _TIMELINE_INTENT_RE = re.compile(
@@ -1717,7 +2095,9 @@ _COMPARISON_INTENT_RE = re.compile(
     r"\b(?:compare|comparison|comparing|difference[s]? between|differ(?:s|ed)? from|versus|\bvs\.?\b|contrast|similarit(?:y|ies) and difference[s]?)\b",
     re.IGNORECASE,
 )
-_ISO_DATE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})?)?)\b")
+_ISO_DATE_RE = re.compile(
+    r"\b(\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})?)?)\b"
+)
 _YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2})\b")
 _TRANSITION_INLINE_RE = re.compile(
     r"(?:changed\s+from|moved\s+from|migrated\s+from|switched\s+from|from)\s+([^.,;]+?)\s+to\s+([^.,;]+)",
@@ -1741,7 +2121,9 @@ def detect_synthesis_intent(question: str) -> str:
     return "fact"
 
 
-def _extract_temporal_sort_key(content: str, row: Mapping[str, Any], index: int) -> tuple[int, str, int]:
+def _extract_temporal_sort_key(
+    content: str, row: Mapping[str, Any], index: int
+) -> tuple[int, str, int]:
     iso_match = _ISO_DATE_RE.search(content)
     if iso_match:
         return (0, iso_match.group(1), index)
@@ -1767,7 +2149,9 @@ def adaptive_synthesize(
     """Produce provenance-verified multi-evidence derivations adapted to question intent."""
     disp = coerce_disposition(disposition)
     intent = detect_synthesis_intent(question)
-    mission_terms = _query_substantive_terms(disp.mission) if disp and disp.mission else set()
+    mission_terms = (
+        _query_substantive_terms(disp.mission) if disp and disp.mission else set()
+    )
 
     normalized_rows: list[dict[str, Any]] = []
     for idx, item in enumerate(evidence_rows):
@@ -1809,7 +2193,11 @@ def adaptive_synthesize(
             "slice_sha256": slice_sha256,
             "quote": quote,
         }
-        mission_overlap = len(_query_substantive_terms(content) & mission_terms) if mission_terms else 0
+        mission_overlap = (
+            len(_query_substantive_terms(content) & mission_terms)
+            if mission_terms
+            else 0
+        )
         normalized_rows.append(
             {
                 **row_dict,
@@ -1824,6 +2212,23 @@ def adaptive_synthesize(
 
     if mission_terms and any(r["_mission_overlap"] > 0 for r in normalized_rows):
         normalized_rows = [r for r in normalized_rows if r["_mission_overlap"] > 0]
+
+    verifier = PremiseConsistencyVerifier()
+    premise_check = verifier.verify(question, evidence_rows=normalized_rows)
+    if premise_check.abstention_recommended and premise_check.clean_abstention_text:
+        return {
+            "intent": intent,
+            "answer": premise_check.clean_abstention_text,
+            "abstained": True,
+            "claims": [],
+            "timeline_events": [],
+            "state_transitions": [],
+            "comparisons": [],
+            "count": 0,
+            "cited_cids": [],
+            "disposition": disp.to_dict() if disp is not None else None,
+            "premise_verification": premise_check.to_dict(),
+        }
 
     timeline_events: list[dict[str, Any]] = []
     state_transitions: list[dict[str, Any]] = []
@@ -1873,7 +2278,9 @@ def adaptive_synthesize(
                         "to_state": curr_row["quote"],
                         "from_cid": prev_row["cid"],
                         "to_cid": curr_row["cid"],
-                        "evidence_cids": list(dict.fromkeys([prev_row["cid"], curr_row["cid"]])),
+                        "evidence_cids": list(
+                            dict.fromkeys([prev_row["cid"], curr_row["cid"]])
+                        ),
                         "spans": [prev_row["span"], curr_row["span"]],
                     }
                 )
@@ -1881,30 +2288,105 @@ def adaptive_synthesize(
     is_literal = bool(disp is not None and disp.literalism > 0.7)
 
     if intent == "count":
-        count_value = len(normalized_rows)
-        if normalized_rows:
-            spans = [r["span"] for r in normalized_rows[:16]]
-            cids = list(dict.fromkeys(r["cid"] for r in normalized_rows[:16]))
+        ledger = EventLedger()
+        ledger.extract_from_evidence(normalized_rows)
+        agg = ledger.aggregate(question)
+        if agg.total_entries_found > 0:
+            count_value = agg.strict_count
+            matched_cids = list(
+                dict.fromkeys(
+                    e.evidence_cid
+                    for e in agg.strict_entries + agg.borderline_entries
+                    if e.evidence_cid
+                )
+            )
+            matched_spans = [
+                r["span"] for r in normalized_rows if r["cid"] in matched_cids
+            ]
+            if not matched_spans:
+                matched_spans = [r["span"] for r in normalized_rows[:16]]
+            if not matched_cids:
+                matched_cids = list(
+                    dict.fromkeys(r["cid"] for r in normalized_rows[:16])
+                )
+
             text = (
                 " ".join(r["quote"] for r in normalized_rows[:3])
                 if is_literal
-                else f"Count: {count_value} ({'; '.join(r['quote'] for r in normalized_rows[:5])})"
+                else agg.synthesis_text
             )
             claims.append(
                 {
-                    "text": text,
+                    "text": _clean_hedging_headers(text),
+                    "evidence_cids": matched_cids,
+                    "spans": matched_spans,
+                    "derivation": {
+                        "schema_version": "mnemosyne.claim-derivation/v1",
+                        "kind": "quotation" if is_literal else "synthesis",
+                        "operation": None if is_literal else "count",
+                        "set_aggregation": agg.to_dict(),
+                    },
+                }
+            )
+        elif (
+            agg.target_category in _TAXONOMY
+            or agg.target_category != "items"
+            or bool(
+                re.search(
+                    r"\b(?:bought|buy|purchas\w*|spent|spend|cost|paid|order\w*)\b",
+                    question,
+                    re.IGNORECASE,
+                )
+            )
+        ):
+            count_value = 0
+            cids = list(dict.fromkeys(r["cid"] for r in normalized_rows[:16]))
+            spans = [r["span"] for r in normalized_rows[:16]]
+            text = (
+                " ".join(r["quote"] for r in normalized_rows[:3])
+                if is_literal
+                else agg.synthesis_text
+            )
+            claims.append(
+                {
+                    "text": _clean_hedging_headers(text),
                     "evidence_cids": cids,
                     "spans": spans,
                     "derivation": {
                         "schema_version": "mnemosyne.claim-derivation/v1",
                         "kind": "quotation" if is_literal else "synthesis",
                         "operation": None if is_literal else "count",
+                        "set_aggregation": agg.to_dict(),
                     },
                 }
             )
+        else:
+            count_value = len(normalized_rows)
+            if normalized_rows:
+                spans = [r["span"] for r in normalized_rows[:16]]
+                cids = list(dict.fromkeys(r["cid"] for r in normalized_rows[:16]))
+                text = (
+                    " ".join(r["quote"] for r in normalized_rows[:3])
+                    if is_literal
+                    else f"Count: {count_value} ({'; '.join(r['quote'] for r in normalized_rows[:5])})"
+                )
+                claims.append(
+                    {
+                        "text": _clean_hedging_headers(text),
+                        "evidence_cids": cids,
+                        "spans": spans,
+                        "derivation": {
+                            "schema_version": "mnemosyne.claim-derivation/v1",
+                            "kind": "quotation" if is_literal else "synthesis",
+                            "operation": None if is_literal else "count",
+                        },
+                    }
+                )
     elif intent == "timeline":
         for ev in timeline_events:
-            prefix = f"[{ev['timestamp']}] " if ev["timestamp"] and not is_literal else ""
+            prefix = (
+                f"[{ev['timestamp']}] " if ev["timestamp"] and not is_literal else ""
+            )
             claims.append(
                 {
                     "text": f"{prefix}{ev['summary']}",
@@ -1953,7 +2435,9 @@ def adaptive_synthesize(
                 )
     elif intent == "comparison":
         for r in normalized_rows:
-            comparisons.append({"cid": r["cid"], "point": r["quote"], "span": r["span"]})
+            comparisons.append(
+                {"cid": r["cid"], "point": r["quote"], "span": r["span"]}
+            )
         if len(normalized_rows) >= 2 and not is_literal:
             spans = [r["span"] for r in normalized_rows[:16]]
             cids = list(dict.fromkeys(r["cid"] for r in normalized_rows[:16]))
@@ -2007,7 +2491,7 @@ def adaptive_synthesize(
 
     return {
         "intent": intent,
-        "answer": "\n".join(c["text"] for c in claims),
+        "answer": _clean_hedging_headers("\n".join(c["text"] for c in claims)),
         "abstained": not bool(claims),
         "claims": claims,
         "timeline_events": timeline_events,

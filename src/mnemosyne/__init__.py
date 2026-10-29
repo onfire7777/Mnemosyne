@@ -74,6 +74,12 @@ _EXPORTS: dict[str, str] = {
     "UserMemoryKind": "mnemosyne.user_model",
     "UserModel": "mnemosyne.user_model",
     "UserModelEntry": "mnemosyne.user_model",
+    "EventLedger": "mnemosyne.event_ledger",
+    "EventLedgerEntry": "mnemosyne.event_ledger",
+    "SetAggregationResult": "mnemosyne.event_ledger",
+    "PremiseConsistencyVerifier": "mnemosyne.premise_verifier",
+    "PremiseMismatch": "mnemosyne.premise_verifier",
+    "PremiseVerificationResult": "mnemosyne.premise_verifier",
 }
 
 __all__ = [
@@ -133,6 +139,12 @@ __all__ = [
     "UserMemoryKind",
     "UserModel",
     "UserModelEntry",
+    "EventLedger",
+    "EventLedgerEntry",
+    "SetAggregationResult",
+    "PremiseConsistencyVerifier",
+    "PremiseMismatch",
+    "PremiseVerificationResult",
     "route",
     "semantic_entropy",
     "wrap_chat_callable",

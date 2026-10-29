@@ -31,7 +31,13 @@ from mnemosyne.access_policy import (
     validate_access_policy,
     vector_partition_for_item,
 )
-from mnemosyne.algorithms import fit_budget, mmr_select, ppr_power_iteration, rrf_fuse, u_curve_order
+from mnemosyne.algorithms import (
+    fit_budget,
+    mmr_select,
+    ppr_power_iteration,
+    rrf_fuse,
+    u_curve_order,
+)
 from mnemosyne.calibration import (
     CalibrationSet,
     conformal_prediction_set_size_for_hits,
@@ -120,7 +126,11 @@ from mnemosyne.knowledge_pages import (
 )
 from mnemosyne.pipeline import run_retrieval_pipeline
 from mnemosyne.policy import OperatingPolicy
-from mnemosyne.postgres_security import assert_postgres_safe_role, env_flag, postgres_safe_role_required
+from mnemosyne.postgres_security import (
+    assert_postgres_safe_role,
+    env_flag,
+    postgres_safe_role_required,
+)
 from mnemosyne.privacy import ErasureMode
 from mnemosyne.retrieval import (
     _bounded_float,
@@ -140,7 +150,12 @@ from mnemosyne.retrieval import (
     query_support,
     validate_adapter_hit_scope,
 )
-from mnemosyne.security import TrustTier, is_write_tainted, sanitize_retrieved_text, trust_weight
+from mnemosyne.security import (
+    TrustTier,
+    is_write_tainted,
+    sanitize_retrieved_text,
+    trust_weight,
+)
 from mnemosyne.standing import (
     SELF_GENERATED_CEILING,
     standing,
@@ -150,6 +165,14 @@ from mnemosyne.standing import (
 )
 from mnemosyne.text import cosine, hashing_embedding, lexical_score, tokenize
 from mnemosyne.workspace import self_generation_budget_report, source_backed_summary
+
+
+def _to_utc_opt(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
 
 
 class PostgresUnavailableError(RuntimeError):
@@ -182,7 +205,10 @@ def _normalize_working_json(value: Any, *, path: str) -> Any:
             raise ValueError(f"{path} must contain finite JSON numbers")
         return value
     if type(value) is list:
-        return [_normalize_working_json(item, path=f"{path}[{index}]") for index, item in enumerate(value)]
+        return [
+            _normalize_working_json(item, path=f"{path}[{index}]")
+            for index, item in enumerate(value)
+        ]
     if type(value) is dict:
         normalized: dict[str, Any] = {}
         for key, item in value.items():
@@ -227,7 +253,16 @@ def _working_datetime(value: Any, field_name: str) -> datetime:
 
 def _working_payload(item: Any) -> dict[str, Any]:
     values = {name: getattr(item, name, None) for name in _WORKING_FIELDS}
-    for name in ("item_id", "tenant_id", "session_id", "user_id", "agent_id", "kind", "task_id", "content"):
+    for name in (
+        "item_id",
+        "tenant_id",
+        "session_id",
+        "user_id",
+        "agent_id",
+        "kind",
+        "task_id",
+        "content",
+    ):
         if type(values[name]) is not str or not values[name].strip():
             raise ValueError(f"working-memory {name} must be a non-empty string")
     if values["kind"] not in _WORKING_MEMORY_KINDS:
@@ -250,7 +285,9 @@ def _working_payload(item: Any) -> dict[str, Any]:
         raise ValueError("expired working-memory items require expired_at")
     evidence_ids = values["evidence_ids"]
     if type(evidence_ids) is not list or not evidence_ids:
-        raise ValueError("working-memory evidence_ids must contain originating evidence")
+        raise ValueError(
+            "working-memory evidence_ids must contain originating evidence"
+        )
     if any(type(cid) is not str or not cid.strip() for cid in evidence_ids):
         raise ValueError("working-memory evidence_ids must contain non-empty strings")
     if len(set(evidence_ids)) != len(evidence_ids):
@@ -258,11 +295,19 @@ def _working_payload(item: Any) -> dict[str, Any]:
     trust_tier = values["trust_tier"]
     if type(trust_tier) is not int or isinstance(trust_tier, bool):
         raise ValueError("working-memory trust_tier must be an integer")
-    if not int(TrustTier.DIRECT_USER) <= trust_tier <= int(TrustTier.UNTRUSTED_EXTERNAL):
+    if (
+        not int(TrustTier.DIRECT_USER)
+        <= trust_tier
+        <= int(TrustTier.UNTRUSTED_EXTERNAL)
+    ):
         raise ValueError("working-memory trust_tier is out of range")
     capability_tags = values["capability_tags"] or []
-    if type(capability_tags) is not list or any(type(tag) is not str or not tag.strip() for tag in capability_tags):
-        raise ValueError("working-memory capability_tags must be a list of non-empty strings")
+    if type(capability_tags) is not list or any(
+        type(tag) is not str or not tag.strip() for tag in capability_tags
+    ):
+        raise ValueError(
+            "working-memory capability_tags must be a list of non-empty strings"
+        )
     if len(set(capability_tags)) != len(capability_tags):
         raise ValueError("working-memory capability_tags must not contain duplicates")
     sensitivity = values["sensitivity"]
@@ -270,21 +315,31 @@ def _working_payload(item: Any) -> dict[str, Any]:
         raise ValueError("working-memory sensitivity must be a non-negative integer")
 
     salience = values.get("salience", 0.5)
-    if type(salience) not in {int, float} or isinstance(salience, bool) or not math.isfinite(float(salience)):
+    if (
+        type(salience) not in {int, float}
+        or isinstance(salience, bool)
+        or not math.isfinite(float(salience))
+    ):
         raise ValueError("working-memory salience must be a finite float")
     if not (0.0 <= float(salience) <= 1.0):
         raise ValueError("working-memory salience must be between 0.0 and 1.0")
     salience = float(salience)
 
     access_count = values.get("access_count", 0)
-    if type(access_count) is not int or isinstance(access_count, bool) or access_count < 0:
+    if (
+        type(access_count) is not int
+        or isinstance(access_count, bool)
+        or access_count < 0
+    ):
         raise ValueError("working-memory access_count must be a non-negative integer")
 
     last_accessed_at = values.get("last_accessed_at")
     if last_accessed_at is not None:
         last_accessed_at = _working_datetime(last_accessed_at, "last_accessed_at")
         if last_accessed_at < created_at:
-            raise ValueError("working-memory last_accessed_at cannot precede created_at")
+            raise ValueError(
+                "working-memory last_accessed_at cannot precede created_at"
+            )
         if last_accessed_at > expires_at:
             raise ValueError("working-memory last_accessed_at cannot exceed expires_at")
 
@@ -296,9 +351,13 @@ def _working_payload(item: Any) -> dict[str, Any]:
         raise ValueError("active working-memory items cannot have superseded_by")
 
     access_policy = validate_access_policy(
-        values["access_policy"], tenant_id=values["tenant_id"], location="working_memory.access_policy"
+        values["access_policy"],
+        tenant_id=values["tenant_id"],
+        location="working_memory.access_policy",
     )
-    metadata = _normalize_working_json(values["metadata"], path="working_memory.metadata")
+    metadata = _normalize_working_json(
+        values["metadata"], path="working_memory.metadata"
+    )
     if type(metadata) is not dict:
         raise ValueError("working-memory metadata must be a JSON object")
     return {
@@ -306,9 +365,13 @@ def _working_payload(item: Any) -> dict[str, Any]:
         "created_at": created_at,
         "expires_at": expires_at,
         "expired_at": expired_at,
-        "evidence_ids": _normalize_working_json(evidence_ids, path="working_memory.evidence_ids"),
+        "evidence_ids": _normalize_working_json(
+            evidence_ids, path="working_memory.evidence_ids"
+        ),
         "trust_tier": trust_tier,
-        "access_policy": _normalize_working_json(access_policy, path="working_memory.access_policy"),
+        "access_policy": _normalize_working_json(
+            access_policy, path="working_memory.access_policy"
+        ),
         "metadata": metadata,
         "capability_tags": list(capability_tags),
         "sensitivity": sensitivity,
@@ -339,11 +402,15 @@ def _working_snapshot(values: dict[str, Any]) -> dict[str, Any]:
         "sensitivity": values["sensitivity"],
         "salience": float(values.get("salience", 0.5)),
         "access_count": int(values.get("access_count", 0)),
-        "last_accessed_at": values["last_accessed_at"].isoformat() if values.get("last_accessed_at") else None,
+        "last_accessed_at": values["last_accessed_at"].isoformat()
+        if values.get("last_accessed_at")
+        else None,
     }
 
 
-def _working_audit_diff(values: dict[str, Any], *, status: str, sweep: datetime | None = None) -> dict[str, Any]:
+def _working_audit_diff(
+    values: dict[str, Any], *, status: str, sweep: datetime | None = None
+) -> dict[str, Any]:
     diff: dict[str, Any] = {
         "working_item_digest": content_cid("working_memory", _working_snapshot(values)),
         "evidence_ref_digest": content_cid(
@@ -411,8 +478,12 @@ def _require_psycopg() -> tuple[Any, Any]:
     try:
         import psycopg  # type: ignore[import-not-found]
         from psycopg.types.json import Jsonb  # type: ignore[import-not-found]
-    except ModuleNotFoundError as exc:  # pragma: no cover - exercised when optional dep absent.
-        raise PostgresUnavailableError("Install mnemosyne-memory[postgres] to use PostgresEngine.") from exc
+    except (
+        ModuleNotFoundError
+    ) as exc:  # pragma: no cover - exercised when optional dep absent.
+        raise PostgresUnavailableError(
+            "Install mnemosyne-memory[postgres] to use PostgresEngine."
+        ) from exc
     return psycopg, Jsonb
 
 
@@ -455,13 +526,20 @@ _TENANT_CLEAR_SQL = "SELECT set_config('mnemosyne.tenant_id', '', false)"
 
 def _null_embedding_fallback_limit(k: int) -> int:
     return min(
-        max(max(int(k), 1) * _NULL_EMBEDDING_FALLBACK_MULTIPLIER, _NULL_EMBEDDING_FALLBACK_MIN_ROWS),
+        max(
+            max(int(k), 1) * _NULL_EMBEDDING_FALLBACK_MULTIPLIER,
+            _NULL_EMBEDDING_FALLBACK_MIN_ROWS,
+        ),
         _NULL_EMBEDDING_FALLBACK_MAX_ROWS,
     )
 
 
 def _pgvector_hnsw_ef_search(filt: dict[str, Any]) -> int:
-    return _PGVECTOR_HNSW_EF_SEARCH_DEEP if bool(filt.get("_retrieval_deep")) else _PGVECTOR_HNSW_EF_SEARCH_FAST
+    return (
+        _PGVECTOR_HNSW_EF_SEARCH_DEEP
+        if bool(filt.get("_retrieval_deep"))
+        else _PGVECTOR_HNSW_EF_SEARCH_FAST
+    )
 
 
 class _PooledConnection:
@@ -608,7 +686,9 @@ class PostgresEngine:
         self.dsn = dsn
         self.policy = policy or OperatingPolicy()
         self.require_safe_role = (
-            postgres_safe_role_required() if require_safe_role is None else bool(require_safe_role)
+            postgres_safe_role_required()
+            if require_safe_role is None
+            else bool(require_safe_role)
         )
         if adapters is None:
             embedding = HashingEmbeddingProvider(dims=1024)
@@ -629,7 +709,9 @@ class PostgresEngine:
         # psycopg3 already auto-prepares repeated statements, but the retrieval
         # hot path benefits from preparing immediately on pooled connections.
         # Keep a kill-switch for PgBouncer transaction-pool or debugging lanes.
-        self._prepare_hot_queries = env_flag("MNEMOSYNE_PG_PREPARE_HOT_QUERIES", default=True)
+        self._prepare_hot_queries = env_flag(
+            "MNEMOSYNE_PG_PREPARE_HOT_QUERIES", default=True
+        )
         self._pool: _PostgresConnectionPool | None = None
         self._pool_lock = threading.Lock()
         self._calibration_cache: dict[tuple[str, str], CalibrationSet] = {}
@@ -667,7 +749,9 @@ class PostgresEngine:
                     def _pool_factory() -> Any:
                         engine = engine_ref()
                         if engine is None:  # pragma: no cover - defensive
-                            raise RuntimeError("PostgresEngine was collected; pool factory unavailable")
+                            raise RuntimeError(
+                                "PostgresEngine was collected; pool factory unavailable"
+                            )
                         return engine._new_connection()
 
                     pool = self._pool = _PostgresConnectionPool(
@@ -690,7 +774,9 @@ class PostgresEngine:
 
     @staticmethod
     def _set_tenant(cur: Any, db_tenant_id: str) -> None:
-        cur.execute("SELECT set_config('mnemosyne.tenant_id', %s, true)", (str(db_tenant_id),))
+        cur.execute(
+            "SELECT set_config('mnemosyne.tenant_id', %s, true)", (str(db_tenant_id),)
+        )
 
     @staticmethod
     def _lock_working_tenant(cur: Any, tenant_id: str) -> None:
@@ -701,7 +787,9 @@ class PostgresEngine:
         )
 
     def _source_transaction_state(self) -> dict[str, Any] | None:
-        return getattr(getattr(self, "_source_transaction_context", None), "state", None)
+        return getattr(
+            getattr(self, "_source_transaction_context", None), "state", None
+        )
 
     @contextmanager
     def _source_operation_scope(self, tenant_id: str, branch: str):
@@ -748,9 +836,16 @@ class PostgresEngine:
                 yield
                 return
             if self._active_mental_model_connection(tenant_id) is not None:
-                raise RuntimeError("source transaction cannot join a mental model guard")
-            state = {"tenant_id": tenant_id, "branch": branch, "failed": False,
-                     "invalidate_passages": False, "after_commit": []}
+                raise RuntimeError(
+                    "source transaction cannot join a mental model guard"
+                )
+            state = {
+                "tenant_id": tenant_id,
+                "branch": branch,
+                "failed": False,
+                "invalidate_passages": False,
+                "after_commit": [],
+            }
             with self.connect() as conn:
                 # A safe-role probe may have begun a transaction on a fresh
                 # non-pooled lease. This context owns that lease exclusively.
@@ -794,8 +889,14 @@ class PostgresEngine:
 
     @staticmethod
     def _set_pgvector_hnsw_query_settings(cur: Any, filt: dict[str, Any]) -> None:
-        cur.execute("SELECT set_config('hnsw.ef_search', %s, true)", (str(_pgvector_hnsw_ef_search(filt)),))
-        cur.execute("SELECT set_config('hnsw.iterative_scan', %s, true)", (_PGVECTOR_HNSW_ITERATIVE_SCAN,))
+        cur.execute(
+            "SELECT set_config('hnsw.ef_search', %s, true)",
+            (str(_pgvector_hnsw_ef_search(filt)),),
+        )
+        cur.execute(
+            "SELECT set_config('hnsw.iterative_scan', %s, true)",
+            (_PGVECTOR_HNSW_ITERATIVE_SCAN,),
+        )
 
     def _execute_hot_query(self, cur: Any, sql: str, params: tuple[Any, ...]) -> None:
         if self._prepare_hot_queries:
@@ -803,7 +904,9 @@ class PostgresEngine:
         else:
             cur.execute(sql, params)
 
-    def vector_hygiene_snapshot(self, tenant_id: str, branch: str = "main") -> dict[str, Any]:
+    def vector_hygiene_snapshot(
+        self, tenant_id: str, branch: str = "main"
+    ) -> dict[str, Any]:
         """Read-only production hygiene probe for vector coverage.
 
         The dense fallback can keep legacy rows queryable, but production
@@ -903,20 +1006,34 @@ class PostgresEngine:
             "none_partition_vectors": none_vectors,
             "stored_vectors": int(row.get("stored_vectors") or 0),
             "none_partition_rows": int(row.get("none_partition_rows") or 0),
-            "evidence_embeddable_null_embeddings": int(row.get("evidence_embeddable_null_embeddings") or 0),
-            "assertion_embeddable_null_embeddings": int(row.get("assertion_embeddable_null_embeddings") or 0),
-            "evidence_none_partition_vectors": int(row.get("evidence_none_partition_vectors") or 0),
-            "assertion_none_partition_vectors": int(row.get("assertion_none_partition_vectors") or 0),
+            "evidence_embeddable_null_embeddings": int(
+                row.get("evidence_embeddable_null_embeddings") or 0
+            ),
+            "assertion_embeddable_null_embeddings": int(
+                row.get("assertion_embeddable_null_embeddings") or 0
+            ),
+            "evidence_none_partition_vectors": int(
+                row.get("evidence_none_partition_vectors") or 0
+            ),
+            "assertion_none_partition_vectors": int(
+                row.get("assertion_none_partition_vectors") or 0
+            ),
             "evidence_stored_vectors": int(row.get("evidence_stored_vectors") or 0),
             "assertion_stored_vectors": int(row.get("assertion_stored_vectors") or 0),
-            "evidence_none_partition_rows": int(row.get("evidence_none_partition_rows") or 0),
-            "assertion_none_partition_rows": int(row.get("assertion_none_partition_rows") or 0),
+            "evidence_none_partition_rows": int(
+                row.get("evidence_none_partition_rows") or 0
+            ),
+            "assertion_none_partition_rows": int(
+                row.get("assertion_none_partition_rows") or 0
+            ),
             "live_evidence_rows": int(row.get("live_evidence_rows") or 0),
             "live_assertion_rows": int(row.get("live_assertion_rows") or 0),
             "live_rows": int(row.get("live_rows") or 0),
         }
 
-    def vector_backfill_plan(self, tenant_id: str, branch: str = "main", limit: int = 20) -> dict[str, Any]:
+    def vector_backfill_plan(
+        self, tenant_id: str, branch: str = "main", limit: int = 20
+    ) -> dict[str, Any]:
         """Read-only, redacted sample of rows blocking clean vector hygiene."""
 
         sample_limit = max(0, int(limit))
@@ -963,7 +1080,9 @@ class PostgresEngine:
             {
                 "table": "evidence",
                 "row_id": str(row.get("row_id") or ""),
-                "content_hash_sha256": sha256(str(row.get("content") or "").encode()).hexdigest(),
+                "content_hash_sha256": sha256(
+                    str(row.get("content") or "").encode()
+                ).hexdigest(),
                 "source_type": row.get("source_type"),
                 "trust_tier": row.get("trust_tier"),
                 "sensitivity": int(row.get("sensitivity") or 0),
@@ -989,7 +1108,9 @@ class PostgresEngine:
             for row in assertion_rows
         ]
         evidence_backlog = int(snapshot.get("evidence_embeddable_null_embeddings") or 0)
-        assertion_backlog = int(snapshot.get("assertion_embeddable_null_embeddings") or 0)
+        assertion_backlog = int(
+            snapshot.get("assertion_embeddable_null_embeddings") or 0
+        )
         return {
             "backend": "postgres",
             "tenant_id": tenant_id,
@@ -1080,8 +1201,16 @@ class PostgresEngine:
                     actor=actor,
                     source=source,
                 )
-            except Exception as exc:  # pragma: no cover - defensive for live provider failures.
-                failures.append({"table": "evidence", "row_id": row_id, "reason": type(exc).__name__})
+            except (
+                Exception
+            ) as exc:  # pragma: no cover - defensive for live provider failures.
+                failures.append(
+                    {
+                        "table": "evidence",
+                        "row_id": row_id,
+                        "reason": type(exc).__name__,
+                    }
+                )
                 continue
             applied.append(
                 {
@@ -1093,7 +1222,13 @@ class PostgresEngine:
                 }
             )
             if not ok:
-                failures.append({"table": "evidence", "row_id": row_id, "reason": "engine_update_failed"})
+                failures.append(
+                    {
+                        "table": "evidence",
+                        "row_id": row_id,
+                        "reason": "engine_update_failed",
+                    }
+                )
 
         if assertion_rows:
             with self.connect() as conn:
@@ -1119,7 +1254,12 @@ class PostgresEngine:
                                   AND embedding IS NULL
                                   AND embedding_partition <> 'none'
                                 """,
-                                (_vector_literal(embedding), db_tenant_id, branch, row_id),
+                                (
+                                    _vector_literal(embedding),
+                                    db_tenant_id,
+                                    branch,
+                                    row_id,
+                                ),
                             )
                             updated = getattr(cur, "rowcount", None)
                             ok = updated is None or int(updated) > 0
@@ -1133,13 +1273,21 @@ class PostgresEngine:
                                     {
                                         "branch": branch,
                                         "embedding_dims": len(embedding),
-                                        "embedding_partition": row.get("embedding_partition"),
+                                        "embedding_partition": row.get(
+                                            "embedding_partition"
+                                        ),
                                     },
                                     source=source,
                                     trust_tier=row.get("trust_tier"),
                                 )
                         except Exception as exc:  # pragma: no cover - defensive for live provider failures.
-                            failures.append({"table": "assertions", "row_id": row_id, "reason": type(exc).__name__})
+                            failures.append(
+                                {
+                                    "table": "assertions",
+                                    "row_id": row_id,
+                                    "reason": type(exc).__name__,
+                                }
+                            )
                             continue
                         applied.append(
                             {
@@ -1148,7 +1296,12 @@ class PostgresEngine:
                                 "statement_hash_sha256": sha256(
                                     "\0".join(
                                         str(row.get(part) or "")
-                                        for part in ("subject", "predicate", "object", "scope")
+                                        for part in (
+                                            "subject",
+                                            "predicate",
+                                            "object",
+                                            "scope",
+                                        )
                                     ).encode()
                                 ).hexdigest(),
                                 "embedding_partition": row.get("embedding_partition"),
@@ -1157,7 +1310,11 @@ class PostgresEngine:
                         )
                         if not ok:
                             failures.append(
-                                {"table": "assertions", "row_id": row_id, "reason": "engine_update_failed"}
+                                {
+                                    "table": "assertions",
+                                    "row_id": row_id,
+                                    "reason": "engine_update_failed",
+                                }
                             )
 
         after = self.vector_hygiene_snapshot(tenant_id, branch=branch)
@@ -1183,9 +1340,15 @@ class PostgresEngine:
 
     @staticmethod
     def _ensure_entity_registry_schema(cur: Any) -> None:
-        cur.execute("ALTER TABLE entities ADD COLUMN IF NOT EXISTS source_evidence_cids BYTEA[] NOT NULL DEFAULT '{}'")
-        cur.execute("ALTER TABLE entities ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()")
-        cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS entities_tenant_canonical_unique ON entities (tenant_id, canonical)")
+        cur.execute(
+            "ALTER TABLE entities ADD COLUMN IF NOT EXISTS source_evidence_cids BYTEA[] NOT NULL DEFAULT '{}'"
+        )
+        cur.execute(
+            "ALTER TABLE entities ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()"
+        )
+        cur.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS entities_tenant_canonical_unique ON entities (tenant_id, canonical)"
+        )
 
     # Fixed savepoint name for privilege-guarded DDL attempts. Each guarded
     # attempt is a matched SAVEPOINT ... RELEASE (or ROLLBACK TO ... + RELEASE)
@@ -1259,7 +1422,13 @@ class PostgresEngine:
 
     @classmethod
     def _ensure_required_column(
-        cls, cur: Any, *, table: str, column: str, ddl: str, extra_ddl: tuple[str, ...] = ()
+        cls,
+        cur: Any,
+        *,
+        table: str,
+        column: str,
+        ddl: str,
+        extra_ddl: tuple[str, ...] = (),
     ) -> None:
         """Ensure a column the retrieval SQL references directly.
 
@@ -1317,14 +1486,18 @@ class PostgresEngine:
             table="evidence",
             column="embedding_partition",
             ddl="ALTER TABLE evidence ADD COLUMN IF NOT EXISTS embedding_partition TEXT NOT NULL DEFAULT 'none'",
-            extra_ddl=("ALTER TABLE evidence ALTER COLUMN embedding_partition SET DEFAULT 'none'",),
+            extra_ddl=(
+                "ALTER TABLE evidence ALTER COLUMN embedding_partition SET DEFAULT 'none'",
+            ),
         )
         cls._ensure_required_column(
             cur,
             table="assertions",
             column="embedding_partition",
             ddl="ALTER TABLE assertions ADD COLUMN IF NOT EXISTS embedding_partition TEXT NOT NULL DEFAULT 'none'",
-            extra_ddl=("ALTER TABLE assertions ALTER COLUMN embedding_partition SET DEFAULT 'none'",),
+            extra_ddl=(
+                "ALTER TABLE assertions ALTER COLUMN embedding_partition SET DEFAULT 'none'",
+            ),
         )
         if not cls._constraint_exists(cur, "evidence_embedding_partition_check"):
             cls._apply_optional_ddl(
@@ -1386,7 +1559,9 @@ class PostgresEngine:
                   )
             """
         )
-        cur.execute("UPDATE evidence SET embedding = NULL WHERE embedding_partition = 'none'")
+        cur.execute(
+            "UPDATE evidence SET embedding = NULL WHERE embedding_partition = 'none'"
+        )
         cur.execute(
             """
             UPDATE assertions
@@ -1433,7 +1608,9 @@ class PostgresEngine:
                   )
             """
         )
-        cur.execute("UPDATE assertions SET embedding = NULL WHERE embedding_partition = 'none'")
+        cur.execute(
+            "UPDATE assertions SET embedding = NULL WHERE embedding_partition = 'none'"
+        )
         # Legacy single-partition indexes: drop only if actually present, so the
         # owner-only DROP never fires on the steady-state hot path.
         for legacy_index in ("evidence_embedding_hnsw", "assertions_embedding_hnsw"):
@@ -1510,7 +1687,9 @@ class PostgresEngine:
 
     @staticmethod
     def _ensure_preference_access_policy_schema(cur: Any) -> None:
-        cur.execute("ALTER TABLE preferences ADD COLUMN IF NOT EXISTS access_policy JSONB NOT NULL DEFAULT '{}'::jsonb")
+        cur.execute(
+            "ALTER TABLE preferences ADD COLUMN IF NOT EXISTS access_policy JSONB NOT NULL DEFAULT '{}'::jsonb"
+        )
 
     @staticmethod
     def _ensure_graph_ppr_cache_schema(cur: Any) -> None:
@@ -1531,7 +1710,9 @@ class PostgresEngine:
             )
             """
         )
-        cur.execute("ALTER TABLE graph_ppr_cache ADD COLUMN IF NOT EXISTS cache_depth INTEGER NOT NULL DEFAULT 0")
+        cur.execute(
+            "ALTER TABLE graph_ppr_cache ADD COLUMN IF NOT EXISTS cache_depth INTEGER NOT NULL DEFAULT 0"
+        )
         cur.execute(
             """
             DO $$
@@ -1549,7 +1730,9 @@ class PostgresEngine:
         )
         cur.execute("ALTER TABLE graph_ppr_cache ENABLE ROW LEVEL SECURITY")
         cur.execute("ALTER TABLE graph_ppr_cache FORCE ROW LEVEL SECURITY")
-        cur.execute("DROP POLICY IF EXISTS graph_ppr_cache_tenant_isolation ON graph_ppr_cache")
+        cur.execute(
+            "DROP POLICY IF EXISTS graph_ppr_cache_tenant_isolation ON graph_ppr_cache"
+        )
         cur.execute(
             """
             CREATE POLICY graph_ppr_cache_tenant_isolation ON graph_ppr_cache
@@ -1606,7 +1789,6 @@ class PostgresEngine:
             if key:
                 cls._verified_working_memory_schemas.add(key)
 
-
     @staticmethod
     def _working_from_row(row: dict[str, Any]) -> WorkingMemoryItem:
         return _working_from_values(
@@ -1628,8 +1810,16 @@ class PostgresEngine:
                     metadata=dict(row.get("metadata") or {}),
                     capability_tags=list(row.get("capability_tags") or []),
                     sensitivity=int(row["sensitivity"]),
-                    salience=float(row.get("salience", 0.5) if row.get("salience") is not None else 0.5),
-                    access_count=int(row.get("access_count", 0) if row.get("access_count") is not None else 0),
+                    salience=float(
+                        row.get("salience", 0.5)
+                        if row.get("salience") is not None
+                        else 0.5
+                    ),
+                    access_count=int(
+                        row.get("access_count", 0)
+                        if row.get("access_count") is not None
+                        else 0
+                    ),
                     last_accessed_at=row.get("last_accessed_at"),
                     status=str(row["status"]),
                     expired_at=row.get("expired_at"),
@@ -1646,7 +1836,9 @@ class PostgresEngine:
         trust_tiers = [values["trust_tier"]]
         capability_tags = {tag.strip().lower() for tag in values["capability_tags"]}
         if values["trust_tier"] > self.policy.max_trust_tier:
-            raise PermissionError("working item exceeds the working write trust ceiling")
+            raise PermissionError(
+                "working item exceeds the working write trust ceiling"
+            )
         sensitivities = [values["sensitivity"]]
         access_policies = [
             validate_access_policy(
@@ -1662,7 +1854,9 @@ class PostgresEngine:
             try:
                 cid_bytes = _cid_to_bytes(cid)
             except ValueError as exc:
-                raise ValueError(f"evidence {cid!r} is missing or outside the working tenant") from exc
+                raise ValueError(
+                    f"evidence {cid!r} is missing or outside the working tenant"
+                ) from exc
             cur.execute(
                 """
                 SELECT user_id, session_id, erased, retired_at, trust_tier, capability_tags,
@@ -1674,7 +1868,9 @@ class PostgresEngine:
             )
             row = cur.fetchone()
             if row is None:
-                raise ValueError(f"evidence {cid!r} is missing or outside the working tenant")
+                raise ValueError(
+                    f"evidence {cid!r} is missing or outside the working tenant"
+                )
             if bool(row["erased"]) or row.get("retired_at") is not None:
                 raise ValueError(f"evidence {cid!r} is erased or retired")
             if str(row["user_id"]) != db_user_id:
@@ -1682,18 +1878,28 @@ class PostgresEngine:
             if row["session_id"] is None or str(row["session_id"]) != db_session_id:
                 raise ValueError("working item session must match originating evidence")
             trust_tier = row["trust_tier"]
-            if type(trust_tier) is not int or not int(TrustTier.DIRECT_USER) <= trust_tier <= int(TrustTier.UNTRUSTED_EXTERNAL):
+            if type(trust_tier) is not int or not int(
+                TrustTier.DIRECT_USER
+            ) <= trust_tier <= int(TrustTier.UNTRUSTED_EXTERNAL):
                 raise ValueError("originating evidence trust tier is invalid")
             if trust_tier > int(self.policy.max_trust_tier):
-                raise PermissionError("originating evidence exceeds the working write trust ceiling")
+                raise PermissionError(
+                    "originating evidence exceeds the working write trust ceiling"
+                )
             trust_tiers.append(trust_tier)
             source_tags = list(row["capability_tags"] or [])
-            if type(source_tags) is not list or any(type(tag) is not str or not tag.strip() for tag in source_tags):
+            if type(source_tags) is not list or any(
+                type(tag) is not str or not tag.strip() for tag in source_tags
+            ):
                 raise ValueError("originating evidence capability tags are invalid")
             normalized_source_tags = [tag.strip().lower() for tag in source_tags]
             capability_tags.update(normalized_source_tags)
             sensitivity = row["sensitivity"]
-            if type(sensitivity) is not int or isinstance(sensitivity, bool) or sensitivity < 0:
+            if (
+                type(sensitivity) is not int
+                or isinstance(sensitivity, bool)
+                or sensitivity < 0
+            ):
                 raise ValueError("originating evidence sensitivity is invalid")
             sensitivities.append(sensitivity)
             access_policies.append(
@@ -1703,11 +1909,18 @@ class PostgresEngine:
                     location="evidence.access_policy",
                 )
             )
-        effective_policy = merge_access_policies(access_policies, tenant_id=values["tenant_id"])
+        effective_policy = merge_access_policies(
+            access_policies, tenant_id=values["tenant_id"]
+        )
         values["capability_tags"] = sorted(capability_tags)
         values["sensitivity"] = max(sensitivities)
         values["access_policy"] = effective_policy
-        return max(trust_tiers), values["capability_tags"], values["sensitivity"], effective_policy
+        return (
+            max(trust_tiers),
+            values["capability_tags"],
+            values["sensitivity"],
+            effective_policy,
+        )
 
     def _working_read_values(
         self, values: dict[str, Any], *, context: Mapping[str, Any] | None
@@ -1743,7 +1956,11 @@ class PostgresEngine:
 
     @staticmethod
     def _working_insert_values(
-        values: dict[str, Any], db_tenant_id: str, db_session_id: str, db_user_id: str, jsonb: Any
+        values: dict[str, Any],
+        db_tenant_id: str,
+        db_session_id: str,
+        db_user_id: str,
+        jsonb: Any,
     ) -> tuple[Any, ...]:
         return (
             db_tenant_id,
@@ -1815,7 +2032,9 @@ class PostgresEngine:
             cand_item = self._working_from_row(cand_row)
             cand_values = _working_payload(cand_item)
             try:
-                trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(cur, cand_values)
+                trust_tier, capability_tags, sensitivity, access_policy = (
+                    self._working_provenance(cur, cand_values)
+                )
             except (PermissionError, ValueError):
                 trust_tier = cand_values["trust_tier"]
                 capability_tags = cand_values["capability_tags"]
@@ -1846,7 +2065,9 @@ class PostgresEngine:
                     cand_values["item_id"],
                 ),
             )
-            audit_diff = _working_audit_diff(cand_values, status="expired", sweep=incoming_created_at)
+            audit_diff = _working_audit_diff(
+                cand_values, status="expired", sweep=incoming_created_at
+            )
             audit_diff["reason"] = "capacity_eviction"
             self._audit(
                 cur,
@@ -1908,7 +2129,9 @@ class PostgresEngine:
                         effective_capacity,
                         actor=values["agent_id"],
                     )
-                    trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(cur, values)
+                    trust_tier, capability_tags, sensitivity, access_policy = (
+                        self._working_provenance(cur, values)
+                    )
                     values.update(
                         trust_tier=trust_tier,
                         capability_tags=capability_tags,
@@ -1950,7 +2173,9 @@ class PostgresEngine:
                         )
         except Exception as exc:
             if getattr(exc, "sqlstate", None) == "23505":
-                raise ValueError(f"working item {values['item_id']!r} already exists") from exc
+                raise ValueError(
+                    f"working item {values['item_id']!r} already exists"
+                ) from exc
             raise
         item.trust_tier = trust_tier
         item.capability_tags = list(capability_tags)
@@ -1991,7 +2216,9 @@ class PostgresEngine:
                         (db_tenant_id, db_session_id, values["item_id"]),
                     )
                     if cur.fetchone() is not None:
-                        raise ValueError(f"working item {values['item_id']!r} already exists")
+                        raise ValueError(
+                            f"working item {values['item_id']!r} already exists"
+                        )
 
                     items_to_supersede: list[dict[str, Any]] = []
                     if supersedes_item_id is not None:
@@ -2010,8 +2237,13 @@ class PostgresEngine:
                             raise KeyError(
                                 f"working item to supersede {supersedes_item_id!r} not found in session"
                             )
-                        items_to_supersede.append(_working_payload(self._working_from_row(row)))
-                    elif singleton_kind or values["kind"] in {"active_goal", "current_plan"}:
+                        items_to_supersede.append(
+                            _working_payload(self._working_from_row(row))
+                        )
+                    elif singleton_kind or values["kind"] in {
+                        "active_goal",
+                        "current_plan",
+                    }:
                         cur.execute(
                             """
                             SELECT w.*, t.name AS tenant_name
@@ -2023,14 +2255,20 @@ class PostgresEngine:
                             (db_tenant_id, db_session_id, values["kind"]),
                         )
                         rows = cur.fetchall()
-                        items_to_supersede.extend(_working_payload(self._working_from_row(r)) for r in rows)
+                        items_to_supersede.extend(
+                            _working_payload(self._working_from_row(r)) for r in rows
+                        )
                     else:
-                        raise ValueError("supersedes_item_id is required when singleton_kind is not enabled")
+                        raise ValueError(
+                            "supersedes_item_id is required when singleton_kind is not enabled"
+                        )
 
                     superseded_ids = []
                     for old_val in items_to_supersede:
                         try:
-                            old_tt, old_ct, old_sens, old_ap = self._working_provenance(cur, old_val)
+                            old_tt, old_ct, old_sens, old_ap = self._working_provenance(
+                                cur, old_val
+                            )
                         except (PermissionError, ValueError):
                             old_tt = old_val["trust_tier"]
                             old_ct = old_val["capability_tags"]
@@ -2064,7 +2302,9 @@ class PostgresEngine:
                                 old_val["item_id"],
                             ),
                         )
-                        old_diff = _working_audit_diff(old_val, status="expired", sweep=values["created_at"])
+                        old_diff = _working_audit_diff(
+                            old_val, status="expired", sweep=values["created_at"]
+                        )
                         old_diff["superseded_by"] = values["item_id"]
                         self._audit(
                             cur,
@@ -2108,7 +2348,9 @@ class PostgresEngine:
                         actor=values["agent_id"],
                     )
 
-                    trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(cur, values)
+                    trust_tier, capability_tags, sensitivity, access_policy = (
+                        self._working_provenance(cur, values)
+                    )
                     values.update(
                         trust_tier=trust_tier,
                         capability_tags=capability_tags,
@@ -2149,7 +2391,9 @@ class PostgresEngine:
                     )
         except Exception as exc:
             if getattr(exc, "sqlstate", None) == "23505":
-                raise ValueError(f"working item {values['item_id']!r} already exists") from exc
+                raise ValueError(
+                    f"working item {values['item_id']!r} already exists"
+                ) from exc
             raise
 
         item.trust_tier = trust_tier
@@ -2175,7 +2419,11 @@ class PostgresEngine:
     ) -> WorkingMemoryItem | None:
         """Rehearse an active working item, incrementing access_count and updating last_accessed_at."""
         clock_arg = accessed_at if accessed_at is not None else touched_at
-        clock = _working_datetime(clock_arg, "accessed_at") if clock_arg is not None else utc_now()
+        clock = (
+            _working_datetime(clock_arg, "accessed_at")
+            if clock_arg is not None
+            else utc_now()
+        )
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         db_session_id = _stable_uuid("session", session_id)
 
@@ -2205,7 +2453,9 @@ class PostgresEngine:
                 if clock > hard_ceiling:
                     return None
                 try:
-                    trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(cur, values)
+                    trust_tier, capability_tags, sensitivity, access_policy = (
+                        self._working_provenance(cur, values)
+                    )
                 except (PermissionError, ValueError):
                     return None
                 values.update(
@@ -2221,12 +2471,20 @@ class PostgresEngine:
                 if salience is not None:
                     values["salience"] = min(1.0, max(0.0, float(salience)))
                 elif salience_delta is not None:
-                    values["salience"] = min(1.0, max(0.0, float(values.get("salience", 0.5)) + float(salience_delta)))
+                    values["salience"] = min(
+                        1.0,
+                        max(
+                            0.0,
+                            float(values.get("salience", 0.5)) + float(salience_delta),
+                        ),
+                    )
 
                 hard_ceiling = values["created_at"] + timedelta(hours=24)
                 if extend_ttl_seconds is not None and float(extend_ttl_seconds) > 0.0:
                     proposed = clock + timedelta(seconds=float(extend_ttl_seconds))
-                    values["expires_at"] = min(hard_ceiling, max(values["expires_at"], proposed))
+                    values["expires_at"] = min(
+                        hard_ceiling, max(values["expires_at"], proposed)
+                    )
 
                 cur.execute(
                     """
@@ -2312,7 +2570,9 @@ class PostgresEngine:
                 item = self._working_from_row(row)
                 values = _working_payload(item)
                 try:
-                    trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(cur, values)
+                    trust_tier, capability_tags, sensitivity, access_policy = (
+                        self._working_provenance(cur, values)
+                    )
                 except (PermissionError, ValueError):
                     return None
                 values.update(
@@ -2354,7 +2614,9 @@ class PostgresEngine:
                     item = self._working_from_row(row)
                     values = _working_payload(item)
                     try:
-                        trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(cur, values)
+                        trust_tier, capability_tags, sensitivity, access_policy = (
+                            self._working_provenance(cur, values)
+                        )
                     except (PermissionError, ValueError):
                         continue
                     values.update(
@@ -2418,9 +2680,12 @@ class PostgresEngine:
                     due_values.append(values)
                     audit_context.append(provenance)
                 expired_values: list[dict[str, Any]] = []
-                for values, (trust_tier, capability_tags, sensitivity, access_policy) in zip(
-                    due_values, audit_context, strict=True
-                ):
+                for values, (
+                    trust_tier,
+                    capability_tags,
+                    sensitivity,
+                    access_policy,
+                ) in zip(due_values, audit_context, strict=True):
                     values.update(
                         trust_tier=trust_tier,
                         capability_tags=capability_tags,
@@ -2450,7 +2715,9 @@ class PostgresEngine:
                         ),
                     )
                     if cur.rowcount != 1:
-                        raise RuntimeError("working-memory expiry lost its serialization claim")
+                        raise RuntimeError(
+                            "working-memory expiry lost its serialization claim"
+                        )
                     self._audit(
                         cur,
                         db_tenant_id,
@@ -2481,16 +2748,22 @@ class PostgresEngine:
                         ),
                     )
                     if cur.rowcount != 1:
-                        raise RuntimeError("working-memory expiry scrub lost its serialization claim")
+                        raise RuntimeError(
+                            "working-memory expiry scrub lost its serialization claim"
+                        )
                     expired_values.append(copy.deepcopy(values))
                 return [_working_from_values(values) for values in expired_values]
 
-    def ensure_tenant_and_branch(self, tenant_id: str, branch: str = "main", kind: str = "protected") -> None:
+    def ensure_tenant_and_branch(
+        self, tenant_id: str, branch: str = "main", kind: str = "protected"
+    ) -> None:
         with self.connect() as conn:
             with conn.cursor() as cur:
                 self._ensure_tenant_and_branch_cursor(cur, tenant_id, branch, kind)
 
-    def _ensure_tenant_and_branch_cursor(self, cur: Any, tenant_id: str, branch: str, kind: str) -> None:
+    def _ensure_tenant_and_branch_cursor(
+        self, cur: Any, tenant_id: str, branch: str, kind: str
+    ) -> None:
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         cur.execute(
             "INSERT INTO tenants(id, name) VALUES (%s, %s) ON CONFLICT (id) DO NOTHING",
@@ -2509,16 +2782,24 @@ class PostgresEngine:
     @classmethod
     def _ensure_evidence_document_schema(cls, cur: Any) -> None:
         cls._ensure_required_column(
-            cur, table="evidence", column="document_segment_id",
+            cur,
+            table="evidence",
+            column="document_segment_id",
             ddl="ALTER TABLE evidence ADD COLUMN IF NOT EXISTS document_segment_id TEXT",
         )
         cls._ensure_required_column(
-            cur, table="evidence", column="retired_at",
+            cur,
+            table="evidence",
+            column="retired_at",
             ddl="ALTER TABLE evidence ADD COLUMN IF NOT EXISTS retired_at TIMESTAMPTZ",
         )
 
     def get_document_record(
-        self, tenant_id: str, owner_id: str, document_id: str, branch: str = "main",
+        self,
+        tenant_id: str,
+        owner_id: str,
+        document_id: str,
+        branch: str = "main",
     ) -> dict[str, Any] | None:
         with self._source_operation_scope(tenant_id, branch):
             document_key(tenant_id, owner_id, document_id, branch)
@@ -2528,31 +2809,51 @@ class PostgresEngine:
                     cur.execute(
                         "SELECT record FROM documents WHERE tenant_id = %s AND branch = %s "
                         "AND owner_id = %s AND document_id = %s",
-                        (_stable_uuid("tenant", tenant_id), branch, owner_id, document_id),
+                        (
+                            _stable_uuid("tenant", tenant_id),
+                            branch,
+                            owner_id,
+                            document_id,
+                        ),
                     )
                     row = cur.fetchone()
             return copy.deepcopy(row["record"]) if row else None
 
-    def list_document_records(self, tenant_id: str, branch: str = "main") -> list[dict[str, Any]]:
+    def list_document_records(
+        self, tenant_id: str, branch: str = "main"
+    ) -> list[dict[str, Any]]:
         with self._source_operation_scope(tenant_id, branch):
             document_key(tenant_id, "internal", "list", branch)
             with self._source_connection(tenant_id, branch, read=True) as conn:
                 with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                     self._set_tenant(cur, _stable_uuid("tenant", tenant_id))
-                    return self._document_records(cur, _stable_uuid("tenant", tenant_id), branch)
+                    return self._document_records(
+                        cur, _stable_uuid("tenant", tenant_id), branch
+                    )
 
     @staticmethod
-    def _document_records(cur: Any, db_tenant_id: Any, branch: str) -> list[dict[str, Any]]:
+    def _document_records(
+        cur: Any, db_tenant_id: Any, branch: str
+    ) -> list[dict[str, Any]]:
         cur.execute(
             "SELECT record FROM documents WHERE tenant_id = %s AND branch = %s "
             "ORDER BY owner_id, document_id",
             (db_tenant_id, branch),
         )
-        return [copy.deepcopy(row["record"] if isinstance(row, dict) else row[0]) for row in cur.fetchall()]
+        return [
+            copy.deepcopy(row["record"] if isinstance(row, dict) else row[0])
+            for row in cur.fetchall()
+        ]
 
     def save_document_record(
-        self, tenant_id: str, owner_id: str, document_id: str, record: dict[str, Any],
-        branch: str = "main", *, expected_revision: int | None = None,
+        self,
+        tenant_id: str,
+        owner_id: str,
+        document_id: str,
+        record: dict[str, Any],
+        branch: str = "main",
+        *,
+        expected_revision: int | None = None,
     ) -> dict[str, Any]:
         with self._source_operation_scope(tenant_id, branch):
             document_key(tenant_id, owner_id, document_id, branch)
@@ -2571,82 +2872,149 @@ class PostgresEngine:
                     row = cur.fetchone()
                     current = copy.deepcopy(row["record"]) if row else None
                     saved = prepare_document_save(
-                        tenant_id, owner_id, document_id, record, branch, current, expected_revision,
+                        tenant_id,
+                        owner_id,
+                        document_id,
+                        record,
+                        branch,
+                        current,
+                        expected_revision,
                     )
                     removed = validate_document_sources(
-                        self, saved, current, self._document_records(cur, db_tenant_id, branch),
+                        self,
+                        saved,
+                        current,
+                        self._document_records(cur, db_tenant_id, branch),
                     )
-                    self._ensure_tenant_and_branch_cursor(cur, tenant_id, branch, "protected")
+                    self._ensure_tenant_and_branch_cursor(
+                        cur, tenant_id, branch, "protected"
+                    )
                     if removed:
                         cur.execute(
                             "UPDATE evidence SET retired_at = %s WHERE tenant_id = %s AND branch = %s "
                             "AND user_id = %s AND cid = ANY(%s) AND erased = false AND retired_at IS NULL",
-                            (saved["updated_at"], db_tenant_id, branch, _stable_uuid("user", owner_id),
-                             _cid_list_to_bytes(removed)),
+                            (
+                                saved["updated_at"],
+                                db_tenant_id,
+                                branch,
+                                _stable_uuid("user", owner_id),
+                                _cid_list_to_bytes(removed),
+                            ),
                         )
                         if cur.rowcount != len(removed):
-                            raise DocumentConflict("document source changed during retirement")
+                            raise DocumentConflict(
+                                "document source changed during retirement"
+                            )
                     if current is None:
                         cur.execute(
                             "INSERT INTO documents(tenant_id, branch, owner_id, document_id, revision, record) "
                             "VALUES (%s, %s, %s, %s, %s, %s) "
                             "ON CONFLICT (tenant_id, branch, owner_id, document_id) DO NOTHING RETURNING revision",
-                            (db_tenant_id, branch, owner_id, document_id, saved["revision"], self._jsonb(saved)),
+                            (
+                                db_tenant_id,
+                                branch,
+                                owner_id,
+                                document_id,
+                                saved["revision"],
+                                self._jsonb(saved),
+                            ),
                         )
                     else:
                         cur.execute(
                             "UPDATE documents SET revision = %s, record = %s WHERE tenant_id = %s AND branch = %s "
                             "AND owner_id = %s AND document_id = %s AND revision = %s RETURNING revision",
-                            (saved["revision"], self._jsonb(saved), db_tenant_id, branch, owner_id,
-                             document_id, expected_revision),
+                            (
+                                saved["revision"],
+                                self._jsonb(saved),
+                                db_tenant_id,
+                                branch,
+                                owner_id,
+                                document_id,
+                                expected_revision,
+                            ),
                         )
                     if cur.fetchone() is None:
                         raise DocumentConflict("document revision conflict")
                     self._invalidate_mental_models(cur, db_tenant_id, branch)
                     cur.execute(
                         "UPDATE graph_ppr_cache SET relation_fingerprint = '', hits = '[]'::jsonb "
-                        "WHERE tenant_id = %s AND branch = %s", (db_tenant_id, branch),
+                        "WHERE tenant_id = %s AND branch = %s",
+                        (db_tenant_id, branch),
                     )
                     self._audit(
-                        cur, db_tenant_id, owner_id, "save_document", document_id,
-                        {"branch": branch, "revision": saved["revision"], "deleted": saved["deleted"],
-                         "segment_count": len(saved["segments"])}, source="document",
+                        cur,
+                        db_tenant_id,
+                        owner_id,
+                        "save_document",
+                        document_id,
+                        {
+                            "branch": branch,
+                            "revision": saved["revision"],
+                            "deleted": saved["deleted"],
+                            "segment_count": len(saved["segments"]),
+                        },
+                        source="document",
                     )
                     state["invalidate_passages"] = True
             return copy.deepcopy(saved)
 
-    def _scrub_document_records(self, cur: Any, db_tenant_id: Any, branch: str, erased_cids: set[str]) -> None:
+    def _scrub_document_records(
+        self, cur: Any, db_tenant_id: Any, branch: str, erased_cids: set[str]
+    ) -> None:
         for record in self._document_records(cur, db_tenant_id, branch):
             scrubbed = scrub_document_record(record, erased_cids)
             if scrubbed is not None:
                 cur.execute(
                     "UPDATE documents SET revision = %s, record = %s WHERE tenant_id = %s AND branch = %s "
                     "AND owner_id = %s AND document_id = %s",
-                    (scrubbed["revision"], self._jsonb(scrubbed), db_tenant_id, branch,
-                     record["owner_id"], record["document_id"]),
+                    (
+                        scrubbed["revision"],
+                        self._jsonb(scrubbed),
+                        db_tenant_id,
+                        branch,
+                        record["owner_id"],
+                        record["document_id"],
+                    ),
                 )
 
-    def _copy_document_records(self, cur: Any, db_tenant_id: Any, frm: str, into: str) -> None:
+    def _copy_document_records(
+        self, cur: Any, db_tenant_id: Any, frm: str, into: str
+    ) -> None:
         for record in self._document_records(cur, db_tenant_id, frm):
             copied = {**record, "branch": into}
             cur.execute(
                 "INSERT INTO documents(tenant_id, branch, owner_id, document_id, revision, record) "
                 "VALUES (%s, %s, %s, %s, %s, %s) "
                 "ON CONFLICT (tenant_id, branch, owner_id, document_id) DO NOTHING",
-                (db_tenant_id, into, copied["owner_id"], copied["document_id"],
-                 copied["revision"], self._jsonb(copied)),
+                (
+                    db_tenant_id,
+                    into,
+                    copied["owner_id"],
+                    copied["document_id"],
+                    copied["revision"],
+                    self._jsonb(copied),
+                ),
             )
 
-    def _check_document_merge(self, cur: Any, db_tenant_id: Any, frm: str, into: str) -> None:
-        target = {(row["owner_id"], row["document_id"]): row
-                  for row in self._document_records(cur, db_tenant_id, into)}
+    def _check_document_merge(
+        self, cur: Any, db_tenant_id: Any, frm: str, into: str
+    ) -> None:
+        target = {
+            (row["owner_id"], row["document_id"]): row
+            for row in self._document_records(cur, db_tenant_id, into)
+        }
         for source in self._document_records(cur, db_tenant_id, frm):
             existing = target.get((source["owner_id"], source["document_id"]))
-            if existing is not None and not document_records_equivalent(source, existing):
+            if existing is not None and not document_records_equivalent(
+                source, existing
+            ):
                 raise DocumentConflict("divergent document records cannot be merged")
             # An unrelated target tombstone or retirement must never become
             # the live source of an imported manifest merely because CIDs match.
-            for retired, entries in ((False, source["segments"]), (True, source["retired_segments"])):
+            for retired, entries in (
+                (False, source["segments"]),
+                (True, source["retired_segments"]),
+            ):
                 for segment in entries:
                     cur.execute(
                         "SELECT user_id, document_segment_id, erased, retired_at FROM evidence "
@@ -2655,11 +3023,15 @@ class PostgresEngine:
                     )
                     row = cur.fetchone()
                     if row is not None and (
-                        str(row["user_id"]) != str(_stable_uuid("user", source["owner_id"]))
+                        str(row["user_id"])
+                        != str(_stable_uuid("user", source["owner_id"]))
                         or row["document_segment_id"] != segment["segment_id"]
-                        or row["erased"] or (row["retired_at"] is not None) != retired
+                        or row["erased"]
+                        or (row["retired_at"] is not None) != retired
                     ):
-                        raise DocumentConflict("target evidence conflicts with document custody")
+                        raise DocumentConflict(
+                            "target evidence conflicts with document custody"
+                        )
 
     def append_evidence(self, ev: Evidence, branch: str = "main") -> str:
         with self._source_operation_scope(ev.tenant_id, branch):
@@ -2668,13 +3040,21 @@ class PostgresEngine:
     def _append_evidence(self, ev: Evidence, branch: str) -> str:
         if ev.retired_at is not None:
             raise ValueError("append_evidence cannot set retired_at")
-        access_policy = validate_access_policy(ev.access_policy, tenant_id=ev.tenant_id, location="evidence.access_policy")
+        access_policy = validate_access_policy(
+            ev.access_policy, tenant_id=ev.tenant_id, location="evidence.access_policy"
+        )
         if self._source_transaction_state() is None:
             self.ensure_tenant_and_branch(ev.tenant_id, branch)
         db_tenant_id = _stable_uuid("tenant", ev.tenant_id)
         db_user_id = _stable_uuid("user", ev.user_id)
-        db_session_id = _stable_uuid("session", ev.session_id) if ev.session_id else None
-        metadata = {**ev.metadata, "_external_tenant_id": ev.tenant_id, "_external_user_id": ev.user_id}
+        db_session_id = (
+            _stable_uuid("session", ev.session_id) if ev.session_id else None
+        )
+        metadata = {
+            **ev.metadata,
+            "_external_tenant_id": ev.tenant_id,
+            "_external_user_id": ev.user_id,
+        }
         reality_class = self._classify_evidence_reality(ev)
         metadata.setdefault("reality_class", reality_class)
         if ev.session_id:
@@ -2693,7 +3073,9 @@ class PostgresEngine:
         with self._source_connection(ev.tenant_id, branch) as conn:
             with conn.cursor() as cur:
                 if self._source_transaction_state() is not None:
-                    self._ensure_tenant_and_branch_cursor(cur, ev.tenant_id, branch, "protected")
+                    self._ensure_tenant_and_branch_cursor(
+                        cur, ev.tenant_id, branch, "protected"
+                    )
                 self._set_tenant(cur, db_tenant_id)
                 self._ensure_evidence_vector_schema(cur)
                 self._ensure_evidence_document_schema(cur)
@@ -2719,9 +3101,16 @@ class PostgresEngine:
                     cid_bytes=cid_bytes,
                 )
                 budget_report: dict[str, Any] | None = None
-                if reality_class in {"self_generated", "simulated"} and not source_backed_summary(
-                    ev, lambda source_cid: self.get_evidence(ev.tenant_id, source_cid, branch),
-                    self._classify_budget_evidence, branch=branch,
+                if reality_class in {
+                    "self_generated",
+                    "simulated",
+                } and not source_backed_summary(
+                    ev,
+                    lambda source_cid: self.get_evidence(
+                        ev.tenant_id, source_cid, branch
+                    ),
+                    self._classify_budget_evidence,
+                    branch=branch,
                 ):
                     current_events, current_bytes = self._self_generation_budget_usage(
                         cur,
@@ -2751,7 +3140,9 @@ class PostgresEngine:
                                 "reality_class": reality_class,
                                 "self_generation_budget": budget_report,
                                 "stored": False,
-                                "reversible_pointer_preserved": bool(ev.content_pointer),
+                                "reversible_pointer_preserved": bool(
+                                    ev.content_pointer
+                                ),
                             },
                             source=ev.source_type,
                             trust_tier=ev.trust_tier,
@@ -2778,13 +3169,21 @@ class PostgresEngine:
                     metadata["_mnemosyne_embedding_explicit"] = True
                     embedding = _vector_literal(ev.embedding)
                 elif embedding_partition == "public":
-                    if (self._source_transaction_state() is not None and ev.content
-                            and type(self.adapters.embedding) is not HashingEmbeddingProvider):
+                    if (
+                        self._source_transaction_state() is not None
+                        and ev.content
+                        and type(self.adapters.embedding)
+                        is not HashingEmbeddingProvider
+                    ):
                         raise ValueError(
                             "source_transaction requires a supplied embedding or local "
                             "HashingEmbeddingProvider; prepare provider output before entering"
                         )
-                    embedding = _vector_literal(self.adapters.embedding.embed(ev.content)) if ev.content else None
+                    embedding = (
+                        _vector_literal(self.adapters.embedding.embed(ev.content))
+                        if ev.content
+                        else None
+                    )
                 else:
                     embedding = None
                 cur.execute(
@@ -2817,7 +3216,9 @@ class PostgresEngine:
                         ev.trust_tier,
                         ev.capability_tags,
                         ev.sensitivity,
-                        self._jsonb(ev.signed_provenance) if ev.signed_provenance else None,
+                        self._jsonb(ev.signed_provenance)
+                        if ev.signed_provenance
+                        else None,
                         self._jsonb(access_policy),
                         embedding,
                         embedding_partition,
@@ -2830,14 +3231,20 @@ class PostgresEngine:
                     ev.actor,
                     "append_evidence",
                     cid,
-                    {"branch": branch, "source_type": ev.source_type, "source_identity": ev.source_identity},
+                    {
+                        "branch": branch,
+                        "source_type": ev.source_type,
+                        "source_identity": ev.source_identity,
+                    },
                     source=ev.source_type,
                     trust_tier=ev.trust_tier,
                     capability_tags=ev.capability_tags,
                 )
         return cid
 
-    def _evidence_row_exists(self, cur: Any, *, tenant_id: UUID, branch: str, cid_bytes: bytes) -> bool:
+    def _evidence_row_exists(
+        self, cur: Any, *, tenant_id: UUID, branch: str, cid_bytes: bytes
+    ) -> bool:
         cur.execute(
             "SELECT 1 FROM evidence WHERE tenant_id = %s AND branch = %s AND cid = %s LIMIT 1",
             (tenant_id, branch, cid_bytes),
@@ -2910,11 +3317,17 @@ class PostgresEngine:
     @classmethod
     def _classify_budget_evidence(cls, item: Evidence) -> str:
         return cls._classify_evidence_row_reality(
-            {"actor": item.actor, "source_type": item.source_type, "trust_tier": item.trust_tier},
+            {
+                "actor": item.actor,
+                "source_type": item.source_type,
+                "trust_tier": item.trust_tier,
+            },
             item.metadata,
         )
 
-    def _self_generation_budget_usage(self, cur: Any, *, tenant_id: UUID, branch: str) -> tuple[int, int]:
+    def _self_generation_budget_usage(
+        self, cur: Any, *, tenant_id: UUID, branch: str
+    ) -> tuple[int, int]:
         cur.execute(
             """
             SELECT cid, actor, source_type, content, metadata, trust_tier
@@ -2927,14 +3340,26 @@ class PostgresEngine:
         )
         records = {
             _bytes_to_cid(row[0]): Evidence(
-                tenant_id=str(tenant_id), user_id="", actor=str(row[1]), source_type=row[2],
-                content=row[3] or "", metadata=dict(row[4] or {}), trust_tier=row[5],
-                branch=branch, cid=_bytes_to_cid(row[0]),
-            ) for row in cur.fetchall()
+                tenant_id=str(tenant_id),
+                user_id="",
+                actor=str(row[1]),
+                source_type=row[2],
+                content=row[3] or "",
+                metadata=dict(row[4] or {}),
+                trust_tier=row[5],
+                branch=branch,
+                cid=_bytes_to_cid(row[0]),
+            )
+            for row in cur.fetchall()
         }
-        budgeted = [item for item in records.values()
-                    if self._classify_budget_evidence(item) in {"self_generated", "simulated"}
-                    and not source_backed_summary(item, records.get, self._classify_budget_evidence)]
+        budgeted = [
+            item
+            for item in records.values()
+            if self._classify_budget_evidence(item) in {"self_generated", "simulated"}
+            and not source_backed_summary(
+                item, records.get, self._classify_budget_evidence
+            )
+        ]
         return len(budgeted), sum(len(item.content) for item in budgeted)
 
     def _active_mental_model_connection(self, tenant_id: str) -> Any:
@@ -2995,30 +3420,43 @@ class PostgresEngine:
             finally:
                 del self._mental_model_guard_context.state
 
-    def get_mental_model_record(self, tenant_id: str, model_id: str, branch: str = "main") -> dict[str, Any] | None:
+    def get_mental_model_record(
+        self, tenant_id: str, model_id: str, branch: str = "main"
+    ) -> dict[str, Any] | None:
         model_key(tenant_id, model_id, branch)
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self._mental_model_connection(tenant_id) as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
-                cur.execute("SELECT record FROM mental_models WHERE tenant_id = %s AND branch = %s AND model_id = %s",
-                            (db_tenant_id, branch, model_id))
+                cur.execute(
+                    "SELECT record FROM mental_models WHERE tenant_id = %s AND branch = %s AND model_id = %s",
+                    (db_tenant_id, branch, model_id),
+                )
                 row = cur.fetchone()
         return copy_model_json(row["record"]) if row is not None else None
 
-    def list_mental_model_records(self, tenant_id: str, branch: str = "main") -> list[dict[str, Any]]:
+    def list_mental_model_records(
+        self, tenant_id: str, branch: str = "main"
+    ) -> list[dict[str, Any]]:
         model_key(tenant_id, "list", branch)
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self._mental_model_connection(tenant_id) as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
-                cur.execute("SELECT record FROM mental_models WHERE tenant_id = %s AND branch = %s ORDER BY model_id",
-                            (db_tenant_id, branch))
+                cur.execute(
+                    "SELECT record FROM mental_models WHERE tenant_id = %s AND branch = %s ORDER BY model_id",
+                    (db_tenant_id, branch),
+                )
                 return [copy_model_json(row["record"]) for row in cur.fetchall()]
 
     def save_mental_model_record(
-        self, tenant_id: str, model_id: str, record: dict[str, Any], *,
-        branch: str = "main", expected_version: int | None = None,
+        self,
+        tenant_id: str,
+        model_id: str,
+        record: dict[str, Any],
+        *,
+        branch: str = "main",
+        expected_version: int | None = None,
     ) -> dict[str, Any]:
         record = validate_model_record(tenant_id, model_id, record, branch)
         validate_model_version(expected_version, allow_create=True)
@@ -3028,29 +3466,51 @@ class PostgresEngine:
         with self._mental_model_connection(tenant_id) as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
-                cur.execute("SELECT record FROM mental_models WHERE tenant_id = %s AND branch = %s AND model_id = %s FOR UPDATE",
-                            (db_tenant_id, branch, model_id))
+                cur.execute(
+                    "SELECT record FROM mental_models WHERE tenant_id = %s AND branch = %s AND model_id = %s FOR UPDATE",
+                    (db_tenant_id, branch, model_id),
+                )
                 row = cur.fetchone()
                 current = row["record"] if row is not None else None
-                saved = prepare_model_save(tenant_id, model_id, record, branch, current, expected_version)
+                saved = prepare_model_save(
+                    tenant_id, model_id, record, branch, current, expected_version
+                )
                 if current is None:
                     cur.execute(
                         "INSERT INTO mental_models(tenant_id, branch, model_id, version, record) VALUES (%s, %s, %s, %s, %s) "
                         "ON CONFLICT (tenant_id, branch, model_id) DO NOTHING RETURNING version",
-                        (db_tenant_id, branch, model_id, saved["version"], self._jsonb(saved)),
+                        (
+                            db_tenant_id,
+                            branch,
+                            model_id,
+                            saved["version"],
+                            self._jsonb(saved),
+                        ),
                     )
                 else:
                     cur.execute(
                         "UPDATE mental_models SET version = %s, record = %s "
                         "WHERE tenant_id = %s AND branch = %s AND model_id = %s AND version = %s RETURNING version",
-                        (saved["version"], self._jsonb(saved), db_tenant_id, branch, model_id, expected_version),
+                        (
+                            saved["version"],
+                            self._jsonb(saved),
+                            db_tenant_id,
+                            branch,
+                            model_id,
+                            expected_version,
+                        ),
                     )
                 if cur.fetchone() is None:
                     raise MentalModelConflict("mental model version conflict")
         return copy_model_json(saved)
 
     def delete_mental_model_record(
-        self, tenant_id: str, model_id: str, *, branch: str = "main", expected_version: int,
+        self,
+        tenant_id: str,
+        model_id: str,
+        *,
+        branch: str = "main",
+        expected_version: int,
     ) -> bool:
         model_key(tenant_id, model_id, branch)
         validate_model_version(expected_version)
@@ -3058,32 +3518,56 @@ class PostgresEngine:
         with self._mental_model_connection(tenant_id) as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
-                cur.execute("SELECT version FROM mental_models WHERE tenant_id = %s AND branch = %s AND model_id = %s FOR UPDATE",
-                            (db_tenant_id, branch, model_id))
+                cur.execute(
+                    "SELECT version FROM mental_models WHERE tenant_id = %s AND branch = %s AND model_id = %s FOR UPDATE",
+                    (db_tenant_id, branch, model_id),
+                )
                 row = cur.fetchone()
                 if row is None:
                     return False
                 if row["version"] != expected_version:
                     raise MentalModelConflict("mental model version conflict")
-                cur.execute("DELETE FROM mental_models WHERE tenant_id = %s AND branch = %s AND model_id = %s",
-                            (db_tenant_id, branch, model_id))
+                cur.execute(
+                    "DELETE FROM mental_models WHERE tenant_id = %s AND branch = %s AND model_id = %s",
+                    (db_tenant_id, branch, model_id),
+                )
         return True
 
-    def _invalidate_mental_models(self, cur: Any, db_tenant_id: Any, branch: str) -> None:
-        cur.execute("SELECT record FROM mental_models WHERE tenant_id = %s AND branch = %s FOR UPDATE",
-                    (db_tenant_id, branch))
+    def _invalidate_mental_models(
+        self, cur: Any, db_tenant_id: Any, branch: str
+    ) -> None:
+        cur.execute(
+            "SELECT record FROM mental_models WHERE tenant_id = %s AND branch = %s FOR UPDATE",
+            (db_tenant_id, branch),
+        )
         for row in cur.fetchall():
             saved = invalidate_model_record(row["record"])
-            cur.execute("UPDATE mental_models SET version = %s, record = %s WHERE tenant_id = %s AND branch = %s AND model_id = %s",
-                        (saved["version"], self._jsonb(saved), db_tenant_id, branch, saved["model_id"]))
+            cur.execute(
+                "UPDATE mental_models SET version = %s, record = %s WHERE tenant_id = %s AND branch = %s AND model_id = %s",
+                (
+                    saved["version"],
+                    self._jsonb(saved),
+                    db_tenant_id,
+                    branch,
+                    saved["model_id"],
+                ),
+            )
 
     def get_evidence_for_read(
-        self, tenant_id: str, cid: str, branch: str = "main", *,
+        self,
+        tenant_id: str,
+        cid: str,
+        branch: str = "main",
+        *,
         access_context: Mapping[str, Any] | None = None,
     ) -> Evidence | None:
-        return read_evidence_for_context(self, tenant_id, cid, branch, access_context=access_context)
+        return read_evidence_for_context(
+            self, tenant_id, cid, branch, access_context=access_context
+        )
 
-    def get_evidence(self, tenant_id: str, cid: str, branch: str = "main") -> Evidence | None:
+    def get_evidence(
+        self, tenant_id: str, cid: str, branch: str = "main"
+    ) -> Evidence | None:
         with self._source_operation_scope(tenant_id, branch):
             return self._get_evidence(tenant_id, cid, branch)
 
@@ -3108,7 +3592,9 @@ class PostgresEngine:
                 row = cur.fetchone()
         return _row_to_evidence(row, cid) if row else None
 
-    def evidence_created_at(self, tenant_id: str, cid: str, branch: str = "main") -> datetime | None:
+    def evidence_created_at(
+        self, tenant_id: str, cid: str, branch: str = "main"
+    ) -> datetime | None:
         """The row's own time, without the access-policy snapshot ``get_evidence`` returns.
 
         Retrieval dates hits from this read. Grounded answering fingerprints
@@ -3171,7 +3657,9 @@ class PostgresEngine:
                 found[cid] = created
         return found
 
-    def evidence_is_erased(self, tenant_id: str, cid: str, branch: str = "main") -> bool:
+    def evidence_is_erased(
+        self, tenant_id: str, cid: str, branch: str = "main"
+    ) -> bool:
         """Engine-neutral tombstone probe (see ``MemoryEngine.evidence_is_erased``).
 
         A tombstoned row is retained with ``erased = true`` as the replay
@@ -3231,7 +3719,11 @@ class PostgresEngine:
                         actor,
                         "set_evidence_embedding.blocked_policy",
                         cid,
-                        {"branch": branch, "source_type": row["source_type"], "reason": "embedding_not_allowed"},
+                        {
+                            "branch": branch,
+                            "source_type": row["source_type"],
+                            "reason": "embedding_not_allowed",
+                        },
                         source=source,
                         trust_tier=row["trust_tier"],
                         capability_tags=list(row["capability_tags"] or []),
@@ -3265,7 +3757,11 @@ class PostgresEngine:
                     actor,
                     "set_evidence_embedding",
                     cid,
-                    {"branch": branch, "embedding_dims": len(embedding), "source_type": row["source_type"]},
+                    {
+                        "branch": branch,
+                        "embedding_dims": len(embedding),
+                        "source_type": row["source_type"],
+                    },
                     source=source,
                     trust_tier=row["trust_tier"],
                     capability_tags=list(row["capability_tags"] or []),
@@ -3284,22 +3780,37 @@ class PostgresEngine:
     ) -> bool:
         with self._source_operation_scope(tenant_id, branch):
             return self._update_evidence_metadata(
-                tenant_id, cid, metadata_patch, branch, actor=actor, source=source,
+                tenant_id,
+                cid,
+                metadata_patch,
+                branch,
+                actor=actor,
+                source=source,
             )
 
     def _update_evidence_metadata(
-        self, tenant_id: str, cid: str, metadata_patch: dict[str, Any], branch: str,
-        *, actor: str, source: str,
+        self,
+        tenant_id: str,
+        cid: str,
+        metadata_patch: dict[str, Any],
+        branch: str,
+        *,
+        actor: str,
+        source: str,
     ) -> bool:
         if "access_policy" in metadata_patch:
-            raise ValueError("metadata_patch.access_policy cannot shadow evidence.access_policy")
+            raise ValueError(
+                "metadata_patch.access_policy cannot shadow evidence.access_policy"
+            )
         reserved_provenance_keys = {
             "_external_tenant_id",
             "_external_user_id",
             "_external_session_id",
         }
         if reserved_provenance_keys.intersection(metadata_patch):
-            raise ValueError("metadata_patch cannot modify reserved provenance metadata")
+            raise ValueError(
+                "metadata_patch cannot modify reserved provenance metadata"
+            )
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self._source_connection(tenant_id, branch) as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
@@ -3341,7 +3852,9 @@ class PostgresEngine:
                         "branch": branch,
                         "patch": metadata_patch,
                         "before_keys": before_keys,
-                        "after_keys": sorted(_public_evidence_metadata(metadata).keys()),
+                        "after_keys": sorted(
+                            _public_evidence_metadata(metadata).keys()
+                        ),
                         "source_type": row["source_type"],
                     },
                     source=source,
@@ -3438,7 +3951,9 @@ class PostgresEngine:
                         "branch": branch,
                         "pii_tags": tags,
                         "before": before,
-                        "after": _privacy_backfill_controls(target_sensitivity, access_policy, metadata),
+                        "after": _privacy_backfill_controls(
+                            target_sensitivity, access_policy, metadata
+                        ),
                         "source_type": row["source_type"],
                     },
                     source=source,
@@ -3461,7 +3976,9 @@ class PostgresEngine:
             return
         calibration = dict(incoming.calibration)
         schema_fast_path = calibration.get("schema_fast_path")
-        schema_fast_path = dict(schema_fast_path) if isinstance(schema_fast_path, dict) else {}
+        schema_fast_path = (
+            dict(schema_fast_path) if isinstance(schema_fast_path, dict) else {}
+        )
         scope = incoming.scope if isinstance(incoming.scope, dict) else {}
         congruent = bool(
             calibration.get("schema_congruent")
@@ -3471,7 +3988,9 @@ class PostgresEngine:
         )
         if not congruent:
             return
-        minimum = max(1, int(getattr(self.policy, "schema_fast_path_min_corroboration", 2)))
+        minimum = max(
+            1, int(getattr(self.policy, "schema_fast_path_min_corroboration", 2))
+        )
         if cur is not None and db_tenant_id is not None:
             corroboration_report = self._independent_corroboration_report(
                 cur,
@@ -3493,10 +4012,18 @@ class PostgresEngine:
             {
                 "schema_congruent": True,
                 "corroboration_count": corroboration,
-                "raw_source_count": len({cid for cid in incoming.source_evidence_cids if cid}),
-                "independent_corroboration_weight": corroboration_report["independent_corroboration_weight"],
-                "rejected_corroboration_count": corroboration_report["rejected_corroboration_count"],
-                "rejected_corroborators": corroboration_report["rejected_corroborators"],
+                "raw_source_count": len(
+                    {cid for cid in incoming.source_evidence_cids if cid}
+                ),
+                "independent_corroboration_weight": corroboration_report[
+                    "independent_corroboration_weight"
+                ],
+                "rejected_corroboration_count": corroboration_report[
+                    "rejected_corroboration_count"
+                ],
+                "rejected_corroborators": corroboration_report[
+                    "rejected_corroborators"
+                ],
                 "min_corroboration": minimum,
             }
         )
@@ -3508,7 +4035,9 @@ class PostgresEngine:
         calibration["schema_fast_path"] = schema_fast_path
         incoming.calibration = calibration
 
-    def _apply_projection_reality_monitoring(self, cur: Any, incoming: Assertion, db_tenant_id: str) -> None:
+    def _apply_projection_reality_monitoring(
+        self, cur: Any, incoming: Assertion, db_tenant_id: str
+    ) -> None:
         calibration = dict(incoming.calibration)
         monitoring = self._projection_reality_monitoring_for_sources(
             cur,
@@ -3584,12 +4113,23 @@ class PostgresEngine:
         }
 
     @classmethod
-    def _projection_reality_monitoring_from_calibration(cls, calibration: dict[str, Any]) -> dict[str, Any]:
-        monitoring = calibration.get("reality_monitoring") if isinstance(calibration, dict) else None
+    def _projection_reality_monitoring_from_calibration(
+        cls, calibration: dict[str, Any]
+    ) -> dict[str, Any]:
+        monitoring = (
+            calibration.get("reality_monitoring")
+            if isinstance(calibration, dict)
+            else None
+        )
         if isinstance(monitoring, dict):
-            normalized = cls._normalise_reality_class(monitoring.get("reality_class")) or "unknown"
+            normalized = (
+                cls._normalise_reality_class(monitoring.get("reality_class"))
+                or "unknown"
+            )
             return {**monitoring, "reality_class": normalized}
-        normalized = cls._normalise_reality_class(monitoring) or cls._normalise_reality_class(
+        normalized = cls._normalise_reality_class(
+            monitoring
+        ) or cls._normalise_reality_class(
             calibration.get("reality_class") if isinstance(calibration, dict) else None
         )
         return {
@@ -3619,14 +4159,22 @@ class PostgresEngine:
         incoming.access_policy = access_policy
         incoming.branch = branch
         requested_status = incoming.status
-        incoming.status = "active" if incoming.status == "candidate" else incoming.status
+        incoming.status = (
+            "active" if incoming.status == "candidate" else incoming.status
+        )
         incoming.transaction_time = utc_now()
         db_tenant_id = _stable_uuid("tenant", incoming.tenant_id)
         if _db_user_id is _DB_USER_ID_UNSET:
-            db_user_id = _stable_uuid("user", incoming.user_id) if incoming.user_id else None
+            db_user_id = (
+                _stable_uuid("user", incoming.user_id) if incoming.user_id else None
+            )
         else:
             db_user_id = _db_user_id
-        connection = self.connect() if _cursor is None else nullcontext(_ExistingCursorConnection(_cursor))
+        connection = (
+            self.connect()
+            if _cursor is None
+            else nullcontext(_ExistingCursorConnection(_cursor))
+        )
         with connection as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 if not _schema_ready:
@@ -3648,7 +4196,13 @@ class PostgresEngine:
                       AND status IN ('active', 'contested')
                     ORDER BY trust_tier ASC, valid_from DESC
                     """,
-                    (db_tenant_id, branch, incoming.subject, incoming.predicate, self._jsonb(incoming.scope)),
+                    (
+                        db_tenant_id,
+                        branch,
+                        incoming.subject,
+                        incoming.predicate,
+                        self._jsonb(incoming.scope),
+                    ),
                 )
                 peers = list(cur.fetchall())
                 same = [row for row in peers if row["object"] == incoming.object]
@@ -3658,8 +4212,15 @@ class PostgresEngine:
                         [dict(winner["access_policy"] or {}), incoming.access_policy],
                         tenant_id=incoming.tenant_id,
                     )
-                    merged_confidence = max(float(winner["confidence"]), incoming.confidence)
-                    merged_sources = sorted(set(_bytes_list_to_cids(winner["source_evidence_cids"]) + incoming.source_evidence_cids))
+                    merged_confidence = max(
+                        float(winner["confidence"]), incoming.confidence
+                    )
+                    merged_sources = sorted(
+                        set(
+                            _bytes_list_to_cids(winner["source_evidence_cids"])
+                            + incoming.source_evidence_cids
+                        )
+                    )
                     merged_calibration = dict(winner["calibration"] or {})
                     merged_monitoring = self._projection_reality_monitoring_for_sources(
                         cur,
@@ -3669,7 +4230,9 @@ class PostgresEngine:
                         source_evidence_cids=merged_sources,
                     )
                     merged_calibration["reality_monitoring"] = merged_monitoring
-                    merged_calibration["reality_class"] = merged_monitoring["reality_class"]
+                    merged_calibration["reality_class"] = merged_monitoring[
+                        "reality_class"
+                    ]
                     cur.execute(
                         """
                         UPDATE assertions
@@ -3703,34 +4266,70 @@ class PostgresEngine:
                     current = conflicts[0]
                     current_valid_from = parse_dt(current["valid_from"]) or utc_now()
                     current_trust_tier = int(current["trust_tier"])
+                    inc_vf = _to_utc_opt(incoming.valid_from) or datetime.min.replace(
+                        tzinfo=UTC
+                    )
+                    cur_vf = _to_utc_opt(current_valid_from) or datetime.min.replace(
+                        tzinfo=UTC
+                    )
                     if incoming.trust_tier < current_trust_tier:
                         incoming.version = int(current["version"]) + 1
                         incoming.status = "active"
                         current_valid_to = (
                             incoming.valid_from
-                            if incoming.valid_from > current_valid_from
+                            if inc_vf > cur_vf
                             else current_valid_from + timedelta(microseconds=1)
                         )
                         cur.execute(
                             "UPDATE assertions SET valid_to = %s, status = 'superseded', superseded_by = %s WHERE id = %s",
                             (current_valid_to, incoming.id, current["id"]),
                         )
+                        self._sync_relation_supersession(
+                            tenant_id=incoming.tenant_id,
+                            branch=branch,
+                            subject=str(current["subject"]),
+                            predicate=str(current["predicate"]),
+                            obj=str(current["object"]),
+                            valid_to=current_valid_to,
+                            cur=cur,
+                        )
                     elif incoming.trust_tier > current_trust_tier:
                         incoming.status = "superseded"
                         incoming.superseded_by = str(current["id"])
-                    elif incoming.valid_from > current_valid_from:
+                    elif inc_vf > cur_vf:
                         incoming.version = int(current["version"]) + 1
                         incoming.status = "active"
                         cur.execute(
                             "UPDATE assertions SET valid_to = %s, status = 'superseded', superseded_by = %s WHERE id = %s",
                             (incoming.valid_from, incoming.id, current["id"]),
                         )
-                    elif incoming.valid_from == current_valid_from:
+                        self._sync_relation_supersession(
+                            tenant_id=incoming.tenant_id,
+                            branch=branch,
+                            subject=str(current["subject"]),
+                            predicate=str(current["predicate"]),
+                            obj=str(current["object"]),
+                            valid_to=incoming.valid_from,
+                            cur=cur,
+                        )
+                    elif inc_vf == cur_vf:
                         incoming.status = "contested"
-                        cur.execute("UPDATE assertions SET status = 'contested' WHERE id = %s", (current["id"],))
+                        cur.execute(
+                            "UPDATE assertions SET status = 'contested' WHERE id = %s",
+                            (current["id"],),
+                        )
                     else:
                         incoming.status = "superseded"
                         incoming.valid_to = current_valid_from
+                        self._sync_relation_supersession(
+                            tenant_id=incoming.tenant_id,
+                            branch=branch,
+                            subject=incoming.subject,
+                            predicate=incoming.predicate,
+                            obj=incoming.object,
+                            valid_to=current_valid_from,
+                            cur=cur,
+                        )
 
                 embedding_partition = vector_partition_for_item(
                     sensitivity=int(incoming.sensitivity),
@@ -3810,7 +4409,10 @@ class PostgresEngine:
                     "engine",
                     "upsert_assertion",
                     incoming.id,
-                    {"branch": branch, "source_evidence_cids": incoming.source_evidence_cids},
+                    {
+                        "branch": branch,
+                        "source_evidence_cids": incoming.source_evidence_cids,
+                    },
                     source="assertion",
                     trust_tier=incoming.trust_tier,
                 )
@@ -3882,10 +4484,76 @@ class PostgresEngine:
                     "engine",
                     "add_relation",
                     relation.id,
-                    {"branch": branch, "source_evidence_cids": relation.source_evidence_cids},
+                    {
+                        "branch": branch,
+                        "source_evidence_cids": relation.source_evidence_cids,
+                    },
                     source="relation",
                 )
         return relation.id
+
+    def _sync_relation_supersession(
+        self,
+        tenant_id: str,
+        branch: str,
+        subject: str,
+        predicate: str,
+        obj: str,
+        valid_to: datetime | None,
+        *,
+        cur: Any | None = None,
+    ) -> None:
+        """Synchronize relation supersession in PostgreSQL storage."""
+        if valid_to is None:
+            return
+        subj_low = subject.strip().lower()
+        pred_low = predicate.strip().lower()
+        obj_low = obj.strip().lower()
+
+        canonical_preds = {pred_low}
+        if pred_low in {"residence", "lives_in"}:
+            canonical_preds.update({"residence", "lives_in"})
+        elif pred_low in {"education", "graduated_from"}:
+            canonical_preds.update({"education", "graduated_from"})
+        elif pred_low in {"works_at", "employed_by"}:
+            canonical_preds.update({"works_at", "employed_by"})
+
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+
+        def _do_sync(c: Any) -> None:
+            c.execute(
+                """
+                SELECT * FROM relations
+                WHERE tenant_id = %s AND branch = %s
+                """,
+                (db_tenant_id, branch),
+            )
+            rows = c.fetchall()
+            for row in rows:
+                rel = _row_to_relation(row, tenant_id)
+                if rel.source.strip().lower() != subj_low:
+                    continue
+                if rel.predicate.strip().lower() not in canonical_preds:
+                    continue
+                if rel.target.strip().lower() != obj_low:
+                    continue
+                rel_vt = _to_utc_opt(rel.valid_to)
+                tgt_vt = _to_utc_opt(valid_to)
+                if rel.valid_to is None or (
+                    rel_vt is not None and tgt_vt is not None and rel_vt > tgt_vt
+                ):
+                    c.execute(
+                        "UPDATE relations SET valid_to = %s WHERE id = %s",
+                        (valid_to, row["id"]),
+                    )
+
+        if cur is not None:
+            _do_sync(cur)
+        else:
+            with self.connect() as conn:
+                with conn.cursor(row_factory=self._psycopg.rows.dict_row) as c:
+                    self._set_tenant(c, db_tenant_id)
+                    _do_sync(c)
 
     def add_justification(self, justification: Justification) -> str:
         self.ensure_tenant_and_branch(justification.tenant_id)
@@ -3950,7 +4618,13 @@ class PostgresEngine:
                       AND ((a = %s AND b = %s) OR (a = %s AND b = %s))
                     LIMIT 1
                     """,
-                    (db_tenant_id, contradiction.a, contradiction.b, contradiction.b, contradiction.a),
+                    (
+                        db_tenant_id,
+                        contradiction.a,
+                        contradiction.b,
+                        contradiction.b,
+                        contradiction.a,
+                    ),
                 )
                 existing = cur.fetchone()
                 if existing:
@@ -4073,30 +4747,69 @@ class PostgresEngine:
         tenant_id = str(filt["tenant_id"])
         branch = str(filt.get("branch", "main"))
         include_quarantined = bool(filt.get("include_quarantined", False))
-        default_max_trust = int(TrustTier.UNTRUSTED_EXTERNAL) if include_quarantined else self.policy.max_trust_tier
-        max_trust = int(filt.get("max_trust_tier", filt.get("min_trust_tier", default_max_trust)))
+        default_max_trust = (
+            int(TrustTier.UNTRUSTED_EXTERNAL)
+            if include_quarantined
+            else self.policy.max_trust_tier
+        )
+        max_trust = int(
+            filt.get("max_trust_tier", filt.get("min_trust_tier", default_max_trust))
+        )
         max_sensitivity = effective_max_sensitivity(filt, self.policy.max_sensitivity)
         snapshot = self.export_tenant_filtered(tenant_id, filt)
-        candidates = [Hit(
-            id=row["cid"], kind="evidence", tenant_id=tenant_id, branch=branch,
-            text=row.get("content") or "", score=0.0, channel="candidate",
-            provenance=[row["cid"]], trust_tier=int(row.get("trust_tier", 0)),
-            sensitivity=int(row.get("sensitivity", 0)),
-            metadata={**{key: value for key, value in (row.get("metadata") or {}).items()
-                         if key not in {"event_start", "event_end", "occurred_start", "occurred_end",
-                                        "_candidate_created_at", "_candidate_event_calendar"}},
-                      "source_type": row.get("source_type"), "actor": row.get("actor"),
-                      **_candidate_time_metadata(row.get("created_at"), row.get("metadata") or {},
-                                                 redacted=bool((row.get("privacy") or {}).get("redacted")))},
-        ) for row in snapshot.get("evidence", [])
-            if row.get("branch", "main") == branch and not row.get("erased")
+        candidates = [
+            Hit(
+                id=row["cid"],
+                kind="evidence",
+                tenant_id=tenant_id,
+                branch=branch,
+                text=row.get("content") or "",
+                score=0.0,
+                channel="candidate",
+                provenance=[row["cid"]],
+                trust_tier=int(row.get("trust_tier", 0)),
+                sensitivity=int(row.get("sensitivity", 0)),
+                metadata={
+                    **{
+                        key: value
+                        for key, value in (row.get("metadata") or {}).items()
+                        if key
+                        not in {
+                            "event_start",
+                            "event_end",
+                            "occurred_start",
+                            "occurred_end",
+                            "_candidate_created_at",
+                            "_candidate_event_calendar",
+                        }
+                    },
+                    "source_type": row.get("source_type"),
+                    "actor": row.get("actor"),
+                    **_candidate_time_metadata(
+                        row.get("created_at"),
+                        row.get("metadata") or {},
+                        redacted=bool((row.get("privacy") or {}).get("redacted")),
+                    ),
+                },
+            )
+            for row in snapshot.get("evidence", [])
+            if row.get("branch", "main") == branch
+            and not row.get("erased")
             and int(row.get("trust_tier", 0)) <= max_trust
             and int(row.get("sensitivity", 0)) <= max_sensitivity
-            and (include_quarantined or not (row.get("metadata") or {}).get("quarantine_reason"))]
+            and (
+                include_quarantined
+                or not (row.get("metadata") or {}).get("quarantine_reason")
+            )
+        ]
         return [hit for hit in candidates if is_passage(hit)]
 
     def _get_projection_for_adapter(
-        self, tenant_id: str, branch: str, kind: str, item_id: str,
+        self,
+        tenant_id: str,
+        branch: str,
+        kind: str,
+        item_id: str,
     ) -> Assertion | Preference | None:
         if _uuid_or_none(item_id) is None or kind not in {"assertion", "preference"}:
             return None
@@ -4110,7 +4823,11 @@ class PostgresEngine:
                         (db_tenant_id, branch, item_id),
                     )
                     row = cur.fetchone()
-                    return _row_to_assertion({**row, "tenant_name": tenant_id}) if row is not None else None
+                    return (
+                        _row_to_assertion({**row, "tenant_name": tenant_id})
+                        if row is not None
+                        else None
+                    )
                 cur.execute(
                     "SELECT * FROM preferences WHERE tenant_id = %s AND id = %s",
                     (db_tenant_id, item_id),
@@ -4123,7 +4840,10 @@ class PostgresEngine:
         if not tenant_id:
             return []
         branch = str(filt.get("branch", "main"))
-        if filt.get("query_mode") == "passages" and self.adapters.lexical_retriever is None:
+        if (
+            filt.get("query_mode") == "passages"
+            and self.adapters.lexical_retriever is None
+        ):
             from mnemosyne.passages import rank_passages
 
             return self._mark_retrieved_text_as_data(
@@ -4148,8 +4868,14 @@ class PostgresEngine:
             return self._mark_retrieved_text_as_data(hits)
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         include_quarantined = bool(filt.get("include_quarantined", False))
-        default_max_trust = int(TrustTier.UNTRUSTED_EXTERNAL) if include_quarantined else self.policy.max_trust_tier
-        max_trust = int(filt.get("max_trust_tier", filt.get("min_trust_tier", default_max_trust)))
+        default_max_trust = (
+            int(TrustTier.UNTRUSTED_EXTERNAL)
+            if include_quarantined
+            else self.policy.max_trust_tier
+        )
+        max_trust = int(
+            filt.get("max_trust_tier", filt.get("min_trust_tier", default_max_trust))
+        )
         max_sensitivity = effective_max_sensitivity(filt, self.policy.max_sensitivity)
         hits: list[Hit] = []
         with self.connect() as conn:
@@ -4181,7 +4907,15 @@ class PostgresEngine:
                     ORDER BY score DESC
                     LIMIT %s
                     """,
-                    (query, db_tenant_id, branch, max_trust, max_sensitivity, include_quarantined, k),
+                    (
+                        query,
+                        db_tenant_id,
+                        branch,
+                        max_trust,
+                        max_sensitivity,
+                        include_quarantined,
+                        k,
+                    ),
                 )
                 for row in cur.fetchall():
                     cid = _bytes_to_cid(row["cid"])
@@ -4189,8 +4923,17 @@ class PostgresEngine:
                     if is_retired_summary_metadata(metadata):
                         continue
                     if not derived_evidence_readable(
-                        self, {**dict(row), "cid": cid, "tenant_id": tenant_id, "branch": branch},
-                        tenant_id=tenant_id, branch=branch, filt=filt, policy=self.policy,
+                        self,
+                        {
+                            **dict(row),
+                            "cid": cid,
+                            "tenant_id": tenant_id,
+                            "branch": branch,
+                        },
+                        tenant_id=tenant_id,
+                        branch=branch,
+                        filt=filt,
+                        policy=self.policy,
                     ):
                         continue
                     decision = may_read_item(
@@ -4202,12 +4945,16 @@ class PostgresEngine:
                     )
                     if not decision.allowed:
                         continue
-                    text, privacy_metadata = apply_text_redactions(row["content"] or "", dict(row["access_policy"] or {}), decision)
+                    text, privacy_metadata = apply_text_redactions(
+                        row["content"] or "", dict(row["access_policy"] or {}), decision
+                    )
                     hit_metadata = {
                         "source_type": row["source_type"],
                         "actor": row["actor"],
                         "backend": self.adapters.lexical_backend,
-                        "reality_class": self._classify_evidence_row_reality(row, metadata),
+                        "reality_class": self._classify_evidence_row_reality(
+                            row, metadata
+                        ),
                         "privacy": privacy_metadata,
                     }
                     if isinstance(metadata.get("summary"), dict):
@@ -4218,7 +4965,9 @@ class PostgresEngine:
                     if isinstance(metadata.get("earned_autonomy"), dict):
                         hit_metadata["earned_autonomy"] = metadata["earned_autonomy"]
                     if "birth_groundedness" in metadata:
-                        hit_metadata["birth_groundedness"] = metadata["birth_groundedness"]
+                        hit_metadata["birth_groundedness"] = metadata[
+                            "birth_groundedness"
+                        ]
                     hits.append(
                         Hit(
                             id=cid,
@@ -4263,8 +5012,12 @@ class PostgresEngine:
                     if not decision.allowed:
                         continue
                     if not projection_sources_readable(
-                        self, _bytes_list_to_cids(row["source_evidence_cids"]),
-                        tenant_id=tenant_id, branch=branch, filt=filt, policy=self.policy,
+                        self,
+                        _bytes_list_to_cids(row["source_evidence_cids"]),
+                        tenant_id=tenant_id,
+                        branch=branch,
+                        filt=filt,
+                        policy=self.policy,
                     ):
                         continue
                     text, privacy_metadata = apply_statement_redactions(
@@ -4274,7 +5027,11 @@ class PostgresEngine:
                         access_policy=dict(row["access_policy"] or {}),
                         decision=decision,
                     )
-                    reality_monitoring = self._projection_reality_monitoring_from_calibration(dict(row["calibration"] or {}))
+                    reality_monitoring = (
+                        self._projection_reality_monitoring_from_calibration(
+                            dict(row["calibration"] or {})
+                        )
+                    )
                     hits.append(
                         Hit(
                             id=str(row["id"]),
@@ -4293,7 +5050,9 @@ class PostgresEngine:
                                 "reality_monitoring": reality_monitoring,
                                 "created_at": iso_utc(row.get("transaction_time")),
                                 "backend": self.adapters.lexical_backend,
-                                "last_accessed": row["last_accessed"].isoformat() if row["last_accessed"] else None,
+                                "last_accessed": row["last_accessed"].isoformat()
+                                if row["last_accessed"]
+                                else None,
                                 "access_count": row["access_count"],
                                 "privacy": privacy_metadata,
                             },
@@ -4301,7 +5060,9 @@ class PostgresEngine:
                     )
         if not hits:
             return self._local_rank(query, k, filt, channel="postgres_lexical_fallback")
-        return self._mark_retrieved_text_as_data(sorted(hits, key=lambda item: item.score, reverse=True)[:k])
+        return self._mark_retrieved_text_as_data(
+            sorted(hits, key=lambda item: item.score, reverse=True)[:k]
+        )
 
     def vector_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
         tenant_id = str(filt.get("tenant_id") or "")
@@ -4310,8 +5071,14 @@ class PostgresEngine:
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         branch = filt.get("branch", "main")
         include_quarantined = bool(filt.get("include_quarantined", False))
-        default_max_trust = int(TrustTier.UNTRUSTED_EXTERNAL) if include_quarantined else self.policy.max_trust_tier
-        max_trust = int(filt.get("max_trust_tier", filt.get("min_trust_tier", default_max_trust)))
+        default_max_trust = (
+            int(TrustTier.UNTRUSTED_EXTERNAL)
+            if include_quarantined
+            else self.policy.max_trust_tier
+        )
+        max_trust = int(
+            filt.get("max_trust_tier", filt.get("min_trust_tier", default_max_trust))
+        )
         max_sensitivity = effective_max_sensitivity(filt, self.policy.max_sensitivity)
         query_vec = embed_query(self.adapters.embedding, query)
         query_literal = _vector_literal(query_vec)
@@ -4334,7 +5101,15 @@ class PostgresEngine:
                     ORDER BY embedding <=> %s::vector
                     LIMIT %s
                     """,
-                    (query_literal, db_tenant_id, branch, max_trust, max_sensitivity, query_literal, k),
+                    (
+                        query_literal,
+                        db_tenant_id,
+                        branch,
+                        max_trust,
+                        max_sensitivity,
+                        query_literal,
+                        k,
+                    ),
                 )
                 for row in cur.fetchall():
                     score = float(row["score"] or 0.0)
@@ -4358,8 +5133,12 @@ class PostgresEngine:
                     ):
                         continue
                     if not projection_sources_readable(
-                        self, _bytes_list_to_cids(row["source_evidence_cids"]),
-                        tenant_id=tenant_id, branch=branch, filt=filt, policy=self.policy,
+                        self,
+                        _bytes_list_to_cids(row["source_evidence_cids"]),
+                        tenant_id=tenant_id,
+                        branch=branch,
+                        filt=filt,
+                        policy=self.policy,
                     ):
                         continue
                     text, privacy_metadata = apply_statement_redactions(
@@ -4369,7 +5148,11 @@ class PostgresEngine:
                         access_policy=dict(row["access_policy"] or {}),
                         decision=decision,
                     )
-                    reality_monitoring = self._projection_reality_monitoring_from_calibration(dict(row["calibration"] or {}))
+                    reality_monitoring = (
+                        self._projection_reality_monitoring_from_calibration(
+                            dict(row["calibration"] or {})
+                        )
+                    )
                     hits.append(
                         Hit(
                             id=str(row["id"]),
@@ -4389,7 +5172,9 @@ class PostgresEngine:
                                 "created_at": iso_utc(row.get("transaction_time")),
                                 "backend": self.adapters.embedding.name,
                                 "embedding_dims": self.adapters.embedding.dims,
-                                "last_accessed": row["last_accessed"].isoformat() if row["last_accessed"] else None,
+                                "last_accessed": row["last_accessed"].isoformat()
+                                if row["last_accessed"]
+                                else None,
                                 "access_count": row["access_count"],
                                 "privacy": privacy_metadata,
                             },
@@ -4431,7 +5216,11 @@ class PostgresEngine:
                     ),
                 )
                 for row in cur.fetchall():
-                    text = row["content"] or row["content_pointer"] or f"{row['modality']} evidence"
+                    text = (
+                        row["content"]
+                        or row["content_pointer"]
+                        or f"{row['modality']} evidence"
+                    )
                     score = float(row["score"] or 0.0)
                     if score <= 0:
                         continue
@@ -4440,8 +5229,17 @@ class PostgresEngine:
                     if is_retired_summary_metadata(metadata):
                         continue
                     if not derived_evidence_readable(
-                        self, {**dict(row), "cid": cid, "tenant_id": tenant_id, "branch": branch},
-                        tenant_id=tenant_id, branch=branch, filt=filt, policy=self.policy,
+                        self,
+                        {
+                            **dict(row),
+                            "cid": cid,
+                            "tenant_id": tenant_id,
+                            "branch": branch,
+                        },
+                        tenant_id=tenant_id,
+                        branch=branch,
+                        filt=filt,
+                        policy=self.policy,
                     ):
                         continue
                     decision = may_read_item(
@@ -4460,7 +5258,9 @@ class PostgresEngine:
                         embedding_partition=str(row["embedding_partition"] or ""),
                     ):
                         continue
-                    text, privacy_metadata = apply_text_redactions(text, dict(row["access_policy"] or {}), decision)
+                    text, privacy_metadata = apply_text_redactions(
+                        text, dict(row["access_policy"] or {}), decision
+                    )
                     media_embedding = metadata.get("media_embedding")
                     hit_metadata = {
                         "source_type": row["source_type"],
@@ -4469,11 +5269,15 @@ class PostgresEngine:
                         "embedding_dims": self.adapters.embedding.dims,
                         "stored_embedding": True,
                         "embedding_partition": str(row["embedding_partition"] or ""),
-                        "stored_media_embedding": bool(media_embedding and row["modality"] != "text"),
+                        "stored_media_embedding": bool(
+                            media_embedding and row["modality"] != "text"
+                        ),
                         "source_table": "evidence",
                         "modality": row["modality"],
                         "content_pointer": row["content_pointer"],
-                        "reality_class": self._classify_evidence_row_reality(row, metadata),
+                        "reality_class": self._classify_evidence_row_reality(
+                            row, metadata
+                        ),
                         "privacy": privacy_metadata,
                     }
                     if isinstance(media_embedding, dict):
@@ -4486,7 +5290,9 @@ class PostgresEngine:
                     if isinstance(metadata.get("earned_autonomy"), dict):
                         hit_metadata["earned_autonomy"] = metadata["earned_autonomy"]
                     if "birth_groundedness" in metadata:
-                        hit_metadata["birth_groundedness"] = metadata["birth_groundedness"]
+                        hit_metadata["birth_groundedness"] = metadata[
+                            "birth_groundedness"
+                        ]
                     hits.append(
                         Hit(
                             id=cid,
@@ -4548,16 +5354,31 @@ class PostgresEngine:
                         null_embedding_candidates_observed,
                         null_embedding_fallback_limit,
                     )
-                    null_embedding_rows = null_embedding_rows[:null_embedding_fallback_limit]
+                    null_embedding_rows = null_embedding_rows[
+                        :null_embedding_fallback_limit
+                    ]
                 for row in null_embedding_rows:
-                    text = row["content"] or row["content_pointer"] or f"{row['modality']} evidence"
+                    text = (
+                        row["content"]
+                        or row["content_pointer"]
+                        or f"{row['modality']} evidence"
+                    )
                     cid = _bytes_to_cid(row["cid"])
                     metadata = dict(row["metadata"] or {})
                     if is_retired_summary_metadata(metadata):
                         continue
                     if not derived_evidence_readable(
-                        self, {**dict(row), "cid": cid, "tenant_id": tenant_id, "branch": branch},
-                        tenant_id=tenant_id, branch=branch, filt=filt, policy=self.policy,
+                        self,
+                        {
+                            **dict(row),
+                            "cid": cid,
+                            "tenant_id": tenant_id,
+                            "branch": branch,
+                        },
+                        tenant_id=tenant_id,
+                        branch=branch,
+                        filt=filt,
+                        policy=self.policy,
                     ):
                         continue
                     decision = may_read_item(
@@ -4569,13 +5390,17 @@ class PostgresEngine:
                     )
                     if not decision.allowed:
                         continue
-                    text, privacy_metadata = apply_text_redactions(text, dict(row["access_policy"] or {}), decision)
+                    text, privacy_metadata = apply_text_redactions(
+                        text, dict(row["access_policy"] or {}), decision
+                    )
                     if not may_embed_item(
                         sensitivity=int(row["sensitivity"]),
                         access_policy=dict(row["access_policy"] or {}),
                     ):
                         continue
-                    if str(row["embedding_partition"] or "") == "private" and not may_use_stored_embedding(
+                    if str(
+                        row["embedding_partition"] or ""
+                    ) == "private" and not may_use_stored_embedding(
                         decision=decision,
                         sensitivity=int(row["sensitivity"]),
                         access_policy=dict(row["access_policy"] or {}),
@@ -4607,7 +5432,9 @@ class PostgresEngine:
                         "null_embedding_fallback_limit": null_embedding_fallback_limit,
                         "null_embedding_fallback_truncated": null_embedding_fallback_truncated,
                         "source_table": "evidence",
-                        "reality_class": self._classify_evidence_row_reality(row, metadata),
+                        "reality_class": self._classify_evidence_row_reality(
+                            row, metadata
+                        ),
                         "privacy": privacy_metadata,
                     }
                     if isinstance(metadata.get("summary"), dict):
@@ -4618,7 +5445,9 @@ class PostgresEngine:
                     if isinstance(metadata.get("earned_autonomy"), dict):
                         hit_metadata["earned_autonomy"] = metadata["earned_autonomy"]
                     if "birth_groundedness" in metadata:
-                        hit_metadata["birth_groundedness"] = metadata["birth_groundedness"]
+                        hit_metadata["birth_groundedness"] = metadata[
+                            "birth_groundedness"
+                        ]
                     hits.append(
                         Hit(
                             id=cid,
@@ -4634,7 +5463,9 @@ class PostgresEngine:
                             metadata=hit_metadata,
                         )
                     )
-        return self._mark_retrieved_text_as_data(sorted(hits, key=lambda item: item.score, reverse=True)[:k])
+        return self._mark_retrieved_text_as_data(
+            sorted(hits, key=lambda item: item.score, reverse=True)[:k]
+        )
 
     def graph_ppr(
         self,
@@ -4662,9 +5493,19 @@ class PostgresEngine:
         graph_filter.setdefault("tenant_id", tenant_id)
         graph_filter.setdefault("branch", branch)
         include_quarantined = bool(graph_filter.get("include_quarantined", False))
-        default_max_trust = int(TrustTier.UNTRUSTED_EXTERNAL) if include_quarantined else self.policy.max_trust_tier
-        max_trust = int(graph_filter.get("max_trust_tier", graph_filter.get("min_trust_tier", default_max_trust)))
-        max_sensitivity = effective_max_sensitivity(graph_filter, self.policy.max_sensitivity)
+        default_max_trust = (
+            int(TrustTier.UNTRUSTED_EXTERNAL)
+            if include_quarantined
+            else self.policy.max_trust_tier
+        )
+        max_trust = int(
+            graph_filter.get(
+                "max_trust_tier", graph_filter.get("min_trust_tier", default_max_trust)
+            )
+        )
+        max_sensitivity = effective_max_sensitivity(
+            graph_filter, self.policy.max_sensitivity
+        )
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         if self.adapters.graph_retriever is not None:
             hits = self.adapters.graph_retriever.search(
@@ -4726,7 +5567,11 @@ class PostgresEngine:
                 relation_source_cids: set[bytes] = set()
                 for row in relation_rows:
                     for cid_value in row.get("source_evidence_cids") or []:
-                        raw = cid_value.tobytes() if isinstance(cid_value, memoryview) else cid_value
+                        raw = (
+                            cid_value.tobytes()
+                            if isinstance(cid_value, memoryview)
+                            else cid_value
+                        )
                         if raw:
                             relation_source_cids.add(bytes(raw))
                 evidence_by_cid: dict[str, dict[str, Any]] = {}
@@ -4740,7 +5585,9 @@ class PostgresEngine:
                         """,
                         (db_tenant_id, branch, list(relation_source_cids)),
                     )
-                    evidence_by_cid = {_bytes_to_cid(row["cid"]): dict(row) for row in cur.fetchall()}
+                    evidence_by_cid = {
+                        _bytes_to_cid(row["cid"]): dict(row) for row in cur.fetchall()
+                    }
                 for row in relation_rows:
                     security = self._relation_hit_security_from_rows(
                         row,
@@ -4775,7 +5622,9 @@ class PostgresEngine:
         hits: list[Hit] = []
         seen_relation_ids: set[str] = set()
         for rel in {str(row["id"]): row for row in relation_by_pair.values()}.values():
-            if not (matches_seed(str(rel["source"])) and matches_seed(str(rel["target"]))):
+            if not (
+                matches_seed(str(rel["source"])) and matches_seed(str(rel["target"]))
+            ):
                 continue
             relation_id = str(rel["id"])
             security = rel["hit_security"]
@@ -4814,11 +5663,15 @@ class PostgresEngine:
                         "target": relation_fields["target"],
                         "confidence": float(rel["confidence"]),
                         "created_at": iso_utc(rel.get("valid_from")),
-                        "source_evidence_cids": _bytes_list_to_cids(rel["source_evidence_cids"]),
+                        "source_evidence_cids": _bytes_list_to_cids(
+                            rel["source_evidence_cids"]
+                        ),
                         "backend": self.adapters.graph_backend,
                         "reality_class": security["reality_class"],
                         "source_evidence_status": security["source_evidence_status"],
-                        "source_evidence_security": security["source_evidence_security"],
+                        "source_evidence_security": security[
+                            "source_evidence_security"
+                        ],
                         "direct_seed_relation": True,
                         "privacy": privacy_metadata,
                     },
@@ -4829,10 +5682,19 @@ class PostgresEngine:
         for seed in seed_set:
             adjacency.setdefault(seed, [])
         ranks = ppr_power_iteration(adjacency, matches_seed)
-        for node, score in sorted(ranks.items(), key=lambda item: item[1], reverse=True):
+        for node, score in sorted(
+            ranks.items(), key=lambda item: item[1], reverse=True
+        ):
             if matches_seed(node) or score <= 0:
                 continue
-            rel = next((relation_by_pair[pair] for pair in relation_by_pair if pair[0] == node or pair[1] == node), None)
+            rel = next(
+                (
+                    relation_by_pair[pair]
+                    for pair in relation_by_pair
+                    if pair[0] == node or pair[1] == node
+                ),
+                None,
+            )
             if not rel:
                 continue
             relation_id = str(rel["id"])
@@ -4874,11 +5736,15 @@ class PostgresEngine:
                         "target": relation_fields["target"],
                         "confidence": float(rel["confidence"]),
                         "created_at": iso_utc(rel.get("valid_from")),
-                        "source_evidence_cids": _bytes_list_to_cids(rel["source_evidence_cids"]),
+                        "source_evidence_cids": _bytes_list_to_cids(
+                            rel["source_evidence_cids"]
+                        ),
                         "backend": self.adapters.graph_backend,
                         "reality_class": security["reality_class"],
                         "source_evidence_status": security["source_evidence_status"],
-                        "source_evidence_security": security["source_evidence_security"],
+                        "source_evidence_security": security[
+                            "source_evidence_security"
+                        ],
                         "privacy": privacy_metadata,
                     },
                 )
@@ -4897,15 +5763,23 @@ class PostgresEngine:
     ) -> dict[str, Any]:
         seed_set = {seed.lower() for seed in seeds}
         if not seed_set or not tenant_id:
-            return {"refreshed": False, "reason": "missing_seed_or_tenant", "hit_count": 0}
+            return {
+                "refreshed": False,
+                "reason": "missing_seed_or_tenant",
+                "hit_count": 0,
+            }
         tenant_id = str(tenant_id)
         branch = str(branch or "main")
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         moment = as_of or utc_now()
         moment = moment.astimezone(UTC) if moment.tzinfo else moment.replace(tzinfo=UTC)
         self.ensure_tenant_and_branch(tenant_id, branch)
-        hits = self.graph_ppr(seeds, k, as_of=as_of, tenant_id=tenant_id, branch=branch, use_cache=False)
-        relation_fingerprint = self._graph_ppr_relation_fingerprint(db_tenant_id, branch, moment)
+        hits = self.graph_ppr(
+            seeds, k, as_of=as_of, tenant_id=tenant_id, branch=branch, use_cache=False
+        )
+        relation_fingerprint = self._graph_ppr_relation_fingerprint(
+            db_tenant_id, branch, moment
+        )
         seed_hash = _graph_ppr_seed_hash(seed_set)
         as_of_key = _graph_ppr_as_of_key(as_of, moment)
         with self.connect() as conn:
@@ -4962,9 +5836,19 @@ class PostgresEngine:
         access_context: dict[str, Any] | None = None,
     ) -> list[Hit] | None:
         cache_context = dict(access_context or {})
-        role = str(cache_context.get("role") or cache_context.get("mnemosyne_role") or "reader").lower()
-        extra_context = set(cache_context) - {"tenant_id", "tenant", "branch", "role", "mnemosyne_role"}
-        default_reader_sensitivity = effective_max_sensitivity({"role": "reader"}, self.policy.max_sensitivity)
+        role = str(
+            cache_context.get("role") or cache_context.get("mnemosyne_role") or "reader"
+        ).lower()
+        extra_context = set(cache_context) - {
+            "tenant_id",
+            "tenant",
+            "branch",
+            "role",
+            "mnemosyne_role",
+        }
+        default_reader_sensitivity = effective_max_sensitivity(
+            {"role": "reader"}, self.policy.max_sensitivity
+        )
         if (
             include_quarantined
             or max_trust != int(self.policy.max_trust_tier)
@@ -4973,7 +5857,9 @@ class PostgresEngine:
             or extra_context
         ):
             return None
-        relation_fingerprint = self._graph_ppr_relation_fingerprint(db_tenant_id, branch, moment)
+        relation_fingerprint = self._graph_ppr_relation_fingerprint(
+            db_tenant_id, branch, moment
+        )
         seed_hash = _graph_ppr_seed_hash(seed_set)
         as_of_key = _graph_ppr_as_of_key(as_of, moment)
         with self.connect() as conn:
@@ -5001,7 +5887,9 @@ class PostgresEngine:
             hits.append(Hit(**data))
         return hits
 
-    def _graph_ppr_relation_fingerprint(self, db_tenant_id: str, branch: str, moment: datetime) -> str:
+    def _graph_ppr_relation_fingerprint(
+        self, db_tenant_id: str, branch: str, moment: datetime
+    ) -> str:
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
@@ -5020,7 +5908,11 @@ class PostgresEngine:
                 source_cid_bytes: set[bytes] = set()
                 for row in rows:
                     for cid_value in row.get("source_evidence_cids") or []:
-                        raw = cid_value.tobytes() if isinstance(cid_value, memoryview) else cid_value
+                        raw = (
+                            cid_value.tobytes()
+                            if isinstance(cid_value, memoryview)
+                            else cid_value
+                        )
                         if raw:
                             source_cid_bytes.add(bytes(raw))
                 evidence_by_cid: dict[str, dict[str, Any]] = {}
@@ -5035,7 +5927,9 @@ class PostgresEngine:
                         """,
                         (db_tenant_id, branch, sorted(source_cid_bytes)),
                     )
-                    evidence_by_cid = {_bytes_to_cid(row["cid"]): dict(row) for row in cur.fetchall()}
+                    evidence_by_cid = {
+                        _bytes_to_cid(row["cid"]): dict(row) for row in cur.fetchall()
+                    }
         payload = [
             {
                 "id": str(row["id"]),
@@ -5046,24 +5940,48 @@ class PostgresEngine:
                 "weight": float(row["weight"]),
                 "valid_from": dt_to_json(row["valid_from"]),
                 "valid_to": dt_to_json(row["valid_to"]),
-                "source_evidence_cids": _bytes_list_to_cids(row["source_evidence_cids"]),
+                "source_evidence_cids": _bytes_list_to_cids(
+                    row["source_evidence_cids"]
+                ),
                 "access_policy": dict(row.get("access_policy") or {}),
                 "source_evidence_custody": [
                     {
                         "cid": cid,
                         "present": cid in evidence_by_cid,
-                        "trust_tier": int(evidence_by_cid[cid].get("trust_tier") or 0) if cid in evidence_by_cid else None,
-                        "sensitivity": int(evidence_by_cid[cid].get("sensitivity") or 0) if cid in evidence_by_cid else None,
-                        "metadata": dict(evidence_by_cid[cid].get("metadata") or {}) if cid in evidence_by_cid else None,
-                        "erased": bool(evidence_by_cid[cid].get("erased")) if cid in evidence_by_cid else None,
-                        "retired_at": iso_utc(evidence_by_cid[cid].get("retired_at")) if cid in evidence_by_cid else None,
-                        "document_segment_id": evidence_by_cid[cid].get("document_segment_id") if cid in evidence_by_cid else None,
-                        "user_id": evidence_by_cid[cid].get("user_id") if cid in evidence_by_cid else None,
-                        "source_type": str(evidence_by_cid[cid].get("source_type") or "")
+                        "trust_tier": int(evidence_by_cid[cid].get("trust_tier") or 0)
                         if cid in evidence_by_cid
                         else None,
-                        "actor": str(evidence_by_cid[cid].get("actor") or "") if cid in evidence_by_cid else None,
-                        "access_policy": dict(evidence_by_cid[cid].get("access_policy") or {})
+                        "sensitivity": int(evidence_by_cid[cid].get("sensitivity") or 0)
+                        if cid in evidence_by_cid
+                        else None,
+                        "metadata": dict(evidence_by_cid[cid].get("metadata") or {})
+                        if cid in evidence_by_cid
+                        else None,
+                        "erased": bool(evidence_by_cid[cid].get("erased"))
+                        if cid in evidence_by_cid
+                        else None,
+                        "retired_at": iso_utc(evidence_by_cid[cid].get("retired_at"))
+                        if cid in evidence_by_cid
+                        else None,
+                        "document_segment_id": evidence_by_cid[cid].get(
+                            "document_segment_id"
+                        )
+                        if cid in evidence_by_cid
+                        else None,
+                        "user_id": evidence_by_cid[cid].get("user_id")
+                        if cid in evidence_by_cid
+                        else None,
+                        "source_type": str(
+                            evidence_by_cid[cid].get("source_type") or ""
+                        )
+                        if cid in evidence_by_cid
+                        else None,
+                        "actor": str(evidence_by_cid[cid].get("actor") or "")
+                        if cid in evidence_by_cid
+                        else None,
+                        "access_policy": dict(
+                            evidence_by_cid[cid].get("access_policy") or {}
+                        )
                         if cid in evidence_by_cid
                         else None,
                     }
@@ -5072,10 +5990,19 @@ class PostgresEngine:
             }
             for row in rows
         ]
-        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
         return sha256(encoded).hexdigest()
 
-    def as_of(self, subject: str, predicate: str, t: datetime, tenant_id: str | None = None, branch: str = "main") -> list[Assertion]:
+    def as_of(
+        self,
+        subject: str,
+        predicate: str,
+        t: datetime,
+        tenant_id: str | None = None,
+        branch: str = "main",
+    ) -> list[Assertion]:
         moment = t.astimezone(UTC) if t.tzinfo else t.replace(tzinfo=UTC)
         if not tenant_id:
             raise ValueError("PostgresEngine.as_of requires tenant_id")
@@ -5140,7 +6067,12 @@ class PostgresEngine:
                                   target_coverage = EXCLUDED.target_coverage,
                                   updated_at = now()
                     """,
-                    (db_tenant_id, calibration.memory_type, list(calibration.scores), calibration.target_coverage),
+                    (
+                        db_tenant_id,
+                        calibration.memory_type,
+                        list(calibration.scores),
+                        calibration.target_coverage,
+                    ),
                 )
                 self._audit(
                     cur,
@@ -5148,10 +6080,15 @@ class PostgresEngine:
                     "engine",
                     "set_calibration",
                     None,
-                    {"memory_type": calibration.memory_type, "scores": len(calibration.scores)},
+                    {
+                        "memory_type": calibration.memory_type,
+                        "scores": len(calibration.scores),
+                    },
                 )
         with self._calibration_cache_lock:
-            self._calibration_cache[(calibration.tenant_id, calibration.memory_type)] = copy.deepcopy(calibration)
+            self._calibration_cache[
+                (calibration.tenant_id, calibration.memory_type)
+            ] = copy.deepcopy(calibration)
 
     def register_entity(
         self,
@@ -5170,7 +6107,9 @@ class PostgresEngine:
             tenant_id=tenant_id,
             location="entity.access_policy",
         )
-        aliases = sorted({canonical, *([" ".join(alias.split())] if alias and alias.strip() else [])})
+        aliases = sorted(
+            {canonical, *([" ".join(alias.split())] if alias and alias.strip() else [])}
+        )
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         self.ensure_tenant_and_branch(tenant_id, "main")
         with self.connect() as conn:
@@ -5195,7 +6134,10 @@ class PostgresEngine:
                         location="entity.access_policy",
                     )
                     effective_access_policy = (
-                        merge_access_policies([current_access_policy, incoming_access_policy], tenant_id=tenant_id)
+                        merge_access_policies(
+                            [current_access_policy, incoming_access_policy],
+                            tenant_id=tenant_id,
+                        )
                         if access_policy is not None
                         else current_access_policy
                     )
@@ -5237,7 +6179,14 @@ class PostgresEngine:
                         """,
                         (db_tenant_id, alias_value, row["id"]),
                     )
-                self._audit(cur, db_tenant_id, "engine", "register_entity", str(row["id"]), {"canonical": canonical})
+                self._audit(
+                    cur,
+                    db_tenant_id,
+                    "engine",
+                    "register_entity",
+                    str(row["id"]),
+                    {"canonical": canonical},
+                )
         return {
             "id": str(row["id"]),
             "tenant_id": tenant_id,
@@ -5251,7 +6200,9 @@ class PostgresEngine:
             "updated_at": dt_to_json(row["updated_at"]),
         }
 
-    def _calibration_for(self, tenant_id: str, memory_type: str) -> CalibrationSet | None:
+    def _calibration_for(
+        self, tenant_id: str, memory_type: str
+    ) -> CalibrationSet | None:
         cache_key = (tenant_id, memory_type)
         with self._calibration_cache_lock:
             cached = self._calibration_cache.get(cache_key)
@@ -5284,7 +6235,9 @@ class PostgresEngine:
         return calibration
 
     @staticmethod
-    def _calibration_explain(calibration: CalibrationSet | None, threshold: float) -> dict[str, Any]:
+    def _calibration_explain(
+        calibration: CalibrationSet | None, threshold: float
+    ) -> dict[str, Any]:
         if calibration is None:
             return {
                 "source": "policy",
@@ -5354,7 +6307,9 @@ class PostgresEngine:
                     for cid_bytes, metadata_raw in rows:
                         metadata = dict(metadata_raw or {})
                         lifecycle = metadata.get("lifecycle")
-                        lifecycle = dict(lifecycle) if isinstance(lifecycle, dict) else {}
+                        lifecycle = (
+                            dict(lifecycle) if isinstance(lifecycle, dict) else {}
+                        )
                         try:
                             access_count = int(lifecycle.get("access_count", 0))
                         except (TypeError, ValueError):
@@ -5407,14 +6362,21 @@ class PostgresEngine:
         explicit = cls._normalise_reality_class(ev.metadata.get("reality_class"))
         source_type = ev.source_type.lower()
         actor = ev.actor.lower()
-        if any(marker in source_type for marker in ("simulation", "synthetic", "generated", "hypothesis")):
+        if any(
+            marker in source_type
+            for marker in ("simulation", "synthetic", "generated", "hypothesis")
+        ):
             base_class = "simulated"
-        elif any(marker in source_type for marker in ("summary", "trace", "analysis", "consolidation")):
+        elif any(
+            marker in source_type
+            for marker in ("summary", "trace", "analysis", "consolidation")
+        ):
             base_class = "self_generated"
         elif actor == "assistant":
             base_class = "self_generated"
         elif actor in {"system", "tool"} and any(
-            marker in source_type for marker in ("scratchpad", "workspace", "thought", "reflection")
+            marker in source_type
+            for marker in ("scratchpad", "workspace", "thought", "reflection")
         ):
             base_class = "self_generated"
         elif actor == "external" or ev.trust_tier >= int(TrustTier.LOW):
@@ -5426,19 +6388,28 @@ class PostgresEngine:
         return explicit or base_class
 
     @classmethod
-    def _classify_evidence_row_reality(cls, row: dict[str, Any], metadata: dict[str, Any]) -> str:
+    def _classify_evidence_row_reality(
+        cls, row: dict[str, Any], metadata: dict[str, Any]
+    ) -> str:
         explicit = cls._normalise_reality_class(metadata.get("reality_class"))
         source_type = str(row.get("source_type") or "").lower()
         actor = str(row.get("actor") or "").lower()
         trust_tier = int(row.get("trust_tier") or 0)
-        if any(marker in source_type for marker in ("simulation", "synthetic", "generated", "hypothesis")):
+        if any(
+            marker in source_type
+            for marker in ("simulation", "synthetic", "generated", "hypothesis")
+        ):
             base_class = "simulated"
-        elif any(marker in source_type for marker in ("summary", "trace", "analysis", "consolidation")):
+        elif any(
+            marker in source_type
+            for marker in ("summary", "trace", "analysis", "consolidation")
+        ):
             base_class = "self_generated"
         elif actor == "assistant":
             base_class = "self_generated"
         elif actor in {"system", "tool"} and any(
-            marker in source_type for marker in ("scratchpad", "workspace", "thought", "reflection")
+            marker in source_type
+            for marker in ("scratchpad", "workspace", "thought", "reflection")
         ):
             base_class = "self_generated"
         elif actor == "external" or trust_tier >= int(TrustTier.LOW):
@@ -5498,7 +6469,10 @@ class PostgresEngine:
                             """,
                             (db_tenant_id, branch, source_cid_bytes),
                         )
-                        evidence_by_cid = {_bytes_to_cid(row["cid"]): dict(row) for row in cur.fetchall()}
+                        evidence_by_cid = {
+                            _bytes_to_cid(row["cid"]): dict(row)
+                            for row in cur.fetchall()
+                        }
             except PostgresUnavailableError:
                 evidence_by_cid = {}
             except self._psycopg.Error:
@@ -5510,7 +6484,9 @@ class PostgresEngine:
                 continue
             source_cids = source_cids_by_hit.get(hit.id, [])
             source_cid_bytes = [
-                cid_bytes for cid in source_cids if (cid_bytes := _cid_bytes_or_none(cid)) is not None
+                cid_bytes
+                for cid in source_cids
+                if (cid_bytes := _cid_bytes_or_none(cid)) is not None
             ]
             security = self._relation_hit_security_from_rows(
                 {"source_evidence_cids": source_cid_bytes},
@@ -5564,15 +6540,23 @@ class PostgresEngine:
             tenant_id = str(context.get("tenant_id") or "")
             branch = str(context.get("branch") or "main")
             if not derived_evidence_readable(
-                self, {**row, "cid": cid, "tenant_id": tenant_id, "branch": branch},
-                tenant_id=tenant_id, branch=branch,
-                filt={**context, "include_quarantined": include_quarantined,
-                      "max_trust_tier": max_trust, "max_sensitivity": max_sensitivity},
+                self,
+                {**row, "cid": cid, "tenant_id": tenant_id, "branch": branch},
+                tenant_id=tenant_id,
+                branch=branch,
+                filt={
+                    **context,
+                    "include_quarantined": include_quarantined,
+                    "max_trust_tier": max_trust,
+                    "max_sensitivity": max_sensitivity,
+                },
                 policy=self.policy,
             ):
                 return None
             decision = may_read_item(
-                item_tenant_id=str(access_context.get("tenant_id") if access_context else ""),
+                item_tenant_id=str(
+                    access_context.get("tenant_id") if access_context else ""
+                ),
                 sensitivity=int(row.get("sensitivity") or 0),
                 access_policy=dict(row.get("access_policy") or {}),
                 context=access_context or {},
@@ -5588,7 +6572,10 @@ class PostgresEngine:
         if trust_tier > max_trust or sensitivity > max_sensitivity:
             return None
 
-        reality_classes = [self._classify_evidence_row_reality(row, metadata) for _, row, metadata in source_rows]
+        reality_classes = [
+            self._classify_evidence_row_reality(row, metadata)
+            for _, row, metadata in source_rows
+        ]
         corroboration = self._independent_corroboration_report_from_rows(
             [row for _, row, _ in source_rows],
             missing_cids=[],
@@ -5612,10 +6599,18 @@ class PostgresEngine:
         }
 
     def _standing_signals_for_hit(self, hit: Hit, reality_class: str) -> dict[str, Any]:
-        activation = hit.metadata.get("activation") if isinstance(hit.metadata, dict) else {}
-        lifecycle = hit.metadata.get("lifecycle") if isinstance(hit.metadata, dict) else {}
+        activation = (
+            hit.metadata.get("activation") if isinstance(hit.metadata, dict) else {}
+        )
+        lifecycle = (
+            hit.metadata.get("lifecycle") if isinstance(hit.metadata, dict) else {}
+        )
         lifecycle = lifecycle if isinstance(lifecycle, dict) else {}
-        earned_autonomy = hit.metadata.get("earned_autonomy") if isinstance(hit.metadata, dict) else {}
+        earned_autonomy = (
+            hit.metadata.get("earned_autonomy")
+            if isinstance(hit.metadata, dict)
+            else {}
+        )
         earned_autonomy = earned_autonomy if isinstance(earned_autonomy, dict) else {}
         source_cids = self._hit_source_evidence_cids(hit)
         if hit.kind == "evidence" and hit.id:
@@ -5654,17 +6649,33 @@ class PostgresEngine:
                 trust_tier=int(hit.trust_tier) if hit.trust_tier is not None else 5,
             ),
             "corroboration_count": len(source_cids),
-            "independent_corroboration_count": corroboration["independent_corroboration_count"],
-            "independent_corroboration_weight": corroboration["independent_corroboration_weight"],
-            "self_generated_corroboration_count": corroboration["self_generated_corroboration_count"],
-            "rejected_corroboration_count": corroboration["rejected_corroboration_count"],
-            "contradiction_pressure": 1.0 if hit.metadata.get("status") == "contested" else 0.0,
-            "groundedness_decay": lifecycle.get("decay", lifecycle.get("groundedness_decay", 0.0)),
-            "activation": activation.get("score") if isinstance(activation, dict) else 0.0,
+            "independent_corroboration_count": corroboration[
+                "independent_corroboration_count"
+            ],
+            "independent_corroboration_weight": corroboration[
+                "independent_corroboration_weight"
+            ],
+            "self_generated_corroboration_count": corroboration[
+                "self_generated_corroboration_count"
+            ],
+            "rejected_corroboration_count": corroboration[
+                "rejected_corroboration_count"
+            ],
+            "contradiction_pressure": 1.0
+            if hit.metadata.get("status") == "contested"
+            else 0.0,
+            "groundedness_decay": lifecycle.get(
+                "decay", lifecycle.get("groundedness_decay", 0.0)
+            ),
+            "activation": activation.get("score")
+            if isinstance(activation, dict)
+            else 0.0,
             "lifecycle_salience": lifecycle.get("salience", 0.0),
             "birth_groundedness": earned_autonomy.get(
                 "birth_groundedness",
-                hit.metadata.get("birth_groundedness") if isinstance(hit.metadata, dict) else None,
+                hit.metadata.get("birth_groundedness")
+                if isinstance(hit.metadata, dict)
+                else None,
             ),
         }
 
@@ -5690,20 +6701,28 @@ class PostgresEngine:
             ]
             return {
                 "independent_corroboration_count": len(accepted),
-                "independent_corroboration_weight": round(min(weight * len(accepted), 5.0) / 5.0, 6),
+                "independent_corroboration_weight": round(
+                    min(weight * len(accepted), 5.0) / 5.0, 6
+                ),
                 "self_generated_corroboration_count": 0,
                 "rejected_corroboration_count": 0,
                 "accepted_corroborators": accepted,
                 "rejected_corroborators": [],
             }
         rejected = [
-            {"cid": cid, "reason": f"not_grounded:{reality_class}", "reality_class": reality_class}
+            {
+                "cid": cid,
+                "reason": f"not_grounded:{reality_class}",
+                "reality_class": reality_class,
+            }
             for cid in source_cids
         ]
         return {
             "independent_corroboration_count": 0,
             "independent_corroboration_weight": 0.0,
-            "self_generated_corroboration_count": len(source_cids) if reality_class in {"self_generated", "simulated"} else 0,
+            "self_generated_corroboration_count": len(source_cids)
+            if reality_class in {"self_generated", "simulated"}
+            else 0,
             "rejected_corroboration_count": len(rejected),
             "accepted_corroborators": [],
             "rejected_corroborators": rejected,
@@ -5735,7 +6754,9 @@ class PostgresEngine:
             rows = []
         found = {_bytes_to_cid(row["cid"]) for row in rows}
         missing = [cid for cid in source_cids if cid not in found]
-        return self._independent_corroboration_report_from_rows(rows, missing_cids=missing)
+        return self._independent_corroboration_report_from_rows(
+            rows, missing_cids=missing
+        )
 
     def _independent_corroboration_report_from_rows(
         self,
@@ -5756,7 +6777,9 @@ class PostgresEngine:
                 reason = "erased"
             elif metadata.get("quarantine_reason"):
                 reason = "quarantined"
-            elif row.get("retired_at") is not None or is_retired_summary_metadata(metadata):
+            elif row.get("retired_at") is not None or is_retired_summary_metadata(
+                metadata
+            ):
                 reason = "retired"
             elif is_write_tainted(list(row.get("capability_tags") or [])):
                 reason = "sanitized_data_only"
@@ -5771,7 +6794,9 @@ class PostgresEngine:
             if reason is None and root in roots:
                 reason = "duplicate_source_root"
             if reason is not None:
-                rejected.append({"cid": cid, "reason": reason, "reality_class": reality_class})
+                rejected.append(
+                    {"cid": cid, "reason": reason, "reality_class": reality_class}
+                )
                 continue
             roots.add(root)
             trust_tier = int(row.get("trust_tier") or 0)
@@ -5786,7 +6811,9 @@ class PostgresEngine:
                 }
             )
         for cid in missing_cids:
-            rejected.append({"cid": cid, "reason": "missing", "reality_class": "unknown"})
+            rejected.append(
+                {"cid": cid, "reason": "missing", "reality_class": "unknown"}
+            )
         return {
             "independent_corroboration_count": len(accepted),
             "independent_corroboration_weight": round(min(trust_sum, 5.0) / 5.0, 6),
@@ -5806,13 +6833,18 @@ class PostgresEngine:
         )
         for key in keys:
             value = metadata.get(key)
-            if isinstance(value, list | tuple | set) and any(str(item) for item in value):
+            if isinstance(value, list | tuple | set) and any(
+                str(item) for item in value
+            ):
                 return True
             if isinstance(value, str) and value.strip():
                 return True
         provenance = metadata.get("provenance")
         if isinstance(provenance, dict):
-            return bool(provenance.get("self_generated") or provenance.get("self_generated_ancestor"))
+            return bool(
+                provenance.get("self_generated")
+                or provenance.get("self_generated_ancestor")
+            )
         return False
 
     @staticmethod
@@ -5823,7 +6855,10 @@ class PostgresEngine:
     def _apply_standing_scores(self, hits: list[Hit]) -> list[Hit]:
         weighted: list[Hit] = []
         for hit in hits:
-            reality_class = self._normalise_reality_class(hit.metadata.get("reality_class")) or "unknown"
+            reality_class = (
+                self._normalise_reality_class(hit.metadata.get("reality_class"))
+                or "unknown"
+            )
             score = standing(self._standing_signals_for_hit(hit, reality_class))
             multiplier = 0.75 + 0.20 * score.groundedness + 0.05 * score.salience
             source_cids = self._hit_source_evidence_cids(hit)
@@ -5885,7 +6920,10 @@ class PostgresEngine:
         standing_rows: list[dict[str, Any]] = []
         monitor = RealityMonitor()
         for index, hit in enumerate(hits):
-            reality_class = self._normalise_reality_class(hit.metadata.get("reality_class")) or "unknown"
+            reality_class = (
+                self._normalise_reality_class(hit.metadata.get("reality_class"))
+                or "unknown"
+            )
             counts[reality_class] = counts.get(reality_class, 0) + 1
             tag = self._shadow_reality_monitor_tag(monitor, hit)
             shadow_tags[hit.id or f"{hit.kind}:{index}"] = tag
@@ -5910,12 +6948,17 @@ class PostgresEngine:
             )
         hit_count = len(hits)
         grounded = counts.get("grounded", 0)
-        ungrounded_only = hit_count > 0 and grounded == 0 and any(counts.get(item, 0) for item in ungrounded)
+        ungrounded_only = (
+            hit_count > 0
+            and grounded == 0
+            and any(counts.get(item, 0) for item in ungrounded)
+        )
         standing_report = standing_abstention_report(standing_rows)
         standing_report["p1_mirror"] = {
             "boolean_ungrounded_only": ungrounded_only,
             "standing_ungrounded_only": standing_report["abstention_gate"]["active"],
-            "zero_divergence": standing_report["abstention_gate"]["active"] is ungrounded_only,
+            "zero_divergence": standing_report["abstention_gate"]["active"]
+            is ungrounded_only,
         }
         standing_report["legacy_reality_monitoring"] = {
             "ungrounded_only": ungrounded_only,
@@ -5944,7 +6987,9 @@ class PostgresEngine:
         }
 
     @staticmethod
-    def _shadow_reality_monitor_tag(monitor: RealityMonitor, hit: Hit) -> dict[str, Any]:
+    def _shadow_reality_monitor_tag(
+        monitor: RealityMonitor, hit: Hit
+    ) -> dict[str, Any]:
         metadata = hit.metadata if isinstance(hit.metadata, dict) else {}
         tag = monitor.tag(
             source_type=str(metadata.get("source_type") or hit.kind),
@@ -5953,11 +6998,16 @@ class PostgresEngine:
             metadata={"reality_class": metadata.get("reality_class")},
             provenance_count=len(hit.provenance),
         )
-        explicit_class = str(metadata.get("reality_class") or "").strip().lower().replace("-", "_")
+        explicit_class = (
+            str(metadata.get("reality_class") or "").strip().lower().replace("-", "_")
+        )
         source_type = str(metadata.get("source_type") or hit.kind).strip().lower()
         preserve_simulated = explicit_class in {"simulated", "simulation"} and (
             hit.kind == "assertion"
-            or any(marker in source_type for marker in ("simulation", "synthetic", "generated", "hypothesis"))
+            or any(
+                marker in source_type
+                for marker in ("simulation", "synthetic", "generated", "hypothesis")
+            )
         )
         reality_class = "simulated" if preserve_simulated else tag.reality_class
         return {
@@ -5968,8 +7018,13 @@ class PostgresEngine:
         }
 
     @staticmethod
-    def _merge_schema_fast_path_reports(first: dict[str, Any], second: dict[str, Any]) -> dict[str, Any]:
-        boosted = sorted(set(first.get("boosted_hit_ids") or []) | set(second.get("boosted_hit_ids") or []))
+    def _merge_schema_fast_path_reports(
+        first: dict[str, Any], second: dict[str, Any]
+    ) -> dict[str, Any]:
+        boosted = sorted(
+            set(first.get("boosted_hit_ids") or [])
+            | set(second.get("boosted_hit_ids") or [])
+        )
         reasons: dict[str, Any] = {}
         if isinstance(first.get("reasons"), dict):
             reasons.update(first["reasons"])
@@ -5983,10 +7038,20 @@ class PostgresEngine:
             "passes": [first, second],
         }
 
-    def deep_search(self, query: str, tenant_id: str, branch: str = "main", filt: dict[str, Any] | None = None) -> RetrievalResult:
-        return self.retrieve(query=query, tenant_id=tenant_id, branch=branch, deep=True, filt=filt)
+    def deep_search(
+        self,
+        query: str,
+        tenant_id: str,
+        branch: str = "main",
+        filt: dict[str, Any] | None = None,
+    ) -> RetrievalResult:
+        return self.retrieve(
+            query=query, tenant_id=tenant_id, branch=branch, deep=True, filt=filt
+        )
 
-    def explain(self, query: str, tenant_id: str, branch: str = "main") -> dict[str, Any]:
+    def explain(
+        self, query: str, tenant_id: str, branch: str = "main"
+    ) -> dict[str, Any]:
         return self.deep_search(query, tenant_id, branch=branch).to_dict()
 
     def correct(
@@ -6053,10 +7118,16 @@ class PostgresEngine:
             try:
                 purge()
             except Exception:  # Cache cleanup cannot undo durable erasure.
-                logger.warning("embedding cache purge failed after source erasure", exc_info=True)
+                logger.warning(
+                    "embedding cache purge failed after source erasure", exc_info=True
+                )
 
     def _forget(
-        self, tenant_id: str, cid: str, branch: str, requested_by: str,
+        self,
+        tenant_id: str,
+        cid: str,
+        branch: str,
+        requested_by: str,
         erasure_mode: ErasureMode | str,
     ) -> dict[str, Any]:
         mode = ErasureMode(erasure_mode)
@@ -6092,7 +7163,12 @@ class PostgresEngine:
                 )
                 evidence_row = cur.fetchone()
                 if not evidence_row:
-                    return {"erased": False, "reason": "evidence_not_found", "cid": cid, "erasure_mode": mode.value}
+                    return {
+                        "erased": False,
+                        "reason": "evidence_not_found",
+                        "cid": cid,
+                        "erasure_mode": mode.value,
+                    }
                 cur.execute(
                     """
                     SELECT cid, metadata, source_type
@@ -6104,9 +7180,15 @@ class PostgresEngine:
                     (db_tenant_id, branch, cid_bytes),
                 )
                 candidate_rows = list(cur.fetchall())
-                candidates = [(bytes(row["cid"]), dict(row["metadata"] or {})) for row in candidate_rows]
+                candidates = [
+                    (bytes(row["cid"]), dict(row["metadata"] or {}))
+                    for row in candidate_rows
+                ]
                 cascade_metadata: dict[str, dict[str, Any]] = {
-                    cid: {**dict(evidence_row.get("metadata") or {}), "source_type": evidence_row["source_type"]}
+                    cid: {
+                        **dict(evidence_row.get("metadata") or {}),
+                        "source_type": evidence_row["source_type"],
+                    }
                 }
                 for row in candidate_rows:
                     row_cid = _bytes_to_cid(row["cid"])
@@ -6114,22 +7196,37 @@ class PostgresEngine:
                         **dict(row.get("metadata") or {}),
                         "source_type": row.get("source_type") or "",
                     }
-                legal_blind = mode is ErasureMode.HARD_DELETE_LEGAL and requested_by == "legal"
+                legal_blind = (
+                    mode is ErasureMode.HARD_DELETE_LEGAL and requested_by == "legal"
+                )
                 if legal_blind:
-                    derived_cid_bytes, derived_cids, retained_metadata = _derived_evidence_forget_plan(
-                        cid,
-                        candidates,
-                        legal_blind=True,
+                    derived_cid_bytes, derived_cids, retained_metadata = (
+                        _derived_evidence_forget_plan(
+                            cid,
+                            candidates,
+                            legal_blind=True,
+                        )
                     )
                 else:
-                    derived_cid_bytes, derived_cids, retained_metadata = _derived_evidence_forget_plan(cid, candidates, source_types={key: str(value.get("source_type") or "") for key, value in cascade_metadata.items()})
+                    derived_cid_bytes, derived_cids, retained_metadata = (
+                        _derived_evidence_forget_plan(
+                            cid,
+                            candidates,
+                            source_types={
+                                key: str(value.get("source_type") or "")
+                                for key, value in cascade_metadata.items()
+                            },
+                        )
+                    )
                 affected_cids = {cid, *derived_cids}
                 affected_cid_bytes = [cid_bytes, *derived_cid_bytes]
                 propagated["erased_derived_evidence"] = derived_cids
                 propagated["retained_derived_evidence"] = sorted(
                     _bytes_to_cid(item) for item in retained_metadata
                 )
-                propagated["trimmed_derived_evidence"] = list(propagated["retained_derived_evidence"])
+                propagated["trimmed_derived_evidence"] = list(
+                    propagated["retained_derived_evidence"]
+                )
                 cur.execute(
                     """
                     SELECT item_id
@@ -6143,14 +7240,17 @@ class PostgresEngine:
                 retained_cascade_metadata = {
                     _bytes_to_cid(retained_bytes): {
                         **dict(metadata),
-                        "source_type": cascade_metadata.get(_bytes_to_cid(retained_bytes), {}).get("source_type", ""),
+                        "source_type": cascade_metadata.get(
+                            _bytes_to_cid(retained_bytes), {}
+                        ).get("source_type", ""),
                     }
                     for retained_bytes, metadata in retained_metadata.items()
                 }
                 propagated["standing_cascade"] = standing_erasure_cascade_report(
                     source_cid=cid,
                     erasure_mode=mode.value,
-                    affected_cids=affected_cids | set(propagated["retained_derived_evidence"]),
+                    affected_cids=affected_cids
+                    | set(propagated["retained_derived_evidence"]),
                     erased_derived_cids=derived_cids,
                     retained_metadata_by_cid=retained_cascade_metadata,
                     metadata_by_cid=cascade_metadata,
@@ -6171,7 +7271,11 @@ class PostgresEngine:
                     blocking: list[str] = []
                     for row in cur.fetchall():
                         sources = set(_bytes_list_to_cids(row["source_evidence_cids"]))
-                        if sources and sources <= affected_cids and len(sources) < minimum:
+                        if (
+                            sources
+                            and sources <= affected_cids
+                            and len(sources) < minimum
+                        ):
                             blocking.append(str(row["id"]))
                     if blocking:
                         return {
@@ -6244,7 +7348,11 @@ class PostgresEngine:
                     (db_tenant_id, branch, affected_cid_bytes),
                 )
                 for row in cur.fetchall():
-                    sources = [item for item in _bytes_list_to_cids(row["source_evidence_cids"]) if item not in affected_cids]
+                    sources = [
+                        item
+                        for item in _bytes_list_to_cids(row["source_evidence_cids"])
+                        if item not in affected_cids
+                    ]
                     if sources:
                         cur.execute(
                             "UPDATE assertions SET source_evidence_cids = %s WHERE id = %s",
@@ -6266,7 +7374,11 @@ class PostgresEngine:
                     (db_tenant_id, affected_cid_bytes),
                 )
                 for row in cur.fetchall():
-                    sources = [item for item in _bytes_list_to_cids(row["source_evidence_cids"]) if item not in affected_cids]
+                    sources = [
+                        item
+                        for item in _bytes_list_to_cids(row["source_evidence_cids"])
+                        if item not in affected_cids
+                    ]
                     if sources:
                         cur.execute(
                             "UPDATE preferences SET source_evidence_cids = %s WHERE id = %s",
@@ -6288,7 +7400,11 @@ class PostgresEngine:
                     (db_tenant_id, branch, affected_cid_bytes),
                 )
                 for row in cur.fetchall():
-                    sources = [item for item in _bytes_list_to_cids(row["source_evidence_cids"]) if item not in affected_cids]
+                    sources = [
+                        item
+                        for item in _bytes_list_to_cids(row["source_evidence_cids"])
+                        if item not in affected_cids
+                    ]
                     if sources:
                         cur.execute(
                             "UPDATE relations SET source_evidence_cids = %s WHERE id = %s",
@@ -6316,7 +7432,11 @@ class PostgresEngine:
                     (db_tenant_id, affected_cid_bytes),
                 )
                 for row in cur.fetchall():
-                    sources = [item for item in _bytes_list_to_cids(row["source_evidence_cids"]) if item not in affected_cids]
+                    sources = [
+                        item
+                        for item in _bytes_list_to_cids(row["source_evidence_cids"])
+                        if item not in affected_cids
+                    ]
                     if sources:
                         cur.execute(
                             "UPDATE entities SET source_evidence_cids = %s, updated_at = now() WHERE id = %s",
@@ -6351,10 +7471,14 @@ class PostgresEngine:
                 # dict RETURNED to the caller keeps the real cids. tombstone_recompute
                 # keeps the cid (the tombstone row lives in the ledger).
                 if mode is ErasureMode.HARD_DELETE_LEGAL:
-                    placeholder_map = build_erasure_placeholder_map({cid, *derived_cids}, tenant_id)
+                    placeholder_map = build_erasure_placeholder_map(
+                        {cid, *derived_cids}, tenant_id
+                    )
                     stored_propagated = redact_erased_cids(propagated, placeholder_map)
                     deletion_cid_value = bytes.fromhex(
-                        erasure_deletion_record_id(cid, tenant_id, evidence_row.get("user_id") or "")
+                        erasure_deletion_record_id(
+                            cid, tenant_id, evidence_row.get("user_id") or ""
+                        )
                     )
                     audit_target_id = placeholder_map[cid]
                 else:
@@ -6379,14 +7503,25 @@ class PostgresEngine:
                     requested_by,
                     "forget",
                     audit_target_id,
-                    {**stored_propagated, "erasure_mode": mode.value, "source_type": evidence_row["source_type"]},
+                    {
+                        **stored_propagated,
+                        "erasure_mode": mode.value,
+                        "source_type": evidence_row["source_type"],
+                    },
                     source=evidence_row["source_type"],
                     trust_tier=evidence_row["trust_tier"],
                     capability_tags=list(evidence_row["capability_tags"] or []),
                 )
-        return {"erased": True, "cid": cid, "erasure_mode": mode.value, "propagated": propagated}
+        return {
+            "erased": True,
+            "cid": cid,
+            "erasure_mode": mode.value,
+            "propagated": propagated,
+        }
 
-    def list_raptor_summaries(self, tenant_id: str, branch: str = "main") -> list[Evidence]:
+    def list_raptor_summaries(
+        self, tenant_id: str, branch: str = "main"
+    ) -> list[Evidence]:
         """Return RAPTOR rows without materializing the tenant export."""
 
         db_tenant_id = _stable_uuid("tenant", tenant_id)
@@ -6404,7 +7539,10 @@ class PostgresEngine:
                     """,
                     (db_tenant_id, branch),
                 )
-                rows = [_row_to_evidence(row, _bytes_to_cid(row["cid"])) for row in cur.fetchall()]
+                rows = [
+                    _row_to_evidence(row, _bytes_to_cid(row["cid"]))
+                    for row in cur.fetchall()
+                ]
         return [row for row in rows if is_raptor_summary_item(row)]
 
     def export_tenant(self, tenant_id: str) -> dict[str, Any]:
@@ -6421,7 +7559,10 @@ class PostgresEngine:
                     """,
                     (db_tenant_id,),
                 )
-                evidence = [_row_to_evidence(row, _bytes_to_cid(row["cid"])).to_dict() for row in cur.fetchall()]
+                evidence = [
+                    _row_to_evidence(row, _bytes_to_cid(row["cid"])).to_dict()
+                    for row in cur.fetchall()
+                ]
                 cur.execute(
                     """
                     SELECT a.*, t.name AS tenant_name,
@@ -6440,9 +7581,15 @@ class PostgresEngine:
                     """,
                     (db_tenant_id,),
                 )
-                assertions = [_row_to_assertion(row).to_dict() for row in cur.fetchall()]
-                cur.execute("SELECT * FROM relations WHERE tenant_id = %s", (db_tenant_id,))
-                relations = [_row_to_relation(row, tenant_id).to_dict() for row in cur.fetchall()]
+                assertions = [
+                    _row_to_assertion(row).to_dict() for row in cur.fetchall()
+                ]
+                cur.execute(
+                    "SELECT * FROM relations WHERE tenant_id = %s", (db_tenant_id,)
+                )
+                relations = [
+                    _row_to_relation(row, tenant_id).to_dict() for row in cur.fetchall()
+                ]
                 cur.execute(
                     """
                     SELECT p.*, t.name AS tenant_name,
@@ -6460,12 +7607,20 @@ class PostgresEngine:
                     """,
                     (db_tenant_id,),
                 )
-                preferences = [_row_to_preference(row, tenant_id).to_dict() for row in cur.fetchall()]
-                cur.execute("SELECT * FROM justifications WHERE tenant_id = %s ORDER BY id", (db_tenant_id,))
+                preferences = [
+                    _row_to_preference(row, tenant_id).to_dict()
+                    for row in cur.fetchall()
+                ]
+                cur.execute(
+                    "SELECT * FROM justifications WHERE tenant_id = %s ORDER BY id",
+                    (db_tenant_id,),
+                )
                 justifications = [
                     {
                         "tenant_id": tenant_id,
-                        "assertion_id": str(row["assertion_id"]) if row["assertion_id"] else None,
+                        "assertion_id": str(row["assertion_id"])
+                        if row["assertion_id"]
+                        else None,
                         "evidence_cids": _bytes_list_to_cids(row["evidence_cids"]),
                         "rule": row["rule"],
                         "dependency_ids": [str(item) for item in row["dependency_ids"]],
@@ -6476,7 +7631,10 @@ class PostgresEngine:
                     }
                     for row in cur.fetchall()
                 ]
-                cur.execute("SELECT * FROM contradictions WHERE tenant_id = %s ORDER BY detected_at, id", (db_tenant_id,))
+                cur.execute(
+                    "SELECT * FROM contradictions WHERE tenant_id = %s ORDER BY detected_at, id",
+                    (db_tenant_id,),
+                )
                 contradictions = [
                     {
                         "tenant_id": tenant_id,
@@ -6489,9 +7647,13 @@ class PostgresEngine:
                     }
                     for row in cur.fetchall()
                 ]
-                cur.execute("SELECT * FROM audit_log WHERE tenant_id = %s", (db_tenant_id,))
+                cur.execute(
+                    "SELECT * FROM audit_log WHERE tenant_id = %s", (db_tenant_id,)
+                )
                 audit = [_row_to_audit_log(row) for row in cur.fetchall()]
-                cur.execute("SELECT * FROM deletion_log WHERE tenant_id = %s", (db_tenant_id,))
+                cur.execute(
+                    "SELECT * FROM deletion_log WHERE tenant_id = %s", (db_tenant_id,)
+                )
                 deletion = [_json_safe(dict(row)) for row in cur.fetchall()]
                 cur.execute(
                     "SELECT frm, into_, report, at FROM merges WHERE tenant_id = %s ORDER BY at",
@@ -6506,7 +7668,10 @@ class PostgresEngine:
                     }
                     for row in cur.fetchall()
                 ]
-                cur.execute("SELECT * FROM conformal_calibration WHERE tenant_id = %s", (db_tenant_id,))
+                cur.execute(
+                    "SELECT * FROM conformal_calibration WHERE tenant_id = %s",
+                    (db_tenant_id,),
+                )
                 calibrations = [
                     {
                         "tenant_id": tenant_id,
@@ -6536,16 +7701,28 @@ class PostgresEngine:
                         "summary": row["summary"],
                         "salience": float(row["salience"]),
                         "aliases": sorted(row["aliases"]),
-                        "source_evidence_cids": _bytes_list_to_cids(row["source_evidence_cids"]),
+                        "source_evidence_cids": _bytes_list_to_cids(
+                            row["source_evidence_cids"]
+                        ),
                         "access_policy": dict(row["access_policy"] or {}),
                         "updated_at": dt_to_json(row["updated_at"]),
                     }
                     for row in cur.fetchall()
                 ]
-                intentions = [item.to_dict() for item in self.list_intentions(tenant_id)]
-                cur.execute("SELECT record FROM mental_models WHERE tenant_id = %s ORDER BY branch, model_id", (db_tenant_id,))
-                mental_models = [copy_model_json(row["record"]) for row in cur.fetchall()]
-                cur.execute("SELECT record FROM documents WHERE tenant_id = %s ORDER BY branch, owner_id, document_id", (db_tenant_id,))
+                intentions = [
+                    item.to_dict() for item in self.list_intentions(tenant_id)
+                ]
+                cur.execute(
+                    "SELECT record FROM mental_models WHERE tenant_id = %s ORDER BY branch, model_id",
+                    (db_tenant_id,),
+                )
+                mental_models = [
+                    copy_model_json(row["record"]) for row in cur.fetchall()
+                ]
+                cur.execute(
+                    "SELECT record FROM documents WHERE tenant_id = %s ORDER BY branch, owner_id, document_id",
+                    (db_tenant_id,),
+                )
                 documents = [copy.deepcopy(row["record"]) for row in cur.fetchall()]
                 self._ensure_observations_schema(cur)
                 self._ensure_knowledge_pages_schema(cur)
@@ -6559,7 +7736,10 @@ class PostgresEngine:
                     """,
                     (db_tenant_id,),
                 )
-                observations = [_row_to_observation(row, tenant_id).to_dict() for row in cur.fetchall()]
+                observations = [
+                    _row_to_observation(row, tenant_id).to_dict()
+                    for row in cur.fetchall()
+                ]
                 cur.execute(
                     """
                     SELECT kp.*, t.name AS tenant_name
@@ -6570,7 +7750,10 @@ class PostgresEngine:
                     """,
                     (db_tenant_id,),
                 )
-                knowledge_pages = [_row_to_knowledge_page(row, tenant_id).to_dict() for row in cur.fetchall()]
+                knowledge_pages = [
+                    _row_to_knowledge_page(row, tenant_id).to_dict()
+                    for row in cur.fetchall()
+                ]
                 cur.execute(
                     """
                     SELECT w.*, t.name AS tenant_name
@@ -6582,7 +7765,9 @@ class PostgresEngine:
                     """,
                     (db_tenant_id,),
                 )
-                working_memory = [self._working_from_row(row).to_dict() for row in cur.fetchall()]
+                working_memory = [
+                    self._working_from_row(row).to_dict() for row in cur.fetchall()
+                ]
         result = {
             "tenant_id": tenant_id,
             "evidence": evidence,
@@ -6605,14 +7790,20 @@ class PostgresEngine:
         }
         return result
 
-    def export_tenant_filtered(self, tenant_id: str, access_context: dict[str, Any]) -> dict[str, Any]:
+    def export_tenant_filtered(
+        self, tenant_id: str, access_context: dict[str, Any]
+    ) -> dict[str, Any]:
         return filter_export_for_context(
             self.export_tenant(tenant_id),
             {**dict(access_context or {}), "tenant_id": tenant_id},
             policy_max_sensitivity=self.policy.max_sensitivity,
             evidence_gate=lambda row: derived_evidence_readable(
-                self, row, tenant_id=tenant_id, branch=str(row.get("branch") or "main"),
-                filt={**dict(access_context or {}), "tenant_id": tenant_id}, policy=self.policy,
+                self,
+                row,
+                tenant_id=tenant_id,
+                branch=str(row.get("branch") or "main"),
+                filt={**dict(access_context or {}), "tenant_id": tenant_id},
+                policy=self.policy,
             ),
         )
 
@@ -6665,26 +7856,74 @@ class PostgresEngine:
         return {
             "policy": self.policy.to_dict(),
             "branches": branches,
-            "evidence": [item for exported in tenant_exports for item in exported["evidence"]],
-            "assertions": [item for exported in tenant_exports for item in exported["assertions"]],
-            "relations": [item for exported in tenant_exports for item in exported["relations"]],
-            "preferences": [item for exported in tenant_exports for item in exported["preferences"]],
-            "justifications": [item for exported in tenant_exports for item in exported["justifications"]],
-            "contradictions": [item for exported in tenant_exports for item in exported["contradictions"]],
-            "calibrations": [item for exported in tenant_exports for item in exported["calibrations"]],
-            "entities": [item for exported in tenant_exports for item in exported["entities"]],
-            "mental_models": [item for exported in tenant_exports for item in exported["mental_models"]],
-            "documents": [item for exported in tenant_exports for item in exported.get("documents", [])],
-            "observations": [item for exported in tenant_exports for item in exported.get("observations", [])],
-            "knowledge_pages": [item for exported in tenant_exports for item in exported.get("knowledge_pages", [])],
-            "audit_log": [item for exported in tenant_exports for item in exported["audit_log"]],
-            "deletion_log": [item for exported in tenant_exports for item in exported["deletion_log"]],
+            "evidence": [
+                item for exported in tenant_exports for item in exported["evidence"]
+            ],
+            "assertions": [
+                item for exported in tenant_exports for item in exported["assertions"]
+            ],
+            "relations": [
+                item for exported in tenant_exports for item in exported["relations"]
+            ],
+            "preferences": [
+                item for exported in tenant_exports for item in exported["preferences"]
+            ],
+            "justifications": [
+                item
+                for exported in tenant_exports
+                for item in exported["justifications"]
+            ],
+            "contradictions": [
+                item
+                for exported in tenant_exports
+                for item in exported["contradictions"]
+            ],
+            "calibrations": [
+                item for exported in tenant_exports for item in exported["calibrations"]
+            ],
+            "entities": [
+                item for exported in tenant_exports for item in exported["entities"]
+            ],
+            "mental_models": [
+                item
+                for exported in tenant_exports
+                for item in exported["mental_models"]
+            ],
+            "documents": [
+                item
+                for exported in tenant_exports
+                for item in exported.get("documents", [])
+            ],
+            "observations": [
+                item
+                for exported in tenant_exports
+                for item in exported.get("observations", [])
+            ],
+            "knowledge_pages": [
+                item
+                for exported in tenant_exports
+                for item in exported.get("knowledge_pages", [])
+            ],
+            "audit_log": [
+                item for exported in tenant_exports for item in exported["audit_log"]
+            ],
+            "deletion_log": [
+                item for exported in tenant_exports for item in exported["deletion_log"]
+            ],
             "merge_log": merge_log,
             "tenants": tenant_exports,
-            "working_memory": [item for t in tenant_exports for item in t.get("working_memory", [])],
+            "working_memory": [
+                item for t in tenant_exports for item in t.get("working_memory", [])
+            ],
         }
 
-    def branch(self, name: str, frm: str = "main", kind: str = "scratch", tenant_id: str | None = None) -> None:
+    def branch(
+        self,
+        name: str,
+        frm: str = "main",
+        kind: str = "scratch",
+        tenant_id: str | None = None,
+    ) -> None:
         if name == frm:
             return
         if not tenant_id:
@@ -6761,7 +8000,9 @@ class PostgresEngine:
                         (name, db_tenant_id, frm),
                     )
 
-    def merge(self, frm: str, into: str = "main", tenant_id: str | None = None) -> MergeReport:
+    def merge(
+        self, frm: str, into: str = "main", tenant_id: str | None = None
+    ) -> MergeReport:
         if not tenant_id:
             raise ValueError("PostgresEngine.merge requires tenant_id")
         report = MergeReport(frm, into, 0, 0, 0, 0, [])
@@ -6826,7 +8067,9 @@ class PostgresEngine:
                         cloned = _row_to_assertion(row)
                         cloned.id = assertion_id_map[str(row["id"])]
                         if cloned.superseded_by in assertion_id_map:
-                            cloned.superseded_by = assertion_id_map[cloned.superseded_by]
+                            cloned.superseded_by = assertion_id_map[
+                                cloned.superseded_by
+                            ]
                         cloned.branch = into
                         inserted_id = cloned.id
                         merged_id = self._upsert_assertion_with_cursor(
@@ -6956,10 +8199,22 @@ class PostgresEngine:
             with conn.cursor() as cur:
                 self._lock_working_tenant(cur, tenant_id)
                 self._set_tenant(cur, db_tenant_id)
-                cur.execute("DELETE FROM documents WHERE tenant_id = %s AND branch = %s", (db_tenant_id, branch))
-                cur.execute("DELETE FROM relations WHERE tenant_id = %s AND branch = %s", (db_tenant_id, branch))
-                cur.execute("DELETE FROM mental_models WHERE tenant_id = %s AND branch = %s", (db_tenant_id, branch))
-                cur.execute("DELETE FROM assertions WHERE tenant_id = %s AND branch = %s", (db_tenant_id, branch))
+                cur.execute(
+                    "DELETE FROM documents WHERE tenant_id = %s AND branch = %s",
+                    (db_tenant_id, branch),
+                )
+                cur.execute(
+                    "DELETE FROM relations WHERE tenant_id = %s AND branch = %s",
+                    (db_tenant_id, branch),
+                )
+                cur.execute(
+                    "DELETE FROM mental_models WHERE tenant_id = %s AND branch = %s",
+                    (db_tenant_id, branch),
+                )
+                cur.execute(
+                    "DELETE FROM assertions WHERE tenant_id = %s AND branch = %s",
+                    (db_tenant_id, branch),
+                )
                 cur.execute(
                     """
                     DELETE FROM justifications j
@@ -6998,16 +8253,30 @@ class PostgresEngine:
                     """,
                     (db_tenant_id,),
                 )
-                cur.execute("DELETE FROM evidence WHERE tenant_id = %s AND branch = %s", (db_tenant_id, branch))
-                cur.execute("DELETE FROM branches WHERE tenant_id = %s AND name = %s", (db_tenant_id, branch))
+                cur.execute(
+                    "DELETE FROM evidence WHERE tenant_id = %s AND branch = %s",
+                    (db_tenant_id, branch),
+                )
+                cur.execute(
+                    "DELETE FROM branches WHERE tenant_id = %s AND name = %s",
+                    (db_tenant_id, branch),
+                )
 
-    def _local_rank(self, query: str, k: int, filt: dict[str, Any], channel: str) -> list[Hit]:
+    def _local_rank(
+        self, query: str, k: int, filt: dict[str, Any], channel: str
+    ) -> list[Hit]:
         tenant_id = filt["tenant_id"]
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         branch = filt.get("branch", "main")
         include_quarantined = bool(filt.get("include_quarantined", False))
-        default_max_trust = int(TrustTier.UNTRUSTED_EXTERNAL) if include_quarantined else self.policy.max_trust_tier
-        max_trust = int(filt.get("max_trust_tier", filt.get("min_trust_tier", default_max_trust)))
+        default_max_trust = (
+            int(TrustTier.UNTRUSTED_EXTERNAL)
+            if include_quarantined
+            else self.policy.max_trust_tier
+        )
+        max_trust = int(
+            filt.get("max_trust_tier", filt.get("min_trust_tier", default_max_trust))
+        )
         max_sensitivity = effective_max_sensitivity(filt, self.policy.max_sensitivity)
         candidates: list[Hit] = []
         with self.connect() as conn:
@@ -7030,7 +8299,13 @@ class PostgresEngine:
                         )
                       )
                     """,
-                    (db_tenant_id, branch, max_trust, max_sensitivity, include_quarantined),
+                    (
+                        db_tenant_id,
+                        branch,
+                        max_trust,
+                        max_sensitivity,
+                        include_quarantined,
+                    ),
                 )
                 for row in cur.fetchall():
                     text = row["content"] or ""
@@ -7041,8 +8316,17 @@ class PostgresEngine:
                         if is_retired_summary_metadata(metadata):
                             continue
                         if not derived_evidence_readable(
-                            self, {**dict(row), "cid": cid, "tenant_id": tenant_id, "branch": branch},
-                            tenant_id=tenant_id, branch=branch, filt=filt, policy=self.policy,
+                            self,
+                            {
+                                **dict(row),
+                                "cid": cid,
+                                "tenant_id": tenant_id,
+                                "branch": branch,
+                            },
+                            tenant_id=tenant_id,
+                            branch=branch,
+                            filt=filt,
+                            policy=self.policy,
                         ):
                             continue
                         decision = may_read_item(
@@ -7054,11 +8338,15 @@ class PostgresEngine:
                         )
                         if not decision.allowed:
                             continue
-                        text, privacy_metadata = apply_text_redactions(text, dict(row["access_policy"] or {}), decision)
+                        text, privacy_metadata = apply_text_redactions(
+                            text, dict(row["access_policy"] or {}), decision
+                        )
                         hit_metadata = {
                             "source_type": row["source_type"],
                             "actor": row["actor"],
-                            "reality_class": self._classify_evidence_row_reality(row, metadata),
+                            "reality_class": self._classify_evidence_row_reality(
+                                row, metadata
+                            ),
                             "privacy": privacy_metadata,
                         }
                         if isinstance(metadata.get("summary"), dict):
@@ -7067,9 +8355,13 @@ class PostgresEngine:
                             hit_metadata["lifecycle"] = metadata["lifecycle"]
                         copy_confidence_metadata(metadata, hit_metadata)
                         if isinstance(metadata.get("earned_autonomy"), dict):
-                            hit_metadata["earned_autonomy"] = metadata["earned_autonomy"]
+                            hit_metadata["earned_autonomy"] = metadata[
+                                "earned_autonomy"
+                            ]
                         if "birth_groundedness" in metadata:
-                            hit_metadata["birth_groundedness"] = metadata["birth_groundedness"]
+                            hit_metadata["birth_groundedness"] = metadata[
+                                "birth_groundedness"
+                            ]
                         candidates.append(
                             Hit(
                                 id=cid,
@@ -7111,8 +8403,12 @@ class PostgresEngine:
                         if not decision.allowed:
                             continue
                         if not projection_sources_readable(
-                            self, _bytes_list_to_cids(row["source_evidence_cids"]),
-                            tenant_id=tenant_id, branch=branch, filt=filt, policy=self.policy,
+                            self,
+                            _bytes_list_to_cids(row["source_evidence_cids"]),
+                            tenant_id=tenant_id,
+                            branch=branch,
+                            filt=filt,
+                            policy=self.policy,
                         ):
                             continue
                         text, privacy_metadata = apply_statement_redactions(
@@ -7122,7 +8418,11 @@ class PostgresEngine:
                             access_policy=dict(row["access_policy"] or {}),
                             decision=decision,
                         )
-                        reality_monitoring = self._projection_reality_monitoring_from_calibration(dict(row["calibration"] or {}))
+                        reality_monitoring = (
+                            self._projection_reality_monitoring_from_calibration(
+                                dict(row["calibration"] or {})
+                            )
+                        )
                         candidates.append(
                             Hit(
                                 id=str(row["id"]),
@@ -7132,21 +8432,29 @@ class PostgresEngine:
                                 text=text,
                                 score=score,
                                 channel=channel,
-                                provenance=_bytes_list_to_cids(row["source_evidence_cids"]),
+                                provenance=_bytes_list_to_cids(
+                                    row["source_evidence_cids"]
+                                ),
                                 trust_tier=row["trust_tier"],
                                 sensitivity=row["sensitivity"],
                                 metadata={
                                     "confidence": float(row["confidence"]),
-                                    "reality_class": reality_monitoring["reality_class"],
+                                    "reality_class": reality_monitoring[
+                                        "reality_class"
+                                    ],
                                     "reality_monitoring": reality_monitoring,
                                     "created_at": iso_utc(row.get("transaction_time")),
-                                    "last_accessed": row["last_accessed"].isoformat() if row["last_accessed"] else None,
+                                    "last_accessed": row["last_accessed"].isoformat()
+                                    if row["last_accessed"]
+                                    else None,
                                     "access_count": row["access_count"],
                                     "privacy": privacy_metadata,
                                 },
                             )
                         )
-        return self._mark_retrieved_text_as_data(sorted(candidates, key=lambda item: item.score, reverse=True)[:k])
+        return self._mark_retrieved_text_as_data(
+            sorted(candidates, key=lambda item: item.score, reverse=True)[:k]
+        )
 
     def _audit(
         self,
@@ -7252,7 +8560,9 @@ class PostgresEngine:
             try:
                 cid_bytes_list.append(_cid_to_bytes(cid))
             except ValueError:
-                raise ValueError(f"evidence {cid!r} is missing or outside the intention tenant")
+                raise ValueError(
+                    f"evidence {cid!r} is missing or outside the intention tenant"
+                )
         cur.execute(
             """
             SELECT cid, user_id,
@@ -7274,7 +8584,9 @@ class PostgresEngine:
         for cid in intention.evidence_ids:
             row = by_cid.get(cid)
             if row is None or row["erased"] or row.get("retired_at") is not None:
-                raise ValueError(f"evidence {cid!r} is missing or outside the intention tenant, erased, or retired")
+                raise ValueError(
+                    f"evidence {cid!r} is missing or outside the intention tenant, erased, or retired"
+                )
             validate_intention_provenance_claim(
                 intention,
                 evidence_id=cid,
@@ -7299,10 +8611,7 @@ class PostgresEngine:
             {
                 "intention_id": row["intention_id"],
                 "tenant_id": tenant_id,
-                "user_id": str(
-                    row.get("external_user_id")
-                    or row["user_id"]
-                ),
+                "user_id": str(row.get("external_user_id") or row["user_id"]),
                 "agent_id": row["agent_id"],
                 "trigger_type": row["trigger_type"],
                 "trigger_expression": dict(row["trigger_expression"] or {}),
@@ -7319,12 +8628,18 @@ class PostgresEngine:
                 ),
                 "evidence_ids": _bytes_list_to_cids(list(row["evidence_ids"] or [])),
                 "session_id": row.get("session_id"),
-                "recurrence_policy": dict(row.get("recurrence_policy") or {"type": "none"}),
-                "recurrence_state": dict(row.get("recurrence_state") or {"occurrence": 0}),
+                "recurrence_policy": dict(
+                    row.get("recurrence_policy") or {"type": "none"}
+                ),
+                "recurrence_state": dict(
+                    row.get("recurrence_state") or {"occurrence": 0}
+                ),
             }
         )
 
-    def _retry_scheduled_intention(self, cur: Any, db_tenant_id: Any, intention: Intention) -> bool:
+    def _retry_scheduled_intention(
+        self, cur: Any, db_tenant_id: Any, intention: Intention
+    ) -> bool:
         # One snapshot binds row existence to creation history. The row lock
         # protects it while provenance is checked; non-UUID legacy IDs live in diff.
         cur.execute(
@@ -7332,17 +8647,27 @@ class PostgresEngine:
             "ON a.tenant_id = i.tenant_id AND a.op = 'schedule_intention' "
             "AND (a.target_id = %s OR a.diff->>'target_id' = %s) "
             "WHERE i.tenant_id = %s AND i.intention_id = %s FOR UPDATE OF i",
-            (_uuid_or_none(intention.intention_id), intention.intention_id,
-             db_tenant_id, intention.intention_id),
+            (
+                _uuid_or_none(intention.intention_id),
+                intention.intention_id,
+                db_tenant_id,
+                intention.intention_id,
+            ),
         )
         rows = cur.fetchall()
         if rows:
-            self._intention_provenance_rows(cur, db_tenant_id=db_tenant_id, intention=intention)
-            validate_intention_retry(intention, [row["diff"] for row in rows if row["diff"] is not None])
+            self._intention_provenance_rows(
+                cur, db_tenant_id=db_tenant_id, intention=intention
+            )
+            validate_intention_retry(
+                intention, [row["diff"] for row in rows if row["diff"] is not None]
+            )
             return True
         return False
 
-    def schedule_intention(self, intention: Intention, *, idempotent: bool = False) -> str:
+    def schedule_intention(
+        self, intention: Intention, *, idempotent: bool = False
+    ) -> str:
         """Store an intention after tenant, provenance, trust, and taint checks.
 
         Validates all five trigger types, rejects cycles at schedule time for
@@ -7357,7 +8682,9 @@ class PostgresEngine:
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
-                if idempotent and self._retry_scheduled_intention(cur, db_tenant_id, intention):
+                if idempotent and self._retry_scheduled_intention(
+                    cur, db_tenant_id, intention
+                ):
                     return intention.intention_id
                 cur.execute(
                     """
@@ -7371,8 +8698,10 @@ class PostgresEngine:
                     LIMIT 1
                     """,
                     (
-                        db_tenant_id, intention.intention_id,
-                        db_tenant_id, intention.intention_id,
+                        db_tenant_id,
+                        intention.intention_id,
+                        db_tenant_id,
+                        intention.intention_id,
                     ),
                 )
                 if cur.fetchone() is not None:
@@ -7394,7 +8723,9 @@ class PostgresEngine:
                         """,
                         (db_tenant_id, list(intention.dependencies)),
                     )
-                    existing_dependencies = {row["intention_id"] for row in cur.fetchall()}
+                    existing_dependencies = {
+                        row["intention_id"] for row in cur.fetchall()
+                    }
                     missing_dependencies = sorted(
                         set(intention.dependencies) - existing_dependencies
                     )
@@ -7438,15 +8769,23 @@ class PostgresEngine:
                     ),
                 )
                 if cur.fetchone() is None:
-                    if idempotent and self._retry_scheduled_intention(cur, db_tenant_id, intention):
+                    if idempotent and self._retry_scheduled_intention(
+                        cur, db_tenant_id, intention
+                    ):
                         return intention.intention_id
-                    raise ValueError(f"intention {intention.intention_id!r} already exists")
+                    raise ValueError(
+                        f"intention {intention.intention_id!r} already exists"
+                    )
                 if idempotent:
                     cur.execute(
                         "SELECT 1 FROM audit_log WHERE tenant_id = %s "
                         "AND op = 'schedule_intention' "
                         "AND (target_id = %s OR diff->>'target_id' = %s)",
-                        (db_tenant_id, _uuid_or_none(intention.intention_id), intention.intention_id),
+                        (
+                            db_tenant_id,
+                            _uuid_or_none(intention.intention_id),
+                            intention.intention_id,
+                        ),
                     )
                     if cur.fetchone() is not None:
                         raise ValueError("cannot retry a removed intention")
@@ -7465,8 +8804,10 @@ class PostgresEngine:
                     LIMIT 1
                     """,
                     (
-                        db_tenant_id, intention.intention_id,
-                        db_tenant_id, intention.intention_id,
+                        db_tenant_id,
+                        intention.intention_id,
+                        db_tenant_id,
+                        intention.intention_id,
                     ),
                 )
                 if cur.fetchone() is not None:
@@ -7487,8 +8828,14 @@ class PostgresEngine:
         return intention.intention_id
 
     def cancel_intention(
-        self, tenant_id: str, intention_id: str, *, cancelled_by: str, session_id: str,
-        expected_revision: str | None = None, idempotency_key: str | None = None,
+        self,
+        tenant_id: str,
+        intention_id: str,
+        *,
+        cancelled_by: str,
+        session_id: str,
+        expected_revision: str | None = None,
+        idempotency_key: str | None = None,
     ) -> None:
         """Cancel an intention. Missing/cross-tenant -> KeyError; non-owner or
         wrong bound session -> PermissionError; fired -> ValueError; repeating
@@ -7535,12 +8882,17 @@ class PostgresEngine:
                     )
                     previous_diffs = [item["diff"] for item in cur.fetchall()]
                 intention, receipt, replay = prepare_intention_cancel(
-                    current, cancelled_by=principal, session_id=session_id,
-                    expected_revision=expected_revision, idempotency_key=idempotency_key,
+                    current,
+                    cancelled_by=principal,
+                    session_id=session_id,
+                    expected_revision=expected_revision,
+                    idempotency_key=idempotency_key,
                     previous_diffs=previous_diffs,
                 )
                 if replay:
-                    self._intention_provenance_rows(cur, db_tenant_id=db_tenant_id, intention=current)
+                    self._intention_provenance_rows(
+                        cur, db_tenant_id=db_tenant_id, intention=current
+                    )
                     return
                 if intention == current and receipt is None:
                     return
@@ -7566,7 +8918,9 @@ class PostgresEngine:
                     ),
                 )
                 if cur.fetchone() is None:
-                    raise RuntimeError("intention cancellation lost its state transition")
+                    raise RuntimeError(
+                        "intention cancellation lost its state transition"
+                    )
                 if was_scheduled or receipt is not None:
                     self._audit(
                         cur,
@@ -7574,8 +8928,14 @@ class PostgresEngine:
                         cancelled_by,
                         "cancel_intention",
                         intention_id,
-                        {**intention_audit_diff(intention, status="cancelled"),
-                         **({"cancel_request": receipt} if receipt is not None else {})},
+                        {
+                            **intention_audit_diff(intention, status="cancelled"),
+                            **(
+                                {"cancel_request": receipt}
+                                if receipt is not None
+                                else {}
+                            ),
+                        },
                         source="prospective_memory",
                         trust_tier=trust_tier,
                         capability_tags=capability_tags,
@@ -7610,20 +8970,35 @@ class PostgresEngine:
                         (db_tenant_id, _cid_list_to_bytes(intention.evidence_ids)),
                     )
                     sources = list(cur.fetchall())
-                    if any(source["retired_at"] is not None or (
-                        source["document_segment_id"] is not None and (
-                            source["erased"] or str(source["user_id"]) != _stable_uuid("user", intention.user_id)
+                    if any(
+                        source["retired_at"] is not None
+                        or (
+                            source["document_segment_id"] is not None
+                            and (
+                                source["erased"]
+                                or str(source["user_id"])
+                                != _stable_uuid("user", intention.user_id)
+                            )
                         )
-                    ) for source in sources):
+                        for source in sources
+                    ):
                         continue
                     current.append(intention)
                 return current
 
     def update_intention(
-        self, tenant_id: str, intention_id: str, *, user_id: str, agent_id: str,
-        session_id: str, due_at: datetime | None = None, action: dict[str, Any] | None = None,
+        self,
+        tenant_id: str,
+        intention_id: str,
+        *,
+        user_id: str,
+        agent_id: str,
+        session_id: str,
+        due_at: datetime | None = None,
+        action: dict[str, Any] | None = None,
         recurrence_policy: dict[str, Any] | None = None,
-        expected_revision: str | None = None, idempotency_key: str | None = None,
+        expected_revision: str | None = None,
+        idempotency_key: str | None = None,
     ) -> Intention:
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self.connect() as conn:
@@ -7657,10 +9032,15 @@ class PostgresEngine:
                     )
                     previous_diffs = [item["diff"] for item in cur.fetchall()]
                 updated, receipt, replay = prepare_intention_update(
-                    current, user_id=principal_user_id, agent_id=agent_id,
-                    session_id=session_id, due_at=due_at, action=action,
+                    current,
+                    user_id=principal_user_id,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    due_at=due_at,
+                    action=action,
                     recurrence_policy=recurrence_policy,
-                    expected_revision=expected_revision, idempotency_key=idempotency_key,
+                    expected_revision=expected_revision,
+                    idempotency_key=idempotency_key,
                     previous_diffs=previous_diffs,
                 )
                 provenance = self._intention_provenance_rows(
@@ -7678,19 +9058,31 @@ class PostgresEngine:
                     RETURNING intention_id
                     """,
                     (
-                        self._jsonb(updated.trigger_expression), self._jsonb(updated.action),
-                        updated.due_at, self._jsonb(updated.reschedule_history),
-                        updated.session_id, self._jsonb(updated.recurrence_policy),
-                        self._jsonb(updated.recurrence_state), db_tenant_id, intention_id,
+                        self._jsonb(updated.trigger_expression),
+                        self._jsonb(updated.action),
+                        updated.due_at,
+                        self._jsonb(updated.reschedule_history),
+                        updated.session_id,
+                        self._jsonb(updated.recurrence_policy),
+                        self._jsonb(updated.recurrence_state),
+                        db_tenant_id,
+                        intention_id,
                     ),
                 )
                 if cur.fetchone() is None:
                     raise RuntimeError("intention update lost its scheduled transition")
                 self._audit(
-                    cur, db_tenant_id, user_id, "update_intention", intention_id,
-                    {**intention_audit_diff(updated, status="scheduled"),
-                     **({"update_request": receipt} if receipt is not None else {})},
-                    source="prospective_memory", trust_tier=trust_tier,
+                    cur,
+                    db_tenant_id,
+                    user_id,
+                    "update_intention",
+                    intention_id,
+                    {
+                        **intention_audit_diff(updated, status="scheduled"),
+                        **({"update_request": receipt} if receipt is not None else {}),
+                    },
+                    source="prospective_memory",
+                    trust_tier=trust_tier,
                     capability_tags=capability_tags,
                 )
                 return copy.deepcopy(updated)
@@ -7739,7 +9131,9 @@ class PostgresEngine:
                     """,
                     (db_tenant_id,),
                 )
-                candidates = [self._row_to_intention(row, tenant_id) for row in cur.fetchall()]
+                candidates = [
+                    self._row_to_intention(row, tenant_id) for row in cur.fetchall()
+                ]
                 tenant_intentions = {
                     (tenant_id, intention.intention_id): intention
                     for intention in candidates
@@ -7767,7 +9161,9 @@ class PostgresEngine:
                     )
                     for row in cur.fetchall():
                         dependency = self._row_to_intention(row, tenant_id)
-                        tenant_intentions[(tenant_id, dependency.intention_id)] = dependency
+                        tenant_intentions[(tenant_id, dependency.intention_id)] = (
+                            dependency
+                        )
                 # Evaluate against the frozen tenant snapshot first, matching
                 # the canonical Local contract. Only candidates that would
                 # fire require provenance validation.
@@ -7813,7 +9209,9 @@ class PostgresEngine:
                     if matched_signal.get("event_id"):
                         fire_audit_diff["matched_event_id"] = matched_signal["event_id"]
                     if matched_signal.get("condition_id"):
-                        fire_audit_diff["matched_condition_id"] = matched_signal["condition_id"]
+                        fire_audit_diff["matched_condition_id"] = matched_signal[
+                            "condition_id"
+                        ]
                     canonical_event_id = intention_fire_receipt_id(
                         tenant_id, intention.intention_id, occurrence
                     )
@@ -7827,7 +9225,12 @@ class PostgresEngine:
                         ON CONFLICT (tenant_id, intention_id, operation, occurrence) DO NOTHING
                         RETURNING intention_id
                         """,
-                        (db_tenant_id, intention.intention_id, occurrence, canonical_event_id),
+                        (
+                            db_tenant_id,
+                            intention.intention_id,
+                            occurrence,
+                            canonical_event_id,
+                        ),
                     )
                     if cur.fetchone() is None:
                         # A concurrent or replayed operation already owns the
@@ -7843,9 +9246,13 @@ class PostgresEngine:
                         RETURNING intention_id
                         """,
                         (
-                            stored.status, self._jsonb(stored.trigger_expression), stored.due_at,
-                            self._jsonb(stored.reschedule_history), self._jsonb(stored.recurrence_state),
-                            db_tenant_id, intention.intention_id,
+                            stored.status,
+                            self._jsonb(stored.trigger_expression),
+                            stored.due_at,
+                            self._jsonb(stored.reschedule_history),
+                            self._jsonb(stored.recurrence_state),
+                            db_tenant_id,
+                            intention.intention_id,
                         ),
                     )
                     if cur.fetchone() is None:
@@ -7878,7 +9285,9 @@ class PostgresEngine:
         return hits
 
     def _rrf(self, ranked_lists: list[list[Hit]], k: int) -> list[Hit]:
-        return rrf_fuse(ranked_lists, k, rrf_k=self.policy.rrf_k, annotate_channel_scores=True)
+        return rrf_fuse(
+            ranked_lists, k, rrf_k=self.policy.rrf_k, annotate_channel_scores=True
+        )
 
     def _mmr(self, query: str, hits: list[Hit], k: int) -> list[Hit]:
         if os.environ.get("MNEMOSYNE_PG_MMR_SPACE", "hashing") == "stored":
@@ -7912,7 +9321,9 @@ class PostgresEngine:
             mmr_lambda=self.policy.mmr_lambda,
         )
 
-    def _stored_hit_vectors(self, hits: list[Hit]) -> dict[tuple[str, str], list[float]]:
+    def _stored_hit_vectors(
+        self, hits: list[Hit]
+    ) -> dict[tuple[str, str], list[float]]:
         """Fetch stored pgvector embeddings for evidence/assertion hits.
 
         Policy gating is layered. Rows restricted to ``embedding_partition =
@@ -7948,7 +9359,9 @@ class PostgresEngine:
             embedding_partition: Any,
         ) -> list[float]:
             hit = hit_by_key[key]
-            privacy = hit.metadata.get("privacy") if isinstance(hit.metadata, dict) else None
+            privacy = (
+                hit.metadata.get("privacy") if isinstance(hit.metadata, dict) else None
+            )
             if not isinstance(privacy, dict):
                 privacy = {}
             # Reconstruct the caller's per-hit access decision recorded by the
@@ -7986,12 +9399,24 @@ class PostgresEngine:
                             " FROM evidence WHERE tenant_id = %s AND branch = %s AND cid = ANY(%s)",
                             (db_tenant_id, branch, list(cid_map)),
                         )
-                        for cid_value, literal, sensitivity, access_policy, partition in cur.fetchall():
+                        for (
+                            cid_value,
+                            literal,
+                            sensitivity,
+                            access_policy,
+                            partition,
+                        ) in cur.fetchall():
                             vector = _vector_from_literal(literal)
-                            raw = cid_value.tobytes() if isinstance(cid_value, memoryview) else bytes(cid_value)
+                            raw = (
+                                cid_value.tobytes()
+                                if isinstance(cid_value, memoryview)
+                                else bytes(cid_value)
+                            )
                             if vector is not None and raw in cid_map:
                                 key = ("evidence", cid_map[raw])
-                                vectors[key] = gated_vector(key, vector, sensitivity, access_policy, partition)
+                                vectors[key] = gated_vector(
+                                    key, vector, sensitivity, access_policy, partition
+                                )
                     assertion_ids = assertion_scope.get(scope, set())
                     if assertion_ids:
                         cur.execute(
@@ -7999,11 +9424,19 @@ class PostgresEngine:
                             " FROM assertions WHERE tenant_id = %s AND branch = %s AND id = ANY(%s::uuid[])",
                             (db_tenant_id, branch, sorted(assertion_ids)),
                         )
-                        for assertion_id, literal, sensitivity, access_policy, partition in cur.fetchall():
+                        for (
+                            assertion_id,
+                            literal,
+                            sensitivity,
+                            access_policy,
+                            partition,
+                        ) in cur.fetchall():
                             vector = _vector_from_literal(literal)
                             if vector is not None and assertion_id in assertion_ids:
                                 key = ("assertion", assertion_id)
-                                vectors[key] = gated_vector(key, vector, sensitivity, access_policy, partition)
+                                vectors[key] = gated_vector(
+                                    key, vector, sensitivity, access_policy, partition
+                                )
         return vectors
 
     @staticmethod
@@ -8015,10 +9448,14 @@ class PostgresEngine:
         return fit_budget(hits, budget)
 
     @staticmethod
-    def _confidence(query: str, hits: list[Hit], *, support_score: float | None = None) -> float:
+    def _confidence(
+        query: str, hits: list[Hit], *, support_score: float | None = None
+    ) -> float:
         if not hits:
             return 0.0
-        scores = [max(hit.score, 0.0) if math.isfinite(hit.score) else 0.0 for hit in hits]
+        scores = [
+            max(hit.score, 0.0) if math.isfinite(hit.score) else 0.0 for hit in hits
+        ]
         max_score = max(scores, default=0.0)
         weighted = 0.0
         total = 0.0
@@ -8027,7 +9464,13 @@ class PostgresEngine:
             relevance = score / max(max_score, 0.01)
             trust = trust_weight(hit.trust_tier)
             explicit = hit.metadata.get("confidence")
-            channel_count = len({part for part in hit.channel.split("+") if part and part != "candidate"})
+            channel_count = len(
+                {
+                    part
+                    for part in hit.channel.split("+")
+                    if part and part != "candidate"
+                }
+            )
             channel_support = min(channel_count / 3.0, 1.0)
             provenance_support = min(len(hit.provenance) / 3.0, 1.0)
             quality = (
@@ -8054,24 +9497,37 @@ class PostgresEngine:
         evidence_quality = max(0.0, min(1.0, confidence))
         if support_score is not None and not math.isfinite(support_score):
             return 0.0
-        query_support_score = support_score if support_score is not None else query_support(query, hits)["score"]
+        query_support_score = (
+            support_score
+            if support_score is not None
+            else query_support(query, hits)["score"]
+        )
         query_support_score = _bounded_float(query_support_score, default=0.0)
         if (
             len(hits) in (2, 3)
             and all(h.trust_tier == 0 for h in hits)
-            and any(h.metadata.get("score_scale") in ("bm25", "reciprocal_rank") or "bm25" in h.channel for h in hits)
+            and any(
+                h.metadata.get("score_scale") in ("bm25", "reciprocal_rank")
+                or "bm25" in h.channel
+                for h in hits
+            )
         ):
             return max(0.0, min(0.98, evidence_quality * 1.48))
         if len(hits) < 4:
             if query_support_score < QUERY_SUPPORT_THRESHOLD:
-                return min(evidence_quality, 0.05 * (query_support_score / QUERY_SUPPORT_THRESHOLD))
+                return min(
+                    evidence_quality,
+                    0.05 * (query_support_score / QUERY_SUPPORT_THRESHOLD),
+                )
             return evidence_quality
         if query_support_score < QUERY_SUPPORT_THRESHOLD:
             return max(
                 0.0,
                 min(
                     0.96,
-                    evidence_quality * (0.85 + 0.15 * (query_support_score / QUERY_SUPPORT_THRESHOLD)) * 1.48,
+                    evidence_quality
+                    * (0.85 + 0.15 * (query_support_score / QUERY_SUPPORT_THRESHOLD))
+                    * 1.48,
                 ),
             )
         return max(0.0, min(0.98, evidence_quality * 1.48))
@@ -8187,9 +9643,17 @@ class PostgresEngine:
     ) -> str:
         if isinstance(observation_or_tenant, str) and observation is not None:
             tenant_id = observation_or_tenant
-            obs = Observation.from_dict(observation) if isinstance(observation, dict) else observation
+            obs = (
+                Observation.from_dict(observation)
+                if isinstance(observation, dict)
+                else observation
+            )
         else:
-            obs = Observation.from_dict(observation_or_tenant) if isinstance(observation_or_tenant, dict) else observation_or_tenant
+            obs = (
+                Observation.from_dict(observation_or_tenant)
+                if isinstance(observation_or_tenant, dict)
+                else observation_or_tenant
+            )
             tenant_id = obs.tenant_id
         if branch == "main" and getattr(obs, "branch", None):
             branch = obs.branch
@@ -8201,8 +9665,13 @@ class PostgresEngine:
             obs,
             lambda cid: self.get_evidence(tenant_id, cid, branch=branch),
         )
-        ev_rows = [self.get_evidence(tenant_id, cid, branch=branch) for cid in obs.source_evidence_cids]
-        obs.independent_source_count = compute_independent_source_count(r for r in ev_rows if r is not None)
+        ev_rows = [
+            self.get_evidence(tenant_id, cid, branch=branch)
+            for cid in obs.source_evidence_cids
+        ]
+        obs.independent_source_count = compute_independent_source_count(
+            r for r in ev_rows if r is not None
+        )
         obs.standing = compute_dynamic_standing(
             independent_source_count=obs.independent_source_count,
             corroboration_velocity=obs.corroboration_velocity,
@@ -8213,7 +9682,9 @@ class PostgresEngine:
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
-                self._ensure_tenant_and_branch_cursor(cur, tenant_id, branch, "protected")
+                self._ensure_tenant_and_branch_cursor(
+                    cur, tenant_id, branch, "protected"
+                )
                 self._ensure_observations_schema(cur)
                 cur.execute(
                     "SELECT * FROM observations WHERE tenant_id = %s AND branch = %s AND observation_id = %s",
@@ -8243,13 +9714,19 @@ class PostgresEngine:
                             list(obs.source_evidence_cids),
                             obs.independent_source_count,
                             obs.corroboration_velocity,
-                            self._jsonb([c.to_dict() for c in obs.contradiction_history]),
-                            parse_dt(obs.freshness_watermark) if obs.freshness_watermark else None,
+                            self._jsonb(
+                                [c.to_dict() for c in obs.contradiction_history]
+                            ),
+                            parse_dt(obs.freshness_watermark)
+                            if obs.freshness_watermark
+                            else None,
                             obs.standing,
                             obs.salience,
                             obs.access_velocity,
                             obs.access_count,
-                            parse_dt(obs.last_accessed_at) if obs.last_accessed_at else None,
+                            parse_dt(obs.last_accessed_at)
+                            if obs.last_accessed_at
+                            else None,
                             obs.status,
                             obs.superseded_by,
                             version,
@@ -8268,7 +9745,12 @@ class PostgresEngine:
                         obs.user_id,
                         "upsert_observation",
                         obs.observation_id,
-                        {"op": "update", "version": version, "subject": obs.subject, "topic": obs.topic},
+                        {
+                            "op": "update",
+                            "version": version,
+                            "subject": obs.subject,
+                            "topic": obs.topic,
+                        },
                         source=obs.user_id,
                         trust_tier=obs.trust_tier,
                     )
@@ -8297,13 +9779,19 @@ class PostgresEngine:
                             list(obs.source_evidence_cids),
                             obs.independent_source_count,
                             obs.corroboration_velocity,
-                            self._jsonb([c.to_dict() for c in obs.contradiction_history]),
-                            parse_dt(obs.freshness_watermark) if obs.freshness_watermark else None,
+                            self._jsonb(
+                                [c.to_dict() for c in obs.contradiction_history]
+                            ),
+                            parse_dt(obs.freshness_watermark)
+                            if obs.freshness_watermark
+                            else None,
                             obs.standing,
                             obs.salience,
                             obs.access_velocity,
                             obs.access_count,
-                            parse_dt(obs.last_accessed_at) if obs.last_accessed_at else None,
+                            parse_dt(obs.last_accessed_at)
+                            if obs.last_accessed_at
+                            else None,
                             obs.status,
                             obs.superseded_by,
                             version,
@@ -8319,7 +9807,12 @@ class PostgresEngine:
                         obs.user_id,
                         "upsert_observation",
                         obs.observation_id,
-                        {"op": "create", "version": version, "subject": obs.subject, "topic": obs.topic},
+                        {
+                            "op": "create",
+                            "version": version,
+                            "subject": obs.subject,
+                            "topic": obs.topic,
+                        },
                         source=obs.user_id,
                         trust_tier=obs.trust_tier,
                     )
@@ -8351,7 +9844,11 @@ class PostgresEngine:
                     erased_any = False
                     for cid in obs.source_evidence_cids:
                         ev = self.get_evidence(tenant_id, cid, branch=branch)
-                        if ev is None or getattr(ev, "erased", False) or getattr(ev, "retired_at", None) is not None:
+                        if (
+                            ev is None
+                            or getattr(ev, "erased", False)
+                            or getattr(ev, "retired_at", None) is not None
+                        ):
                             erased_any = True
                             break
                     if erased_any:
@@ -8369,7 +9866,11 @@ class PostgresEngine:
                             "system",
                             "retract_observation",
                             observation_id,
-                            {"reason": "transitive_custody_erasure", "status": "retracted", "standing": obs.standing},
+                            {
+                                "reason": "transitive_custody_erasure",
+                                "status": "retracted",
+                                "standing": obs.standing,
+                            },
                             source="transitive_custody",
                         )
                 return obs
@@ -8390,7 +9891,9 @@ class PostgresEngine:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
                 self._ensure_observations_schema(cur)
-                query = "SELECT * FROM observations WHERE tenant_id = %s AND branch = %s"
+                query = (
+                    "SELECT * FROM observations WHERE tenant_id = %s AND branch = %s"
+                )
                 params: list[Any] = [db_tenant_id, branch]
                 if subject is not None:
                     query += " AND subject = %s"
@@ -8416,12 +9919,18 @@ class PostgresEngine:
         *,
         observation: Observation | dict[str, Any],
     ) -> tuple[Observation, bool]:
-        obs = Observation.from_dict(observation) if isinstance(observation, dict) else observation
+        obs = (
+            Observation.from_dict(observation)
+            if isinstance(observation, dict)
+            else observation
+        )
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
-                self._ensure_tenant_and_branch_cursor(cur, tenant_id, branch, "protected")
+                self._ensure_tenant_and_branch_cursor(
+                    cur, tenant_id, branch, "protected"
+                )
                 self._ensure_observations_schema(cur)
                 cur.execute(
                     "SELECT * FROM observations WHERE tenant_id = %s AND branch = %s AND subject = %s AND topic = %s AND status = 'active'",
@@ -8430,7 +9939,9 @@ class PostgresEngine:
                 row = cur.fetchone()
                 if row is not None:
                     existing_obs = _row_to_observation(row, tenant_id)
-                    reconciled, is_contradiction = reconcile_observation(existing_obs, obs)
+                    reconciled, is_contradiction = reconcile_observation(
+                        existing_obs, obs
+                    )
                     if is_contradiction:
                         existing_obs.status = "superseded"
                         existing_obs.superseded_by = reconciled.observation_id
@@ -8444,7 +9955,10 @@ class PostgresEngine:
                         obs.user_id or "system",
                         "observation_reconcile",
                         reconciled.observation_id,
-                        {"is_contradiction": is_contradiction, "status": reconciled.status},
+                        {
+                            "is_contradiction": is_contradiction,
+                            "status": reconciled.status,
+                        },
                         source="reconcile",
                     )
                     return reconciled, is_contradiction
@@ -8499,9 +10013,24 @@ class PostgresEngine:
         return obs.to_dict() if obs is not None else None
 
     def list_observation_records(
-        self, tenant_id: str, branch: str = "main", *, subject: str | None = None, topic: str | None = None, status: str | None = None
+        self,
+        tenant_id: str,
+        branch: str = "main",
+        *,
+        subject: str | None = None,
+        topic: str | None = None,
+        status: str | None = None,
     ) -> list[dict[str, Any]]:
-        return [obs.to_dict() for obs in self.observation_list(tenant_id, branch=branch, subject=subject, topic=topic, status=status or "all")]
+        return [
+            obs.to_dict()
+            for obs in self.observation_list(
+                tenant_id,
+                branch=branch,
+                subject=subject,
+                topic=topic,
+                status=status or "all",
+            )
+        ]
 
     def save_observation_record(
         self,
@@ -8516,7 +10045,9 @@ class PostgresEngine:
         if expected_version is not None:
             current_ver = existing.version if existing is not None else 0
             if current_ver != expected_version:
-                raise ValueError(f"Version conflict: expected {expected_version}, got {current_ver}")
+                raise ValueError(
+                    f"Version conflict: expected {expected_version}, got {current_ver}"
+                )
         data = dict(record)
         data["tenant_id"] = tenant_id
         data["branch"] = branch
@@ -8536,7 +10067,11 @@ class PostgresEngine:
             tenant_id = page_or_tenant
             kp = KnowledgePage.from_dict(page) if isinstance(page, dict) else page
         else:
-            kp = KnowledgePage.from_dict(page_or_tenant) if isinstance(page_or_tenant, dict) else page_or_tenant
+            kp = (
+                KnowledgePage.from_dict(page_or_tenant)
+                if isinstance(page_or_tenant, dict)
+                else page_or_tenant
+            )
             tenant_id = kp.tenant_id
         if branch == "main" and getattr(kp, "branch", None):
             branch = kp.branch
@@ -8547,13 +10082,17 @@ class PostgresEngine:
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         verify_knowledge_page_acyclic_custody(
             kp,
-            get_observation=lambda oid: self.observation_get(tenant_id, oid, branch=branch, validate_custody=False),
+            get_observation=lambda oid: self.observation_get(
+                tenant_id, oid, branch=branch, validate_custody=False
+            ),
             get_evidence=lambda cid: self.get_evidence(tenant_id, cid, branch=branch),
         )
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
-                self._ensure_tenant_and_branch_cursor(cur, tenant_id, branch, "protected")
+                self._ensure_tenant_and_branch_cursor(
+                    cur, tenant_id, branch, "protected"
+                )
                 self._ensure_knowledge_pages_schema(cur)
                 cur.execute(
                     "SELECT page_id FROM knowledge_pages WHERE tenant_id = %s AND branch = %s AND path = %s "
@@ -8561,13 +10100,17 @@ class PostgresEngine:
                     (db_tenant_id, branch, kp.path),
                 )
                 if cur.fetchone() is not None:
-                    raise KnowledgePageConflict(f"KnowledgePage already exists at path '{kp.path}'")
+                    raise KnowledgePageConflict(
+                        f"KnowledgePage already exists at path '{kp.path}'"
+                    )
                 cur.execute(
                     "SELECT page_id FROM knowledge_pages WHERE tenant_id = %s AND branch = %s AND page_id = %s",
                     (db_tenant_id, branch, kp.page_id),
                 )
                 if cur.fetchone() is not None:
-                    raise KnowledgePageConflict(f"KnowledgePage already exists with page_id '{kp.page_id}'")
+                    raise KnowledgePageConflict(
+                        f"KnowledgePage already exists with page_id '{kp.page_id}'"
+                    )
                 cur.execute(
                     """
                     INSERT INTO knowledge_pages (
@@ -8619,7 +10162,11 @@ class PostgresEngine:
             tenant_id = page_or_tenant
             kp = KnowledgePage.from_dict(page) if isinstance(page, dict) else page
         else:
-            kp = KnowledgePage.from_dict(page_or_tenant) if isinstance(page_or_tenant, dict) else page_or_tenant
+            kp = (
+                KnowledgePage.from_dict(page_or_tenant)
+                if isinstance(page_or_tenant, dict)
+                else page_or_tenant
+            )
             tenant_id = kp.tenant_id
         if branch == "main" and getattr(kp, "branch", None):
             branch = kp.branch
@@ -8630,13 +10177,17 @@ class PostgresEngine:
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         verify_knowledge_page_acyclic_custody(
             kp,
-            get_observation=lambda oid: self.observation_get(tenant_id, oid, branch=branch, validate_custody=False),
+            get_observation=lambda oid: self.observation_get(
+                tenant_id, oid, branch=branch, validate_custody=False
+            ),
             get_evidence=lambda cid: self.get_evidence(tenant_id, cid, branch=branch),
         )
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
-                self._ensure_tenant_and_branch_cursor(cur, tenant_id, branch, "protected")
+                self._ensure_tenant_and_branch_cursor(
+                    cur, tenant_id, branch, "protected"
+                )
                 self._ensure_knowledge_pages_schema(cur)
                 cur.execute(
                     "SELECT * FROM knowledge_pages WHERE tenant_id = %s AND branch = %s AND page_id = %s FOR UPDATE",
@@ -8644,10 +10195,14 @@ class PostgresEngine:
                 )
                 row = cur.fetchone()
                 if row is None:
-                    raise CustodyNotFoundError(f"KnowledgePage '{kp.page_id}' not found")
+                    raise CustodyNotFoundError(
+                        f"KnowledgePage '{kp.page_id}' not found"
+                    )
                 current = _row_to_knowledge_page(row, tenant_id)
                 if expected_version is not None and current.version != expected_version:
-                    raise KnowledgePageConflict(f"Version conflict: expected {expected_version}, got {current.version}")
+                    raise KnowledgePageConflict(
+                        f"Version conflict: expected {expected_version}, got {current.version}"
+                    )
                 if kp.path != current.path:
                     cur.execute(
                         "SELECT page_id FROM knowledge_pages WHERE tenant_id = %s AND branch = %s AND path = %s "
@@ -8655,7 +10210,9 @@ class PostgresEngine:
                         (db_tenant_id, branch, kp.path, kp.page_id),
                     )
                     if cur.fetchone() is not None:
-                        raise KnowledgePageConflict(f"KnowledgePage already exists at path '{kp.path}'")
+                        raise KnowledgePageConflict(
+                            f"KnowledgePage already exists at path '{kp.path}'"
+                        )
                 new_version = current.version + 1
                 cur.execute(
                     """
@@ -8749,8 +10306,15 @@ class PostgresEngine:
                     try:
                         verify_knowledge_page_acyclic_custody(
                             page,
-                            get_observation=lambda oid: self.observation_get(tenant_id, oid, branch=actual_branch, validate_custody=False),
-                            get_evidence=lambda cid: self.get_evidence(tenant_id, cid, branch=actual_branch),
+                            get_observation=lambda oid: self.observation_get(
+                                tenant_id,
+                                oid,
+                                branch=actual_branch,
+                                validate_custody=False,
+                            ),
+                            get_evidence=lambda cid: self.get_evidence(
+                                tenant_id, cid, branch=actual_branch
+                            ),
                         )
                     except Exception:
                         page.status = "stale"
@@ -8776,7 +10340,9 @@ class PostgresEngine:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
                 self._ensure_knowledge_pages_schema(cur)
-                query = "SELECT * FROM knowledge_pages WHERE tenant_id = %s AND branch = %s"
+                query = (
+                    "SELECT * FROM knowledge_pages WHERE tenant_id = %s AND branch = %s"
+                )
                 params: list[Any] = [db_tenant_id, branch]
                 if status != "all":
                     query += " AND status = %s"
@@ -8788,7 +10354,12 @@ class PostgresEngine:
                 prefix = folder or path_prefix
                 if prefix is not None:
                     norm_prefix = prefix.strip().lower().rstrip("/") + "/"
-                    pages = [p for p in pages if p.path.startswith(norm_prefix) or p.path == prefix.strip().lower()]
+                    pages = [
+                        p
+                        for p in pages
+                        if p.path.startswith(norm_prefix)
+                        or p.path == prefix.strip().lower()
+                    ]
                 if tags:
                     tag_set = set(tags)
                     pages = [p for p in pages if tag_set.issubset(set(p.tags))]
@@ -8818,7 +10389,9 @@ class PostgresEngine:
             raise CustodyNotFoundError(f"KnowledgePage '{ident}' not found")
         return render_knowledge_page_markdown(
             page,
-            get_observation=lambda oid: self.observation_get(tenant_id, oid, branch=branch, validate_custody=False),
+            get_observation=lambda oid: self.observation_get(
+                tenant_id, oid, branch=branch, validate_custody=False
+            ),
             get_evidence=lambda cid: self.get_evidence(tenant_id, cid, branch=branch),
             include_frontmatter=include_frontmatter,
             include_citations_ledger=include_citations_ledger,
@@ -8888,13 +10461,18 @@ class PostgresEngine:
     def get_knowledge_page_record(
         self, tenant_id: str, page_id_or_path: str, branch: str = "main"
     ) -> dict[str, Any] | None:
-        page = self.knowledge_page_get(tenant_id, page_id_or_path, branch=branch, validate_custody=False)
+        page = self.knowledge_page_get(
+            tenant_id, page_id_or_path, branch=branch, validate_custody=False
+        )
         return page.to_dict() if page is not None else None
 
     def list_knowledge_page_records(
         self, tenant_id: str, branch: str = "main"
     ) -> list[dict[str, Any]]:
-        return [p.to_dict() for p in self.knowledge_page_list(tenant_id, branch=branch, status="all")]
+        return [
+            p.to_dict()
+            for p in self.knowledge_page_list(tenant_id, branch=branch, status="all")
+        ]
 
     def save_knowledge_page_record(
         self,
@@ -8905,7 +10483,9 @@ class PostgresEngine:
         branch: str = "main",
         expected_version: int | None = None,
     ) -> dict[str, Any]:
-        existing = self.knowledge_page_get(tenant_id, page_id, branch=branch, validate_custody=False)
+        existing = self.knowledge_page_get(
+            tenant_id, page_id, branch=branch, validate_custody=False
+        )
         data = dict(record)
         data["tenant_id"] = tenant_id
         data["branch"] = branch
@@ -8913,10 +10493,14 @@ class PostgresEngine:
         page = KnowledgePage.from_dict(data)
         if existing is None:
             self.knowledge_page_create(page, branch=branch)
-            saved = self.knowledge_page_get(tenant_id, page_id, branch=branch, validate_custody=False)
+            saved = self.knowledge_page_get(
+                tenant_id, page_id, branch=branch, validate_custody=False
+            )
             return saved.to_dict() if saved is not None else record
         else:
-            saved = self.knowledge_page_update(page, branch=branch, expected_version=expected_version)
+            saved = self.knowledge_page_update(
+                page, branch=branch, expected_version=expected_version
+            )
             return saved.to_dict()
 
 
@@ -9017,7 +10601,9 @@ def _bytes_list_to_cids(values: list[bytes] | None) -> list[str]:
 
 
 def _graph_ppr_seed_hash(seed_set: set[str]) -> str:
-    payload = json.dumps(sorted(seed_set), sort_keys=True, separators=(",", ":")).encode("utf-8")
+    payload = json.dumps(
+        sorted(seed_set), sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
     return sha256(payload).hexdigest()
 
 
@@ -9055,7 +10641,11 @@ def _derived_evidence_forget_plan(
                 continue
             surviving_sources = sources - affected
             if surviving_sources and not legal_blind:
-                retained[candidate_bytes] = _trim_metadata_source_cids(metadata, affected, source_type=(source_types or {}).get(candidate_cid, ""))
+                retained[candidate_bytes] = _trim_metadata_source_cids(
+                    metadata,
+                    affected,
+                    source_type=(source_types or {}).get(candidate_cid, ""),
+                )
                 continue
             affected.add(candidate_cid)
             retained.pop(candidate_bytes, None)
@@ -9066,7 +10656,10 @@ def _derived_evidence_forget_plan(
 
 
 def _trim_metadata_source_cids(
-    metadata: dict[str, Any], affected_cids: set[str], *, source_type: str = "",
+    metadata: dict[str, Any],
+    affected_cids: set[str],
+    *,
+    source_type: str = "",
 ) -> dict[str, Any]:
     return trim_derived_source_cids(metadata, affected_cids, source_type=source_type)
 
@@ -9145,19 +10738,27 @@ def _row_to_evidence(row: dict[str, Any], cid: str) -> Evidence:
     explicit_embedding = bool(metadata.get("_mnemosyne_embedding_explicit"))
     public_metadata = _public_evidence_metadata(metadata)
     return Evidence(
-        tenant_id=str(row.get("tenant_name") or metadata.get("_external_tenant_id") or row["tenant_id"]),
+        tenant_id=str(
+            row.get("tenant_name")
+            or metadata.get("_external_tenant_id")
+            or row["tenant_id"]
+        ),
         user_id=str(metadata.get("_external_user_id") or row["user_id"]),
         actor=row["actor"],
         source_type=row["source_type"],
         source_identity=row["source_identity"],
         document_segment_id=row.get("document_segment_id"),
-        session_id=str(metadata.get("_external_session_id") or row["session_id"]) if row["session_id"] else None,
+        session_id=str(metadata.get("_external_session_id") or row["session_id"])
+        if row["session_id"]
+        else None,
         content=row["content"] or "",
         metadata=public_metadata,
         content_pointer=row["content_pointer"],
         modality=row["modality"],
         embedding=_vector_from_db(row.get("embedding")) if explicit_embedding else None,
-        signed_provenance=dict(row["signed_provenance"]) if row["signed_provenance"] else None,
+        signed_provenance=dict(row["signed_provenance"])
+        if row["signed_provenance"]
+        else None,
         trust_tier=row["trust_tier"],
         capability_tags=list(row["capability_tags"] or []),
         sensitivity=row["sensitivity"],
@@ -9174,7 +10775,9 @@ def _row_to_assertion(row: dict[str, Any]) -> Assertion:
     return Assertion(
         id=str(row["id"]),
         tenant_id=str(row.get("tenant_name") or row["tenant_id"]),
-        user_id=str(row.get("external_user_id") or row["user_id"]) if row["user_id"] else None,
+        user_id=str(row.get("external_user_id") or row["user_id"])
+        if row["user_id"]
+        else None,
         branch=row["branch"],
         subject=row["subject"],
         predicate=row["predicate"],
@@ -9186,7 +10789,9 @@ def _row_to_assertion(row: dict[str, Any]) -> Assertion:
         valid_to=parse_dt(row["valid_to"]),
         transaction_time=parse_dt(row["transaction_time"]) or utc_now(),
         expired_at=parse_dt(row["expired_at"]),
-        justification_id=str(row["justification_id"]) if row["justification_id"] else None,
+        justification_id=str(row["justification_id"])
+        if row["justification_id"]
+        else None,
         source_evidence_cids=_bytes_list_to_cids(row["source_evidence_cids"]),
         status=row["status"],
         version=row["version"],
@@ -9234,18 +10839,23 @@ def _row_to_preference(row: dict[str, Any], tenant_id: str) -> Preference:
     )
 
 
-def _row_to_observation(row: dict[str, Any], tenant_id: str | None = None) -> Observation:
+def _row_to_observation(
+    row: dict[str, Any], tenant_id: str | None = None
+) -> Observation:
     tid = tenant_id or str(row.get("tenant_name") or row["tenant_id"])
     proof_quotes_raw = row.get("proof_quotes") or []
     if isinstance(proof_quotes_raw, str):
         proof_quotes_raw = json.loads(proof_quotes_raw)
-    proof_quotes = [ProofQuote.from_dict(q) if isinstance(q, dict) else q for q in proof_quotes_raw]
+    proof_quotes = [
+        ProofQuote.from_dict(q) if isinstance(q, dict) else q for q in proof_quotes_raw
+    ]
 
     contradiction_history_raw = row.get("contradiction_history") or []
     if isinstance(contradiction_history_raw, str):
         contradiction_history_raw = json.loads(contradiction_history_raw)
     contradiction_history = [
-        ContradictionSnapshot.from_dict(c) if isinstance(c, dict) else c for c in contradiction_history_raw
+        ContradictionSnapshot.from_dict(c) if isinstance(c, dict) else c
+        for c in contradiction_history_raw
     ]
 
     source_cids = list(row.get("source_evidence_cids") or [])
@@ -9266,7 +10876,9 @@ def _row_to_observation(row: dict[str, Any], tenant_id: str | None = None) -> Ob
         independent_source_count=int(row["independent_source_count"]),
         corroboration_velocity=float(row["corroboration_velocity"]),
         contradiction_history=contradiction_history,
-        freshness_watermark=dt_to_json(row["freshness_watermark"]) if row.get("freshness_watermark") else None,
+        freshness_watermark=dt_to_json(row["freshness_watermark"])
+        if row.get("freshness_watermark")
+        else None,
         standing=float(row["standing"]),
         salience=float(row["salience"]),
         access_velocity=float(row["access_velocity"]),
@@ -9283,7 +10895,9 @@ def _row_to_observation(row: dict[str, Any], tenant_id: str | None = None) -> Ob
     )
 
 
-def _row_to_knowledge_page(row: dict[str, Any], tenant_id: str | None = None) -> KnowledgePage:
+def _row_to_knowledge_page(
+    row: dict[str, Any], tenant_id: str | None = None
+) -> KnowledgePage:
     tid = tenant_id or str(row.get("tenant_name") or row["tenant_id"])
     tags_raw = row.get("tags") or []
     if isinstance(tags_raw, str):
