@@ -22,16 +22,31 @@ from threading import RLock
 from typing import Any, Callable, Mapping, Protocol, Sequence
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from mnemosyne.access_policy import apply_statement_redactions, apply_text_redactions, effective_max_sensitivity, may_read_item
+from mnemosyne.access_policy import (
+    apply_statement_redactions,
+    apply_text_redactions,
+    effective_max_sensitivity,
+    may_read_item,
+)
 from mnemosyne.cid_lists import shared_or_copy
 from mnemosyne.command_line import split_command
 from mnemosyne.evidence_redaction import redaction_findings
-from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES, enforce_byte_limit, validate_byte_limit
+from mnemosyne.media_limits import (
+    DEFAULT_MAX_INGEST_BYTES,
+    enforce_byte_limit,
+    validate_byte_limit,
+)
 from mnemosyne.models import Hit, iso_utc, parse_dt, utc_now
 from mnemosyne.network_safety import safe_urlopen, validate_fetch_url
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.security import TrustTier, sanitize_retrieved_text, trust_weight
-from mnemosyne.text import TAXONOMIC_EXPANSIONS, cosine, hashing_embedding, lexical_score, tokenize
+from mnemosyne.text import (
+    TAXONOMIC_EXPANSIONS,
+    cosine,
+    hashing_embedding,
+    lexical_score,
+    tokenize,
+)
 
 
 QUERY_SUPPORT_THRESHOLD = 2.0 / 3.0
@@ -50,13 +65,18 @@ WORKSPACE_RETRIEVAL_ADVISORY_FILTER_KEYS = (
     "apply_workspace_retrieval_advisory",
     "workspace_retrieval_advisory_mode",
 )
-WORKSPACE_CONTROLLER_FILTER_KEYS = WORKSPACE_BROADCAST_FILTER_KEYS + WORKSPACE_RETRIEVAL_ADVISORY_FILTER_KEYS
+WORKSPACE_CONTROLLER_FILTER_KEYS = (
+    WORKSPACE_BROADCAST_FILTER_KEYS + WORKSPACE_RETRIEVAL_ADVISORY_FILTER_KEYS
+)
 WORKING_MEMORY_ROUTE_VERSION = "working-memory-route.v1"
 WORKING_MEMORY_TASK_WEIGHT = 0.75
 WORKING_MEMORY_RECENCY_WEIGHT = 0.25
 HttpEmbeddingCacheKey = tuple[str, str, str, str, int, str, str]
-_HTTP_EMBEDDING_CACHE: OrderedDict[HttpEmbeddingCacheKey, tuple[float, ...]] = OrderedDict()
+_HTTP_EMBEDDING_CACHE: OrderedDict[HttpEmbeddingCacheKey, tuple[float, ...]] = (
+    OrderedDict()
+)
 _HTTP_EMBEDDING_CACHE_LOCK = RLock()
+
 
 def _plane_value(item: Any, name: str, default: Any = None) -> Any:
     if isinstance(item, Mapping):
@@ -86,7 +106,9 @@ def prospective_memory_hits(
         return []
     user_id = str(owner.get("user_id") or "").strip()
     agent_id = str(owner.get("agent_id") or "").strip()
-    if not all(isinstance(value, str) and value.strip() for value in (user_id, agent_id)):
+    if not all(
+        isinstance(value, str) and value.strip() for value in (user_id, agent_id)
+    ):
         return []
     # The selector is not authority by itself.  Bind it to the authenticated
     # retrieval principal so a caller cannot enumerate another owner's actions.
@@ -105,7 +127,10 @@ def prospective_memory_hits(
         due_at = _plane_value(intention, "due_at")
         if not isinstance(due_at, datetime) or due_at.tzinfo is None:
             continue
-        if _plane_value(intention, "status") != "scheduled" or due_at.astimezone(UTC) > as_of:
+        if (
+            _plane_value(intention, "status") != "scheduled"
+            or due_at.astimezone(UTC) > as_of
+        ):
             continue
         raw_id = str(_plane_value(intention, "intention_id"))
         action = _plane_value(intention, "action", {})
@@ -140,7 +165,9 @@ def prospective_memory_hits(
             if not decision.allowed:
                 allowed = False
                 break
-            text, redaction = apply_text_redactions(text, evidence.access_policy, decision)
+            text, redaction = apply_text_redactions(
+                text, evidence.access_policy, decision
+            )
             if not text:
                 allowed = False
                 break
@@ -148,7 +175,9 @@ def prospective_memory_hits(
                 privacy.append(redaction)
             trust_tiers.append(evidence.trust_tier)
             sensitivities.append(evidence.sensitivity)
-            capability_tags.update(str(tag) for tag in evidence.capability_tags if str(tag).strip())
+            capability_tags.update(
+                str(tag) for tag in evidence.capability_tags if str(tag).strip()
+            )
         if not allowed:
             continue
         hits.append(
@@ -172,7 +201,9 @@ def prospective_memory_hits(
                 },
             )
         )
-    return sorted(hits, key=lambda hit: (-hit.score, hit.metadata["due_at"], hit.id))[:k]
+    return sorted(hits, key=lambda hit: (-hit.score, hit.metadata["due_at"], hit.id))[
+        :k
+    ]
 
 
 QUERY_SUPPORT_STOPWORDS = {
@@ -347,19 +378,26 @@ QUERY_SUPPORT_QUESTION_STOPWORDS = {
     "younger",
 }
 
-QUERY_SUPPORT_STOPWORDS = set(QUERY_SUPPORT_STOPWORDS) | QUERY_SUPPORT_QUESTION_STOPWORDS
+QUERY_SUPPORT_STOPWORDS = (
+    set(QUERY_SUPPORT_STOPWORDS) | QUERY_SUPPORT_QUESTION_STOPWORDS
+)
 
 _SCHEMA_NAME_RE = r"([A-Z][A-Za-z0-9_-]*)"
 _ASSIGNED_PROJECT_RE = re.compile(
     rf"\b{_SCHEMA_NAME_RE}\s+is\s+assigned\s+to\s+project\s+{_SCHEMA_NAME_RE}\b",
     re.IGNORECASE,
 )
-_REPORTS_TO_RE = re.compile(rf"\b{_SCHEMA_NAME_RE}\s+reports\s+to\s+{_SCHEMA_NAME_RE}\b", re.IGNORECASE)
+_REPORTS_TO_RE = re.compile(
+    rf"\b{_SCHEMA_NAME_RE}\s+reports\s+to\s+{_SCHEMA_NAME_RE}\b", re.IGNORECASE
+)
 _PROJECT_DEADLINE_RE = re.compile(
     rf"\bproject\s+{_SCHEMA_NAME_RE}\s+has\s+a\s+delivery\s+deadline\b",
     re.IGNORECASE,
 )
-_PROJECT_LEAD_RE = re.compile(rf"\bproject\s+{_SCHEMA_NAME_RE}\s+is\s+led\s+by\s+{_SCHEMA_NAME_RE}\b", re.IGNORECASE)
+_PROJECT_LEAD_RE = re.compile(
+    rf"\bproject\s+{_SCHEMA_NAME_RE}\s+is\s+led\s+by\s+{_SCHEMA_NAME_RE}\b",
+    re.IGNORECASE,
+)
 _AS_OF_RE = re.compile(r"\bas\s+of\s+(\d{4}-\d{2}-\d{2})\b", re.IGNORECASE)
 
 _TEMPORAL_SUBJECTS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -431,15 +469,28 @@ def answer_grounding_floor_report(
     )
     for index, hit in enumerate(hits):
         metadata = hit.metadata if isinstance(hit.metadata, Mapping) else {}
-        standing_payload = metadata.get("standing") if isinstance(metadata.get("standing"), Mapping) else {}
+        standing_payload = (
+            metadata.get("standing")
+            if isinstance(metadata.get("standing"), Mapping)
+            else {}
+        )
         raw_groundedness = standing_payload.get("groundedness", 0.0)
         try:
             groundedness = _bounded_unit(float(raw_groundedness))
         except (TypeError, ValueError):
             groundedness = 0.0
-        reality_class = _normalise_retrieval_reality_class(metadata.get("reality_class"))
-        authority = bool(standing_payload.get("authority")) if standing_payload else groundedness >= low_threshold
-        low_self_support = reality_class in {"self_generated", "simulated"} and groundedness < low_threshold
+        reality_class = _normalise_retrieval_reality_class(
+            metadata.get("reality_class")
+        )
+        authority = (
+            bool(standing_payload.get("authority"))
+            if standing_payload
+            else groundedness >= low_threshold
+        )
+        low_self_support = (
+            reality_class in {"self_generated", "simulated"}
+            and groundedness < low_threshold
+        )
         grounded_support = authority and reality_class == "grounded"
         if low_self_support:
             low_self += 1
@@ -510,13 +561,16 @@ def apply_workspace_retrieval_advisory(
         report["reason"] = "no_workspace_retrieval_advisory"
         return original, report
 
-    apply_requested = ctx.get("apply_workspace_retrieval_advisory") is True or ctx.get(
-        "workspace_retrieval_advisory_mode"
-    ) == "apply"
+    apply_requested = (
+        ctx.get("apply_workspace_retrieval_advisory") is True
+        or ctx.get("workspace_retrieval_advisory_mode") == "apply"
+    )
     report["apply_requested"] = bool(apply_requested)
     raw = ctx.get("workspace_retrieval_advisory")
     if not isinstance(raw, Mapping):
-        report.update({"status": "rejected", "reason": "workspace_retrieval_advisory_not_mapping"})
+        report.update(
+            {"status": "rejected", "reason": "workspace_retrieval_advisory_not_mapping"}
+        )
         return original, report
     if not apply_requested:
         report.update(
@@ -537,13 +591,19 @@ def apply_workspace_retrieval_advisory(
         )
         return original, report
 
-    max_items = max(1, int(getattr(policy, "workspace_retrieval_advisory_max_items", 4)))
-    max_boost = _bounded_unit(getattr(policy, "workspace_retrieval_advisory_max_boost", 1.0))
+    max_items = max(
+        1, int(getattr(policy, "workspace_retrieval_advisory_max_items", 4))
+    )
+    max_boost = _bounded_unit(
+        getattr(policy, "workspace_retrieval_advisory_max_boost", 1.0)
+    )
     if max_boost <= 0.0:
         report.update({"status": "disabled", "reason": "zero_boost"})
         return original, report
 
-    contract = _workspace_retrieval_contract_checks(raw, tenant_id=tenant_id, branch=branch)
+    contract = _workspace_retrieval_contract_checks(
+        raw, tenant_id=tenant_id, branch=branch
+    )
     report["contract"] = contract
     if not all(contract.values()):
         report.update(
@@ -555,11 +615,20 @@ def apply_workspace_retrieval_advisory(
         return original, report
 
     raw_items = raw.get("items")
-    if not isinstance(raw_items, Sequence) or isinstance(raw_items, (str, bytes, bytearray)):
-        report.update({"status": "rejected", "reason": "workspace_retrieval_advisory_items_invalid"})
+    if not isinstance(raw_items, Sequence) or isinstance(
+        raw_items, (str, bytes, bytearray)
+    ):
+        report.update(
+            {
+                "status": "rejected",
+                "reason": "workspace_retrieval_advisory_items_invalid",
+            }
+        )
         return original, report
 
-    hit_matches = _workspace_retrieval_matches(original, tenant_id=tenant_id, branch=branch)
+    hit_matches = _workspace_retrieval_matches(
+        original, tenant_id=tenant_id, branch=branch
+    )
     boosts_by_hit: dict[tuple[str, str], dict[str, Any]] = {}
     invalid_reasons: list[str] = []
     considered = 0
@@ -568,11 +637,15 @@ def apply_workspace_retrieval_advisory(
         if not isinstance(item, Mapping):
             invalid_reasons.append(f"item_{index + 1}_not_mapping")
             continue
-        cid = str(item.get("cid") or item.get("source_cid") or item.get("evidence_cid") or "").strip()
+        cid = str(
+            item.get("cid") or item.get("source_cid") or item.get("evidence_cid") or ""
+        ).strip()
         if not cid:
             invalid_reasons.append(f"item_{index + 1}_missing_cid")
             continue
-        priority = _bounded_unit(item.get("priority", item.get("score", item.get("weight", 1.0))))
+        priority = _bounded_unit(
+            item.get("priority", item.get("score", item.get("weight", 1.0)))
+        )
         if priority <= 0.0:
             invalid_reasons.append(f"item_{index + 1}_nonpositive_priority")
             continue
@@ -581,7 +654,11 @@ def apply_workspace_retrieval_advisory(
             invalid_reasons.append(f"item_{index + 1}_cid_not_in_candidates")
             continue
         boost = round(max_boost * priority, 6)
-        item_id = str(item.get("workspace_item_id") or item.get("id") or f"workspace-retrieval-item-{index + 1}")
+        item_id = str(
+            item.get("workspace_item_id")
+            or item.get("id")
+            or f"workspace-retrieval-item-{index + 1}"
+        )
         for match_key in matches:
             previous = boosts_by_hit.get(match_key)
             if previous is None or float(previous["boost"]) < boost:
@@ -601,7 +678,13 @@ def apply_workspace_retrieval_advisory(
         )
         return original, report
     if not boosts_by_hit:
-        report.update({"status": "rejected", "reason": "no_matching_candidate_cids", "item_count": considered})
+        report.update(
+            {
+                "status": "rejected",
+                "reason": "no_matching_candidate_cids",
+                "item_count": considered,
+            }
+        )
         return original, report
 
     boosted: list[Hit] = []
@@ -654,11 +737,17 @@ def _workspace_broadcast_items(raw: object) -> list[dict[str, Any]]:
     if raw is None:
         return []
     if isinstance(raw, Mapping):
-        if isinstance(raw.get("items"), Sequence) and not isinstance(raw.get("items"), (str, bytes, bytearray)):
+        if isinstance(raw.get("items"), Sequence) and not isinstance(
+            raw.get("items"), (str, bytes, bytearray)
+        ):
             candidates = list(raw.get("items", []))
-        elif isinstance(raw.get("selected_items"), Sequence) and not isinstance(raw.get("selected_items"), (str, bytes, bytearray)):
+        elif isinstance(raw.get("selected_items"), Sequence) and not isinstance(
+            raw.get("selected_items"), (str, bytes, bytearray)
+        ):
             candidates = list(raw.get("selected_items", []))
-        elif isinstance(raw.get("trace"), Sequence) and not isinstance(raw.get("trace"), (str, bytes, bytearray)):
+        elif isinstance(raw.get("trace"), Sequence) and not isinstance(
+            raw.get("trace"), (str, bytes, bytearray)
+        ):
             candidates = list(raw.get("trace", []))
         else:
             candidates = [raw]
@@ -674,7 +763,9 @@ def _workspace_broadcast_items(raw: object) -> list[dict[str, Any]]:
 
 def _workspace_broadcast_item(item: object, *, index: int) -> dict[str, Any]:
     if isinstance(item, Mapping):
-        item_id = str(item.get("id") or item.get("focus_id") or f"workspace-focus-{index + 1}")
+        item_id = str(
+            item.get("id") or item.get("focus_id") or f"workspace-focus-{index + 1}"
+        )
         text = str(item.get("content") or item.get("text") or "")
         source = str(item.get("source") or item.get("reality_class") or "workspace")
         stripped = sorted(
@@ -702,7 +793,9 @@ def _workspace_broadcast_item(item: object, *, index: int) -> dict[str, Any]:
         "id": item_id,
         "source": source,
         "content_chars": len(text),
-        "content_ref": f"[workspace-broadcast-redacted:{digest}:chars={len(text)}]" if text else "",
+        "content_ref": f"[workspace-broadcast-redacted:{digest}:chars={len(text)}]"
+        if text
+        else "",
         "data_not_instructions": True,
         "used_for_control_flow": False,
         "stripped_control_keys": stripped,
@@ -727,9 +820,12 @@ def _workspace_retrieval_base_report() -> dict[str, Any]:
     }
 
 
-def _workspace_retrieval_contract_checks(raw: Mapping[str, Any], *, tenant_id: str, branch: str) -> dict[str, bool]:
+def _workspace_retrieval_contract_checks(
+    raw: Mapping[str, Any], *, tenant_id: str, branch: str
+) -> dict[str, bool]:
     return {
-        "version": str(raw.get("version") or "") == WORKSPACE_RETRIEVAL_ADVISORY_VERSION,
+        "version": str(raw.get("version") or "")
+        == WORKSPACE_RETRIEVAL_ADVISORY_VERSION,
         "tenant_matches": str(raw.get("tenant_id") or "") == tenant_id,
         "branch_matches": str(raw.get("branch") or branch) == branch,
         "shadow_only_input": raw.get("shadow_only") is True,
@@ -764,7 +860,9 @@ def _workspace_retrieval_refs(hit: Hit) -> set[str]:
     refs = {str(hit.id)}
     refs.update(str(cid) for cid in hit.provenance if str(cid))
     source_cids = hit.metadata.get("source_evidence_cids")
-    if isinstance(source_cids, Sequence) and not isinstance(source_cids, (str, bytes, bytearray)):
+    if isinstance(source_cids, Sequence) and not isinstance(
+        source_cids, (str, bytes, bytearray)
+    ):
         refs.update(str(cid) for cid in source_cids if str(cid))
     return refs
 
@@ -822,7 +920,9 @@ def normalise_query_term(token: str) -> str:
     if (
         len(token) == 4
         and token.endswith("s")
-        and not token.endswith(("ss", "us", "is", "as", "os", "yes", "was", "has", "his"))
+        and not token.endswith(
+            ("ss", "us", "is", "as", "os", "yes", "was", "has", "his")
+        )
     ):
         return token[:-1]
     return token
@@ -850,7 +950,7 @@ def similar_query_terms(left: str, right: str) -> bool:
                 return True
     shorter, longer = (left, right) if len(left) <= len(right) else (right, left)
     if len(shorter) >= 4 and longer.startswith(shorter):
-        suffix = longer[len(shorter):]
+        suffix = longer[len(shorter) :]
         if suffix in {"s", "e", "d", "y", "ed", "es", "ing"}:
             return True
         if suffix.startswith(("-", "_")) and len(suffix) > 1:
@@ -858,11 +958,50 @@ def similar_query_terms(left: str, right: str) -> bool:
     return False
 
 
-_WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
-_MONTHS = ("january", "february", "march", "april", "may", "june", "july", "august",
-           "september", "october", "november", "december")
-_DAY_PARTS = {"morning": (5, 12), "afternoon": (12, 17), "evening": (17, 24), "tonight": (17, 24), "night": (18, 24)}
-_SMALL_NUMBERS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "few": 3, "a": 1}
+_WEEKDAYS = (
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+)
+_MONTHS = (
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december",
+)
+_DAY_PARTS = {
+    "morning": (5, 12),
+    "afternoon": (12, 17),
+    "evening": (17, 24),
+    "tonight": (17, 24),
+    "night": (18, 24),
+}
+_SMALL_NUMBERS = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "few": 3,
+    "a": 1,
+}
 _PAST_CUE = re.compile(
     r"\b(did|was|were|had|remember|recall|said|told|asked|talked|mentioned|happened|discussed|spoke|"
     r"wrote|recorded|logged|messaged|replied|suggested|answered|first thing|last thing|"
@@ -883,17 +1022,20 @@ def _query_time_axis(text: str) -> str:
     """Explicit questions about records/speech use source time; activities use occurrence time."""
     source = re.search(
         r"\b(asked|said|told|mentioned|discussed|spoke|talked|wrote|recorded|logged|messaged|replied|suggested|answered|"
-        r"conversations?|messages?|transcripts?)\b", text,
+        r"conversations?|messages?|transcripts?)\b",
+        text,
     )
     # "Tell me what happened" and "can you tell me what I did" are requests to
     # recall events, not claims about past speech. Bare verbs need a past auxiliary.
     speaking = re.search(
         r"\b(?:did|have|had)\s+[a-z0-9']+\s+"
         r"(?:(?:first|last|just|previously|originally|recently|already|ever|actually|initially)\s+)*"
-        r"(?:ask|say|tell|mention|discuss|speak|talk|write|answer|reply|suggest|record|log|message)\b", text,
+        r"(?:ask|say|tell|mention|discuss|speak|talk|write|answer|reply|suggest|record|log|message)\b",
+        text,
     )
-    record_time = (re.search(r"\b(?:documents?|sources?|records?|notes?|entries|files?)\b", text)
-                   and re.search(r"\b(?:created|written|saved|uploaded|imported|received)\b", text))
+    record_time = re.search(
+        r"\b(?:documents?|sources?|records?|notes?|entries|files?)\b", text
+    ) and re.search(r"\b(?:created|written|saved|uploaded|imported|received)\b", text)
     return "source" if source or speaking or record_time else "event"
 
 
@@ -918,7 +1060,9 @@ def window_support_query(window: TimeWindow) -> str:
     if window.axis == "event":
         rest = re.sub(r"\bevents?\b", " ", rest)
     else:
-        rest = re.sub(r"\b(?:messages?|send|sent|conversations?|transcripts?)\b", " ", rest)
+        rest = re.sub(
+            r"\b(?:messages?|send|sent|conversations?|transcripts?)\b", " ", rest
+        )
     return " ".join(rest.split())
 
 
@@ -939,7 +1083,10 @@ def resolve_query_timezone(value: str | None) -> ZoneInfo | None:
 
 
 def query_time_window(
-    query: str, now: datetime, *, query_timezone: str | None = None,
+    query: str,
+    now: datetime,
+    *,
+    query_timezone: str | None = None,
 ) -> TimeWindow | None:
     """The time span a question names, in the asker's local time, or None.
 
@@ -972,9 +1119,11 @@ def query_time_window(
     found: re.Match[str] | None = None
 
     def rest_without(match: re.Match[str]) -> str:
-        return " ".join((text[: match.start()] + " " + text[match.end():]).split())
+        return " ".join((text[: match.start()] + " " + text[match.end() :]).split())
 
-    def make_window(start: datetime, end: datetime, label: str, rest: str) -> TimeWindow:
+    def make_window(
+        start: datetime, end: datetime, label: str, rest: str
+    ) -> TimeWindow:
         if zone is None:
             start, end = start.astimezone(), end.astimezone()
         return TimeWindow(start, end, label, rest, _query_time_axis(text))
@@ -982,17 +1131,32 @@ def query_time_window(
     iso_tokens = [token for token in text.split() if re.match(r"\d{4}-", token)]
     if any(not re.fullmatch(r"\d{4}-\d{2}-\d{2}", token) for token in iso_tokens):
         return None
-    if re.search(r"\b(?:before|after|since|until|between|through|from|as of|earlier than|later than) "
-                 r"\d{4}-\d{2}-\d{2}\b", text):
+    if re.search(
+        r"\b(?:before|after|since|until|between|through|from|as of|earlier than|later than) "
+        r"\d{4}-\d{2}-\d{2}\b",
+        text,
+    ):
         return None  # These ask for ranges/instants, not one calendar day.
     if re.search(r"\bbetween\b.+\band\b", text, re.IGNORECASE):
         return None  # Spans between named events are not single-calendar-day filters.
-    if re.search(r"\bwhat\s+(?:was|is)\s+the\s+(?:date|day|time)\b", text, re.IGNORECASE):
+    if re.search(
+        r"\bwhat\s+(?:was|is)\s+the\s+(?:date|day|time)\b", text, re.IGNORECASE
+    ):
         return None  # Target of the question is the date itself, not a search window.
-    iso_days = list(re.finditer(r"(?<![\w-])(?:(?:on|during|in) )?(\d{4}-\d{2}-\d{2})(?![\w-])", text))
-    month_expression = r"\b(?:in|during|back in) (" + "|".join(_MONTHS) + r")(?: (\d+))?\b"
+    iso_days = list(
+        re.finditer(
+            r"(?<![\w-])(?:(?:on|during|in) )?(\d{4}-\d{2}-\d{2})(?![\w-])", text
+        )
+    )
+    month_expression = (
+        r"\b(?:in|during|back in) (" + "|".join(_MONTHS) + r")(?: (\d+))?\b"
+    )
     year_expression = r"\b(?:in|during|back in) (\d{4})(?![\d-])\b"
-    explicit_spans = iso_days + list(re.finditer(month_expression, text)) + list(re.finditer(year_expression, text))
+    explicit_spans = (
+        iso_days
+        + list(re.finditer(month_expression, text))
+        + list(re.finditer(year_expression, text))
+    )
     if len(explicit_spans) > 1:
         return None  # Compound periods need their own interpretation, never just the first date.
     if iso_days:
@@ -1000,26 +1164,36 @@ def query_time_window(
         try:
             date = datetime.fromisoformat(found.group(1))
             day = today.replace(year=date.year, month=date.month, day=date.day)
-            return make_window(day, day + timedelta(days=1), found.group(1), rest_without(found))
+            return make_window(
+                day, day + timedelta(days=1), found.group(1), rest_without(found)
+            )
         except (ValueError, OverflowError):
             return None
     elif found := re.search(r"\b(?:the )?day before yesterday\b", text):
         day, label = today - timedelta(days=2), "the day before yesterday"
     elif found := re.search(r"\blast night\b", text):
         start = today - timedelta(days=1) + timedelta(hours=18)
-        return make_window(start, today + timedelta(hours=5), "last night", rest_without(found))
+        return make_window(
+            start, today + timedelta(hours=5), "last night", rest_without(found)
+        )
     elif found := re.search(r"\byesterday\b", text):
         day, label = today - timedelta(days=1), "yesterday"
-    elif found := re.search(r"\b(\d+|" + "|".join(_SMALL_NUMBERS) + r") days? ago\b", text):
+    elif found := re.search(
+        r"\b(\d+|" + "|".join(_SMALL_NUMBERS) + r") days? ago\b", text
+    ):
         count = found.group(1)
         # User text can exceed both Python's integer conversion limit and the
         # datetime range. Unsupported dates must not crash ordinary retrieval.
         try:
-            day = today - timedelta(days=int(count) if count.isdigit() else _SMALL_NUMBERS[count])
+            day = today - timedelta(
+                days=int(count) if count.isdigit() else _SMALL_NUMBERS[count]
+            )
         except (ValueError, OverflowError):
             return None
         label = found.group(0)
-    elif found := re.search(r"\b(\d+|" + "|".join(_SMALL_NUMBERS) + r") weeks? ago\b", text):
+    elif found := re.search(
+        r"\b(\d+|" + "|".join(_SMALL_NUMBERS) + r") weeks? ago\b", text
+    ):
         count = found.group(1)
         try:
             weeks = int(count) if count.isdigit() else _SMALL_NUMBERS[count]
@@ -1031,10 +1205,22 @@ def query_time_window(
             return None
     elif found := re.search(r"\blast week\b", text):
         start = today - timedelta(days=today.weekday() + 7)
-        return make_window(start, start + timedelta(days=7), "last week", rest_without(found))
+        return make_window(
+            start, start + timedelta(days=7), "last week", rest_without(found)
+        )
     elif found := re.search(r"\bthis week\b", text):
-        return make_window(today - timedelta(days=today.weekday()), local, "this week", rest_without(found))
-    elif found := re.search(r"\b(?:in|during|over)\s+the\s+(?:past|last)\s+(\d+|" + "|".join(_SMALL_NUMBERS) + r")\s+(days?|weeks?|months?|years?)\b", text):
+        return make_window(
+            today - timedelta(days=today.weekday()),
+            local,
+            "this week",
+            rest_without(found),
+        )
+    elif found := re.search(
+        r"\b(?:in|during|over)\s+the\s+(?:past|last)\s+(\d+|"
+        + "|".join(_SMALL_NUMBERS)
+        + r")\s+(days?|weeks?|months?|years?)\b",
+        text,
+    ):
         num_str, unit = found.group(1), found.group(2)
         try:
             n = int(num_str) if num_str.isdigit() else _SMALL_NUMBERS[num_str]
@@ -1049,7 +1235,9 @@ def query_time_window(
             return make_window(start, local, found.group(0), rest_without(found))
         except (ValueError, OverflowError):
             return None
-    elif found := re.search(r"\b(?:in|during|over)\s+the\s+(?:past|last)\s+(day|week|month|year)\b", text):
+    elif found := re.search(
+        r"\b(?:in|during|over)\s+the\s+(?:past|last)\s+(day|week|month|year)\b", text
+    ):
         unit = found.group(1)
         try:
             if unit == "day":
@@ -1073,15 +1261,27 @@ def query_time_window(
         try:
             if found.group(2) == "year":
                 end = today.replace(month=1, day=1)
-                start = end.replace(year=end.year - 1) if found.group(1) == "last" else end
+                start = (
+                    end.replace(year=end.year - 1) if found.group(1) == "last" else end
+                )
             else:
                 end = today.replace(day=1)
-                start = (end - timedelta(days=1)).replace(day=1) if found.group(1) == "last" else end
-            return make_window(start, end if found.group(1) == "last" else local,
-                               found.group(0), rest_without(found))
+                start = (
+                    (end - timedelta(days=1)).replace(day=1)
+                    if found.group(1) == "last"
+                    else end
+                )
+            return make_window(
+                start,
+                end if found.group(1) == "last" else local,
+                found.group(0),
+                rest_without(found),
+            )
         except (ValueError, OverflowError):
             return None
-    elif found := re.search(r"\b(?:(last|on|this past) )?(" + "|".join(_WEEKDAYS) + r")\b", text):
+    elif found := re.search(
+        r"\b(?:(last|on|this past) )?(" + "|".join(_WEEKDAYS) + r")\b", text
+    ):
         offset = (today.weekday() - _WEEKDAYS.index(found.group(2))) % 7
         if offset == 0 and found.group(1) in {"last", "this past"}:
             offset = 7
@@ -1090,9 +1290,17 @@ def query_time_window(
         month = _MONTHS.index(found.group(1)) + 1
         explicit_year = found.group(2)
         try:
-            year = int(explicit_year) if explicit_year else (local.year if month <= local.month else local.year - 1)
+            year = (
+                int(explicit_year)
+                if explicit_year
+                else (local.year if month <= local.month else local.year - 1)
+            )
             start = today.replace(year=year, month=month, day=1)
-            end = start.replace(year=year + 1, month=1) if month == 12 else start.replace(month=month + 1)
+            end = (
+                start.replace(year=year + 1, month=1)
+                if month == 12
+                else start.replace(month=month + 1)
+            )
         except (ValueError, OverflowError):
             return None
         label = f"{found.group(1)} {explicit_year}" if explicit_year else found.group(1)
@@ -1104,82 +1312,372 @@ def query_time_window(
         except (ValueError, OverflowError):
             return None
         return make_window(start, end, found.group(1), rest_without(found))
-    elif found := re.search(r"\b(today|this (?:morning|afternoon|evening)|tonight)\b", text):
+    elif found := re.search(
+        r"\b(today|this (?:morning|afternoon|evening)|tonight)\b", text
+    ):
         day, label = today, found.group(1)
     if day is None or found is None:
         return None
     rest = rest_without(found)
-    part = next((name for name in _DAY_PARTS if re.search(rf"\b{name}\b", found.group(0) + " " + rest)), None)
+    part = next(
+        (
+            name
+            for name in _DAY_PARTS
+            if re.search(rf"\b{name}\b", found.group(0) + " " + rest)
+        ),
+        None,
+    )
     if part is not None:
         first, last = _DAY_PARTS[part]
-        rest = " ".join(re.sub(rf"\b(?:in the |this |that )?{part}\b", " ", rest).split())
+        rest = " ".join(
+            re.sub(rf"\b(?:in the |this |that )?{part}\b", " ", rest).split()
+        )
         label = label if part in label else f"{label} {part}"
-        return make_window(day + timedelta(hours=first), day + timedelta(hours=last), label, rest)
+        return make_window(
+            day + timedelta(hours=first), day + timedelta(hours=last), label, rest
+        )
     return make_window(day, day + timedelta(days=1), label, rest)
 
 
-_ANCHOR_SENTENCE_START = frozenset({
-    "what", "when", "where", "which", "who", "whom", "whose", "why", "how",
-    "did", "do", "does", "have", "has", "had", "can", "could", "would",
-    "will", "is", "are", "was", "were", "at", "in", "on", "if", "for", "to",
-    "tell", "please", "may",
-    "list", "show", "find", "describe", "count", "identify", "give", "explain",
-    "recall", "name", "check", "search", "detail", "summarize", "outline",
-    "today", "yesterday",
-})
+_ANCHOR_SENTENCE_START = frozenset(
+    {
+        "what",
+        "when",
+        "where",
+        "which",
+        "who",
+        "whom",
+        "whose",
+        "why",
+        "how",
+        "did",
+        "do",
+        "does",
+        "have",
+        "has",
+        "had",
+        "can",
+        "could",
+        "would",
+        "will",
+        "is",
+        "are",
+        "was",
+        "were",
+        "at",
+        "in",
+        "on",
+        "if",
+        "for",
+        "to",
+        "tell",
+        "please",
+        "may",
+        "list",
+        "show",
+        "find",
+        "describe",
+        "count",
+        "identify",
+        "give",
+        "explain",
+        "recall",
+        "name",
+        "check",
+        "search",
+        "detail",
+        "summarize",
+        "outline",
+        "today",
+        "yesterday",
+    }
+)
 
-_LOW_WEIGHT_PREDICATES = frozenset({
-    "spend", "spent", "take", "took", "taken", "work", "worked", "working",
-    "start", "started", "starting", "cost", "costs", "costed", "tried", "try",
-    "visit", "visited", "visiting", "added", "add", "adding", "read", "reading",
-    "living", "live", "lived", "current", "currently", "name", "named", "every",
-    "left", "became", "become", "initially", "initial", "complete", "completed",
-    "completion", "purchased", "purchase", "purchasing", "gave", "give", "given",
-    "dedicate", "dedicated", "booking", "book", "booked", "attend", "attended",
-    "attending", "receive", "received", "receiving", "make", "made", "making",
-    "find", "found", "finding", "get", "getting", "got", "gotten", "see", "seeing",
-    "saw", "seen", "play", "played", "playing", "lead", "leading", "learn",
-    "learned", "learning", "call", "called", "calling", "practice", "practicing",
-    "practiced", "decide", "decided", "plant", "planted", "planting",
-    "buy", "bought", "locate", "located", "eat", "ate", "sell", "sold",
-    "own", "owned", "open", "close", "stay", "watch", "watched",
-    "approximate", "approximately", "related", "relat", "exceed", "exce",
-    "relocation", "relocat", "earliest", "latest", "previously", "frequently",
-    "downloaded", "download", "listening", "listen", "six", "five", "four", "three",
-    "event", "events", "activity", "activities", "mention", "mentioned", "money",
-})
+_LOW_WEIGHT_PREDICATES = frozenset(
+    {
+        "spend",
+        "spent",
+        "take",
+        "took",
+        "taken",
+        "work",
+        "worked",
+        "working",
+        "start",
+        "started",
+        "starting",
+        "cost",
+        "costs",
+        "costed",
+        "tried",
+        "try",
+        "visit",
+        "visited",
+        "visiting",
+        "added",
+        "add",
+        "adding",
+        "read",
+        "reading",
+        "living",
+        "live",
+        "lived",
+        "current",
+        "currently",
+        "name",
+        "named",
+        "every",
+        "left",
+        "became",
+        "become",
+        "initially",
+        "initial",
+        "complete",
+        "completed",
+        "completion",
+        "purchased",
+        "purchase",
+        "purchasing",
+        "gave",
+        "give",
+        "given",
+        "dedicate",
+        "dedicated",
+        "booking",
+        "book",
+        "booked",
+        "attend",
+        "attended",
+        "attending",
+        "receive",
+        "received",
+        "receiving",
+        "make",
+        "made",
+        "making",
+        "find",
+        "found",
+        "finding",
+        "get",
+        "getting",
+        "got",
+        "gotten",
+        "see",
+        "seeing",
+        "saw",
+        "seen",
+        "play",
+        "played",
+        "playing",
+        "lead",
+        "leading",
+        "learn",
+        "learned",
+        "learning",
+        "call",
+        "called",
+        "calling",
+        "practice",
+        "practicing",
+        "practiced",
+        "decide",
+        "decided",
+        "plant",
+        "planted",
+        "planting",
+        "buy",
+        "bought",
+        "locate",
+        "located",
+        "eat",
+        "ate",
+        "sell",
+        "sold",
+        "own",
+        "owned",
+        "open",
+        "close",
+        "stay",
+        "watch",
+        "watched",
+        "approximate",
+        "approximately",
+        "related",
+        "relat",
+        "exceed",
+        "exce",
+        "relocation",
+        "relocat",
+        "earliest",
+        "latest",
+        "previously",
+        "frequently",
+        "downloaded",
+        "download",
+        "listening",
+        "listen",
+        "six",
+        "five",
+        "four",
+        "three",
+        "event",
+        "events",
+        "activity",
+        "activities",
+        "mention",
+        "mentioned",
+        "money",
+    }
+)
 
-_FOCAL_OBJECT_TERMS = frozenset({
-    "hamster", "football", "footballs", "violin", "uncle", "dad", "father",
-    "taxi", "bus", "cows", "cow", "fence", "tart", "tarts", "pepper", "peppers",
-    "porsche", "ferrari", "sapiens", "cucumbers", "cucumber", "guitar",
-    "airbnbs", "airbnb", "passport", "salary", "anniversary", "birthday",
-    "saxophone", "piano", "flute", "drums", "trumpet", "clarinet",
-    "baseball", "basketball", "tennis", "soccer",
-    "parrot", "rabbit", "cat", "dog", "horse",
-    "boat", "yacht", "motorcycle", "bicycle",
-    "gift", "gifts", "wedding", "plants", "apartment",
-})
+_FOCAL_OBJECT_TERMS = frozenset(
+    {
+        "hamster",
+        "football",
+        "footballs",
+        "violin",
+        "uncle",
+        "dad",
+        "father",
+        "taxi",
+        "bus",
+        "cows",
+        "cow",
+        "fence",
+        "tart",
+        "tarts",
+        "pepper",
+        "peppers",
+        "porsche",
+        "ferrari",
+        "sapiens",
+        "cucumbers",
+        "cucumber",
+        "guitar",
+        "airbnbs",
+        "airbnb",
+        "passport",
+        "salary",
+        "anniversary",
+        "birthday",
+        "saxophone",
+        "piano",
+        "flute",
+        "drums",
+        "trumpet",
+        "clarinet",
+        "baseball",
+        "basketball",
+        "tennis",
+        "soccer",
+        "parrot",
+        "rabbit",
+        "cat",
+        "dog",
+        "horse",
+        "boat",
+        "yacht",
+        "motorcycle",
+        "bicycle",
+        "gift",
+        "gifts",
+        "wedding",
+        "plants",
+        "apartment",
+    }
+)
 
-_RELATIONAL_SUBJECT_TERMS = frozenset({
-    "dad", "father", "mom", "mother", "uncle", "aunt", "grandma", "grandmother",
-    "grandpa", "grandfather", "brother", "sister", "friend", "cousin", "boss",
-    "manager", "coworker", "roommate", "partner", "wife", "husband",
-})
+_RELATIONAL_SUBJECT_TERMS = frozenset(
+    {
+        "dad",
+        "father",
+        "mom",
+        "mother",
+        "uncle",
+        "aunt",
+        "grandma",
+        "grandmother",
+        "grandpa",
+        "grandfather",
+        "brother",
+        "sister",
+        "friend",
+        "cousin",
+        "boss",
+        "manager",
+        "coworker",
+        "roommate",
+        "partner",
+        "wife",
+        "husband",
+    }
+)
 
-_GENERIC_DESCRIPTORS = frozenset({
-    "kind", "type", "style", "level", "relation", "procedure", "size",
-    "memory", "answer", "total", "number", "time", "date", "day", "month",
-    "year", "thing", "things", "item", "items", "details", "information",
-    "way", "event", "events", "fact", "facts", "part", "parts",
-})
+_GENERIC_DESCRIPTORS = frozenset(
+    {
+        "kind",
+        "type",
+        "style",
+        "level",
+        "relation",
+        "procedure",
+        "size",
+        "memory",
+        "answer",
+        "total",
+        "number",
+        "time",
+        "date",
+        "day",
+        "month",
+        "year",
+        "thing",
+        "things",
+        "item",
+        "items",
+        "details",
+        "information",
+        "way",
+        "event",
+        "events",
+        "fact",
+        "facts",
+        "part",
+        "parts",
+    }
+)
 
-_COMMON_ADJECTIVES = frozenset({
-    "favorite", "favourite", "best", "worst", "top", "good", "bad",
-    "new", "old", "first", "last", "next", "previous", "recent",
-    "main", "major", "primary", "secondary", "special", "particular",
-    "high", "low", "big", "small", "great", "little", "average",
-})
+_COMMON_ADJECTIVES = frozenset(
+    {
+        "favorite",
+        "favourite",
+        "best",
+        "worst",
+        "top",
+        "good",
+        "bad",
+        "new",
+        "old",
+        "first",
+        "last",
+        "next",
+        "previous",
+        "recent",
+        "main",
+        "major",
+        "primary",
+        "secondary",
+        "special",
+        "particular",
+        "high",
+        "low",
+        "big",
+        "small",
+        "great",
+        "little",
+        "average",
+    }
+)
 
 _RECOGNIZED_COMPOUND_ANCHORS = (
     ("table", "tennis"),
@@ -1236,14 +1734,23 @@ def _extract_user_grounding_text(text: str, allow_assistant: bool = False) -> st
     return extracted if extracted else text
 
 
-def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = ()) -> dict[str, Any]:
+def query_support(
+    query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = ()
+) -> dict[str, Any]:
     """Specificity-weighted query support with proper-noun, compound-noun, and focal-object grounding."""
     words = re.findall(r"[A-Za-z0-9]+(?:[\x27\x2D][A-Za-z0-9]+)*", query)
     hit_texts = [hit.text for hit in hits[:5]] + list(extra_texts)
     allow_assistant = bool(
-        re.search(r"\b(?:you|assistant)\s+(?:recommend|recommended|suggest|suggested|mention|mentioned|say|said|tell|told|give|gave|provide|provided)\b", query, re.I)
+        re.search(
+            r"\b(?:you|assistant)\s+(?:recommend|recommended|suggest|suggested|mention|mentioned|say|said|tell|told|give|gave|provide|provided)\b",
+            query,
+            re.I,
+        )
     )
-    user_hit_texts = [_extract_user_grounding_text(t, allow_assistant=allow_assistant) for t in hit_texts]
+    user_hit_texts = [
+        _extract_user_grounding_text(t, allow_assistant=allow_assistant)
+        for t in hit_texts
+    ]
 
     # 1. Extract proper nouns and multi-word proper nouns
     proper_nouns: list[str] = []
@@ -1253,7 +1760,11 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
     for i, w in enumerate(words):
         clean_w = re.sub(r"['’]s$", "", w)
         norm = clean_w.lower()
-        is_cap = (clean_w[0].isupper() or any(c.isupper() for c in clean_w[1:]) or (any(c.isdigit() for c in clean_w) and any(c.isalpha() for c in clean_w)))
+        is_cap = (
+            clean_w[0].isupper()
+            or any(c.isupper() for c in clean_w[1:])
+            or (any(c.isdigit() for c in clean_w) and any(c.isalpha() for c in clean_w))
+        )
         if is_cap:
             if i == 0 and norm in _ANCHOR_SENTENCE_START:
                 if current_mw:
@@ -1282,7 +1793,10 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
         found = False
         for text in user_hit_texts:
             tokens = [normalise_query_term(t) for t in tokenize(text)]
-            if any(similar_query_terms(pn_norm, t) for t in tokens) or pn_norm in text.lower():
+            if (
+                any(similar_query_terms(pn_norm, t) for t in tokens)
+                or pn_norm in text.lower()
+            ):
                 found = True
                 break
         if not found:
@@ -1297,15 +1811,28 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
             tokens = [normalise_query_term(t) for t in tokenize(text)]
             positions = []
             for mwn in mw_norms:
-                pos = [idx for idx, tok in enumerate(tokens) if similar_query_terms(mwn, tok)]
+                pos = [
+                    idx
+                    for idx, tok in enumerate(tokens)
+                    if similar_query_terms(mwn, tok)
+                ]
                 positions.append(pos)
             if all(positions):
                 if len(positions) == 2:
-                    if any(1 <= abs(p0 - p1) <= 3 for p0 in positions[0] for p1 in positions[1]):
+                    if any(
+                        1 <= abs(p0 - p1) <= 3
+                        for p0 in positions[0]
+                        for p1 in positions[1]
+                    ):
                         found_mw = True
                         break
                 elif len(positions) == 3:
-                    if any(1 <= abs(p0 - p1) <= 3 and 1 <= abs(p1 - p2) <= 3 for p0 in positions[0] for p1 in positions[1] for p2 in positions[2]):
+                    if any(
+                        1 <= abs(p0 - p1) <= 3 and 1 <= abs(p1 - p2) <= 3
+                        for p0 in positions[0]
+                        for p1 in positions[1]
+                        for p2 in positions[2]
+                    ):
                         found_mw = True
                         break
                 else:
@@ -1323,7 +1850,10 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
             owned = re.sub(r"['’]s$", "", w2).strip()
             owner_norm = normalise_query_term(owner.lower())
             owned_norm = normalise_query_term(owned.lower())
-            if owner_norm not in QUERY_SUPPORT_STOPWORDS and owned_norm not in QUERY_SUPPORT_STOPWORDS:
+            if (
+                owner_norm not in QUERY_SUPPORT_STOPWORDS
+                and owned_norm not in QUERY_SUPPORT_STOPWORDS
+            ):
                 possessive_pairs.append((owner, owned))
 
     for owner, owned in possessive_pairs:
@@ -1353,8 +1883,16 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
             found = False
             for text in user_hit_texts:
                 tokens = [normalise_query_term(t) for t in tokenize(text)]
-                p1 = [idx for idx, tok in enumerate(tokens) if similar_query_terms(t1, tok)]
-                p2 = [idx for idx, tok in enumerate(tokens) if similar_query_terms(t2, tok)]
+                p1 = [
+                    idx
+                    for idx, tok in enumerate(tokens)
+                    if similar_query_terms(t1, tok)
+                ]
+                p2 = [
+                    idx
+                    for idx, tok in enumerate(tokens)
+                    if similar_query_terms(t2, tok)
+                ]
                 if any(abs(i - j) <= 2 for i in p1 for j in p2):
                     found = True
                     break
@@ -1411,7 +1949,14 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
             base_w = 1.5
 
         # Dynamic corpus IDF: log((N + 1) / (df + 0.5)), keeping matched terms at >= 1.0
-        df = sum(1 for text in hit_texts if any(similar_query_terms(norm, normalise_query_term(t)) for t in tokenize(text)))
+        df = sum(
+            1
+            for text in hit_texts
+            if any(
+                similar_query_terms(norm, normalise_query_term(t))
+                for t in tokenize(text)
+            )
+        )
         corpus_idf = math.log((n_docs + 1.0) / (df + 0.5))
         if n_docs <= 2 or df > 0:
             dynamic_factor = 1.0
@@ -1425,7 +1970,11 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
         # Fallback to minimal stopwords if all query terms are conversational stopwords
         for token in tokenize(query):
             term = normalise_query_term(token)
-            if len(term) <= 2 or term in MINIMAL_QUERY_SUPPORT_STOPWORDS or term in query_terms:
+            if (
+                len(term) <= 2
+                or term in MINIMAL_QUERY_SUPPORT_STOPWORDS
+                or term in query_terms
+            ):
                 continue
             query_terms.append(term)
             term_weights[term] = 1.0
@@ -1451,7 +2000,9 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
 
     evidence_terms: list[str] = []
     for text in hit_texts:
-        evidence_terms.extend(normalise_query_term(token) for token in tokenize(text) if len(token) > 2)
+        evidence_terms.extend(
+            normalise_query_term(token) for token in tokenize(text) if len(token) > 2
+        )
     matched_terms = [
         term
         for term in query_terms
@@ -1467,7 +2018,9 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
     missing_locatives: list[str] = []
     is_ordering_query = bool(re.search(r"\b(?:order of|chronological)\b", q_lower))
     if not is_ordering_query:
-        locative_pairs = re.findall(r"\b([A-Za-z]+)\s+(?:in|at)\s+([A-Z][A-Za-z]+)\b", query)
+        locative_pairs = re.findall(
+            r"\b([A-Za-z]+)\s+(?:in|at)\s+([A-Z][A-Za-z]+)\b", query
+        )
         for entity, loc in locative_pairs:
             if loc.lower() in _MONTHS or loc.lower() in _WEEKDAYS:
                 continue
@@ -1483,8 +2036,16 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
                 found_loc = False
                 for text in user_hit_texts[:5]:
                     tokens = [normalise_query_term(t) for t in tokenize(text)]
-                    p_e = [idx for idx, tok in enumerate(tokens) if similar_query_terms(en, tok)]
-                    p_l = [idx for idx, tok in enumerate(tokens) if similar_query_terms(ln, tok)]
+                    p_e = [
+                        idx
+                        for idx, tok in enumerate(tokens)
+                        if similar_query_terms(en, tok)
+                    ]
+                    p_l = [
+                        idx
+                        for idx, tok in enumerate(tokens)
+                        if similar_query_terms(ln, tok)
+                    ]
                     if any(abs(i - j) <= 25 for i in p_e for j in p_l):
                         found_loc = True
                         break
@@ -1494,7 +2055,11 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
     # Duration grounding: "how long [was/have/stayed] ... in [Location]"
     if re.search(r"\bhow\s+long\b", query, re.I):
         loc_match = re.search(r"\b(?:in|at)\s+([A-Z][A-Za-z]+)\b", query)
-        if loc_match and loc_match.group(1).lower() not in _MONTHS and loc_match.group(1).lower() not in _WEEKDAYS:
+        if (
+            loc_match
+            and loc_match.group(1).lower() not in _MONTHS
+            and loc_match.group(1).lower() not in _WEEKDAYS
+        ):
             loc_target = normalise_query_term(loc_match.group(1).lower())
             if loc_target not in QUERY_SUPPORT_STOPWORDS and len(loc_target) > 2:
                 dur_regex = re.compile(
@@ -1506,7 +2071,9 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
                     sentences = re.split(r"[.!?\n]+", text)
                     for sent in sentences:
                         sent_tokens = [normalise_query_term(t) for t in tokenize(sent)]
-                        has_loc_in_sent = any(similar_query_terms(loc_target, tok) for tok in sent_tokens)
+                        has_loc_in_sent = any(
+                            similar_query_terms(loc_target, tok) for tok in sent_tokens
+                        )
                         if has_loc_in_sent and dur_regex.search(sent):
                             has_loc_duration = True
                             break
@@ -1520,16 +2087,26 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
     # and a distinct focal object/event anchor (e.g. birthday gift),
     # require that they co-occur within at least one candidate hit to avoid cross-session unigram pooling.
     missing_arguments: list[str] = []
-    subjects = [pn for pn in proper_nouns if normalise_query_term(pn.lower()) not in _FOCAL_OBJECT_TERMS] + [
-        w for w in query_terms if w in _RELATIONAL_SUBJECT_TERMS
+    subjects = [
+        pn
+        for pn in proper_nouns
+        if normalise_query_term(pn.lower()) not in _FOCAL_OBJECT_TERMS
+    ] + [w for w in query_terms if w in _RELATIONAL_SUBJECT_TERMS]
+    focal_objects = [
+        t for t in query_terms if t in _FOCAL_OBJECT_TERMS and t not in subjects
     ]
-    focal_objects = [t for t in query_terms if t in _FOCAL_OBJECT_TERMS and t not in subjects]
     if subjects and focal_objects:
         has_joint_hit = False
         for text in user_hit_texts[:5]:
             tokens = [normalise_query_term(tok) for tok in tokenize(text)]
-            subj_in_hit = any(any(similar_query_terms(s.lower(), tok) for tok in tokens) for s in subjects)
-            obj_in_hit = any(any(similar_query_terms(fo, tok) for tok in tokens) for fo in focal_objects)
+            subj_in_hit = any(
+                any(similar_query_terms(s.lower(), tok) for tok in tokens)
+                for s in subjects
+            )
+            obj_in_hit = any(
+                any(similar_query_terms(fo, tok) for tok in tokens)
+                for fo in focal_objects
+            )
             if subj_in_hit and obj_in_hit:
                 has_joint_hit = True
                 break
@@ -1537,7 +2114,9 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
             missing_arguments.append(f"{subjects[0]} + {focal_objects[0]}")
 
     # Age-of-person grounding: "How old is/was <ProperNoun>" requires an age indicator in a hit mentioning <ProperNoun>
-    age_person_match = re.search(r"\b[Hh]ow\s+old\s+(?:is|was|will)\s+([A-Z][a-z]+)\b", query)
+    age_person_match = re.search(
+        r"\b[Hh]ow\s+old\s+(?:is|was|will)\s+([A-Z][a-z]+)\b", query
+    )
     if age_person_match:
         person_norm = normalise_query_term(age_person_match.group(1).lower())
         age_indicator_re = re.compile(
@@ -1547,7 +2126,9 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
         has_person_age = False
         for text in user_hit_texts[:5]:
             tokens = [normalise_query_term(tok) for tok in tokenize(text)]
-            if any(similar_query_terms(person_norm, tok) for tok in tokens) and age_indicator_re.search(text):
+            if any(
+                similar_query_terms(person_norm, tok) for tok in tokens
+            ) and age_indicator_re.search(text):
                 has_person_age = True
                 break
         if not has_person_age:
@@ -1556,7 +2137,8 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
     # Remaining-quantity grounding: "How many pages do I have left..." requires 'left' or 'remaining' in user hit text
     if re.search(r"\bhow\s+many\s+pages\s+do\s+i\s+have\s+left\b", q_lower):
         has_remaining_pages = any(
-            re.search(r"\b(?:left|remaining)\b", text, re.I) and re.search(r"\bpages?\b", text, re.I)
+            re.search(r"\b(?:left|remaining)\b", text, re.I)
+            and re.search(r"\bpages?\b", text, re.I)
             for text in user_hit_texts[:5]
         )
         if not has_remaining_pages:
@@ -1592,10 +2174,24 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
 
     for c1, c2 in conjunction_pairs:
         n1, n2 = normalise_query_term(c1.lower()), normalise_query_term(c2.lower())
-        found_c1 = any(any(similar_query_terms(n1, normalise_query_term(tok)) for tok in tokenize(text)) for text in user_hit_texts)
-        found_c2 = any(any(similar_query_terms(n2, normalise_query_term(tok)) for tok in tokenize(text)) for text in user_hit_texts)
+        found_c1 = any(
+            any(
+                similar_query_terms(n1, normalise_query_term(tok))
+                for tok in tokenize(text)
+            )
+            for text in user_hit_texts
+        )
+        found_c2 = any(
+            any(
+                similar_query_terms(n2, normalise_query_term(tok))
+                for tok in tokenize(text)
+            )
+            for text in user_hit_texts
+        )
         if not found_c1 and not found_c2:
-            missing_conjunctions.append(f"conjunction({c1} and {c2}) missing {c1} and {c2}")
+            missing_conjunctions.append(
+                f"conjunction({c1} and {c2}) missing {c1} and {c2}"
+            )
         elif not found_c1:
             missing_conjunctions.append(f"conjunction({c1} and {c2}) missing {c1}")
         elif not found_c2:
@@ -1634,7 +2230,9 @@ def query_support(query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = 
 
 def _spans_calendar_period(start: datetime, end: datetime) -> bool:
     """Recognize complete calendar months/years, not arbitrary month-long trips."""
-    if start.day != 1 or any((start.hour, start.minute, start.second, start.microsecond)):
+    if start.day != 1 or any(
+        (start.hour, start.minute, start.second, start.microsecond)
+    ):
         return False
     if end <= start:
         return False
@@ -1663,7 +2261,11 @@ def compute_recency_decay(
         if days_ago <= 0:
             return 1.0
         return 0.5 ** (days_ago / halflife_days)
-    window = linear_window_days if math.isfinite(linear_window_days) and linear_window_days > 0 else 60.0
+    window = (
+        linear_window_days
+        if math.isfinite(linear_window_days) and linear_window_days > 0
+        else 60.0
+    )
     return max(0.1, min(1.0, 1.0 - (days_ago / window)))
 
 
@@ -1680,7 +2282,9 @@ def hit_recency_for_unit(
     """
     occ_start = hit.metadata.get("event_start") or hit.metadata.get("occurred_start")
     occ_end = hit.metadata.get("event_end") or hit.metadata.get("occurred_end")
-    created_at = hit.metadata.get("_candidate_created_at") or hit.metadata.get("created_at")
+    created_at = hit.metadata.get("_candidate_created_at") or hit.metadata.get(
+        "created_at"
+    )
 
     def _safe_dt(val: Any) -> datetime | None:
         if val is None:
@@ -1699,18 +2303,36 @@ def hit_recency_for_unit(
 
     def local_calendar_span() -> bool:
         try:
-            local_start = occ_start if isinstance(occ_start, datetime) else datetime.fromisoformat(occ_start)
-            local_end = occ_end if isinstance(occ_end, datetime) else datetime.fromisoformat(occ_end)
+            local_start = (
+                occ_start
+                if isinstance(occ_start, datetime)
+                else datetime.fromisoformat(occ_start)
+            )
+            local_end = (
+                occ_end
+                if isinstance(occ_end, datetime)
+                else datetime.fromisoformat(occ_end)
+            )
         except (TypeError, ValueError, OverflowError):
             return False
-        return _spans_calendar_period(local_start.replace(tzinfo=None), local_end.replace(tzinfo=None))
+        return _spans_calendar_period(
+            local_start.replace(tzinfo=None), local_end.replace(tzinfo=None)
+        )
 
-    if start_utc is not None and end_utc is not None and (
-            hit.metadata.get("_candidate_event_calendar") is True or local_calendar_span()
-            or _spans_calendar_period(start_utc, end_utc)):
+    if (
+        start_utc is not None
+        and end_utc is not None
+        and (
+            hit.metadata.get("_candidate_event_calendar") is True
+            or local_calendar_span()
+            or _spans_calendar_period(start_utc, end_utc)
+        )
+    ):
         sec = max(0.0, (now_utc - end_utc).total_seconds())
         days_ago = 0.0 if sec < 60.0 else sec / 86400.0
-        recency = compute_recency_decay(days_ago, function, linear_window_days, halflife_days)
+        recency = compute_recency_decay(
+            days_ago, function, linear_window_days, halflife_days
+        )
         return min(0.5, recency)
 
     effective = start_utc or created_utc or end_utc
@@ -1730,7 +2352,9 @@ def precision_aware_recency_score(
     """Compute precision-aware recency score without inventing fake day-level age for coarse intervals."""
     if not math.isfinite(days_ago) or days_ago < 0:
         return 0.5
-    raw = compute_recency_decay(days_ago, function="exponential", halflife_days=halflife_days)
+    raw = compute_recency_decay(
+        days_ago, function="exponential", halflife_days=halflife_days
+    )
     prec = (precision or "day").lower()
     if prec in {"year", "quarter", "season", "month"} or span_days >= 28.0:
         # Coarse calendar intervals should not dominate point-event freshness or suffer artificial day aging
@@ -1750,7 +2374,12 @@ def spread_temporal_buckets(
         return list(hits)
 
     def _hit_dt(h: Hit) -> datetime | None:
-        for key in ("event_start", "occurred_start", "_candidate_created_at", "created_at"):
+        for key in (
+            "event_start",
+            "occurred_start",
+            "_candidate_created_at",
+            "created_at",
+        ):
             val = h.metadata.get(key)
             if val is not None:
                 try:
@@ -1847,15 +2476,27 @@ def schema_fast_path_rerank(
     """
 
     if not hits or not bool(getattr(policy, "schema_fast_path_enabled", True)):
-        return list(hits), {"applied": False, "reason": "disabled_or_empty", "boosted_hit_ids": []}
+        return list(hits), {
+            "applied": False,
+            "reason": "disabled_or_empty",
+            "boosted_hit_ids": [],
+        }
 
     boost = max(0.0, float(getattr(policy, "schema_fast_path_boost", 1.25)))
     if boost <= 0.0:
-        return list(hits), {"applied": False, "reason": "zero_boost", "boosted_hit_ids": []}
+        return list(hits), {
+            "applied": False,
+            "reason": "zero_boost",
+            "boosted_hit_ids": [],
+        }
 
     reasons = _schema_fast_path_reasons(query, hits)
     if not reasons:
-        return list(hits), {"applied": False, "reason": "no_schema_pattern", "boosted_hit_ids": []}
+        return list(hits), {
+            "applied": False,
+            "reason": "no_schema_pattern",
+            "boosted_hit_ids": [],
+        }
 
     boosted_ids = set(reasons)
     boosted: list[Hit] = []
@@ -1873,9 +2514,18 @@ def schema_fast_path_rerank(
                 "original_rank": index + 1,
             },
         }
-        boosted.append(replace(hit, score=hit.score + boost, channel=_append_channel(hit.channel, "schema"), metadata=metadata))
+        boosted.append(
+            replace(
+                hit,
+                score=hit.score + boost,
+                channel=_append_channel(hit.channel, "schema"),
+                metadata=metadata,
+            )
+        )
 
-    return sorted(boosted, key=lambda item: (item.score, item.id in boosted_ids), reverse=True), {
+    return sorted(
+        boosted, key=lambda item: (item.score, item.id in boosted_ids), reverse=True
+    ), {
         "applied": True,
         "boost": round(boost, 6),
         "boosted_hit_ids": sorted(boosted_ids),
@@ -1888,25 +2538,37 @@ def _schema_fast_path_reasons(query: str, hits: Sequence[Hit]) -> dict[str, str]
     query_lower = query_text.lower()
     reasons: dict[str, str] = {}
 
-    deadline_person = _regex_group(r"\bproject\s+([A-Za-z][A-Za-z0-9_-]*)\s+is\s+assigned\s+to\b", query_text)
+    deadline_person = _regex_group(
+        r"\bproject\s+([A-Za-z][A-Za-z0-9_-]*)\s+is\s+assigned\s+to\b", query_text
+    )
     if deadline_person and "deadline" in query_lower:
         project = _assigned_project_for_person(deadline_person, hits)
         if project:
             for hit in hits:
                 text = hit.text.lower()
-                if hit.id not in reasons and _ASSIGNED_PROJECT_RE.search(hit.text) and deadline_person.lower() in text:
+                if (
+                    hit.id not in reasons
+                    and _ASSIGNED_PROJECT_RE.search(hit.text)
+                    and deadline_person.lower() in text
+                ):
                     reasons[hit.id] = "first-hop assigned-project support"
                 if hit.id not in reasons and _PROJECT_DEADLINE_RE.search(hit.text):
                     if project.lower() in text and "deadline" in text:
                         reasons[hit.id] = "second-hop project deadline support"
 
-    manager_person = _regex_group(r"\bperson\s+([A-Za-z][A-Za-z0-9_-]*)\s+reports\s+to\b", query_text)
+    manager_person = _regex_group(
+        r"\bperson\s+([A-Za-z][A-Za-z0-9_-]*)\s+reports\s+to\b", query_text
+    )
     if manager_person and "led" in query_lower:
         manager = _manager_for_person(manager_person, hits)
         if manager:
             for hit in hits:
                 text = hit.text.lower()
-                if hit.id not in reasons and _REPORTS_TO_RE.search(hit.text) and manager_person.lower() in text:
+                if (
+                    hit.id not in reasons
+                    and _REPORTS_TO_RE.search(hit.text)
+                    and manager_person.lower() in text
+                ):
                     reasons[hit.id] = "first-hop manager support"
                 if hit.id not in reasons and _PROJECT_LEAD_RE.search(hit.text):
                     if manager.lower() in text:
@@ -1923,7 +2585,19 @@ def _schema_fast_path_reasons(query: str, hits: Sequence[Hit]) -> dict[str, str]
         if selected_policy:
             reasons[selected_policy] = "current policy schema support"
 
-    if any(term in query_lower for term in ("current", "currently", "now", "latest", "today", "presently", "at present", "so far")):
+    if any(
+        term in query_lower
+        for term in (
+            "current",
+            "currently",
+            "now",
+            "latest",
+            "today",
+            "presently",
+            "at present",
+            "so far",
+        )
+    ):
         selected_curr = _current_currency_hit_id(query_text, hits)
         if selected_curr and selected_curr not in reasons:
             reasons[selected_curr] = "current currency schema support"
@@ -1962,7 +2636,9 @@ def _temporal_subject(text: str) -> tuple[str, ...] | None:
     return None
 
 
-def _temporal_selected_hit_id(query: str, hits: Sequence[Hit], subject_terms: tuple[str, ...]) -> str | None:
+def _temporal_selected_hit_id(
+    query: str, hits: Sequence[Hit], subject_terms: tuple[str, ...]
+) -> str | None:
     rows: list[tuple[datetime, str]] = []
     subject_set = set(subject_terms)
     for hit in hits:
@@ -1993,7 +2669,11 @@ def _temporal_selected_hit_id(query: str, hits: Sequence[Hit], subject_terms: tu
 
 def _current_policy_hit_id(query: str, hits: Sequence[Hit]) -> str | None:
     query_terms = set(tokenize(query))
-    policy_terms = {term for term in query_terms if term not in QUERY_SUPPORT_STOPWORDS and term != "current"}
+    policy_terms = {
+        term
+        for term in query_terms
+        if term not in QUERY_SUPPORT_STOPWORDS and term != "current"
+    }
     candidates: list[tuple[int, float, str]] = []
     for hit in hits:
         text_terms = set(tokenize(hit.text))
@@ -2238,7 +2918,9 @@ def _command_hit(
         channel=str(item.get("channel") or default_channel),
         provenance=_command_provenance(item.get("provenance")),
         trust_tier=_command_int(item.get("trust_tier"), default=0, field="trust_tier"),
-        sensitivity=_command_int(item.get("sensitivity"), default=0, field="sensitivity"),
+        sensitivity=_command_int(
+            item.get("sensitivity"), default=0, field="sensitivity"
+        ),
         metadata=metadata,
     )
 
@@ -2256,7 +2938,13 @@ def _command_hits(
     if not isinstance(raw_hits, list):
         raise ValueError("retrieval command response requires hits array")
     hits = [
-        _command_hit(item, tenant_id=tenant_id, branch=branch, default_channel=default_channel, backend=backend)
+        _command_hit(
+            item,
+            tenant_id=tenant_id,
+            branch=branch,
+            default_channel=default_channel,
+            backend=backend,
+        )
         for item in raw_hits
     ]
     return sorted(hits, key=lambda item: item.score, reverse=True)[: max(k, 0)]
@@ -2275,9 +2963,13 @@ def validate_adapter_hit_scope(
     scoped: list[Hit] = []
     for hit in hits:
         if hit.tenant_id != tenant_id:
-            raise ValueError(f"{adapter_name} adapter returned hit outside requested tenant")
+            raise ValueError(
+                f"{adapter_name} adapter returned hit outside requested tenant"
+            )
         if hit.branch != branch:
-            raise ValueError(f"{adapter_name} adapter returned hit outside requested branch")
+            raise ValueError(
+                f"{adapter_name} adapter returned hit outside requested branch"
+            )
         scoped.append(hit)
     if k is None:
         return scoped
@@ -2319,7 +3011,9 @@ class LocalSimilarityReranker:
                 tenant_id=hit.tenant_id,
                 branch=hit.branch,
                 text=hit.text,
-                score=max(0.0, self.lexical_weight * lexical + self.dense_weight * dense),
+                score=max(
+                    0.0, self.lexical_weight * lexical + self.dense_weight * dense
+                ),
                 channel=f"{hit.channel}+rerank",
                 provenance=shared_or_copy(hit.provenance),
                 trust_tier=hit.trust_tier,
@@ -2363,7 +3057,9 @@ class HttpEmbeddingProvider:
             extra = json.loads(self.extra_body_json)
             if not isinstance(extra, dict):
                 raise ValueError("embedding extra body must be a JSON object")
-            payload.update({key: value for key, value in extra.items() if key not in payload})
+            payload.update(
+                {key: value for key, value in extra.items() if key not in payload}
+            )
         return payload
 
     def embed(self, text: str) -> list[float]:
@@ -2377,7 +3073,9 @@ class HttpEmbeddingProvider:
                 return cached
         normalized = self.embed_sensitive(text)
         _http_embedding_cache_put(cache_key, normalized, self.cache_size)
-        _http_embedding_disk_cache_put(self, cache_key, text, normalized, self.cache_size)
+        _http_embedding_disk_cache_put(
+            self, cache_key, text, normalized, self.cache_size
+        )
         return normalized
 
     def embed_sensitive(self, text: str) -> list[float]:
@@ -2388,7 +3086,9 @@ class HttpEmbeddingProvider:
         admission rule SqliteEngine's A1 embedding cache hardcodes. Engines
         route private-partition content here.
         """
-        response = _post_json(self.url, self._payload(text), self.api_key, self.timeout_seconds)
+        response = _post_json(
+            self.url, self._payload(text), self.api_key, self.timeout_seconds
+        )
         return _normalize_vector(_extract_embedding(response), self.dims)
 
     def purge_cache(self) -> None:
@@ -2409,7 +3109,10 @@ class HttpEmbeddingProvider:
         if not os.path.exists(path):
             return
         scope_hash = _http_embedding_cache_digest(scope)
-        with _HTTP_EMBEDDING_CACHE_LOCK, _http_embedding_disk_cache_connect(self) as conn:
+        with (
+            _HTTP_EMBEDDING_CACHE_LOCK,
+            _http_embedding_disk_cache_connect(self) as conn,
+        ):
             conn.execute(
                 "DELETE FROM http_embedding_cache WHERE scope_sha256 = ?",
                 (scope_hash,),
@@ -2465,7 +3168,9 @@ class HttpEmbeddingProvider:
         for (index, _text, cache_key), vector in zip(missing, vectors, strict=True):
             normalized = _normalize_vector(vector, self.dims)
             _http_embedding_cache_put(cache_key, normalized, self.cache_size)
-            _http_embedding_disk_cache_put(self, cache_key, _text, normalized, self.cache_size)
+            _http_embedding_disk_cache_put(
+                self, cache_key, _text, normalized, self.cache_size
+            )
             results[index] = normalized
         return [vector for vector in results if vector is not None]
 
@@ -2479,7 +3184,9 @@ class HttpEmbeddingProvider:
             "process_lru_entries": _http_embedding_memory_cache_size(),
             "durable_enabled": bool(self.cache_path and self.cache_size > 0),
             "durable_configured": bool(self.cache_path),
-            "cache_scope_sha256": _http_embedding_cache_digest(_http_embedding_cache_scope(self)),
+            "cache_scope_sha256": _http_embedding_cache_digest(
+                _http_embedding_cache_scope(self)
+            ),
             "ttl_seconds": float(self.cache_ttl_seconds),
         }
         if self.cache_path and self.cache_size > 0:
@@ -2541,7 +3248,9 @@ def _http_embedding_cache_digest(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def _http_embedding_disk_cache_key(key: HttpEmbeddingCacheKey) -> tuple[str, str, str, str, int, str, str]:
+def _http_embedding_disk_cache_key(
+    key: HttpEmbeddingCacheKey,
+) -> tuple[str, str, str, str, int, str, str]:
     scope, url, model, model_revision, dims, auth, text_hash = key
     return (
         _http_embedding_cache_digest(scope),
@@ -2555,13 +3264,17 @@ def _http_embedding_disk_cache_key(key: HttpEmbeddingCacheKey) -> tuple[str, str
 
 
 def _http_embedding_disk_cache_safe(provider: HttpEmbeddingProvider, text: str) -> bool:
-    return bool(provider.cache_path and provider.cache_size > 0) and not redaction_findings(
+    return bool(
+        provider.cache_path and provider.cache_size > 0
+    ) and not redaction_findings(
         "http_embedding_cache_input",
         text,
     )
 
 
-def _http_embedding_disk_cache_connect(provider: HttpEmbeddingProvider) -> sqlite3.Connection:
+def _http_embedding_disk_cache_connect(
+    provider: HttpEmbeddingProvider,
+) -> sqlite3.Connection:
     if not provider.cache_path:
         raise ValueError("HTTP embedding durable cache path is not configured")
     path = os.path.expanduser(provider.cache_path)
@@ -2612,7 +3325,10 @@ def _http_embedding_disk_cache_get(
     disk_key = _http_embedding_disk_cache_key(key)
     now = time.time()
     ttl = float(provider.cache_ttl_seconds)
-    with _HTTP_EMBEDDING_CACHE_LOCK, _http_embedding_disk_cache_connect(provider) as conn:
+    with (
+        _HTTP_EMBEDDING_CACHE_LOCK,
+        _http_embedding_disk_cache_connect(provider) as conn,
+    ):
         row = conn.execute(
             """
             SELECT vector_json, created_at
@@ -2690,7 +3406,10 @@ def _http_embedding_disk_cache_put(
         return
     disk_key = _http_embedding_disk_cache_key(key)
     now = time.time()
-    with _HTTP_EMBEDDING_CACHE_LOCK, _http_embedding_disk_cache_connect(provider) as conn:
+    with (
+        _HTTP_EMBEDDING_CACHE_LOCK,
+        _http_embedding_disk_cache_connect(provider) as conn,
+    ):
         conn.execute(
             """
             INSERT INTO http_embedding_cache (
@@ -2720,7 +3439,12 @@ def _http_embedding_disk_cache_put(
                 created_at = excluded.created_at,
                 last_access_at = excluded.last_access_at
             """,
-            (*disk_key, json.dumps([float(value) for value in vector], separators=(",", ":")), now, now),
+            (
+                *disk_key,
+                json.dumps([float(value) for value in vector], separators=(",", ":")),
+                now,
+                now,
+            ),
         )
         if max_size > 0:
             conn.execute(
@@ -2739,7 +3463,9 @@ def _http_embedding_disk_cache_put(
             )
 
 
-def _http_embedding_disk_cache_stats(provider: HttpEmbeddingProvider) -> dict[str, object]:
+def _http_embedding_disk_cache_stats(
+    provider: HttpEmbeddingProvider,
+) -> dict[str, object]:
     try:
         if not provider.cache_path:
             return {"durable_entries": 0}
@@ -2747,7 +3473,10 @@ def _http_embedding_disk_cache_stats(provider: HttpEmbeddingProvider) -> dict[st
         if not os.path.exists(path):
             return {"durable_entries": 0}
         scope_hash = _http_embedding_cache_digest(_http_embedding_cache_scope(provider))
-        with _HTTP_EMBEDDING_CACHE_LOCK, sqlite3.connect(f"file:{path}?mode=ro", uri=True) as conn:
+        with (
+            _HTTP_EMBEDDING_CACHE_LOCK,
+            sqlite3.connect(f"file:{path}?mode=ro", uri=True) as conn,
+        ):
             try:
                 row = conn.execute(
                     "SELECT COUNT(*) FROM http_embedding_cache WHERE scope_sha256 = ?",
@@ -2778,7 +3507,9 @@ class CommandMediaEmbeddingProvider:
         timeout_seconds: float = 30.0,
         max_media_bytes: int = DEFAULT_MAX_INGEST_BYTES,
     ):
-        self.command = split_command(command) if isinstance(command, str) else list(command)
+        self.command = (
+            split_command(command) if isinstance(command, str) else list(command)
+        )
         if not self.command:
             raise ValueError("media embedding command must not be empty")
         if dims <= 0:
@@ -2787,7 +3518,9 @@ class CommandMediaEmbeddingProvider:
             raise ValueError("media embedding timeout must be positive")
         self.dims = dims
         self.timeout_seconds = timeout_seconds
-        self.max_media_bytes = validate_byte_limit(max_media_bytes, name="max_media_bytes")
+        self.max_media_bytes = validate_byte_limit(
+            max_media_bytes, name="max_media_bytes"
+        )
 
     def embed_media(
         self,
@@ -2797,7 +3530,9 @@ class CommandMediaEmbeddingProvider:
         modality: str,
         metadata: dict[str, object] | None = None,
     ) -> list[float]:
-        enforce_byte_limit(payload, limit=self.max_media_bytes, label="media embedding payload")
+        enforce_byte_limit(
+            payload, limit=self.max_media_bytes, label="media embedding payload"
+        )
         # closed before the command reads it (Windows locks an open temp file); deleted on exit
         with tempfile.NamedTemporaryFile(delete_on_close=False) as tmp:
             tmp.write(payload)
@@ -2853,7 +3588,9 @@ class CommandLexicalRetriever:
         backend: str = "command-lexical",
         timeout_seconds: float = 30.0,
     ):
-        self.command = split_command(command) if isinstance(command, str) else list(command)
+        self.command = (
+            split_command(command) if isinstance(command, str) else list(command)
+        )
         if not self.command:
             raise ValueError("lexical retrieval command must not be empty")
         if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
@@ -2906,7 +3643,9 @@ class CommandGraphRetriever:
         backend: str = "command-graph",
         timeout_seconds: float = 30.0,
     ):
-        self.command = split_command(command) if isinstance(command, str) else list(command)
+        self.command = (
+            split_command(command) if isinstance(command, str) else list(command)
+        )
         if not self.command:
             raise ValueError("graph retrieval command must not be empty")
         if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
@@ -3035,7 +3774,9 @@ def retrieval_adapters_from_env(prefix: str = "MNEMOSYNE") -> RetrievalAdapters:
     graph_provider = os.environ.get(f"{prefix}_GRAPH_PROVIDER", "postgres").lower()
     dims = int(os.environ.get(f"{prefix}_EMBEDDING_DIMS", "1024"))
     embedding_cache_size = int(os.environ.get(f"{prefix}_EMBEDDING_CACHE_SIZE", "8192"))
-    embedding_cache_ttl_seconds = float(os.environ.get(f"{prefix}_EMBEDDING_CACHE_TTL_SECONDS", "86400"))
+    embedding_cache_ttl_seconds = float(
+        os.environ.get(f"{prefix}_EMBEDDING_CACHE_TTL_SECONDS", "86400")
+    )
     timeout = float(os.environ.get(f"{prefix}_RETRIEVAL_TIMEOUT", "30"))
     if embedding_provider == "http":
         embedding = HttpEmbeddingProvider(
@@ -3117,7 +3858,9 @@ def semantic_entropy(alternatives: Sequence[str]) -> float:
     total = sum(counts.values())
     if total <= 0:
         return 0.0
-    entropy = -sum((count / total) * math.log(count / total, 2) for count in counts.values())
+    entropy = -sum(
+        (count / total) * math.log(count / total, 2) for count in counts.values()
+    )
     max_entropy = math.log(len(counts), 2) if len(counts) > 1 else 1.0
     return entropy / max_entropy if max_entropy else 0.0
 
@@ -3141,11 +3884,17 @@ def _is_gist_hit(hit: Hit) -> bool:
     lifecycle = metadata.get("lifecycle")
     source_type = str(metadata.get("source_type") or "")
     relation_predicate = str(metadata.get("predicate") or "").lower()
-    summary_kind = str(summary.get("kind") or "").lower() if isinstance(summary, dict) else ""
-    lifecycle_tier = str(lifecycle.get("tier") or "").lower() if isinstance(lifecycle, dict) else ""
-    confabulation_risk = bool(metadata.get("confabulation_risk")) or (
-        isinstance(summary, dict) and bool(summary.get("confabulation_risk"))
-    ) or (isinstance(lifecycle, dict) and bool(lifecycle.get("confabulation_risk")))
+    summary_kind = (
+        str(summary.get("kind") or "").lower() if isinstance(summary, dict) else ""
+    )
+    lifecycle_tier = (
+        str(lifecycle.get("tier") or "").lower() if isinstance(lifecycle, dict) else ""
+    )
+    confabulation_risk = (
+        bool(metadata.get("confabulation_risk"))
+        or (isinstance(summary, dict) and bool(summary.get("confabulation_risk")))
+        or (isinstance(lifecycle, dict) and bool(lifecycle.get("confabulation_risk")))
+    )
     return (
         summary_kind in {"abstractive_gist", "statistical_trace"}
         or lifecycle_tier in {"abstractive_gist", "statistical_trace"}
@@ -3173,7 +3922,11 @@ def evidence_current_for_context(item: Any, filt: Mapping[str, Any] | None) -> b
         return False
     if _item_field(item, "document_segment_id") is not None:
         owner = _item_field(item, "user_id")
-        return isinstance(owner, str) and bool(owner) and (filt or {}).get("user_id") == owner
+        return (
+            isinstance(owner, str)
+            and bool(owner)
+            and (filt or {}).get("user_id") == owner
+        )
     return True
 
 
@@ -3202,7 +3955,9 @@ def require_supported_query_mode(mode: str | None) -> str | None:
 
 
 def is_raptor_summary_item(item: Any) -> bool:
-    return is_raptor_summary_metadata(_item_field(item, "source_type"), _item_field(item, "metadata"))
+    return is_raptor_summary_metadata(
+        _item_field(item, "source_type"), _item_field(item, "metadata")
+    )
 
 
 def is_raptor_summary_metadata(source_type: object, metadata: object) -> bool:
@@ -3242,7 +3997,9 @@ def raptor_source_cids(metadata: object) -> list[str]:
             if cid and cid not in cids:
                 cids.append(cid)
 
-    summary = metadata.get("summary") if isinstance(metadata.get("summary"), Mapping) else {}
+    summary = (
+        metadata.get("summary") if isinstance(metadata.get("summary"), Mapping) else {}
+    )
     add(summary.get("source_evidence_cids") if isinstance(summary, Mapping) else None)
     add(metadata.get("source_evidence_cids"))
     return cids
@@ -3252,7 +4009,9 @@ def _raptor_child_summary_cids(metadata: object) -> list[str]:
     if not isinstance(metadata, Mapping):
         return []
     cids: list[str] = []
-    summary = metadata.get("summary") if isinstance(metadata.get("summary"), Mapping) else {}
+    summary = (
+        metadata.get("summary") if isinstance(metadata.get("summary"), Mapping) else {}
+    )
     if not isinstance(summary, Mapping):
         return []
     for key in ("child_summary_cids", "source_summary_cids"):
@@ -3271,7 +4030,11 @@ def iter_raptor_summary_items(ops: Any, tenant_id: str, branch: str) -> list[Any
 
     list_fn = getattr(ops, "list_raptor_summaries", None)
     if callable(list_fn):
-        items = [item for item in list(list_fn(tenant_id, branch) or []) if is_raptor_summary_item(item)]
+        items = [
+            item
+            for item in list(list_fn(tenant_id, branch) or [])
+            if is_raptor_summary_item(item)
+        ]
         return sorted(items, key=lambda item: str(_item_field(item, "cid") or ""))
     export_fn = getattr(ops, "export_tenant", None)
     if not callable(export_fn):
@@ -3314,11 +4077,17 @@ def classify_raptor_node(
 def is_derived_evidence(item: Any) -> bool:
     """Rows whose prose depends on source custody, including legacy proposals."""
     metadata = _item_field(item, "metadata")
-    return str(_item_field(item, "source_type") or (metadata.get("source_type") if isinstance(metadata, Mapping) else "") or "") in {
-        "consolidation-summary", "provider-proposal",
-    } or (isinstance(metadata, Mapping) and any(
-        key in metadata for key in ("summary", "provider_proposal")
-    ))
+    return str(
+        _item_field(item, "source_type")
+        or (metadata.get("source_type") if isinstance(metadata, Mapping) else "")
+        or ""
+    ) in {
+        "consolidation-summary",
+        "provider-proposal",
+    } or (
+        isinstance(metadata, Mapping)
+        and any(key in metadata for key in ("summary", "provider_proposal"))
+    )
 
 
 def derived_source_cids(item: Any) -> tuple[list[str], bool]:
@@ -3341,10 +4110,17 @@ def derived_source_cids(item: Any) -> tuple[list[str], bool]:
                 return [], False
             containers.append(metadata[key])
     for container in containers:
-        for key in ("source_evidence_cid", "source_evidence_cids", "source_summary_cids", "child_summary_cids"):
+        for key in (
+            "source_evidence_cid",
+            "source_evidence_cids",
+            "source_summary_cids",
+            "child_summary_cids",
+        ):
             if key not in container:
                 continue
-            values = [container[key]] if key == "source_evidence_cid" else container[key]
+            values = (
+                [container[key]] if key == "source_evidence_cid" else container[key]
+            )
             if not isinstance(values, (list, tuple)):
                 return [], False
             for cid in values:
@@ -3368,8 +4144,13 @@ def derived_source_cids(item: Any) -> tuple[list[str], bool]:
 
 
 def derived_evidence_readable(
-    ops: Any, item: Any, *, tenant_id: str, branch: str,
-    filt: Mapping[str, Any], policy: OperatingPolicy,
+    ops: Any,
+    item: Any,
+    *,
+    tenant_id: str,
+    branch: str,
+    filt: Mapping[str, Any],
+    policy: OperatingPolicy,
 ) -> bool:
     """Require full current read access to every transitive input of derived prose.
 
@@ -3384,13 +4165,23 @@ def derived_evidence_readable(
         return True
     root = str(_item_field(item, "cid") or "__root__")
     return _evidence_sources_readable(
-        ops, [(root, item, False)], tenant_id=tenant_id, branch=branch, filt=filt, policy=policy,
+        ops,
+        [(root, item, False)],
+        tenant_id=tenant_id,
+        branch=branch,
+        filt=filt,
+        policy=policy,
     )
 
 
 def projection_sources_readable(
-    ops: Any, source_cids: Any, *, tenant_id: str, branch: str,
-    filt: Mapping[str, Any], policy: OperatingPolicy,
+    ops: Any,
+    source_cids: Any,
+    *,
+    tenant_id: str,
+    branch: str,
+    filt: Mapping[str, Any],
+    policy: OperatingPolicy,
 ) -> bool:
     """Require current, unredacted custody for a projection's remaining sources.
 
@@ -3401,20 +4192,30 @@ def projection_sources_readable(
     projection without treating a missing or denied source as corroboration.
     """
     if not isinstance(source_cids, (list, tuple)) or any(
-        not isinstance(cid, str) or not cid.strip() or cid != cid.strip() for cid in source_cids
+        not isinstance(cid, str) or not cid.strip() or cid != cid.strip()
+        for cid in source_cids
     ):
         return False
     if not source_cids:
         return True
     return _evidence_sources_readable(
-        ops, [(cid, None, False) for cid in reversed(source_cids)],
-        tenant_id=tenant_id, branch=branch, filt=filt, policy=policy,
+        ops,
+        [(cid, None, False) for cid in reversed(source_cids)],
+        tenant_id=tenant_id,
+        branch=branch,
+        filt=filt,
+        policy=policy,
     )
 
 
 def _evidence_sources_readable(
-    ops: Any, stack: list[tuple[str, Any, bool]], *, tenant_id: str, branch: str,
-    filt: Mapping[str, Any], policy: OperatingPolicy,
+    ops: Any,
+    stack: list[tuple[str, Any, bool]],
+    *,
+    tenant_id: str,
+    branch: str,
+    filt: Mapping[str, Any],
+    policy: OperatingPolicy,
 ) -> bool:
     lookup = getattr(ops, "get_evidence", None)
     if not callable(lookup):
@@ -3435,15 +4236,19 @@ def _evidence_sources_readable(
             row = lookup(tenant_id, cid, branch)
         if row is None or str(_item_field(row, "cid") or "") != cid:
             return False
-        allowed, _ = classify_scoped_evidence(row, tenant_id=tenant_id, branch=branch, filt=filt, policy=policy)
+        allowed, _ = classify_scoped_evidence(
+            row, tenant_id=tenant_id, branch=branch, filt=filt, policy=policy
+        )
         if not allowed:
             return False
         decision = may_read_item(
             item_tenant_id=tenant_id,
             sensitivity=int(_item_field(row, "sensitivity") or 0),
             access_policy=_item_field(row, "access_policy") or {},
-            context=filt, policy_max_sensitivity=policy.max_sensitivity,
-            status="active", erased=bool(_item_field(row, "erased")),
+            context=filt,
+            policy_max_sensitivity=policy.max_sensitivity,
+            status="active",
+            erased=bool(_item_field(row, "erased")),
         )
         if not decision.allowed or decision.redacted:
             return False
@@ -3453,7 +4258,10 @@ def _evidence_sources_readable(
         metadata = _item_field(row, "metadata") or {}
         if metadata.get("derived_source_custody") == "incomplete":
             return False
-        summary = str(_item_field(row, "source_type") or "") == "consolidation-summary" or "summary" in metadata
+        summary = (
+            str(_item_field(row, "source_type") or "") == "consolidation-summary"
+            or "summary" in metadata
+        )
         if (summary and not sources) or len(stack) + len(sources) > 20000:
             return False
         active.add(cid)
@@ -3463,30 +4271,50 @@ def _evidence_sources_readable(
 
 
 def trim_derived_source_cids(
-    metadata: Mapping[str, Any], affected_cids: set[str], *, source_type: str = "",
+    metadata: Mapping[str, Any],
+    affected_cids: set[str],
+    *,
+    source_type: str = "",
 ) -> dict[str, Any]:
     """Trim every lineage spelling, retaining a denial marker for unchanged prose."""
     trimmed = copy.deepcopy(dict(metadata))
     if is_derived_evidence({"source_type": source_type, "metadata": metadata}):
         trimmed["derived_source_custody"] = "incomplete"
     containers = [trimmed]
-    containers.extend(trimmed[key] for key in ("summary", "provider_proposal") if isinstance(trimmed.get(key), dict))
+    containers.extend(
+        trimmed[key]
+        for key in ("summary", "provider_proposal")
+        if isinstance(trimmed.get(key), dict)
+    )
     for container in containers:
         if str(container.get("source_evidence_cid") or "") in affected_cids:
             container.pop("source_evidence_cid", None)
-        for key in ("source_evidence_cids", "source_summary_cids", "child_summary_cids", "input_cids"):
+        for key in (
+            "source_evidence_cids",
+            "source_summary_cids",
+            "child_summary_cids",
+            "input_cids",
+        ):
             if isinstance(container.get(key), (list, tuple)):
-                container[key] = [cid for cid in container[key] if cid not in affected_cids]
+                container[key] = [
+                    cid for cid in container[key] if cid not in affected_cids
+                ]
     summary = trimmed.get("summary")
-    if isinstance(summary, dict) and isinstance(summary.get("source_evidence_cids"), list):
+    if isinstance(summary, dict) and isinstance(
+        summary.get("source_evidence_cids"), list
+    ):
         summary["source_count"] = len(summary["source_evidence_cids"])
         summary.pop("source_fingerprint", None)
     return trimmed
 
 
 def read_evidence_for_context(
-    ops: Any, tenant_id: str, cid: str, branch: str = "main",
-    *, access_context: Mapping[str, Any] | None = None,
+    ops: Any,
+    tenant_id: str,
+    cid: str,
+    branch: str = "main",
+    *,
+    access_context: Mapping[str, Any] | None = None,
 ) -> Any:
     """Return a detached, fully authorized row or None; raw reads stay internal.
 
@@ -3494,19 +4322,29 @@ def read_evidence_for_context(
     (pointers, embeddings, metadata), so this full-row API requires full access.
     """
     context = dict(access_context or {})
-    if context.get("tenant_id", tenant_id) != tenant_id or context.get("branch", branch) != branch:
+    if (
+        context.get("tenant_id", tenant_id) != tenant_id
+        or context.get("branch", branch) != branch
+    ):
         return None
     context.update(tenant_id=tenant_id, branch=branch)
     row = ops.get_evidence(tenant_id, cid, branch)
     if row is None:
         return None
-    allowed, _ = classify_scoped_evidence(row, tenant_id=tenant_id, branch=branch, filt=context, policy=ops.policy)
-    if not allowed or not derived_evidence_readable(ops, row, tenant_id=tenant_id, branch=branch, filt=context, policy=ops.policy):
+    allowed, _ = classify_scoped_evidence(
+        row, tenant_id=tenant_id, branch=branch, filt=context, policy=ops.policy
+    )
+    if not allowed or not derived_evidence_readable(
+        ops, row, tenant_id=tenant_id, branch=branch, filt=context, policy=ops.policy
+    ):
         return None
     decision = may_read_item(
-        item_tenant_id=tenant_id, sensitivity=int(_item_field(row, "sensitivity") or 0),
-        access_policy=_item_field(row, "access_policy") or {}, context=context,
-        policy_max_sensitivity=ops.policy.max_sensitivity, status="active",
+        item_tenant_id=tenant_id,
+        sensitivity=int(_item_field(row, "sensitivity") or 0),
+        access_policy=_item_field(row, "access_policy") or {},
+        context=context,
+        policy_max_sensitivity=ops.policy.max_sensitivity,
+        status="active",
     )
     return None if not decision.allowed or decision.redacted else copy.deepcopy(row)
 
@@ -3523,50 +4361,88 @@ def _projection_adapter_hit(ops: Any, hit: Hit, filt: Mapping[str, Any]) -> Hit 
         return None
     if hit.kind == "assertion" and row.branch != branch:
         return None
-    if row.status not in ({"active", "contested"} if hit.kind == "assertion" else {"active"}):
+    if row.status not in (
+        {"active", "contested"} if hit.kind == "assertion" else {"active"}
+    ):
         return None
     tier = row.trust_tier if hit.kind == "assertion" else (0 if row.explicit else 3)
     sensitivity = row.sensitivity if hit.kind == "assertion" else 0
     allowed, _ = classify_scoped_evidence(
-        {"tenant_id": tenant_id, "branch": branch, "trust_tier": tier,
-         "sensitivity": sensitivity, "access_policy": row.access_policy},
-        tenant_id=tenant_id, branch=branch, filt=filt, policy=ops.policy,
+        {
+            "tenant_id": tenant_id,
+            "branch": branch,
+            "trust_tier": tier,
+            "sensitivity": sensitivity,
+            "access_policy": row.access_policy,
+        },
+        tenant_id=tenant_id,
+        branch=branch,
+        filt=filt,
+        policy=ops.policy,
     )
     if not allowed or not projection_sources_readable(
-        ops, row.source_evidence_cids, tenant_id=tenant_id, branch=branch, filt=filt, policy=ops.policy,
+        ops,
+        row.source_evidence_cids,
+        tenant_id=tenant_id,
+        branch=branch,
+        filt=filt,
+        policy=ops.policy,
     ):
         return None
     decision = may_read_item(
-        item_tenant_id=tenant_id, sensitivity=sensitivity, access_policy=row.access_policy,
-        context=filt, policy_max_sensitivity=ops.policy.max_sensitivity, status=row.status,
+        item_tenant_id=tenant_id,
+        sensitivity=sensitivity,
+        access_policy=row.access_policy,
+        context=filt,
+        policy_max_sensitivity=ops.policy.max_sensitivity,
+        status=row.status,
     )
     if not decision.allowed:
         return None
     metadata = {"status": row.status, "confidence": row.confidence}
     if hit.kind == "assertion":
         text, privacy = apply_statement_redactions(
-            subject=row.subject, predicate=row.predicate, object_value=row.object,
-            access_policy=row.access_policy, decision=decision,
+            subject=row.subject,
+            predicate=row.predicate,
+            object_value=row.object,
+            access_policy=row.access_policy,
+            decision=decision,
         )
         metadata["created_at"] = iso_utc(row.transaction_time)
         for key in ("reality_class", "reality_monitoring"):
             if key in row.calibration:
                 metadata[key] = copy.deepcopy(row.calibration[key])
     else:
-        text, privacy = apply_text_redactions(row.statement, row.access_policy, decision)
-        metadata.update(created_at=iso_utc(row.valid_from), category=row.category, explicit=row.explicit)
+        text, privacy = apply_text_redactions(
+            row.statement, row.access_policy, decision
+        )
+        metadata.update(
+            created_at=iso_utc(row.valid_from),
+            category=row.category,
+            explicit=row.explicit,
+        )
     metadata["privacy"] = privacy
     for key in ("backend", "score_scale", "score_family", "rank", "command_retrieval"):
         if key in hit.metadata:
             metadata[key] = copy.deepcopy(hit.metadata[key])
     return Hit(
-        id=row.id, kind=hit.kind, tenant_id=tenant_id, branch=branch, text=text,
-        score=hit.score, channel=hit.channel, provenance=list(row.source_evidence_cids),
-        trust_tier=tier, sensitivity=sensitivity, metadata=metadata,
+        id=row.id,
+        kind=hit.kind,
+        tenant_id=tenant_id,
+        branch=branch,
+        text=text,
+        score=hit.score,
+        channel=hit.channel,
+        provenance=list(row.source_evidence_cids),
+        trust_tier=tier,
+        sensitivity=sensitivity,
+        metadata=metadata,
     )
 
 
-def filter_derived_adapter_hits(ops: Any, hits: Sequence[Hit], filt: Mapping[str, Any]) -> list[Hit]:
+def filter_derived_adapter_hits(
+    ops: Any, hits: Sequence[Hit], filt: Mapping[str, Any]
+) -> list[Hit]:
     """Adapters rank IDs; authoritative current rows supply evidence and facts."""
     result: list[Hit] = []
     tenant_id = str(filt.get("tenant_id") or "")
@@ -3580,25 +4456,44 @@ def filter_derived_adapter_hits(ops: Any, hits: Sequence[Hit], filt: Mapping[str
         if hit.kind != "evidence":
             result.append(hit)
             continue
-        row = read_evidence_for_context(ops, tenant_id, hit.id, branch, access_context=filt)
+        row = read_evidence_for_context(
+            ops, tenant_id, hit.id, branch, access_context=filt
+        )
         if row is None:
             continue
         metadata = copy.deepcopy(_item_field(row, "metadata") or {})
         # Keep rank diagnostics only; provider-supplied text, privacy, confidence,
         # provenance and reality classifications cannot override the ledger.
-        for key in ("backend", "score_scale", "score_family", "rank", "command_retrieval"):
+        for key in (
+            "backend",
+            "score_scale",
+            "score_family",
+            "rank",
+            "command_retrieval",
+        ):
             if key in hit.metadata:
                 metadata[key] = copy.deepcopy(hit.metadata[key])
         metadata.update(
-            source_type=row.source_type, actor=row.actor, modality=row.modality,
+            source_type=row.source_type,
+            actor=row.actor,
+            modality=row.modality,
             content_pointer=row.content_pointer,
         )
-        result.append(Hit(
-            id=row.cid, kind="evidence", tenant_id=row.tenant_id, branch=row.branch,
-            text=row.content or row.content_pointer or f"{row.modality} evidence",
-            score=hit.score, channel=hit.channel, provenance=[row.cid],
-            trust_tier=row.trust_tier, sensitivity=row.sensitivity, metadata=metadata,
-        ))
+        result.append(
+            Hit(
+                id=row.cid,
+                kind="evidence",
+                tenant_id=row.tenant_id,
+                branch=row.branch,
+                text=row.content or row.content_pointer or f"{row.modality} evidence",
+                score=hit.score,
+                channel=hit.channel,
+                provenance=[row.cid],
+                trust_tier=row.trust_tier,
+                sensitivity=row.sensitivity,
+                metadata=metadata,
+            )
+        )
     return result
 
 
@@ -3639,7 +4534,9 @@ def classify_scoped_evidence(
     if include_quarantined:
         default_max_trust = max(default_max_trust, 5)
     try:
-        max_trust = int(filt.get("max_trust_tier", filt.get("min_trust_tier", default_max_trust)))
+        max_trust = int(
+            filt.get("max_trust_tier", filt.get("min_trust_tier", default_max_trust))
+        )
     except (TypeError, ValueError):
         max_trust = default_max_trust
     if trust_tier > max_trust:
@@ -3711,7 +4608,10 @@ def global_sensemaking_projection(
     validated_summary_ids: set[str] = set()
     for item in sorted(
         readable_items,
-        key=lambda row: (raptor_level_of(_item_field(row, "metadata") or {}) or 0, str(_item_field(row, "cid") or "")),
+        key=lambda row: (
+            raptor_level_of(_item_field(row, "metadata") or {}) or 0,
+            str(_item_field(row, "cid") or ""),
+        ),
     ):
         cid = str(_item_field(item, "cid") or "")
         hit = _raptor_node_hit(
@@ -3760,7 +4660,13 @@ def global_sensemaking_projection(
     for hit in mapped:
         if hit.id not in kept_ids:
             exclusions.append({"cid": hit.id, "reason": "node_budget"})
-    exclusions.sort(key=lambda item: (str(item.get("reason") or ""), str(item.get("cid") or ""), int(item.get("count") or 0)))
+    exclusions.sort(
+        key=lambda item: (
+            str(item.get("reason") or ""),
+            str(item.get("cid") or ""),
+            int(item.get("count") or 0),
+        )
+    )
     report = {
         "version": GLOBAL_SENSEMAKING_VERSION,
         "query_mode": GLOBAL_SENSEMAKING_MODE,
@@ -3785,7 +4691,9 @@ def global_sensemaking_projection(
     return reduced, report
 
 
-def _sensemaking_node_budget(filt: Mapping[str, Any], policy: OperatingPolicy, *, deep: bool) -> int:
+def _sensemaking_node_budget(
+    filt: Mapping[str, Any], policy: OperatingPolicy, *, deep: bool
+) -> int:
     raw = filt.get("sensemaking_node_budget")
     if raw is None:
         return max(1, int(policy.deep_top_k if deep else policy.top_k))
@@ -3814,7 +4722,9 @@ def _raptor_node_hit(
     level = raptor_level_of(metadata)
     if not cid or level is None:
         return None
-    if not derived_evidence_readable(ops, item, tenant_id=tenant_id, branch=branch, filt=filt, policy=policy):
+    if not derived_evidence_readable(
+        ops, item, tenant_id=tenant_id, branch=branch, filt=filt, policy=policy
+    ):
         denied_cids.add(cid)
         return None
     access_policy = _item_field(item, "access_policy") or {}
@@ -3840,7 +4750,9 @@ def _raptor_node_hit(
     # Tip unread-erased-child redaction: any child CID missing from the
     # validated (or policy-readable) set drops this ancestor entirely.
     unavailable_child_cids = {
-        child for child in _raptor_child_summary_cids(metadata) if child not in readable_summary_ids
+        child
+        for child in _raptor_child_summary_cids(metadata)
+        if child not in readable_summary_ids
     }
     if unavailable_child_cids:
         return None
@@ -3859,14 +4771,18 @@ def _raptor_node_hit(
     if hidden_source:
         return None
     text = _redact_denied_cids(text, set(referenced) - set(source_cids))
-    summary = dict(metadata["summary"]) if isinstance(metadata.get("summary"), dict) else {}
+    summary = (
+        dict(metadata["summary"]) if isinstance(metadata.get("summary"), dict) else {}
+    )
     for key in ("child_summary_cids", "source_summary_cids"):
         raw_children = summary.get(key)
         if isinstance(raw_children, list):
             children = [str(child) for child in raw_children if str(child)]
             if any(child not in readable_summary_ids for child in children):
                 return None
-            summary[key] = [child for child in children if child in readable_summary_ids]
+            summary[key] = [
+                child for child in children if child in readable_summary_ids
+            ]
     summary["source_evidence_cids"] = list(source_cids)
     provenance = [cid, *source_cids]
     return Hit(
@@ -3881,7 +4797,9 @@ def _raptor_node_hit(
         trust_tier=int(_item_field(item, "trust_tier") or 0),
         sensitivity=int(_item_field(item, "sensitivity") or 0),
         metadata={
-            "source_type": str(_item_field(item, "source_type") or "consolidation-summary"),
+            "source_type": str(
+                _item_field(item, "source_type") or "consolidation-summary"
+            ),
             "summary": summary,
             "raptor_level": level,
             "source_evidence_cids": list(source_cids),
@@ -3980,17 +4898,26 @@ def _classify_raptor_source_reality(item: Any) -> str:
     explicit = _preserve_source_reality_class(metadata.get("reality_class"))
     source_type = str(_item_field(item, "source_type") or "").lower()
     actor = str(_item_field(item, "actor") or "").lower()
-    if any(marker in source_type for marker in ("simulation", "synthetic", "generated", "hypothesis")):
+    if any(
+        marker in source_type
+        for marker in ("simulation", "synthetic", "generated", "hypothesis")
+    ):
         base_class = "simulated"
-    elif any(marker in source_type for marker in ("summary", "trace", "analysis", "consolidation")):
+    elif any(
+        marker in source_type
+        for marker in ("summary", "trace", "analysis", "consolidation")
+    ):
         base_class = "self_generated"
     elif actor == "assistant":
         base_class = "self_generated"
     elif actor in {"system", "tool"} and any(
-        marker in source_type for marker in ("scratchpad", "workspace", "thought", "reflection")
+        marker in source_type
+        for marker in ("scratchpad", "workspace", "thought", "reflection")
     ):
         base_class = "self_generated"
-    elif actor == "external" or int(_item_field(item, "trust_tier") or 0) >= int(TrustTier.LOW):
+    elif actor == "external" or int(_item_field(item, "trust_tier") or 0) >= int(
+        TrustTier.LOW
+    ):
         base_class = "externally_suggested"
     else:
         base_class = "grounded"
@@ -4031,7 +4958,13 @@ def _reduce_sensemaking_hits(
         hit.metadata["theme_root_cid"] = root_id
         groups.setdefault(root_id, []).append(hit)
     for members in groups.values():
-        members.sort(key=lambda item: (-item.score, -int(item.metadata.get("raptor_level") or 0), item.id))
+        members.sort(
+            key=lambda item: (
+                -item.score,
+                -int(item.metadata.get("raptor_level") or 0),
+                item.id,
+            )
+        )
     group_order = sorted(
         groups,
         key=lambda root_id: (-groups[root_id][0].score, root_id),
@@ -4051,12 +4984,24 @@ def _reduce_sensemaking_hits(
             for hit in groups[root_id]
             if hit.id not in taken
         ]
-        leftover.sort(key=lambda item: (-item.score, -int(item.metadata.get("raptor_level") or 0), item.id))
+        leftover.sort(
+            key=lambda item: (
+                -item.score,
+                -int(item.metadata.get("raptor_level") or 0),
+                item.id,
+            )
+        )
         for hit in leftover:
             if len(reduced) >= node_budget:
                 break
             reduced.append(hit)
-    reduced.sort(key=lambda item: (-item.score, -int(item.metadata.get("raptor_level") or 0), item.id))
+    reduced.sort(
+        key=lambda item: (
+            -item.score,
+            -int(item.metadata.get("raptor_level") or 0),
+            item.id,
+        )
+    )
     return reduced, selected_roots if incomplete else group_order, incomplete
 
 
@@ -4067,7 +5012,9 @@ def _sensemaking_child_to_parent(hits: Sequence[Hit]) -> dict[str, str]:
         summary = hit.metadata.get("summary") if isinstance(hit.metadata, dict) else {}
         if not isinstance(summary, Mapping):
             continue
-        children = list(summary.get("child_summary_cids") or []) + list(summary.get("source_summary_cids") or [])
+        children = list(summary.get("child_summary_cids") or []) + list(
+            summary.get("source_summary_cids") or []
+        )
         for child in children:
             child_id = str(child)
             if child_id in known:
@@ -4098,7 +5045,9 @@ def _item_field(item: Any, name: str, default: Any = None) -> Any:
     return getattr(item, name, default)
 
 
-def apply_activation_scores(hits: Sequence[Hit], policy: OperatingPolicy, *, now: datetime | None = None) -> list[Hit]:
+def apply_activation_scores(
+    hits: Sequence[Hit], policy: OperatingPolicy, *, now: datetime | None = None
+) -> list[Hit]:
     """Apply blueprint-style activation scoring to already retrieved hits."""
 
     if not hits:
@@ -4119,14 +5068,20 @@ def apply_activation_scores(hits: Sequence[Hit], policy: OperatingPolicy, *, now
         semantic = max(hit.score, 0.0) / max(max_relevance, 0.01)
         confidence = _bounded_float(hit.metadata.get("confidence", 0.7), default=0.7)
         access_count = _bounded_int(hit.metadata.get("access_count", 0))
-        recency = _recency_score(hit.metadata.get("last_accessed"), moment, policy.decay)
+        recency = _recency_score(
+            hit.metadata.get("last_accessed"), moment, policy.decay
+        )
         actr_d = max(float(getattr(policy, "actr_decay", 0.0)), 0.0)
         if actr_d > 0.0:
             age_days = _age_days(hit.metadata.get("last_accessed"), moment)
             raw_base_level = math.log1p(access_count) - actr_d * math.log1p(age_days)
             base_level = max(
                 0.0,
-                min(1.0, (raw_base_level + actr_d * math.log1p(_BASE_LEVEL_AGE_REF)) / math.log(11)),
+                min(
+                    1.0,
+                    (raw_base_level + actr_d * math.log1p(_BASE_LEVEL_AGE_REF))
+                    / math.log(11),
+                ),
             )
         else:
             base_level = min(1.0, math.log1p(access_count) / math.log(11))
@@ -4173,7 +5128,9 @@ def apply_activation_scores(hits: Sequence[Hit], policy: OperatingPolicy, *, now
     return sorted(activated, key=lambda item: item.score, reverse=True)
 
 
-def activation_explain(hits: Sequence[Hit], policy: OperatingPolicy) -> dict[str, object]:
+def activation_explain(
+    hits: Sequence[Hit], policy: OperatingPolicy
+) -> dict[str, object]:
     return {
         "weights": dict(policy.activation_weights),
         "applied": True,
@@ -4222,7 +5179,11 @@ def _spreading_activation(hits: Sequence[Hit]) -> dict[str, float]:
         if total <= 1 or not cue_sets[index]:
             signals[hit.id] = 0.0
             continue
-        shared = sum(1 for other in range(total) if other != index and cue_sets[index] & cue_sets[other])
+        shared = sum(
+            1
+            for other in range(total)
+            if other != index and cue_sets[index] & cue_sets[other]
+        )
         signals[hit.id] = shared / (total - 1)
     return signals
 
@@ -4256,7 +5217,9 @@ def marginal_gain_cutoff(
         if used + tokens > token_budget:
             break
         relevance = max(hit.score, 0.0) / max_score
-        redundancy = max((lexical_score(hit.text, chosen.text) for chosen in selected), default=0.0)
+        redundancy = max(
+            (lexical_score(hit.text, chosen.text) for chosen in selected), default=0.0
+        )
         marginal = relevance - redundancy_lambda * redundancy
         if selected and marginal < cost:
             break
@@ -4296,7 +5259,9 @@ class GraphSignalCache:
             )
             for hit in hits
         ]
-        self._store[(tenant_id, branch)] = sorted(cached, key=lambda item: item.score, reverse=True)
+        self._store[(tenant_id, branch)] = sorted(
+            cached, key=lambda item: item.score, reverse=True
+        )
 
     def fast_signal(
         self,
@@ -4388,7 +5353,9 @@ def build_channel_hits(
                 text=text,
                 score=score,
                 channel=channel,
-                provenance=[str(value) for value in (item.get("provenance") or []) if str(value)],  # type: ignore[union-attr]
+                provenance=[
+                    str(value) for value in (item.get("provenance") or []) if str(value)
+                ],  # type: ignore[union-attr]
                 trust_tier=int(item.get("trust_tier", default_trust_tier)),  # type: ignore[arg-type]
                 sensitivity=int(item.get("sensitivity", 0)),  # type: ignore[arg-type]
                 metadata=metadata,
@@ -4492,27 +5459,39 @@ def working_memory_hits(
         if _working_text(_working_field(item, "status", "active")) != "active":
             continue
         try:
-            created_at = _working_datetime(_working_field(item, "created_at"), field="created_at")
-            expires_at = _working_datetime(_working_field(item, "expires_at"), field="expires_at")
+            created_at = _working_datetime(
+                _working_field(item, "created_at"), field="created_at"
+            )
+            expires_at = _working_datetime(
+                _working_field(item, "expires_at"), field="expires_at"
+            )
         except ValueError:
             # A malformed row is not allowed to widen a read; the owning store
             # is responsible for surfacing its write-time validation error.
             continue
         if created_at > clock or clock >= expires_at:
             continue
-        item_id = _working_text(_working_field(item, "item_id", _working_field(item, "id")))
+        item_id = _working_text(
+            _working_field(item, "item_id", _working_field(item, "id"))
+        )
         kind = _working_text(_working_field(item, "kind"))
-        content = _working_text(_working_field(item, "content", _working_field(item, "text")))
+        content = _working_text(
+            _working_field(item, "content", _working_field(item, "text"))
+        )
         task_id = _working_text(_working_field(item, "task_id"))
         if not item_id or not kind or not content or not task_id:
             continue
         metadata = copy.deepcopy(item_metadata)
-        evidence_ids = _working_field(item, "evidence_ids", _working_field(item, "provenance", []))
+        evidence_ids = _working_field(
+            item, "evidence_ids", _working_field(item, "provenance", [])
+        )
         if not isinstance(evidence_ids, (list, tuple)):
             evidence_ids = []
         provenance = [str(value) for value in evidence_ids if str(value).strip()]
         trust_value = _working_field(item, "trust_tier", metadata.get("trust_tier", 0))
-        sensitivity_value = _working_field(item, "sensitivity", metadata.get("sensitivity", 0))
+        sensitivity_value = _working_field(
+            item, "sensitivity", metadata.get("sensitivity", 0)
+        )
         if isinstance(trust_value, bool) or isinstance(sensitivity_value, bool):
             continue
         try:
@@ -4522,7 +5501,9 @@ def working_memory_hits(
             continue
         if max_trust_tier is not None and trust_tier > max_trust_tier:
             continue
-        access_policy = _working_json_object(_working_field(item, "access_policy", metadata.get("access_policy", {})))
+        access_policy = _working_json_object(
+            _working_field(item, "access_policy", metadata.get("access_policy", {}))
+        )
         if access_context is not None:
             decision = may_read_item(
                 item_tenant_id=tenant_id,
@@ -4530,7 +5511,9 @@ def working_memory_hits(
                 access_policy=access_policy,
                 context=access_context,
                 policy_max_sensitivity=(
-                    policy_max_sensitivity if policy_max_sensitivity is not None else sensitivity
+                    policy_max_sensitivity
+                    if policy_max_sensitivity is not None
+                    else sensitivity
                 ),
                 status="active",
                 erased=False,
@@ -4538,7 +5521,11 @@ def working_memory_hits(
             if not decision.allowed:
                 continue
         else:
-            policy_tenant = str(access_policy.get("tenant") or access_policy.get("tenant_id") or tenant_id)
+            policy_tenant = str(
+                access_policy.get("tenant")
+                or access_policy.get("tenant_id")
+                or tenant_id
+            )
             if policy_tenant != tenant_id or sensitivity >= 4:
                 continue
             try:
@@ -4570,14 +5557,20 @@ def working_memory_hits(
         content_for_hit = content
         privacy_metadata: dict[str, Any] = {}
         if decision is not None:
-            content_for_hit, privacy_metadata = apply_text_redactions(content, access_policy, decision)
+            content_for_hit, privacy_metadata = apply_text_redactions(
+                content, access_policy, decision
+            )
             if not content_for_hit:
                 continue
         if privacy_metadata:
             metadata["privacy"] = privacy_metadata
-        capability_tags = _working_field(item, "capability_tags", metadata.get("capability_tags"))
+        capability_tags = _working_field(
+            item, "capability_tags", metadata.get("capability_tags")
+        )
         if isinstance(capability_tags, (list, tuple, set)):
-            metadata["capability_tags"] = [str(value) for value in capability_tags if str(value).strip()]
+            metadata["capability_tags"] = [
+                str(value) for value in capability_tags if str(value).strip()
+            ]
         metadata["access_policy"] = copy.deepcopy(access_policy)
         for field_name in ("reality_class", "source_type", "source_identity"):
             field_value = _working_field(item, field_name)
@@ -4596,24 +5589,36 @@ def working_memory_hits(
         else:
             content_raw = lex_content
 
-        access_count_val = _working_field(item, "access_count", metadata.get("access_count", 0))
+        access_count_val = _working_field(
+            item, "access_count", metadata.get("access_count", 0)
+        )
         salience_val = _working_field(item, "salience", metadata.get("salience", 0.5))
-        last_accessed_val = _working_field(item, "last_accessed_at", metadata.get("last_accessed_at"))
+        last_accessed_val = _working_field(
+            item, "last_accessed_at", metadata.get("last_accessed_at")
+        )
 
         try:
-            access_count = max(0, int(access_count_val)) if access_count_val is not None else 0
+            access_count = (
+                max(0, int(access_count_val)) if access_count_val is not None else 0
+            )
         except (TypeError, ValueError):
             access_count = 0
 
         try:
-            salience = max(0.0, min(1.0, float(salience_val))) if salience_val is not None else 0.5
+            salience = (
+                max(0.0, min(1.0, float(salience_val)))
+                if salience_val is not None
+                else 0.5
+            )
         except (TypeError, ValueError):
             salience = 0.5
 
         last_accessed_at: datetime | None = None
         if last_accessed_val is not None:
             try:
-                last_accessed_at = _working_datetime(last_accessed_val, field="last_accessed_at")
+                last_accessed_at = _working_datetime(
+                    last_accessed_val, field="last_accessed_at"
+                )
             except ValueError:
                 last_accessed_at = None
 
@@ -4625,8 +5630,15 @@ def working_memory_hits(
         age_since_ref = max((clock - ref_moment).total_seconds(), 0.0)
         rehearsal_recency = max(0.0, min(1.0, 1.0 - (age_since_ref / ttl_seconds)))
 
-        freq_factor = min(1.0, math.log1p(access_count) / math.log(11)) if access_count > 0 else 0.0
-        activation = max(0.0, min(1.0, 0.50 * rehearsal_recency + 0.25 * freq_factor + 0.25 * salience))
+        freq_factor = (
+            min(1.0, math.log1p(access_count) / math.log(11))
+            if access_count > 0
+            else 0.0
+        )
+        activation = max(
+            0.0,
+            min(1.0, 0.50 * rehearsal_recency + 0.25 * freq_factor + 0.25 * salience),
+        )
 
         candidates.append(
             {
@@ -4673,7 +5685,10 @@ def working_memory_hits(
         task_relevance = min(1.0, float(row["task_raw"]) / max(max_task, 1.0))
         content_relevance = min(1.0, float(row["content_raw"]) / max(max_content, 1.0))
         relevance = task_weight * task_relevance + content_weight * content_relevance
-        score = WORKING_MEMORY_TASK_WEIGHT * relevance + WORKING_MEMORY_RECENCY_WEIGHT * row["recency"]
+        score = (
+            WORKING_MEMORY_TASK_WEIGHT * relevance
+            + WORKING_MEMORY_RECENCY_WEIGHT * row["recency"]
+        )
         metadata = dict(row["metadata"])
         metadata.update(
             {
@@ -4706,7 +5721,9 @@ def working_memory_hits(
                 },
             }
         )
-        metadata["retrieved_text"] = sanitize_retrieved_text(row["content"], row["trust_tier"])
+        metadata["retrieved_text"] = sanitize_retrieved_text(
+            row["content"], row["trust_tier"]
+        )
         ranked.append(
             Hit(
                 id=row["item_id"],
@@ -4812,7 +5829,9 @@ def _recency_score(value: object, now: datetime, decay: float) -> float:
     accessed = value if isinstance(value, datetime) else parse_dt(value)
     if accessed is None:
         return 0.0
-    accessed = accessed.astimezone(UTC) if accessed.tzinfo else accessed.replace(tzinfo=UTC)
+    accessed = (
+        accessed.astimezone(UTC) if accessed.tzinfo else accessed.replace(tzinfo=UTC)
+    )
     age_days = max((now - accessed).total_seconds(), 0.0) / 86_400.0
     return 1.0 / (1.0 + max(decay, 0.0) * age_days)
 
@@ -4824,7 +5843,9 @@ def _age_days(value: object, now: datetime) -> float:
     accessed = value if isinstance(value, datetime) else parse_dt(value)
     if accessed is None:
         return _BASE_LEVEL_AGE_REF
-    accessed = accessed.astimezone(UTC) if accessed.tzinfo else accessed.replace(tzinfo=UTC)
+    accessed = (
+        accessed.astimezone(UTC) if accessed.tzinfo else accessed.replace(tzinfo=UTC)
+    )
     return max((now - accessed).total_seconds(), 0.0) / 86_400.0
 
 
@@ -4865,7 +5886,9 @@ class _ProviderHttpError(ValueError):
         self.code = code
 
 
-def _post_json(url: str, payload: dict[str, object], api_key: str | None, timeout: float) -> dict[str, object]:
+def _post_json(
+    url: str, payload: dict[str, object], api_key: str | None, timeout: float
+) -> dict[str, object]:
     validated_url = _validate_http_provider_config(url, timeout)
     body = json.dumps(payload).encode("utf-8")
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
@@ -4873,7 +5896,9 @@ def _post_json(url: str, payload: dict[str, object], api_key: str | None, timeou
         headers["Authorization"] = f"Bearer {api_key}"
     request = urllib.request.Request(url, data=body, headers=headers, method="POST")
     try:
-        with safe_urlopen(request, validated=validated_url, timeout=timeout) as response:
+        with safe_urlopen(
+            request, validated=validated_url, timeout=timeout
+        ) as response:
             decoded = response.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         reason = str(getattr(exc, "reason", "") or "").strip()
@@ -4897,12 +5922,21 @@ def _extract_embedding(response: dict[str, object]) -> list[float]:
     if isinstance(response.get("embedding"), list):
         return _coerce_vector(response["embedding"], field="embedding")  # type: ignore[arg-type,index]
     data = response.get("data")
-    if isinstance(data, list) and data and isinstance(data[0], dict) and isinstance(data[0].get("embedding"), list):
+    if (
+        isinstance(data, list)
+        and data
+        and isinstance(data[0], dict)
+        and isinstance(data[0].get("embedding"), list)
+    ):
         return _coerce_vector(data[0]["embedding"], field="data[0].embedding")
-    raise ValueError("embedding response must contain `embedding` or `data[0].embedding`")
+    raise ValueError(
+        "embedding response must contain `embedding` or `data[0].embedding`"
+    )
 
 
-def _extract_embeddings_batch(response: dict[str, object], expected: int) -> list[list[float]]:
+def _extract_embeddings_batch(
+    response: dict[str, object], expected: int
+) -> list[list[float]]:
     """Parse an OpenAI-style batch embedding response into input order.
 
     Entries are placed by their ``index`` field (defaulting to list position),
@@ -4911,17 +5945,25 @@ def _extract_embeddings_batch(response: dict[str, object], expected: int) -> lis
     """
     data = response.get("data")
     if not isinstance(data, list) or len(data) != expected:
-        raise ValueError("batch embedding response must contain a `data` list matching the input length")
+        raise ValueError(
+            "batch embedding response must contain a `data` list matching the input length"
+        )
     vectors: list[list[float] | None] = [None] * expected
     for position, item in enumerate(data):
         if not isinstance(item, dict) or not isinstance(item.get("embedding"), list):
             raise ValueError("batch embedding entries must contain `embedding`")
         index = item.get("index", position)
-        if not isinstance(index, int) or isinstance(index, bool) or not 0 <= index < expected:
+        if (
+            not isinstance(index, int)
+            or isinstance(index, bool)
+            or not 0 <= index < expected
+        ):
             raise ValueError("batch embedding entry index out of range")
         if vectors[index] is not None:
             raise ValueError("batch embedding entry index duplicated")
-        vectors[index] = _coerce_vector(item["embedding"], field=f"data[{index}].embedding")
+        vectors[index] = _coerce_vector(
+            item["embedding"], field=f"data[{index}].embedding"
+        )
     if any(vector is None for vector in vectors):
         raise ValueError("batch embedding entries must cover every input index")
     return [vector for vector in vectors if vector is not None]
@@ -4997,3 +6039,339 @@ def _finite_float(value: object, *, field: str) -> float:
     if not math.isfinite(number):
         raise ValueError(f"{field} values must be finite")
     return number
+
+
+@dataclass(frozen=True, slots=True)
+class CalendarDelta:
+    reference_date: datetime
+    target_date: datetime
+    delta_days: int
+    delta_weeks: int
+    delta_months: int
+    delta_years: int
+    is_past: bool
+    formatted_relative: str
+
+    @property
+    def formatted_days_relative(self) -> str:
+        if self.delta_days == 0:
+            return "today"
+        if self.is_past:
+            return f"{self.delta_days} day{'s' if self.delta_days != 1 else ''} ago"
+        return f"in {self.delta_days} day{'s' if self.delta_days != 1 else ''}"
+
+    @property
+    def formatted_weeks_relative(self) -> str:
+        if self.delta_weeks == 0:
+            return self.formatted_days_relative
+        if self.is_past:
+            return f"{self.delta_weeks} week{'s' if self.delta_weeks != 1 else ''} ago"
+        return f"in {self.delta_weeks} week{'s' if self.delta_weeks != 1 else ''}"
+
+
+def compute_calendar_delta(
+    reference_date: datetime | str,
+    target_date: datetime | str,
+) -> CalendarDelta:
+    """Compute exact day, week, month, and year calendar deltas between reference and target dates."""
+    if isinstance(reference_date, datetime):
+        ref_dt = reference_date
+    else:
+        try:
+            parsed = parse_dt(str(reference_date))
+        except (ValueError, TypeError):
+            parsed = None
+        if parsed is None:
+            try:
+                ref_dt = datetime.fromisoformat(
+                    str(reference_date).replace("Z", "+00:00")
+                )
+            except (ValueError, TypeError):
+                ref_dt = utc_now()
+        else:
+            ref_dt = parsed
+
+    if isinstance(target_date, datetime):
+        tgt_dt = target_date
+    else:
+        try:
+            parsed = parse_dt(str(target_date))
+        except (ValueError, TypeError):
+            parsed = None
+        if parsed is None:
+            try:
+                tgt_dt = datetime.fromisoformat(str(target_date).replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                tgt_dt = utc_now()
+        else:
+            tgt_dt = parsed
+
+    if ref_dt.tzinfo is None:
+        ref_dt = ref_dt.replace(tzinfo=UTC)
+    else:
+        ref_dt = ref_dt.astimezone(UTC)
+
+    if tgt_dt.tzinfo is None:
+        tgt_dt = tgt_dt.replace(tzinfo=UTC)
+    else:
+        tgt_dt = tgt_dt.astimezone(UTC)
+
+    is_past = tgt_dt <= ref_dt
+    d_earlier, d_later = (tgt_dt, ref_dt) if is_past else (ref_dt, tgt_dt)
+
+    delta_days = (d_later.date() - d_earlier.date()).days
+    delta_weeks = delta_days // 7
+
+    years = d_later.year - d_earlier.year
+    if (d_later.month, d_later.day) < (d_earlier.month, d_earlier.day):
+        _, last_day_later = calendar.monthrange(d_later.year, d_later.month)
+        if (
+            d_later.month == d_earlier.month
+            and d_later.day == last_day_later
+            and d_earlier.day >= last_day_later
+        ):
+            pass
+        else:
+            years -= 1
+    delta_years = max(0, years)
+
+    total_months = (d_later.year - d_earlier.year) * 12 + (
+        d_later.month - d_earlier.month
+    )
+    if d_later.day < d_earlier.day:
+        _, last_day_later = calendar.monthrange(d_later.year, d_later.month)
+        if d_later.day == last_day_later and d_earlier.day >= last_day_later:
+            pass
+        else:
+            total_months -= 1
+    delta_months = max(0, total_months)
+
+    if delta_days == 0:
+        formatted_relative = "today"
+    elif is_past:
+        if delta_years >= 1:
+            formatted_relative = (
+                "1 year ago" if delta_years == 1 else f"{delta_years} years ago"
+            )
+        elif delta_months >= 1:
+            formatted_relative = (
+                "1 month ago" if delta_months == 1 else f"{delta_months} months ago"
+            )
+        elif delta_weeks >= 1:
+            formatted_relative = (
+                "1 week ago" if delta_weeks == 1 else f"{delta_weeks} weeks ago"
+            )
+        else:
+            formatted_relative = (
+                "1 day ago" if delta_days == 1 else f"{delta_days} days ago"
+            )
+    else:
+        if delta_years >= 1:
+            formatted_relative = (
+                "in 1 year" if delta_years == 1 else f"in {delta_years} years"
+            )
+        elif delta_months >= 1:
+            formatted_relative = (
+                "in 1 month" if delta_months == 1 else f"in {delta_months} months"
+            )
+        elif delta_weeks >= 1:
+            formatted_relative = (
+                "in 1 week" if delta_weeks == 1 else f"in {delta_weeks} weeks"
+            )
+        else:
+            formatted_relative = (
+                "in 1 day" if delta_days == 1 else f"in {delta_days} days"
+            )
+
+    return CalendarDelta(
+        reference_date=ref_dt,
+        target_date=tgt_dt,
+        delta_days=delta_days,
+        delta_weeks=delta_weeks,
+        delta_months=delta_months,
+        delta_years=delta_years,
+        is_past=is_past,
+        formatted_relative=formatted_relative,
+    )
+
+
+def build_event_timeline(
+    hits: Sequence[Hit],
+    reference_date: datetime | str | None = None,
+) -> list[dict[str, Any]]:
+    """Build a chronologically sorted event timeline from hits with precomputed calendar deltas."""
+    if reference_date is None:
+        ref_dt = utc_now()
+    elif isinstance(reference_date, datetime):
+        ref_dt = (
+            reference_date.astimezone(UTC)
+            if reference_date.tzinfo is not None
+            else reference_date.replace(tzinfo=UTC)
+        )
+    else:
+        try:
+            parsed = parse_dt(str(reference_date))
+        except (ValueError, TypeError):
+            parsed = None
+        if parsed is None:
+            try:
+                ref_dt = datetime.fromisoformat(
+                    str(reference_date).replace("Z", "+00:00")
+                )
+            except (ValueError, TypeError):
+                ref_dt = utc_now()
+        else:
+            ref_dt = parsed
+        if ref_dt.tzinfo is None:
+            ref_dt = ref_dt.replace(tzinfo=UTC)
+        else:
+            ref_dt = ref_dt.astimezone(UTC)
+
+    dated_items: list[tuple[datetime, Hit, CalendarDelta]] = []
+    for h in hits:
+        val = (
+            h.metadata.get("event_start")
+            or h.metadata.get("occurred_start")
+            or h.metadata.get("_candidate_created_at")
+            or h.metadata.get("created_at")
+        )
+        if val is not None:
+            try:
+                if isinstance(val, datetime):
+                    dt = val
+                else:
+                    try:
+                        dt = parse_dt(str(val))
+                    except (ValueError, TypeError):
+                        dt = None
+                    if dt is None:
+                        try:
+                            dt = datetime.fromisoformat(str(val).replace("Z", "+00:00"))
+                        except (ValueError, TypeError):
+                            dt = None
+                if dt is not None:
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=UTC)
+                    else:
+                        dt = dt.astimezone(UTC)
+                    delta = compute_calendar_delta(ref_dt, dt)
+                    h.metadata["calendar_delta"] = {
+                        "reference_date": iso_utc(delta.reference_date),
+                        "target_date": iso_utc(delta.target_date),
+                        "delta_days": delta.delta_days,
+                        "delta_weeks": delta.delta_weeks,
+                        "delta_months": delta.delta_months,
+                        "delta_years": delta.delta_years,
+                        "is_past": delta.is_past,
+                        "formatted_relative": delta.formatted_relative,
+                    }
+                    dated_items.append((dt, h, delta))
+            except (ValueError, TypeError, OverflowError):
+                continue
+
+    dated_items.sort(key=lambda item: item[0])
+
+    timeline: list[dict[str, Any]] = []
+    for idx, (dt, h, delta) in enumerate(dated_items):
+        days_since_prev: int | None = None
+        if idx > 0:
+            prev_dt = dated_items[idx - 1][0]
+            days_since_prev = max(0, (dt.date() - prev_dt.date()).days)
+
+        timeline.append(
+            {
+                "hit_id": h.id,
+                "date": iso_utc(dt),
+                "target_date": dt,
+                "text": h.text,
+                "delta_days_to_reference": delta.delta_days,
+                "delta_weeks_to_reference": delta.delta_weeks,
+                "delta_months_to_reference": delta.delta_months,
+                "delta_years_to_reference": delta.delta_years,
+                "formatted_relative": delta.formatted_relative,
+                "days_since_previous": days_since_prev,
+                "calendar_delta": delta,
+                "metadata": h.metadata,
+            }
+        )
+    return timeline
+
+
+def retrieve_passages(
+    ops: Any,
+    query: str,
+    candidates: Sequence[Hit],
+    k: int,
+    *,
+    alpha: float = 0.5,
+    beta: float = 0.5,
+    granularity: str = "session",
+    reference_date: datetime | str | None = None,
+) -> list[Hit]:
+    """Retrieve and rank passages using multi-granularity score fusion,
+    recency decay, and structured calendar delta indexing.
+    """
+    from mnemosyne.passages import is_passage, rank_passages
+
+    passages = [hit for hit in candidates if is_passage(hit)]
+    if not passages:
+        return []
+
+    ranked = rank_passages(ops, query, passages, k, alpha=alpha, beta=beta)
+
+    if reference_date is not None:
+        build_event_timeline(ranked, reference_date=reference_date)
+    else:
+        has_dates = any(
+            (
+                h.metadata.get("created_at")
+                or h.metadata.get("event_start")
+                or h.metadata.get("_candidate_created_at")
+            )
+            for h in ranked
+        )
+        if has_dates:
+            build_event_timeline(ranked, reference_date=utc_now())
+
+    if granularity == "round":
+        round_hits: list[Hit] = []
+        for h in ranked:
+            mg = h.metadata.get("multi_granularity", {})
+            r_idx = mg.get("best_round_index", 0)
+            r_id = f"{h.id}:round:{r_idx}"
+            r_text = mg.get("best_round_text") or h.text
+            meta = dict(h.metadata)
+            meta["parent_session_id"] = h.id
+            meta["granularity"] = "round"
+            round_hits.append(
+                replace(
+                    h,
+                    id=r_id,
+                    text=r_text,
+                    score=mg.get("max_round_score", h.score),
+                    metadata=meta,
+                )
+            )
+        return round_hits[:k]
+    elif granularity == "turn":
+        turn_hits: list[Hit] = []
+        for h in ranked:
+            mg = h.metadata.get("multi_granularity", {})
+            t_idx = mg.get("best_turn_index", 0)
+            t_id = f"{h.id}:turn:{t_idx}"
+            t_text = mg.get("best_turn_text") or h.text
+            meta = dict(h.metadata)
+            meta["parent_session_id"] = h.id
+            meta["granularity"] = "turn"
+            turn_hits.append(
+                replace(
+                    h,
+                    id=t_id,
+                    text=t_text,
+                    score=mg.get("max_turn_score", h.score),
+                    metadata=meta,
+                )
+            )
+        return turn_hits[:k]
+
+    return ranked[:k]

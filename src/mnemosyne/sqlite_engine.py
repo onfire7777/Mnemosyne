@@ -48,6 +48,7 @@ remaining ``MemoryEngine`` Protocol methods (``branch`` / ``merge`` /
 naming their Phase-2 task, so ``isinstance(engine, MemoryEngine)`` already holds
 — the runtime_checkable Protocol checks method presence.
 """
+
 from __future__ import annotations
 
 import array
@@ -66,6 +67,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Mapping, Sequence
+
 
 from mnemosyne import text as text_kernels
 from mnemosyne.access_policy import (
@@ -194,6 +196,15 @@ from mnemosyne.standing import (
 from mnemosyne.text import cosine, lexical_score, tokenize
 from mnemosyne.workspace import self_generation_budget_report, source_backed_summary
 
+
+def _to_utc_opt(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
+
+
 LEXICAL_BACKEND = "sqlite-fts5"
 GRAPH_BACKEND = "sqlite-cached-ppr"
 
@@ -317,7 +328,12 @@ def _metadata_patch_tightens_privacy(patch: dict[str, Any]) -> bool:
     drops the embedding partition) that must invalidate a cached embedding."""
     for key, value in patch.items():
         name = str(key)
-        if name in {"restricted", "hold", "quarantine_reason", "quarantined"} or name.startswith("hold:"):
+        if name in {
+            "restricted",
+            "hold",
+            "quarantine_reason",
+            "quarantined",
+        } or name.startswith("hold:"):
             return True
         if name == "embedding_partition" and str(value) == "none":
             return True
@@ -335,7 +351,9 @@ INSERT INTO evidence (
 
 # Branch row-copy variant: evidence keeps its cid, so an INSERT OR IGNORE on the
 # unique key (tenant_id, branch, cid) is the idempotent copy (T6 handoff).
-_EVIDENCE_INSERT_OR_IGNORE = _EVIDENCE_INSERT.replace("INSERT INTO", "INSERT OR IGNORE INTO", 1)
+_EVIDENCE_INSERT_OR_IGNORE = _EVIDENCE_INSERT.replace(
+    "INSERT INTO", "INSERT OR IGNORE INTO", 1
+)
 
 # Task-5 assertion / relation column writers. The column order matches
 # ``_assertion_from_row`` / ``_relation_from_row`` (which feed the byte-parity
@@ -369,7 +387,9 @@ INSERT INTO relations (
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
-_RELATION_UPSERT = _RELATION_INSERT + """
+_RELATION_UPSERT = (
+    _RELATION_INSERT
+    + """
 ON CONFLICT (tenant_id, branch, id) DO UPDATE SET
     source = excluded.source,
     predicate = excluded.predicate,
@@ -380,6 +400,7 @@ ON CONFLICT (tenant_id, branch, id) DO UPDATE SET
     source_evidence_cids = excluded.source_evidence_cids,
     access_policy = excluded.access_policy
 """
+)
 
 
 def _assertion_insert_values(a: Assertion) -> tuple[Any, ...]:
@@ -472,14 +493,18 @@ def _evidence_from_row(row: sqlite3.Row) -> Evidence:
             "source_type": row["source_type"],
             "content": row["content"],
             "source_identity": row["source_identity"],
-            "document_segment_id": row["document_segment_id"] if "document_segment_id" in row.keys() else None,
+            "document_segment_id": row["document_segment_id"]
+            if "document_segment_id" in row.keys()
+            else None,
             "retired_at": row["retired_at"] if "retired_at" in row.keys() else None,
             "session_id": row["session_id"],
             "metadata": json.loads(row["metadata"]),
             "content_pointer": row["content_pointer"],
             "modality": row["modality"],
             "embedding": unpack_embedding(row["embedding"]),
-            "signed_provenance": None if signed_provenance is None else json.loads(signed_provenance),
+            "signed_provenance": None
+            if signed_provenance is None
+            else json.loads(signed_provenance),
             "trust_tier": row["trust_tier"],
             "capability_tags": json.loads(row["capability_tags"]),
             "sensitivity": row["sensitivity"],
@@ -680,17 +705,25 @@ def _working_payload(item: Any) -> dict[str, Any]:
     trust_tier = values["trust_tier"]
     if type(trust_tier) is not int or isinstance(trust_tier, bool):
         raise ValueError("working-memory trust_tier must be an integer")
-    if not int(TrustTier.DIRECT_USER) <= trust_tier <= int(TrustTier.UNTRUSTED_EXTERNAL):
+    if (
+        not int(TrustTier.DIRECT_USER)
+        <= trust_tier
+        <= int(TrustTier.UNTRUSTED_EXTERNAL)
+    ):
         raise ValueError("working-memory trust_tier is out of range")
     access_policy = validate_access_policy(
-        values["access_policy"], tenant_id=values["tenant_id"], location="working_memory.access_policy"
+        values["access_policy"],
+        tenant_id=values["tenant_id"],
+        location="working_memory.access_policy",
     )
     metadata = values["metadata"]
     capability_tags = values["capability_tags"] or []
     if type(capability_tags) is not list or any(
         type(tag) is not str or not tag.strip() for tag in capability_tags
     ):
-        raise ValueError("working-memory capability_tags must be a list of non-empty strings")
+        raise ValueError(
+            "working-memory capability_tags must be a list of non-empty strings"
+        )
     if len(set(capability_tags)) != len(capability_tags):
         raise ValueError("working-memory capability_tags must not contain duplicates")
     sensitivity = values["sensitivity"]
@@ -698,21 +731,31 @@ def _working_payload(item: Any) -> dict[str, Any]:
         raise ValueError("working-memory sensitivity must be a non-negative integer")
 
     salience = values.get("salience", 0.5)
-    if type(salience) not in {int, float} or isinstance(salience, bool) or not math.isfinite(float(salience)):
+    if (
+        type(salience) not in {int, float}
+        or isinstance(salience, bool)
+        or not math.isfinite(float(salience))
+    ):
         raise ValueError("working-memory salience must be a finite float")
     if not (0.0 <= float(salience) <= 1.0):
         raise ValueError("working-memory salience must be between 0.0 and 1.0")
     salience = float(salience)
 
     access_count = values.get("access_count", 0)
-    if type(access_count) is not int or isinstance(access_count, bool) or access_count < 0:
+    if (
+        type(access_count) is not int
+        or isinstance(access_count, bool)
+        or access_count < 0
+    ):
         raise ValueError("working-memory access_count must be a non-negative integer")
 
     last_accessed_at = values.get("last_accessed_at")
     if last_accessed_at is not None:
         last_accessed_at = _working_datetime(last_accessed_at, "last_accessed_at")
         if last_accessed_at < created_at:
-            raise ValueError("working-memory last_accessed_at cannot precede created_at")
+            raise ValueError(
+                "working-memory last_accessed_at cannot precede created_at"
+            )
         if last_accessed_at > expires_at:
             raise ValueError("working-memory last_accessed_at cannot exceed expires_at")
 
@@ -723,11 +766,17 @@ def _working_payload(item: Any) -> dict[str, Any]:
     if status == "active" and superseded_by is not None:
         raise ValueError("active working items cannot have superseded_by")
 
-    evidence_ids = _normalize_working_json(evidence_ids, path="working_memory.evidence_ids")
-    access_policy = _normalize_working_json(access_policy, path="working_memory.access_policy")
+    evidence_ids = _normalize_working_json(
+        evidence_ids, path="working_memory.evidence_ids"
+    )
+    access_policy = _normalize_working_json(
+        access_policy, path="working_memory.access_policy"
+    )
     metadata = _normalize_working_json(metadata, path="working_memory.metadata")
     if type(evidence_ids) is not list or type(access_policy) is not dict:
-        raise ValueError("working-memory evidence_ids and access_policy have invalid JSON shapes")
+        raise ValueError(
+            "working-memory evidence_ids and access_policy have invalid JSON shapes"
+        )
     if type(metadata) is not dict:
         raise ValueError("working-memory metadata must be a JSON object")
     return {
@@ -825,11 +874,15 @@ def _working_snapshot(values: dict[str, Any]) -> dict[str, Any]:
         "sensitivity": values["sensitivity"],
         "salience": float(values.get("salience", 0.5)),
         "access_count": int(values.get("access_count", 0)),
-        "last_accessed_at": values["last_accessed_at"].isoformat() if values.get("last_accessed_at") else None,
+        "last_accessed_at": values["last_accessed_at"].isoformat()
+        if values.get("last_accessed_at")
+        else None,
     }
 
 
-def _working_audit_diff(values: dict[str, Any], *, status: str, sweep: datetime | None = None) -> dict[str, Any]:
+def _working_audit_diff(
+    values: dict[str, Any], *, status: str, sweep: datetime | None = None
+) -> dict[str, Any]:
     snapshot = _working_snapshot(values)
     diff: dict[str, Any] = {
         "tenant_id": values["tenant_id"],
@@ -885,8 +938,11 @@ class _SourceConnection(sqlite3.Connection):
 
     def _authorize_source(self, action, *args):
         state = self._source_guard
-        if (state is not None and not state.get("ending")
-                and action in {sqlite3.SQLITE_TRANSACTION, sqlite3.SQLITE_SAVEPOINT}):
+        if (
+            state is not None
+            and not state.get("ending")
+            and action in {sqlite3.SQLITE_TRANSACTION, sqlite3.SQLITE_SAVEPOINT}
+        ):
             state["failed"] = True
             return sqlite3.SQLITE_DENY
         return sqlite3.SQLITE_OK
@@ -977,8 +1033,9 @@ class SqliteEngine:
                 conn.total_changes,
                 data_version,
                 effective_filter.get("_retrieval_deep", False),
-                self._scan_oracle({**effective_filter, "tenant_id": tenant_id, "branch": branch})
-                ._retrieval_policy_deadline_token(tenant_id, branch),
+                self._scan_oracle(
+                    {**effective_filter, "tenant_id": tenant_id, "branch": branch}
+                )._retrieval_policy_deadline_token(tenant_id, branch),
             )
 
     def _tenant_db_path(self, tenant_id: str) -> Path:
@@ -995,14 +1052,18 @@ class SqliteEngine:
                     raise ValueError("source transaction tenant scope mismatch")
                 if self._source_operation_depth == 0:
                     state["failed"] = True
-                    raise RuntimeError("operation is not supported inside a source transaction")
+                    raise RuntimeError(
+                        "operation is not supported inside a source transaction"
+                    )
             path = self._tenant_db_path(tenant_id)
             key = str(path)
             cached = self._connections.get(key)
             if cached is not None:
                 return cached
             existed = path.exists()
-            conn = sqlite3.connect(path, check_same_thread=False, factory=_SourceConnection)
+            conn = sqlite3.connect(
+                path, check_same_thread=False, factory=_SourceConnection
+            )
             try:
                 conn.row_factory = sqlite3.Row
                 try:
@@ -1013,7 +1074,9 @@ class SqliteEngine:
                         self._integrity_checked.add(key)
                     self._ensure_schema(conn, tenant_id)
                 except sqlite3.DatabaseError as exc:
-                    raise RuntimeError(f"sqlite store failed to open cleanly at {path}: {exc}") from exc
+                    raise RuntimeError(
+                        f"sqlite store failed to open cleanly at {path}: {exc}"
+                    ) from exc
             except Exception:
                 conn.close()
                 raise
@@ -1034,7 +1097,9 @@ class SqliteEngine:
         with conn:
             for statement in ENSURE_STATEMENTS:
                 conn.execute(statement)
-            evidence_columns = {row[1] for row in conn.execute("PRAGMA table_info(evidence)")}
+            evidence_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(evidence)")
+            }
             if "document_segment_id" not in evidence_columns:
                 conn.execute("ALTER TABLE evidence ADD COLUMN document_segment_id TEXT")
             if "retired_at" not in evidence_columns:
@@ -1060,19 +1125,26 @@ class SqliteEngine:
                     "ALTER TABLE working_memory ADD COLUMN last_accessed_at TEXT"
                 )
             if "superseded_by" not in working_columns:
-                conn.execute(
-                    "ALTER TABLE working_memory ADD COLUMN superseded_by TEXT"
-                )
+                conn.execute("ALTER TABLE working_memory ADD COLUMN superseded_by TEXT")
             # Lease C residual #3 (Plan CR-C1 admit): migration-safe relation columns.
             relation_columns = {
                 row[1] for row in conn.execute("PRAGMA table_info(relations)")
             }
             relation_alters = (
-                ("weight", "ALTER TABLE relations ADD COLUMN weight REAL NOT NULL DEFAULT 1.0"),
+                (
+                    "weight",
+                    "ALTER TABLE relations ADD COLUMN weight REAL NOT NULL DEFAULT 1.0",
+                ),
                 ("recorded_at", "ALTER TABLE relations ADD COLUMN recorded_at TEXT"),
                 ("expired_at", "ALTER TABLE relations ADD COLUMN expired_at TEXT"),
-                ("justification_id", "ALTER TABLE relations ADD COLUMN justification_id TEXT"),
-                ("status", "ALTER TABLE relations ADD COLUMN status TEXT NOT NULL DEFAULT 'active'"),
+                (
+                    "justification_id",
+                    "ALTER TABLE relations ADD COLUMN justification_id TEXT",
+                ),
+                (
+                    "status",
+                    "ALTER TABLE relations ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
+                ),
             )
             for name, statement in relation_alters:
                 if name not in relation_columns:
@@ -1132,7 +1204,9 @@ class SqliteEngine:
             ),
         )
 
-    def _require_branch(self, conn: sqlite3.Connection, tenant_id: str, branch: str) -> None:
+    def _require_branch(
+        self, conn: sqlite3.Connection, tenant_id: str, branch: str
+    ) -> None:
         """Local-parity branch guard — raises BEFORE the composite FK can fire
         so hostile/unknown branches surface as ``ValueError`` not IntegrityError."""
         row = conn.execute(
@@ -1274,7 +1348,9 @@ class SqliteEngine:
     ) -> tuple[int, list[str]]:
         """Validate all backing evidence before a working read or mutation."""
         if values["trust_tier"] > int(self.policy.max_trust_tier):
-            raise PermissionError("working item exceeds the working write trust ceiling")
+            raise PermissionError(
+                "working item exceeds the working write trust ceiling"
+            )
         trust_tiers: list[int] = [values["trust_tier"]]
         capability_tags: set[str] = set(values["capability_tags"])
         sensitivities = [values["sensitivity"]]
@@ -1292,7 +1368,9 @@ class SqliteEngine:
                 (values["tenant_id"], cid),
             ).fetchone()
             if row is None:
-                raise ValueError(f"evidence {cid!r} is missing or outside the working tenant")
+                raise ValueError(
+                    f"evidence {cid!r} is missing or outside the working tenant"
+                )
             evidence = _evidence_from_row(row)
             if evidence.erased:
                 raise ValueError(f"evidence {cid!r} is erased")
@@ -1304,17 +1382,26 @@ class SqliteEngine:
                 raise ValueError("working item session must match originating evidence")
             if type(evidence.trust_tier) is not int:
                 raise ValueError("originating evidence trust tier is invalid")
-            if not int(TrustTier.DIRECT_USER) <= evidence.trust_tier <= int(TrustTier.UNTRUSTED_EXTERNAL):
+            if (
+                not int(TrustTier.DIRECT_USER)
+                <= evidence.trust_tier
+                <= int(TrustTier.UNTRUSTED_EXTERNAL)
+            ):
                 raise ValueError("originating evidence trust tier is out of range")
             if evidence.trust_tier > int(self.policy.max_trust_tier):
-                raise PermissionError("originating evidence exceeds the working write trust ceiling")
+                raise PermissionError(
+                    "originating evidence exceeds the working write trust ceiling"
+                )
             trust_tiers.append(evidence.trust_tier)
             if type(evidence.capability_tags) is not list or any(
-                type(tag) is not str or not tag.strip() for tag in evidence.capability_tags
+                type(tag) is not str or not tag.strip()
+                for tag in evidence.capability_tags
             ):
                 raise ValueError("originating evidence capability tags are invalid")
             capability_tags.update(evidence.capability_tags)
-            if type(evidence.sensitivity) is not int or isinstance(evidence.sensitivity, bool):
+            if type(evidence.sensitivity) is not int or isinstance(
+                evidence.sensitivity, bool
+            ):
                 raise ValueError("originating evidence sensitivity is invalid")
             if evidence.sensitivity < 0:
                 raise ValueError("originating evidence sensitivity is negative")
@@ -1411,7 +1498,9 @@ class SqliteEngine:
                     cand_values["item_id"],
                 ),
             )
-            audit_diff = _working_audit_diff(cand_values, status="expired", sweep=incoming_created_at)
+            audit_diff = _working_audit_diff(
+                cand_values, status="expired", sweep=incoming_created_at
+            )
             audit_diff["reason"] = "capacity_eviction"
             self._audit_row(
                 conn,
@@ -1495,7 +1584,9 @@ class SqliteEngine:
                 conn.rollback()
                 message = str(exc).upper()
                 if "UNIQUE" in message or "PRIMARY KEY" in message:
-                    raise ValueError(f"working item already exists: {values['item_id']!r}") from exc
+                    raise ValueError(
+                        f"working item already exists: {values['item_id']!r}"
+                    ) from exc
                 raise
             except BaseException:
                 conn.rollback()
@@ -1532,7 +1623,9 @@ class SqliteEngine:
                     (values["tenant_id"], values["session_id"], values["item_id"]),
                 ).fetchone()
                 if existing:
-                    raise ValueError(f"working item already exists: {values['item_id']!r}")
+                    raise ValueError(
+                        f"working item already exists: {values['item_id']!r}"
+                    )
 
                 items_to_supersede: list[dict[str, Any]] = []
                 if supersedes_item_id is not None:
@@ -1545,14 +1638,21 @@ class SqliteEngine:
                             f"working item to supersede {supersedes_item_id!r} not found in session"
                         )
                     items_to_supersede.append(_working_payload(_working_from_row(row)))
-                elif singleton_kind or values["kind"] in {"active_goal", "current_plan"}:
+                elif singleton_kind or values["kind"] in {
+                    "active_goal",
+                    "current_plan",
+                }:
                     rows = conn.execute(
                         "SELECT * FROM working_memory WHERE tenant_id = ? AND session_id = ? AND status = 'active' AND kind = ?",
                         (values["tenant_id"], values["session_id"], values["kind"]),
                     ).fetchall()
-                    items_to_supersede.extend(_working_payload(_working_from_row(r)) for r in rows)
+                    items_to_supersede.extend(
+                        _working_payload(_working_from_row(r)) for r in rows
+                    )
                 else:
-                    raise ValueError("supersedes_item_id is required when singleton_kind is not enabled")
+                    raise ValueError(
+                        "supersedes_item_id is required when singleton_kind is not enabled"
+                    )
 
                 superseded_ids = []
                 for old_val in items_to_supersede:
@@ -1577,7 +1677,9 @@ class SqliteEngine:
                             old_val["item_id"],
                         ),
                     )
-                    old_diff = _working_audit_diff(old_val, status="expired", sweep=values["created_at"])
+                    old_diff = _working_audit_diff(
+                        old_val, status="expired", sweep=values["created_at"]
+                    )
                     old_diff["superseded_by"] = values["item_id"]
                     self._audit_row(
                         conn,
@@ -1650,7 +1752,9 @@ class SqliteEngine:
                 conn.rollback()
                 message = str(exc).upper()
                 if "UNIQUE" in message or "PRIMARY KEY" in message:
-                    raise ValueError(f"working item already exists: {values['item_id']!r}") from exc
+                    raise ValueError(
+                        f"working item already exists: {values['item_id']!r}"
+                    ) from exc
                 raise
             except BaseException:
                 conn.rollback()
@@ -1679,7 +1783,11 @@ class SqliteEngine:
     ) -> Any | None:
         """Rehearse an active working item, incrementing access_count and updating last_accessed_at."""
         clock_arg = accessed_at if accessed_at is not None else touched_at
-        clock = self._require_working_clock(clock_arg, "accessed_at") if clock_arg is not None else utc_now()
+        clock = (
+            self._require_working_clock(clock_arg, "accessed_at")
+            if clock_arg is not None
+            else utc_now()
+        )
 
         with self._lock:
             conn = self._connect(tenant_id)
@@ -1709,12 +1817,20 @@ class SqliteEngine:
                 if salience is not None:
                     values["salience"] = min(1.0, max(0.0, float(salience)))
                 elif salience_delta is not None:
-                    values["salience"] = min(1.0, max(0.0, float(values.get("salience", 0.5)) + float(salience_delta)))
+                    values["salience"] = min(
+                        1.0,
+                        max(
+                            0.0,
+                            float(values.get("salience", 0.5)) + float(salience_delta),
+                        ),
+                    )
 
                 hard_ceiling = values["created_at"] + timedelta(hours=24)
                 if extend_ttl_seconds is not None and float(extend_ttl_seconds) > 0.0:
                     proposed = clock + timedelta(seconds=float(extend_ttl_seconds))
-                    values["expires_at"] = min(hard_ceiling, max(values["expires_at"], proposed))
+                    values["expires_at"] = min(
+                        hard_ceiling, max(values["expires_at"], proposed)
+                    )
 
                 conn.execute(
                     "UPDATE working_memory "
@@ -1783,7 +1899,13 @@ class SqliteEngine:
                 "SELECT * FROM working_memory "
                 "WHERE tenant_id = ? AND session_id = ? AND item_id = ? "
                 "AND status = 'active' AND created_at <= ? AND expires_at > ?",
-                (tenant_id, session_id, item_id, dt_to_json(moment), dt_to_json(moment)),
+                (
+                    tenant_id,
+                    session_id,
+                    item_id,
+                    dt_to_json(moment),
+                    dt_to_json(moment),
+                ),
             ).fetchone()
             if row is None:
                 return None
@@ -1881,8 +2003,12 @@ class SqliteEngine:
                         ),
                     )
                     if updated.rowcount != 1:
-                        raise RuntimeError("working-memory expiry lost its serialization claim")
-                    audit_diff = _working_audit_diff(values, status="expired", sweep=sweep)
+                        raise RuntimeError(
+                            "working-memory expiry lost its serialization claim"
+                        )
+                    audit_diff = _working_audit_diff(
+                        values, status="expired", sweep=sweep
+                    )
                     self._audit_row(
                         conn,
                         values["tenant_id"],
@@ -1924,10 +2050,14 @@ class SqliteEngine:
         ).fetchall()
         for row in rows:
             item = _evidence_from_row(row)
-            if LocalMemoryEngine._classify_evidence_reality(item) not in {"self_generated", "simulated"}:
+            if LocalMemoryEngine._classify_evidence_reality(item) not in {
+                "self_generated",
+                "simulated",
+            }:
                 continue
             if source_backed_summary(
-                item, lambda cid: self.get_evidence(tenant_id, cid, branch),
+                item,
+                lambda cid: self.get_evidence(tenant_id, cid, branch),
                 LocalMemoryEngine._classify_evidence_reality,
             ):
                 continue
@@ -1935,7 +2065,9 @@ class SqliteEngine:
             byte_count += len(item.content or "")
         return events, byte_count
 
-    def _fetch_evidence(self, tenant_id: str, cid: str, branch: str = "main") -> Evidence | None:
+    def _fetch_evidence(
+        self, tenant_id: str, cid: str, branch: str = "main"
+    ) -> Evidence | None:
         """Store-core evidence row read (no policy filtering — Task 3's
         get_evidence adds the erased/deepcopy contract)."""
         conn = self._connect(tenant_id)
@@ -1985,7 +2117,9 @@ class SqliteEngine:
         with self._lock:
             state = self._check_source_scope(tenant_id, branch)
             if writable and self._mental_model_guard_state is not None:
-                raise RuntimeError("source operations cannot run inside a mental model guard")
+                raise RuntimeError(
+                    "source operations cannot run inside a mental model guard"
+                )
             self._source_operation_depth += 1
             try:
                 yield
@@ -2003,7 +2137,11 @@ class SqliteEngine:
             with conn:
                 yield
         else:
-            if state["connection"] is not conn or state["failed"] or not conn.in_transaction:
+            if (
+                state["connection"] is not conn
+                or state["failed"]
+                or not conn.in_transaction
+            ):
                 state["failed"] = True
                 raise RuntimeError("source transaction connection is not active")
             yield
@@ -2025,7 +2163,9 @@ class SqliteEngine:
         """
         with self._lock:
             if self._mental_model_guard_state is not None:
-                raise RuntimeError("source transaction cannot run inside a mental model guard")
+                raise RuntimeError(
+                    "source transaction cannot run inside a mental model guard"
+                )
             state = self._check_source_scope(tenant_id, branch)
             if state is not None:
                 try:
@@ -2037,10 +2177,17 @@ class SqliteEngine:
             model_key(tenant_id, "source-transaction", branch)
             conn = self._connect(tenant_id)
             if conn.in_transaction:
-                raise RuntimeError("source transaction cannot adopt an existing transaction")
+                raise RuntimeError(
+                    "source transaction cannot adopt an existing transaction"
+                )
             conn.execute("BEGIN IMMEDIATE")
-            state = {"tenant_id": tenant_id, "branch": branch, "connection": conn,
-                     "failed": False, "after_commit": []}
+            state = {
+                "tenant_id": tenant_id,
+                "branch": branch,
+                "connection": conn,
+                "failed": False,
+                "after_commit": [],
+            }
             self._source_transaction_state = state
             conn._source_guard = state
             # The authorizer also covers existing cursors and commented SQL;
@@ -2117,10 +2264,13 @@ class SqliteEngine:
                     existing.source_type == ev.source_type
                     and existing.content_pointer == ev.content_pointer
                     and existing.modality == ev.modality
-                    and (existing.document_segment_id is None or (
-                        existing.document_segment_id == ev.document_segment_id
-                        and existing.user_id == ev.user_id
-                    ))
+                    and (
+                        existing.document_segment_id is None
+                        or (
+                            existing.document_segment_id == ev.document_segment_id
+                            and existing.user_id == ev.user_id
+                        )
+                    )
                     and existing.cid
                 ):
                     replay_cid = evidence_cid(
@@ -2134,14 +2284,19 @@ class SqliteEngine:
                         document_segment_id=existing.document_segment_id,
                     )
                     if replay_cid == existing.cid or (
-                        existing.document_segment_id is None and unscoped_cid == existing.cid
+                        existing.document_segment_id is None
+                        and unscoped_cid == existing.cid
                     ):
                         cid = existing.cid
                         break
             existing = self._fetch_evidence(ev.tenant_id, cid, branch)
             reality_class = LocalMemoryEngine._classify_evidence_reality(ev)
             if existing is not None:
-                op = "append_evidence.blocked_erased_replay" if existing.erased else "append_evidence.noop_dedup"
+                op = (
+                    "append_evidence.blocked_erased_replay"
+                    if existing.erased
+                    else "append_evidence.noop_dedup"
+                )
                 with self._source_write(conn):
                     self._audit_row(
                         conn,
@@ -2149,16 +2304,25 @@ class SqliteEngine:
                         ev.actor,
                         op,
                         cid,
-                        {"branch": branch, "source_type": ev.source_type, "source_identity": ev.source_identity},
+                        {
+                            "branch": branch,
+                            "source_type": ev.source_type,
+                            "source_identity": ev.source_identity,
+                        },
                         source=ev.source_type,
                         trust_tier=ev.trust_tier,
                         capability_tags=ev.capability_tags,
                     )
                 return cid
             budget_report: dict[str, Any] | None = None
-            if reality_class in {"self_generated", "simulated"} and not source_backed_summary(
-                ev, lambda cid: self.get_evidence(ev.tenant_id, cid, branch),
-                LocalMemoryEngine._classify_evidence_reality, branch=branch,
+            if reality_class in {
+                "self_generated",
+                "simulated",
+            } and not source_backed_summary(
+                ev,
+                lambda cid: self.get_evidence(ev.tenant_id, cid, branch),
+                LocalMemoryEngine._classify_evidence_reality,
+                branch=branch,
             ):
                 current_events, current_bytes = self._self_generation_budget_usage(
                     conn, tenant_id=ev.tenant_id, branch=branch
@@ -2186,7 +2350,9 @@ class SqliteEngine:
                                 "reality_class": reality_class,
                                 "self_generation_budget": budget_report,
                                 "stored": False,
-                                "reversible_pointer_preserved": bool(ev.content_pointer),
+                                "reversible_pointer_preserved": bool(
+                                    ev.content_pointer
+                                ),
                             },
                             source=ev.source_type,
                             trust_tier=ev.trust_tier,
@@ -2225,17 +2391,23 @@ class SqliteEngine:
                     ev.actor,
                     "append_evidence",
                     cid,
-                    {"source_type": ev.source_type, "source_identity": ev.source_identity, "branch": branch},
+                    {
+                        "source_type": ev.source_type,
+                        "source_identity": ev.source_identity,
+                        "branch": branch,
+                    },
                     source=ev.source_type,
                     trust_tier=ev.trust_tier,
                     capability_tags=ev.capability_tags,
                 )
+
             def committed_effects():
                 # A later operation in the same batch may already have erased
                 # this source. Never publish that plaintext after commit.
                 live_copy = conn.execute(
                     "SELECT 1 FROM evidence WHERE tenant_id = ? AND cid = ? "
-                    "AND erased = 0 LIMIT 1", (stored.tenant_id, stored.cid),
+                    "AND erased = 0 LIMIT 1",
+                    (stored.tenant_id, stored.cid),
                 ).fetchone()
                 if live_copy is not None:
                     self._append_source_journal(stored)
@@ -2282,8 +2454,13 @@ class SqliteEngine:
             ev = self._fetch_evidence(tenant_id, cid, branch)
             if ev is None or ev.erased:
                 return False
-            before = _privacy_backfill_controls(ev.sensitivity, ev.access_policy, ev.metadata)
-            target_sensitivity = max(int(ev.sensitivity), int(pii_sensitivity) if tags else int(ev.sensitivity))
+            before = _privacy_backfill_controls(
+                ev.sensitivity, ev.access_policy, ev.metadata
+            )
+            target_sensitivity = max(
+                int(ev.sensitivity),
+                int(pii_sensitivity) if tags else int(ev.sensitivity),
+            )
             access_policy = _privacy_backfill_access_policy(
                 ev.access_policy,
                 tenant_id=tenant_id,
@@ -2320,7 +2497,9 @@ class SqliteEngine:
                         "branch": branch,
                         "pii_tags": tags,
                         "before": before,
-                        "after": _privacy_backfill_controls(ev.sensitivity, ev.access_policy, ev.metadata),
+                        "after": _privacy_backfill_controls(
+                            ev.sensitivity, ev.access_policy, ev.metadata
+                        ),
                         "source_type": ev.source_type,
                     },
                     source=source,
@@ -2341,22 +2520,31 @@ class SqliteEngine:
         with self._lock:
             if self._source_transaction_state is not None:
                 self._source_transaction_state["failed"] = True
-                raise RuntimeError("mental model guard cannot join a source transaction")
+                raise RuntimeError(
+                    "mental model guard cannot join a source transaction"
+                )
             model_key(tenant_id, "guard", "main")
             conn = self._connect(tenant_id)
             if self._mental_model_guard_state is not None:
-                if self._mental_model_guard_state != (tenant_id, conn) or not conn.in_transaction:
+                if (
+                    self._mental_model_guard_state != (tenant_id, conn)
+                    or not conn.in_transaction
+                ):
                     raise RuntimeError("mental model guard transaction scope mismatch")
                 yield
                 return
             if conn.in_transaction:
-                raise RuntimeError("mental model guard cannot adopt an existing transaction")
+                raise RuntimeError(
+                    "mental model guard cannot adopt an existing transaction"
+                )
             conn.execute("BEGIN IMMEDIATE")
             self._mental_model_guard_state = (tenant_id, conn)
             try:
                 yield
                 if not conn.in_transaction:
-                    raise RuntimeError("mental model guard transaction ended unexpectedly")
+                    raise RuntimeError(
+                        "mental model guard transaction ended unexpectedly"
+                    )
                 conn.commit()
             except BaseException:
                 conn.rollback()
@@ -2365,7 +2553,11 @@ class SqliteEngine:
                 self._mental_model_guard_state = None
 
     def get_document_record(
-        self, tenant_id: str, owner_id: str, document_id: str, branch: str = "main",
+        self,
+        tenant_id: str,
+        owner_id: str,
+        document_id: str,
+        branch: str = "main",
     ) -> dict[str, Any] | None:
         with self._source_operation(tenant_id, branch, writable=False):
             document_key(tenant_id, owner_id, document_id, branch)
@@ -2377,31 +2569,54 @@ class SqliteEngine:
             ).fetchone()
             return json.loads(row["record"]) if row else None
 
-    def list_document_records(self, tenant_id: str, branch: str = "main") -> list[dict[str, Any]]:
+    def list_document_records(
+        self, tenant_id: str, branch: str = "main"
+    ) -> list[dict[str, Any]]:
         with self._source_operation(tenant_id, branch, writable=False):
             document_key(tenant_id, "document-list", "document-list", branch)
             conn = self._connect(tenant_id)
-            return [json.loads(row["record"]) for row in conn.execute(
-                "SELECT record FROM documents WHERE tenant_id = ? AND branch = ? "
-                "ORDER BY owner_id, document_id", (tenant_id, branch),
-            ).fetchall()]
+            return [
+                json.loads(row["record"])
+                for row in conn.execute(
+                    "SELECT record FROM documents WHERE tenant_id = ? AND branch = ? "
+                    "ORDER BY owner_id, document_id",
+                    (tenant_id, branch),
+                ).fetchall()
+            ]
 
     def save_document_record(
-        self, tenant_id: str, owner_id: str, document_id: str, record: dict[str, Any],
-        branch: str = "main", *, expected_revision: int | None,
+        self,
+        tenant_id: str,
+        owner_id: str,
+        document_id: str,
+        record: dict[str, Any],
+        branch: str = "main",
+        *,
+        expected_revision: int | None,
     ) -> dict[str, Any]:
         """Publish a manifest and retire removed sources in the caller's transaction."""
         with self._source_operation(tenant_id, branch):
             if self._source_transaction_state is None:
-                raise RuntimeError("document save requires an active source transaction")
+                raise RuntimeError(
+                    "document save requires an active source transaction"
+                )
             document_key(tenant_id, owner_id, document_id, branch)
             conn = self._connect(tenant_id)
             current = self.get_document_record(tenant_id, owner_id, document_id, branch)
             saved = prepare_document_save(
-                tenant_id, owner_id, document_id, record, branch, current, expected_revision,
+                tenant_id,
+                owner_id,
+                document_id,
+                record,
+                branch,
+                current,
+                expected_revision,
             )
             removed = validate_document_sources(
-                self, saved, current, self.list_document_records(tenant_id, branch),
+                self,
+                saved,
+                current,
+                self.list_document_records(tenant_id, branch),
             )
             retired_at = dt_to_json(parse_dt(saved["updated_at"]))
             for cid in removed:
@@ -2416,10 +2631,20 @@ class SqliteEngine:
                 "INSERT INTO documents(tenant_id, branch, owner_id, document_id, revision, record) "
                 "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(tenant_id, branch, owner_id, document_id) "
                 "DO UPDATE SET revision = excluded.revision, record = excluded.record",
-                (tenant_id, branch, owner_id, document_id, saved["revision"], json_text(saved)),
+                (
+                    tenant_id,
+                    branch,
+                    owner_id,
+                    document_id,
+                    saved["revision"],
+                    json_text(saved),
+                ),
             )
             self._invalidate_mental_models(conn, tenant_id, branch)
-            conn.execute("DELETE FROM graph_ppr_cache WHERE tenant_id = ? AND branch = ?", (tenant_id, branch))
+            conn.execute(
+                "DELETE FROM graph_ppr_cache WHERE tenant_id = ? AND branch = ?",
+                (tenant_id, branch),
+            )
             self._scan_oracle_memo.clear()
             self._registries.clear()
             self._passage_bm25_index = None
@@ -2428,40 +2653,66 @@ class SqliteEngine:
 
     @staticmethod
     def _scrub_document_records(
-        conn: sqlite3.Connection, tenant_id: str, branch: str, erased_cids: set[str],
+        conn: sqlite3.Connection,
+        tenant_id: str,
+        branch: str,
+        erased_cids: set[str],
     ) -> None:
         for row in conn.execute(
-            "SELECT record FROM documents WHERE tenant_id = ? AND branch = ?", (tenant_id, branch),
+            "SELECT record FROM documents WHERE tenant_id = ? AND branch = ?",
+            (tenant_id, branch),
         ).fetchall():
             saved = scrub_document_record(json.loads(row["record"]), erased_cids)
             if saved is not None:
                 conn.execute(
                     "UPDATE documents SET revision = ?, record = ? WHERE tenant_id = ? "
                     "AND branch = ? AND owner_id = ? AND document_id = ?",
-                    (saved["revision"], json_text(saved), tenant_id, branch,
-                     saved["owner_id"], saved["document_id"]),
+                    (
+                        saved["revision"],
+                        json_text(saved),
+                        tenant_id,
+                        branch,
+                        saved["owner_id"],
+                        saved["document_id"],
+                    ),
                 )
 
-    def get_mental_model_record(self, tenant_id: str, model_id: str, branch: str = "main") -> dict[str, Any] | None:
+    def get_mental_model_record(
+        self, tenant_id: str, model_id: str, branch: str = "main"
+    ) -> dict[str, Any] | None:
         model_key(tenant_id, model_id, branch)
         with self._lock:
-            row = self._connect(tenant_id).execute(
-                "SELECT record FROM mental_models WHERE tenant_id = ? AND branch = ? AND model_id = ?",
-                (tenant_id, branch, model_id),
-            ).fetchone()
+            row = (
+                self._connect(tenant_id)
+                .execute(
+                    "SELECT record FROM mental_models WHERE tenant_id = ? AND branch = ? AND model_id = ?",
+                    (tenant_id, branch, model_id),
+                )
+                .fetchone()
+            )
         return json.loads(row["record"]) if row is not None else None
 
-    def list_mental_model_records(self, tenant_id: str, branch: str = "main") -> list[dict[str, Any]]:
+    def list_mental_model_records(
+        self, tenant_id: str, branch: str = "main"
+    ) -> list[dict[str, Any]]:
         model_key(tenant_id, "list", branch)
         with self._lock:
-            return [json.loads(row["record"]) for row in self._connect(tenant_id).execute(
-                "SELECT record FROM mental_models WHERE tenant_id = ? AND branch = ? ORDER BY model_id",
-                (tenant_id, branch),
-            )]
+            return [
+                json.loads(row["record"])
+                for row in self._connect(tenant_id).execute(
+                    "SELECT record FROM mental_models WHERE tenant_id = ? AND branch = ? ORDER BY model_id",
+                    (tenant_id, branch),
+                )
+            ]
 
     def save_mental_model_record(
-        self, tenant_id: str, model_id: str, record: dict[str, Any], *,
-        branch: str = "main", expected_version: int | None = None,
+        self,
+        tenant_id: str,
+        model_id: str,
+        record: dict[str, Any],
+        *,
+        branch: str = "main",
+        expected_version: int | None = None,
     ) -> dict[str, Any]:
         model_key(tenant_id, model_id, branch)
         validate_model_version(expected_version, allow_create=True)
@@ -2470,7 +2721,9 @@ class SqliteEngine:
             guarded = self._mental_model_guard_state == (tenant_id, conn)
             if guarded:
                 if not conn.in_transaction:
-                    raise RuntimeError("mental model guard transaction ended unexpectedly")
+                    raise RuntimeError(
+                        "mental model guard transaction ended unexpectedly"
+                    )
             else:
                 conn.execute("BEGIN IMMEDIATE")
             try:
@@ -2480,7 +2733,9 @@ class SqliteEngine:
                     (tenant_id, branch, model_id),
                 ).fetchone()
                 current = json.loads(row["record"]) if row is not None else None
-                saved = prepare_model_save(tenant_id, model_id, record, branch, current, expected_version)
+                saved = prepare_model_save(
+                    tenant_id, model_id, record, branch, current, expected_version
+                )
                 conn.execute(
                     "INSERT INTO mental_models(tenant_id, branch, model_id, version, record) VALUES (?, ?, ?, ?, ?) "
                     "ON CONFLICT(tenant_id, branch, model_id) DO UPDATE SET version = excluded.version, record = excluded.record",
@@ -2495,7 +2750,12 @@ class SqliteEngine:
         return copy_model_json(saved)
 
     def delete_mental_model_record(
-        self, tenant_id: str, model_id: str, *, branch: str = "main", expected_version: int,
+        self,
+        tenant_id: str,
+        model_id: str,
+        *,
+        branch: str = "main",
+        expected_version: int,
     ) -> bool:
         model_key(tenant_id, model_id, branch)
         validate_model_version(expected_version)
@@ -2504,7 +2764,9 @@ class SqliteEngine:
             guarded = self._mental_model_guard_state == (tenant_id, conn)
             if guarded:
                 if not conn.in_transaction:
-                    raise RuntimeError("mental model guard transaction ended unexpectedly")
+                    raise RuntimeError(
+                        "mental model guard transaction ended unexpectedly"
+                    )
             else:
                 conn.execute("BEGIN IMMEDIATE")
             try:
@@ -2514,8 +2776,10 @@ class SqliteEngine:
                 ).fetchone()
                 if row is not None and row["version"] != expected_version:
                     raise MentalModelConflict("mental model version conflict")
-                conn.execute("DELETE FROM mental_models WHERE tenant_id = ? AND branch = ? AND model_id = ?",
-                             (tenant_id, branch, model_id))
+                conn.execute(
+                    "DELETE FROM mental_models WHERE tenant_id = ? AND branch = ? AND model_id = ?",
+                    (tenant_id, branch, model_id),
+                )
                 if not guarded:
                     conn.commit()
             except BaseException:
@@ -2525,29 +2789,51 @@ class SqliteEngine:
         return row is not None
 
     @staticmethod
-    def _invalidate_mental_models(conn: sqlite3.Connection, tenant_id: str, branch: str) -> None:
-        rows = conn.execute("SELECT record FROM mental_models WHERE tenant_id = ? AND branch = ?",
-                            (tenant_id, branch)).fetchall()
+    def _invalidate_mental_models(
+        conn: sqlite3.Connection, tenant_id: str, branch: str
+    ) -> None:
+        rows = conn.execute(
+            "SELECT record FROM mental_models WHERE tenant_id = ? AND branch = ?",
+            (tenant_id, branch),
+        ).fetchall()
         for row in rows:
             saved = invalidate_model_record(json.loads(row["record"]))
-            conn.execute("UPDATE mental_models SET version = ?, record = ? WHERE tenant_id = ? AND branch = ? AND model_id = ?",
-                         (saved["version"], json_text(saved), tenant_id, branch, saved["model_id"]))
+            conn.execute(
+                "UPDATE mental_models SET version = ?, record = ? WHERE tenant_id = ? AND branch = ? AND model_id = ?",
+                (
+                    saved["version"],
+                    json_text(saved),
+                    tenant_id,
+                    branch,
+                    saved["model_id"],
+                ),
+            )
 
     def get_evidence_for_read(
-        self, tenant_id: str, cid: str, branch: str = "main", *,
+        self,
+        tenant_id: str,
+        cid: str,
+        branch: str = "main",
+        *,
         access_context: Mapping[str, Any] | None = None,
     ) -> Evidence | None:
         with self._lock:
-            return read_evidence_for_context(self, tenant_id, cid, branch, access_context=access_context)
+            return read_evidence_for_context(
+                self, tenant_id, cid, branch, access_context=access_context
+            )
 
-    def get_evidence(self, tenant_id: str, cid: str, branch: str = "main") -> Evidence | None:
+    def get_evidence(
+        self, tenant_id: str, cid: str, branch: str = "main"
+    ) -> Evidence | None:
         with self._source_operation(tenant_id, branch, writable=False):
             ev = self._fetch_evidence(tenant_id, cid, branch)
             if ev and not ev.erased:
                 return ev
             return None
 
-    def evidence_created_at(self, tenant_id: str, cid: str, branch: str = "main") -> datetime | None:
+    def evidence_created_at(
+        self, tenant_id: str, cid: str, branch: str = "main"
+    ) -> datetime | None:
         """The row's own time, without the access-policy snapshot ``get_evidence`` returns.
 
         Retrieval dates hits from this read. Grounded answering fingerprints
@@ -2585,12 +2871,18 @@ class SqliteEngine:
                     (tenant_id, branch, *chunk),
                 ).fetchall()
                 for row in rows:
-                    created = parse_dt(row["created_at"]) if row["created_at"] is not None else None
+                    created = (
+                        parse_dt(row["created_at"])
+                        if row["created_at"] is not None
+                        else None
+                    )
                     if created is not None:
                         found[str(row["cid"])] = created
         return found
 
-    def evidence_is_erased(self, tenant_id: str, cid: str, branch: str = "main") -> bool:
+    def evidence_is_erased(
+        self, tenant_id: str, cid: str, branch: str = "main"
+    ) -> bool:
         """Engine-neutral tombstone probe (see ``MemoryEngine.evidence_is_erased``).
 
         A tombstoned row is retained with ``erased = 1`` as the replay blocklist
@@ -2612,15 +2904,28 @@ class SqliteEngine:
     ) -> bool:
         with self._source_operation(tenant_id, branch):
             return self._update_evidence_metadata_impl(
-                tenant_id, cid, metadata_patch, branch, actor=actor, source=source,
+                tenant_id,
+                cid,
+                metadata_patch,
+                branch,
+                actor=actor,
+                source=source,
             )
 
     def _update_evidence_metadata_impl(
-        self, tenant_id: str, cid: str, metadata_patch: dict[str, Any], branch: str = "main", *,
-        actor: str = "consolidation", source: str = "metadata_update",
+        self,
+        tenant_id: str,
+        cid: str,
+        metadata_patch: dict[str, Any],
+        branch: str = "main",
+        *,
+        actor: str = "consolidation",
+        source: str = "metadata_update",
     ) -> bool:
         if "access_policy" in metadata_patch:
-            raise ValueError("metadata_patch.access_policy cannot shadow evidence.access_policy")
+            raise ValueError(
+                "metadata_patch.access_policy cannot shadow evidence.access_policy"
+            )
         with self._lock:
             conn = self._connect(tenant_id)
             ev = self._fetch_evidence(tenant_id, cid, branch)
@@ -2633,8 +2938,12 @@ class SqliteEngine:
                 # A metadata patch that signals a restriction/hold/quarantine
                 # change (or drops the embedding partition to "none") invalidates
                 # the cached vector for this cid — purge on those paths (R4).
-                if _metadata_patch_tightens_privacy(metadata_patch) or not self._embedding_cache_admits(
-                    sensitivity=int(ev.sensitivity), access_policy=ev.access_policy, erased=ev.erased
+                if _metadata_patch_tightens_privacy(
+                    metadata_patch
+                ) or not self._embedding_cache_admits(
+                    sensitivity=int(ev.sensitivity),
+                    access_policy=ev.access_policy,
+                    erased=ev.erased,
                 ):
                     self._purge_embedding_cache_row(conn, tenant_id, cid)
                 self._audit_row(
@@ -2683,7 +2992,11 @@ class SqliteEngine:
                         actor,
                         "set_evidence_embedding.blocked_policy",
                         cid,
-                        {"branch": branch, "source_type": ev.source_type, "reason": "embedding_not_allowed"},
+                        {
+                            "branch": branch,
+                            "source_type": ev.source_type,
+                            "reason": "embedding_not_allowed",
+                        },
                         source=source,
                         trust_tier=ev.trust_tier,
                         capability_tags=ev.capability_tags,
@@ -2701,10 +3014,17 @@ class SqliteEngine:
                 # when admissible (same txn; invisible to export parity). The
                 # cache_key is the STORED cid (already subject-salted for S2+/PII).
                 if self._embedding_cache_admits(
-                    sensitivity=int(ev.sensitivity), access_policy=ev.access_policy, erased=ev.erased
+                    sensitivity=int(ev.sensitivity),
+                    access_policy=ev.access_policy,
+                    erased=ev.erased,
                 ):
                     self._embedding_cache_store_row(
-                        conn, tenant_id, cid, self._model_id(), list(embedding), int(ev.sensitivity)
+                        conn,
+                        tenant_id,
+                        cid,
+                        self._model_id(),
+                        list(embedding),
+                        int(ev.sensitivity),
                     )
                 self._audit_row(
                     conn,
@@ -2712,14 +3032,20 @@ class SqliteEngine:
                     actor,
                     "set_evidence_embedding",
                     cid,
-                    {"branch": branch, "embedding_dims": len(embedding), "source_type": ev.source_type},
+                    {
+                        "branch": branch,
+                        "embedding_dims": len(embedding),
+                        "source_type": ev.source_type,
+                    },
                     source=source,
                     trust_tier=ev.trust_tier,
                     capability_tags=ev.capability_tags,
                 )
             return True
 
-    def list_raptor_summaries(self, tenant_id: str, branch: str = "main") -> list[Evidence]:
+    def list_raptor_summaries(
+        self, tenant_id: str, branch: str = "main"
+    ) -> list[Evidence]:
         """Return RAPTOR rows without materializing the tenant export."""
 
         conn = self._connect(tenant_id)
@@ -2751,13 +3077,15 @@ class SqliteEngine:
             assertions = [
                 _assertion_from_row(row).to_dict()
                 for row in conn.execute(
-                    "SELECT * FROM assertions WHERE tenant_id = ? ORDER BY rowid", (tenant_id,)
+                    "SELECT * FROM assertions WHERE tenant_id = ? ORDER BY rowid",
+                    (tenant_id,),
                 )
             ]
             relations = [
                 _relation_from_row(row).to_dict()
                 for row in conn.execute(
-                    "SELECT * FROM relations WHERE tenant_id = ? ORDER BY rowid", (tenant_id,)
+                    "SELECT * FROM relations WHERE tenant_id = ? ORDER BY rowid",
+                    (tenant_id,),
                 )
             ]
             preferences = self._records(conn, "preferences", tenant_id)
@@ -2770,13 +3098,15 @@ class SqliteEngine:
             observations = [
                 _observation_from_row(row).to_dict()
                 for row in conn.execute(
-                    "SELECT * FROM observations WHERE tenant_id = ? ORDER BY rowid", (tenant_id,)
+                    "SELECT * FROM observations WHERE tenant_id = ? ORDER BY rowid",
+                    (tenant_id,),
                 )
             ]
             knowledge_pages = [
                 _knowledge_page_from_row(row).to_dict()
                 for row in conn.execute(
-                    "SELECT * FROM knowledge_pages WHERE tenant_id = ? ORDER BY rowid", (tenant_id,)
+                    "SELECT * FROM knowledge_pages WHERE tenant_id = ? ORDER BY rowid",
+                    (tenant_id,),
                 )
             ]
             working_memory = [
@@ -2794,7 +3124,9 @@ class SqliteEngine:
                 item
                 for item in (
                     json.loads(row["record"])
-                    for row in conn.execute("SELECT record FROM deletion_log ORDER BY seq")
+                    for row in conn.execute(
+                        "SELECT record FROM deletion_log ORDER BY seq"
+                    )
                 )
                 if item.get("tenant_id") == tenant_id
             ]
@@ -2834,24 +3166,33 @@ class SqliteEngine:
         }
         return exported
 
-    def export_tenant_filtered(self, tenant_id: str, access_context: dict[str, Any]) -> dict[str, Any]:
+    def export_tenant_filtered(
+        self, tenant_id: str, access_context: dict[str, Any]
+    ) -> dict[str, Any]:
         return filter_export_for_context(
             self.export_tenant(tenant_id),
             {**dict(access_context or {}), "tenant_id": tenant_id},
             policy_max_sensitivity=self.policy.max_sensitivity,
             evidence_gate=lambda row: derived_evidence_readable(
-                self, row, tenant_id=tenant_id, branch=str(row.get("branch") or "main"),
-                filt={**dict(access_context or {}), "tenant_id": tenant_id}, policy=self.policy,
+                self,
+                row,
+                tenant_id=tenant_id,
+                branch=str(row.get("branch") or "main"),
+                filt={**dict(access_context or {}), "tenant_id": tenant_id},
+                policy=self.policy,
             ),
         )
 
     @staticmethod
-    def _records(conn: sqlite3.Connection, table: str, tenant_id: str) -> list[dict[str, Any]]:
+    def _records(
+        conn: sqlite3.Connection, table: str, tenant_id: str
+    ) -> list[dict[str, Any]]:
         """JSON-record collections rehydrate to the exact ``to_dict()`` shape."""
         return [
             json.loads(row["record"])
             for row in conn.execute(
-                f"SELECT record FROM {table} WHERE tenant_id = ? ORDER BY rowid", (tenant_id,)
+                f"SELECT record FROM {table} WHERE tenant_id = ? ORDER BY rowid",
+                (tenant_id,),
             )
         ]
 
@@ -2903,7 +3244,9 @@ class SqliteEngine:
                 for table in tables:
                     if table not in available_tables:
                         continue
-                    for (tenant_id,) in conn.execute(f"SELECT DISTINCT tenant_id FROM {table}"):
+                    for (tenant_id,) in conn.execute(
+                        f"SELECT DISTINCT tenant_id FROM {table}"
+                    ):
                         if tenant_id and tenant_id != "*":
                             found.add(tenant_id)
             finally:
@@ -2935,7 +3278,9 @@ class SqliteEngine:
         return rows
 
     def export_all(self) -> dict[str, Any]:
-        tenant_exports = [self.export_tenant(tenant_id) for tenant_id in self._all_tenant_ids()]
+        tenant_exports = [
+            self.export_tenant(tenant_id) for tenant_id in self._all_tenant_ids()
+        ]
         merge_log: list[dict[str, Any]] = []
         for path in self._iter_tenant_db_paths():
             conn, owned = self._borrow_conn(path)
@@ -2950,20 +3295,58 @@ class SqliteEngine:
         exported = {
             "policy": self.policy.to_dict(),
             "branches": self._export_branches(),
-            "evidence": [item for exported in tenant_exports for item in exported["evidence"]],
-            "assertions": [item for exported in tenant_exports for item in exported["assertions"]],
-            "relations": [item for exported in tenant_exports for item in exported["relations"]],
-            "preferences": [item for exported in tenant_exports for item in exported["preferences"]],
-            "justifications": [item for exported in tenant_exports for item in exported["justifications"]],
-            "contradictions": [item for exported in tenant_exports for item in exported["contradictions"]],
-            "calibrations": [item for exported in tenant_exports for item in exported["calibrations"]],
-            "entities": [item for exported in tenant_exports for item in exported["entities"]],
-            "mental_models": [item for exported in tenant_exports for item in exported["mental_models"]],
-            "documents": [item for exported in tenant_exports for item in exported["documents"]],
-            "observations": [item for exported in tenant_exports for item in exported.get("observations", [])],
-            "knowledge_pages": [item for exported in tenant_exports for item in exported.get("knowledge_pages", [])],
-            "audit_log": [item for exported in tenant_exports for item in exported["audit_log"]],
-            "deletion_log": [item for exported in tenant_exports for item in exported["deletion_log"]],
+            "evidence": [
+                item for exported in tenant_exports for item in exported["evidence"]
+            ],
+            "assertions": [
+                item for exported in tenant_exports for item in exported["assertions"]
+            ],
+            "relations": [
+                item for exported in tenant_exports for item in exported["relations"]
+            ],
+            "preferences": [
+                item for exported in tenant_exports for item in exported["preferences"]
+            ],
+            "justifications": [
+                item
+                for exported in tenant_exports
+                for item in exported["justifications"]
+            ],
+            "contradictions": [
+                item
+                for exported in tenant_exports
+                for item in exported["contradictions"]
+            ],
+            "calibrations": [
+                item for exported in tenant_exports for item in exported["calibrations"]
+            ],
+            "entities": [
+                item for exported in tenant_exports for item in exported["entities"]
+            ],
+            "mental_models": [
+                item
+                for exported in tenant_exports
+                for item in exported["mental_models"]
+            ],
+            "documents": [
+                item for exported in tenant_exports for item in exported["documents"]
+            ],
+            "observations": [
+                item
+                for exported in tenant_exports
+                for item in exported.get("observations", [])
+            ],
+            "knowledge_pages": [
+                item
+                for exported in tenant_exports
+                for item in exported.get("knowledge_pages", [])
+            ],
+            "audit_log": [
+                item for exported in tenant_exports for item in exported["audit_log"]
+            ],
+            "deletion_log": [
+                item for exported in tenant_exports for item in exported["deletion_log"]
+            ],
             "merge_log": merge_log,
             "tenants": tenant_exports,
             "working_memory": [
@@ -2993,7 +3376,9 @@ class SqliteEngine:
     def _embed_text(self, text: str) -> list[float]:
         return self.adapters.embedding.embed(text)
 
-    def _candidate_scope_bounds(self, filt: dict[str, Any]) -> tuple[Any, str, int, int]:
+    def _candidate_scope_bounds(
+        self, filt: dict[str, Any]
+    ) -> tuple[Any, str, int, int]:
         """Replicate ``LocalMemoryEngine._candidate_hits``'s cheap, indexable
         filter bounds (tenant, branch, max_trust_tier, max_sensitivity) VERBATIM
         (engine.py ``_candidate_hits`` head, incl. the ``min_trust_tier`` legacy
@@ -3007,8 +3392,14 @@ class SqliteEngine:
         tenant_id = filt.get("tenant_id")
         branch = str(filt.get("branch", "main"))
         include_quarantined = bool(filt.get("include_quarantined", False))
-        default_max_trust = int(TrustTier.UNTRUSTED_EXTERNAL) if include_quarantined else self.policy.max_trust_tier
-        max_trust = int(filt.get("max_trust_tier", filt.get("min_trust_tier", default_max_trust)))
+        default_max_trust = (
+            int(TrustTier.UNTRUSTED_EXTERNAL)
+            if include_quarantined
+            else self.policy.max_trust_tier
+        )
+        max_trust = int(
+            filt.get("max_trust_tier", filt.get("min_trust_tier", default_max_trust))
+        )
         max_sensitivity = effective_max_sensitivity(filt, self.policy.max_sensitivity)
         return tenant_id, branch, max_trust, max_sensitivity
 
@@ -3030,11 +3421,19 @@ class SqliteEngine:
         if not _candidate_memo_enabled():
             oracle, raw_blobs = self._hydrate_scan_oracle(filt)
             return (oracle, raw_blobs) if with_blobs else oracle
-        tenant_id, branch, max_trust, max_sensitivity = self._candidate_scope_bounds(filt)
+        tenant_id, branch, max_trust, max_sensitivity = self._candidate_scope_bounds(
+            filt
+        )
         cached: tuple[LocalMemoryEngine, dict[str, bytes | None]]
         if tenant_id:
             with self._lock:
-                key = (tenant_id, branch, max_trust, max_sensitivity, *self.write_fingerprint(tenant_id))
+                key = (
+                    tenant_id,
+                    branch,
+                    max_trust,
+                    max_sensitivity,
+                    *self.write_fingerprint(tenant_id),
+                )
                 cached = self._scan_oracle_memo.get(key)
                 if cached is None:
                     cached = self._hydrate_scan_oracle(filt)
@@ -3068,7 +3467,9 @@ class SqliteEngine:
         is filtered app-side). The raw packed embedding BLOBs are always
         collected (cheap row-value references), keyed by evidence key for the
         dense seam; :meth:`_scan_oracle` hands them out on ``with_blobs``."""
-        tenant_id, branch, max_trust, max_sensitivity = self._candidate_scope_bounds(filt)
+        tenant_id, branch, max_trust, max_sensitivity = self._candidate_scope_bounds(
+            filt
+        )
         oracle = LocalMemoryEngine(policy=self.policy, adapters=self.adapters)
         raw_blobs: dict[str, bytes | None] = {}
         if tenant_id:
@@ -3137,7 +3538,9 @@ class SqliteEngine:
             oracle.relations[rel.id] = rel
         for row in ev_rows:
             ev = _evidence_from_row(row)
-            oracle.evidence[oracle._evidence_key(ev.tenant_id, ev.branch, ev.cid or "")] = ev
+            oracle.evidence[
+                oracle._evidence_key(ev.tenant_id, ev.branch, ev.cid or "")
+            ] = ev
         return oracle
 
     def _packed_embedding_for_hit(
@@ -3177,7 +3580,9 @@ class SqliteEngine:
                 ):
                     hit.metadata["stored_embedding_used"] = True
                     return raw_blobs.get(key)
-        partition = str(hit.metadata.get("embedding_partition") or VECTOR_PARTITION_PUBLIC)
+        partition = str(
+            hit.metadata.get("embedding_partition") or VECTOR_PARTITION_PUBLIC
+        )
         if partition == "none":
             return None
         hit.metadata["stored_embedding_used"] = False
@@ -3188,7 +3593,9 @@ class SqliteEngine:
         hit.score = score
         stored_raw = bool(hit.metadata.get("stored_embedding_used"))
         hit.channel = (
-            "dense_media" if stored_raw and hit.metadata.get("stored_media_embedding") else "dense_hash"
+            "dense_media"
+            if stored_raw and hit.metadata.get("stored_media_embedding")
+            else "dense_hash"
         )
 
     def _fts_candidate_cids(
@@ -3225,26 +3632,36 @@ class SqliteEngine:
         hits: list[Hit] = []
         if text_kernels.NATIVE is not None:
             chunks = [
-                self._packed_embedding_for_hit(hit, filt, dims, oracle=oracle, raw_blobs=raw_blobs)
+                self._packed_embedding_for_hit(
+                    hit, filt, dims, oracle=oracle, raw_blobs=raw_blobs
+                )
                 for hit in candidates
             ]
-            heterogeneous = any(chunk is not None and len(chunk) != dims * 8 for chunk in chunks)
+            heterogeneous = any(
+                chunk is not None and len(chunk) != dims * 8 for chunk in chunks
+            )
             if heterogeneous:
                 # GUARD path: mixed embedding widths — reuse Local's exact list
                 # dense_scan fast path (byte-parity), never the packed seam.
                 vectors = [oracle._embedding_for_hit(hit, filt) for hit in candidates]
                 scores = text_kernels.NATIVE.dense_scan(query_vec, vectors)
-                for hit, hit_vec, score in zip(candidates, vectors, scores, strict=True):
+                for hit, hit_vec, score in zip(
+                    candidates, vectors, scores, strict=True
+                ):
                     if hit_vec is None:
                         continue
                     if score > 0:
                         self._apply_dense_channel(hit, score)
                         hits.append(hit)
             else:
-                rows_bytes = b"".join(chunk if chunk else b"\x00" * (dims * 8) for chunk in chunks)
+                rows_bytes = b"".join(
+                    chunk if chunk else b"\x00" * (dims * 8) for chunk in chunks
+                )
                 row_mask = bytes(1 if chunk else 0 for chunk in chunks)
                 query_bytes = array.array("d", query_vec).tobytes()
-                scores = text_kernels.NATIVE.dense_scan_packed(query_bytes, rows_bytes, dims, row_mask)
+                scores = text_kernels.NATIVE.dense_scan_packed(
+                    query_bytes, rows_bytes, dims, row_mask
+                )
                 for hit, chunk, score in zip(candidates, chunks, scores, strict=True):
                     if chunk is None:
                         continue
@@ -3269,10 +3686,18 @@ class SqliteEngine:
         from mnemosyne.passages import is_passage
 
         scoped = {**filt, "query_mode": "passages"}
-        return [hit for hit in self._scan_oracle(scoped)._candidate_hits(scoped) if is_passage(hit)]
+        return [
+            hit
+            for hit in self._scan_oracle(scoped)._candidate_hits(scoped)
+            if is_passage(hit)
+        ]
 
     def _get_projection_for_adapter(
-        self, tenant_id: str, branch: str, kind: str, item_id: str,
+        self,
+        tenant_id: str,
+        branch: str,
+        kind: str,
+        item_id: str,
     ) -> Assertion | Preference | None:
         conn = self._connect(tenant_id)
         with self._lock:
@@ -3287,7 +3712,11 @@ class SqliteEngine:
                     "SELECT record FROM preferences WHERE tenant_id = ? AND id = ?",
                     (tenant_id, item_id),
                 ).fetchone()
-                return Preference.from_dict(json.loads(row["record"])) if row is not None else None
+                return (
+                    Preference.from_dict(json.loads(row["record"]))
+                    if row is not None
+                    else None
+                )
         return None
 
     def lexical_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
@@ -3326,7 +3755,9 @@ class SqliteEngine:
         tokens = tokenize(query)
         if tenant_id and tokens and fts_safe_query(tokens):
             conn = self._connect(tenant_id)
-            allowed_evidence_cids = self._fts_candidate_cids(conn, tenant_id, branch, tokens)
+            allowed_evidence_cids = self._fts_candidate_cids(
+                conn, tenant_id, branch, tokens
+            )
         scored = [
             hit
             for hit in candidates
@@ -3338,7 +3769,9 @@ class SqliteEngine:
         ]
         hits = []
         if text_kernels.NATIVE is not None:
-            scores = text_kernels.NATIVE.lexical_scan(query, [hit.text for hit in scored])
+            scores = text_kernels.NATIVE.lexical_scan(
+                query, [hit.text for hit in scored]
+            )
             for hit, score in zip(scored, scores, strict=True):
                 if score > 0:
                     hit.score = score
@@ -3385,10 +3818,14 @@ class SqliteEngine:
         live path, so ``use_cache=False`` and an unpopulated/stale cache are both
         byte-identical to the pre-Task-8 oracle behaviour."""
         if use_cache:
-            cached = self._read_ppr_cache(seeds, k, as_of=as_of, tenant_id=tenant_id, branch=branch, filt=filt)
+            cached = self._read_ppr_cache(
+                seeds, k, as_of=as_of, tenant_id=tenant_id, branch=branch, filt=filt
+            )
             if cached is not None:
                 return cached
-        return self._compute_graph_ppr(seeds, k, as_of=as_of, tenant_id=tenant_id, branch=branch, filt=filt)
+        return self._compute_graph_ppr(
+            seeds, k, as_of=as_of, tenant_id=tenant_id, branch=branch, filt=filt
+        )
 
     def _compute_graph_ppr(
         self,
@@ -3434,7 +3871,12 @@ class SqliteEngine:
         return type(provider).__name__
 
     def _embedding_cache_admits(
-        self, *, sensitivity: int, access_policy: Any, erased: bool = False, status: str = "active"
+        self,
+        *,
+        sensitivity: int,
+        access_policy: Any,
+        erased: bool = False,
+        status: str = "active",
     ) -> bool:
         """Admission predicate (spec §4.2 A1). Never admits a ``none`` partition
         (S4 / ``embed_ok:false`` / ``restricted`` / ``hold`` / unknown-policy /
@@ -3442,7 +3884,10 @@ class SqliteEngine:
         flag, which does not exist → S3 fails closed. S0–S2 with a usable
         partition are admitted (their cid is already subject-salted for S2)."""
         partition = vector_partition_for_item(
-            sensitivity=int(sensitivity), access_policy=access_policy, status=status, erased=erased
+            sensitivity=int(sensitivity),
+            access_policy=access_policy,
+            status=status,
+            erased=erased,
         )
         if partition == VECTOR_PARTITION_NONE:
             return False
@@ -3485,9 +3930,12 @@ class SqliteEngine:
         return None if row is None else unpack_embedding(row["embedding"])
 
     @staticmethod
-    def _purge_embedding_cache_row(conn: sqlite3.Connection, tenant_id: str, cache_key: str) -> int:
+    def _purge_embedding_cache_row(
+        conn: sqlite3.Connection, tenant_id: str, cache_key: str
+    ) -> int:
         cur = conn.execute(
-            "DELETE FROM embedding_cache WHERE tenant_id = ? AND cache_key = ?", (tenant_id, str(cache_key))
+            "DELETE FROM embedding_cache WHERE tenant_id = ? AND cache_key = ?",
+            (tenant_id, str(cache_key)),
         )
         return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
 
@@ -3505,7 +3953,9 @@ class SqliteEngine:
     def _cache_record(self, tenant_id: str, hit: bool) -> None:
         """Tenant-granular hit/miss telemetry ONLY — a per-cid counter would
         itself be a presence oracle."""
-        stats = self._cache_telemetry.setdefault(str(tenant_id), {"hits": 0, "misses": 0})
+        stats = self._cache_telemetry.setdefault(
+            str(tenant_id), {"hits": 0, "misses": 0}
+        )
         stats["hits" if hit else "misses"] += 1
 
     def cache_stats(self, tenant_id: str) -> dict[str, int]:
@@ -3556,13 +4006,19 @@ class SqliteEngine:
                 return cached
         self._cache_record(tenant_id, False)
         vector = self._embed_text(text)
-        if gate and store and self._embedding_cache_admits(
-            sensitivity=int(sensitivity), access_policy=access_policy, erased=erased
+        if (
+            gate
+            and store
+            and self._embedding_cache_admits(
+                sensitivity=int(sensitivity), access_policy=access_policy, erased=erased
+            )
         ):
             with self._lock:
                 conn = self._connect(tenant_id)
                 with conn:
-                    self._embedding_cache_store_row(conn, tenant_id, str(cid), model, vector, int(sensitivity))
+                    self._embedding_cache_store_row(
+                        conn, tenant_id, str(cid), model, vector, int(sensitivity)
+                    )
         return vector
 
     # --- Task 8: cached-PPR projection + projection registry -----------------
@@ -3587,7 +4043,9 @@ class SqliteEngine:
             rel_payload: list[tuple[sqlite3.Row, list[str]]] = []
             wanted: set[str] = set()
             for row in rel_rows:
-                source_cids = [str(c) for c in json.loads(row["source_evidence_cids"] or "[]") if c]
+                source_cids = [
+                    str(c) for c in json.loads(row["source_evidence_cids"] or "[]") if c
+                ]
                 wanted.update(source_cids)
                 rel_payload.append((row, source_cids))
             custody: dict[str, sqlite3.Row] = {}
@@ -3616,23 +4074,43 @@ class SqliteEngine:
                     {
                         "cid": cid,
                         "present": cid in custody,
-                        "trust_tier": int(custody[cid]["trust_tier"]) if cid in custody else None,
-                        "sensitivity": int(custody[cid]["sensitivity"]) if cid in custody else None,
-                        "metadata": json.loads(custody[cid]["metadata"] or "{}") if cid in custody else None,
-                        "erased": bool(custody[cid]["erased"]) if cid in custody else None,
-                        "retired_at": custody[cid]["retired_at"] if cid in custody else None,
+                        "trust_tier": int(custody[cid]["trust_tier"])
+                        if cid in custody
+                        else None,
+                        "sensitivity": int(custody[cid]["sensitivity"])
+                        if cid in custody
+                        else None,
+                        "metadata": json.loads(custody[cid]["metadata"] or "{}")
+                        if cid in custody
+                        else None,
+                        "erased": bool(custody[cid]["erased"])
+                        if cid in custody
+                        else None,
+                        "retired_at": custody[cid]["retired_at"]
+                        if cid in custody
+                        else None,
                         "user_id": custody[cid]["user_id"] if cid in custody else None,
-                        "document_segment_id": custody[cid]["document_segment_id"] if cid in custody else None,
-                        "source_type": str(custody[cid]["source_type"]) if cid in custody else None,
+                        "document_segment_id": custody[cid]["document_segment_id"]
+                        if cid in custody
+                        else None,
+                        "source_type": str(custody[cid]["source_type"])
+                        if cid in custody
+                        else None,
                         "actor": str(custody[cid]["actor"]) if cid in custody else None,
-                        "access_policy": json.loads(custody[cid]["access_policy"] or "{}") if cid in custody else None,
+                        "access_policy": json.loads(
+                            custody[cid]["access_policy"] or "{}"
+                        )
+                        if cid in custody
+                        else None,
                     }
                     for cid in source_cids
                 ],
             }
             for row, source_cids in rel_payload
         ]
-        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
         return hashlib.sha256(encoded).hexdigest()
 
     def _relations_fingerprint_all(self, tenant_id: str) -> str:
@@ -3645,7 +4123,9 @@ class SqliteEngine:
                 "source_evidence_cids, access_policy FROM relations WHERE tenant_id = ? ORDER BY branch, id",
                 (tenant_id,),
             ).fetchall()
-        encoded = json.dumps([list(row) for row in rows], sort_keys=True, separators=(",", ":")).encode("utf-8")
+        encoded = json.dumps(
+            [list(row) for row in rows], sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()
 
     def _is_default_reader_context(self, filt: dict[str, Any] | None) -> bool:
@@ -3658,14 +4138,21 @@ class SqliteEngine:
             return False
         default_max_trust = int(self.policy.max_trust_tier)
         if "max_trust_tier" in ctx or "min_trust_tier" in ctx:
-            max_trust = int(ctx.get("max_trust_tier", ctx.get("min_trust_tier", default_max_trust)))
+            max_trust = int(
+                ctx.get("max_trust_tier", ctx.get("min_trust_tier", default_max_trust))
+            )
             if max_trust != default_max_trust:
                 return False
         role = str(ctx.get("role") or ctx.get("mnemosyne_role") or "reader").lower()
         if role != "reader":
             return False
-        default_reader_sensitivity = effective_max_sensitivity({"role": "reader"}, self.policy.max_sensitivity)
-        if effective_max_sensitivity(ctx, self.policy.max_sensitivity) != default_reader_sensitivity:
+        default_reader_sensitivity = effective_max_sensitivity(
+            {"role": "reader"}, self.policy.max_sensitivity
+        )
+        if (
+            effective_max_sensitivity(ctx, self.policy.max_sensitivity)
+            != default_reader_sensitivity
+        ):
             return False
         if set(ctx) - {"tenant_id", "tenant", "branch", "role", "mnemosyne_role"}:
             return False
@@ -3764,7 +4251,11 @@ class SqliteEngine:
         payload that never reflected a consistent graph."""
         seed_set = {str(seed).lower() for seed in seeds}
         if not seed_set or not tenant_id:
-            return {"refreshed": False, "reason": "missing_seed_or_tenant", "hit_count": 0}
+            return {
+                "refreshed": False,
+                "reason": "missing_seed_or_tenant",
+                "hit_count": 0,
+            }
         tenant_id = str(tenant_id)
         branch_key = str(branch or "main")
         moment = as_of or utc_now()
@@ -3772,12 +4263,24 @@ class SqliteEngine:
         seed_hash = _graph_ppr_seed_hash(seed_set)
         as_of_key = _graph_ppr_as_of_key(as_of, moment)
         with self._lock:
-            fingerprint = self._relations_fingerprint(tenant_id, branch_key)  # BEFORE compute (TOCTOU)
-            hits = self._compute_graph_ppr(seeds, k, as_of=as_of, tenant_id=tenant_id, branch=branch_key)
+            fingerprint = self._relations_fingerprint(
+                tenant_id, branch_key
+            )  # BEFORE compute (TOCTOU)
+            hits = self._compute_graph_ppr(
+                seeds, k, as_of=as_of, tenant_id=tenant_id, branch=branch_key
+            )
             conn = self._connect(tenant_id)
             with conn:
                 self._store_ppr_cache(
-                    conn, tenant_id, branch_key, seed_hash, as_of_key, fingerprint, k, sorted(seed_set), hits
+                    conn,
+                    tenant_id,
+                    branch_key,
+                    seed_hash,
+                    as_of_key,
+                    fingerprint,
+                    k,
+                    sorted(seed_set),
+                    hits,
                 )
         return {
             "refreshed": True,
@@ -3801,7 +4304,12 @@ class SqliteEngine:
             ).fetchall()
         for row in rows:
             seeds = json.loads(row["seeds"] or "[]")
-            self.refresh_graph_ppr_cache(seeds, int(row["cache_depth"] or 0), tenant_id=tenant_id, branch=row["branch"])
+            self.refresh_graph_ppr_cache(
+                seeds,
+                int(row["cache_depth"] or 0),
+                tenant_id=tenant_id,
+                branch=row["branch"],
+            )
 
     def _evidence_fts_fingerprint(self, tenant_id: str) -> str:
         conn = self._connect(tenant_id)
@@ -3811,7 +4319,9 @@ class SqliteEngine:
                 (tenant_id,),
             ).fetchall()
         encoded = json.dumps(
-            [[row["branch"], row["cid"], row["content"]] for row in rows], sort_keys=True, separators=(",", ":")
+            [[row["branch"], row["cid"], row["content"]] for row in rows],
+            sort_keys=True,
+            separators=(",", ":"),
         ).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()
 
@@ -3828,7 +4338,9 @@ class SqliteEngine:
                 (tenant_id,),
             )
 
-    def _evidence_vec0_fingerprint(self, tenant_id: str) -> str:  # pragma: no cover - needs sqlite-vec
+    def _evidence_vec0_fingerprint(
+        self, tenant_id: str
+    ) -> str:  # pragma: no cover - needs sqlite-vec
         conn = self._connect(tenant_id)
         with self._lock:
             rows = conn.execute(
@@ -3836,11 +4348,15 @@ class SqliteEngine:
                 (tenant_id,),
             ).fetchall()
         encoded = json.dumps(
-            [[row["branch"], row["cid"]] for row in rows], sort_keys=True, separators=(",", ":")
+            [[row["branch"], row["cid"]] for row in rows],
+            sort_keys=True,
+            separators=(",", ":"),
         ).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()
 
-    def _rebuild_evidence_vec0(self, tenant_id: str) -> None:  # pragma: no cover - needs sqlite-vec
+    def _rebuild_evidence_vec0(
+        self, tenant_id: str
+    ) -> None:  # pragma: no cover - needs sqlite-vec
         """OPTIONAL dense candidate index (vec0). Only registered/run when
         ``sqlite_vec_available()``; the DEFAULT dense channel is always the
         packed-BLOB kernel exact scan, so this is a pure approximate-recall
@@ -3861,7 +4377,9 @@ class SqliteEngine:
             dims = len(unpack_embedding(probe["embedding"]) or [])
             if dims <= 0:
                 return
-            conn.execute(f"CREATE VIRTUAL TABLE IF NOT EXISTS evidence_vec0 USING vec0(cid TEXT, embedding float[{dims}])")
+            conn.execute(
+                f"CREATE VIRTUAL TABLE IF NOT EXISTS evidence_vec0 USING vec0(cid TEXT, embedding float[{dims}])"
+            )
             conn.execute("DELETE FROM evidence_vec0")
             for row in conn.execute(
                 "SELECT cid, embedding FROM evidence WHERE tenant_id = ? AND embedding IS NOT NULL",
@@ -3870,7 +4388,8 @@ class SqliteEngine:
                 vector = unpack_embedding(row["embedding"]) or []
                 if len(vector) == dims:
                     conn.execute(
-                        "INSERT INTO evidence_vec0(cid, embedding) VALUES (?, ?)", (row["cid"], json.dumps(vector))
+                        "INSERT INTO evidence_vec0(cid, embedding) VALUES (?, ?)",
+                        (row["cid"], json.dumps(vector)),
                     )
 
     def _projection_registry(self, tenant_id: str) -> ProjectionRegistry:
@@ -3911,7 +4430,9 @@ class SqliteEngine:
         self._registries[key] = registry
         return registry
 
-    def ensure_projections(self, tenant_id: str, branch: str = "main") -> dict[str, bool]:
+    def ensure_projections(
+        self, tenant_id: str, branch: str = "main"
+    ) -> dict[str, bool]:
         """Consolidation/maintenance hook: rebuild-on-mismatch for every
         registered projection (mirrors ``refresh_graph_ppr_cache`` for the graph
         signal). Returns which projections were rebuilt this call."""
@@ -3927,7 +4448,9 @@ class SqliteEngine:
         # gauge 1.0 when it had to rebuild, 0.0 when already fresh, and count the
         # rebuilds so derived-store lag is tracked distinctly from durability.
         for name, was_rebuilt in rebuilt.items():
-            self.metrics.gauge(f"sqlite.projection.rebuild_lag.{name}", 1.0 if was_rebuilt else 0.0)
+            self.metrics.gauge(
+                f"sqlite.projection.rebuild_lag.{name}", 1.0 if was_rebuilt else 0.0
+            )
             if was_rebuilt:
                 self.metrics.increment("sqlite.projection.rebuilds")
         return rebuilt
@@ -3940,7 +4463,9 @@ class SqliteEngine:
         """Active dense retrieval channel: the packed-BLOB kernel exact scan by
         default; ``sqlite-vec-vec0`` only when the optional extra is present AND
         its projection is fresh for the tenant."""
-        if tenant_id is not None and sqlite_vec_available():  # pragma: no cover - needs sqlite-vec
+        if (
+            tenant_id is not None and sqlite_vec_available()
+        ):  # pragma: no cover - needs sqlite-vec
             registry = self._projection_registry(str(tenant_id))
             try:
                 if registry.check("evidence-vec0"):
@@ -3996,6 +4521,10 @@ class SqliteEngine:
                 "SELECT * FROM assertions WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
                 (tenant_id, branch),
             ).fetchall()
+            rel_rows = conn.execute(
+                "SELECT * FROM relations WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
+                (tenant_id, branch),
+            ).fetchall()
         for row in branch_rows:
             oracle.branches[row["name"]] = {
                 "from": row["from_branch"],
@@ -4004,13 +4533,24 @@ class SqliteEngine:
             }
         for row in ev_rows:
             ev = _evidence_from_row(row)
-            oracle.evidence[oracle._evidence_key(ev.tenant_id, ev.branch, ev.cid or "")] = ev
+            oracle.evidence[
+                oracle._evidence_key(ev.tenant_id, ev.branch, ev.cid or "")
+            ] = ev
         for row in a_rows:
             assertion = _assertion_from_row(row)
-            oracle.assertions[oracle._branch_key(assertion.tenant_id, assertion.branch, assertion.id)] = assertion
+            oracle.assertions[
+                oracle._branch_key(assertion.tenant_id, assertion.branch, assertion.id)
+            ] = assertion
+        for row in rel_rows:
+            rel = _relation_from_row(row)
+            oracle.relations[oracle._branch_key(rel.tenant_id, rel.branch, rel.id)] = (
+                rel
+            )
         return oracle
 
-    def _preference_oracle(self, conn: sqlite3.Connection, tenant_id: str) -> LocalMemoryEngine:
+    def _preference_oracle(
+        self, conn: sqlite3.Connection, tenant_id: str
+    ) -> LocalMemoryEngine:
         """Hydrate a preference-scope oracle: all of the tenant's preferences
         (supersession is tenant/user/category/scope-scoped, never branch-scoped)."""
         oracle = LocalMemoryEngine(policy=self.policy, adapters=self.adapters)
@@ -4024,7 +4564,9 @@ class SqliteEngine:
             oracle.preferences[pref.id] = pref
         return oracle
 
-    def _entity_oracle(self, conn: sqlite3.Connection, tenant_id: str) -> LocalMemoryEngine:
+    def _entity_oracle(
+        self, conn: sqlite3.Connection, tenant_id: str
+    ) -> LocalMemoryEngine:
         """Hydrate an entity-scope oracle: all of the tenant's entities keyed
         by (tenant_id, canonical) exactly as Local keys them."""
         oracle = LocalMemoryEngine(policy=self.policy, adapters=self.adapters)
@@ -4047,12 +4589,19 @@ class SqliteEngine:
                 (record.get("tenant_id"), json_text(record)),
             )
 
-    def _insert_assertion_row(self, conn: sqlite3.Connection, assertion: Assertion) -> None:
+    def _insert_assertion_row(
+        self, conn: sqlite3.Connection, assertion: Assertion
+    ) -> None:
         conn.execute(_ASSERTION_INSERT, _assertion_insert_values(assertion))
 
-    def _update_assertion_row(self, conn: sqlite3.Connection, assertion: Assertion) -> None:
+    def _update_assertion_row(
+        self, conn: sqlite3.Connection, assertion: Assertion
+    ) -> None:
         values = _assertion_insert_values(assertion)
-        conn.execute(_ASSERTION_UPDATE, (*values[3:], assertion.tenant_id, assertion.branch, assertion.id))
+        conn.execute(
+            _ASSERTION_UPDATE,
+            (*values[3:], assertion.tenant_id, assertion.branch, assertion.id),
+        )
 
     def upsert_assertion(self, assertion: Assertion, branch: str = "main") -> str:
         """Replay/supersede/contest over SQL, byte-parity with Local.
@@ -4075,6 +4624,9 @@ class SqliteEngine:
             self._require_branch(conn, assertion.tenant_id, branch)
             oracle = self._assertion_oracle(conn, assertion.tenant_id, branch)
             before = {item.id: item.to_dict() for item in oracle.assertions.values()}
+            before_relations = {
+                item.id: item.to_dict() for item in oracle.relations.values()
+            }
             result_id = oracle.upsert_assertion(copy.deepcopy(assertion), branch=branch)
             with conn:
                 for item in oracle.assertions.values():
@@ -4085,8 +4637,61 @@ class SqliteEngine:
                         self._insert_assertion_row(conn, item)
                     elif item.to_dict() != snapshot:
                         self._update_assertion_row(conn, item)
+                for rel in oracle.relations.values():
+                    if rel.tenant_id != assertion.tenant_id or rel.branch != branch:
+                        continue
+                    snapshot_rel = before_relations.get(rel.id)
+                    if snapshot_rel is not None and rel.to_dict() != snapshot_rel:
+                        conn.execute(_RELATION_UPSERT, _relation_insert_values(rel))
                 self._replay_audit(conn, oracle.audit_log)
             return result_id
+
+    def _sync_relation_supersession(
+        self,
+        tenant_id: str,
+        branch: str,
+        subject: str,
+        predicate: str,
+        obj: str,
+        valid_to: datetime | None,
+    ) -> None:
+        """Synchronize relation supersession in SQLite storage."""
+        if valid_to is None:
+            return
+        subj_low = subject.strip().lower()
+        pred_low = predicate.strip().lower()
+        obj_low = obj.strip().lower()
+
+        canonical_preds = {pred_low}
+        if pred_low in {"residence", "lives_in"}:
+            canonical_preds.update({"residence", "lives_in"})
+        elif pred_low in {"education", "graduated_from"}:
+            canonical_preds.update({"education", "graduated_from"})
+        elif pred_low in {"works_at", "employed_by"}:
+            canonical_preds.update({"works_at", "employed_by"})
+
+        with self._lock:
+            conn = self._connect(tenant_id)
+            with conn:
+                rows = conn.execute(
+                    "SELECT * FROM relations WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
+                    (tenant_id, branch),
+                ).fetchall()
+                for row in rows:
+                    rel = _relation_from_row(row)
+                    if rel.source.strip().lower() != subj_low:
+                        continue
+                    if rel.predicate.strip().lower() not in canonical_preds:
+                        continue
+                    if rel.target.strip().lower() != obj_low:
+                        continue
+                    rel_vt = _to_utc_opt(rel.valid_to)
+                    tgt_vt = _to_utc_opt(valid_to)
+                    if rel.valid_to is None or (
+                        rel_vt is not None and tgt_vt is not None and rel_vt > tgt_vt
+                    ):
+                        rel.valid_to = valid_to
+                        conn.execute(_RELATION_UPSERT, _relation_insert_values(rel))
 
     def add_relation(self, relation: Relation, branch: str = "main") -> str:
         """Single-row relation write mirroring ``LocalMemoryEngine.add_relation``:
@@ -4161,7 +4766,10 @@ class SqliteEngine:
                 ).fetchall()
                 for row in rows:
                     existing = Contradiction.from_dict(json.loads(row["record"]))
-                    if existing.status == "open" and {existing.a, existing.b} == {item.a, item.b}:
+                    if existing.status == "open" and {existing.a, existing.b} == {
+                        item.a,
+                        item.b,
+                    }:
                         return existing.id
                 conn.execute(
                     "INSERT OR REPLACE INTO contradictions(id, tenant_id, record) VALUES (?, ?, ?)",
@@ -4240,7 +4848,9 @@ class SqliteEngine:
         ``valid_from``."""
         moment = t.astimezone(UTC) if t.tzinfo else t.replace(tzinfo=UTC)
 
-        def _valid_at(valid_from: datetime | str | None, valid_to: datetime | str | None) -> bool:
+        def _valid_at(
+            valid_from: datetime | str | None, valid_to: datetime | str | None
+        ) -> bool:
             start = parse_dt(valid_from)
             end = parse_dt(valid_to)
             if start is None:
@@ -4261,7 +4871,9 @@ class SqliteEngine:
         with self._lock:
             if tenant_id:
                 conn = self._connect(tenant_id)
-                rows = conn.execute(sql, (tenant_id, branch, subject, predicate)).fetchall()
+                rows = conn.execute(
+                    sql, (tenant_id, branch, subject, predicate)
+                ).fetchall()
                 for row in rows:
                     assertion = _assertion_from_row(row)
                     if _valid_at(assertion.valid_from, assertion.valid_to):
@@ -4270,8 +4882,12 @@ class SqliteEngine:
                 for path in self._iter_tenant_db_paths():
                     conn, owned = self._borrow_conn(path)
                     try:
-                        for (tid,) in conn.execute("SELECT DISTINCT tenant_id FROM assertions"):
-                            rows = conn.execute(sql, (tid, branch, subject, predicate)).fetchall()
+                        for (tid,) in conn.execute(
+                            "SELECT DISTINCT tenant_id FROM assertions"
+                        ):
+                            rows = conn.execute(
+                                sql, (tid, branch, subject, predicate)
+                            ).fetchall()
                             for row in rows:
                                 assertion = _assertion_from_row(row)
                                 if _valid_at(assertion.valid_from, assertion.valid_to):
@@ -4300,10 +4916,15 @@ class SqliteEngine:
                     "engine",
                     "set_calibration",
                     calibration.memory_type,
-                    {"scores": len(calibration.scores), "target_coverage": calibration.target_coverage},
+                    {
+                        "scores": len(calibration.scores),
+                        "target_coverage": calibration.target_coverage,
+                    },
                 )
 
-    def _calibration_for(self, tenant_id: str, memory_type: str) -> CalibrationSet | None:
+    def _calibration_for(
+        self, tenant_id: str, memory_type: str
+    ) -> CalibrationSet | None:
         """Rehydrate the stored ``CalibrationSet`` (or None), matching Local."""
         with self._lock:
             conn = self._connect(tenant_id)
@@ -4356,18 +4977,30 @@ class SqliteEngine:
                 self._replay_audit(conn, oracle.audit_log)
             return row
 
-    def deep_search(self, query: str, tenant_id: str, branch: str = "main", filt: dict[str, Any] | None = None) -> RetrievalResult:
+    def deep_search(
+        self,
+        query: str,
+        tenant_id: str,
+        branch: str = "main",
+        filt: dict[str, Any] | None = None,
+    ) -> RetrievalResult:
         """Thin delegator to :meth:`retrieve` (deep=True), identical to
         ``LocalMemoryEngine.deep_search``. Full behaviour arrives with the
         ``retrieve()`` pipeline in Phase-2 Task 7; until then this raises
         ``NotImplementedError`` transitively (never as a separate stub)."""
-        return self.retrieve(query=query, tenant_id=tenant_id, branch=branch, deep=True, filt=filt)
+        return self.retrieve(
+            query=query, tenant_id=tenant_id, branch=branch, deep=True, filt=filt
+        )
 
-    def explain(self, query: str, tenant_id: str, branch: str = "main") -> dict[str, Any]:
+    def explain(
+        self, query: str, tenant_id: str, branch: str = "main"
+    ) -> dict[str, Any]:
         """Thin delegator to :meth:`retrieve` (deep=True) → ``to_dict()``,
         identical to ``LocalMemoryEngine.explain``. Full behaviour arrives with
         the ``retrieve()`` pipeline in Phase-2 Task 7."""
-        return self.retrieve(query=query, tenant_id=tenant_id, branch=branch, deep=True).to_dict()
+        return self.retrieve(
+            query=query, tenant_id=tenant_id, branch=branch, deep=True
+        ).to_dict()
 
     def correct(
         self,
@@ -4460,7 +5093,13 @@ class SqliteEngine:
             (tenant_id, branch),
         ).fetchone()[0]
 
-    def branch(self, name: str, frm: str = "main", kind: str = "scratch", tenant_id: str | None = None) -> None:
+    def branch(
+        self,
+        name: str,
+        frm: str = "main",
+        kind: str = "scratch",
+        tenant_id: str | None = None,
+    ) -> None:
         """Row-copy branch, tenant-scoped (PG-shaped).
 
         Registry row FIRST (composite FK), then copy evidence (cid kept, INSERT
@@ -4477,9 +5116,13 @@ class SqliteEngine:
         with self._lock:
             conn = self._connect(tenant_id)
             self._require_branch(conn, tenant_id, frm)
-            if conn.execute(
-                "SELECT 1 FROM branches WHERE tenant_id = ? AND name = ?", (tenant_id, name)
-            ).fetchone() is not None:
+            if (
+                conn.execute(
+                    "SELECT 1 FROM branches WHERE tenant_id = ? AND name = ?",
+                    (tenant_id, name),
+                ).fetchone()
+                is not None
+            ):
                 return
             with conn:
                 conn.execute(
@@ -4493,7 +5136,9 @@ class SqliteEngine:
                 ).fetchall():
                     ev = _evidence_from_row(row)
                     ev.branch = name
-                    conn.execute(_EVIDENCE_INSERT_OR_IGNORE, _evidence_insert_values(ev))
+                    conn.execute(
+                        _EVIDENCE_INSERT_OR_IGNORE, _evidence_insert_values(ev)
+                    )
                 for row in conn.execute(
                     "SELECT record FROM documents WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
                     (tenant_id, frm),
@@ -4503,8 +5148,14 @@ class SqliteEngine:
                     conn.execute(
                         "INSERT INTO documents(tenant_id, branch, owner_id, document_id, revision, record) "
                         "VALUES (?, ?, ?, ?, ?, ?)",
-                        (tenant_id, name, record["owner_id"], record["document_id"],
-                         record["revision"], json_text(record)),
+                        (
+                            tenant_id,
+                            name,
+                            record["owner_id"],
+                            record["document_id"],
+                            record["revision"],
+                            json_text(record),
+                        ),
                     )
                 for row in conn.execute(
                     "SELECT * FROM assertions WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
@@ -4522,9 +5173,18 @@ class SqliteEngine:
                     rel.branch = name
                     rel.id = new_id()
                     conn.execute(_RELATION_INSERT, _relation_insert_values(rel))
-                self._audit_row(conn, tenant_id, "engine", "branch", name, {"from": frm, "kind": kind})
+                self._audit_row(
+                    conn,
+                    tenant_id,
+                    "engine",
+                    "branch",
+                    name,
+                    {"from": frm, "kind": kind},
+                )
 
-    def merge(self, frm: str, into: str = "main", tenant_id: str | None = None) -> MergeReport:
+    def merge(
+        self, frm: str, into: str = "main", tenant_id: str | None = None
+    ) -> MergeReport:
         """Local-style replay-upsert merge, tenant-scoped.
 
         Evidence: non-erased ``frm`` rows copied onto ``into`` with cid-dedup
@@ -4552,12 +5212,17 @@ class SqliteEngine:
                 # This intentionally rejects divergent histories; merge does not
                 # guess which document revision should be current.
                 documents_to_copy: list[dict[str, Any]] = []
-                target_documents = [json.loads(row["record"]) for row in conn.execute(
-                    "SELECT record FROM documents WHERE tenant_id = ? AND branch = ?",
-                    (tenant_id, into),
-                ).fetchall()]
+                target_documents = [
+                    json.loads(row["record"])
+                    for row in conn.execute(
+                        "SELECT record FROM documents WHERE tenant_id = ? AND branch = ?",
+                        (tenant_id, into),
+                    ).fetchall()
+                ]
 
-                def merged_evidence(tenant: str, cid: str, branch: str) -> Evidence | None:
+                def merged_evidence(
+                    tenant: str, cid: str, branch: str
+                ) -> Evidence | None:
                     # Existing destination custody wins, including a tombstone.
                     item = self._fetch_evidence(tenant, cid, branch)
                     if item is None:
@@ -4578,19 +5243,37 @@ class SqliteEngine:
                         (tenant_id, into, record["owner_id"], record["document_id"]),
                     ).fetchone()
                     if target is not None:
-                        if not document_records_equivalent(json.loads(target["record"]), record):
-                            raise DocumentConflict("document merge conflict: divergent revisions")
+                        if not document_records_equivalent(
+                            json.loads(target["record"]), record
+                        ):
+                            raise DocumentConflict(
+                                "document merge conflict: divergent revisions"
+                            )
                     else:
                         documents_to_copy.append(record)
                     for segment in record["segments"]:
                         source = self._fetch_evidence(tenant_id, segment["cid"], frm)
-                        if source is None or source.erased or source.retired_at is not None:
-                            raise DocumentConflict("document merge conflict: source segment is unavailable")
-                        destination = self._fetch_evidence(tenant_id, segment["cid"], into)
-                        if destination is not None and (destination.erased or destination.retired_at is not None):
-                            raise DocumentConflict("document merge conflict: destination segment is unavailable")
+                        if (
+                            source is None
+                            or source.erased
+                            or source.retired_at is not None
+                        ):
+                            raise DocumentConflict(
+                                "document merge conflict: source segment is unavailable"
+                            )
+                        destination = self._fetch_evidence(
+                            tenant_id, segment["cid"], into
+                        )
+                        if destination is not None and (
+                            destination.erased or destination.retired_at is not None
+                        ):
+                            raise DocumentConflict(
+                                "document merge conflict: destination segment is unavailable"
+                            )
                     validate_document_sources(
-                        SimpleNamespace(get_evidence=merged_evidence), record, None,
+                        SimpleNamespace(get_evidence=merged_evidence),
+                        record,
+                        None,
                         target_documents + documents_to_copy,
                     )
                 report = MergeReport(frm, into, 0, 0, 0, 0, [])
@@ -4614,8 +5297,14 @@ class SqliteEngine:
                     conn.execute(
                         "INSERT INTO documents(tenant_id, branch, owner_id, document_id, revision, record) "
                         "VALUES (?, ?, ?, ?, ?, ?)",
-                        (tenant_id, into, record["owner_id"], record["document_id"],
-                         record["revision"], json_text(record)),
+                        (
+                            tenant_id,
+                            into,
+                            record["owner_id"],
+                            record["document_id"],
+                            record["revision"],
+                            json_text(record),
+                        ),
                     )
             # Replay-upsert OUTSIDE any open transaction — upsert_assertion opens
             # (and commits) its own per-call transaction on the same connection.
@@ -4704,7 +5393,9 @@ class SqliteEngine:
                     "INSERT INTO merge_log(tenant_id, record) VALUES (?, ?)",
                     (tenant_id, json_text(report.to_dict())),
                 )
-                self._audit_row(conn, tenant_id, "engine", "merge", frm, report.to_dict())
+                self._audit_row(
+                    conn, tenant_id, "engine", "merge", frm, report.to_dict()
+                )
             return report
 
     def discard(self, branch: str, tenant_id: str | None = None) -> None:
@@ -4731,26 +5422,47 @@ class SqliteEngine:
                         (tenant_id, branch),
                     )
                 }
-                conn.execute("DELETE FROM relations WHERE tenant_id = ? AND branch = ?", (tenant_id, branch))
-                conn.execute("DELETE FROM mental_models WHERE tenant_id = ? AND branch = ?", (tenant_id, branch))
-                conn.execute("DELETE FROM documents WHERE tenant_id = ? AND branch = ?", (tenant_id, branch))
-                conn.execute("DELETE FROM assertions WHERE tenant_id = ? AND branch = ?", (tenant_id, branch))
-                conn.execute("DELETE FROM evidence WHERE tenant_id = ? AND branch = ?", (tenant_id, branch))
+                conn.execute(
+                    "DELETE FROM relations WHERE tenant_id = ? AND branch = ?",
+                    (tenant_id, branch),
+                )
+                conn.execute(
+                    "DELETE FROM mental_models WHERE tenant_id = ? AND branch = ?",
+                    (tenant_id, branch),
+                )
+                conn.execute(
+                    "DELETE FROM documents WHERE tenant_id = ? AND branch = ?",
+                    (tenant_id, branch),
+                )
+                conn.execute(
+                    "DELETE FROM assertions WHERE tenant_id = ? AND branch = ?",
+                    (tenant_id, branch),
+                )
+                conn.execute(
+                    "DELETE FROM evidence WHERE tenant_id = ? AND branch = ?",
+                    (tenant_id, branch),
+                )
                 if discarded_ids:
                     surviving = {
                         row[0]
                         for row in conn.execute(
-                            "SELECT id FROM assertions WHERE tenant_id = ?", (tenant_id,)
+                            "SELECT id FROM assertions WHERE tenant_id = ?",
+                            (tenant_id,),
                         )
                     }
                     orphaned = discarded_ids - surviving
                     if orphaned:
                         self._prune_dangling(conn, tenant_id, orphaned)
-                conn.execute("DELETE FROM branches WHERE tenant_id = ? AND name = ?", (tenant_id, branch))
+                conn.execute(
+                    "DELETE FROM branches WHERE tenant_id = ? AND name = ?",
+                    (tenant_id, branch),
+                )
                 self._audit_row(conn, tenant_id, "engine", "discard", branch, {})
 
     @staticmethod
-    def _prune_dangling(conn: sqlite3.Connection, tenant_id: str, orphaned: set[str]) -> None:
+    def _prune_dangling(
+        conn: sqlite3.Connection, tenant_id: str, orphaned: set[str]
+    ) -> None:
         """Prune justifications/contradictions that reference orphaned assertion
         ids (Local discard parity: justification kept iff its assertion_id and
         every dependency_id survive; contradiction kept iff both a and b survive)."""
@@ -4783,7 +5495,11 @@ class SqliteEngine:
     # shipped Local/Postgres engines (test_shared_engine_contract asserts
     # read_marks["assertions"] >= 1 synchronously); the spec's async-telemetry
     # optimization is DEFERRED here — shipped-behaviour parity wins (ledger).
-    retrieval_explain_channel_keys: tuple[str, str, str] = ("dense_hash", "lexical", "graph_ppr")
+    retrieval_explain_channel_keys: tuple[str, str, str] = (
+        "dense_hash",
+        "lexical",
+        "graph_ppr",
+    )
 
     # Pure pipeline helpers reused VERBATIM from LocalMemoryEngine (same code,
     # not a re-implementation): _rrf/_calibration_explain are plain methods whose
@@ -4795,8 +5511,12 @@ class SqliteEngine:
     _fit_budget = staticmethod(LocalMemoryEngine._fit_budget)
     _confidence = staticmethod(LocalMemoryEngine._confidence)
     _prediction_set_size = staticmethod(LocalMemoryEngine._prediction_set_size)
-    _mark_retrieved_text_as_data = staticmethod(LocalMemoryEngine._mark_retrieved_text_as_data)
-    _merge_schema_fast_path_reports = staticmethod(LocalMemoryEngine._merge_schema_fast_path_reports)
+    _mark_retrieved_text_as_data = staticmethod(
+        LocalMemoryEngine._mark_retrieved_text_as_data
+    )
+    _merge_schema_fast_path_reports = staticmethod(
+        LocalMemoryEngine._merge_schema_fast_path_reports
+    )
 
     def _hits_oracle(self, hits: list[Hit]) -> LocalMemoryEngine:
         """Hydrate a minimal oracle with ONLY the evidence rows the given hits
@@ -4816,13 +5536,19 @@ class SqliteEngine:
             for cid in hit.provenance:
                 if cid:
                     cids.add(str(cid))
-            raw = hit.metadata.get("source_evidence_cids") if isinstance(hit.metadata, dict) else None
+            raw = (
+                hit.metadata.get("source_evidence_cids")
+                if isinstance(hit.metadata, dict)
+                else None
+            )
             if isinstance(raw, list | tuple):
                 cids.update(str(c) for c in raw if c)
             elif isinstance(raw, str) and raw:
                 cids.add(raw)
             if cids and hit.tenant_id:
-                wanted.setdefault(hit.tenant_id, {}).setdefault(hit.branch, set()).update(cids)
+                wanted.setdefault(hit.tenant_id, {}).setdefault(
+                    hit.branch, set()
+                ).update(cids)
         for tenant_id, branches in wanted.items():
             conn = self._connect(tenant_id)
             with self._lock:
@@ -4834,7 +5560,11 @@ class SqliteEngine:
                         ).fetchone()
                         if row is not None:
                             ev = _evidence_from_row(row)
-                            oracle.evidence[oracle._evidence_key(ev.tenant_id, ev.branch, ev.cid or "")] = ev
+                            oracle.evidence[
+                                oracle._evidence_key(
+                                    ev.tenant_id, ev.branch, ev.cid or ""
+                                )
+                            ] = ev
         return oracle
 
     def _mmr(self, query: str, hits: list[Hit], k: int) -> list[Hit]:
@@ -4852,7 +5582,9 @@ class SqliteEngine:
     def _reality_monitoring_report(self, hits: list[Hit]) -> dict[str, Any]:
         """Reality-monitoring + standing abstention report: Local's ACTUAL body
         over a hits-scoped oracle, byte-identical to Local."""
-        return LocalMemoryEngine._reality_monitoring_report(self._hits_oracle(hits), hits)
+        return LocalMemoryEngine._reality_monitoring_report(
+            self._hits_oracle(hits), hits
+        )
 
     def _record_retrieval_access(self, hits: list[Hit]) -> dict[str, int]:
         """SYNCHRONOUS write-on-read, byte-parity with
@@ -4872,7 +5604,9 @@ class SqliteEngine:
             if hit.kind == "working":
                 continue
             if hit.kind == "assertion" and hit.id:
-                assertion_refs.setdefault(hit.tenant_id, set()).add((hit.branch, hit.id))
+                assertion_refs.setdefault(hit.tenant_id, set()).add(
+                    (hit.branch, hit.id)
+                )
         for tenant_id, refs in assertion_refs.items():
             conn = self._connect(tenant_id)
             with self._lock:
@@ -4883,7 +5617,9 @@ class SqliteEngine:
                     ).fetchone()
                     if row is not None:
                         a = _assertion_from_row(row)
-                        oracle.assertions[oracle._branch_key(a.tenant_id, a.branch, a.id)] = a
+                        oracle.assertions[
+                            oracle._branch_key(a.tenant_id, a.branch, a.id)
+                        ] = a
         # 2. evidence refs from hits + hydrated assertions' source cids.
         ev_refs: dict[str, set[tuple[str, str]]] = {}
 
@@ -4911,7 +5647,9 @@ class SqliteEngine:
                     ).fetchone()
                     if row is not None:
                         ev = _evidence_from_row(row)
-                        oracle.evidence[oracle._evidence_key(ev.tenant_id, ev.branch, ev.cid or "")] = ev
+                        oracle.evidence[
+                            oracle._evidence_key(ev.tenant_id, ev.branch, ev.cid or "")
+                        ] = ev
         # 3. Local's exact body mutates the oracle dicts in place (its _persist is
         #    a no-op with no store_path); snapshot for the write-back delta.
         a_before = {key: item.to_dict() for key, item in oracle.assertions.items()}
@@ -4922,10 +5660,14 @@ class SqliteEngine:
             conn = self._connect(tenant_id)
             with self._lock, conn:
                 for key, item in oracle.assertions.items():
-                    if item.tenant_id == tenant_id and item.to_dict() != a_before.get(key):
+                    if item.tenant_id == tenant_id and item.to_dict() != a_before.get(
+                        key
+                    ):
                         self._update_assertion_row(conn, item)
                 for key, item in oracle.evidence.items():
-                    if item.tenant_id == tenant_id and item.to_dict() != ev_before.get(key):
+                    if item.tenant_id == tenant_id and item.to_dict() != ev_before.get(
+                        key
+                    ):
                         self._write_evidence_mutable(conn, item)
         return result
 
@@ -4968,9 +5710,12 @@ class SqliteEngine:
                 result = {key: scrub(item) for key, item in node.items()}
                 evidence_ids = result.get("evidence_ids")
                 diff = result.get("diff")
-                diff_evidence_ids = diff.get("evidence_ids") if isinstance(diff, dict) else None
+                diff_evidence_ids = (
+                    diff.get("evidence_ids") if isinstance(diff, dict) else None
+                )
                 affected = (
-                    isinstance(evidence_ids, list) and placeholders.intersection(evidence_ids)
+                    isinstance(evidence_ids, list)
+                    and placeholders.intersection(evidence_ids)
                 ) or (
                     isinstance(diff_evidence_ids, list)
                     and placeholders.intersection(diff_evidence_ids)
@@ -4998,7 +5743,11 @@ class SqliteEngine:
             return self._forget_impl(tenant_id, cid, branch, requested_by, erasure_mode)
 
     def _forget_impl(
-        self, tenant_id: str, cid: str, branch: str = "main", requested_by: str = "user",
+        self,
+        tenant_id: str,
+        cid: str,
+        branch: str = "main",
+        requested_by: str = "user",
         erasure_mode: ErasureMode | str = ErasureMode.TOMBSTONE_RECOMPUTE,
     ) -> dict[str, Any]:
         """Erase evidence + cascade, byte-parity with ``LocalMemoryEngine.forget``.
@@ -5062,30 +5811,58 @@ class SqliteEngine:
                     (tenant_id, branch, cid),
                 ).fetchone()
                 if target is None:
-                    return {"erased": False, "reason": "evidence_not_found", "cid": cid, "erasure_mode": mode.value}
+                    return {
+                        "erased": False,
+                        "reason": "evidence_not_found",
+                        "cid": cid,
+                        "erasure_mode": mode.value,
+                    }
                 candidate_rows = conn.execute(
                     "SELECT cid, metadata, source_type FROM evidence "
                     "WHERE tenant_id = ? AND branch = ? AND erased = 0 AND cid <> ? ORDER BY rowid",
                     (tenant_id, branch, cid),
                 ).fetchall()
                 candidates = [
-                    (_cid_to_bytes(row["cid"]), json.loads(row["metadata"] or "{}")) for row in candidate_rows
+                    (_cid_to_bytes(row["cid"]), json.loads(row["metadata"] or "{}"))
+                    for row in candidate_rows
                 ]
                 cascade_metadata: dict[str, dict[str, Any]] = {
-                    cid: {**json.loads(target["metadata"] or "{}"), "source_type": target["source_type"]}
+                    cid: {
+                        **json.loads(target["metadata"] or "{}"),
+                        "source_type": target["source_type"],
+                    }
                 }
                 for row in candidate_rows:
                     cascade_metadata[row["cid"]] = {
                         **json.loads(row["metadata"] or "{}"),
                         "source_type": row["source_type"] or "",
                     }
-                legal_blind = mode is ErasureMode.HARD_DELETE_LEGAL and requested_by == "legal"
+                legal_blind = (
+                    mode is ErasureMode.HARD_DELETE_LEGAL and requested_by == "legal"
+                )
                 if legal_blind:
-                    _derived_bytes, derived_cids, retained_metadata = _derived_evidence_forget_plan(
-                        cid, candidates, legal_blind=True, source_types={key: str(value.get("source_type") or "") for key, value in cascade_metadata.items()}
+                    _derived_bytes, derived_cids, retained_metadata = (
+                        _derived_evidence_forget_plan(
+                            cid,
+                            candidates,
+                            legal_blind=True,
+                            source_types={
+                                key: str(value.get("source_type") or "")
+                                for key, value in cascade_metadata.items()
+                            },
+                        )
                     )
                 else:
-                    _derived_bytes, derived_cids, retained_metadata = _derived_evidence_forget_plan(cid, candidates, source_types={key: str(value.get("source_type") or "") for key, value in cascade_metadata.items()})
+                    _derived_bytes, derived_cids, retained_metadata = (
+                        _derived_evidence_forget_plan(
+                            cid,
+                            candidates,
+                            source_types={
+                                key: str(value.get("source_type") or "")
+                                for key, value in cascade_metadata.items()
+                            },
+                        )
+                    )
                 affected_cids = {cid, *derived_cids}
                 propagated["erased_derived_evidence"] = derived_cids
                 if mode is ErasureMode.HARD_DELETE_LEGAL and requested_by != "legal":
@@ -5097,7 +5874,11 @@ class SqliteEngine:
                         (tenant_id, branch),
                     ).fetchall():
                         sources = set(json.loads(row["source_evidence_cids"] or "[]"))
-                        if sources and sources <= affected_cids and len(sources) < minimum:
+                        if (
+                            sources
+                            and sources <= affected_cids
+                            and len(sources) < minimum
+                        ):
                             blocking.append(row["id"])
                     if blocking:
                         return {
@@ -5117,7 +5898,9 @@ class SqliteEngine:
                 working_trims: list[tuple[dict[str, str], dict[str, Any]]] = []
                 for row in working_rows:
                     evidence_ids = json.loads(row["evidence_ids"] or "[]")
-                    surviving = [item for item in evidence_ids if item not in affected_cids]
+                    surviving = [
+                        item for item in evidence_ids if item not in affected_cids
+                    ]
                     if len(surviving) == len(evidence_ids):
                         continue
                     descriptor = {
@@ -5136,19 +5919,26 @@ class SqliteEngine:
                 propagated["trimmed_working_items"] = [
                     descriptor for descriptor, _ in working_trims
                 ]
-                propagated["retained_derived_evidence"] = sorted(_bytes_to_cid(item) for item in retained_metadata)
-                propagated["trimmed_derived_evidence"] = list(propagated["retained_derived_evidence"])
+                propagated["retained_derived_evidence"] = sorted(
+                    _bytes_to_cid(item) for item in retained_metadata
+                )
+                propagated["trimmed_derived_evidence"] = list(
+                    propagated["retained_derived_evidence"]
+                )
                 retained_cascade_metadata = {
                     _bytes_to_cid(retained_bytes): {
                         **dict(metadata),
-                        "source_type": cascade_metadata.get(_bytes_to_cid(retained_bytes), {}).get("source_type", ""),
+                        "source_type": cascade_metadata.get(
+                            _bytes_to_cid(retained_bytes), {}
+                        ).get("source_type", ""),
                     }
                     for retained_bytes, metadata in retained_metadata.items()
                 }
                 propagated["standing_cascade"] = standing_erasure_cascade_report(
                     source_cid=cid,
                     erasure_mode=mode.value,
-                    affected_cids=affected_cids | set(propagated["retained_derived_evidence"]),
+                    affected_cids=affected_cids
+                    | set(propagated["retained_derived_evidence"]),
                     erased_derived_cids=derived_cids,
                     retained_metadata_by_cid=retained_cascade_metadata,
                     metadata_by_cid=cascade_metadata,
@@ -5164,7 +5954,10 @@ class SqliteEngine:
                         f"WHERE tenant_id = ? AND branch = ? AND cid IN ({placeholders})",
                         (tenant_id, branch, *affected_order),
                     ).fetchall():
-                        originals[row["cid"]] = (row["content"] or "", row["user_id"] or "")
+                        originals[row["cid"]] = (
+                            row["content"] or "",
+                            row["user_id"] or "",
+                        )
                 if mode is ErasureMode.HARD_DELETE_LEGAL:
                     for affected_cid in affected_order:
                         conn.execute(
@@ -5181,7 +5974,12 @@ class SqliteEngine:
                 for retained_bytes, metadata in retained_metadata.items():
                     conn.execute(
                         "UPDATE evidence SET metadata = ? WHERE tenant_id = ? AND branch = ? AND cid = ?",
-                        (json_text(metadata), tenant_id, branch, _bytes_to_cid(retained_bytes)),
+                        (
+                            json_text(metadata),
+                            tenant_id,
+                            branch,
+                            _bytes_to_cid(retained_bytes),
+                        ),
                     )
                 # Assertions (branch-scoped): trim surviving sources or retract.
                 self._invalidate_mental_models(conn, tenant_id, branch)
@@ -5206,7 +6004,13 @@ class SqliteEngine:
                         conn.execute(
                             "UPDATE assertions SET status = 'retracted', expired_at = ?, source_evidence_cids = ? "
                             "WHERE tenant_id = ? AND branch = ? AND id = ?",
-                            (dt_to_json(utc_now()), json_text([]), tenant_id, branch, row["id"]),
+                            (
+                                dt_to_json(utc_now()),
+                                json_text([]),
+                                tenant_id,
+                                branch,
+                                row["id"],
+                            ),
                         )
                         propagated["retracted_assertions"].append(row["id"])
                 # Preferences (tenant-scoped): rehydrate to keep the record byte-shape.
@@ -5252,7 +6056,13 @@ class SqliteEngine:
                         conn.execute(
                             "UPDATE relations SET valid_to = ?, source_evidence_cids = ? "
                             "WHERE tenant_id = ? AND branch = ? AND id = ?",
-                            (dt_to_json(utc_now()), json_text([]), tenant_id, branch, row["id"]),
+                            (
+                                dt_to_json(utc_now()),
+                                json_text([]),
+                                tenant_id,
+                                branch,
+                                row["id"],
+                            ),
                         )
                         propagated["expired_relations"].append(row["id"])
                 # Entities (tenant-scoped, plain dict record).
@@ -5303,7 +6113,11 @@ class SqliteEngine:
                     conn.execute(
                         "DELETE FROM working_memory "
                         "WHERE tenant_id = ? AND session_id = ? AND item_id = ?",
-                        (descriptor["tenant_id"], descriptor["session_id"], descriptor["item_id"]),
+                        (
+                            descriptor["tenant_id"],
+                            descriptor["session_id"],
+                            descriptor["item_id"],
+                        ),
                     )
                 for descriptor, values in working_trims:
                     conn.execute(
@@ -5328,10 +6142,14 @@ class SqliteEngine:
                 # dict RETURNED to the caller keeps the real cids. A tombstone keeps
                 # the cid (the row still exists as the replay blocklist).
                 if mode is ErasureMode.HARD_DELETE_LEGAL:
-                    placeholder_map = build_erasure_placeholder_map({cid, *derived_cids}, tenant_id)
+                    placeholder_map = build_erasure_placeholder_map(
+                        {cid, *derived_cids}, tenant_id
+                    )
                     stored_propagated = redact_erased_cids(propagated, placeholder_map)
                     for table in ("audit_log", "deletion_log", "merge_log"):
-                        for row in conn.execute(f"SELECT seq, record FROM {table}").fetchall():
+                        for row in conn.execute(
+                            f"SELECT seq, record FROM {table}"
+                        ).fetchall():
                             redacted = self._redact_working_digests(
                                 json.loads(row["record"]), placeholder_map
                             )
@@ -5339,7 +6157,9 @@ class SqliteEngine:
                                 f"UPDATE {table} SET record = ? WHERE seq = ?",
                                 (json_text(redacted), row["seq"]),
                             )
-                    deletion_record_cid = erasure_deletion_record_id(cid, tenant_id, target["user_id"] or "")
+                    deletion_record_cid = erasure_deletion_record_id(
+                        cid, tenant_id, target["user_id"] or ""
+                    )
                     audit_target_id = placeholder_map[cid]
                 else:
                     stored_propagated = propagated
@@ -5364,7 +6184,11 @@ class SqliteEngine:
                     requested_by,
                     "forget",
                     audit_target_id,
-                    {**stored_propagated, "erasure_mode": mode.value, "source_type": target["source_type"]},
+                    {
+                        **stored_propagated,
+                        "erasure_mode": mode.value,
+                        "source_type": target["source_type"],
+                    },
                     source=target["source_type"],
                     trust_tier=target["trust_tier"],
                     capability_tags=json.loads(target["capability_tags"] or "[]"),
@@ -5378,13 +6202,16 @@ class SqliteEngine:
                     "DELETE FROM graph_ppr_cache WHERE tenant_id = ? AND branch = ?",
                     (tenant_id, branch),
                 )
+
             # Journal AFTER commit (append-parity): tombstone keeps a salted-hash
             # marker per affected cid; a hard delete purges the lines outright.
             def committed_effects():
                 journal_steps = 0.0
                 first_error: BaseException | None = None
                 if self._journal_dir is not None:
-                    journal = CIDJournal(self._journal_dir / journal_filename(tenant_id))
+                    journal = CIDJournal(
+                        self._journal_dir / journal_filename(tenant_id)
+                    )
                     erased_at = utc_now().isoformat()
                     for affected_cid in affected_order:
                         try:
@@ -5392,17 +6219,22 @@ class SqliteEngine:
                             # to this branch. Preserve surviving branch content.
                             live_copy = conn.execute(
                                 "SELECT 1 FROM evidence WHERE tenant_id = ? AND cid = ? "
-                                "AND erased = 0 LIMIT 1", (tenant_id, affected_cid),
+                                "AND erased = 0 LIMIT 1",
+                                (tenant_id, affected_cid),
                             ).fetchone()
                             if live_copy is not None:
                                 continue
                             if mode is ErasureMode.HARD_DELETE_LEGAL:
                                 journal.purge(affected_cid)
                             else:
-                                original_content, original_user = originals.get(affected_cid, ("", ""))
+                                original_content, original_user = originals.get(
+                                    affected_cid, ("", "")
+                                )
                                 journal.tombstone(
                                     affected_cid,
-                                    salted_hash=erasure_tombstone_hash(original_content, tenant_id, original_user),
+                                    salted_hash=erasure_tombstone_hash(
+                                        original_content, tenant_id, original_user
+                                    ),
                                     erased_at=erased_at,
                                 )
                             journal_steps += 1.0
@@ -5412,8 +6244,13 @@ class SqliteEngine:
                             if first_error is None:
                                 first_error = error
                 self.metrics.increment("sqlite.erasure.propagations")
-                self.metrics.observe("sqlite.erasure.propagation.cache_purges", float(len(affected_order)))
-                self.metrics.observe("sqlite.erasure.propagation.journal_steps", journal_steps)
+                self.metrics.observe(
+                    "sqlite.erasure.propagation.cache_purges",
+                    float(len(affected_order)),
+                )
+                self.metrics.observe(
+                    "sqlite.erasure.propagation.journal_steps", journal_steps
+                )
                 if first_error is not None:
                     raise first_error
 
@@ -5424,7 +6261,12 @@ class SqliteEngine:
         # cache-purge and journal (compaction/tombstone) step counts so a purge is
         # observable live, distinct from the returned `propagated` cascade dict
         # (which stays byte-parity with Local/Postgres — no new keys added there).
-        return {"erased": True, "cid": cid, "erasure_mode": mode.value, "propagated": propagated}
+        return {
+            "erased": True,
+            "cid": cid,
+            "erasure_mode": mode.value,
+            "propagated": propagated,
+        }
 
     # --- prospective memory (Phase 2, exact Local parity) --------------------
     #
@@ -5469,7 +6311,9 @@ class SqliteEngine:
             evidence.append(source)
         return evidence
 
-    def _intention_rows(self, conn: sqlite3.Connection, tenant_id: str) -> dict[tuple[str, str], Intention]:
+    def _intention_rows(
+        self, conn: sqlite3.Connection, tenant_id: str
+    ) -> dict[tuple[str, str], Intention]:
         rows = conn.execute(
             "SELECT record FROM intentions WHERE tenant_id = ? ORDER BY intention_id",
             (tenant_id,),
@@ -5480,7 +6324,9 @@ class SqliteEngine:
             for intention in [Intention.from_dict(json.loads(row["record"]))]
         }
 
-    def schedule_intention(self, intention: Intention, *, idempotent: bool = False) -> str:
+    def schedule_intention(
+        self, intention: Intention, *, idempotent: bool = False
+    ) -> str:
         """Store an intention after tenant, provenance, trust, and taint checks."""
         intention = canonicalize_intention(intention, require_scheduled=True)
         with self._lock:
@@ -5494,15 +6340,19 @@ class SqliteEngine:
                         (intention.tenant_id,),
                     )
                     creation_diffs = [
-                        record["diff"] for row in rows
+                        record["diff"]
+                        for row in rows
                         for record in [json.loads(row["record"])]
                         if record.get("op") == "schedule_intention"
                         and record.get("target_id") == intention.intention_id
                     ]
-                    if conn.execute(
-                        "SELECT 1 FROM intentions WHERE tenant_id = ? AND intention_id = ?",
-                        (intention.tenant_id, intention.intention_id),
-                    ).fetchone() is not None:
+                    if (
+                        conn.execute(
+                            "SELECT 1 FROM intentions WHERE tenant_id = ? AND intention_id = ?",
+                            (intention.tenant_id, intention.intention_id),
+                        ).fetchone()
+                        is not None
+                    ):
                         self._intention_provenance_rows(conn, intention)
                         validate_intention_retry(intention, creation_diffs)
                         conn.commit()
@@ -5559,8 +6409,14 @@ class SqliteEngine:
             return intention.intention_id
 
     def cancel_intention(
-        self, tenant_id: str, intention_id: str, *, cancelled_by: str, session_id: str,
-        expected_revision: str | None = None, idempotency_key: str | None = None,
+        self,
+        tenant_id: str,
+        intention_id: str,
+        *,
+        cancelled_by: str,
+        session_id: str,
+        expected_revision: str | None = None,
+        idempotency_key: str | None = None,
     ) -> None:
         with self._lock:
             conn = self._connect(tenant_id)
@@ -5575,13 +6431,22 @@ class SqliteEngine:
                 current = Intention.from_dict(json.loads(row["record"]))
                 previous_diffs = []
                 if idempotency_key is not None:
-                    previous_diffs = [record["diff"] for item in conn.execute(
-                        "SELECT record FROM audit_log WHERE tenant_id = ?", (tenant_id,))
+                    previous_diffs = [
+                        record["diff"]
+                        for item in conn.execute(
+                            "SELECT record FROM audit_log WHERE tenant_id = ?",
+                            (tenant_id,),
+                        )
                         for record in [json.loads(item["record"])]
-                        if record.get("op") == "cancel_intention" and record.get("target_id") == intention_id]
+                        if record.get("op") == "cancel_intention"
+                        and record.get("target_id") == intention_id
+                    ]
                 intention, receipt, replay = prepare_intention_cancel(
-                    current, cancelled_by=cancelled_by, session_id=session_id,
-                    expected_revision=expected_revision, idempotency_key=idempotency_key,
+                    current,
+                    cancelled_by=cancelled_by,
+                    session_id=session_id,
+                    expected_revision=expected_revision,
+                    idempotency_key=idempotency_key,
                     previous_diffs=previous_diffs,
                 )
                 if replay:
@@ -5606,7 +6471,9 @@ class SqliteEngine:
                     ),
                 )
                 if cursor.rowcount != 1:
-                    raise RuntimeError("intention cancellation lost its state transition")
+                    raise RuntimeError(
+                        "intention cancellation lost its state transition"
+                    )
                 if was_scheduled or receipt is not None:
                     self._audit_row(
                         conn,
@@ -5614,8 +6481,14 @@ class SqliteEngine:
                         cancelled_by,
                         "cancel_intention",
                         intention_id,
-                        {**intention_audit_diff(intention, status="cancelled"),
-                         **({"cancel_request": receipt} if receipt is not None else {})},
+                        {
+                            **intention_audit_diff(intention, status="cancelled"),
+                            **(
+                                {"cancel_request": receipt}
+                                if receipt is not None
+                                else {}
+                            ),
+                        },
                         source="prospective_memory",
                         trust_tier=trust_tier,
                         capability_tags=capability_tags,
@@ -5626,10 +6499,18 @@ class SqliteEngine:
                 raise
 
     def update_intention(
-        self, tenant_id: str, intention_id: str, *, user_id: str, agent_id: str,
-        session_id: str, due_at: datetime | None = None, action: dict[str, Any] | None = None,
+        self,
+        tenant_id: str,
+        intention_id: str,
+        *,
+        user_id: str,
+        agent_id: str,
+        session_id: str,
+        due_at: datetime | None = None,
+        action: dict[str, Any] | None = None,
         recurrence_policy: dict[str, Any] | None = None,
-        expected_revision: str | None = None, idempotency_key: str | None = None,
+        expected_revision: str | None = None,
+        idempotency_key: str | None = None,
     ) -> Intention:
         with self._lock:
             conn = self._connect(tenant_id)
@@ -5644,15 +6525,26 @@ class SqliteEngine:
                 current = Intention.from_dict(json.loads(row["record"]))
                 previous_diffs = []
                 if idempotency_key is not None:
-                    previous_diffs = [record["diff"] for item in conn.execute(
-                        "SELECT record FROM audit_log WHERE tenant_id = ?", (tenant_id,))
+                    previous_diffs = [
+                        record["diff"]
+                        for item in conn.execute(
+                            "SELECT record FROM audit_log WHERE tenant_id = ?",
+                            (tenant_id,),
+                        )
                         for record in [json.loads(item["record"])]
-                        if record.get("op") == "update_intention" and record.get("target_id") == intention_id]
+                        if record.get("op") == "update_intention"
+                        and record.get("target_id") == intention_id
+                    ]
                 updated, receipt, replay = prepare_intention_update(
-                    current, user_id=user_id,
-                    agent_id=agent_id, session_id=session_id, due_at=due_at, action=action,
+                    current,
+                    user_id=user_id,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    due_at=due_at,
+                    action=action,
                     recurrence_policy=recurrence_policy,
-                    expected_revision=expected_revision, idempotency_key=idempotency_key,
+                    expected_revision=expected_revision,
+                    idempotency_key=idempotency_key,
                     previous_diffs=previous_diffs,
                 )
                 provenance = self._intention_provenance_rows(conn, updated)
@@ -5663,15 +6555,27 @@ class SqliteEngine:
                 cursor = conn.execute(
                     "UPDATE intentions SET due_at = ?, record = ? "
                     "WHERE tenant_id = ? AND intention_id = ? AND status = 'scheduled'",
-                    (dt_to_json(updated.due_at), json_text(updated.to_dict()), tenant_id, intention_id),
+                    (
+                        dt_to_json(updated.due_at),
+                        json_text(updated.to_dict()),
+                        tenant_id,
+                        intention_id,
+                    ),
                 )
                 if cursor.rowcount != 1:
                     raise RuntimeError("intention update lost its scheduled transition")
                 self._audit_row(
-                    conn, tenant_id, user_id, "update_intention", intention_id,
-                    {**intention_audit_diff(updated, status="scheduled"),
-                     **({"update_request": receipt} if receipt is not None else {})},
-                    source="prospective_memory", trust_tier=trust_tier,
+                    conn,
+                    tenant_id,
+                    user_id,
+                    "update_intention",
+                    intention_id,
+                    {
+                        **intention_audit_diff(updated, status="scheduled"),
+                        **({"update_request": receipt} if receipt is not None else {}),
+                    },
+                    source="prospective_memory",
+                    trust_tier=trust_tier,
                     capability_tags=capability_tags,
                 )
                 conn.commit()
@@ -5750,7 +6654,9 @@ class SqliteEngine:
                         ),
                     )
                     if cursor.rowcount != 1:
-                        raise RuntimeError("intention firing lost its scheduled transition")
+                        raise RuntimeError(
+                            "intention firing lost its scheduled transition"
+                        )
                     conn.execute(
                         "INSERT INTO intention_fire_receipts "
                         "(event_id, tenant_id, intention_id, occurred_at) VALUES (?, ?, ?, ?)",
@@ -5810,9 +6716,17 @@ class SqliteEngine:
     ) -> str:
         if isinstance(observation_or_tenant, str) and observation is not None:
             tenant_id = observation_or_tenant
-            obs = Observation.from_dict(observation) if isinstance(observation, dict) else observation
+            obs = (
+                Observation.from_dict(observation)
+                if isinstance(observation, dict)
+                else observation
+            )
         else:
-            obs = Observation.from_dict(observation_or_tenant) if isinstance(observation_or_tenant, dict) else observation_or_tenant
+            obs = (
+                Observation.from_dict(observation_or_tenant)
+                if isinstance(observation_or_tenant, dict)
+                else observation_or_tenant
+            )
             tenant_id = obs.tenant_id
         if branch == "main" and getattr(obs, "branch", None):
             branch = obs.branch
@@ -5826,8 +6740,13 @@ class SqliteEngine:
                 obs,
                 lambda cid: self.get_evidence(tenant_id, cid, branch=branch),
             )
-            ev_rows = [self.get_evidence(tenant_id, cid, branch=branch) for cid in obs.source_evidence_cids]
-            obs.independent_source_count = compute_independent_source_count(r for r in ev_rows if r is not None)
+            ev_rows = [
+                self.get_evidence(tenant_id, cid, branch=branch)
+                for cid in obs.source_evidence_cids
+            ]
+            obs.independent_source_count = compute_independent_source_count(
+                r for r in ev_rows if r is not None
+            )
             obs.standing = compute_dynamic_standing(
                 independent_source_count=obs.independent_source_count,
                 corroboration_velocity=obs.corroboration_velocity,
@@ -5889,7 +6808,12 @@ class SqliteEngine:
                     obs.user_id,
                     "upsert_observation",
                     obs.observation_id,
-                    {"op": "update", "version": version, "subject": obs.subject, "topic": obs.topic},
+                    {
+                        "op": "update",
+                        "version": version,
+                        "subject": obs.subject,
+                        "topic": obs.topic,
+                    },
                     source=obs.user_id,
                     trust_tier=obs.trust_tier,
                 )
@@ -5946,7 +6870,12 @@ class SqliteEngine:
                     obs.user_id,
                     "upsert_observation",
                     obs.observation_id,
-                    {"op": "create", "version": version, "subject": obs.subject, "topic": obs.topic},
+                    {
+                        "op": "create",
+                        "version": version,
+                        "subject": obs.subject,
+                        "topic": obs.topic,
+                    },
                     source=obs.user_id,
                     trust_tier=obs.trust_tier,
                 )
@@ -5977,7 +6906,11 @@ class SqliteEngine:
                 erased_any = False
                 for cid in obs.source_evidence_cids:
                     ev = self.get_evidence(tenant_id, cid, branch=branch)
-                    if ev is None or getattr(ev, "erased", False) or getattr(ev, "retired_at", None) is not None:
+                    if (
+                        ev is None
+                        or getattr(ev, "erased", False)
+                        or getattr(ev, "retired_at", None) is not None
+                    ):
                         erased_any = True
                         break
                 if erased_any:
@@ -5987,7 +6920,13 @@ class SqliteEngine:
                     conn.execute(
                         "UPDATE observations SET status = 'retracted', standing = ?, updated_at = ? "
                         "WHERE tenant_id = ? AND branch = ? AND observation_id = ?",
-                        (obs.standing, obs.updated_at, tenant_id, branch, observation_id),
+                        (
+                            obs.standing,
+                            obs.updated_at,
+                            tenant_id,
+                            branch,
+                            observation_id,
+                        ),
                     )
                     self._audit_row(
                         conn,
@@ -5995,7 +6934,11 @@ class SqliteEngine:
                         "system",
                         "retract_observation",
                         observation_id,
-                        {"reason": "transitive_custody_erasure", "status": "retracted", "standing": obs.standing},
+                        {
+                            "reason": "transitive_custody_erasure",
+                            "status": "retracted",
+                            "standing": obs.standing,
+                        },
                         source="transitive_custody",
                     )
                     conn.commit()
@@ -6040,7 +6983,11 @@ class SqliteEngine:
         *,
         observation: Observation | dict[str, Any],
     ) -> tuple[Observation, bool]:
-        obs = Observation.from_dict(observation) if isinstance(observation, dict) else observation
+        obs = (
+            Observation.from_dict(observation)
+            if isinstance(observation, dict)
+            else observation
+        )
         with self._lock:
             conn = self._connect(tenant_id)
             self._require_branch(conn, tenant_id, branch)
@@ -6118,9 +7065,24 @@ class SqliteEngine:
         return obs.to_dict() if obs is not None else None
 
     def list_observation_records(
-        self, tenant_id: str, branch: str = "main", *, subject: str | None = None, topic: str | None = None, status: str | None = None
+        self,
+        tenant_id: str,
+        branch: str = "main",
+        *,
+        subject: str | None = None,
+        topic: str | None = None,
+        status: str | None = None,
     ) -> list[dict[str, Any]]:
-        return [obs.to_dict() for obs in self.observation_list(tenant_id, branch=branch, subject=subject, topic=topic, status=status or "all")]
+        return [
+            obs.to_dict()
+            for obs in self.observation_list(
+                tenant_id,
+                branch=branch,
+                subject=subject,
+                topic=topic,
+                status=status or "all",
+            )
+        ]
 
     def save_observation_record(
         self,
@@ -6136,7 +7098,9 @@ class SqliteEngine:
             if expected_version is not None:
                 current_ver = existing.version if existing is not None else 0
                 if current_ver != expected_version:
-                    raise ValueError(f"Version conflict: expected {expected_version}, got {current_ver}")
+                    raise ValueError(
+                        f"Version conflict: expected {expected_version}, got {current_ver}"
+                    )
             data = dict(record)
             data["tenant_id"] = tenant_id
             data["branch"] = branch
@@ -6156,7 +7120,11 @@ class SqliteEngine:
             tenant_id = page_or_tenant
             kp = KnowledgePage.from_dict(page) if isinstance(page, dict) else page
         else:
-            kp = KnowledgePage.from_dict(page_or_tenant) if isinstance(page_or_tenant, dict) else page_or_tenant
+            kp = (
+                KnowledgePage.from_dict(page_or_tenant)
+                if isinstance(page_or_tenant, dict)
+                else page_or_tenant
+            )
             tenant_id = kp.tenant_id
         if branch == "main" and getattr(kp, "branch", None):
             branch = kp.branch
@@ -6169,8 +7137,12 @@ class SqliteEngine:
             self._require_branch(conn, tenant_id, branch)
             verify_knowledge_page_acyclic_custody(
                 kp,
-                get_observation=lambda oid: self.observation_get(tenant_id, oid, branch=branch),
-                get_evidence=lambda cid: self.get_evidence(tenant_id, cid, branch=branch),
+                get_observation=lambda oid: self.observation_get(
+                    tenant_id, oid, branch=branch
+                ),
+                get_evidence=lambda cid: self.get_evidence(
+                    tenant_id, cid, branch=branch
+                ),
             )
             row = conn.execute(
                 "SELECT page_id FROM knowledge_pages WHERE tenant_id = ? AND branch = ? AND path = ? "
@@ -6178,13 +7150,17 @@ class SqliteEngine:
                 (tenant_id, branch, kp.path),
             ).fetchone()
             if row is not None:
-                raise KnowledgePageConflict(f"KnowledgePage already exists at path '{kp.path}'")
+                raise KnowledgePageConflict(
+                    f"KnowledgePage already exists at path '{kp.path}'"
+                )
             row_id = conn.execute(
                 "SELECT page_id FROM knowledge_pages WHERE tenant_id = ? AND branch = ? AND page_id = ?",
                 (tenant_id, branch, kp.page_id),
             ).fetchone()
             if row_id is not None:
-                raise KnowledgePageConflict(f"KnowledgePage already exists with page_id '{kp.page_id}'")
+                raise KnowledgePageConflict(
+                    f"KnowledgePage already exists with page_id '{kp.page_id}'"
+                )
             now_iso = dt_to_json(utc_now())
             created_at = dt_to_json(kp.created_at) or now_iso
             updated_at = dt_to_json(kp.updated_at) or now_iso
@@ -6243,7 +7219,11 @@ class SqliteEngine:
             tenant_id = page_or_tenant
             kp = KnowledgePage.from_dict(page) if isinstance(page, dict) else page
         else:
-            kp = KnowledgePage.from_dict(page_or_tenant) if isinstance(page_or_tenant, dict) else page_or_tenant
+            kp = (
+                KnowledgePage.from_dict(page_or_tenant)
+                if isinstance(page_or_tenant, dict)
+                else page_or_tenant
+            )
             tenant_id = kp.tenant_id
         if branch == "main" and getattr(kp, "branch", None):
             branch = kp.branch
@@ -6256,8 +7236,12 @@ class SqliteEngine:
             self._require_branch(conn, tenant_id, branch)
             verify_knowledge_page_acyclic_custody(
                 kp,
-                get_observation=lambda oid: self.observation_get(tenant_id, oid, branch=branch),
-                get_evidence=lambda cid: self.get_evidence(tenant_id, cid, branch=branch),
+                get_observation=lambda oid: self.observation_get(
+                    tenant_id, oid, branch=branch
+                ),
+                get_evidence=lambda cid: self.get_evidence(
+                    tenant_id, cid, branch=branch
+                ),
             )
             row = conn.execute(
                 "SELECT * FROM knowledge_pages WHERE tenant_id = ? AND branch = ? AND page_id = ?",
@@ -6267,7 +7251,9 @@ class SqliteEngine:
                 raise CustodyNotFoundError(f"KnowledgePage '{kp.page_id}' not found")
             current = _knowledge_page_from_row(row)
             if expected_version is not None and current.version != expected_version:
-                raise KnowledgePageConflict(f"Version conflict: expected {expected_version}, got {current.version}")
+                raise KnowledgePageConflict(
+                    f"Version conflict: expected {expected_version}, got {current.version}"
+                )
             if kp.path != current.path:
                 conflict_row = conn.execute(
                     "SELECT page_id FROM knowledge_pages WHERE tenant_id = ? AND branch = ? AND path = ? "
@@ -6275,7 +7261,9 @@ class SqliteEngine:
                     (tenant_id, branch, kp.path, kp.page_id),
                 ).fetchone()
                 if conflict_row is not None:
-                    raise KnowledgePageConflict(f"KnowledgePage already exists at path '{kp.path}'")
+                    raise KnowledgePageConflict(
+                        f"KnowledgePage already exists at path '{kp.path}'"
+                    )
             new_version = current.version + 1
             updated_at = dt_to_json(utc_now())
             conn.execute(
@@ -6369,8 +7357,12 @@ class SqliteEngine:
                 try:
                     verify_knowledge_page_acyclic_custody(
                         page,
-                        get_observation=lambda oid: self.observation_get(tenant_id, oid, branch=actual_branch, validate_custody=False),
-                        get_evidence=lambda cid: self.get_evidence(tenant_id, cid, branch=actual_branch),
+                        get_observation=lambda oid: self.observation_get(
+                            tenant_id, oid, branch=actual_branch, validate_custody=False
+                        ),
+                        get_evidence=lambda cid: self.get_evidence(
+                            tenant_id, cid, branch=actual_branch
+                        ),
                     )
                 except Exception:
                     page.status = "stale"
@@ -6407,7 +7399,12 @@ class SqliteEngine:
             prefix = path_prefix or folder
             if prefix is not None:
                 norm_prefix = prefix.strip().lower().rstrip("/") + "/"
-                pages = [p for p in pages if p.path.startswith(norm_prefix) or p.path == prefix.strip().lower()]
+                pages = [
+                    p
+                    for p in pages
+                    if p.path.startswith(norm_prefix)
+                    or p.path == prefix.strip().lower()
+                ]
             if tags:
                 tag_set = set(tags)
                 pages = [p for p in pages if tag_set.issubset(set(p.tags))]
@@ -6437,7 +7434,9 @@ class SqliteEngine:
             raise CustodyNotFoundError(f"KnowledgePage '{ident}' not found")
         return render_knowledge_page_markdown(
             page,
-            get_observation=lambda oid: self.observation_get(tenant_id, oid, branch=branch, validate_custody=False),
+            get_observation=lambda oid: self.observation_get(
+                tenant_id, oid, branch=branch, validate_custody=False
+            ),
             get_evidence=lambda cid: self.get_evidence(tenant_id, cid, branch=branch),
             include_frontmatter=include_frontmatter,
             include_citations_ledger=include_citations_ledger,
@@ -6506,13 +7505,18 @@ class SqliteEngine:
     def get_knowledge_page_record(
         self, tenant_id: str, page_id_or_path: str, branch: str = "main"
     ) -> dict[str, Any] | None:
-        page = self.knowledge_page_get(tenant_id, page_id_or_path, branch=branch, validate_custody=False)
+        page = self.knowledge_page_get(
+            tenant_id, page_id_or_path, branch=branch, validate_custody=False
+        )
         return page.to_dict() if page is not None else None
 
     def list_knowledge_page_records(
         self, tenant_id: str, branch: str = "main"
     ) -> list[dict[str, Any]]:
-        return [p.to_dict() for p in self.knowledge_page_list(tenant_id, branch=branch, status="all")]
+        return [
+            p.to_dict()
+            for p in self.knowledge_page_list(tenant_id, branch=branch, status="all")
+        ]
 
     def save_knowledge_page_record(
         self,
@@ -6524,7 +7528,9 @@ class SqliteEngine:
         expected_version: int | None = None,
     ) -> dict[str, Any]:
         with self._lock:
-            existing = self.knowledge_page_get(tenant_id, page_id, branch=branch, validate_custody=False)
+            existing = self.knowledge_page_get(
+                tenant_id, page_id, branch=branch, validate_custody=False
+            )
             data = dict(record)
             data["tenant_id"] = tenant_id
             data["branch"] = branch
@@ -6532,8 +7538,12 @@ class SqliteEngine:
             page = KnowledgePage.from_dict(data)
             if existing is None:
                 self.knowledge_page_create(page, branch=branch)
-                saved = self.knowledge_page_get(tenant_id, page_id, branch=branch, validate_custody=False)
+                saved = self.knowledge_page_get(
+                    tenant_id, page_id, branch=branch, validate_custody=False
+                )
                 return saved.to_dict() if saved is not None else record
             else:
-                saved = self.knowledge_page_update(page, branch=branch, expected_version=expected_version)
+                saved = self.knowledge_page_update(
+                    page, branch=branch, expected_version=expected_version
+                )
                 return saved.to_dict()
