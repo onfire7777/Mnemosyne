@@ -1242,6 +1242,8 @@ class PassageGraphIndex:
         progress: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
         """Extract triples for, and embed, every disclosable passage not yet indexed."""
+        if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size <= 0:
+            raise ValueError("passage indexing batch_size must be a positive integer")
         if self.store.read_only:
             raise ValueError("the passage index is open read-only")
         if self.chat is None and not self.embeddings_only:
@@ -1590,6 +1592,8 @@ class PassageGraphIndex:
         A batch evaluation that also calls the chat model per query would otherwise make a
         small GPU swap the embedding and chat models on every question.
         """
+        if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size <= 0:
+            raise ValueError("query preparation batch_size must be a positive integer")
         embedder = self.embedder or embedder
         texts = [
             text

@@ -2135,6 +2135,8 @@ def cmd_eval_query_batch(args: argparse.Namespace) -> None:
     payload = {"count": len(results), "ok": True, "results": results}
     if getattr(args, "compact", False):
         payload["peak_rss_mb"] = _peak_rss_mb()
+        payload["peak_rss_scope"] = "current_process_lifetime_peak_before_output_serialization"
+        payload["peak_rss_unit"] = "MiB"
     if overrides:
         payload["evaluation_policy"] = {
             "token_budget": tools.engine.policy.token_budget,
@@ -2162,7 +2164,14 @@ def _peak_rss_mb() -> float | None:
             counters = Counters()
             counters.cb = ctypes.sizeof(counters)
             psapi = ctypes.WinDLL("psapi")
-            process = ctypes.windll.kernel32.GetCurrentProcess()
+            get_current_process = ctypes.windll.kernel32.GetCurrentProcess
+            get_current_process.argtypes = []
+            get_current_process.restype = wintypes.HANDLE
+            psapi.GetProcessMemoryInfo.argtypes = [
+                wintypes.HANDLE, ctypes.POINTER(Counters), wintypes.DWORD,
+            ]
+            psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
+            process = get_current_process()
             if psapi.GetProcessMemoryInfo(process, ctypes.byref(counters), counters.cb):
                 return round(counters.PeakWorkingSetSize / 1048576, 1)
             return None

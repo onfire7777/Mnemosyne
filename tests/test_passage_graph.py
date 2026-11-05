@@ -46,6 +46,59 @@ def test_passage_embedding_rejects_invalid_vectors(vector, batched):
         _embed(provider, ["synthetic passage"])
 
 
+@pytest.mark.parametrize("failure", ["short", "long", "nonfinite", "dimensions"])
+def test_query_preparation_rejects_entire_invalid_batch(tmp_path, failure):
+    _engine, graph, _chat, _cids = _setup(tmp_path)
+
+    class Provider:
+        dims = 2
+
+        def embed_many(self, texts):
+            vectors = [[1.0, 0.0] for _ in texts]
+            if failure == "short":
+                return vectors[:-1]
+            if failure == "long":
+                return vectors + [[1.0, 0.0]]
+            vectors[-1] = [float("nan"), 0.0] if failure == "nonfinite" else [1.0]
+            return vectors
+
+    graph.embedder = Provider()
+    graph._query_vectors["previously cached"] = [0.0, 1.0]
+    before = dict(graph._query_vectors)
+    try:
+        with pytest.raises(ValueError):
+            graph.prepare(["synthetic first question", "synthetic second question"], Provider())
+        assert graph._query_vectors == before
+    finally:
+        graph.store.close()
+
+
+@pytest.mark.parametrize("batch_size", [0, -1, True, False, 1.5, "2"])
+def test_query_preparation_rejects_invalid_batch_size_before_embedding(tmp_path, batch_size):
+    _engine, graph, _chat, _cids = _setup(tmp_path)
+
+    class UnexpectedProvider:
+        def embed_many(self, texts):
+            pytest.fail("invalid batch size must not call the embedding provider")
+
+    graph.embedder = UnexpectedProvider()
+    graph._query_vectors["previously cached"] = [0.0, 1.0]
+    before = dict(graph._query_vectors)
+    try:
+        with pytest.raises(ValueError, match="batch_size must be a positive integer"):
+            graph.prepare(["synthetic question"], UnexpectedProvider(), batch_size=batch_size)
+        assert graph._query_vectors == before
+    finally:
+        graph.store.close()
+
+
+@pytest.mark.parametrize("batch_size", [0, -1, True, False, 1.5, "2"])
+def test_passage_indexing_rejects_invalid_batch_size_before_store_access(batch_size):
+    graph = object.__new__(PassageGraphIndex)
+    with pytest.raises(ValueError, match="indexing batch_size must be a positive integer"):
+        graph.index(TENANT, [], None, batch_size=batch_size)
+
+
 def test_passage_embedding_preserves_valid_batch():
     class Provider:
         dims = 2
