@@ -14513,6 +14513,7 @@ def test_cli_parametric_synthetic_suite_is_shadow_only_and_unverified(tmp_path: 
         failure_signature="parametric-synthetic-suite",
         content="Never promote from synthetic protected cases.",
         status="active",
+        origin="curated",
     )
     procedure = Procedure(
         tenant_id=TENANT,
@@ -14521,6 +14522,7 @@ def test_cli_parametric_synthetic_suite_is_shadow_only_and_unverified(tmp_path: 
         body="Require persisted curated protected cases.",
         signature={"failure_signature": lesson.failure_signature},
         status="validated",
+        origin="curated",
     )
     learning.lessons[lesson.id] = lesson
     learning.procedures[procedure.id] = procedure
@@ -15298,7 +15300,7 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
     rollback_record = json.loads(artifact_path.read_text(encoding="utf-8"))
     promoted_procedure = run_cli(store, "procedure-promote", "--procedure-id", procedure["id"], *PARAMETRIC_AUTH)
     rolled_back = run_cli(store, "procedure-rollback", "--procedure-id", procedure["id"], *PARAMETRIC_AUTH)
-    rolled_back_search = run_cli(store, "procedure-search", "--tenant", TENANT, "--query", "date-math-deploy", "--status", "rolled_back")
+    rolled_back_search = run_cli(store, "procedure-search", "--tenant", TENANT, "--query", "date-math-deploy", "--status", "retired")
     ops = run_cli(store, "ops-report", "--tenant", TENANT)
 
     assert validated["status"] == "candidate"
@@ -15322,7 +15324,7 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
     assert rollback_record["payload"]["phase"] == "rolled_back"
     assert promoted_procedure["status"] == "candidate"
     assert promoted_procedure["gate"]["promoted"] is False
-    assert rolled_back["status"] == "rolled_back"
+    assert rolled_back["status"] == "retired"
     assert rolled_back_search["procedures"][0]["id"] == procedure["id"]
     assert ops["tripwires"]["gate_promotions"] >= 1
     assert ops["tripwires"]["gate_rollbacks"] >= 2

@@ -2343,7 +2343,16 @@ def _merge_relation_overlap_component(
         pending: list[Relation] = []
         matched = False
         for peer in remaining:
-            if _relation_windows_overlap(peer, expanded):
+            # Replaying the same historical row is idempotent even when its
+            # closed window is empty (or was invalidated before it began).
+            # Such a window cannot overlap itself; cloning it on every merge
+            # otherwise doubles the retained rows with each canary replay.
+            same_record = (
+                peer.id == incoming.id
+                and peer.valid_from == incoming.valid_from
+                and peer.valid_to == incoming.valid_to
+            )
+            if same_record or _relation_windows_overlap(peer, expanded):
                 _merge_relation_state(expanded, peer)
                 component.append(peer)
                 matched = True
@@ -3220,6 +3229,15 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             tuple[Any, ...], tuple[datetime | None, list[Hit]]
         ] = OrderedDict()
         self._candidate_memo_lock = threading.Lock()
+        self._claim_store_writer()
+        try:
+            if self.store_path and self.store_path.exists():
+                self._load()
+        except BaseException:
+            self.close()
+            raise
+
+    def _claim_store_writer(self) -> None:
         if self.store_path and not self._read_only:
             writer_path_key = str(self.store_path.resolve(strict=False))
             with self._writer_owners_lock:
@@ -3230,11 +3248,44 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     )
                 self._writer_owners[writer_path_key] = self
                 self._writer_path_key = writer_path_key
+
+    def attach_store(self, store_path: str | os.PathLike[str]) -> None:
+        """Give an ephemeral engine a new durable home without copying its state."""
+        path = Path(store_path).expanduser().resolve(strict=False)
+        with self._lock:
+            if self._read_only or self._source_transaction_state is not None or self._persistence_defer_depth:
+                raise RuntimeError("cannot attach a store during a transaction or to a read-only engine")
+            if self.store_path is not None:
+                if self.store_path.resolve(strict=False) == path:
+                    return
+                raise ValueError("engine already owns a different store")
+            if path.exists():
+                raise FileExistsError("cannot overwrite an existing native checkpoint")
+            self.store_path = path
+            try:
+                self._claim_store_writer()
+                self._persist()
+            except BaseException:
+                self.close()
+                self.store_path = None
+                raise
+
+    @classmethod
+    def shared_writer(cls, store_path: str | os.PathLike[str]) -> "LocalMemoryEngine":
+        """Open a native checkpoint, reusing its sole in-process writer if alive."""
+        key = str(Path(store_path).expanduser().resolve(strict=False))
+        with cls._writer_owners_lock:
+            owner = cls._writer_owners.get(key)
+        if owner is not None:
+            return owner
         try:
-            if self.store_path and self.store_path.exists():
-                self._load()
-        except BaseException:
-            self.close()
+            return cls(store_path=key)
+        except RuntimeError:
+            # Another opener may have claimed it after the first lookup.
+            with cls._writer_owners_lock:
+                owner = cls._writer_owners.get(key)
+            if owner is not None:
+                return owner
             raise
 
     def close(self) -> None:

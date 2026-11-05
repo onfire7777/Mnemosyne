@@ -1495,7 +1495,7 @@ class SkillStore:
             source_sha,
             self._keep(source_sha, files),
             model,
-            meta,
+            self._manual_metadata(meta),
             needs if isinstance(needs, list) else [needs],
             kept,
             None,
@@ -1513,6 +1513,13 @@ class SkillStore:
             "effects": status["effects"],
             "attachments": sorted(kept),
         }
+
+    @staticmethod
+    def _manual_metadata(meta: dict[str, Any]) -> dict[str, Any]:
+        """A new explicit import/conversion cannot inherit another row's owner."""
+        reserved = {"lifecycle_owner", "native_artifact_id", "native_artifact_ids",
+                    "native_states", "source_episode_ids"}
+        return {key: value for key, value in meta.items() if key not in reserved}
 
     def make_burnskill(
         self,
@@ -1565,7 +1572,7 @@ class SkillStore:
             row["source_sha"],
             Path(row["source_dir"]),
             model,
-            json.loads(row["meta"]),
+            self._manual_metadata(json.loads(row["meta"])),
             json.loads(row["needs"]),
             json.loads(row["attachments"]),
             None,
@@ -1971,11 +1978,14 @@ class SkillStore:
             source_sha,
             self._keep(source_sha, files),
             skill.get("model", ""),
-            load(skill.get("meta") or {}),
+            self._manual_metadata(load(skill.get("meta") or {})),
             load(skill.get("needs") or []),
             load(skill.get("attachments") or []),
             fw,
-            state="draft" if problems else "probation",
+            state=("draft" if problems else "probation" if effects_of(
+                fw["nodes"], load(skill.get("attachments") or []),
+                (fw.get("meta") or {}).get("effects"),
+            ) else "active"),
             conversion="incomplete" if problems else "completed",
             applicability=skill.get("applicability", ""),
             memory=memory,
@@ -2001,7 +2011,7 @@ class SkillStore:
         rows = self._rows(
             "SELECT * FROM skill_revisions WHERE (skill_id = ? OR lower(name) = lower(?)) "
             + ("AND revision = ? " if revision else "")
-            + "ORDER BY state = 'active' DESC, revision DESC LIMIT 1",
+            + "ORDER BY state = 'active' DESC, state IN ('probation', 'labile') DESC, revision DESC LIMIT 1",
             (skill_id, skill_id, revision) if revision else (skill_id, skill_id),
         )
         if not rows:
@@ -2020,6 +2030,8 @@ class SkillStore:
             "name": row["name"],
             "state": row["state"],
             "posterior": self._posterior(row),
+            "lifecycle_owner": meta.get("lifecycle_owner", "skill_store"),
+            "native_states": meta.get("native_states", {}),
             "needs_approval": bool(row["needs_approval"]),
             "approved": bool(row["approved"]),
             "kind": "burnskill" if row["framework"] else "skill",
@@ -2460,22 +2472,26 @@ class SkillStore:
         if state not in STATES:
             raise ValueError(f"state is one of {sorted(STATES)}")
         row = self._skill(skill_id, revision)
+        if self._learning_managed(row):
+            if state != row["state"]:
+                raise ValueError("native-managed skill state belongs to the learning runtime")
+            return self.status(row["skill_id"], row["revision"])
         if row["state"] == "retired" and state != "retired":
             raise ValueError("retired skill revisions cannot be reactivated")
         if state == "active" and row["conversion"] not in ("completed", "native"):
             raise ValueError(
                 f"{row['name']} is not converted yet ({row['conversion']})"
             )
-        if state == "active" and (row["runs"] < 12 or self._posterior(row)["lower_bound"] < .5):
-            raise ValueError("activation requires verified local outcomes")
-        if state == "active" and row["needs_approval"] and not row["approved"]:
-            raise ValueError("effects require explicit approval")
         if state == "active" and row["framework"]:
             problems = _framework_problems(
                 json.loads(row["framework"]), json.loads(row["units"])
             )
             if problems:
                 raise ValueError("framework needs review: " + "; ".join(problems))
+        if state == "active" and not row["framework"] and (row["runs"] < 12 or self._posterior(row)["lower_bound"] < .5):
+            raise ValueError("activation requires verified local outcomes")
+        if state == "active" and row["needs_approval"] and not row["approved"]:
+            raise ValueError("effects require explicit approval")
         with self._sql() as conn:
             if state == "active":  # one active revision per skill
                 conn.execute(
@@ -2546,6 +2562,10 @@ class SkillStore:
         candidates = []
         for hit in ranked:
             row = self._skill(hit["skill_id"], hit["revision"])
+            if json.loads(row["meta"]).get("native_artifact_id"):
+                # This is already a native artifact; importing its projection would
+                # create a second learner for the same content.
+                continue
             origin = json.loads(row["memory"]) if row.get("memory") else {}
             if origin.get("tenant") != tenant_id or origin.get("user") != user_id:
                 continue
@@ -2566,6 +2586,68 @@ class SkillStore:
                 "framework": json.loads(row["framework"]) if row["framework"] else None,
             })
         return candidates
+
+    @staticmethod
+    def _learning_managed(row: dict[str, Any]) -> bool:
+        meta = json.loads(row.get("meta") or "{}")
+        return meta.get("lifecycle_owner") == "experience" or bool(meta.get("native_artifact_id"))
+
+    def sync_learning_revision(
+        self, skill_id: str, revision: int, artifacts: list[dict[str, Any]],
+        *, outcomes: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Project native states and distinct observed outcomes without a second gate.
+
+        A library revision can have several task-scoped native views. Its public
+        state is their conservative aggregate; ``native_states`` preserves each
+        scope. Replacing the projection also makes rollback and erasure exact.
+        Only this path can change a native-managed revision's learning state.
+        """
+        row = self._skill(skill_id, revision)
+        if not row["source_sha"]:
+            # Erasure is irreversible, even if an older runtime audit is restored.
+            return self.status(skill_id, revision)
+        states = {item["id"]: item["state"] for item in artifacts}
+        if any(value not in STATES | {"candidate", "archived", "rejected"} for value in states.values()):
+            raise ValueError("invalid native artifact state")
+        for item in artifacts:
+            if item.get("source_skill_id") != row["skill_id"] or item.get("source_skill_revision") != revision:
+                raise ValueError("native artifact does not own this library revision")
+            if item["state"] == "active" and (
+                not item.get("gate_passed") or not item.get("source_cids")
+                or not item.get("source_episode_ids")
+                or item.get("needs_approval") and not item.get("approved")
+            ):
+                raise ValueError("active projection requires verified provenance and effect approval")
+        projected = ["draft" if value == "candidate" else value for value in states.values()]
+        terminal = {"retired", "archived", "rejected"}
+        if not projected or all(value in terminal for value in projected):
+            desired = "retired"
+        elif any(value in terminal for value in projected):
+            desired = "demoted"
+        else:
+            desired = next(value for value in ("draft", "probation", "demoted", "labile", "active") if value in projected)
+        events = {}
+        for event in outcomes or []:
+            probability = event["probability"]
+            if not isinstance(event.get("episode_id"), str) or not event["episode_id"] or not isinstance(probability, (int, float)) or not math.isfinite(probability) or not 0 <= probability <= 1:
+                raise ValueError("invalid native outcome projection")
+            previous = events.setdefault(event["episode_id"], probability)
+            if previous != probability:
+                raise ValueError("conflicting native outcomes for one episode")
+        metadata = {**json.loads(row["meta"]), "lifecycle_owner": "experience",
+                    "native_artifact_ids": sorted(states), "native_states": states}
+        with self._sql() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("UPDATE skill_revisions SET meta = ?, state = ?, runs = ?, successes = ?, last_outcome = NULL, needs_approval = ?, approved = ? WHERE skill_id = ? AND revision = ?",
+                         (json.dumps(metadata), desired, len(events), sum(events.values()),
+                          int(any(item.get("needs_approval") for item in artifacts)),
+                          int(all(not item.get("needs_approval") or item.get("approved") for item in artifacts)),
+                          row["skill_id"], revision))
+            conn.execute("DELETE FROM skill_outcome_events WHERE skill_id = ? AND revision = ?", (row["skill_id"], revision))
+            conn.executemany("INSERT INTO skill_outcome_events VALUES (?, ?, ?, ?, ?)",
+                             [(row["skill_id"], revision, episode_id, probability, episode_id) for episode_id, probability in sorted(events.items())])
+        return self.status(row["skill_id"], revision)
 
     def mirror_learned_revision(self, skill_id: str, parent_revision: int, artifact: dict[str, Any]) -> dict[str, Any]:
         """Append a verified native revision, atomically comparing its library parent."""
@@ -2597,6 +2679,8 @@ class SkillStore:
             files = [("SKILL.md", content.encode("utf-8"))]
             source_sha = _sha_of(files)
             metadata = {**json.loads(row["meta"]), "native_artifact_id":artifact["id"],
+                        "native_artifact_ids": [artifact["id"]], "lifecycle_owner": "experience",
+                        "native_states": {artifact["id"]: "active"},
                         "source_episode_ids":artifact["source_episode_ids"]}
             previous_memory = json.loads(row["memory"]) if row["memory"] else {}
             memory = {**previous_memory, "source_cids":artifact["source_cids"]}
@@ -2645,7 +2729,7 @@ class SkillStore:
                 conn.execute("UPDATE skill_revisions SET runs = max(0, runs - 1), successes = max(0, successes - ?), last_outcome = NULL WHERE skill_id = ? AND revision = ?",
                              (event["probability"], event["skill_id"], event["revision"]))
                 row = conn.execute("SELECT * FROM skill_revisions WHERE skill_id = ? AND revision = ?", (event["skill_id"], event["revision"])).fetchone()
-                if row is not None and row["state"] == "active" and (row["runs"] < 12 or self._posterior(dict(row))["lower_bound"] < .5):
+                if row is not None and not self._learning_managed(dict(row)) and row["state"] == "active" and (row["runs"] < 12 or self._posterior(dict(row))["lower_bound"] < .5):
                     conn.execute("UPDATE skill_revisions SET state = 'probation' WHERE skill_id = ? AND revision = ?", (event["skill_id"], event["revision"]))
                 revisions.append({"skill_id": event["skill_id"], "revision": event["revision"]})
             conn.execute("DELETE FROM skill_outcome_events WHERE episode_id = ?", (episode_id,))
@@ -2663,6 +2747,12 @@ class SkillStore:
         if not isinstance(evidence, str) or not evidence.strip():
             raise ValueError("an external outcome requires evidence")
         row = self._skill(skill_id, revision)
+        if self._learning_managed(row):
+            return {"skill_id": row["skill_id"], "revision": revision,
+                    "runs": row["runs"], "successes": row["successes"],
+                    "state": row["state"], "posterior": self._posterior(row),
+                    "recorded": False, "lifecycle_owner": "experience",
+                    "reason": "record outcomes through the native learning runtime"}
         with self._sql() as conn:
             conn.execute("BEGIN IMMEDIATE")
             if episode_id is not None:

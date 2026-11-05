@@ -187,12 +187,24 @@ def _validate_episodes(before: dict, after: dict, operation: str) -> None:
                 "X12",
                 "episode prediction is immutable",
             )
-            if previous.get("status") != "open":
+            if previous.get("status") != "open" and not (
+                previous.get("status") == "legacy"
+                and operation in {"legacy_migration", "compatibility_save"}
+                and episode.get("status") == "legacy"
+            ):
                 require(
-                    episode == previous,
+                    episode == previous or (
+                        operation == "compatibility_save"
+                        and {key: value for key, value in episode.items() if key != "failure_attribution"}
+                            == {key: value for key, value in previous.items() if key != "failure_attribution"}
+                    ),
                     "X3",
                     "a finalized episode cannot receive another outcome",
                 )
+        if episode.get("status") == "legacy":
+            require(episode.get("reward") is None and episode.get("rpe") is None
+                    and not episode.get("signals") and not episode.get("receipt_ids"),
+                    "X7", "historical claims cannot supply verified outcomes")
         if episode.get("status") == "erased":
             require(
                 not any(
@@ -404,15 +416,26 @@ def _validate_artifacts(
     for artifact_id, artifact in after["artifacts"].items():
         state = artifact.get("state")
         require(state in STATES, "X10", "unknown artifact state")
-        _forbidden_inputs(
-            {key: value for key, value in artifact.items() if key != "sanitized"}, "X22"
-        )
         previous = before["artifacts"].get(artifact_id)
+        legacy = artifact.get("origin") == "legacy"
+        if legacy:
+            require(state == "candidate" or state in TERMINAL_STATES,
+                    "X21", "unverified historical artifacts cannot be served")
+            require(not previous or previous.get("origin") == "legacy",
+                    "X21", "native artifacts cannot become historical claims")
+        else:
+            _forbidden_inputs(
+                {key: value for key, value in artifact.items() if key != "sanitized"}, "X22"
+            )
+        legacy_edit = (legacy and previous and previous.get("origin") == "legacy"
+                       and operation == "compatibility_save")
+        legacy_admission = (previous and previous.get("origin") == "legacy"
+                            and operation == "candidate_admission")
         if previous and operation != "erasure":
             require(
-                artifact.get("content") == previous.get("content")
+                legacy_edit or (artifact.get("content") == previous.get("content")
                 and artifact.get("steps") == previous.get("steps")
-                and artifact.get("revision") == previous.get("revision"),
+                and artifact.get("revision") == previous.get("revision")),
                 "X18",
                 "content and steps changes require a new revision",
             )
@@ -425,12 +448,12 @@ def _validate_artifacts(
             ) != previous.get("conditions"):
                 sources = artifact.get("scope_evidence", [])
                 require(
-                    operation == "scope_evidence"
+                    legacy_edit or legacy_admission or (operation == "scope_evidence"
                     and bool(sources)
                     and all(
                         after["episodes"].get(key, {}).get("reward", -1) > 0
                         for key in sources
-                    ),
+                    )),
                     "X9",
                     "scope changes require recorded successful episodes",
                 )
@@ -443,16 +466,26 @@ def _validate_artifacts(
                 False, "X21", "new artifacts must enter probation before activation"
             )
         if artifact.get("origin") == "imported" and previous is None:
-            require(state == "probation", "X21", "imports must start in probation")
+            parent = before["artifacts"].get(artifact.get("parent_revision"), {})
+            dormant_rollback = (
+                operation == "rollback" and state == "candidate"
+                and parent.get("state") in TERMINAL_STATES
+                and artifact.get("gate_passed") is False
+                and artifact.get("source_episode_ids") == parent.get("source_episode_ids")
+                and artifact.get("source_cids") == parent.get("source_cids")
+                and artifact.get("content") == parent.get("content")
+                and artifact.get("steps") == parent.get("steps")
+            )
+            require(state == "probation" or dormant_rollback, "X21", "imports must start in probation")
         source_ids = artifact.get("source_episode_ids", [])
         episodes = [after["episodes"].get(key) for key in source_ids]
         require(
-            all(episode is not None for episode in episodes),
+            legacy or all(episode is not None for episode in episodes),
             "X15",
             "missing source episode",
         )
         if state in SERVABLE_STATES or (
-            state == "candidate" and artifact.get("content")
+            state == "candidate" and artifact.get("content") and not legacy
         ):
             require(
                 bool(source_ids) and bool(artifact.get("source_cids")),
@@ -521,6 +554,9 @@ def _validate_artifacts(
                 )
         if state in SERVABLE_STATES:
             _validate_gate(artifact)
+        if state == "labile":
+            require(previous is not None and previous.get("state") in {"active", "labile"},
+                    "X21", "only an activated artifact may enter reconsolidation")
         if state == "active":
             require(
                 not artifact.get("needs_approval") or artifact.get("approved"),

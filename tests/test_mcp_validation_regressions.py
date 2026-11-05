@@ -774,6 +774,7 @@ def test_b15_sdk_adapter_accepts_signed_sessions_on_session_identity_tools(tmp_p
                         "actor": "burnos",
                         "source_type": "conversation",
                         "content": "[2026-09-30 18:00:00] user: hello there",
+                        "session_id": "voice",
                     },
                 }
             )

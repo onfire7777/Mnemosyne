@@ -38,6 +38,18 @@ def ab_decision(
     return "inconclusive" if candidate_n + incumbent_n >= 40 else "pending"
 
 
+def inherit_library_lineage(candidate: dict, parent: dict) -> None:
+    """A new native revision must not masquerade as its parent's library row."""
+    skill_id = parent.get("source_skill_id") or parent.get("source_library_skill_id")
+    if not skill_id:
+        return
+    candidate["source_library_skill_id"] = skill_id
+    candidate["source_library_parent_revision"] = parent.get("source_skill_revision")
+    candidate["source_library_parent_artifact"] = parent["id"]
+    candidate.pop("source_skill_id", None)
+    candidate.pop("source_skill_revision", None)
+
+
 def install_revision(
     state: dict, candidate: dict, parent_id: str, expected_revision: int
 ) -> None:
@@ -59,6 +71,7 @@ def install_revision(
     if parent["state"] in {"archived", "retired", "rejected"}:
         raise ValueError("terminal artifact requires an independent candidate")
     candidate.update(parent_revision=parent_id, revision=expected_revision + 1)
+    inherit_library_lineage(candidate, parent)
     candidate["ab_trial"] = {
         "incumbent_id": parent_id,
         "status": "pending",
@@ -188,7 +201,10 @@ def propagate_children(state: dict) -> None:
                 for ref, child in zip(parent.get("children", []), children, strict=True)
             )
             labile = any(child and child["state"] == "labile" for child in children)
-            target = "demoted" if invalid else "labile" if labile else parent["state"]
+            target = (
+                "demoted" if invalid else "labile"
+                if labile and parent["state"] == "active" else parent["state"]
+            )
             if target != parent["state"]:
                 parent["state"] = target
                 changed = True

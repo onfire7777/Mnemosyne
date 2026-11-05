@@ -120,3 +120,20 @@ def test_justifications_are_exported_with_evidence_links() -> None:
 
     assert report.justification_id in justifications
     assert justifications[report.justification_id]["evidence_cids"] == [cid]
+def test_shared_wilson_kernel_preserves_evaluation_and_runtime_contracts():
+    import math
+    import pytest
+    from eval.harness.metrics import wilson_interval as evaluate_interval
+    from mnemosyne.experience.stats import wilson_interval as learning_interval
+
+    for successes, total, expected in (
+        (5, 10, (0.2365895936154873, 0.7634104063845126)),
+        (0, 100, (0.0, 0.03699480747600191)),
+        (100, 100, (0.963005192523998, 1.0)),
+    ):
+        for interval in (evaluate_interval(successes, total), learning_interval(successes, total)):
+            assert (interval.low, interval.high) == pytest.approx(expected)
+    assert math.isnan(evaluate_interval(0, 0).low)
+    assert (learning_interval(0, 0).low, learning_interval(0, 0).high) == (0.0, 1.0)
+    point_only = evaluate_interval(4, 10, z=0)
+    assert (point_only.point, point_only.low, point_only.high) == (0.4, 0.4, 0.4)

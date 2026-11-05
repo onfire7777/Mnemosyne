@@ -362,16 +362,23 @@ def test_next_fidelity_tier_progresses_and_saturates() -> None:
     assert next_fidelity_tier(FidelityTier.STATISTICAL_TRACE) == FidelityTier.STATISTICAL_TRACE
 
 
-def test_decayed_salience_rewards_recent_access() -> None:
+def test_decayed_salience_ignores_access_and_rewards_recent_outcomes() -> None:
     now = datetime(2026, 6, 1, tzinfo=UTC)
-    fresh = LifecycleState("fresh", FidelityTier.VERBATIM, 0.8, 0.5, 10, now)
-    stale = LifecycleState("stale", FidelityTier.VERBATIM, 0.8, 0.5, 10, now - timedelta(days=180))
+    fresh = LifecycleState("fresh", FidelityTier.VERBATIM, 0.8, 0.5, 1000, now)
+    stale = LifecycleState("stale", FidelityTier.VERBATIM, 0.8, 0.5, 0, now - timedelta(days=180))
+    # Repeated reads and their timestamps are not successful learning outcomes.
+    assert decayed_salience(fresh, now) == decayed_salience(stale, now)
+    fresh.last_outcome_at = now
+    stale.last_outcome_at = now - timedelta(days=180)
     assert decayed_salience(fresh, now) > decayed_salience(stale, now)
 
 
 def test_actr_decay_uses_power_law_salience_when_enabled() -> None:
     now = datetime(2026, 6, 1, tzinfo=UTC)
-    stale = LifecycleState("stale", FidelityTier.VERBATIM, 0.8, 0.0, 0, now - timedelta(days=180))
+    stale = LifecycleState(
+        "stale", FidelityTier.VERBATIM, 0.8, 0.0, 1000, now,
+        last_outcome_at=now - timedelta(days=180),
+    )
 
     legacy = decayed_salience(stale, now)
     actr = decayed_salience(stale, now, actr_decay=0.5)
@@ -384,7 +391,10 @@ def test_consolidation_forgetter_uses_policy_actr_decay() -> None:
 
     def run_forgetter(policy: OperatingPolicy) -> dict[str, object]:
         engine = LocalMemoryEngine(policy=policy)
-        state = LifecycleState("cold", FidelityTier.VERBATIM, 0.8, 0.0, 0, now - timedelta(days=180))
+        state = LifecycleState(
+            "cold", FidelityTier.VERBATIM, 0.8, 0.0, 1000, now,
+            last_outcome_at=now - timedelta(days=180),
+        )
         cid = engine.append_evidence(
             Evidence(
                 tenant_id=TENANT,

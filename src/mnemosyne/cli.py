@@ -19183,6 +19183,7 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
                             failure_signature="provider-health",
                             content="provider health check",
                             status="active",
+                            origin="curated",
                             id=cid,
                         )
                         for cid in train_cids[:2]
@@ -19195,6 +19196,7 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
                             body="provider health check",
                             signature={"check": "parametric"},
                             status="validated",
+                            origin="curated",
                             id=cid,
                         )
                         for index, cid in enumerate(train_cids[2:])

@@ -7,7 +7,9 @@ import threading
 from pathlib import Path
 
 from mnemosyne.experience.receipts import digest
-from mnemosyne.experience.runtime import LearningRuntime
+from mnemosyne.experience.integration import (
+    build_learning_runtime, end_learning_session, observe_completed_turn,
+)
 from mnemosyne.sqlite_engine import SqliteEngine
 
 
@@ -38,7 +40,7 @@ class HermesAdapter:
                 root = Path(home).expanduser().resolve()
                 self.tenant_id = "hermes-" + digest(str(root))[:24]
                 self.user_id = str(kwargs.get("user_id") or "primary")
-                self.runtime = LearningRuntime(SqliteEngine(root / "mnemosyne"))
+                self.runtime = build_learning_runtime(SqliteEngine(root / "mnemosyne"))
             self.session_id = session_id
             self._writable = kwargs.get("agent_context", "primary") == "primary"
 
@@ -111,7 +113,8 @@ class HermesAdapter:
         events.reverse()
         with self._lock:
             receipt = self._pending.pop(session, None)
-            return self.runtime.observe_turn(
+            return observe_completed_turn(
+                self.runtime,
                 self.tenant_id,
                 self.user_id,
                 session,
@@ -127,8 +130,8 @@ class HermesAdapter:
 
     def on_session_end(self, messages):
         with self._lock:
-            result = self.runtime.end_session(self.tenant_id, self.session_id)
-            self.runtime.consolidate(self.tenant_id)
+            result = end_learning_session(self.runtime, self.tenant_id,
+                                          self.user_id, self.session_id)
             self._pending.pop(self.session_id, None)
             return result
 

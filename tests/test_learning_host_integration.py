@@ -149,7 +149,7 @@ def test_legacy_migration_is_scoped_idempotent_and_unrewarded():
             Trajectory(tenant, "u", "s", "legacy task", [], "success", 1, "v1")
         )
     runtime = LearningRuntime(engine)
-    assert migrate_legacy_learning(runtime, old, "t")["archived"] == 1
+    assert migrate_legacy_learning(runtime, old, "t")["archived"] == 0
     assert migrate_legacy_learning(runtime, old, "t")["archived"] == 0
     state = runtime.writer.read("t")
     assert len(state["episodes"]) == 1

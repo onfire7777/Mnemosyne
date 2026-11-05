@@ -1,7 +1,7 @@
 """Metric primitives for the §33 evaluation harness.
 
-Pure functions, no Mnemosyne imports — everything here operates on the parsed
-CLI output. Implements exactly the measurement set named in blueprint §33 / §16:
+Pure functions over parsed CLI output, sharing the runtime's numerical Wilson
+kernel. Implements exactly the measurement set named in blueprint §33 / §16:
 
   * recall@k, nDCG@k                          (FR-3 retrieval quality)
   * P50/P95/P99 latency                       (§16 fast-path SLO)
@@ -21,6 +21,8 @@ import math
 import random
 from dataclasses import dataclass
 from typing import Iterable, Mapping, Sequence
+
+from mnemosyne.calibration import wilson_bounds
 
 
 # --------------------------------------------------------------------------- #
@@ -215,11 +217,8 @@ def wilson_interval(successes: int, total: int, z: float = 1.96) -> Interval:
     if total == 0:
         return Interval(float("nan"), float("nan"), float("nan"), "wilson")
     p = successes / total
-    z2 = z * z
-    denom = 1 + z2 / total
-    center = (p + z2 / (2 * total)) / denom
-    margin = (z * math.sqrt((p * (1 - p) + z2 / (4 * total)) / total)) / denom
-    return Interval(point=p, low=max(0.0, center - margin), high=min(1.0, center + margin), method="wilson")
+    low, high = wilson_bounds(successes, total, z)
+    return Interval(point=p, low=low, high=high, method="wilson")
 
 
 def bootstrap_mean_interval(

@@ -367,17 +367,41 @@ def test_serial_parallel_results_are_byte_identical(monkeypatch: pytest.MonkeyPa
 def test_plane_hits_share_the_common_budget_gate(monkeypatch: pytest.MonkeyPatch) -> None:
     engine = _engine()
     _install_working(monkeypatch, engine, [_working_item()])
-    candidates: list[str] = []
+    candidates: set[tuple[str, str]] = set()
+    offered_budgets: list[int] = []
 
     def recording_fit_budget(hits: list[object], budget: int) -> tuple[list[object], int]:
-        candidates.extend(hit.id for hit in hits)
+        candidates.update((hit.kind, hit.id) for hit in hits)
+        offered_budgets.append(budget)
         return [], 0
 
     monkeypatch.setattr(LocalMemoryEngine, "_fit_budget", staticmethod(recording_fit_budget))
     result = engine.retrieve("Helios release review", TENANT, filt=_filter(), record_access=False)
 
-    assert candidates.count("shared-id") == 2
-    assert not any(hit.metadata.get("memory_plane") for hit in result.hits)
+    # Priority reservation and packing may retry a hit against remaining tokens.
+    # Both planes must still pass through the same rejecting budget gate.
+    assert {(kind, identity) for kind, identity in candidates if identity == "shared-id"} == {
+        ("working", "shared-id"), ("intention", "shared-id"),
+    }
+    assert offered_budgets and all(0 <= budget <= result.token_budget for budget in offered_budgets)
+    assert result.hits == []
+    assert result.used_tokens == 0
+
+
+@pytest.mark.parametrize("budget", [1, 4, 16, 64])
+def test_memory_planes_remain_within_total_token_budget(monkeypatch: pytest.MonkeyPatch, budget: int) -> None:
+    from mnemosyne.text import approx_tokens
+
+    engine = _engine()
+    _install_working(monkeypatch, engine, [_working_item()])
+    engine.policy.token_budget = budget
+    result = engine.retrieve("Helios release review", TENANT, filt=_filter(), record_access=False)
+
+    assert result.used_tokens == sum(approx_tokens(hit.text) for hit in result.hits)
+    assert result.used_tokens <= result.token_budget == budget
+    assert len({(hit.kind, hit.id) for hit in result.hits}) == len(result.hits)
+    if budget == 64:
+        assert {hit.kind for hit in result.hits if hit.id == "shared-id"} == {"working", "intention"}
 
 
 def test_plane_reads_are_non_mutating(monkeypatch: pytest.MonkeyPatch) -> None:
