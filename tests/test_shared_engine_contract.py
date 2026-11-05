@@ -3892,7 +3892,7 @@ def test_shared_engine_contract_memory_tools_profile_graph_learning_facades(
         role="operator",
         source_trust_tier=0,
     )
-    lesson_lookup = tools.lesson_search("alias drift", tenant_id=tenant, status="active")
+    lesson_lookup = tools.lesson_search("alias drift", tenant_id=tenant, status="candidate")
     procedure_lookup = tools.procedure_search("alias-drift", tenant_id=tenant)
     validated = tools.procedure_validate(
         procedure["id"],
@@ -3968,13 +3968,16 @@ def test_shared_engine_contract_memory_tools_profile_graph_learning_facades(
     assert procedure["signature"]["failure_signature"] == lesson["failure_signature"]
     assert alias_lesson["failure_signature"].endswith("alias-drift")
     assert alias_procedure["signature"]["failure_signature"] == alias_lesson["failure_signature"]
-    assert promoted_lesson["promoted"] is True
+    assert promoted_lesson["promoted"] is False
+    assert promoted_lesson["failed_cases"] == ["outcome_grounded_sources_required"]
     assert promoted_lesson["security"]["allowed"] is True
     assert lesson_lookup["lessons"][0]["id"] == alias_lesson["id"]
     assert procedure_lookup["procedures"][0]["id"] == alias_procedure["id"]
-    assert validated["status"] == "validated"
-    assert promoted["status"] == "promoted"
-    assert rolled_back["status"] == "rolled_back"
+    assert validated["status"] == "candidate"
+    assert validated["promoted"] is False
+    assert promoted["status"] == "candidate"
+    assert promoted["promoted"] is False
+    assert rolled_back["status"] == "retired"
     assert outcome["outcome"] == "failure"
     assert replay["counterfactual_replay_score"] > 0
 
@@ -4054,6 +4057,17 @@ def test_shared_engine_contract_memory_tools_parametric_facades(
         role="operator",
         source_trust_tier=0,
     )
+    # Test the parametric transport with explicit operator inputs; a reported
+    # failure and unrelated source text do not validate the induced candidates.
+    from mnemosyne.learning import Lesson, Procedure
+
+    curated_lesson = Lesson(tenant, "corrective", "operator-transport",
+                            "Operator-authored adapter input.", status="active", origin="curated")
+    curated_procedure = Procedure(tenant, "checklist", "operator-transport",
+                                  "Run the protected adapter checks.", {},
+                                  status="validated", origin="curated")
+    tools.learning.lessons[curated_lesson.id] = curated_lesson
+    tools.learning.procedures[curated_procedure.id] = curated_procedure
     artifact = tools.parametric_propose(tenant_id=tenant, role="operator", source_trust_tier=0)
     evaluated = tools.parametric_evaluate(
         artifact_uri=artifact["artifact_uri"],
@@ -4071,10 +4085,11 @@ def test_shared_engine_contract_memory_tools_parametric_facades(
 
     assert attribution["trajectory_id"] == trajectory["id"]
     assert procedure["signature"]["failure_signature"] == lesson["failure_signature"]
-    assert promoted_lesson["promoted"] is True
-    assert validated_procedure["status"] == "validated"
-    assert lesson["id"] in artifact["source_ids"]
-    assert procedure["id"] in artifact["source_ids"]
+    assert promoted_lesson["promoted"] is False
+    assert promoted_lesson["failed_cases"] == ["outcome_grounded_sources_required"]
+    assert validated_procedure["status"] == "candidate"
+    assert validated_procedure["promoted"] is False
+    assert set(artifact["source_ids"]) == {curated_lesson.id, curated_procedure.id}
     assert artifact["artifact_uri"].startswith("local-parametric://")
     assert artifact["security"]["allowed"] is True
     assert evaluated["promoted"] is True

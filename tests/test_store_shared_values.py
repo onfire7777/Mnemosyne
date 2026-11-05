@@ -11,9 +11,10 @@ from mnemosyne.models import Assertion, Evidence, Relation
 
 
 def _legacy_payload(engine: LocalMemoryEngine) -> str:
-    """The store text as _persist wrote it before shared values: every row via to_dict()."""
+    """Current native schema with the original, unshared row.to_dict() encoding."""
     data = {
         "policy": engine.policy.to_dict(),
+        "learning_state": engine._learning_data,
         "branches": engine.branches,
         "evidence": [item.to_dict() for item in engine.evidence.values()],
         "assertions": [item.to_dict() for item in engine.assertions.values()],

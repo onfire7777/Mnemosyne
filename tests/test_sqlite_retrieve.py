@@ -49,7 +49,7 @@ MOMENT = parse_dt("2026-01-01T00:00:00.250000Z")
 # --------------------------------------------------------------------------- #
 # Seeding helpers (byte-identical inputs into both engines).
 # --------------------------------------------------------------------------- #
-def _seed_basic(engine: Any, *, tenant: str = TENANT, user: str = USER) -> list[str]:
+def _seed_basic(engine: Any, *, tenant: str = TENANT, user: str = USER, moment: Any = None) -> list[str]:
     """A small mixed store: evidence + one active assertion citing two of them."""
     cids = [
         engine.append_evidence(
@@ -61,6 +61,7 @@ def _seed_basic(engine: Any, *, tenant: str = TENANT, user: str = USER) -> list[
                 content=f"memory evidence about vector graph tenant branch item {i}",
                 trust_tier=0,
                 access_policy={"tenant": tenant},
+                **({"created_at": moment} if moment is not None else {}),
             )
         )
         for i in range(6)
@@ -78,6 +79,7 @@ def _seed_basic(engine: Any, *, tenant: str = TENANT, user: str = USER) -> list[
             status="active",
             trust_tier=0,
             access_policy={"tenant": tenant},
+            **({"valid_from": moment, "transaction_time": moment} if moment is not None else {}),
         )
     )
     return cids
@@ -267,9 +269,11 @@ def _signature(result: RetrievalResult) -> dict[str, Any]:
 
 @pytest.mark.parametrize("deep", [False, True])
 def test_retrieve_explain_parity_vs_local(deep: bool) -> None:
-    sq, lo = _fresh_pair(_seed_basic)
-    rs = sq.retrieve("vector graph memory", tenant_id=TENANT, deep=deep)
-    rl = lo.retrieve("vector graph memory", tenant_id=TENANT, deep=deep)
+    # Salience ages continuously: exact score parity needs identical creation
+    # timestamps and an identical evaluation instant, regardless of CPU load.
+    sq, lo = _fresh_pair(lambda engine: _seed_basic(engine, moment=T_WHOLE))
+    rs = sq.retrieve("vector graph memory", tenant_id=TENANT, deep=deep, filt={"evaluated_at": MOMENT})
+    rl = lo.retrieve("vector graph memory", tenant_id=TENANT, deep=deep, filt={"evaluated_at": MOMENT})
     assert _signature(rs) == _signature(rl)
     # The sanctioned divergence is present and is ONLY the backend names.
     assert rs.explain["adapters"]["lexical_backend"] == "sqlite-fts5"
@@ -278,11 +282,11 @@ def test_retrieve_explain_parity_vs_local(deep: bool) -> None:
 
 
 def test_deep_search_equals_retrieve_deep() -> None:
-    sq, lo = _fresh_pair(_seed_basic)
+    sq, lo = _fresh_pair(lambda engine: _seed_basic(engine, moment=T_WHOLE))
     # deep_search must equal retrieve(deep=True) structurally vs Local; use a
     # fresh pair per call because retrieve() writes access marks on read.
-    ds = sq.deep_search("vector graph memory", tenant_id=TENANT)
-    dl = lo.deep_search("vector graph memory", tenant_id=TENANT)
+    ds = sq.deep_search("vector graph memory", tenant_id=TENANT, filt={"evaluated_at": MOMENT})
+    dl = lo.deep_search("vector graph memory", tenant_id=TENANT, filt={"evaluated_at": MOMENT})
     assert _signature(ds) == _signature(dl)
 
 
