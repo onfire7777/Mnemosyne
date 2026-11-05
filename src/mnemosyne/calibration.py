@@ -8,6 +8,22 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 
+def wilson_bounds(successes: float, total: float, z: float = 1.96) -> tuple[float, float]:
+    """Return Wilson bounds for a positive number of binomial observations.
+
+    Callers own the meaning of an empty sample. Runtime learning uses an
+    uninformative interval, while evaluation reports an undefined measurement.
+    """
+    proportion = successes / total
+    z_squared = z * z
+    denominator = 1 + z_squared / total
+    center = (proportion + z_squared / (2 * total)) / denominator
+    margin = z * math.sqrt(
+        (proportion * (1 - proportion) + z_squared / (4 * total)) / total
+    ) / denominator
+    return max(0.0, center - margin), min(1.0, center + margin)
+
+
 @dataclass(slots=True)
 class CalibrationSet:
     tenant_id: str

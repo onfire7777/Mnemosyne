@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from copy import deepcopy
 
 from mnemosyne.gate import Candidate, PromotionGate, RegressionCase
-from mnemosyne.learning import LocalCritic
+from mnemosyne.learning import LocalCritic, Procedure, Trajectory
 from mnemosyne.security import sanitize_retrieved_text
 from mnemosyne.skills import effects_of
 from .receipts import digest
@@ -101,10 +101,17 @@ def expected_steps(episode: dict) -> list[list[str]]:
 
 
 def observed_steps(episode: dict) -> list[str]:
+    """Preserve nonblank external tool names exactly, in observed order.
+
+    Names are executable identifiers: never stringify arbitrary values or trim
+    accepted strings. Missing source means host-recorded, as elsewhere in capture.
+    Verifier pseudo-events and model-authored traces are not execution steps.
+    """
     return [
         event["name"]
         for event in episode.get("tool_events", [])
         if isinstance(event.get("name"), str)
+        and event["name"].strip()
         and event["name"] != "benchmark_verifier"
         and event.get("source") not in EXCLUDED_SOURCES
     ]
@@ -318,10 +325,11 @@ def register_import(runtime, tenant: str, candidate: dict) -> dict:
     )
     snapshot = runtime.writer.read(tenant)
     if identity in snapshot["artifacts"]:
+        runtime._sync_library_revision_states(tenant)
         return snapshot["artifacts"][identity]
     timestamp = datetime.now(UTC)
     episode_id = "import-" + identity
-    episode = {
+    episode = Trajectory.native(**{
         "id": episode_id,
         "tenant_id": tenant,
         "user_id": user,
@@ -338,8 +346,8 @@ def register_import(runtime, tenant: str, candidate: dict) -> dict:
         "rpe": None,
         "prediction": 0.5,
         "created_at": timestamp.isoformat(),
-    }
-    artifact = {
+    }).to_record()
+    artifact = Procedure.native(**{
         "id": identity,
         "kind": "skill",
         "origin": "imported",
@@ -373,7 +381,7 @@ def register_import(runtime, tenant: str, candidate: dict) -> dict:
         "created_at": timestamp.isoformat(),
         "revalidation_step": 0,
         "next_revalidation_at": (timestamp + timedelta(days=1)).isoformat(),
-    }
+    }).to_record()
     valid_identity = (
         origin.get("tenant_id") == tenant
         and bool(user)
@@ -393,7 +401,9 @@ def register_import(runtime, tenant: str, candidate: dict) -> dict:
                 state["policy"].get("pending_imports", {}).pop(identity, None)
             return state["artifacts"][identity]
 
-        return runtime.writer.apply(tenant, "register_import", admit)
+        result = runtime.writer.apply(tenant, "register_import", admit)
+        runtime._sync_library_revision_states(tenant)
+        return result
     pending = {
         "id": identity,
         "source_skill_id": candidate["id"],

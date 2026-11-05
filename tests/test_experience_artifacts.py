@@ -481,9 +481,10 @@ def test_schema_probation_is_five_outcomes_and_standalone_is_twelve():
         id="fitted",
         state="probation",
         approved=True,
+        gate_passed=True,
         schema_ref={"id": "schema", "revision": 1},
     )
-    standalone = artifact(id="standalone", state="probation", approved=True)
+    standalone = artifact(id="standalone", state="probation", approved=True, gate_passed=True)
     state = {
         "artifacts": {"fitted": fitted, "standalone": standalone},
         "stats": {},
@@ -496,6 +497,8 @@ def test_schema_probation_is_five_outcomes_and_standalone_is_twelve():
             stat_key(row["kind"], row["id"], row["revision"], row["task_class"])
         ] = {
             **Posterior(alpha=6, beta=1, n=5).to_dict(),
+            "verified_n": 5,
+            "verified_successes": 5,
             "control_successes": 0,
             "control_n": 8,
         }

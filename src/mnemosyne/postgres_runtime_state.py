@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from typing import Any
+from contextlib import nullcontext
 
 from mnemosyne.gate import RegressionCase
-from mnemosyne.learning import FailureAttribution, LearningSystem, Lesson, Procedure, Trajectory
+from mnemosyne.learning import LearningSystem, Lesson, Procedure, Trajectory
 from mnemosyne.observability import MetricsRegistry
 from mnemosyne.postgres_engine import (
     _bytes_list_to_cids,
@@ -213,24 +214,31 @@ class PostgresRuntimeState:
         )
         self._mirror_user_model(entries, latent_profiles)
 
+    def _bind_learning(self, learning: LearningSystem) -> None:
+        # The supplied facade may have been constructed before the backend was
+        # selected. PostgreSQL pointers must always refer to PostgreSQL records.
+        if getattr(learning.engine, "dsn", None) != self.dsn:
+            native = getattr(learning.engine, "_learning_data", {})
+            if (getattr(learning.engine, "evidence", {})
+                    or any(row.get("status") not in {"legacy", "erased"}
+                           for state in native.values() for row in state["episodes"].values())
+                    or any(row.get("origin") != "legacy"
+                           for state in native.values() for row in state["artifacts"].values())
+                    or getattr(learning.engine, "root_dir", None)
+                    or getattr(learning.engine, "dsn", None)):
+                raise ValueError("native learning and evidence must be saved through their owning engine")
+            from mnemosyne.postgres_engine import PostgresEngine
+            learning.engine = PostgresEngine(self.dsn, require_safe_role=self.require_safe_role)
+            learning._baselines = {}
+
     def load_learning(self, learning: LearningSystem) -> LearningSystem:
+        self._bind_learning(learning)
         payload = self._load_payload("learning", None)
-        if payload is None:
-            return self._load_learning_from_tables(learning)
-        if "engine_tenants" in payload:
-            learning.load_native(payload["engine_tenants"])
-            return learning
-        learning.trajectories = {
-            item.id: item for item in (Trajectory.from_dict(row) for row in payload.get("trajectories", []))
-        }
-        learning.attributions = {
-            item.trajectory_id: item
-            for item in (FailureAttribution.from_dict(row) for row in payload.get("attributions", []))
-        }
-        learning.lessons = {item.id: item for item in (Lesson.from_dict(row) for row in payload.get("lessons", []))}
-        learning.procedures = {
-            item.id: item for item in (Procedure.from_dict(row) for row in payload.get("procedures", []))
-        }
+        if payload is not None and "engine_tenants" not in payload:
+            learning.import_legacy(payload, [self.tenant_id])
+        self._import_learning_tables(learning.engine)
+        learning.load_native([self.tenant_id])
+        self._save_payload("learning", {"engine_tenants": [self.tenant_id]})
         return learning
 
     def migrate_learning(self, runtime, tenant_id: str) -> dict[str, int]:
@@ -239,8 +247,24 @@ class PostgresRuntimeState:
         return migrate_legacy_learning(runtime, legacy, tenant_id)
 
     def save_learning(self, learning: LearningSystem) -> None:
-        tenants = learning.persist_native()
+        self._bind_learning(learning)
+        tenants = learning.persist_native([self.tenant_id])
         self._save_payload("learning", {"engine_tenants": [tenant for tenant in tenants if tenant == self.tenant_id]})
+
+    def _import_learning_tables(self, engine) -> None:
+        # Hold legacy row locks until the native transaction commits and the
+        # imported originals are removed. A concurrent legacy update therefore
+        # cannot be silently deleted after our snapshot was read.
+        with self.connect() as conn:
+            legacy = self._load_learning_from_tables(LearningSystem(engine), connection=conn)
+            imported_ids = {"trajectories": list(legacy.trajectories),
+                            "lessons": list(legacy.lessons), "procedures": list(legacy.procedures)}
+            legacy.persist_native([self.tenant_id])
+            with conn.cursor() as cur:
+                self._set_tenant(cur)
+                for table, identifiers in imported_ids.items():
+                    for key in identifiers:
+                        cur.execute(f"DELETE FROM {table} WHERE tenant_id = %s AND id = %s", (self.db_tenant_id, key))
 
     def load_queue(self) -> InProcessQueue:
         return InProcessQueue.from_dict(self._load_payload("queue", _DEFAULT_RUNTIME_PAYLOAD["queue"]))
@@ -334,11 +358,11 @@ class PostgresRuntimeState:
                     )
         return model
 
-    def _load_learning_from_tables(self, learning: LearningSystem) -> LearningSystem:
-        with self.connect() as conn:
+    def _load_learning_from_tables(self, learning: LearningSystem, *, connection=None) -> LearningSystem:
+        with (nullcontext(connection) if connection is not None else self.connect()) as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur)
-                cur.execute("SELECT * FROM trajectories WHERE tenant_id = %s", (self.db_tenant_id,))
+                cur.execute("SELECT * FROM trajectories WHERE tenant_id = %s FOR UPDATE", (self.db_tenant_id,))
                 learning.trajectories = {
                     str(row["id"]): Trajectory(
                         id=str(row["id"]),
@@ -354,7 +378,7 @@ class PostgresRuntimeState:
                     )
                     for row in cur.fetchall()
                 }
-                cur.execute("SELECT * FROM lessons WHERE tenant_id = %s", (self.db_tenant_id,))
+                cur.execute("SELECT * FROM lessons WHERE tenant_id = %s FOR UPDATE", (self.db_tenant_id,))
                 learning.lessons = {
                     str(row["id"]): Lesson(
                         id=str(row["id"]),
@@ -367,7 +391,7 @@ class PostgresRuntimeState:
                     )
                     for row in cur.fetchall()
                 }
-                cur.execute("SELECT * FROM procedures WHERE tenant_id = %s", (self.db_tenant_id,))
+                cur.execute("SELECT * FROM procedures WHERE tenant_id = %s FOR UPDATE", (self.db_tenant_id,))
                 learning.procedures = {
                     str(row["id"]): Procedure(
                         id=str(row["id"]),
@@ -478,82 +502,6 @@ class PostgresRuntimeState:
                         ),
                     )
 
-    def _mirror_learning(
-        self,
-        trajectories: list[Trajectory],
-        lessons: list[Lesson],
-        procedures: list[Procedure],
-    ) -> None:
-        with self.connect() as conn:
-            with conn.cursor() as cur:
-                self._set_tenant(cur)
-                cur.execute("DELETE FROM trajectories WHERE tenant_id = %s", (self.db_tenant_id,))
-                for item in trajectories:
-                    cur.execute(
-                        """
-                        INSERT INTO trajectories (
-                          id, tenant_id, user_id, session_id, task, steps,
-                          outcome, reward, memory_version, created_at
-                        )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        """,
-                        (
-                            item.id,
-                            self.db_tenant_id,
-                            _stable_uuid("user", item.user_id),
-                            _stable_uuid("session", item.session_id),
-                            item.task,
-                            self._jsonb(item.steps),
-                            item.outcome,
-                            item.reward,
-                            item.memory_version.encode("utf-8"),
-                            item.created_at,
-                        ),
-                    )
-                cur.execute("DELETE FROM lessons WHERE tenant_id = %s", (self.db_tenant_id,))
-                for item in lessons:
-                    cur.execute(
-                        """
-                        INSERT INTO lessons (
-                          id, tenant_id, lesson_type, failure_signature, content,
-                          votes, status, embedding
-                        )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s::vector)
-                        """,
-                        (
-                            item.id,
-                            self.db_tenant_id,
-                            item.lesson_type,
-                            item.failure_signature,
-                            item.content,
-                            item.votes,
-                            item.status,
-                            _vector_literal(self.embedding.embed(item.content)),
-                        ),
-                    )
-                cur.execute("DELETE FROM procedures WHERE tenant_id = %s", (self.db_tenant_id,))
-                for item in procedures:
-                    cur.execute(
-                        """
-                        INSERT INTO procedures (
-                          id, tenant_id, kind, name, body, signature, embedding,
-                          status, success_rate, n_trials
-                        )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s::vector, %s, %s, %s)
-                        """,
-                        (
-                            item.id,
-                            self.db_tenant_id,
-                            item.kind,
-                            item.name,
-                            item.body,
-                            self._jsonb(item.signature),
-                            _vector_literal(self.embedding.embed(f"{item.name}\n{item.body}")),
-                            item.status,
-                            item.success_rate,
-                            item.n_trials,
-                        ),
-                    )
 
 
 def _preference_category(entry: UserModelEntry) -> str:

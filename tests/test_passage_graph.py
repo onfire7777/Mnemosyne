@@ -153,9 +153,9 @@ def test_graph_reaches_the_second_hop_passage(tmp_path) -> None:
     assert report["configured"] is True
     assert report["passages"] == len(PASSAGES)
     assert report["openie_failures"] == 0
-    question = "When did Lothair II's mother pass away?"
+    question = "When did Lothair II's mother die?"
     ranked = _ranked(engine, question)
-    # The answer passage never names Lothair II - only the mother fact links the two.
+    # The answer names neither Lothair II nor "die"; only the mother fact links them.
     assert ranked[:2] == ["Lothair II", "Ermengarde of Tours"]
     lexical_only = LocalMemoryEngine()
     for text in PASSAGES:
@@ -163,12 +163,15 @@ def test_graph_reaches_the_second_hop_passage(tmp_path) -> None:
             Evidence(tenant_id=TENANT, user_id="u", actor="user", source_type="document",
                      content=text, access_policy={"tenant": TENANT})
         )
-    assert _ranked(lexical_only, question).index("Ermengarde of Tours") > 1
+    assert "Ermengarde of Tours" not in _ranked(lexical_only, question)[:2]
     result = engine.retrieve(
-        "When did Lothair II's mother pass away?", tenant_id=TENANT,
+        question, tenant_id=TENANT,
         filt={"query_mode": "passages", "role": "reader"}, record_access=False,
     )
     assert result.explain["passage_graph"]["route"] == "ppr"
+    assert result.explain["passage_graph"]["linked_facts"] == [
+        ["lothair ii", "mother", "ermengarde of tours"],
+    ]
     assert all(hit.kind == "evidence" for hit in result.hits)
     # Indexing again is free: every passage is already extracted and embedded.
     calls = chat.openie_calls

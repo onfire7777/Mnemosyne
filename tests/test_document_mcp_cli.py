@@ -83,11 +83,19 @@ def test_document_tools_in_tool_spec():
         "document_replace",
         "document_append",
         "document_get",
+        "document_reconcile_branch",
     }
     assert doc_tools["document_create"]["arguments"] == ["tenant_id", "user_id", "document_id", "content"]
     assert doc_tools["document_replace"]["arguments"] == ["tenant_id", "user_id", "document_id", "content", "expected_revision"]
     assert doc_tools["document_append"]["arguments"] == ["tenant_id", "user_id", "document_id", "suffix", "expected_revision"]
     assert doc_tools["document_get"]["arguments"] == ["tenant_id", "user_id", "document_id"]
+    assert doc_tools["document_reconcile_branch"]["arguments"] == [
+        "tenant_id", "user_id", "source_branch", "target_branch",
+    ]
+    reconcile_schema = _to_mcp_tool_spec(doc_tools["document_reconcile_branch"])["inputSchema"]
+    assert {"tenant_id", "user_id", "source_branch"} <= set(reconcile_schema["required"])
+    assert "document_id" not in reconcile_schema["required"]
+    assert reconcile_schema["additionalProperties"] is False
 
 
 def test_document_tool_mcp_schemas():

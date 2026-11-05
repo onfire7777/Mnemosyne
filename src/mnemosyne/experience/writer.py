@@ -16,7 +16,13 @@ class LearningWriter:
         self.store = LearningStore(engine)
 
     def read(self, tenant: str) -> dict:
-        return self.store.read(tenant)
+        state = self.store.read(tenant)
+        if "legacy_learning" in state["policy"] or any("legacy_trajectory" in row for row in state["episodes"].values()):
+            from mnemosyne.learning import merge_legacy_learning
+            self.apply(tenant, "legacy_migration",
+                       lambda current: merge_legacy_learning(current, self.store.engine, tenant))
+            state = self.store.read(tenant)
+        return state
 
     def apply(
         self,
@@ -27,6 +33,8 @@ class LearningWriter:
         expected_revision: int | None = None,
         erasure_terms: list[str] | None = None,
     ):
+        if operation != "legacy_migration":
+            self.read(tenant)
         error = None
         with self.store.transaction(tenant) as (state, handle):
             before = copy.deepcopy(state)
@@ -104,8 +112,10 @@ class LearningWriter:
             "learning.observe",
             "learning.erasure",
             "learning.defect",
+            "learning.legacy_archive",
+            "learning.legacy_migration",
         }:
-            raise ValueError("capture, erasure and defect records are immutable")
+            raise ValueError("capture, erasure, migration and defect records are immutable")
 
         def revert(state):
             restored_candidates = []
@@ -131,6 +141,8 @@ class LearningWriter:
                         gate_passed=False,
                     )
                     candidate.pop("gate_evidence", None)
+                    from .revisions import inherit_library_lineage
+                    inherit_library_lineage(candidate, change["before"])
                     state[collection][candidate["id"]] = candidate
                     restored_candidates.append(candidate["id"])
                 elif change["before"] is None:

@@ -316,9 +316,37 @@ class ParametricTier:
         self.rails = rails or ParametricInvariantRails()
         self.required_rails = self.rails.labels()
 
+    @staticmethod
+    def _eligible_source(item: Lesson | Procedure, tenant_id: str, statuses: set[str]) -> bool:
+        """Export curated inputs or admitted native content, never legacy claims."""
+        if item.tenant_id != tenant_id or item.status not in statuses:
+            return False
+        native = getattr(item, "_native", {})
+        record = native or item.to_record()
+        if (record.get("tenant_id") != tenant_id or record.get("erased")
+                or record.get("state") in {"retired", "archived", "rejected"}):
+            return False
+        content = item.content if isinstance(item, Lesson) else item.body
+        if content != record.get("content"):
+            return False
+        origin = record.get("reported_origin", record.get("origin"))
+        if origin in {"curated", "manual"} and item.origin == origin:
+            # Explicit operator-authored transport inputs remain separate from
+            # automatic learning and still pass the parametric invariant rails.
+            return True
+        evidence = record.get("gate_evidence", {})
+        return bool(
+            native and record.get("origin") != "legacy" and record.get("state") == "active"
+            and record.get("gate_passed") and evidence.get("passed")
+            and record.get("source_episode_ids") and record.get("source_cids")
+            and item.to_dict() == type(item).from_record(record).to_dict()
+        )
+
     def propose_from_lessons(self, tenant_id: str, lessons: list[Lesson], procedures: list[Procedure]) -> ParametricArtifact:
-        active_lessons = [lesson.id for lesson in lessons if lesson.tenant_id == tenant_id and lesson.status == "active"]
-        active_procedures = [procedure.id for procedure in procedures if procedure.tenant_id == tenant_id and procedure.status in {"active", "validated"}]
+        lessons = [lesson for lesson in lessons if self._eligible_source(lesson, tenant_id, {"active"})]
+        procedures = [procedure for procedure in procedures if self._eligible_source(procedure, tenant_id, {"active", "validated"})]
+        active_lessons = [lesson.id for lesson in lessons]
+        active_procedures = [procedure.id for procedure in procedures]
         artifact = ParametricArtifact(
             tenant_id=tenant_id,
             source_ids=active_lessons + active_procedures,

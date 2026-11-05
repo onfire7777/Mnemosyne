@@ -7733,8 +7733,11 @@ class PostgresEngine:
                     (db_tenant_id,),
                 )
                 documents = [copy.deepcopy(row["record"]) for row in cur.fetchall()]
-                self._ensure_observations_schema(cur)
-                self._ensure_knowledge_pages_schema(cur)
+                # Publication reads already hold source locks and must remain
+                # read-only; schema readiness belongs before entering that guard.
+                if self._active_mental_model_connection(tenant_id) is None:
+                    self._ensure_observations_schema(cur)
+                    self._ensure_knowledge_pages_schema(cur)
                 cur.execute(
                     """
                     SELECT o.*, t.name AS tenant_name

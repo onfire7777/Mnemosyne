@@ -234,3 +234,22 @@ def test_startup_safe_role_probe_does_not_pin_old_snapshot(backend):
     with engine.mental_model_guard("t"):
         assert engine.get_mental_model_record("t", "m")["version"] == 1
     assert connections[0].rollbacks >= 1
+
+
+def test_missing_projection_schema_during_publication_fails_closed(backend, monkeypatch):
+    engine, connections = backend
+    original = Cursor.execute
+
+    def missing_observations(cursor, sql, params=None):
+        if "FROM observations o" in " ".join(sql.split()):
+            raise RuntimeError("relation observations does not exist")
+        return original(cursor, sql, params)
+
+    monkeypatch.setattr(Cursor, "execute", missing_observations)
+    with pytest.raises(RuntimeError, match="relation observations"):
+        with engine.mental_model_guard("t"):
+            engine.export_tenant("t")
+    assert engine._active_mental_model_connection("t") is None
+    assert connections[0].rollbacks == 2
+    assert not any(sql.startswith(("CREATE", "ALTER TABLE", "UPDATE mental_models"))
+                   for sql, _ in connections[0].statements)

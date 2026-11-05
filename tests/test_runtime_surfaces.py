@@ -1339,7 +1339,7 @@ def test_memory_tools_direct_profile_graph_learning_facade_methods() -> None:
         role="operator",
         source_trust_tier=0,
     )
-    lesson_lookup = tools.lesson_search("alias drift", tenant_id=TENANT, status="active")
+    lesson_lookup = tools.lesson_search("alias drift", tenant_id=TENANT, status="candidate")
     procedure_lookup = tools.procedure_search("alias-drift", tenant_id=TENANT)
     validated = tools.procedure_validate(
         procedure["id"],
@@ -1375,13 +1375,18 @@ def test_memory_tools_direct_profile_graph_learning_facade_methods() -> None:
     assert procedure["signature"]["failure_signature"] == lesson["failure_signature"]
     assert alias_lesson["failure_signature"].endswith("alias-drift")
     assert alias_procedure["signature"]["failure_signature"] == alias_lesson["failure_signature"]
-    assert promoted_lesson["promoted"] is True
+    # Authority to call the gate does not turn historical failure reports into
+    # outcome-grounded evidence or validate their proposed fixes.
+    assert promoted_lesson["promoted"] is False
+    assert "outcome_grounded_sources_required" in promoted_lesson["failed_cases"]
     assert promoted_lesson["security"]["allowed"] is True
     assert lesson_lookup["lessons"][0]["id"] == alias_lesson["id"]
     assert procedure_lookup["procedures"][0]["id"] == alias_procedure["id"]
-    assert validated["status"] == "validated"
-    assert promoted["status"] == "promoted"
-    assert rolled_back["status"] == "rolled_back"
+    assert validated["status"] == "candidate"
+    assert validated["promoted"] is False
+    assert promoted["status"] == "candidate"
+    assert promoted["promoted"] is False
+    assert rolled_back["status"] == "retired"
     assert outcome["outcome"] == "failure"
     assert replay["counterfactual_replay_score"] > 0
 
@@ -4031,11 +4036,14 @@ def test_mcp_server_persists_parametric_artifacts_and_rolls_back(tmp_path: Path)
     )
     rollback_record = json.loads(artifact_path.read_text(encoding="utf-8"))
 
-    assert set(artifact["source_ids"]) == {lesson["id"], procedure["id"]}
+    assert artifact["source_ids"] == []
+    assert server.tools.learning.lessons[lesson["id"]].status == "candidate"
+    assert server.tools.learning.procedures[procedure["id"]].status == "candidate"
     assert artifact["artifact_uri"].startswith("local-parametric://")
     assert proposal_record["payload"]["phase"] == "proposal"
     assert evaluated["artifact"]["id"] == artifact["id"]
-    assert evaluated["promoted"] is True
+    assert evaluated["promoted"] is False
+    assert evaluated["reason"] == "no validated source lessons or procedures"
     assert rolled_back["status"] == "rolled_back"
     assert rolled_back["rollback_ref"].startswith("rollback-")
     assert rollback_record["payload"]["phase"] == "rolled_back"
@@ -4098,9 +4106,9 @@ def test_mcp_server_parametric_tier_can_use_command_provider(tmp_path: Path) -> 
     calls = json.loads(provider_state.read_text(encoding="utf-8"))["calls"]
 
     assert artifact["adapter_kind"] == "test-time-command-adapter"
-    assert artifact["metrics"]["provider_invoked"] == 1.0
-    assert artifact["metrics"]["source_count"] == 2.0
-    assert proposal_record["payload"]["provider"]["artifact_ref"] == f"provider://{TENANT}/adapter"
+    assert artifact["source_ids"] == []
+    assert "provider_invoked" not in artifact["metrics"]
+    assert "provider" not in proposal_record["payload"]
     assert rolled_back["rollback_ref"] == f"provider-rollback-{artifact['id']}"
     assert rolled_back["metrics"]["provider_rolled_back"] == 1.0
     assert rolled_back["protected_suite"]["source"] == "synthetic"
@@ -4110,7 +4118,7 @@ def test_mcp_server_parametric_tier_can_use_command_provider(tmp_path: Path) -> 
     assert rolled_back["rollback"]["protected_suite_passed"] is False
     assert rollback_record["payload"]["provider"]["rollback_ref"] == f"provider-rollback-{artifact['id']}"
     assert rollback_record["payload"]["protected_suite"]["protected_case_ids"] == ["parametric-protected-0"]
-    assert [call["action"] for call in calls] == ["propose", "rollback"]
+    assert [call["action"] for call in calls] == ["rollback"]
     assert calls[-1]["protected_cases"] == ["parametric-protected-0"]
     assert calls[-1]["protected_suite"]["protected_case_count"] == 1
 
@@ -4722,7 +4730,11 @@ def test_postgres_adapter_uses_sql_retrieval_backends() -> None:
     assert "plainto_tsquery('english'" in source
     assert "embedding <=> %s::vector" in source
     assert "postgres_graph_ppr" in source
-    assert "return []" not in inspect.getsource(PostgresEngine.vector_search)
+    vector_source = inspect.getsource(PostgresEngine.vector_search)
+    assert "FROM assertions" in vector_source
+    assert "ORDER BY embedding <=> %s::vector" in vector_source
+    # Missing tenant context must fail closed before connecting to PostgreSQL.
+    assert PostgresEngine("unused").vector_search("query", 5, {}) == []
     assert "del seeds" not in inspect.getsource(PostgresEngine.graph_ppr)
     assert "FROM relations" in inspect.getsource(PostgresEngine.graph_ppr)
 

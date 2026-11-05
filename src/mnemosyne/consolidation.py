@@ -651,8 +651,12 @@ class ConsolidationWorker:
         self.entity_resolver = entity_resolver or DeterministicEntityResolver()
         self.candidate_extractor = candidate_extractor or DeterministicCandidateExtractor()
         self.summarizer = summarizer or DeterministicEvidenceSummarizer()
-        self.lesson_distiller = lesson_distiller or DeterministicLessonDistiller()
-        self.procedure_inducer = procedure_inducer or DeterministicProcedureInducer()
+        from mnemosyne.experience.integration import configure_learning
+        configure_learning(engine, lesson_distiller=lesson_distiller,
+                           procedure_inducer=procedure_inducer)
+        configuration = getattr(engine, "_learning_configuration", {})
+        self.lesson_distiller = configuration.get("lesson_distiller") or DeterministicLessonDistiller()
+        self.procedure_inducer = configuration.get("procedure_inducer") or DeterministicProcedureInducer()
         self.user_model = user_model
         # §21: minimum wall-clock interval between consolidations of the same
         # (tenant, signature). 0.0 disables throttling (behaviour-preserving
@@ -959,7 +963,7 @@ class ConsolidationWorker:
                     pass_results.append(PassResult(pass_name, "skipped", {"reason": "no_evidence"}))
                 continue
             if pass_name == "lesson_distiller":
-                lesson_result = self._distill_lessons(tenant_id, candidates)
+                lesson_result = self._distill_lessons(tenant_id, candidates, branch=branch)
                 status = "complete" if lesson_result["lessons"] else "skipped"
                 if status == "skipped":
                     skipped.append("lesson_distiller_no_candidates")
@@ -967,7 +971,7 @@ class ConsolidationWorker:
                 pass_results.append(PassResult(pass_name, status, lesson_result))
                 continue
             if pass_name == "skill_inducer":
-                procedure_result = self._induce_procedures(tenant_id, candidates)
+                procedure_result = self._induce_procedures(tenant_id, candidates, branch=branch)
                 status = "complete" if procedure_result["procedures"] else "skipped"
                 if status == "skipped":
                     skipped.append("skill_inducer_no_candidates")
@@ -977,8 +981,7 @@ class ConsolidationWorker:
             if pass_name == "learning_reflect":
                 if branch != "main":
                     raise ValueError("learning consolidation currently requires the main branch")
-                from mnemosyne.experience.runtime import LearningRuntime
-                details = LearningRuntime(self.engine).consolidate(tenant_id)
+                details = self._learning_runtime().consolidate(tenant_id)
                 pass_results.append(PassResult(pass_name, "complete", details))
                 continue
             if pass_name == "forgetter":
@@ -1842,7 +1845,28 @@ class ConsolidationWorker:
             effective["replay_scores"] = merged_replay_scores
         return effective
 
-    def _distill_lessons(self, tenant_id: str, candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    def _learning_runtime(self):
+        from mnemosyne.experience.integration import build_learning_runtime
+        return build_learning_runtime(
+            self.engine, protected_cases=self.gate.cases or None,
+            lesson_distiller=self.lesson_distiller, procedure_inducer=self.procedure_inducer)
+
+    def _legacy_learning_candidates(self, tenant_id: str, candidates: list[dict[str, Any]], *, branch: str = "main") -> list[dict[str, Any]]:
+        """Native-observed evidence has one induction owner: experience sleep."""
+        if branch != "main":
+            return candidates
+        runtime = self._learning_runtime()
+        state = runtime.writer.read(tenant_id)
+        owned_cids = {cid for episode in state["episodes"].values()
+                      if episode.get("status") != "legacy"
+                      for cid in episode.get("source_cids", [])}
+        return [candidate for candidate in candidates
+                if not owned_cids.intersection(candidate.get("source_evidence_cids", []))
+                and candidate.get("episode_id") not in state["episodes"]]
+
+    def _distill_lessons(self, tenant_id: str, candidates: list[dict[str, Any]], *, branch: str = "main") -> dict[str, Any]:
+        if self.learning is not None and candidates:
+            candidates = self._legacy_learning_candidates(tenant_id, candidates, branch=branch)
         if self.learning is None or not candidates:
             return {"lessons": []}
         distilled = self.lesson_distiller.distill(tenant_id, candidates)
@@ -1876,6 +1900,8 @@ class ConsolidationWorker:
             lesson_index.setdefault((tenant_id, signature), lesson)
             lesson_ids.append(lesson.id)
             created += 1
+        if created and hasattr(self.learning, "persist_native"):
+            self.learning.persist_native()
         result = {
             "lessons": lesson_ids,
             "created": created,
@@ -1887,7 +1913,9 @@ class ConsolidationWorker:
             result["proposal_record"] = proposal_record
         return result
 
-    def _induce_procedures(self, tenant_id: str, candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    def _induce_procedures(self, tenant_id: str, candidates: list[dict[str, Any]], *, branch: str = "main") -> dict[str, Any]:
+        if self.learning is not None and candidates:
+            candidates = self._legacy_learning_candidates(tenant_id, candidates, branch=branch)
         if self.learning is None or not candidates:
             return {"procedures": []}
         induced = self.procedure_inducer.induce(tenant_id, candidates)
@@ -1950,6 +1978,8 @@ class ConsolidationWorker:
                 procedure_index.setdefault((tenant_id, signature_key), []).append(procedure)
             procedure_ids.append(procedure.id)
             created += 1
+        if created and hasattr(self.learning, "persist_native"):
+            self.learning.persist_native()
         result = {
             "procedures": procedure_ids,
             "created": created,

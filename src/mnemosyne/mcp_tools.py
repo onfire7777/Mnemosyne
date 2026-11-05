@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import base64
 import json
-import os
 from collections import defaultdict
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -808,6 +807,16 @@ class MemoryTools:
         procedure_inducer: Any | None = None,
         protected_cases: list[RegressionCase] | None = None,
     ):
+        self.learning = learning or LearningSystem(engine)
+        if runtime_state:
+            self.learning = runtime_state.load_learning(self.learning)
+            if self.learning.engine is not engine:
+                # Side-state may resolve an empty caller engine to its durable
+                # checkpoint. Every surface must use that same canonical owner.
+                engine = self.learning.engine
+                for name, component in (("ingestion", ingestion), ("prefetcher", prefetcher)):
+                    if component is not None and getattr(component, "engine", engine) is not engine:
+                        raise ValueError(f"{name} must use the restored learning engine")
         self.engine = engine
         self.skill_store = skill_store or getattr(engine, "_learning_skill_store", None)
         self.lesson_distiller = lesson_distiller
@@ -818,9 +827,6 @@ class MemoryTools:
         self.runtime_state = runtime_state
         self.security = security or SecurityPolicy()
         self.user_model = user_model or (runtime_state.load_user_model() if runtime_state else UserModel())
-        self.learning = learning or LearningSystem(engine)
-        if runtime_state:
-            self.learning = runtime_state.load_learning(self.learning)
         self.parametric = parametric or ParametricTier()
         self.metrics = metrics or (runtime_state.load_metrics() if runtime_state else MetricsRegistry())
         # Resolve lazily and per request: provider disclosure is mutable state,
@@ -830,6 +836,10 @@ class MemoryTools:
         model, state = self.user_model, self.runtime_state
         self.engine._learning_profile_erasure = lambda tenant, cid: MemoryTools._erase_profile_model(model, state, tenant, cid)
         self.engine._learning_tools = weakref.ref(self)
+        from mnemosyne.experience.integration import configure_learning
+        configure_learning(engine, skill_store=self.skill_store, lesson_distiller=lesson_distiller,
+                           procedure_inducer=procedure_inducer, protected_cases=protected_cases,
+                           runtime_state=runtime_state)
 
     @staticmethod
     def _working_time(value: str | datetime, name: str) -> datetime:
@@ -3828,23 +3838,14 @@ class MemoryTools:
         return {"subject": subject, "predicate": predicate, "time": time, "assertions": readable}
 
     def _learning_runtime(self):
-        from mnemosyne.experience.runtime import LearningRuntime
-        if self.skill_store is None:
-            from pathlib import Path
-            configured = os.environ.get("MNEMOSYNE_SKILLS_DB")
-            root = getattr(self.engine, "root_dir", None)
-            store = getattr(self.engine, "store_path", None)
-            path = Path(configured) if configured else (Path(root) / "skills.sqlite" if root is not None else Path(store).parent / "skills.sqlite" if store else None)
-            if path is not None and path.is_file():
-                self.skill_store = self._skills()
+        from mnemosyne.experience.integration import build_learning_runtime
+        runtime = build_learning_runtime(
+            self.engine, skill_store=self.skill_store, lesson_distiller=self.lesson_distiller,
+            procedure_inducer=self.procedure_inducer, protected_cases=self.protected_cases,
+            runtime_state=self.runtime_state)
+        self.skill_store = runtime.skill_store
         if self.skill_store is not None:
-            self.engine._learning_skill_store = self.skill_store
-        runtime = LearningRuntime(self.engine, skill_store=self.skill_store)
-        runtime.lesson_distiller = self.lesson_distiller
-        runtime.procedure_inducer = self.procedure_inducer
-        cases = self.protected_cases if self.protected_cases is not None else (self.runtime_state.load_gate_cases() if self.runtime_state is not None else getattr(self.engine, "_learning_protected_cases", []))
-        runtime.protected_cases = [case for case in cases if case.protected
-                                  and case.origin in {"curated", "genuine"} and case.mode == "active"]
+            self._remember_skills(self.skill_store)
         return runtime
 
     def _learning_access(self, operation: str, role: WriteRole, source_trust_tier: int,
@@ -3939,17 +3940,14 @@ class MemoryTools:
         if tool_events and source_trust_tier > 1:
             raise PermissionError("tool outcomes require an authenticated trusted host")
         runtime = self._learning_runtime()
-        observed = runtime.observe_turn(tenant_id, user_id, session_id,
-            user_text, assistant_text, tool_events, receipt_ids, used_skills, used_lessons)
-        if tool_events:
-            episode = runtime.resolve(tenant_id, observed['episode_id'])
-            resolved = [row for row in runtime.writer.read(tenant_id)['episodes'].values()
-                        if row['status'] == 'resolved']
-            if episode['status'] == 'resolved' and (episode['reward'] < 0 or len(resolved) % 10 == 0):
-                observed['consolidation'] = runtime.consolidate(tenant_id)
-        self._capture_learning_user_feedback(runtime, tenant_id, user_id, session_id,
-            user_text, observed['episode_id'], role, source_trust_tier)
-        return observed
+        from mnemosyne.experience.integration import observe_completed_turn
+        return observe_completed_turn(
+            runtime, tenant_id, user_id, session_id, user_text, assistant_text,
+            tool_events=tool_events, receipt_ids=receipt_ids, used_skills=used_skills,
+            used_lessons=used_lessons,
+            feedback=lambda episode_id: self._capture_learning_user_feedback(
+                runtime, tenant_id, user_id, session_id, user_text, episode_id,
+                role, source_trust_tier))
 
     def record_signal(self, tenant_id: str, user_id: str, session_id: str,
                       kind: str, value: float, episode_id: str | None = None,
@@ -3966,14 +3964,9 @@ class MemoryTools:
                    (receipt_id is not None and receipt_id in row['receipt_ids'])]
         if len(matches) != 1 or matches[0]['user_id'] != user_id or matches[0]['session_id'] != session_id:
             raise PermissionError("signal target belongs to a different learning session")
-        result = runtime.record_signal(tenant_id, episode_id=matches[0]['id'],
-            kind=kind, value=value, evidence=evidence, final=final)
-        if final and result['status'] == 'resolved':
-            resolved = [row for row in runtime.writer.read(tenant_id)['episodes'].values()
-                        if row['status'] == 'resolved']
-            if result['reward'] < 0 or len(resolved) % 10 == 0:
-                runtime.consolidate(tenant_id)
-        return result
+        from mnemosyne.experience.integration import record_completed_signal
+        return record_completed_signal(runtime, tenant_id, user_id,
+            episode_id=matches[0]['id'], kind=kind, value=value, evidence=evidence, final=final)
 
     def end_session(self, tenant_id: str, user_id: str, session_id: str,
                     role: WriteRole = "agent", source_trust_tier: int = 1,
@@ -3981,13 +3974,8 @@ class MemoryTools:
         self._learning_session(tenant_id, user_id, session_id, session_identity)
         self._learning_access("end_session", role, source_trust_tier)
         runtime = self._learning_runtime()
-        matching = [row for row in runtime.writer.read(tenant_id)['episodes'].values()
-                    if row['session_id'] == session_id]
-        if any(row['user_id'] != user_id for row in matching):
-            raise PermissionError("session includes another learning owner")
-        result = runtime.end_session(tenant_id, session_id)
-        result['consolidation'] = runtime.consolidate(tenant_id)
-        return result
+        from mnemosyne.experience.integration import end_learning_session
+        return end_learning_session(runtime, tenant_id, user_id, session_id)
 
     def learning_status(self, tenant_id: str, role: WriteRole = "reader",
                         source_trust_tier: int = 1) -> dict[str, Any]:
@@ -4172,8 +4160,6 @@ class MemoryTools:
         procedure = self.learning.procedures[procedure_id]
         cases = self._learning_runtime().protected_cases
         result = self.learning.validate_procedure(procedure, cases)
-        if not result.promoted:
-            procedure.status = "candidate"
         self._save_learning()
         self.metrics.record_gate(promoted=result.promoted, rolled_back=bool(result.rollback_branch))
         self._save_metrics()
@@ -4199,23 +4185,10 @@ class MemoryTools:
 
     # Skills: complete frameworks (mnemosyne.frameworks) in one file beside the store (mnemosyne.skills).
     def _skills(self) -> Any:
-        from pathlib import Path
+        from mnemosyne.experience.integration import learning_skill_store
 
-        from mnemosyne.skills import SkillStore
-
-        path = str(self.skill_store.path) if self.skill_store is not None else os.environ.get("MNEMOSYNE_SKILLS_DB")
-        if not path:
-            root = getattr(self.engine, "root_dir", None)
-            store = getattr(self.engine, "store_path", None)
-            if root is None and store is None:
-                raise ValueError("skills need a store on disk (sqlite or local backend) or MNEMOSYNE_SKILLS_DB")
-            path = str(Path(root) / "skills.sqlite" if root is not None else Path(store).parent / "skills.sqlite")
-        skills = self.skill_store or SkillStore.at(path)
+        skills = learning_skill_store(self.engine, self.skill_store, create=True)
         self.skill_store = skills
-        self.engine._learning_skill_store = skills
-        adapters = getattr(self.engine, "adapters", None)
-        skills.embedder = getattr(getattr(adapters, "passage_graph", None), "embedder", None) or getattr(
-            adapters, "embedding", None)
         self._remember_skills(skills)
         return skills
 
@@ -4323,8 +4296,15 @@ class MemoryTools:
                         source_trust_tier: int = 1) -> dict[str, Any]:
         self._learning_access("skill_set_state", role, source_trust_tier, administrative=True)
         skills = self._skills()
+        row = skills._skill(skill_id, revision)
+        if skills._learning_managed(row):
+            owner = json.loads(row.get("memory") or "{}")
+            if not owner.get("tenant"):
+                raise ValueError("native-managed skill requires its owning tenant")
+            return self._learning_runtime().set_import_state(
+                owner["tenant"], row["skill_id"], row["revision"], state,
+                approve_effects=approve_effects)
         if approve_effects:
-            row = skills._skill(skill_id, revision)
             skills.approve_effects(skill_id, row["revision"])
         return skills.set_state(skill_id, state, revision)
 
@@ -4355,6 +4335,8 @@ class MemoryTools:
         if owner.get("tenant") != tenant_id or owner.get("user") != user_id:
             self._learning_access("skill_outcome", role, source_trust_tier, administrative=True)
         result = skills.outcome(skill_id, revision, success, evidence)
+        if result.get("recorded") is False:
+            return result
         self.trajectory_log(
             tenant_id, user_id, "skills", task or result["skill_id"],
             [{"skill_id": result["skill_id"], "revision": result["revision"], "evidence": evidence[:2000]}],
@@ -4397,8 +4379,7 @@ class MemoryTools:
             destructive=True,
             target_sink="branch_promotion",
         )
-        procedure = self.learning.procedures[procedure_id]
-        procedure.status = "rolled_back"
+        procedure = self.learning.rollback_procedure(procedure_id)
         self._save_learning()
         self.metrics.record_gate(promoted=False, rolled_back=True)
         self._save_metrics()
@@ -4449,6 +4430,7 @@ class MemoryTools:
             source_trust_tier=source_trust_tier,
             target_sink="safety_rail",
         )
+        self.learning.persist_native([tenant_id])
         artifact = self.parametric.propose_from_lessons(
             tenant_id,
             list(self.learning.lessons.values()),
@@ -4587,6 +4569,8 @@ class MemoryTools:
     def _save_learning(self) -> None:
         if self.runtime_state:
             self.runtime_state.save_learning(self.learning)
+        else:
+            self.learning.persist_native()
 
     def _save_metrics(self) -> None:
         if self.runtime_state:

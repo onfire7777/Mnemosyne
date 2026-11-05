@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from mnemosyne.gate import RegressionCase
-from mnemosyne.learning import FailureAttribution, LearningSystem, Lesson, Procedure, Trajectory
+from mnemosyne.learning import LearningSystem
 from mnemosyne.observability import MetricsRegistry
 from mnemosyne.queue import InProcessQueue
 from mnemosyne.user_model import LatentUserProfile, SupportStrategy, UserMistakeEvent, UserModel, UserModelEntry
@@ -20,36 +20,20 @@ def _support_strategy_threshold(value: Any) -> int:
         return 2
 
 def migrate_legacy_learning(runtime, learning: LearningSystem, tenant_id: str) -> dict[str, int]:
-    """Archive legacy trajectories once without inventing receipts or outcomes.
-
-    Existing lessons and procedures remain available through the compatibility
-    reader. They cannot enter the active runtime without contemporary evidence.
-    """
-    from mnemosyne.experience.receipts import digest
-    candidates = [row for row in learning.trajectories.values() if row.tenant_id == tenant_id]
-    if not candidates:
-        return {"archived": 0}
-
-    def migrate(state):
-        count = 0
-        for row in candidates:
-            key = 'legacy-' + digest([tenant_id, row.id])
-            if key in state['episodes']:
-                continue
-            state['episodes'][key] = {
-                'id': key, 'tenant_id': tenant_id, 'user_id': row.user_id,
-                'session_id': row.session_id, 'task_class': 'legacy',
-                'receipt_ids': [], 'source_cids': [], 'signals': [], 'tool_events': [],
-                'used_skills': [], 'used_lessons': [], 'user_text': row.task,
-                'status': 'legacy', 'created_at': row.created_at.isoformat(),
-                'expires_at': row.created_at.isoformat(), 'prediction': None,
-                'reward': None, 'rpe': None, 'turn_index': 0,
-                'legacy_trajectory': row.to_dict(),
-            }
-            count += 1
-        return {"archived": count}
-    return runtime.writer.apply(tenant_id, 'legacy_migration', migrate)
-
+    """Import compatibility objects into their canonical records exactly once."""
+    before = runtime.writer.read(tenant_id)
+    if learning.engine is runtime.engine:
+        learning.persist_native([tenant_id])
+    else:
+        destination = LearningSystem(runtime.engine)
+        destination.import_legacy({
+            "trajectories": [item.to_dict() for item in learning.trajectories.values()],
+            "attributions": [item.to_dict() for item in learning.attributions.values()],
+            "lessons": [item.to_dict() for item in learning.lessons.values()],
+            "procedures": [item.to_dict() for item in learning.procedures.values()],
+        }, [tenant_id])
+    after = runtime.writer.read(tenant_id)
+    return {"archived": len(after["episodes"].keys() - before["episodes"].keys())}
 
 
 class RuntimeState:
@@ -123,16 +107,27 @@ class RuntimeState:
     def load_learning(self, learning: LearningSystem) -> LearningSystem:
         learning_data = self.data.get("learning", {})
         if "engine_tenants" in learning_data:
+            checkpoint = learning_data.get("engine_path")
+            if checkpoint is not None:
+                from mnemosyne.engine import LocalMemoryEngine
+                path = self.path.with_suffix(self.path.suffix + ".learning.json").resolve()
+                if checkpoint != path.name:
+                    raise ValueError("learning checkpoint must be adjacent to its runtime state")
+                current = getattr(learning.engine, "store_path", None)
+                if current is not None and Path(current).resolve() != path:
+                    raise ValueError("learning checkpoint belongs to another engine")
+                if current is None:
+                    if (not isinstance(learning.engine, LocalMemoryEngine)
+                            or learning.engine.evidence or getattr(learning.engine, "_learning_data", {})):
+                        raise ValueError("load a learning checkpoint with an empty local engine")
+                    if not path.is_file():
+                        raise FileNotFoundError(path)
+                    learning.engine = LocalMemoryEngine.shared_writer(path)
             learning.load_native(learning_data["engine_tenants"])
             return learning
-        learning.trajectories = {
-            item.id: item for item in (Trajectory.from_dict(row) for row in learning_data.get("trajectories", []))
-        }
-        learning.attributions = {
-            item.trajectory_id: item for item in (FailureAttribution.from_dict(row) for row in learning_data.get("attributions", []))
-        }
-        learning.lessons = {item.id: item for item in (Lesson.from_dict(row) for row in learning_data.get("lessons", []))}
-        learning.procedures = {item.id: item for item in (Procedure.from_dict(row) for row in learning_data.get("procedures", []))}
+        learning.import_legacy(learning_data)
+        if learning._native_tenants:
+            self.save_learning(learning)
         return learning
 
     def migrate_learning(self, runtime, tenant_id: str) -> dict[str, int]:
@@ -141,17 +136,19 @@ class RuntimeState:
         return migrate_legacy_learning(runtime, legacy, tenant_id)
 
     def save_learning(self, learning: LearningSystem) -> None:
+        from mnemosyne.engine import LocalMemoryEngine
+        checkpoint = self.path.with_suffix(self.path.suffix + ".learning.json").resolve()
+        engine = learning.engine
+        if (isinstance(engine, LocalMemoryEngine) and not getattr(engine, "store_path", None)
+                and not getattr(engine, "root_dir", None)):
+            # Explicitly saving an ephemeral engine gives its native records,
+            # evidence and audit trail one durable home, rather than reserializing
+            # a second, lossy compatibility model into runtime side-state.
+            engine.attach_store(checkpoint)
         tenants = learning.persist_native()
-        if getattr(learning.engine, "store_path", None) or getattr(learning.engine, "root_dir", None):
-            self.data["learning"] = {"engine_tenants": tenants}
-            self.save()
-            return
-        self.data["learning"] = {
-            "trajectories": [item.to_dict() for item in learning.trajectories.values()],
-            "attributions": [item.to_dict() for item in learning.attributions.values()],
-            "lessons": [item.to_dict() for item in learning.lessons.values()],
-            "procedures": [item.to_dict() for item in learning.procedures.values()],
-        }
+        self.data["learning"] = {"engine_tenants": tenants}
+        if getattr(engine, "store_path", None) and Path(engine.store_path).resolve() == checkpoint:
+            self.data["learning"]["engine_path"] = checkpoint.name
         self.save()
 
     def load_queue(self) -> InProcessQueue:

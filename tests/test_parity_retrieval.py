@@ -642,20 +642,38 @@ def test_apply_activation_scores_annotates_and_sorts() -> None:
     assert apply_activation_scores([], policy) == []
 
 
-def test_apply_activation_scores_uses_actr_base_level_when_enabled() -> None:
+@pytest.mark.parametrize("actr_decay", [0.0, 0.5])
+@pytest.mark.parametrize("extra", [{}, {"demand_count": 1000}])
+def test_apply_activation_scores_requires_verified_demand_for_use_credit(actr_decay: float, extra: dict) -> None:
+    now = datetime(2026, 6, 23, tzinfo=UTC)
+    common = {"confidence": 0.9, "created_at": (now - timedelta(days=90)).isoformat()}
+    unseen = _hit("unseen", "same fact", score=0.8, metadata=common, trust_tier=3)
+    read = _hit(
+        "read", "same fact", score=0.8,
+        metadata={**common, "access_count": 1000, "last_accessed": now.isoformat(),
+                  "demand_last_at": now.isoformat(), **extra},
+        trust_tier=3,
+    )
+    activated = apply_activation_scores([unseen, read], OperatingPolicy(actr_decay=actr_decay), now=now)
+    assert activated[0].metadata["activation"] == activated[1].metadata["activation"]
+    assert activated[0].metadata["activation"]["components"]["base_level"] == 0.0
+
+
+def test_apply_activation_scores_uses_actr_base_level_for_verified_demand() -> None:
     now = datetime(2026, 6, 23, tzinfo=UTC)
     hit = _hit(
         "stale",
-        "frequently accessed but old memory",
+        "memory with old verified demand",
         score=0.8,
-        metadata={"confidence": 0.9, "access_count": 5, "last_accessed": (now - timedelta(days=90)).isoformat()},
+        metadata={"confidence": 0.9, "demand_count": 5, "demand_outcome_count": 5,
+                  "demand_last_at": (now - timedelta(days=90)).isoformat()},
         trust_tier=3,
     )
 
     legacy = apply_activation_scores([hit], OperatingPolicy(), now=now)[0]
     actr = apply_activation_scores([hit], OperatingPolicy(actr_decay=0.5), now=now)[0]
 
-    assert actr.metadata["activation"]["components"]["base_level"] < legacy.metadata["activation"]["components"]["base_level"]
+    assert 0.0 < actr.metadata["activation"]["components"]["base_level"] < legacy.metadata["activation"]["components"]["base_level"]
 
 
 def test_activation_explain_reports_weights() -> None:

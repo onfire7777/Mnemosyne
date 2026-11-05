@@ -8,17 +8,14 @@ from dataclasses import asdict, dataclass
 
 from types import SimpleNamespace
 
+from mnemosyne.calibration import wilson_bounds
+
 
 def wilson_interval(successes: float, total: float):
     if total <= 0:
         return SimpleNamespace(low=0.0, high=1.0)
-    p, z = successes / total, 1.96
-    d = 1 + z * z / total
-    center = (p + z * z / (2 * total)) / d
-    margin = z * math.sqrt((p * (1 - p) + z * z / (4 * total)) / total) / d
-    return SimpleNamespace(
-        low=max(0.0, center - margin), high=min(1.0, center + margin)
-    )
+    low, high = wilson_bounds(successes, total)
+    return SimpleNamespace(low=low, high=high)
 
 
 @dataclass

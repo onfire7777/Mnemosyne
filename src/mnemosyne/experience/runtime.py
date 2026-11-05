@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from mnemosyne.ids import new_id
 
 from mnemosyne.models import Evidence
+from mnemosyne.learning import Trajectory
 from .guards import require
 from .receipts import ContextReceipt, ROUTE_OF_CHANNEL, ServedItem, digest
 from .signals import reward, signal, tool_signals, user_signals
@@ -832,7 +833,7 @@ class LearningRuntime:
         normalized_lessons = [item for item in used_lessons or [] if item in served_ids]
         episode_id = new_id()
         timestamp = now()
-        episode = {
+        episode = Trajectory.from_record({
             "id": episode_id,
             "tenant_id": tenant_id,
             "user_id": user_id,
@@ -871,7 +872,7 @@ class LearningRuntime:
             "turn_index": len(
                 [e for e in state["episodes"].values() if e["session_id"] == session_id]
             ),
-        }
+        }).to_record()
 
         def observe(current):
             if any(
@@ -1007,7 +1008,12 @@ class LearningRuntime:
                     "X12",
                     "prediction changed",
                 )
-            if self._collects(state, "contingency"):
+            episode["learning_collected"] = self._collects(state, "contingency")
+            episode["learning_components"] = {
+                component: self._collects(state, component)
+                for component in ("items", "lessons", "skills")
+            }
+            if episode["learning_collected"]:
                 self._credit(state, episode)
             self._update_goal_state(state, episode)
             if self._collects(state, "metacognition") and any(
@@ -1074,23 +1080,16 @@ class LearningRuntime:
     def _flush_skill_outbox(self, tenant_id: str) -> None:
         if self.skill_store is None:
             return
-        snapshot = self.writer.read(tenant_id)
-        if not self._enabled(snapshot, "skills"):
+        if not self._enabled(self.writer.read(tenant_id), "skills"):
             return
-        for event_id in snapshot["policy"].get("skill_outbox", {}):
-
-            def deliver(state):
-                # Run under the same serialized transaction as pause/mode changes.
-                # External delivery is retry-safe through the episode idempotency key.
-                if not self._enabled(state, "skills"):
-                    return
-                event = state["policy"].get("skill_outbox", {}).get(event_id)
-                if event is None:
-                    return
-                self.skill_store.outcome(**event)
-                state["policy"]["skill_outbox"].pop(event_id)
-
-            self.writer.apply(tenant_id, "skill_outcome_delivered", deliver)
+        # The library projects the native ledger; delivering an event must never
+        # run a second lifecycle or add outcomes on top of projected counters.
+        self._sync_library_revision_states(tenant_id)
+        if self.writer.read(tenant_id)["policy"].get("skill_outbox"):
+            self.writer.apply(
+                tenant_id, "skill_outcomes_projected",
+                lambda state: state["policy"].pop("skill_outbox", None),
+            )
 
     def _credit(self, state: dict, episode: dict, *, rebuild: bool = False) -> None:
         task, outcome = episode["task_class"], episode["reward"]
@@ -1113,6 +1112,9 @@ class LearningRuntime:
                 )
         route_rewards = {}
         for (kind, target, revision), served in targets.items():
+            component = "skills" if kind in {"skill", "chunk"} else "lessons" if kind in {"lesson", "procedure"} else "items"
+            if not episode.get("learning_components", {}).get(component, True):
+                continue
             key = stat_key(kind, target, revision, task)
             row = state["stats"].setdefault(
                 key,
@@ -1643,8 +1645,54 @@ class LearningRuntime:
             ],
         }
 
+    def set_import_state(
+        self, tenant_id: str, skill_id: str, revision: int, state: str,
+        *, approve_effects: bool = False,
+    ) -> dict:
+        """Apply an authenticated operator request at the native lifecycle owner."""
+        from mnemosyne.skills import STATES
+
+        if state not in STATES:
+            raise ValueError(f"state is one of {sorted(STATES)}")
+        desired = "candidate" if state == "draft" else state
+
+        def change(current):
+            artifacts = [item for item in current["artifacts"].values()
+                         if item.get("source_skill_id") == skill_id
+                         and item.get("source_skill_revision") == revision]
+            if not artifacts:
+                raise ValueError("native skill revision not found")
+            for item in artifacts:
+                if item.get("state") in {"retired", "archived", "rejected"} and desired != item["state"]:
+                    raise ValueError("terminal native revisions cannot be reactivated")
+                if approve_effects:
+                    item["approved"] = True
+                if desired in {"active", "labile"}:
+                    from .sleep import activation_supported
+                    if not activation_supported(self, current, item):
+                        raise ValueError("activation requires verified native probation and control outcomes")
+                item["state"] = desired
+            return {"skill_id": skill_id, "revision": revision, "state": state}
+
+        result = self.writer.apply(tenant_id, "skill_state", change)
+        self._sync_library_revision_states(tenant_id)
+        return self.skill_store.status(skill_id, revision) if self.skill_store else result
+
     def rollback(self, tenant_id: str, audit_id: str) -> dict:
-        return self.writer.rollback(tenant_id, audit_id)
+        result = self.writer.rollback(tenant_id, audit_id)
+        self._sync_library_revision_states(tenant_id)
+        return result
+
+    def retire_artifact(self, tenant_id: str, target: str) -> dict:
+        def retire(state):
+            artifact = state["artifacts"][target]
+            if artifact["state"] not in {"retired", "archived", "rejected"}:
+                artifact["state"] = "retired"
+            return artifact
+
+        result = self.writer.apply(tenant_id, "retire_artifact", retire)
+        self._sync_library_revision_states(tenant_id)
+        return result
 
     def pin(self, tenant_id: str, target: str, pinned: bool = True) -> dict:
         def change(state):
@@ -1661,7 +1709,7 @@ class LearningRuntime:
         return self.writer.apply(tenant_id, "lock", change)
 
     def erase(self, tenant_id: str, cid: str) -> dict:
-        erasure_terms = [cid]
+        erasure_terms = [cid, "legacy_learning"]
 
         def scrub(state):
             affected = {
@@ -1702,7 +1750,13 @@ class LearningRuntime:
             erasure_terms.extend(affected)
             for episode_id in affected:
                 row = state["episodes"][episode_id]
-                row.pop("legacy_trajectory", None)
+                keep = {"id", "tenant_id", "user_id", "session_id", "task_class", "created_at",
+                        "expires_at", "turn_index", "receipt_ids", "prediction", "reward", "rpe"}
+                for name in list(row):
+                    if name not in keep:
+                        row.pop(name)
+                row["used_skills"] = []
+                row["used_lessons"] = []
                 row["cited_cids"] = []
                 row.update(
                     status="erased",
@@ -1719,29 +1773,19 @@ class LearningRuntime:
                     row["source_episode_ids"]
                 ):
                     erasure_terms.append(row["id"])
-                    for field in (
-                        "sanitized",
-                        "source_quotes",
-                        "framework_node",
-                        "framework",
-                        "schema_ref",
-                        "replay_evidence",
-                        "abstraction_evaluation",
-                        "ab_trial",
-                        "gate_evidence",
-                        "source_origin",
-                        "children",
-                        "replaces",
-                        "scope_match",
-                        "conditions",
-                        "training_source_episode_ids",
-                    ):
-                        row.pop(field, None)
+                    keep = {"id", "tenant_id", "user_id", "kind", "task_class", "revision",
+                            "parent_revision", "origin", "state", "pinned", "locked", "created_at",
+                            "source_skill_id", "source_skill_revision", "source_library_skill_id",
+                            "source_library_parent_revision", "source_library_parent_artifact"}
+                    for name in list(row):
+                        if name not in keep:
+                            row.pop(name)
+                    row["erased"] = True
                     row["goal"] = ""
                     row["scope"] = row["task_class"]
                     row["explanation"] = ""
                     row.update(
-                        state="candidate",
+                        state=row["state"] if row["state"] in {"retired", "archived", "rejected"} else "candidate",
                         source_cids=[],
                         source_episode_ids=[],
                         explanation_sources=[],
@@ -1775,32 +1819,20 @@ class LearningRuntime:
                     }
             for key in ("last_good", "active_policy_variants", "policy_gate_evidence"):
                 state["policy"].pop(key, None)
-            encoded_legacy = state["policy"].get("legacy_learning")
-            if encoded_legacy and cid in encoded_legacy:
-                import json
-
-                legacy = json.loads(encoded_legacy)
-                removed = {
-                    row["id"]
-                    for row in legacy.get("trajectories", [])
-                    if cid in json.dumps(row)
-                }
-                for key, rows in legacy.items():
-                    legacy[key] = [
-                        row
-                        for row in rows
-                        if cid not in json.dumps(row)
-                        and row.get("trajectory_id") not in removed
-                        and not removed.intersection(row.get("source_episode_ids", []))
-                    ]
-                state["policy"]["legacy_learning"] = json.dumps(legacy, sort_keys=True)
-                erasure_terms.append("legacy_learning")
+            for tracking in state["policy"].get("host_consolidation", {}).values():
+                removed = {"failure:" + key for key in affected}
+                tracking["completed"] = [key for key in tracking.get("completed", []) if key not in removed]
+                pending = tracking.get("pending")
+                if pending:
+                    pending["triggers"] = [key for key in pending.get("triggers", []) if key not in removed]
+                    if not pending["triggers"]:
+                        tracking.pop("pending", None)
             # Rebuild sufficient statistics without reissuing credit or learning again.
             state["stats"] = {}
             for row in sorted(
                 state["episodes"].values(), key=lambda e: (e["created_at"], e["id"])
             ):
-                if row["status"] == "resolved":
+                if row["status"] == "resolved" and row.get("learning_collected", True):
                     self._credit(state, row, rebuild=True)
             for credit_id, credit in list(state["credit"].items()):
                 key = stat_key(
@@ -1835,8 +1867,17 @@ class LearningRuntime:
                     row["importance"] += (
                         state["episodes"][credit["episode_id"]]["reward"] + 1
                     ) / 2
-            from .sleep import _homeostasis
+            from .sleep import _homeostasis, activation_supported
 
+            erasure_targets = {
+                item["item_id"]
+                for episode_id in affected
+                for receipt_id in state["episodes"][episode_id].get("receipt_ids", [])
+                for item in state["receipts"].get(receipt_id, {}).get("items", [])
+            }
+            for artifact in state["artifacts"].values():
+                if artifact["id"] in erasure_targets and artifact["state"] in {"active", "labile"} and not activation_supported(self, state, artifact):
+                    artifact["state"] = "probation"
             _homeostasis(state)
             state["policy"].pop("routes", None)
             state["policy"].pop("route_daily", None)
@@ -1856,6 +1897,7 @@ class LearningRuntime:
         )
         if skill_store is not None:
             skill_store.retract_source(cid)
+        self._sync_library_revision_states(tenant_id)
         profile_erasure = getattr(self.engine, "_learning_profile_erasure", None)
         if profile_erasure is not None:
             profile_erasure(tenant_id, cid)
@@ -1876,44 +1918,56 @@ class LearningRuntime:
             self.writer.apply(tenant_id, "skill_erasure_delivered", acknowledge)
 
     def _sync_library_revision_states(self, tenant_id: str) -> None:
-        if self.skill_store is None:
+        store = self.skill_store or getattr(self.engine, "_learning_skill_store", None)
+        if store is None:
             return
         import json
 
-        state = self.writer.read(tenant_id)
-        for artifact in state["artifacts"].values():
-            skill_id, revision = (
-                artifact.get("source_skill_id"),
-                artifact.get("source_skill_revision"),
-            )
-            if not skill_id or revision is None:
-                continue
-            try:
-                row = self.skill_store._skill(skill_id, revision)
-            except ValueError:
-                continue
-            if (
-                json.loads(row["meta"]).get("native_artifact_id") != artifact["id"]
-                or row["state"] == "retired"
-            ):
-                continue
-            desired = artifact["state"]
-            if (
-                desired not in {"active", "labile", "demoted", "retired"}
-                or desired == row["state"]
-            ):
-                continue
-            if desired == "active" and (
-                not self._enabled(state, "skills")
-                or not artifact.get("gate_passed")
-                or (artifact.get("needs_approval") and not artifact.get("approved"))
-            ):
-                continue
-            try:
-                self.skill_store.set_state(skill_id, desired, revision)
-            except ValueError:
-                # The standalone outcome gate is allowed to remain stricter.
-                continue
+        with self.writer.store.transaction(tenant_id) as (state, _):
+            groups = {}
+            for artifact in state["artifacts"].values():
+                skill_id, revision = artifact.get("source_skill_id"), artifact.get("source_skill_revision")
+                if skill_id and revision is not None:
+                    groups.setdefault((skill_id, revision), []).append(artifact)
+            # A rollback can remove a native revision entirely. Keep its append-only
+            # library record, but revoke the projection that no longer has an owner.
+            for row in store._rows("SELECT * FROM skill_revisions"):
+                origin = json.loads(row.get("memory") or "{}")
+                if origin.get("tenant") == tenant_id and store._learning_managed(row):
+                    groups.setdefault((row["skill_id"], row["revision"]), [])
+            for (skill_id, revision), artifacts in groups.items():
+                try:
+                    library_row = store._skill(skill_id, revision)
+                except ValueError:
+                    continue
+                owner = json.loads(library_row.get("memory") or "{}")
+                if owner.get("tenant") != tenant_id or any(
+                    item.get("tenant_id") != tenant_id or item.get("user_id") != owner.get("user")
+                    for item in artifacts
+                ):
+                    continue
+                identities = {(item["id"], item["revision"]) for item in artifacts}
+                outcomes = []
+                for episode in state["episodes"].values():
+                    if (episode.get("status") != "resolved"
+                            or not episode.get("learning_collected", True)
+                            or not episode.get("learning_components", {}).get("skills", True)
+                            or not any(
+                        signal.get("kind") in {"verifier", "tests", "critic", "rating"}
+                        for signal in episode.get("signals", [])
+                    )):
+                        continue
+                    served = {
+                        (item["item_id"], item["revision"])
+                        for receipt_id in episode.get("receipt_ids", [])
+                        for item in state["receipts"].get(receipt_id, {}).get("items", [])
+                    }
+                    if identities.intersection(served):
+                        outcomes.append({"episode_id": episode["id"],
+                                         "probability": (episode["reward"] + 1) / 2})
+                store.sync_learning_revision(
+                    skill_id, revision, artifacts, outcomes=outcomes,
+                )
 
     def _flush_skill_revision_outbox(self, tenant_id: str) -> None:
         if self.skill_store is None:

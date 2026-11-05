@@ -9,9 +9,10 @@ from math import ceil
 from datetime import UTC, datetime, timedelta
 
 from mnemosyne.skills import effects_of
+from mnemosyne.learning import Lesson, Procedure
 from .receipts import digest
 from .runtime import stat_key
-from .stats import Posterior, prob_better
+from .stats import Posterior, prob_better, contingency_lower_bound
 from .candidates import (
     evaluate_candidate,
     ground_quotes,
@@ -19,8 +20,9 @@ from .candidates import (
     applies_to,
     correction_texts,
     persist_protected_cases,
+    observed_steps,
 )
-from .revisions import install_revision, score_trials, propagate_children
+from .revisions import install_revision, score_trials, propagate_children, inherit_library_lineage
 from .schema import assimilate
 from .separation import propose_splits
 from .revalidate import revalidate
@@ -42,17 +44,6 @@ def common_sequence(sequences: list[list[str]]) -> list[str]:
                 )
         common = table[-1][-1]
     return common
-
-
-def _steps(episode: dict) -> list[str]:
-    return [
-        str(event["name"])
-        for event in episode["tool_events"]
-        if event.get("name")
-        and event.get("name") != "benchmark_verifier"
-        and event.get("source")
-        not in {"assistant", "self_generated", "provider_self_grade"}
-    ]
 
 
 def replay_batch(
@@ -117,7 +108,8 @@ def _candidate(
         else None
     )
     conditions = [scope_match["query"]] if scope_match and scope_match["query"] else []
-    return {
+    model = Lesson if kind == "lesson" else Procedure
+    return model.native(**{
         "id": digest([kind, task, content, scope_match]),
         "kind": kind,
         "task_class": task,
@@ -147,7 +139,7 @@ def _candidate(
         "approved": False,
         "next_revalidation_at": (datetime.now(UTC) + timedelta(days=1)).isoformat(),
         "revalidation_step": 0,
-    }
+    }).to_record()
 
 
 def _patch_parent(candidate: dict, artifacts: list[dict]) -> dict | None:
@@ -236,7 +228,7 @@ def consolidate(runtime, tenant: str) -> dict:
             and episode["status"] == "resolved"
             and episode["reward"] > 0
         ]
-        demonstrated = [steps for episode in successes if (steps := _steps(episode))]
+        demonstrated = [steps for episode in successes if (steps := observed_steps(episode))]
         if len(demonstrated) >= 2 and (steps := common_sequence(demonstrated)):
             candidates.append(_candidate(task, steps, successes))
         for episode in episodes:
@@ -357,15 +349,8 @@ def consolidate(runtime, tenant: str) -> dict:
             candidate.update(
                 parent_revision=parent["id"], revision=parent["revision"] + 1
             )
-            source_skill = parent.get("source_skill_id") or parent.get(
-                "source_library_skill_id"
-            )
-            if candidate["kind"] == "skill" and source_skill:
-                candidate["source_library_skill_id"] = source_skill
-                candidate["source_library_parent_revision"] = parent.get(
-                    "source_skill_revision"
-                )
-                candidate["source_library_parent_artifact"] = parent["id"]
+            if candidate["kind"] == "skill":
+                inherit_library_lineage(candidate, parent)
         replay = [
             row
             for row in snapshot["episodes"].values()
@@ -889,6 +874,51 @@ def _abstract_rules(state: dict) -> list[dict]:
     return proposals
 
 
+def _activation_trial(runtime, state: dict, artifact: dict):
+    row = state["stats"].get(
+        stat_key(artifact["kind"], artifact["id"], artifact["revision"], artifact["task_class"]),
+        {},
+    )
+    probation = getattr(
+        getattr(getattr(runtime, "engine", None), "policy", None),
+        "learning_probation_outcomes", {},
+    )
+    threshold = (
+        probation.get("schema", 5) if artifact.get("schema_ref")
+        else probation.get("standalone", 12)
+    )
+    tested = Posterior.from_dict(row)
+    control = Posterior(
+        1 + row.get("control_successes", 0),
+        1 + row.get("control_n", 0) - row.get("control_successes", 0),
+        row.get("control_n", 0),
+    )
+    return row, tested, control, threshold
+
+
+def activation_supported(
+    runtime, state: dict, artifact: dict, *, superiority: float | None = None,
+) -> bool:
+    """Shared native evidence for promotion, operator changes and erasure."""
+    row, tested, control, threshold = _activation_trial(runtime, state, artifact)
+    bound = contingency_lower_bound(
+        row.get("served_successes", tested.alpha - 1), row.get("served_n", tested.n),
+        row.get("control_successes", 0), control.n, minimum=min(8, threshold),
+    )
+    return bool(
+        tested.n >= threshold and control.n >= 8
+        and row.get("verified_n", 0) >= threshold
+        and row.get("verified_successes", 0) > 0
+        and bound is not None and bound > 0
+        and (prob_better(tested, control) if superiority is None else superiority) >= 0.9
+        and artifact.get("gate_passed")
+        and artifact.get("source_cids") and artifact.get("source_episode_ids")
+        and (not artifact.get("needs_approval") or artifact.get("approved"))
+        and (not artifact.get("ab_trial") or artifact.get("ab_passed"))
+        and not artifact.get("abstraction_pending")
+    )
+
+
 def _lifecycle(runtime, state: dict, tenant: str = "") -> None:
     timestamp = datetime.now(UTC)
     score_trials(state)
@@ -906,42 +936,13 @@ def _lifecycle(runtime, state: dict, tenant: str = "") -> None:
                 if age >= 30:
                     artifact["state"] = "archived"
             continue
-        row = state["stats"].get(
-            stat_key(
-                artifact["kind"],
-                artifact["id"],
-                artifact["revision"],
-                artifact["task_class"],
-            ),
-            {},
-        )
-        tested = Posterior.from_dict(row)
-        control = Posterior(
-            1 + row.get("control_successes", 0),
-            1 + row.get("control_n", 0) - row.get("control_successes", 0),
-            row.get("control_n", 0),
-        )
-        probation = getattr(
-            getattr(getattr(runtime, "engine", None), "policy", None),
-            "learning_probation_outcomes",
-            {},
-        )
-        threshold = (
-            probation.get("schema", 5)
-            if artifact.get("schema_ref")
-            else probation.get("standalone", 12)
-        )
+        row, tested, control, threshold = _activation_trial(runtime, state, artifact)
         if tested.n >= threshold and control.n >= 8:
             better = prob_better(tested, control)
             if better <= 0.1:
                 artifact["state"] = "retired"
                 continue
-            allowed = not artifact.get("needs_approval") or artifact.get("approved")
-            allowed = allowed and (
-                not artifact.get("ab_trial") or artifact.get("ab_passed")
-            )
-            allowed = allowed and not artifact.get("abstraction_pending")
-            if better >= 0.9 and allowed:
+            if activation_supported(runtime, state, artifact, superiority=better):
                 artifact["state"] = "active"
                 if artifact.get("parent_revision"):
                     parent = state["artifacts"][artifact["parent_revision"]]
@@ -964,7 +965,7 @@ def _lifecycle(runtime, state: dict, tenant: str = "") -> None:
             and artifact.get("labile_until")
             and timestamp >= datetime.fromisoformat(artifact["labile_until"])
         ):
-            artifact["state"] = "active"
+            artifact["state"] = "active" if activation_supported(runtime, state, artifact) else "probation"
         uses = [
             receipt["created_at"]
             for receipt in state["receipts"].values()

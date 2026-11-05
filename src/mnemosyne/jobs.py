@@ -102,14 +102,10 @@ class RuntimeJobHandlers:
         }
 
     def run_learning_consolidation(self, payload: dict[str, Any]) -> RuntimeJobResult:
-        from mnemosyne.experience.runtime import LearningRuntime
         if payload.get("branch", "main") != "main":
             raise ValueError("learning consolidation currently requires the main branch")
         tenant_id = str(payload["tenant_id"])
-        runtime = LearningRuntime(self.engine, skill_store=getattr(self.engine, "_learning_skill_store", None))
-        runtime.lesson_distiller = self.consolidator.lesson_distiller
-        runtime.procedure_inducer = self.consolidator.procedure_inducer
-        runtime.protected_cases = [case for case in self.gate_cases if case.protected and case.origin in {"curated", "genuine"} and case.mode == "active"]
+        runtime = self.consolidator._learning_runtime()
         details = runtime.consolidate(tenant_id)
         return RuntimeJobResult(LEARNING_CONSOLIDATE_JOB, "complete", {"tenant_id": tenant_id, **details})
 
@@ -297,16 +293,14 @@ class RuntimeJobHandlers:
         )
 
     def run_calibration(self, payload: dict[str, Any]) -> RuntimeJobResult:
-        from mnemosyne.experience.runtime import LearningRuntime
         learning_rows = {}
         if payload.get("memory_type") == "learning" or ("examples" not in payload and "scores" not in payload):
-            learning_rows = LearningRuntime(self.engine).writer.read(str(payload["tenant_id"]))["episodes"]
+            learning_rows = self.consolidator._learning_runtime().writer.read(str(payload["tenant_id"]))["episodes"]
         automatic_learning = "examples" not in payload and "scores" not in payload and any(
             row["status"] == "resolved" and any(signal["kind"] in {"verifier", "tests"} for signal in row["signals"])
             for row in learning_rows.values())
         if payload.get("memory_type") == "learning" or automatic_learning:
-            from mnemosyne.experience.runtime import LearningRuntime
-            runtime = LearningRuntime(self.engine)
+            runtime = self.consolidator._learning_runtime()
             tenant_id = str(payload["tenant_id"])
             state = runtime.writer.read(tenant_id)
             examples = [{"confidence": row["prediction"],

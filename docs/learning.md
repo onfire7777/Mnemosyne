@@ -6,7 +6,7 @@ A host first calls `prepare_context` with tenant, user, session and query. The r
 
 Retrieval and repetition earn no outcome credit. Assistant prose earns no reward. Evidence and authority remain separate from learned utility. The runtime's mandatory guards validate changes through its single learning writer.
 
-Completed tool results can resolve an episode. Failures and every ten resolved outcomes trigger consolidation through the host adapter. Session closure resolves remaining episodes under the runtime's expiration rules and runs consolidation. The `learning_consolidate` queue job and `learning_reflect` slow-cadence pass use the same guarded runtime.
+Completed tool results can resolve an episode immediately. Failures and every ten resolved outcomes per user trigger consolidation through shared host orchestration. Atomic claims prevent duplicate feedback from scheduling the same automatic pass twice; failed passes remain retryable. Session closure resolves remaining episodes under the runtime's expiration rules and runs maintenance even without new outcomes. The `learning_consolidate` queue job and `learning_reflect` slow-cadence pass use the same guarded runtime and configured providers.
 
 ## Learning mechanisms
 
@@ -84,7 +84,9 @@ Test-only mutations cover every code through the real writer and verify containm
 
 ## Persistence and compatibility
 
-New receipts, episodes, credit, statistics, artifacts, defects and policy state live in the owning engine's learning storage. Durable legacy trajectories, lessons and procedures also persist through the native writer, with a compatibility reader for older side-state files. Historical trajectories can be archived as `legacy` episodes. Historical claimed outcomes do not become verified rewards or credit. Existing artifacts require contemporary evidence before entering the active learning runtime.
+Receipts, episodes, credit, statistics, artifacts, defects and policy state live in the owning engine's learning storage. `Trajectory`, `Lesson` and `Procedure` serialize these canonical records; the existing `LearningSystem` API is a compatibility view over them. Older side-state files and embedded legacy archives migrate into this storage without retaining a second mutable copy. Compatibility saves preserve native metadata and reject conflicting edits. Historical trajectories are retained as `legacy` episodes, with claimed outcomes stored separately from verified rewards and credit. Existing artifacts require contemporary evidence before entering the active learning runtime.
+
+The runtime owns the lifecycle of learned and runtime-imported skills. `SkillStore` projects their states and distinct episode outcomes, including rollback and erasure, instead of applying a second promotion threshold. When one library revision supports several task classes, its public state conservatively summarizes those scopes and `native_states` exposes each artifact's state. Native revisions retain their library lineage without importing the library projection as another candidate. Standalone skill imports keep their existing validation path until they enter the runtime. Legacy consolidation skips evidence already owned by native episodes, preventing duplicate lesson and procedure induction.
 
 Audit payloads are encrypted with independently revocable keys. Erasure removes the relevant keys and source-dependent learning state while retaining append-only audit events. Terminal revisions remain terminal. Rolling back retirement creates a new candidate revision for validation.
 

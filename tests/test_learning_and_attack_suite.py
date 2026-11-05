@@ -37,6 +37,7 @@ def _active_lesson() -> Lesson:
         failure_signature="parametric:protected-suite",
         content="Use protected suite before accepting a parametric adapter.",
         status="active",
+        origin="curated",
     )
 
 
@@ -48,6 +49,7 @@ def _active_procedure() -> Procedure:
         body="Run protected cases before accepting LoRA or test-time-training artifacts.",
         signature={"failure_signature": "parametric:protected-suite"},
         status="validated",
+        origin="curated",
     )
 
 
@@ -181,7 +183,7 @@ def test_trajectory_failure_attribution_lesson_and_procedure_induction() -> None
     assert lesson.votes == 0
     assert attribution.confidence == 0
     assert procedure.signature["failure_signature"] == attribution.signature
-    assert any(item["op"] == "log_trajectory" for item in engine.audit_log)
+    assert any(item["op"] == "learning.compatibility_save" for item in engine.audit_log)
 
 
 def test_legacy_lesson_promotion_requires_native_outcome_provenance() -> None:

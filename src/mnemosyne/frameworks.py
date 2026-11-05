@@ -2245,14 +2245,12 @@ class AutoMemorySession:
         self._last_user_turn_text: str = ""
         self._last_user_evidence_cid: str = ""
         self._closed: bool = False
-        from mnemosyne.experience.runtime import LearningRuntime
+        from mnemosyne.experience.integration import build_learning_runtime
         # The learning runtime currently serves the main branch only.
-        self.learning_runtime = LearningRuntime(
-            engine, skill_store=skill_store or getattr(engine, "_learning_skill_store", None)
-        ) if branch == "main" else None
+        self.learning_runtime = None
         self._learning_receipt_id: str | None = None
         self._learning_tools = None
-        if self.learning_runtime is not None:
+        if branch == "main":
             from mnemosyne.mcp_tools import MemoryTools
             from mnemosyne.runtime_state import RuntimeState
             import weakref
@@ -2261,10 +2259,12 @@ class AutoMemorySession:
                 self._learning_tools = self._learning_tools()
             if self._learning_tools is None:
                 self._learning_tools = MemoryTools(engine, runtime_state=RuntimeState.from_store_path(getattr(engine, "store_path", None)), skill_store=skill_store)
-                engine._learning_tools = weakref.ref(self._learning_tools)
-            self.learning_runtime.protected_cases = list(protected_cases if protected_cases is not None else getattr(engine, "_learning_protected_cases", []))
-            self.learning_runtime.lesson_distiller = lesson_distiller
-            self.learning_runtime.procedure_inducer = procedure_inducer
+            engine = self._learning_tools.engine
+            self.engine = engine
+            self.learning_runtime = build_learning_runtime(
+                engine, skill_store=skill_store, lesson_distiller=lesson_distiller,
+                procedure_inducer=procedure_inducer, protected_cases=protected_cases,
+                runtime_state=self._learning_tools.runtime_state)
 
     def pre_turn_retrieve(self, query: str) -> dict[str, Any]:
         """Perform adaptive context retrieval with dynamic sub-budget partitioning."""
@@ -2557,19 +2557,16 @@ class AutoMemorySession:
         learning_episode = None
         if self.learning_runtime is not None:
             receipt = receipt_id or self._learning_receipt_id
-            learning_episode = self.learning_runtime.observe_turn(
-                self.tenant_id, self.user_id, self.session_id, user_text, assistant_text,
-                tool_events=tool_events, receipt_ids=[receipt] if receipt else [], source_cids=[cid_user, cid_asst], used_skills=used_skills, used_lessons=used_lessons)
-            self._learning_receipt_id = None
-            self._learning_tools._capture_learning_user_feedback(
+            from mnemosyne.experience.integration import observe_completed_turn
+            learning_episode = observe_completed_turn(
                 self.learning_runtime, self.tenant_id, self.user_id, self.session_id,
-                user_text, learning_episode['episode_id'], self.role, 1)
-            if tool_events:
-                episode = self.learning_runtime.resolve(self.tenant_id, learning_episode['episode_id'])
-                resolved = [row for row in self.learning_runtime.writer.read(self.tenant_id)['episodes'].values()
-                            if row['status'] == 'resolved']
-                if episode['status'] == 'resolved' and (episode['reward'] < 0 or len(resolved) % 10 == 0):
-                    self.learning_runtime.consolidate(self.tenant_id)
+                user_text, assistant_text, tool_events=tool_events,
+                receipt_ids=[receipt] if receipt else [], source_cids=[cid_user, cid_asst],
+                used_skills=used_skills, used_lessons=used_lessons,
+                feedback=lambda episode_id: self._learning_tools._capture_learning_user_feedback(
+                    self.learning_runtime, self.tenant_id, self.user_id, self.session_id,
+                    user_text, episode_id, self.role, 1))
+            self._learning_receipt_id = None
 
         return {
             "learning_episode": learning_episode,
@@ -2783,9 +2780,9 @@ class AutoMemorySession:
         """Close the session and trigger auto-consolidation if enabled."""
         if not self._closed:
             if self.learning_runtime is not None:
-                self.learning_runtime.end_session(self.tenant_id, self.session_id)
-                if self.auto_consolidate:
-                    self.learning_runtime.consolidate(self.tenant_id)
+                from mnemosyne.experience.integration import end_learning_session
+                end_learning_session(self.learning_runtime, self.tenant_id, self.user_id,
+                                     self.session_id, consolidate=self.auto_consolidate)
             self._closed = True
             if self.auto_consolidate:
                 return self.consolidate()

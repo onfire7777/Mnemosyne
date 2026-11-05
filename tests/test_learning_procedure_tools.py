@@ -16,5 +16,8 @@ def test_legacy_procedure_tools_do_not_bypass_outcome_gate(method):
     assert result["status"] == "candidate"
     assert result["promoted"] is False
     assert result["gate"]["failed_cases"] == ["outcome_grounded_sources_required"]
-    assert not tools._learning_runtime().writer.read("t")["artifacts"]
+    artifacts = tools._learning_runtime().writer.read("t")["artifacts"]
+    assert len(artifacts) == 1
+    assert artifacts[procedure.id]["origin"] == "legacy"
+    assert artifacts[procedure.id]["state"] == "candidate"
     assert tools.metrics.snapshot().counters.get("gate.promotions", 0) == 0
