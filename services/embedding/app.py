@@ -54,6 +54,7 @@ import json
 import math
 import os
 import struct
+import sys
 from dataclasses import dataclass, field
 from typing import Any, Sequence
 
@@ -432,11 +433,19 @@ def _make_stdlib_handler():
                 self._send(404, {"error": "not found"})
 
         def do_POST(self) -> None:  # noqa: N802 - stdlib naming
-            length = int(self.headers.get("Content-Length", "0") or "0")
+            try:
+                length = int(self.headers.get("Content-Length", "0") or "0")
+                if length < 0 or length > sys.maxsize:
+                    raise ValueError("length is outside the supported read range")
+            except ValueError:
+                # The unread body cannot safely be reused as another request.
+                self.close_connection = True
+                self._send(400, {"error": "Content-Length must be a supported non-negative integer"})
+                return
             raw = self.rfile.read(length) if length else b"{}"
             try:
                 payload = json.loads(raw.decode("utf-8") or "{}")
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, UnicodeDecodeError):
                 self._send(400, {"error": "request body must be valid JSON"})
                 return
             route = self.path.rstrip("/")

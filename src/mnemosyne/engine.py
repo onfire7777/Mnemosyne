@@ -12,7 +12,7 @@ import weakref
 from collections import OrderedDict, defaultdict
 from collections.abc import Mapping
 from functools import lru_cache
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
 from datetime import UTC, datetime, timedelta
@@ -4281,11 +4281,11 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             if action == "append":
                 journal.append(record)
             elif action == "purge":
-                journal.purge(record["cid"])
+                journal.purge(record["cid"], tenant_id=record["tenant_id"])
             else:
                 journal.tombstone(
                     record["cid"], salted_hash=record["salted_hash"],
-                    erased_at=record["erased_at"],
+                    erased_at=record["erased_at"], tenant_id=record["tenant_id"],
                 )
 
     @contextmanager
@@ -4923,7 +4923,18 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         if ev.retired_at is not None:
             raise ValueError("append_evidence cannot set retired_at")
         access_policy = validate_access_policy(ev.access_policy, tenant_id=ev.tenant_id, location="evidence.access_policy")
-        with self._lock:
+        with self._lock, ExitStack() as journal_scope:
+            journal_append = None
+            if self._journal_dir is not None:
+                journal = CIDJournal(self._journal_dir / journal_filename(ev.tenant_id))
+                if self._source_transaction_state is None:
+                    # Hold tenant admission from here through the ledger write and its journal
+                    # line, so an aliasing tenant id is refused before either is stored.
+                    journal_append = journal_scope.enter_context(journal.owned_append(ev.tenant_id))
+                else:
+                    # shortcut: inside a source_transaction the line is published at commit, where
+                    # CIDJournal.append checks ownership again; the lock is not held across a batch.
+                    journal.validate_owner(ev.tenant_id)
             self._require_branch(branch)
             cid = evidence_cid(
                 ev.content,
@@ -5062,7 +5073,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 )
                 self._persist()
             if self._journal_dir is not None:
-                self._append_source_journal(
+                (journal_append or self._append_source_journal)(
                     {
                         "cid": stored.cid,
                         "tenant_id": stored.tenant_id,

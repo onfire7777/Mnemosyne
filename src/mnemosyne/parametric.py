@@ -457,7 +457,7 @@ class ParametricArtifactStore:
         self.root = Path(root).expanduser().resolve()
 
     def write(self, artifact: ParametricArtifact, payload: dict[str, Any] | None = None) -> str:
-        path = self._path_for(artifact.tenant_id, artifact.id)
+        path = self._io_path(self._path_for(artifact.tenant_id, artifact.id))
         path.parent.mkdir(parents=True, exist_ok=True)
         artifact.artifact_uri = f"{self.uri_prefix}{artifact.tenant_id}/{artifact.id}.json"
         body = {
@@ -471,10 +471,24 @@ class ParametricArtifactStore:
 
     def read(self, artifact_uri: str) -> dict[str, Any]:
         tenant_id, artifact_id = self._parse_uri(artifact_uri)
-        return json.loads(self._path_for(tenant_id, artifact_id).read_text(encoding="utf-8"))
+        path = self._io_path(self._path_for(tenant_id, artifact_id))
+        return json.loads(path.read_text(encoding="utf-8"))
 
     def load_artifact(self, artifact_uri: str) -> ParametricArtifact:
         return ParametricArtifact.from_dict(self.read(artifact_uri)["artifact"])
+
+    @staticmethod
+    def _io_path(path: Path) -> Path:
+        # Only apply to absolute paths after _path_for resolves symlinks and
+        # verifies containment. Keep logical roots and artifact URIs unchanged.
+        if os.name != "nt":
+            return path
+        value = str(path)
+        if value.startswith("\\\\?\\"):
+            return path
+        if value.startswith("\\\\"):
+            return Path("\\\\?\\UNC\\" + value[2:])
+        return Path("\\\\?\\" + value)
 
     def _path_for(self, tenant_id: str, artifact_id: str) -> Path:
         self._validate_segment(tenant_id, "tenant")

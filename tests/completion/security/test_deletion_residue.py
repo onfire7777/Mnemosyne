@@ -2767,9 +2767,19 @@ def test_cache_resume_without_the_marker_refuses_to_attest_invalidation() -> Non
     assert receipt.action == "invalidated"
 
 
-def test_engine_retry_after_failure_restamps_a_new_destructive_attempt() -> None:
+def test_engine_retry_after_failure_restamps_a_new_destructive_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A retried engine pass is new destruction, not a crash resume."""
     world = _world()
+    clock = datetime.now(UTC)
+
+    class AttemptClock(datetime):
+        @classmethod
+        def now(cls, tz: Any = None) -> datetime:
+            return clock.astimezone(tz) if tz is not None else clock.replace(tzinfo=None)
+
+    monkeypatch.setattr(importlib.import_module("mnemosyne.deletion"), "datetime", AttemptClock)
     world.engine.audit_log.append(
         {"id": "audit-retry", "tenant_id": TENANT, "details": {"note": CANARY}}
     )
@@ -2789,6 +2799,7 @@ def test_engine_retry_after_failure_restamps_a_new_destructive_attempt() -> None
     assert surface["attempts"] == 1
     first_attempted_at = surface["attempted_at"]
 
+    clock += timedelta(seconds=1)
     retried = _surface(_delete(world), "source_evidence")
     assert retried["verified_removed"] is True
     # The failed receipt is a completed outcome; retrying it is a second
