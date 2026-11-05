@@ -29,6 +29,13 @@ def test_ndcg_perfect_and_worst():
     assert metrics.ndcg_at_k(["x", "y"], ["a"], 2) == 0.0
 
 
+def test_ndcg_duplicate_hits_do_not_repeat_gain_or_promote_later_hits():
+    assert metrics.ndcg_at_k(["a", "a", "a"], ["a"], 3) == 1.0
+    expected = (1.0 + 1.0 / math.log2(4)) / (1.0 + 1.0 / math.log2(3))
+    assert metrics.ndcg_at_k(["a", "a", "b"], ["a", "b"], 3) == expected
+    assert metrics.dcg_at_k(["a", "a", "b"], ["a", "b"], 2) == 1.0
+
+
 def test_percentile_interpolation():
     vals = [1, 2, 3, 4, 5]
     assert metrics.percentile(vals, 0.5) == 3

@@ -2,8 +2,8 @@
 
 Runs MemoryTools.search in-process, configured exactly as the CLI configures it (backend,
 adapters, MNEMOSYNE_PASSAGE_* from the environment), against a fresh COPY of a SQLite store
-directory, so the real store is never touched. Each question scores the share of its gold
-evidence CIDs (or CID prefixes) found among the first five ranked records. Keep the question
+directory, so the real store is never touched. Each question scores the share of its distinct
+gold evidence CID strings (or CID prefixes) found among the first five ranked records. Keep the question
 file outside git when it is built from private conversations:
 
     [{"id": "name", "kind": "fact", "question": "What is my name?", "gold": ["c9165dc4b830"],
@@ -53,6 +53,7 @@ def ranked_evidence(hits: list[dict]) -> list[str]:
 
 def main() -> None:
     from mnemosyne import cli
+    from mnemosyne.models import parse_dt
 
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--store", type=Path, required=True, help="SQLite store directory (copied, never modified)")
@@ -83,6 +84,16 @@ def main() -> None:
             ap.error("each question requires non-blank question text")
         if "id" not in question:
             ap.error("each question requires an id")
+        if "kind" in question and not isinstance(question["kind"], str):
+            ap.error("question kind must be a string when provided")
+        now = question.get("now")
+        if now is not None:
+            if not isinstance(now, str):
+                ap.error("question now must be an ISO 8601 timestamp")
+            try:
+                parse_dt(now)
+            except (ValueError, OverflowError):
+                ap.error("question now must be an ISO 8601 timestamp")
     with tempfile.TemporaryDirectory(prefix="store-recall-", ignore_cleanup_errors=True) as temp, ExitStack() as cleanup:
         store = Path(temp) / "store"
         shutil.copytree(args.store, store)
@@ -117,8 +128,9 @@ def main() -> None:
             result = tools.search(tenant_id=args.tenant, query=q["question"], **kwargs)
             latencies.append((time.perf_counter() - asked) * 1000.0)
             top5 = ranked_evidence(result.get("hits", []))[:5]
-            found = [g for g in q["gold"] if any(cid.startswith(g) for cid in top5)]
-            score = len(found) / len(q["gold"])
+            gold = set(q["gold"])
+            found = [g for g in gold if any(cid.startswith(g) for cid in top5)]
+            score = len(found) / len(gold)
             per_kind[q.get("kind", "?")].append(score)
             rows_out.append({
                 "id": q["id"], "kind": q.get("kind"), "recall_at_5": score,
@@ -139,6 +151,7 @@ def main() -> None:
         "query_vectors_prepared": graph is not None,
         "query_preparation_seconds": round(query_preparation_seconds, 3),
         "seconds": round(seconds, 1), "rows": rows_out,
+        "seconds_scope": "query_loop_excluding_setup_indexing_preparation_cleanup_and_report_writing",
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=1), encoding="utf-8", newline="\n")
