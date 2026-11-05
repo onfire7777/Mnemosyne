@@ -220,7 +220,7 @@ def test_g1_legacy_projection_reality_monitoring_abstains_on_unknown_assertion()
     assert result.explain["reality_monitoring"]["ungrounded_only"] is True
 
 
-def test_g1_retrieval_strengthens_evidence_lifecycle_metadata() -> None:
+def test_g1_retrieval_records_audit_without_strengthening() -> None:
     engine = LocalMemoryEngine()
     cid = _append(engine, "Lifecycle strengthening evidence should survive demotion.", metadata={"lifecycle": {"access_count": 2}})
 
@@ -231,10 +231,10 @@ def test_g1_retrieval_strengthens_evidence_lifecycle_metadata() -> None:
     assert ev is not None
     assert ev.metadata["lifecycle"]["access_count"] == 3
     assert ev.metadata["lifecycle"]["last_accessed"]
-    assert ev.metadata["lifecycle"]["salience"] > 0.5
+    assert "salience" not in ev.metadata["lifecycle"]
 
 
-def test_g1_retrieval_strengthening_feeds_forgetter_retention() -> None:
+def test_g1_retrieval_does_not_prevent_forgetting() -> None:
     engine = LocalMemoryEngine()
     cid = _append(
         engine,
@@ -272,8 +272,8 @@ def test_g1_retrieval_strengthening_feeds_forgetter_retention() -> None:
 
     assert result.explain["read_marks"]["evidence"] >= 1
     assert state["from_tier"] == "verbatim"
-    assert state["to_tier"] == "verbatim"
-    assert state["demoted"] is False
+    assert state["to_tier"] == "extractive_summary"
+    assert state["demoted"] is True
 
 
 def test_g1_postgres_read_marks_ignore_provider_local_hit_ids() -> None:
@@ -476,7 +476,8 @@ def test_g1_importance_sampling_debias_weights_long_tail_writes() -> None:
     low_debias = low_ev.metadata["write_priority"]["debias"]
     high_debias = high_ev.metadata["write_priority"]["debias"]
     assert low_debias["importance_weight"] > high_debias["importance_weight"]
-    assert high_debias["importance_weight"] == 1.0
+    assert high_ev.metadata["write_priority"]["components"]["reward"] == 0.0
+    assert abs(high_debias["importance_weight"] - 1 / 0.85) < 1e-6
 
 
 def test_g1_prediction_error_gate_skips_candidate_extraction_for_low_error() -> None:

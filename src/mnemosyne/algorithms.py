@@ -27,6 +27,7 @@ def rrf_fuse(
     *,
     rrf_k: float,
     annotate_channel_scores: bool = False,
+    channel_weights: Mapping[str, float] | None = None,
 ) -> list[Hit]:
     """Reciprocal-rank fusion of per-channel ranked hit lists.
 
@@ -45,7 +46,14 @@ def rrf_fuse(
         for rank, hit in enumerate(ranked, start=1):
             key = (hit.kind, hit.id)
             by_id[key] = hit
-            scores[key] += 1.0 / (rrf_k + rank)
+            weight = 1.0
+            if channel_weights is not None:
+                from mnemosyne.experience.receipts import ROUTE_OF_CHANNEL
+                route = ROUTE_OF_CHANNEL.get(hit.channel, hit.channel)
+                weight = float(channel_weights.get(route, 1.0))
+                if not math.isfinite(weight) or weight < 0:
+                    raise ValueError("channel weights must be finite and nonnegative")
+            scores[key] += weight / (rrf_k + rank)
             channels[key].append(hit.channel)
             if annotate_channel_scores:
                 channel_scores[key][hit.channel] = max(

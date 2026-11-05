@@ -19,6 +19,38 @@ def _support_strategy_threshold(value: Any) -> int:
     except (TypeError, ValueError):
         return 2
 
+def migrate_legacy_learning(runtime, learning: LearningSystem, tenant_id: str) -> dict[str, int]:
+    """Archive legacy trajectories once without inventing receipts or outcomes.
+
+    Existing lessons and procedures remain available through the compatibility
+    reader. They cannot enter the active runtime without contemporary evidence.
+    """
+    from mnemosyne.experience.receipts import digest
+    candidates = [row for row in learning.trajectories.values() if row.tenant_id == tenant_id]
+    if not candidates:
+        return {"archived": 0}
+
+    def migrate(state):
+        count = 0
+        for row in candidates:
+            key = 'legacy-' + digest([tenant_id, row.id])
+            if key in state['episodes']:
+                continue
+            state['episodes'][key] = {
+                'id': key, 'tenant_id': tenant_id, 'user_id': row.user_id,
+                'session_id': row.session_id, 'task_class': 'legacy',
+                'receipt_ids': [], 'source_cids': [], 'signals': [], 'tool_events': [],
+                'used_skills': [], 'used_lessons': [], 'user_text': row.task,
+                'status': 'legacy', 'created_at': row.created_at.isoformat(),
+                'expires_at': row.created_at.isoformat(), 'prediction': None,
+                'reward': None, 'rpe': None, 'turn_index': 0,
+                'legacy_trajectory': row.to_dict(),
+            }
+            count += 1
+        return {"archived": count}
+    return runtime.writer.apply(tenant_id, 'legacy_migration', migrate)
+
+
 
 class RuntimeState:
     """JSON-backed side-state for non-core local runtime surfaces.
@@ -90,6 +122,9 @@ class RuntimeState:
 
     def load_learning(self, learning: LearningSystem) -> LearningSystem:
         learning_data = self.data.get("learning", {})
+        if "engine_tenants" in learning_data:
+            learning.load_native(learning_data["engine_tenants"])
+            return learning
         learning.trajectories = {
             item.id: item for item in (Trajectory.from_dict(row) for row in learning_data.get("trajectories", []))
         }
@@ -100,7 +135,17 @@ class RuntimeState:
         learning.procedures = {item.id: item for item in (Procedure.from_dict(row) for row in learning_data.get("procedures", []))}
         return learning
 
+    def migrate_learning(self, runtime, tenant_id: str) -> dict[str, int]:
+        from mnemosyne.runtime_state import migrate_legacy_learning
+        legacy = self.load_learning(LearningSystem(runtime.engine))
+        return migrate_legacy_learning(runtime, legacy, tenant_id)
+
     def save_learning(self, learning: LearningSystem) -> None:
+        tenants = learning.persist_native()
+        if getattr(learning.engine, "store_path", None) or getattr(learning.engine, "root_dir", None):
+            self.data["learning"] = {"engine_tenants": tenants}
+            self.save()
+            return
         self.data["learning"] = {
             "trajectories": [item.to_dict() for item in learning.trajectories.values()],
             "attributions": [item.to_dict() for item in learning.attributions.values()],

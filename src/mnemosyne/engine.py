@@ -3161,6 +3161,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         self._persistence_deferred_dirty = False
         self._persistence_aborted = False
         self._source_transaction_state: dict[str, Any] | None = None
+        self._learning_data: dict[str, Any] = {}
         self._mental_model_guard_depth = 0
         self.policy = policy or OperatingPolicy()
         if adapters is None:
@@ -4413,6 +4414,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         encoder = _SharedValueEncoder()
         data = {
             "policy": self.policy.to_dict(),
+            "learning_state": getattr(self, "_learning_data", {}),
             "branches": self.branches,
             # Same JSON as each row's to_dict(), without deep-copying shared source lists.
             "evidence": encoder.encode(
@@ -4511,6 +4513,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         # still carry an escaped user dict that merely looks like a reference (see encode).
         data = _decode_shared_values(data, shared if isinstance(shared, dict) else {})
         self.policy = OperatingPolicy.from_dict(data.get("policy"))
+        self._learning_data = data.get("learning_state", {})
         branches = data.get("branches")
         if isinstance(branches, list):
             loaded_branches: dict[str, dict[str, Any]] = {}
@@ -4683,6 +4686,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 "contradictions",
                 "calibrations",
                 "_store_version",
+                "_learning_data",
                 "policy",
                 "overlay_stats",
             )
@@ -5121,7 +5125,10 @@ class LocalMemoryEngine(CanaryOverlayMixin):
 
             if existing_row is not None:
                 existing_obs = Observation.from_dict(existing_row)
-                reconciled, is_contradiction = reconcile_observation(existing_obs, obs)
+                reconciled, is_contradiction = reconcile_observation(
+                    existing_obs, obs,
+                    evidence_getter=lambda cid: self.get_evidence(tenant_id, cid, branch=branch),
+                )
                 if is_contradiction:
                     existing_obs.status = "superseded"
                     existing_obs.superseded_by = reconciled.observation_id
@@ -7454,10 +7461,6 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 access_count += 1
                 lifecycle["access_count"] = access_count
                 lifecycle["last_accessed"] = now.isoformat()
-                lifecycle["salience"] = min(
-                    1.0,
-                    _bounded_float(lifecycle.get("salience", 0.5), default=0.5) + 0.05,
-                )
                 metadata["lifecycle"] = lifecycle
                 ev.metadata = metadata
                 touched_evidence += 1
@@ -8515,6 +8518,17 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         requested_by: str = "user",
         erasure_mode: ErasureMode | str = ErasureMode.TOMBSTONE_RECOMPUTE,
     ) -> dict[str, Any]:
+        with self.source_transaction(tenant_id, branch):
+            return self._forget_scoped(tenant_id, cid, branch, requested_by, erasure_mode)
+
+    def _forget_scoped(
+        self,
+        tenant_id: str,
+        cid: str,
+        branch: str = "main",
+        requested_by: str = "user",
+        erasure_mode: ErasureMode | str = ErasureMode.TOMBSTONE_RECOMPUTE,
+    ) -> dict[str, Any]:
         with self._source_operation(tenant_id, branch):
             before = (
                 copy.deepcopy(self.evidence),
@@ -8539,6 +8553,9 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     requested_by=requested_by,
                     erasure_mode=erasure_mode,
                 )
+                if result.get("erased") and branch == "main":
+                    from mnemosyne.experience.runtime import LearningRuntime
+                    LearningRuntime(self).erase(tenant_id, cid)
             except BaseException:
                 (
                     self.evidence,
@@ -9808,8 +9825,8 @@ class LocalMemoryEngine(CanaryOverlayMixin):
     def _embed_text(self, text: str) -> list[float]:
         return self.adapters.embedding.embed(text)
 
-    def _rrf(self, ranked_lists: list[list[Hit]], k: int) -> list[Hit]:
-        return rrf_fuse(ranked_lists, k, rrf_k=self.policy.rrf_k)
+    def _rrf(self, ranked_lists: list[list[Hit]], k: int, *, channel_weights=None) -> list[Hit]:
+        return rrf_fuse(ranked_lists, k, rrf_k=self.policy.rrf_k, channel_weights=channel_weights)
 
     def _mmr(self, query: str, hits: list[Hit], k: int) -> list[Hit]:
         # Embedding sourcing stays security-gated via _embedding_for_hit

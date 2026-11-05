@@ -768,7 +768,6 @@ class CanaryOverlayMixin:
                     access_count += 1
                     lifecycle["access_count"] = access_count
                     lifecycle["last_accessed"] = now.isoformat()
-                    lifecycle["salience"] = min(1.0, _bounded_float(lifecycle.get("salience", 0.5), default=0.5) + 0.05)
                     metadata["lifecycle"] = lifecycle
                     ev.metadata = metadata
                 touched_evidence += 1

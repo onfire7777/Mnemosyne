@@ -28,6 +28,30 @@ required = [
   "branch_promotion_requires_gate",
   "explicit_preferences_outrank_inferred",
   "erasure_propagates_to_derived_indexes",
+  "learning_reward_external_only",
+  "learning_salience_only",
+  "learning_after_access_policy",
+  "learning_changes_reversible",
+  "learning_bounded_steps",
+  "labile_updates_are_new_revisions",
+  "learning_freeze_on_regression",
+  "learning_tenant_scoped",
+  "learned_effects_need_approval",
+  "erasure_cascades_to_learning",
+  "credit_requires_contingency",
+  "no_use_only_strengthening",
+  "exploration_never_zero",
+  "symmetric_updates",
+  "goal_check_on_every_serve",
+  "reward_sources_allowlisted",
+  "replay_requires_new_evidence",
+  "scope_grows_by_evidence_only",
+  "retired_stays_retired",
+  "evidence_never_labile",
+  "predictions_write_once",
+  "slow_store_revisions_only",
+  "single_learning_write_path",
+  "learning_failures_are_defects",
 ]
 
 [rails.security]
@@ -79,6 +103,7 @@ max_trust_tier = 4
 max_sensitivity = 3
 decay = 0.5
 
+# base_level credits outcome-backed cited demand only, never raw retrievals.
 [tunables.activation_weights]
 base_level = 0.35
 semantic = 0.35
@@ -136,6 +161,8 @@ required_tables = [
   "trajectories",
   "self_model",
   "mental_models",
+  "knowledge_pages",
+  "observations",
   "documents",
   "eval_cases",
   "resources",
@@ -145,8 +172,30 @@ required_tables = [
   "audit_log",
   "runtime_jobs",
   "runtime_state",
+  "learning_receipts",
+  "learning_episodes",
+  "learning_credit",
+  "learning_stats",
+  "learning_artifacts",
+  "learning_defects",
+  "learning_policy_state",
+
   "working_memory",
   "intentions",
   "intention_firing_receipts",
   "intention_firing_receipts_v2",
 ]
+
+[learning.defaults]
+learning_enabled = true
+learning_distill_mode = "deterministic"
+learning_trace_lambda = 0.7
+learning_trace_tau_minutes = 30
+learning_resolution_window_minutes = 180
+learning_exploration_rate = 0.1
+learning_exploration_floor = 0.02
+learning_probation_outcomes = { schema = 5, standalone = 12 }
+learning_interleave_fraction = 0.3
+learning_homeostasis_budget = 0.08
+learning_contingency_min_samples = 8
+learning_goal_check_comparison_rate = 0.05

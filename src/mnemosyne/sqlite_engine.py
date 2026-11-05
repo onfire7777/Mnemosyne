@@ -5739,8 +5739,23 @@ class SqliteEngine:
         requested_by: str = "user",
         erasure_mode: ErasureMode | str = ErasureMode.TOMBSTONE_RECOMPUTE,
     ) -> dict[str, Any]:
+        with self.source_transaction(tenant_id, branch):
+            return self._forget_scoped(tenant_id, cid, branch, requested_by, erasure_mode)
+
+    def _forget_scoped(
+        self,
+        tenant_id: str,
+        cid: str,
+        branch: str = "main",
+        requested_by: str = "user",
+        erasure_mode: ErasureMode | str = ErasureMode.TOMBSTONE_RECOMPUTE,
+    ) -> dict[str, Any]:
         with self._source_operation(tenant_id, branch):
-            return self._forget_impl(tenant_id, cid, branch, requested_by, erasure_mode)
+            result = self._forget_impl(tenant_id, cid, branch, requested_by, erasure_mode)
+            if result.get("erased") and branch == "main":
+                from mnemosyne.experience.runtime import LearningRuntime
+                LearningRuntime(self).erase(tenant_id, cid)
+            return result
 
     def _forget_impl(
         self,
@@ -6997,7 +7012,10 @@ class SqliteEngine:
             ).fetchone()
             if row is not None:
                 existing_obs = _observation_from_row(row)
-                reconciled, is_contradiction = reconcile_observation(existing_obs, obs)
+                reconciled, is_contradiction = reconcile_observation(
+                    existing_obs, obs,
+                    evidence_getter=lambda cid: self.get_evidence(tenant_id, cid, branch=branch),
+                )
                 if is_contradiction:
                     existing_obs.status = "superseded"
                     existing_obs.superseded_by = reconciled.observation_id

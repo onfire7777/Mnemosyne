@@ -9626,7 +9626,8 @@ def cmd_skill_get(args: argparse.Namespace) -> None:
 
 
 def cmd_skill_set_state(args: argparse.Namespace) -> None:
-    emit(load_tools(args).skill_set_state(args.skill_id, args.state, revision=args.revision))
+    emit(load_tools(args).skill_set_state(args.skill_id, args.state, revision=args.revision,
+        approve_effects=args.approve_effects, role=args.role, source_trust_tier=args.source_trust_tier))
 
 
 def cmd_skill_forget(args: argparse.Namespace) -> None:
@@ -9644,7 +9645,7 @@ def cmd_skill_validate(args: argparse.Namespace) -> None:
 def cmd_skill_outcome(args: argparse.Namespace) -> None:
     emit(load_tools(args).skill_outcome(
         args.tenant, args.user, args.skill_id, args.revision, args.success == "true", args.evidence,
-        task=args.task,
+        task=args.task, role=args.role, source_trust_tier=args.source_trust_tier,
     ))
 
 
@@ -19599,6 +19600,211 @@ MCP_TOOL_COMMAND_ALIASES: dict[str, str] = {
 _CANONICAL_COMMAND: dict[str, str] = {alias: command for command, alias in MCP_TOOL_COMMAND_ALIASES.items()}
 
 
+LEARNING_TOOL_COMMANDS = (
+    "prepare_context", "observe_turn", "record_signal", "end_session", "learning_status",
+    "learning_explain", "learning_rollback", "learning_pause", "learning_resume", "learning_pin",
+    "learning_lock", "learning_mode", "learning_defects", "learning_defect_export", "learning_reflect", "learning_verify_defect", "learning_export_training",
+)
+
+
+def cmd_prepare_context(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.prepare_context(
+        tenant_id=args.tenant_id,
+        user_id=args.user_id,
+        session_id=args.session_id,
+        query=args.query,
+        available_tools=args.available_tools,
+        task_type=args.task_type,
+        risk_level=args.risk_level,
+        role=args.role,
+        source_trust_tier=args.source_trust_tier,
+    ))
+
+def cmd_observe_turn(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.observe_turn(
+        tenant_id=args.tenant_id,
+        user_id=args.user_id,
+        session_id=args.session_id,
+        user_text=args.user_text,
+        assistant_text=args.assistant_text,
+        tool_events=args.tool_events,
+        receipt_ids=args.receipt_ids,
+        used_skills=args.used_skills,
+        used_lessons=args.used_lessons,
+        role=args.role,
+        source_trust_tier=args.source_trust_tier,
+    ))
+
+def cmd_record_signal(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.record_signal(
+        tenant_id=args.tenant_id,
+        user_id=args.user_id,
+        session_id=args.session_id,
+        kind=args.kind,
+        value=args.value,
+        episode_id=args.episode_id,
+        receipt_id=args.receipt_id,
+        evidence=args.evidence,
+        final=args.final,
+        role=args.role,
+        source_trust_tier=args.source_trust_tier,
+    ))
+
+def cmd_end_session(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.end_session(
+        tenant_id=args.tenant_id,
+        user_id=args.user_id,
+        session_id=args.session_id,
+        role=args.role,
+        source_trust_tier=args.source_trust_tier,
+    ))
+
+def cmd_learning_status(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.learning_status(
+        tenant_id=args.tenant_id,
+        role=args.role,
+        source_trust_tier=args.source_trust_tier,
+    ))
+
+def cmd_learning_explain(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.learning_explain(
+        tenant_id=args.tenant_id,
+        target=args.target,
+        user_id=args.user_id,
+        session_id=args.session_id,
+        role=args.role,
+        source_trust_tier=args.source_trust_tier,
+    ))
+
+def cmd_learning_rollback(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.learning_rollback(
+        tenant_id=args.tenant_id,
+        audit_id=args.audit_id,
+        role=args.role,
+        source_trust_tier=args.source_trust_tier,
+    ))
+
+def cmd_learning_pause(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.learning_pause(
+        tenant_id=args.tenant_id,
+        role=args.role,
+        source_trust_tier=args.source_trust_tier,
+    ))
+
+def cmd_learning_resume(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.learning_resume(
+        tenant_id=args.tenant_id,
+        role=args.role,
+        source_trust_tier=args.source_trust_tier,
+    ))
+
+def cmd_learning_pin(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.learning_pin(
+        tenant_id=args.tenant_id,
+        target=args.target,
+        pinned=args.pinned,
+        role=args.role,
+        source_trust_tier=args.source_trust_tier,
+    ))
+
+def cmd_learning_lock(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.learning_lock(
+        tenant_id=args.tenant_id,
+        target=args.target,
+        locked=args.locked,
+        role=args.role,
+        source_trust_tier=args.source_trust_tier,
+    ))
+
+def cmd_learning_mode(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.learning_mode(
+        tenant_id=args.tenant_id,
+        component=args.component,
+        mode=args.mode,
+        role=args.role,
+        source_trust_tier=args.source_trust_tier,
+    ))
+
+def cmd_learning_defects(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.learning_defects(
+        tenant_id=args.tenant_id,
+        status=args.status,
+        role=args.role,
+        source_trust_tier=args.source_trust_tier,
+    ))
+
+def cmd_learning_defect_export(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.learning_defect_export(
+        tenant_id=args.tenant_id,
+        defect_id=args.defect_id,
+        role=args.role,
+        source_trust_tier=args.source_trust_tier,
+    ))
+
+def cmd_learning_reflect(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.learning_reflect(
+        tenant_id=args.tenant_id,
+        role=args.role,
+        source_trust_tier=args.source_trust_tier,
+    ))
+
+
+def cmd_learning_verify_defect(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.learning_verify_defect(tenant_id=args.tenant_id, defect_id=args.defect_id,
+        fixing_commit=args.fixing_commit, role=args.role, source_trust_tier=args.source_trust_tier))
+
+
+def cmd_learning_export_training(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.learning_export_training(tenant_id=args.tenant_id, role=args.role,
+        source_trust_tier=args.source_trust_tier))
+
+
+def _add_learning_commands(sub) -> None:
+    from mnemosyne.mcp_server import _to_mcp_tool_spec
+    from mnemosyne.mcp_tools import TOOL_SPEC
+    for spec in TOOL_SPEC:
+        if spec['name'] not in LEARNING_TOOL_COMMANDS:
+            continue
+        parser = sub.add_parser(spec['name'].replace('_', '-'), help=spec['description'])
+        schema = _to_mcp_tool_spec(spec)['inputSchema']
+        for name, value in schema['properties'].items():
+            options = value.get('anyOf', [value])
+            types = {option.get('type') for option in options}
+            arguments = {'dest': name, 'required': name in schema.get('required', [])}
+            if 'default' in value:
+                arguments['default'] = value['default']
+            flag = '--' + name.replace('_', '-')
+            if 'boolean' in types:
+                arguments['action'] = argparse.BooleanOptionalAction
+            elif types & {'array', 'object'}:
+                arguments['type'] = json.loads
+            elif 'integer' in types:
+                arguments['type'] = int
+            elif 'number' in types:
+                arguments['type'] = float
+            else:
+                arguments['type'] = str
+            parser.add_argument(flag, **arguments)
+        parser.set_defaults(func=globals()['cmd_' + spec['name']])
+
+
 def build_parser() -> argparse.ArgumentParser:
     from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES
 
@@ -21269,8 +21475,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     skill_set_state = sub.add_parser("skill-set-state")
     skill_set_state.add_argument("--skill-id", required=True)
-    skill_set_state.add_argument("--state", required=True, choices=["draft", "active", "retired"])
+    skill_set_state.add_argument("--state", required=True, choices=["draft", "probation", "active", "labile", "demoted", "retired"])
     skill_set_state.add_argument("--revision", type=int)
+    skill_set_state.add_argument("--approve-effects", action="store_true")
+    skill_set_state.add_argument("--role", default="reader", choices=["reader", "agent", "consolidator", "operator"])
+    skill_set_state.add_argument("--source-trust-tier", type=int, default=1)
     skill_set_state.set_defaults(func=cmd_skill_set_state)
 
     skill_forget = sub.add_parser("skill-forget")
@@ -21295,6 +21504,8 @@ def build_parser() -> argparse.ArgumentParser:
     skill_outcome.add_argument("--success", required=True, choices=["true", "false"])
     skill_outcome.add_argument("--evidence", required=True)
     skill_outcome.add_argument("--task", default="")
+    skill_outcome.add_argument("--role", default="agent", choices=["reader", "agent", "consolidator", "operator"])
+    skill_outcome.add_argument("--source-trust-tier", type=int, default=1)
     skill_outcome.set_defaults(func=cmd_skill_outcome)
 
     procedure_rollback = sub.add_parser("procedure-rollback")
@@ -22167,6 +22378,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Emit the capability report as JSON instead of shell-exportable lines",
     )
     capability.set_defaults(func=cmd_capability)
+    _add_learning_commands(sub)
     return parser
 
 

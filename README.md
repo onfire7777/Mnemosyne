@@ -27,6 +27,9 @@ used by [BurnOS](https://github.com/onfire7777/BurnOS).
 | Books to BurnSkills | Turn PDF or EPUB text into a linked framework with source citations, coverage reports and audits. |
 | Working and prospective memory | Stage temporary context and evaluate scheduled intentions through authenticated interfaces. |
 | Controlled writes | Apply trust tiers, capabilities, sensitivity limits and regression gates to memory changes. |
+| Experience learning | Capture outcomes, learn bounded retrieval utility, and revise source-backed procedures and skills through guarded probation and testing. |
+
+Learning is enabled by default for the learning host APIs. Hosts forward turns and real tool outcomes through the [learning integration](docs/learning-host-integration.md). [Learning documentation](docs/learning.md) describes controls and the remaining evaluation work.
 
 The core runtime starts without a model service. Model-based skill conversion, remote embeddings
 and other provider-backed features require their own configuration and may incur provider charges.

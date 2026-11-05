@@ -1624,6 +1624,17 @@ def run_retrieval_pipeline(
 ) -> RetrievalResult:
     """The shared retrieve() orchestration — LocalMemoryEngine's body verbatim."""
 
+    overrides = (filt or {}).get("_learning_policy_overrides")
+    if overrides is not None:
+        if not isinstance(overrides, dict) or set(overrides) - {"top_k", "abstention_threshold"}:
+            raise ValueError("unsupported learned policy field")
+        if "top_k" in overrides and (type(overrides["top_k"]) is not int or not 1 <= overrides["top_k"] <= 64):
+            raise ValueError("learned top_k is outside its invariant bounds")
+        if "abstention_threshold" in overrides:
+            threshold = overrides["abstention_threshold"]
+            if type(threshold) not in (int, float) or not policy.abstention_threshold <= threshold <= .95:
+                raise ValueError("learned policy cannot weaken abstention")
+        policy = replace(policy, **overrides)
     workspace_broadcast = workspace_broadcast_from_context(filt)
     effective_filter = strip_workspace_broadcast_filter(filt)
     effective_filter.update({"tenant_id": tenant_id, "branch": branch, "_retrieval_deep": deep})
@@ -1999,6 +2010,14 @@ def run_retrieval_pipeline(
     cosine_ranked = (
         semantic and graph_ranked is not None and (passage_graph_explain or {}).get("score_scale") == "cosine"
     )
+    def fuse(ranked_lists, k):
+        weights = effective_filter.get("_learning_route_weights")
+        if weights is None:
+            return ops._rrf(ranked_lists, k=k)
+        if not isinstance(weights, dict) or any(not .05 <= value <= .65 for value in weights.values()):
+            raise ValueError("learning route weights must be within immutable bounds")
+        return ops._rrf(ranked_lists, k=k, channel_weights=weights)
+
     if source_ranked is not None:
         fused = source_ranked
     elif window is not None or (passage_mode and graph_ranked is not None):
@@ -2006,12 +2025,12 @@ def run_retrieval_pipeline(
     elif cosine_ranked:
         found = {(hit.kind, hit.id) for hit in dense}
         fused = dense + [
-            hit for hit in ops._rrf([lexical, prospective, working], k=max(k * 2, policy.rerank_width))
+            hit for hit in fuse([lexical, prospective, working], k=max(k * 2, policy.rerank_width))
             if (hit.kind, hit.id) not in found
         ]
     else:
         fused = (
-            ops._rrf(ranked_routes, k=max(k * 2, policy.rerank_width, 100 if passage_mode else 0))
+            fuse(ranked_routes, k=max(k * 2, policy.rerank_width, 100 if passage_mode else 0))
             if not passage_mode or dense else lexical
         )
     collapsed_turns = 0

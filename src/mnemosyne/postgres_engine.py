@@ -6316,11 +6316,6 @@ class PostgresEngine:
                             access_count = 0
                         lifecycle["access_count"] = access_count + 1
                         lifecycle["last_accessed"] = utc_now().isoformat()
-                        try:
-                            salience = float(lifecycle.get("salience", 0.5))
-                        except (TypeError, ValueError):
-                            salience = 0.5
-                        lifecycle["salience"] = min(1.0, max(0.0, salience) + 0.05)
                         metadata["lifecycle"] = lifecycle
                         cur.execute(
                             """
@@ -7101,8 +7096,22 @@ class PostgresEngine:
         requested_by: str = "user",
         erasure_mode: ErasureMode | str = ErasureMode.TOMBSTONE_RECOMPUTE,
     ) -> dict[str, Any]:
+        with self.source_transaction(tenant_id, branch):
+            return self._forget_scoped(tenant_id, cid, branch, requested_by, erasure_mode)
+
+    def _forget_scoped(
+        self,
+        tenant_id: str,
+        cid: str,
+        branch: str = "main",
+        requested_by: str = "user",
+        erasure_mode: ErasureMode | str = ErasureMode.TOMBSTONE_RECOMPUTE,
+    ) -> dict[str, Any]:
         with self._source_operation_scope(tenant_id, branch):
             result = self._forget(tenant_id, cid, branch, requested_by, erasure_mode)
+            if result.get("erased") and branch == "main":
+                from mnemosyne.experience.runtime import LearningRuntime
+                LearningRuntime(self).erase(tenant_id, cid)
             state = self._source_transaction_state()
             if state is not None:
                 state["invalidate_passages"] = True
@@ -9284,9 +9293,9 @@ class PostgresEngine:
             }
         return hits
 
-    def _rrf(self, ranked_lists: list[list[Hit]], k: int) -> list[Hit]:
+    def _rrf(self, ranked_lists: list[list[Hit]], k: int, *, channel_weights=None) -> list[Hit]:
         return rrf_fuse(
-            ranked_lists, k, rrf_k=self.policy.rrf_k, annotate_channel_scores=True
+            ranked_lists, k, rrf_k=self.policy.rrf_k, annotate_channel_scores=True, channel_weights=channel_weights
         )
 
     def _mmr(self, query: str, hits: list[Hit], k: int) -> list[Hit]:
@@ -9940,7 +9949,8 @@ class PostgresEngine:
                 if row is not None:
                     existing_obs = _row_to_observation(row, tenant_id)
                     reconciled, is_contradiction = reconcile_observation(
-                        existing_obs, obs
+                        existing_obs, obs,
+                        evidence_getter=lambda cid: self.get_evidence(tenant_id, cid, branch=branch),
                     )
                     if is_contradiction:
                         existing_obs.status = "superseded"

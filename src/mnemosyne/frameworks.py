@@ -2213,6 +2213,11 @@ class AutoMemorySession:
         auto_consolidate: bool = True,
         cache: str | None = None,
         model: str | None = None,
+        skill_store: Any | None = None,
+        lesson_distiller: Any | None = None,
+        procedure_inducer: Any | None = None,
+        protected_cases: list[Any] | None = None,
+        risk_level: str | None = None,
     ) -> None:
         if not tenant_id or not user_id:
             raise ValueError("tenant_id and user_id must be non-empty strings")
@@ -2224,6 +2229,7 @@ class AutoMemorySession:
         self.role = role
         self.agent_id = agent_id
         self.task_id = task_id
+        self.risk_level = risk_level
         self.token_budget = token_budget
         self.max_working_turns = max_working_turns
         self.auto_consolidate = auto_consolidate
@@ -2239,6 +2245,26 @@ class AutoMemorySession:
         self._last_user_turn_text: str = ""
         self._last_user_evidence_cid: str = ""
         self._closed: bool = False
+        from mnemosyne.experience.runtime import LearningRuntime
+        # The learning runtime currently serves the main branch only.
+        self.learning_runtime = LearningRuntime(
+            engine, skill_store=skill_store or getattr(engine, "_learning_skill_store", None)
+        ) if branch == "main" else None
+        self._learning_receipt_id: str | None = None
+        self._learning_tools = None
+        if self.learning_runtime is not None:
+            from mnemosyne.mcp_tools import MemoryTools
+            from mnemosyne.runtime_state import RuntimeState
+            import weakref
+            self._learning_tools = getattr(engine, "_learning_tools", None)
+            if isinstance(self._learning_tools, weakref.ReferenceType):
+                self._learning_tools = self._learning_tools()
+            if self._learning_tools is None:
+                self._learning_tools = MemoryTools(engine, runtime_state=RuntimeState.from_store_path(getattr(engine, "store_path", None)), skill_store=skill_store)
+                engine._learning_tools = weakref.ref(self._learning_tools)
+            self.learning_runtime.protected_cases = list(protected_cases if protected_cases is not None else getattr(engine, "_learning_protected_cases", []))
+            self.learning_runtime.lesson_distiller = lesson_distiller
+            self.learning_runtime.procedure_inducer = procedure_inducer
 
     def pre_turn_retrieve(self, query: str) -> dict[str, Any]:
         """Perform adaptive context retrieval with dynamic sub-budget partitioning."""
@@ -2302,23 +2328,30 @@ class AutoMemorySession:
                 log.debug("AutoMemorySession observation_list error: %s", exc)
 
         evidence_hits: list[str] = []
-        if query and hasattr(self.engine, "retrieve"):
-            try:
-                evidence_budget = int(self.token_budget * evidence_pct)
-                ret = self.engine.retrieve(
-                    self.tenant_id,
-                    query=query,
-                    branch=self.branch,
-                    token_budget=evidence_budget,
-                )
-                for h in getattr(ret, "hits", [])[:5]:
-                    c = getattr(h, "content", getattr(h, "text", ""))
-                    if c:
-                        evidence_hits.append(f"[cid:{getattr(h, 'cid', '')}] {c[:250]}")
-            except Exception as exc:
-                log.debug("AutoMemorySession retrieve error: %s", exc)
+        learned_snippets: list[str] = []
+        if query and self.learning_runtime is not None:
+            learning_context = self.learning_runtime.prepare_context(
+                self.tenant_id, self.user_id, self.session_id, query, task_type=self.task_id if self.task_id != "chat" else None, risk_level=self.risk_level)
+            self._learning_receipt_id = learning_context['receipt_id']
+            for hit in learning_context['hits']:
+                evidence_hits.append(f"[cid:{hit['id']}] {hit['text']}")
+            for kind in ('procedures', 'lessons', 'skills'):
+                for artifact in learning_context[kind]:
+                    learned_snippets.append(f"[{artifact['id']}] {artifact['content']}")
+            for page in learning_context.get("knowledge_pages", []):
+                learned_snippets.append(f"[knowledge page {page.get('id', '')}] {page['content']}")
+            if self._learning_tools is not None:
+                profile = self._learning_tools.profile_context(self.tenant_id, self.user_id, {"session_id": self.session_id})
+                for entry in profile["authoritative"]:
+                    learned_snippets.append(f"[user preference {entry['id']}] {entry['statement']}")
+        elif query and hasattr(self.engine, "retrieve"):
+            ret = self.engine.retrieve(query, tenant_id=self.tenant_id,
+                                       branch=self.branch, record_access=True)
+            evidence_hits.extend(f"[cid:{hit.id}] {hit.text[:250]}" for hit in ret.hits[:5])
 
         sections: list[str] = []
+        if learned_snippets:
+            sections.append("### Tested procedures and lessons\n" + "\n".join(learned_snippets))
         if active_goals or active_constraints:
             g_lines: list[str] = []
             if active_goals:
@@ -2348,6 +2381,7 @@ class AutoMemorySession:
 
         return {
             "context_text": context_str,
+            "receipt_id": self._learning_receipt_id,
             "sub_budgets": {
                 "goals": goals_pct,
                 "knowledge": knowledge_pct,
@@ -2358,7 +2392,11 @@ class AutoMemorySession:
             "turn_window": turn_window,
         }
 
-    def post_turn_capture(self, user_text: str, assistant_text: str) -> dict[str, Any]:
+    def post_turn_capture(self, user_text: str, assistant_text: str,
+                          tool_events: list[dict[str, Any]] | None = None,
+                          receipt_id: str | None = None,
+                          used_skills: list[str] | None = None,
+                          used_lessons: list[str] | None = None) -> dict[str, Any]:
         """Atomically record user and assistant turns into working memory and durable evidence."""
         from mnemosyne.engine import WorkingMemoryItem
         from mnemosyne.ids import evidence_cid
@@ -2516,7 +2554,25 @@ class AutoMemorySession:
                     except Exception as exc:
                         log.debug("AutoMemorySession put_working constraint error: %s", exc)
 
+        learning_episode = None
+        if self.learning_runtime is not None:
+            receipt = receipt_id or self._learning_receipt_id
+            learning_episode = self.learning_runtime.observe_turn(
+                self.tenant_id, self.user_id, self.session_id, user_text, assistant_text,
+                tool_events=tool_events, receipt_ids=[receipt] if receipt else [], source_cids=[cid_user, cid_asst], used_skills=used_skills, used_lessons=used_lessons)
+            self._learning_receipt_id = None
+            self._learning_tools._capture_learning_user_feedback(
+                self.learning_runtime, self.tenant_id, self.user_id, self.session_id,
+                user_text, learning_episode['episode_id'], self.role, 1)
+            if tool_events:
+                episode = self.learning_runtime.resolve(self.tenant_id, learning_episode['episode_id'])
+                resolved = [row for row in self.learning_runtime.writer.read(self.tenant_id)['episodes'].values()
+                            if row['status'] == 'resolved']
+                if episode['status'] == 'resolved' and (episode['reward'] < 0 or len(resolved) % 10 == 0):
+                    self.learning_runtime.consolidate(self.tenant_id)
+
         return {
+            "learning_episode": learning_episode,
             "turn": self._turn_count,
             "salience": user_salience,
             "user_cid": cid_user,
@@ -2564,11 +2620,81 @@ class AutoMemorySession:
             with framework_context(cache=self.cache, model=self.model):
                 response = chat_fn(augmented_messages, *args, **kwargs)
 
-            # 4. Post-turn turn capture
-            asst_text = _extract_text_content(response)
-            self.post_turn_capture(query, asst_text)
+            # Capture only after completion, using actual host tool results.
+            def capture(completed):
+                events = completed.get("tool_events") if isinstance(completed, dict) else getattr(completed, "tool_events", None)
+                self.post_turn_capture(query, _extract_text_content(completed),
+                                       tool_events=events, receipt_id=retrieval.get("receipt_id"),
+                                       used_skills=completed.get("used_skills") if isinstance(completed, dict) else None,
+                                       used_lessons=completed.get("used_lessons") if isinstance(completed, dict) else None)
+                return completed
 
-            return response
+            from collections.abc import AsyncIterator, Iterator
+            import inspect
+
+            def stream_piece(chunk):
+                if isinstance(chunk, str):
+                    return chunk, []
+                events = chunk.get("tool_events", []) if isinstance(chunk, dict) else getattr(chunk, "tool_events", [])
+                if isinstance(chunk, dict):
+                    if isinstance(chunk.get("content"), str):
+                        return chunk["content"], events
+                    choices = chunk.get("choices") or []
+                    delta = choices[0].get("delta", {}) if choices else {}
+                    return delta.get("content") or "", events
+                choices = getattr(chunk, "choices", [])
+                delta = getattr(choices[0], "delta", None) if choices else None
+                return getattr(chunk, "content", None) or getattr(delta, "content", None) or "", events
+
+            def adapt(completed):
+                if isinstance(completed, AsyncIterator):
+                    async def async_stream():
+                        parts, events = [], []
+                        try:
+                            while True:
+                                try:
+                                    with framework_context(cache=self.cache, model=self.model):
+                                        chunk = await anext(completed)
+                                except StopAsyncIteration:
+                                    break
+                                text, observed = stream_piece(chunk)
+                                parts.append(text)
+                                events.extend(observed or [])
+                                yield chunk
+                            capture({"content": "".join(parts), "tool_events": events})
+                        finally:
+                            closer = getattr(completed, "aclose", None)
+                            if closer is not None:
+                                await closer()
+                    return async_stream()
+                if isinstance(completed, Iterator):
+                    def stream():
+                        parts, events = [], []
+                        try:
+                            while True:
+                                try:
+                                    with framework_context(cache=self.cache, model=self.model):
+                                        chunk = next(completed)
+                                except StopIteration:
+                                    break
+                                text, observed = stream_piece(chunk)
+                                parts.append(text)
+                                events.extend(observed or [])
+                                yield chunk
+                            capture({"content": "".join(parts), "tool_events": events})
+                        finally:
+                            closer = getattr(completed, "close", None)
+                            if closer is not None:
+                                closer()
+                    return stream()
+                return capture(completed)
+
+            if inspect.isawaitable(response):
+                async def finish():
+                    with framework_context(cache=self.cache, model=self.model):
+                        return adapt(await response)
+                return finish()
+            return adapt(response)
 
         setattr(_wrapped, "session", self)
         return _wrapped
@@ -2656,6 +2782,10 @@ class AutoMemorySession:
     def close(self) -> dict[str, Any]:
         """Close the session and trigger auto-consolidation if enabled."""
         if not self._closed:
+            if self.learning_runtime is not None:
+                self.learning_runtime.end_session(self.tenant_id, self.session_id)
+                if self.auto_consolidate:
+                    self.learning_runtime.consolidate(self.tenant_id)
             self._closed = True
             if self.auto_consolidate:
                 return self.consolidate()

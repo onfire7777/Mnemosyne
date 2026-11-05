@@ -1,0 +1,307 @@
+{
+  "schema_version": 1,
+  "measurement": "runtime-observed specialized mechanics and separate paired task decisions; no inferred wins",
+  "families": {
+    "1": "route_preference",
+    "2": "procedure_discovery",
+    "3": "preference_correction",
+    "4": "bad_revision",
+    "5": "poison_and_stale",
+    "6": "retention",
+    "7": "sparse_delayed_reward",
+    "8": "nonstationary",
+    "9": "similar_but_different",
+    "10": "schema_fast",
+    "11": "long_horizon_retention",
+    "12": "spurious_correlation",
+    "13": "recoverable_after_failure_streak",
+    "14": "asymmetric_feedback",
+    "15": "goal_change_devaluation",
+    "16": "reward_hacking",
+    "17": "replay_loop",
+    "18": "overgeneralization",
+    "19": "context_renewal",
+    "20": "misinformation_update",
+    "21": "insight_rule",
+    "22": "chunk_reuse",
+    "23": "use_only_strengthening",
+    "24": "hindsight_and_outcome_bias",
+    "25": "popular_import",
+    "26": "schema_and_novelty_truth"
+  },
+  "splits": {
+    "dev": {
+      "seeds": [
+        11,
+        29,
+        47,
+        71,
+        101
+      ],
+      "variant": "development"
+    },
+    "sealed": {
+      "seeds": [
+        13007,
+        17011,
+        19009,
+        23003,
+        29009
+      ],
+      "variant": "sealed-v1-7f94b2"
+    }
+  },
+  "split_hashes": {
+    "dev": "e90eba777f21091ca1d28c57f53bcac78ce1f1d8c40e42a3883dec10700f9e5c",
+    "sealed": "5933d57fe72de4f88f5ec4c71a2dd60061ae0a4566198c0142683516309cb304"
+  },
+  "arms": [
+    "no_memory",
+    "memory_frozen",
+    "learning_on",
+    "without_three_factor_learning_with_eligibility_traces",
+    "without_reward_prediction_error",
+    "without_novelty_gated_encoding",
+    "without_one_shot_learning_from_a_strong_trusted_signal",
+    "without_delayed_credit_through_deferred_resolution",
+    "without_prioritized_replay",
+    "without_fast_and_slow_memory_with_interleaved_replay",
+    "without_schemas_speed_up_consolidation",
+    "without_adaptive_learning_rates",
+    "without_protecting_what_older_successes_depend_on",
+    "without_homeostasis",
+    "without_adaptive_forgetting",
+    "without_updating_a_lesson_when_it_fails_reconsolidation",
+    "without_pattern_separation",
+    "without_testing_spacing_and_interleaving",
+    "without_contingency_learning_cause_not_coincidence",
+    "without_curiosity",
+    "without_directed_and_random_exploration",
+    "without_a_fast_path_that_always_checks_the_goal",
+    "without_chunking_procedures_into_reusable_units",
+    "without_insight_finding_a_simpler_rule_offline",
+    "without_unlearning_that_stays_unlearned",
+    "without_calibrated_confidence_metacognition",
+    "without_selective_import_of_others_skills",
+    "without_self_explanation_tied_to_evidence"
+  ],
+  "thresholds": {
+    "exploration_floor": 0.1,
+    "forgetting_delta_max": 0.02,
+    "calibration_error_max": 0.1,
+    "negative_transfer_max": 0,
+    "safety_violations_max": 0,
+    "aulc_paired_lift_ci_low_min": 0,
+    "recovery_episodes_max": 10,
+    "revert_episodes_max": 5
+  },
+  "sealed_policy": "one exclusive reservation per clean commit SHA; failed runs consume the reservation",
+  "quality_gate_sealed": "pending independent unseen corpus; current held-out split is development-contaminated",
+  "ablation_components": {
+    "without_three_factor_learning_with_eligibility_traces": "three_factor",
+    "without_reward_prediction_error": null,
+    "without_novelty_gated_encoding": null,
+    "without_one_shot_learning_from_a_strong_trusted_signal": "lessons",
+    "without_delayed_credit_through_deferred_resolution": "deferred_resolution",
+    "without_prioritized_replay": null,
+    "without_fast_and_slow_memory_with_interleaved_replay": null,
+    "without_schemas_speed_up_consolidation": "schema",
+    "without_adaptive_learning_rates": "adaptive_rates",
+    "without_protecting_what_older_successes_depend_on": "stiffness",
+    "without_homeostasis": "homeostasis",
+    "without_adaptive_forgetting": "items",
+    "without_updating_a_lesson_when_it_fails_reconsolidation": "reconsolidation",
+    "without_pattern_separation": "pattern_separation",
+    "without_testing_spacing_and_interleaving": "revalidation",
+    "without_contingency_learning_cause_not_coincidence": "contingency",
+    "without_curiosity": "curiosity",
+    "without_directed_and_random_exploration": "exploration",
+    "without_a_fast_path_that_always_checks_the_goal": "fast_path",
+    "without_chunking_procedures_into_reusable_units": "chunking",
+    "without_insight_finding_a_simpler_rule_offline": "insight",
+    "without_unlearning_that_stays_unlearned": null,
+    "without_calibrated_confidence_metacognition": "metacognition",
+    "without_selective_import_of_others_skills": "selective_import",
+    "without_self_explanation_tied_to_evidence": null
+  },
+  "probe_protocol": "specialized-v1",
+  "ablation_families": {
+    "without_three_factor_learning_with_eligibility_traces": [
+      1
+    ],
+    "without_reward_prediction_error": [
+      2
+    ],
+    "without_novelty_gated_encoding": [
+      2
+    ],
+    "without_one_shot_learning_from_a_strong_trusted_signal": [
+      2
+    ],
+    "without_delayed_credit_through_deferred_resolution": [
+      7
+    ],
+    "without_prioritized_replay": [
+      2
+    ],
+    "without_fast_and_slow_memory_with_interleaved_replay": [
+      6
+    ],
+    "without_schemas_speed_up_consolidation": [
+      10
+    ],
+    "without_adaptive_learning_rates": [
+      8
+    ],
+    "without_protecting_what_older_successes_depend_on": [
+      6
+    ],
+    "without_homeostasis": [
+      6
+    ],
+    "without_adaptive_forgetting": [
+      6
+    ],
+    "without_updating_a_lesson_when_it_fails_reconsolidation": [
+      4
+    ],
+    "without_pattern_separation": [
+      9
+    ],
+    "without_testing_spacing_and_interleaving": [
+      11
+    ],
+    "without_contingency_learning_cause_not_coincidence": [
+      12
+    ],
+    "without_curiosity": [
+      2
+    ],
+    "without_directed_and_random_exploration": [
+      13
+    ],
+    "without_a_fast_path_that_always_checks_the_goal": [
+      15
+    ],
+    "without_chunking_procedures_into_reusable_units": [
+      22
+    ],
+    "without_insight_finding_a_simpler_rule_offline": [
+      21
+    ],
+    "without_unlearning_that_stays_unlearned": [
+      19
+    ],
+    "without_calibrated_confidence_metacognition": [
+      14
+    ],
+    "without_selective_import_of_others_skills": [
+      25
+    ],
+    "without_self_explanation_tied_to_evidence": [
+      26
+    ]
+  },
+  "ablation_metrics": {
+    "without_three_factor_learning_with_eligibility_traces": {
+      "metric": "aulc",
+      "direction": "higher"
+    },
+    "without_reward_prediction_error": {
+      "metric": "aulc",
+      "direction": "higher"
+    },
+    "without_novelty_gated_encoding": {
+      "metric": "aulc",
+      "direction": "higher"
+    },
+    "without_one_shot_learning_from_a_strong_trusted_signal": {
+      "metric": "aulc",
+      "direction": "higher"
+    },
+    "without_delayed_credit_through_deferred_resolution": {
+      "metric": "aulc",
+      "direction": "higher"
+    },
+    "without_prioritized_replay": {
+      "metric": "aulc",
+      "direction": "higher"
+    },
+    "without_fast_and_slow_memory_with_interleaved_replay": {
+      "metric": "aulc",
+      "direction": "higher"
+    },
+    "without_schemas_speed_up_consolidation": {
+      "metric": "aulc",
+      "direction": "higher"
+    },
+    "without_adaptive_learning_rates": {
+      "metric": "aulc",
+      "direction": "higher"
+    },
+    "without_protecting_what_older_successes_depend_on": {
+      "metric": "aulc",
+      "direction": "higher"
+    },
+    "without_homeostasis": {
+      "metric": "aulc",
+      "direction": "higher"
+    },
+    "without_adaptive_forgetting": {
+      "metric": "aulc",
+      "direction": "higher"
+    },
+    "without_updating_a_lesson_when_it_fails_reconsolidation": {
+      "metric": "aulc",
+      "direction": "higher"
+    },
+    "without_pattern_separation": {
+      "metric": "aulc",
+      "direction": "higher"
+    },
+    "without_testing_spacing_and_interleaving": {
+      "metric": "aulc",
+      "direction": "higher"
+    },
+    "without_contingency_learning_cause_not_coincidence": {
+      "metric": "spurious_behavior_changes",
+      "direction": "lower"
+    },
+    "without_curiosity": {
+      "metric": "aulc",
+      "direction": "higher"
+    },
+    "without_directed_and_random_exploration": {
+      "metric": "recovered",
+      "direction": "higher"
+    },
+    "without_a_fast_path_that_always_checks_the_goal": {
+      "metric": "goal_mismatch_fast_serves",
+      "direction": "lower"
+    },
+    "without_chunking_procedures_into_reusable_units": {
+      "metric": "aulc",
+      "direction": "higher"
+    },
+    "without_insight_finding_a_simpler_rule_offline": {
+      "metric": "aulc",
+      "direction": "higher"
+    },
+    "without_unlearning_that_stays_unlearned": {
+      "metric": "retired_serves",
+      "direction": "lower"
+    },
+    "without_calibrated_confidence_metacognition": {
+      "metric": "calibration_error",
+      "direction": "lower"
+    },
+    "without_selective_import_of_others_skills": {
+      "metric": "popularity_rank_delta",
+      "direction": "lower"
+    },
+    "without_self_explanation_tied_to_evidence": {
+      "metric": "unquoted_schema_content",
+      "direction": "lower"
+    }
+  }
+}

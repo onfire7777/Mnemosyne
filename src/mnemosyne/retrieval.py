@@ -5067,14 +5067,19 @@ def apply_activation_scores(
     for hit in hits:
         semantic = max(hit.score, 0.0) / max(max_relevance, 0.01)
         confidence = _bounded_float(hit.metadata.get("confidence", 0.7), default=0.7)
-        access_count = _bounded_int(hit.metadata.get("access_count", 0))
+        # Demand is credited once per resolved, non-negative cited episode.
+        # Unresolved demand and legacy read counters carry no activation credit.
+        demand_count = _bounded_int(hit.metadata.get("demand_count", 0))
+        outcome_count = _bounded_int(hit.metadata.get("demand_outcome_count", 0))
+        demand_count = min(demand_count, outcome_count)
+        demand_time = hit.metadata.get("demand_last_at") if demand_count else hit.metadata.get("created_at")
         recency = _recency_score(
-            hit.metadata.get("last_accessed"), moment, policy.decay
+            demand_time, moment, policy.decay
         )
         actr_d = max(float(getattr(policy, "actr_decay", 0.0)), 0.0)
-        if actr_d > 0.0:
-            age_days = _age_days(hit.metadata.get("last_accessed"), moment)
-            raw_base_level = math.log1p(access_count) - actr_d * math.log1p(age_days)
+        if actr_d > 0.0 and demand_count > 0:
+            age_days = _age_days(demand_time, moment)
+            raw_base_level = math.log1p(demand_count) - actr_d * math.log1p(age_days)
             base_level = max(
                 0.0,
                 min(
@@ -5084,7 +5089,7 @@ def apply_activation_scores(
                 ),
             )
         else:
-            base_level = min(1.0, math.log1p(access_count) / math.log(11))
+            base_level = min(1.0, math.log1p(demand_count) / math.log(11))
         importance = confidence * trust_weight(hit.trust_tier)
         activation_numerator = (
             max(weights.get("base_level", 0.0), 0.0) * base_level

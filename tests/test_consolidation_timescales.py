@@ -52,6 +52,7 @@ SLOW_PASSES = [
     "skill_inducer",
     "forgetter",
     "user_model_updater",
+    "learning_reflect",
 ]
 TIER_PASSES = {"fast": FAST_PASSES, "medium": MEDIUM_PASSES, "slow": SLOW_PASSES}
 

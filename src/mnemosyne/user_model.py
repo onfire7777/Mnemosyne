@@ -40,6 +40,7 @@ _INTERNAL_SCOPE_KEYS = frozenset({
     "corroboration_count",
     "graduated_from",
     "drift_history",
+    "_learning_source_cids",
 })
 
 

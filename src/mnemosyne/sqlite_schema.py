@@ -541,3 +541,12 @@ def unpack_embedding(blob: bytes | None) -> list[float] | None:
     if sys.byteorder == "big":  # pragma: no cover — no supported big-endian target
         unpacked.byteswap()
     return list(unpacked)
+
+# Experience records use the engine transaction and tenant database.
+LEARNING_TABLES = ("learning_receipts", "learning_episodes", "learning_credit",
+                   "learning_stats", "learning_artifacts", "learning_defects", "learning_policy_state")
+ENSURE_STATEMENTS.extend(
+    f"CREATE TABLE IF NOT EXISTS {table} (tenant_id TEXT NOT NULL, record_key TEXT NOT NULL, "
+    "payload TEXT NOT NULL, PRIMARY KEY (tenant_id, record_key))"
+    for table in LEARNING_TABLES
+)

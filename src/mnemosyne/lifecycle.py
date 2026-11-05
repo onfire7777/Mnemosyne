@@ -42,6 +42,8 @@ class LifecycleState:
     confabulation_risk: bool = False
     protected: bool = False
     verbatim_pointer: str | None = None
+    outcome_utility: float = 0.0
+    last_outcome_at: datetime | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -53,6 +55,7 @@ class LifecycleState:
         data["last_rehearsed_at"] = (
             self.last_rehearsed_at.astimezone(UTC).isoformat() if self.last_rehearsed_at else None
         )
+        data["last_outcome_at"] = self.last_outcome_at.isoformat() if self.last_outcome_at else None
         data["rehearsal_interval_days"] = next_rehearsal_days(self.successful_rehearsals)
         return data
 
@@ -64,16 +67,17 @@ def decayed_salience(state: LifecycleState, now: datetime, *, actr_decay: float 
     decay. Positive values switch the recency term to the ACT-R power-law
     ``(1 + age_days) ** -d`` used by the blueprint's forgetting model.
     """
-    if state.last_accessed is None:
+    evidence_time = state.last_outcome_at or state.last_rehearsed_at
+    if evidence_time is None:
         age_days = 30.0
     else:
-        age_days = max((now.astimezone(UTC) - state.last_accessed.astimezone(UTC)).total_seconds() / 86400.0, 0.0)
+        age_days = max((now.astimezone(UTC) - evidence_time.astimezone(UTC)).total_seconds() / 86400.0, 0.0)
     if actr_decay > 0.0:
         decay = (1.0 + age_days) ** (-actr_decay)
     else:
         decay = math.exp(-age_days / 45.0)
-    access_boost = min(math.log1p(state.access_count) / 6.0, 0.35)
-    return max(0.0, min(1.0, state.salience * decay + state.importance * 0.35 + access_boost))
+    outcome_boost = max(-1.0, min(1.0, state.outcome_utility)) * 0.35
+    return max(0.0, min(1.0, state.salience * decay + state.importance * 0.35 + outcome_boost))
 
 
 def next_fidelity_tier(current: FidelityTier) -> FidelityTier:
@@ -123,6 +127,8 @@ def demotion_decision(
             confabulation_risk=state.confabulation_risk,
             protected=state.protected,
             verbatim_pointer=state.verbatim_pointer,
+            outcome_utility=state.outcome_utility,
+            last_outcome_at=state.last_outcome_at,
         )
         return updated, False
     new_tier = next_fidelity_tier(state.tier)
@@ -144,6 +150,8 @@ def demotion_decision(
         # When no explicit pointer was set, demotion records the item_id itself as
         # the pointer-to-original so reconstruction never loses the source handle.
         verbatim_pointer=state.verbatim_pointer or state.item_id,
+        outcome_utility=state.outcome_utility,
+        last_outcome_at=state.last_outcome_at,
     )
     return updated, True
 
@@ -178,6 +186,8 @@ def lifecycle_state_from_dict(row: Mapping[str, Any]) -> LifecycleState:
         salience=float(row.get("salience", 0.5)),
         importance=float(row.get("importance", 0.5)),
         access_count=int(row.get("access_count", 0)),
+        outcome_utility=float(row.get("outcome_utility", 0.0)),
+        last_outcome_at=parse_lifecycle_datetime(row.get("last_outcome_at") or row.get("created_at")),
         last_accessed=parse_lifecycle_datetime(row.get("last_accessed")),
         must_keep=bool(row.get("must_keep", False)),
         successful_rehearsals=int(row.get("successful_rehearsals", 0)),
@@ -359,6 +369,8 @@ def apply_rehearsal_schedule(state: LifecycleState, now: datetime) -> tuple[Life
             confabulation_risk=state.confabulation_risk,
             protected=state.protected,
             verbatim_pointer=state.verbatim_pointer,
+            outcome_utility=state.outcome_utility,
+            last_outcome_at=state.last_outcome_at,
         ),
         True,
     )
