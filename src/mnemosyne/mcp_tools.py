@@ -20,6 +20,7 @@ import base64
 import json
 from collections import defaultdict
 from collections.abc import Callable
+from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from time import perf_counter
 from typing import Any, Literal, assert_never
@@ -55,6 +56,9 @@ from mnemosyne.security import SecurityPolicy, SessionIdentity, TrustTier, Write
 from mnemosyne.source_truth import apply_markdown_git_source
 from mnemosyne.text import tokenize
 from mnemosyne.user_model import UserMemoryKind, UserMistakeEvent, UserModel, UserModelEntry, correction_kind
+
+
+_DEFERRED_PROFILE_ERASURE: ContextVar[Any] = ContextVar("deferred_profile_erasure", default=None)
 
 
 def _parse_prospective_datetime(value: str, *, field: str) -> datetime:
@@ -833,8 +837,8 @@ class MemoryTools:
         # and unconfigured reflection must not prevent ordinary memory use.
         self._grounded_provider_factory = grounded_provider_factory
         import weakref
-        model, state = self.user_model, self.runtime_state
-        self.engine._learning_profile_erasure = lambda tenant, cid: MemoryTools._erase_profile_model(model, state, tenant, cid)
+        model, state, owner = self.user_model, self.runtime_state, weakref.ref(self.engine)
+        self.engine._learning_profile_erasure = lambda tenant, cid: MemoryTools._erase_profile_model(model, state, tenant, cid, engine=owner())
         self.engine._learning_tools = weakref.ref(self)
         from mnemosyne.experience.integration import configure_learning
         configure_learning(engine, skill_store=self.skill_store, lesson_distiller=lesson_distiller,
@@ -3123,20 +3127,27 @@ class MemoryTools:
         # been approved; shredding on the first success would delete bytes a
         # later branch can still refuse to erase (min_corroboration_for_delete).
         live_pointers: dict[str, str | None] = {}
-        for target in targets:
-            evidence = self.engine.get_evidence(tenant_id, cid, target)
-            if evidence is not None:
-                live_pointers[target] = evidence.content_pointer
-            outcome = self.engine.forget(
-                tenant_id=tenant_id,
-                cid=cid,
-                branch=target,
-                requested_by=requested_by,
-                erasure_mode=mode,
-            )
-            if outcome.get("erased"):
-                erased_branches.append(target)
-            per_branch[target] = outcome
+        # The facade owns the branch-wide decision. Defer this call's native
+        # profile callback so it neither retracts a still-supported entry nor
+        # consumes the changed IDs before the final report is assembled.
+        token = _DEFERRED_PROFILE_ERASURE.set(self.engine)
+        try:
+            for target in targets:
+                evidence = self.engine.get_evidence(tenant_id, cid, target)
+                if evidence is not None:
+                    live_pointers[target] = evidence.content_pointer
+                outcome = self.engine.forget(
+                    tenant_id=tenant_id,
+                    cid=cid,
+                    branch=target,
+                    requested_by=requested_by,
+                    erasure_mode=mode,
+                )
+                if outcome.get("erased"):
+                    erased_branches.append(target)
+                per_branch[target] = outcome
+        finally:
+            _DEFERRED_PROFILE_ERASURE.reset(token)
         passage_graph = getattr(getattr(self.engine, "adapters", None), "passage_graph", None)
         if passage_graph is not None and erased_branches:
             # The passage index holds triples and vectors derived from this passage's text.
@@ -3181,9 +3192,9 @@ class MemoryTools:
             # Closed entries are blanked too. The returned ids are every
             # entry that changed, so a forget that only blanks residue still
             # saves.
-            retracted = self.user_model.retract_citing(tenant_id, cid)
+            profile_erasure = self._erase_profile_model(self.user_model, self.runtime_state, tenant_id, cid)
+            retracted = profile_erasure["retracted_profile_entries"]
             if retracted:
-                self._save_user_model()
                 existing = result.get("propagated")
                 propagated = dict(existing) if isinstance(existing, dict) else {}
                 propagated["profile_entries"] = len(retracted)
@@ -3881,7 +3892,19 @@ class MemoryTools:
         return context
 
     @staticmethod
-    def _erase_profile_model(user_model, runtime_state, tenant_id: str, cid: str) -> dict[str, int]:
+    def _erase_profile_model(user_model, runtime_state, tenant_id: str, cid: str,
+                             *, engine=None) -> dict[str, Any]:
+        if engine is not None and _DEFERRED_PROFILE_ERASURE.get() is engine:
+            return {"profile_entries": 0, "mistake_events": 0, "support_strategies": 0,
+                    "retracted_profile_entries": []}
+        if engine is not None and any(
+            item.get("cid") == cid and item.get("branch", "main") != "main" and not item.get("erased")
+            for item in engine.export_tenant(tenant_id).get("evidence", [])
+        ):
+            # Export lists live copies without opening a different branch's
+            # source operation inside the active main-branch transaction.
+            return {"profile_entries": 0, "mistake_events": 0, "support_strategies": 0,
+                    "retracted_profile_entries": []}
         changed = user_model.retract_citing(tenant_id, cid)
         for entry_id in changed:
             user_model.entries[entry_id].scope.pop("drift_history", None)
@@ -3895,7 +3918,8 @@ class MemoryTools:
         if changed or removed or strategies:
             if runtime_state is not None:
                 runtime_state.save_user_model(user_model)
-        return {"profile_entries":len(changed), "mistake_events":len(removed), "support_strategies":len(strategies)}
+        return {"profile_entries":len(changed), "mistake_events":len(removed), "support_strategies":len(strategies),
+                "retracted_profile_entries": changed}
 
     def _capture_learning_user_feedback(self, runtime, tenant_id: str, user_id: str,
                                         session_id: str, user_text: str, episode_id: str,

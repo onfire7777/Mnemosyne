@@ -1059,6 +1059,58 @@ def test_closed_entry_blanking_is_persisted(tmp_path: Path) -> None:
     assert reloaded.user_model.entries[built["id"]].statement == ERASED_STATEMENT
 
 
+def test_forget_reports_and_persists_profile_erasure_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    state = RuntimeState(tmp_path / "runtime.json")
+    tools = MemoryTools(LocalMemoryEngine(), runtime_state=state)
+    line = tools.capture("t", "u", "user", "conversation", "Call me Captain.")
+    built = tools.profile_record_explicit("t", "u", "Wants to be called Captain.", source_evidence_cids=[line["cid"]])
+    saves: list[UserModel] = []
+    original = state.save_user_model
+
+    def save(model: UserModel) -> None:
+        saves.append(model)
+        original(model)
+
+    monkeypatch.setattr(state, "save_user_model", save)
+    result = tools.forget("t", line["cid"])
+    assert result["retracted_profile_entries"] == [built["id"]]
+    assert result["propagated"]["profile_entries"] == 1
+    assert len(saves) == 1
+    repeated = tools.forget("t", line["cid"])
+    assert not repeated.get("retracted_profile_entries")
+    assert len(saves) == 1
+
+
+def test_profile_erasure_deferral_is_engine_scoped_and_resets_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    tools, other = MemoryTools(LocalMemoryEngine()), MemoryTools(LocalMemoryEngine())
+    line = tools.capture("t", "u", "user", "conversation", "Call me Captain.")
+    own = tools.profile_record_explicit("t", "u", "Captain", source_evidence_cids=[line["cid"]])
+    other_line = other.capture("t", "u", "user", "conversation", "Call me Doctor.")
+    foreign = other.profile_record_explicit("t", "u", "Doctor", source_evidence_cids=[other_line["cid"]])
+
+    def fail(**kwargs: Any) -> dict[str, Any]:
+        other.engine._learning_profile_erasure("t", other_line["cid"])
+        raise RuntimeError("erase failed")
+
+    monkeypatch.setattr(tools.engine, "forget", fail)
+    with pytest.raises(RuntimeError, match="erase failed"):
+        tools.forget("t", line["cid"])
+    assert other.user_model.entries[foreign["id"]].statement == ERASED_STATEMENT
+    assert tools.user_model.entries[own["id"]].status == "active"
+    tools.engine._learning_profile_erasure("t", line["cid"])
+    assert tools.user_model.entries[own["id"]].statement == ERASED_STATEMENT
+
+
+def test_direct_main_erasure_keeps_profile_supported_on_another_branch() -> None:
+    tools = MemoryTools(LocalMemoryEngine())
+    line = tools.capture("t", "u", "user", "conversation", "Call me Captain.")
+    built = tools.profile_record_explicit("t", "u", "Captain", source_evidence_cids=[line["cid"]])
+    tools.branch("side", role="operator", source_trust_tier=0, tenant_id="t")
+    tools.engine.forget("t", line["cid"])
+    assert tools.user_model.entries[built["id"]].status == "active"
+    assert tools.forget("t", line["cid"])["retracted_profile_entries"] == [built["id"]]
+
+
 def test_profile_correct_rejects_an_entry_that_is_not_active() -> None:
     tools = MemoryTools(LocalMemoryEngine())
     old = tools.profile_record_explicit("t", "u", "Prefers temperatures in Celsius.")
