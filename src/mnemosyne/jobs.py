@@ -31,6 +31,7 @@ from mnemosyne.queue import InProcessQueue
 from mnemosyne.security import TrustTier
 from mnemosyne.storage import LocalObjectStore
 
+LEARNING_CONSOLIDATE_JOB = "learning_consolidate"
 CALIBRATE_JOB = "calibrate"
 LIFECYCLE_SWEEP_JOB = "lifecycle_sweep"
 EVAL_SUITE_JOB = "eval_suite"
@@ -91,6 +92,7 @@ class RuntimeJobHandlers:
         return {
             CONSOLIDATE_EVIDENCE_JOB: self.consolidator.run_queue_payload,
             CONSOLIDATE_SLEEP_JOB: self.consolidator.run_sleep_payload,
+            LEARNING_CONSOLIDATE_JOB: self.run_learning_consolidation,
             CALIBRATE_JOB: self.run_calibration,
             LIFECYCLE_SWEEP_JOB: self.run_lifecycle_sweep,
             EVAL_SUITE_JOB: self.run_eval_suite,
@@ -98,6 +100,18 @@ class RuntimeJobHandlers:
             MEDIA_EXTRACT_JOB: self.run_media_extract,
             PROJECTION_RECOMPUTE_JOB: self.run_projection_recompute,
         }
+
+    def run_learning_consolidation(self, payload: dict[str, Any]) -> RuntimeJobResult:
+        from mnemosyne.experience.runtime import LearningRuntime
+        if payload.get("branch", "main") != "main":
+            raise ValueError("learning consolidation currently requires the main branch")
+        tenant_id = str(payload["tenant_id"])
+        runtime = LearningRuntime(self.engine, skill_store=getattr(self.engine, "_learning_skill_store", None))
+        runtime.lesson_distiller = self.consolidator.lesson_distiller
+        runtime.procedure_inducer = self.consolidator.procedure_inducer
+        runtime.protected_cases = [case for case in self.gate_cases if case.protected and case.origin in {"curated", "genuine"} and case.mode == "active"]
+        details = runtime.consolidate(tenant_id)
+        return RuntimeJobResult(LEARNING_CONSOLIDATE_JOB, "complete", {"tenant_id": tenant_id, **details})
 
     def run_projection_recompute(self, payload: dict[str, Any]) -> RuntimeJobResult:
         tenant_id = str(payload["tenant_id"])
@@ -283,6 +297,35 @@ class RuntimeJobHandlers:
         )
 
     def run_calibration(self, payload: dict[str, Any]) -> RuntimeJobResult:
+        from mnemosyne.experience.runtime import LearningRuntime
+        learning_rows = {}
+        if payload.get("memory_type") == "learning" or ("examples" not in payload and "scores" not in payload):
+            learning_rows = LearningRuntime(self.engine).writer.read(str(payload["tenant_id"]))["episodes"]
+        automatic_learning = "examples" not in payload and "scores" not in payload and any(
+            row["status"] == "resolved" and any(signal["kind"] in {"verifier", "tests"} for signal in row["signals"])
+            for row in learning_rows.values())
+        if payload.get("memory_type") == "learning" or automatic_learning:
+            from mnemosyne.experience.runtime import LearningRuntime
+            runtime = LearningRuntime(self.engine)
+            tenant_id = str(payload["tenant_id"])
+            state = runtime.writer.read(tenant_id)
+            examples = [{"confidence": row["prediction"],
+                         "correct": sum(signal["value"] * signal["weight"] for signal in row["signals"]
+                                        if signal["kind"] in {"verifier", "tests"}) > 0}
+                        for row in state["episodes"].values()
+                        if row["status"] == "resolved" and any(signal["kind"] in {"verifier", "tests"} for signal in row["signals"])]
+            tuning = tune_calibration_set(
+                tenant_id=tenant_id, memory_type="learning",
+                examples=calibration_examples_from_rows(examples),
+                target_coverage=float(payload.get("target_coverage", .9)),
+                min_examples=int(payload.get("min_examples", 20)),
+            )
+            details = tuning.to_dict()
+            def record(current):
+                if runtime._enabled(current, "metacognition"):
+                    current["policy"]["learning_calibration"] = details
+            runtime.writer.apply(tenant_id, "calibrate", record)
+            return RuntimeJobResult(CALIBRATE_JOB, "complete" if tuning.ok else "failed", details)
         examples = payload.get("examples")
         if isinstance(examples, list):
             tuning = tune_calibration_set(

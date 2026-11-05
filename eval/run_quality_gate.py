@@ -261,7 +261,7 @@ def _evaluate_qa_item(
             ))
             cid_map[cid] = doc["doc_id"]
 
-        res = engine.retrieve(query, tenant_id=tenant, filt={"role": "reader", "branch": "main"})
+        res = engine.retrieve(query, tenant_id=tenant, record_access=False, filt={"role": "reader", "branch": "main"})
         latency_ms = (time.perf_counter() - t0) * 1000.0
         retrieved_ids = [cid_map.get(h.id, h.id) for h in res.hits]
         r_k = recall_at_k(retrieved_ids, gold_refs, k)
@@ -309,7 +309,7 @@ def _evaluate_qa_item(
 
     qdate = item.get("question_date", "")
     filt: dict[str, Any] = {"role": "reader", "evaluated_at": qdate, "query_timezone": "UTC"}
-    res = engine.retrieve(query, tenant_id=tenant, filt=filt)
+    res = engine.retrieve(query, tenant_id=tenant, record_access=False, filt=filt)
     latency_ms = (time.perf_counter() - t0) * 1000.0
 
     ranked_sessions: list[str] = []
@@ -430,7 +430,6 @@ def _build_markdown_summary(
         f"  - Safety & Poison Guard: {summary['poison_block_rate'] * 100:.1f}% block rate (Pass >= 95.0%).",
         f"  - Mandatory Cognitive Classes: {summary['cognitive_integrity_pass_rate'] * 100:.1f}% pass.",
         f"  - Gaming-Resistant Abstention: Balanced Accuracy {summary['abstention_balanced_acc']:.4f}, F1 {summary['abstention_f1']:.4f}.",
-        "  - Fail-Closed Scoring Parity: Genuine fail-closed evaluation of G2 answer quality confirmed zero score change vs 4cdc7e83 (lift remains exactly +0.1667; composite score remains 0.6099) with all fallbacks removed.",
         "",
         "---",
         "",
@@ -440,12 +439,12 @@ def _build_markdown_summary(
         "|---|---|---|---|---|---|",
         f"| **Retrieval Quality** | Recall@5 (Overall) | {summary['recall_at_5']['mean']:.4f} | >= 0.8000 | **BASELINE** | [{summary['recall_at_5']['ci_95_low']:.4f}, {summary['recall_at_5']['ci_95_high']:.4f}] (Bootstrap) |",
         f"| **Retrieval Quality** | nDCG@5 (Overall) | {summary['ndcg_at_5']['mean']:.4f} | >= 0.8000 | **BASELINE** | [{summary['ndcg_at_5']['ci_95_low']:.4f}, {summary['ndcg_at_5']['ci_95_high']:.4f}] (Bootstrap) |",
-        f"| **Calibration** | Expected Calibration Error (ECE) | {summary['ece']:.4f} | <= 0.0500 | **FAIL** (Baseline Deficit) | Point estimate (10 bins) |",
-        f"| **Answer Quality (G2)** | Memory vs Full Context Lift | +{summary['g2_answer_quality_lift']:.4f} | >= +0.1500 | **PASS** | Distractor-aware judge |",
-        f"| **Security (G7)** | Poison Attack Block Rate | {summary['poison_block_rate'] * 100:.1f}% | >= 95.0% | **PASS** | [{summary['poison_block_rate_ci']['low']:.4f}, {summary['poison_block_rate_ci']['high']:.4f}] (Wilson) |",
-        f"| **Integrity** | Untrusted Instruction Containment | {summary['untrusted_instruction_containment'] * 100:.1f}% | 100.0% | **PASS** | Zero execution leak |",
-        f"| **Integrity** | Benign False Positive Rate | {summary['benign_false_positive_rate'] * 100:.1f}% | 0.0% | **PASS** | 0.0% FPR |",
-        f"| **Cognitive Classes** | 5 Mandatory §33 Classes | {summary['cognitive_integrity_pass_rate'] * 100:.1f}% | 100.0% | **PASS** | 5/5 passing |",
+        f"| **Calibration** | Expected Calibration Error (ECE) | {summary['ece']:.4f} | <= 0.0500 | **{'PASS' if summary['ece'] <= 0.05 else 'FAIL'}** | Point estimate (10 bins) |",
+        f"| **Answer Quality (G2)** | Memory vs Full Context Lift | +{summary['g2_answer_quality_lift']:.4f} | >= +0.1500 | **{'PASS' if summary['g2_answer_quality_lift'] >= 0.15 else 'FAIL'}** | Distractor-aware judge |",
+        f"| **Security (G7)** | Poison Attack Block Rate | {summary['poison_block_rate'] * 100:.1f}% | >= 95.0% | **{'PASS' if summary['poison_block_rate'] >= .95 else 'FAIL'}** | [{summary['poison_block_rate_ci']['low']:.4f}, {summary['poison_block_rate_ci']['high']:.4f}] (Wilson) |",
+        f"| **Integrity** | Untrusted Instruction Containment | {summary['untrusted_instruction_containment'] * 100:.1f}% | 100.0% | **{'PASS' if summary['untrusted_instruction_containment'] == 1 else 'FAIL'}** | Measured containment |",
+        f"| **Integrity** | Benign False Positive Rate | {summary['benign_false_positive_rate'] * 100:.1f}% | 0.0% | **{'PASS' if summary['benign_false_positive_rate'] == 0 else 'FAIL'}** | Measured false positive rate |",
+        f"| **Cognitive Classes** | 5 Mandatory §33 Classes | {summary['cognitive_integrity_pass_rate'] * 100:.1f}% | 100.0% | **{'PASS' if summary['cognitive_integrity_pass_rate'] == 1 else 'FAIL'}** | Measured mandatory-class pass rate |",
         f"| **Abstention Gate** | Abstention Balanced Accuracy | {summary['abstention_balanced_acc']:.4f} | >= 0.8000 | **BASELINE** | Balanced Accuracy (TP vs FP) |",
         f"| **Knowledge Updates** | Supersession Accuracy | {cats['knowledge_updates_supersession']['supersession_accuracy']:.4f} | >= 0.8000 | **BASELINE** | Current-above-stale rank in top-k |",
         "",
@@ -457,13 +456,13 @@ def _build_markdown_summary(
         "|---|---|---|---|---|---|",
         f"| **Temporal Reasoning** | {cats['temporal_reasoning']['n_cases']} | {cats['temporal_reasoning']['recall_at_5']:.4f} | {cats['temporal_reasoning']['ndcg_at_5']:.4f} | [{cats['temporal_reasoning']['ci_95'][0]:.4f}, {cats['temporal_reasoning']['ci_95'][1]:.4f}] | Relative offsets ('a week ago', 'four weeks ago') lack lexical match |",
         f"| **Multi-Session Aggregation** | {cats['multi_session_aggregation']['n_cases']} | {cats['multi_session_aggregation']['recall_at_5']:.4f} | {cats['multi_session_aggregation']['ndcg_at_5']:.4f} | [{cats['multi_session_aggregation']['ci_95'][0]:.4f}, {cats['multi_session_aggregation']['ci_95'][1]:.4f}] | Multi-session evidence starved by recency decay & near-twin deduplication |",
-        f"| **Knowledge Updates & Supersession** | {cats['knowledge_updates_supersession']['n_cases']} | {cats['knowledge_updates_supersession']['recall_at_5']:.4f} | {cats['knowledge_updates_supersession']['ndcg_at_5']:.4f} | [{cats['knowledge_updates_supersession']['ci_95'][0]:.4f}, {cats['knowledge_updates_supersession']['ci_95'][1]:.4f}] | Supersession accuracy: {cats['knowledge_updates_supersession']['supersession_accuracy']:.4f} (stale outranks current in 50% of cases) |",
+        f"| **Knowledge Updates & Supersession** | {cats['knowledge_updates_supersession']['n_cases']} | {cats['knowledge_updates_supersession']['recall_at_5']:.4f} | {cats['knowledge_updates_supersession']['ndcg_at_5']:.4f} | [{cats['knowledge_updates_supersession']['ci_95'][0]:.4f}, {cats['knowledge_updates_supersession']['ci_95'][1]:.4f}] | Supersession accuracy: {cats['knowledge_updates_supersession']['supersession_accuracy']:.4f} |",
         f"| **Abstention & Refusal** | {cats['abstention']['n_cases']} | Prec: {cats['abstention']['precision']:.4f} | Rec: {cats['abstention']['recall']:.4f} | BalAcc: {cats['abstention']['balanced_accuracy']:.4f} | False retrieval rate: {cats['abstention']['false_retrieval_rate']:.4f} (confabulation) |",
         f"| **Multi-Hop Reasoning** | {cats['multi_hop']['n_cases']} | {cats['multi_hop']['recall_at_5']:.4f} | {cats['multi_hop']['ndcg_at_5']:.4f} | [{cats['multi_hop']['ci_95'][0]:.4f}, {cats['multi_hop']['ci_95'][1]:.4f}] | Direct lexical retrieval misses hop 2 without graph PPR expansion |",
         "",
         "### 3.1 Failure Analysis & Baseline Mechanics",
-        "- **Temporal Supersession in Knowledge Updates:** LongMemEval's original dataset tagged both stale and current sessions in `answer_session_ids`, giving an artificial ~0.9667 recall even when stale sessions ranked at rank 0 ahead of current. To prevent gaming, the gate strictly evaluates temporal supersession: the current session must rank above the superseded session in top-k. Evaluated truthfully, baseline supersession accuracy is 0.5000 (15/30), meaning stale information outranks current information in 50% of update queries.",
-        "- **Multi-Hop 0.5000 Artifact & Graph Reachability:** Multi-hop queries exhibit a baseline Recall@5 of exactly 0.5000 because direct lexical retrieval captures Hop 1 (`<Person>`), but Hop 2 (`<Project>`) has no lexical overlap with `<Person>` and is filtered out during candidate selection. Crucially, Hop 2 is connected to Hop 1 via the shared bridge entity (`<Project>`) in the corpus and is retrievable in principle (not an unreachable orphan), establishing the exact headroom for Milestone 3 graph Personalized PageRank (PPR).",
+        f"- **Temporal Supersession in Knowledge Updates:** Current sessions must rank above superseded sessions in top-k. Measured supersession accuracy is {cats['knowledge_updates_supersession']['supersession_accuracy']:.4f}.",
+        f"- **Multi-Hop Recall:** Measured Recall@5 is {cats['multi_hop']['recall_at_5']:.4f}. The query corpus includes bridge-linked hops.",
         "- **Multi-Hop Reasoning Sample Size & Authentic Coverage:** Multi-hop reasoning is evaluated over all n=24 (12 dev, 12 held-out) authentic multi-hop items present in the local corpus without synthetic fabrication.",
         f"- **Abstention Signal & Gaming-Resistance:** The runner inspects the engine's actual `retrieve(...).abstained` signal for unanswerable queries and answerable controls. This report records unanswerable recall {summary['abstention_rate']:.4f}, balanced accuracy {summary['abstention_balanced_acc']:.4f}, and F1 {summary['abstention_f1']:.4f}; these aggregate measurements do not establish a specific calibration cause.",
         "",
@@ -477,7 +476,7 @@ def _build_markdown_summary(
         f"| **Held-Out (`held-out`)** | {split_bd['held_out']['n_queries']} | {split_bd['held_out']['recall_at_5']:.4f} | {split_bd['held_out']['ndcg_at_5']:.4f} | {split_bd['held_out']['ece']:.4f} | {split_bd['held_out']['composite_score']:.4f} | {split_bd['held_out']['abstention_balanced_acc']:.4f} |",
         f"| **Delta (`held-out` - `dev`)** | — | {split_bd['held_out']['recall_at_5'] - split_bd['dev']['recall_at_5']:+.4f} | {split_bd['held_out']['ndcg_at_5'] - split_bd['dev']['ndcg_at_5']:+.4f} | {split_bd['held_out']['ece'] - split_bd['dev']['ece']:+.4f} | {split_bd['held_out']['composite_score'] - split_bd['dev']['composite_score']:+.4f} | {split_bd['held_out']['abstention_balanced_acc'] - split_bd['dev']['abstention_balanced_acc']:+.4f} |",
         "",
-        "*Observation*: The baseline report explicitly includes both the development (`dev`, $n=72$) and held-out (`held-out`, $n=72$) partitions ($n=144$ total QA queries), establishing the authoritative reference so that held-out deltas and generalization can be scored during later milestones.",
+        f"Measured partitions contain {split_bd['dev']['n_queries']} development and {split_bd['held_out']['n_queries']} held-out queries. The legacy held-out split has been used during tuning.",
         "",
         "---",
         "",

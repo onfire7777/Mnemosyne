@@ -39,7 +39,18 @@ def _run_growth(run_dir: Path, extra: list[str]) -> tuple[Path, list[Any]]:
 
 
 def _without(text: str, run_dir: Path) -> Any:
-    return json.loads(text.replace(json.dumps(str(run_dir))[1:-1], "RUN"))
+    value = json.loads(text.replace(json.dumps(str(run_dir))[1:-1], "RUN"))
+    if isinstance(value, dict) and "learning_state" in value:
+        from mnemosyne.experience.store import LearningStore
+        for event in value.get("audit_log", []):
+            if event.get("source") == "experience":
+                state = value["learning_state"][event["tenant_id"]]
+                event["diff"] = LearningStore._open_event(state, event["diff"])
+        # Randomized encryption is compared through its decrypted semantics.
+        for state in value["learning_state"].values():
+            state["policy"].pop("audit_keys", None)
+            state["policy"].pop("audit_key_slots", None)
+    return value
 
 
 def test_the_default_gate_batch_is_sixty_four(tmp_path: Path) -> None:

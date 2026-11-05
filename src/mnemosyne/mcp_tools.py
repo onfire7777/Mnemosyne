@@ -567,12 +567,12 @@ TOOL_SPEC: list[dict[str, Any]] = [
     },
     {
         "name": "procedure_validate",
-        "description": "Mark an induced procedure as validated for the isolated parametric tier.",
+        "description": "Evaluate an induced procedure through native provenance and protected regression gates. Successful admission enters probation.",
         "arguments": ["procedure_id", "role", "source_trust_tier"],
     },
     {
         "name": "procedure_promote",
-        "description": "Promote a validated procedure into the active procedural tier.",
+        "description": "Submit an induced procedure to outcome-grounded admission gates. Successful admission enters probation pending verified outcomes.",
         "arguments": ["procedure_id", "role", "source_trust_tier"],
     },
     {
@@ -769,6 +769,27 @@ def _profile_write_sink(kind: UserMemoryKind) -> str | None:
             assert_never(kind)
 
 
+TOOL_SPEC.extend([
+    {'name': 'prepare_context', 'description': 'Prepare authorized learning context and a durable receipt.', 'arguments': ['tenant_id', 'user_id', 'session_id', 'query']},
+    {'name': 'observe_turn', 'description': 'Capture a completed turn and actual trusted tool outcomes.', 'arguments': ['tenant_id', 'user_id', 'session_id', 'user_text', 'assistant_text']},
+    {'name': 'record_signal', 'description': 'Attach an external outcome to an owned captured episode.', 'arguments': ['tenant_id', 'user_id', 'session_id', 'kind', 'value']},
+    {'name': 'end_session', 'description': 'Close owned unresolved session episodes.', 'arguments': ['tenant_id', 'user_id', 'session_id']},
+    {'name': 'learning_status', 'description': 'Inspect tenant learning state with operator authority.', 'arguments': ['tenant_id']},
+    {'name': 'learning_explain', 'description': 'Explain an owned episode or inspect a learning artifact as operator.', 'arguments': ['tenant_id', 'target']},
+    {'name': 'learning_rollback', 'description': 'Rollback one auditable learning change as operator.', 'arguments': ['tenant_id', 'audit_id']},
+    {'name': 'learning_pause', 'description': 'Pause tenant learning as operator.', 'arguments': ['tenant_id']},
+    {'name': 'learning_resume', 'description': 'Resume tenant learning after all defects are verified.', 'arguments': ['tenant_id']},
+    {'name': 'learning_pin', 'description': 'Pin an artifact with operator authority.', 'arguments': ['tenant_id', 'target']},
+    {'name': 'learning_lock', 'description': 'Lock an artifact with operator authority.', 'arguments': ['tenant_id', 'target']},
+    {'name': 'learning_mode', 'description': 'Change one learning component mode with operator authority.', 'arguments': ['tenant_id', 'component', 'mode']},
+    {'name': 'learning_defects', 'description': 'List release-blocking learning defects as operator.', 'arguments': ['tenant_id']},
+    {'name': 'learning_defect_export', 'description': 'Export one defect reproduction as operator.', 'arguments': ['tenant_id', 'defect_id']},
+    {'name': 'learning_verify_defect', 'description': 'Replay a recorded defect under operator authority and verify its fixing commit.', 'arguments': ['tenant_id', 'defect_id', 'fixing_commit']},
+    {'name': 'document_reconcile_branch', 'description': 'Reconcile branch-level document manifests from a source branch into a target branch.', 'arguments': ['tenant_id', 'user_id', 'source_branch', 'target_branch']},
+    {'name': 'learning_export_training', 'description': 'Export eligible externally verified procedures for explicitly configured shadow training.', 'arguments': ['tenant_id']},
+    {'name': 'learning_reflect', 'description': 'Run outcome-grounded learning consolidation as operator.', 'arguments': ['tenant_id']},
+])
+
 class MemoryTools:
     def __init__(
         self,
@@ -782,8 +803,16 @@ class MemoryTools:
         parametric: ParametricTier | None = None,
         metrics: MetricsRegistry | None = None,
         grounded_provider_factory: Callable[[], GroundedProvider] | None = None,
+        skill_store: Any | None = None,
+        lesson_distiller: Any | None = None,
+        procedure_inducer: Any | None = None,
+        protected_cases: list[RegressionCase] | None = None,
     ):
         self.engine = engine
+        self.skill_store = skill_store or getattr(engine, "_learning_skill_store", None)
+        self.lesson_distiller = lesson_distiller
+        self.procedure_inducer = procedure_inducer
+        self.protected_cases = protected_cases
         self.ingestion = ingestion or IngestionPipeline(engine)
         self.prefetcher = prefetcher or AnticipatoryPrefetcher(engine)
         self.runtime_state = runtime_state
@@ -797,6 +826,10 @@ class MemoryTools:
         # Resolve lazily and per request: provider disclosure is mutable state,
         # and unconfigured reflection must not prevent ordinary memory use.
         self._grounded_provider_factory = grounded_provider_factory
+        import weakref
+        model, state = self.user_model, self.runtime_state
+        self.engine._learning_profile_erasure = lambda tenant, cid: MemoryTools._erase_profile_model(model, state, tenant, cid)
+        self.engine._learning_tools = weakref.ref(self)
 
     @staticmethod
     def _working_time(value: str | datetime, name: str) -> datetime:
@@ -3774,6 +3807,7 @@ class MemoryTools:
             for item in assertions
             if item.valid_from == latest_by_scope[canonical_json(item.scope)]
         ]
+        assertions.sort(key=lambda item: (canonical_json(item.scope), item.valid_from, item.object, item.id))
         readable = []
         for item in assertions:
             # The engine already selected the historical validity window. Apply
@@ -3792,6 +3826,243 @@ class MemoryTools:
                 record.pop("access_policy", None)
                 readable.append(record)
         return {"subject": subject, "predicate": predicate, "time": time, "assertions": readable}
+
+    def _learning_runtime(self):
+        from mnemosyne.experience.runtime import LearningRuntime
+        if self.skill_store is None:
+            from pathlib import Path
+            configured = os.environ.get("MNEMOSYNE_SKILLS_DB")
+            root = getattr(self.engine, "root_dir", None)
+            store = getattr(self.engine, "store_path", None)
+            path = Path(configured) if configured else (Path(root) / "skills.sqlite" if root is not None else Path(store).parent / "skills.sqlite" if store else None)
+            if path is not None and path.is_file():
+                self.skill_store = self._skills()
+        if self.skill_store is not None:
+            self.engine._learning_skill_store = self.skill_store
+        runtime = LearningRuntime(self.engine, skill_store=self.skill_store)
+        runtime.lesson_distiller = self.lesson_distiller
+        runtime.procedure_inducer = self.procedure_inducer
+        cases = self.protected_cases if self.protected_cases is not None else (self.runtime_state.load_gate_cases() if self.runtime_state is not None else getattr(self.engine, "_learning_protected_cases", []))
+        runtime.protected_cases = [case for case in cases if case.protected
+                                  and case.origin in {"curated", "genuine"} and case.mode == "active"]
+        return runtime
+
+    def _learning_access(self, operation: str, role: WriteRole, source_trust_tier: int,
+                         *, administrative: bool = False) -> None:
+        _require_trust_tier(source_trust_tier, field="source_trust_tier")
+        self._authorize(operation, role=role, source_trust_tier=source_trust_tier,
+                        target_sink="policy" if administrative else "evidence")
+
+    @staticmethod
+    def _learning_session(tenant_id: str, user_id: str, session_id: str,
+                          session_identity: SessionIdentity | None) -> None:
+        for value in (tenant_id, user_id, session_id):
+            _require_text(value, field="learning session identity")
+        if session_identity is not None and (
+            session_identity.tenant_id != tenant_id or session_identity.user_id != user_id
+            or session_identity.session_id != session_id
+        ):
+            raise PermissionError("learning session identity mismatch")
+
+    def prepare_context(self, tenant_id: str, user_id: str, session_id: str, query: str,
+                        available_tools: list[str] | None = None, task_type: str | None = None,
+                        risk_level: str | None = None,
+                        role: WriteRole = "agent", source_trust_tier: int = 1,
+                        session_identity: SessionIdentity | None = None) -> dict[str, Any]:
+        self._learning_session(tenant_id, user_id, session_id, session_identity)
+        self._learning_access("prepare_context", role, source_trust_tier)
+        runtime = self._learning_runtime()
+        from mnemosyne.runtime_state import migrate_legacy_learning
+        migrate_legacy_learning(runtime, self.learning, tenant_id)
+        context = runtime.prepare_context(tenant_id, user_id, session_id,
+            _require_text(query, field="query"), available_tools, task_type, risk_level)
+        context["user_model"] = self.profile_context(tenant_id, user_id, {"session_id": session_id})
+        return context
+
+    @staticmethod
+    def _erase_profile_model(user_model, runtime_state, tenant_id: str, cid: str) -> dict[str, int]:
+        changed = user_model.retract_citing(tenant_id, cid)
+        for entry_id in changed:
+            user_model.entries[entry_id].scope.pop("drift_history", None)
+        removed = {event.id for event in user_model.mistake_events
+                   if event.tenant_id == tenant_id and cid in event.scope.get("_learning_source_cids", [])}
+        user_model.mistake_events = [event for event in user_model.mistake_events if event.id not in removed]
+        strategies = [key for key, strategy in user_model.support_strategies.items()
+                      if strategy.tenant_id == tenant_id and removed.intersection(strategy.supporting_event_ids)]
+        for key in strategies:
+            del user_model.support_strategies[key]
+        if changed or removed or strategies:
+            if runtime_state is not None:
+                runtime_state.save_user_model(user_model)
+        return {"profile_entries":len(changed), "mistake_events":len(removed), "support_strategies":len(strategies)}
+
+    def _capture_learning_user_feedback(self, runtime, tenant_id: str, user_id: str,
+                                        session_id: str, user_text: str, episode_id: str,
+                                        role: WriteRole = "agent", source_trust_tier: int = 1) -> None:
+        import re
+        if not user_text or source_trust_tier > 1:
+            return
+        state = runtime.writer.read(tenant_id)
+        if not runtime._enabled(state, "lessons"):
+            return
+        episode = state["episodes"][episode_id]
+        scope = {} if re.search(r"\b(?:i (?:would )?prefer|from now on|always)\b", user_text, re.IGNORECASE) else {"session_id": session_id}
+        source_cids = [cid for cid in episode.get("source_cids", [])
+                       if (source := self.engine.get_evidence(tenant_id, cid)) is not None
+                       and source.actor == "user" and source.content == user_text]
+        if not source_cids:
+            return
+        scope["_learning_source_cids"] = source_cids
+        preference = re.search(
+            r"\b(?:i (?:would )?prefer|from now on|please (?:use|keep|respond)|(?:use|write|respond)\b.{0,100}\binstead)\b",
+            user_text, re.IGNORECASE,
+        )
+        if preference and not any(entry.tenant_id == tenant_id and entry.user_id == user_id
+                                  and entry.statement == user_text and entry.scope == scope
+                                  for entry in self.user_model.entries.values()):
+            self.profile_record_explicit(tenant_id, user_id, user_text, scope=scope,
+                                         source_evidence_cids=source_cids)
+        if re.search(r"\b(?:i (?:made (?:a|the) mistake|forgot|keep forgetting|missed|misread)|my mistake)\b",
+                     user_text, re.IGNORECASE):
+            self.profile_record_mistake(tenant_id, user_id, pattern=user_text,
+                description=user_text, scope=scope, role=role, source_trust_tier=int(TrustTier.USER_AUTHORED))
+
+    def observe_turn(self, tenant_id: str, user_id: str, session_id: str,
+                     user_text: str, assistant_text: str,
+                     tool_events: list[dict[str, Any]] | None = None,
+                     receipt_ids: list[str] | None = None, used_skills: list[str] | None = None,
+                     used_lessons: list[str] | None = None, role: WriteRole = "agent",
+                     source_trust_tier: int = 1,
+                     session_identity: SessionIdentity | None = None) -> dict[str, Any]:
+        self._learning_session(tenant_id, user_id, session_id, session_identity)
+        self._learning_access("observe_turn", role, source_trust_tier)
+        if tool_events and source_trust_tier > 1:
+            raise PermissionError("tool outcomes require an authenticated trusted host")
+        runtime = self._learning_runtime()
+        observed = runtime.observe_turn(tenant_id, user_id, session_id,
+            user_text, assistant_text, tool_events, receipt_ids, used_skills, used_lessons)
+        if tool_events:
+            episode = runtime.resolve(tenant_id, observed['episode_id'])
+            resolved = [row for row in runtime.writer.read(tenant_id)['episodes'].values()
+                        if row['status'] == 'resolved']
+            if episode['status'] == 'resolved' and (episode['reward'] < 0 or len(resolved) % 10 == 0):
+                observed['consolidation'] = runtime.consolidate(tenant_id)
+        self._capture_learning_user_feedback(runtime, tenant_id, user_id, session_id,
+            user_text, observed['episode_id'], role, source_trust_tier)
+        return observed
+
+    def record_signal(self, tenant_id: str, user_id: str, session_id: str,
+                      kind: str, value: float, episode_id: str | None = None,
+                      receipt_id: str | None = None, evidence: str = "", final: bool = False,
+                      role: WriteRole = "agent", source_trust_tier: int = 1,
+                      session_identity: SessionIdentity | None = None) -> dict[str, Any]:
+        self._learning_session(tenant_id, user_id, session_id, session_identity)
+        self._learning_access("record_signal", role, source_trust_tier)
+        if source_trust_tier > 1 and kind not in {"rating", "correction", "acceptance", "reask"}:
+            raise PermissionError("verifier outcomes require an authenticated trusted host")
+        runtime = self._learning_runtime()
+        episodes = runtime.writer.read(tenant_id)['episodes']
+        matches = [row for row in episodes.values() if row['id'] == episode_id or
+                   (receipt_id is not None and receipt_id in row['receipt_ids'])]
+        if len(matches) != 1 or matches[0]['user_id'] != user_id or matches[0]['session_id'] != session_id:
+            raise PermissionError("signal target belongs to a different learning session")
+        result = runtime.record_signal(tenant_id, episode_id=matches[0]['id'],
+            kind=kind, value=value, evidence=evidence, final=final)
+        if final and result['status'] == 'resolved':
+            resolved = [row for row in runtime.writer.read(tenant_id)['episodes'].values()
+                        if row['status'] == 'resolved']
+            if result['reward'] < 0 or len(resolved) % 10 == 0:
+                runtime.consolidate(tenant_id)
+        return result
+
+    def end_session(self, tenant_id: str, user_id: str, session_id: str,
+                    role: WriteRole = "agent", source_trust_tier: int = 1,
+                    session_identity: SessionIdentity | None = None) -> dict[str, Any]:
+        self._learning_session(tenant_id, user_id, session_id, session_identity)
+        self._learning_access("end_session", role, source_trust_tier)
+        runtime = self._learning_runtime()
+        matching = [row for row in runtime.writer.read(tenant_id)['episodes'].values()
+                    if row['session_id'] == session_id]
+        if any(row['user_id'] != user_id for row in matching):
+            raise PermissionError("session includes another learning owner")
+        result = runtime.end_session(tenant_id, session_id)
+        result['consolidation'] = runtime.consolidate(tenant_id)
+        return result
+
+    def learning_status(self, tenant_id: str, role: WriteRole = "reader",
+                        source_trust_tier: int = 1) -> dict[str, Any]:
+        self._learning_access("learning_status", role, source_trust_tier, administrative=True)
+        return self._learning_runtime().status(tenant_id)
+
+    def learning_explain(self, tenant_id: str, target: str, user_id: str | None = None,
+                         session_id: str | None = None, role: WriteRole = "reader",
+                         source_trust_tier: int = 1,
+                         session_identity: SessionIdentity | None = None) -> dict[str, Any]:
+        runtime = self._learning_runtime()
+        episode = runtime.writer.read(tenant_id)['episodes'].get(target)
+        if episode is not None and user_id is not None and session_id is not None:
+            self._learning_session(tenant_id, user_id, session_id, session_identity)
+            if episode['user_id'] != user_id or episode['session_id'] != session_id:
+                raise PermissionError("episode belongs to a different learning session")
+            return {'episode': episode}
+        self._learning_access("learning_explain", role, source_trust_tier, administrative=True)
+        return runtime.explain(tenant_id, target)
+
+    def learning_rollback(self, tenant_id: str, audit_id: str, role: WriteRole = "reader",
+                          source_trust_tier: int = 1) -> dict[str, Any]:
+        self._learning_access("learning_rollback", role, source_trust_tier, administrative=True)
+        return self._learning_runtime().rollback(tenant_id, audit_id)
+
+    def learning_pause(self, tenant_id: str, role: WriteRole = "reader",
+                       source_trust_tier: int = 1) -> dict[str, Any]:
+        self._learning_access("learning_pause", role, source_trust_tier, administrative=True)
+        return self._learning_runtime().pause(tenant_id)
+
+    def learning_resume(self, tenant_id: str, role: WriteRole = "reader",
+                        source_trust_tier: int = 1) -> dict[str, Any]:
+        self._learning_access("learning_resume", role, source_trust_tier, administrative=True)
+        return self._learning_runtime().resume(tenant_id)
+
+    def learning_pin(self, tenant_id: str, target: str, pinned: bool = True,
+                     role: WriteRole = "reader", source_trust_tier: int = 1) -> dict[str, Any]:
+        self._learning_access("learning_pin", role, source_trust_tier, administrative=True)
+        return self._learning_runtime().pin(tenant_id, target, pinned)
+
+    def learning_lock(self, tenant_id: str, target: str, locked: bool = True,
+                      role: WriteRole = "reader", source_trust_tier: int = 1) -> dict[str, Any]:
+        self._learning_access("learning_lock", role, source_trust_tier, administrative=True)
+        return self._learning_runtime().lock(tenant_id, target, locked)
+
+    def learning_mode(self, tenant_id: str, component: str, mode: str,
+                      role: WriteRole = "reader", source_trust_tier: int = 1) -> dict[str, Any]:
+        self._learning_access("learning_mode", role, source_trust_tier, administrative=True)
+        return self._learning_runtime().mode(tenant_id, component, mode)
+
+    def learning_defects(self, tenant_id: str, status: str | None = None,
+                        role: WriteRole = "reader", source_trust_tier: int = 1) -> dict[str, Any]:
+        self._learning_access("learning_defects", role, source_trust_tier, administrative=True)
+        return {'defects': self._learning_runtime().defects(tenant_id, status)}
+
+    def learning_defect_export(self, tenant_id: str, defect_id: str,
+                              role: WriteRole = "reader", source_trust_tier: int = 1) -> dict[str, Any]:
+        self._learning_access("learning_defect_export", role, source_trust_tier, administrative=True)
+        return self._learning_runtime().defect_export(tenant_id, defect_id)
+
+    def learning_verify_defect(self, tenant_id: str, defect_id: str, fixing_commit: str,
+                               role: WriteRole = "reader", source_trust_tier: int = 1) -> dict[str, Any]:
+        self._learning_access("learning_verify_defect", role, source_trust_tier, administrative=True)
+        return self._learning_runtime().verify_defect(tenant_id, defect_id, fixing_commit, True)
+
+    def learning_export_training(self, tenant_id: str, role: WriteRole = "reader",
+                                 source_trust_tier: int = 1) -> dict[str, Any]:
+        self._learning_access("learning_export_training", role, source_trust_tier, administrative=True)
+        from mnemosyne.experience.candidates import parametric_export
+        return parametric_export(self._learning_runtime(), tenant_id)
+
+    def learning_reflect(self, tenant_id: str, role: WriteRole = "reader",
+                         source_trust_tier: int = 1) -> dict[str, Any]:
+        self._learning_access("learning_reflect", role, source_trust_tier, administrative=True)
+        return self._learning_runtime().consolidate(tenant_id)
 
     def trajectory_log(
         self,
@@ -3897,35 +4168,34 @@ class MemoryTools:
         payload["security"] = decision
         return payload
 
-    def procedure_validate(self, procedure_id: str, role: WriteRole, source_trust_tier: int) -> dict[str, Any]:
-        decision = self._authorize(
-            "procedure_validate",
-            role=role,
-            source_trust_tier=source_trust_tier,
-            target_sink="branch_promotion",
-        )
+    def _gate_procedure(self, procedure_id: str, decision: dict[str, Any]) -> dict[str, Any]:
         procedure = self.learning.procedures[procedure_id]
-        procedure.status = "validated"
+        cases = self._learning_runtime().protected_cases
+        result = self.learning.validate_procedure(procedure, cases)
+        if not result.promoted:
+            procedure.status = "candidate"
         self._save_learning()
+        self.metrics.record_gate(promoted=result.promoted, rolled_back=bool(result.rollback_branch))
+        self._save_metrics()
         payload = procedure.to_dict()
+        payload["promoted"] = result.promoted
+        payload["gate"] = result.to_dict()
         payload["security"] = decision
         return payload
 
-    def procedure_promote(self, procedure_id: str, role: WriteRole, source_trust_tier: int) -> dict[str, Any]:
+    def procedure_validate(self, procedure_id: str, role: WriteRole, source_trust_tier: int) -> dict[str, Any]:
         decision = self._authorize(
-            "procedure_promote",
-            role=role,
-            source_trust_tier=source_trust_tier,
+            "procedure_validate", role=role, source_trust_tier=source_trust_tier,
             target_sink="branch_promotion",
         )
-        procedure = self.learning.procedures[procedure_id]
-        procedure.status = "promoted"
-        self._save_learning()
-        self.metrics.record_gate(promoted=True, rolled_back=False)
-        self._save_metrics()
-        payload = procedure.to_dict()
-        payload["security"] = decision
-        return payload
+        return self._gate_procedure(procedure_id, decision)
+
+    def procedure_promote(self, procedure_id: str, role: WriteRole, source_trust_tier: int) -> dict[str, Any]:
+        decision = self._authorize(
+            "procedure_promote", role=role, source_trust_tier=source_trust_tier,
+            target_sink="branch_promotion",
+        )
+        return self._gate_procedure(procedure_id, decision)
 
     # Skills: complete frameworks (mnemosyne.frameworks) in one file beside the store (mnemosyne.skills).
     def _skills(self) -> Any:
@@ -3933,14 +4203,16 @@ class MemoryTools:
 
         from mnemosyne.skills import SkillStore
 
-        path = os.environ.get("MNEMOSYNE_SKILLS_DB")
+        path = str(self.skill_store.path) if self.skill_store is not None else os.environ.get("MNEMOSYNE_SKILLS_DB")
         if not path:
             root = getattr(self.engine, "root_dir", None)
             store = getattr(self.engine, "store_path", None)
             if root is None and store is None:
                 raise ValueError("skills need a store on disk (sqlite or local backend) or MNEMOSYNE_SKILLS_DB")
             path = str(Path(root) / "skills.sqlite" if root is not None else Path(store).parent / "skills.sqlite")
-        skills = SkillStore.at(path)
+        skills = self.skill_store or SkillStore.at(path)
+        self.skill_store = skills
+        self.engine._learning_skill_store = skills
         adapters = getattr(self.engine, "adapters", None)
         skills.embedder = getattr(getattr(adapters, "passage_graph", None), "embedder", None) or getattr(
             adapters, "embedding", None)
@@ -3952,6 +4224,17 @@ class MemoryTools:
         the converting thread. A book's passages go in first, at once, so the whole book can be
         recalled while its framework is built; then one entry per node, and the older revision's
         entries are erased."""
+        for row in skills.unremembered_sources():
+            where = json.loads(row["memory"])
+            try:
+                cids = [self.ingest(where["tenant"], where["user"], "tool", "skill-source", content=unit,
+                    source_identity=f"skill-source:{row['source_sha']}#{index}",
+                    metadata={"skill_id": row["skill_id"], "revision": row["revision"],
+                              "source_sha": row["source_sha"], "source_unit": index})["cid"]
+                    for index, unit in enumerate(json.loads(row["units"]), 1)]
+            except Exception:
+                continue
+            skills.sources_read(row["skill_id"], row["revision"], cids)
         for row in skills.unread_passages():
             where = json.loads(row["memory"])
             try:
@@ -3973,11 +4256,15 @@ class MemoryTools:
                         for text in skills.memory_texts(row)]
             except Exception:  # noqa: BLE001 - the next skill call tries again
                 continue
-            for old in skills.remembered(row["skill_id"], row["revision"], {**where, "cids": cids}):
-                self._forget_skill_memory(old)
+            retained = {**where, "cids": cids}
+            live_cids = {cid for key in ("cids", "passages", "source_cids") for cid in retained.get(key, [])}
+            for old in skills.remembered(row["skill_id"], row["revision"], retained):
+                unshared = {**old, **{key: [cid for cid in old.get(key, []) if cid not in live_cids]
+                                    for key in ("cids", "passages", "source_cids")}}
+                self._forget_skill_memory(unshared)
 
     def _forget_skill_memory(self, where: dict[str, Any]) -> None:
-        for cid in [*(where.get("cids") or []), *(where.get("passages") or [])]:
+        for cid in [*(where.get("cids") or []), *(where.get("passages") or []), *(where.get("source_cids") or [])]:
             try:
                 self.forget(where["tenant"], cid, requested_by="skills")
             except Exception:  # noqa: BLE001 - already gone
@@ -4031,8 +4318,15 @@ class MemoryTools:
     ) -> dict[str, Any]:
         return self._skills().get(skill_id, revision, section, node_id, attachment, offset, limit)
 
-    def skill_set_state(self, skill_id: str, state: str, revision: int | None = None) -> dict[str, Any]:
-        return self._skills().set_state(skill_id, state, revision)
+    def skill_set_state(self, skill_id: str, state: str, revision: int | None = None,
+                        approve_effects: bool = False, role: WriteRole = "reader",
+                        source_trust_tier: int = 1) -> dict[str, Any]:
+        self._learning_access("skill_set_state", role, source_trust_tier, administrative=True)
+        skills = self._skills()
+        if approve_effects:
+            row = skills._skill(skill_id, revision)
+            skills.approve_effects(skill_id, row["revision"])
+        return skills.set_state(skill_id, state, revision)
 
     def skill_forget(self, skill_id: str) -> dict[str, Any]:
         result = self._skills().forget(skill_id)
@@ -4050,9 +4344,17 @@ class MemoryTools:
 
     def skill_outcome(
         self, tenant_id: str, user_id: str, skill_id: str, revision: int, success: bool, evidence: str,
-        task: str = "",
+        task: str = "", role: WriteRole = "agent", source_trust_tier: int = 1,
     ) -> dict[str, Any]:
-        result = self._skills().outcome(skill_id, revision, success, evidence)
+        self._learning_access("skill_outcome", role, source_trust_tier)
+        if source_trust_tier > 1:
+            raise PermissionError("skill outcomes require a trusted authenticated host")
+        skills = self._skills()
+        row = skills._skill(skill_id, revision)
+        owner = json.loads(row["memory"]) if row.get("memory") else {}
+        if owner.get("tenant") != tenant_id or owner.get("user") != user_id:
+            self._learning_access("skill_outcome", role, source_trust_tier, administrative=True)
+        result = skills.outcome(skill_id, revision, success, evidence)
         self.trajectory_log(
             tenant_id, user_id, "skills", task or result["skill_id"],
             [{"skill_id": result["skill_id"], "revision": result["revision"], "evidence": evidence[:2000]}],

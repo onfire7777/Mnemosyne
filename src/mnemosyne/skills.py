@@ -27,6 +27,7 @@ import threading
 import zipfile
 import zlib
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -74,7 +75,7 @@ RUNNABLE_SUFFIXES = {
     ".dll",
     ".jar",
 }
-STATES = {"draft", "active", "retired"}
+STATES = {"draft", "probation", "active", "labile", "demoted", "retired"}
 SECTIONS = (
     "definition",
     "principle",
@@ -1175,6 +1176,19 @@ class SkillStore:
             }:
                 # where a BurnSkill sits in the user's memory: {"tenant", "user", "cids"}
                 conn.execute("ALTER TABLE skill_revisions ADD COLUMN memory TEXT")
+            columns = {column["name"] for column in conn.execute("PRAGMA table_info(skill_revisions)")}
+            for name, declaration in {
+                "prior_alpha": "REAL NOT NULL DEFAULT 1",
+                "prior_beta": "REAL NOT NULL DEFAULT 1",
+                "needs_approval": "INTEGER NOT NULL DEFAULT 0",
+                "approved": "INTEGER NOT NULL DEFAULT 0",
+            }.items():
+                if name not in columns:
+                    conn.execute(f"ALTER TABLE skill_revisions ADD COLUMN {name} {declaration}")
+            conn.execute("""CREATE TABLE IF NOT EXISTS skill_outcome_events (
+                skill_id TEXT NOT NULL, revision INTEGER NOT NULL, episode_id TEXT NOT NULL,
+                probability REAL NOT NULL, evidence TEXT NOT NULL,
+                PRIMARY KEY (skill_id, revision, episode_id))""")
         self._migrate(self.path.parent / "frameworks.sqlite")
         self._jobs: queue.Queue[tuple[str, int]] = queue.Queue()
         for n in range(WORKERS):
@@ -1356,6 +1370,7 @@ class SkillStore:
         applicability: str = "",
         conversion: str = "",
         memory: dict[str, str] | None = None,
+        _connection: sqlite3.Connection | None = None,
     ) -> None:
         effects = effects_of(
             fw["nodes"] if fw else [{"content": " ".join(units)}],
@@ -1369,12 +1384,18 @@ class SkillStore:
             effects.append(
                 "runs scripts"
             )  # a skill that asks for a shell runs commands
-        with self._sql() as conn:
+        with (self._sql() if _connection is None else nullcontext(_connection)) as conn:
             if state == "active":  # one active revision per skill
                 conn.execute(
-                    "UPDATE skill_revisions SET state = 'draft' WHERE skill_id = ? AND state = 'active'",
+                    "UPDATE skill_revisions SET state = 'retired' WHERE skill_id = ? AND state = 'active'",
                     (skill_id,),
                 )
+            previous = conn.execute(
+                "SELECT effects, approved FROM skill_revisions WHERE skill_id = ? ORDER BY revision DESC LIMIT 1",
+                (skill_id,),
+            ).fetchone()
+            changed_effects = bool(effects) and (previous is None or set(json.loads(previous["effects"])) != set(effects))
+            approved = not effects or bool(previous and previous["approved"] and not changed_effects)
             conn.execute(
                 "INSERT INTO skill_revisions (skill_id, revision, name, applicability, needs, effects, attachments, "
                 "meta, state, conversion, units, framework, source_sha, source_dir, model, created_at, memory) "
@@ -1399,6 +1420,8 @@ class SkillStore:
                     json.dumps(memory) if memory else None,
                 ),
             )
+            conn.execute("UPDATE skill_revisions SET needs_approval = ?, approved = ? WHERE skill_id = ? AND revision = ?",
+                         (int(changed_effects or (bool(effects) and not approved)), int(approved), skill_id, revision))
 
     def import_skill(
         self,
@@ -1408,7 +1431,7 @@ class SkillStore:
         force: bool = False,
         memory: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        """A plain skill, active and searchable at once; a .burnskill file as the BurnSkill it is."""
+        """Import source bytes into probation; activation requires local outcomes."""
         folder = Path(path).expanduser()
         if folder.suffix.lower() in SKILL_FILES:
             return self._import_bs(folder, memory)
@@ -1476,8 +1499,9 @@ class SkillStore:
             needs if isinstance(needs, list) else [needs],
             kept,
             None,
-            state="active",
+            state="probation",
             conversion="native",
+            memory=memory,
         )
         status = self.status(skill_id, revision)
         return {
@@ -1746,13 +1770,13 @@ class SkillStore:
                         revision,
                     ),
                 )
-                # the finished BurnSkill replaces whatever was on; the older revisions stay
+                converted_effects = effects_of(fw["nodes"], json.loads(row["attachments"]), fw["meta"].get("effects"))
+                if set(converted_effects) != set(json.loads(row["effects"])):
+                    conn.execute("UPDATE skill_revisions SET needs_approval = ?, approved = ? WHERE skill_id = ? AND revision = ?",
+                                 (int(bool(converted_effects)), int(not converted_effects), skill_id, revision))
+                # Conversion establishes structure, while local outcomes establish utility.
                 conn.execute(
-                    "UPDATE skill_revisions SET state = 'draft' WHERE skill_id = ? AND state = 'active'",
-                    (skill_id,),
-                )
-                conn.execute(
-                    "UPDATE skill_revisions SET state = 'active' WHERE skill_id = ? AND revision = ?",
+                    "UPDATE skill_revisions SET state = 'probation' WHERE skill_id = ? AND revision = ?",
                     (skill_id, revision),
                 )
             self._trim_cache()
@@ -1797,6 +1821,21 @@ class SkillStore:
                 (json.dumps(cids), skill_id, revision),
             )
 
+    def unremembered_sources(self) -> list[dict[str, Any]]:
+        """Imported source units awaiting custody records in their owning tenant."""
+        return self._rows(
+            "SELECT * FROM skill_revisions WHERE memory IS NOT NULL "
+            "AND json_extract(memory, '$.source_cids') IS NULL"
+        )
+
+    def sources_read(self, skill_id: str, revision: int, cids: list[str]) -> None:
+        with self._sql() as conn:
+            conn.execute(
+                "UPDATE skill_revisions SET memory = json_set(memory, '$.source_cids', json(?)) "
+                "WHERE skill_id = ? AND revision = ?",
+                (json.dumps(cids), skill_id, revision),
+            )
+
     def unremembered(self) -> list[dict[str, Any]]:
         """Finished BurnSkills whose nodes are not in the user's memory yet."""
         return self._rows(
@@ -1833,7 +1872,7 @@ class SkillStore:
                 "UPDATE skill_revisions SET memory = ? WHERE skill_id = ? AND revision = ?",
                 (json.dumps(memory), skill_id, revision),
             )
-        return [m for m in old if m.get("cids") or m.get("passages")]
+        return [m for m in old if m.get("cids") or m.get("passages") or m.get("source_cids")]
 
     # ------------------------------------------------------------------ .burnskill files
 
@@ -1936,7 +1975,7 @@ class SkillStore:
             load(skill.get("needs") or []),
             load(skill.get("attachments") or []),
             fw,
-            state="draft" if problems else "active",
+            state="draft" if problems else "probation",
             conversion="incomplete" if problems else "completed",
             applicability=skill.get("applicability", ""),
             memory=memory,
@@ -1980,6 +2019,9 @@ class SkillStore:
             "revision": row["revision"],
             "name": row["name"],
             "state": row["state"],
+            "posterior": self._posterior(row),
+            "needs_approval": bool(row["needs_approval"]),
+            "approved": bool(row["approved"]),
             "kind": "burnskill" if row["framework"] else "skill",
             "conversion": row["conversion"],
             "progress": row["progress"],
@@ -2020,6 +2062,8 @@ class SkillStore:
         limit: int = 6000,
     ) -> dict[str, Any]:
         row = self._skill(skill_id, revision)
+        if not row["source_sha"]:
+            raise ValueError("skill source was erased")
         fw = (
             json.loads(row["framework"])
             if row["framework"]
@@ -2190,64 +2234,64 @@ class SkillStore:
             raise ValueError(
                 f"{row['name']} is not a BurnSkill ({row['conversion']}): read it with skill_get"
             )
-        frameworks.MODEL.set(row["model"])
-        fw, units = json.loads(row["framework"]), json.loads(row["units"])
-        views = _answer_views(fw)
-        full_chars = (
-            len(fw.get("document") or "")
-            + sum(len(f"[Unit {i}]\n") + len(text) for i, text in enumerate(units, 1))
-            + 2 * max(0, len(units) - 1)
-            + len("\n\nSOURCE UNITS:\n\n\nQUESTION: ")
-        )
-        overhead = frameworks._answer_prompt_size([], units, [], question) - len(
-            frameworks._answer_context_prompt([], units, [], "")
-        )
-        if full_chars <= min(80_000, frameworks.MAX_PROMPT_CHARS - overhead):
-            answer = frameworks.ask(fw, units, question)
-            context = {
-                "mode": "full",
-                "framework_representation": "document",
-                "partial": False,
-                "selected_units": list(range(1, len(units) + 1)),
-                "selected_view_ids": [],
-                "selected_view_count": 0,
-                "total_unit_count": len(units),
-                "selected_unit_count": len(units),
-                "omitted_unit_count": 0,
-                "context_chars": full_chars,
-                "context_budget_chars": min(
-                    80_000, frameworks.MAX_PROMPT_CHARS - overhead
-                ),
-            }
-        else:
-            numbers, selected, context = _select_answer_context(views, units, question)
-            if numbers:
-                answer = frameworks.ask(
-                    fw,
-                    units,
-                    question,
-                    numbers,
-                    sorted({view["canonical_id"] for view in selected}),
-                    node_views=selected,
-                )
-            else:
-                answer = {
-                    "answer": "No matching source passages fit the answer context.",
-                    "units": [],
-                    "answered": False,
+        with frameworks.model_scope(row["model"]):
+            fw, units = json.loads(row["framework"]), json.loads(row["units"])
+            views = _answer_views(fw)
+            full_chars = (
+                len(fw.get("document") or "")
+                + sum(len(f"[Unit {i}]\n") + len(text) for i, text in enumerate(units, 1))
+                + 2 * max(0, len(units) - 1)
+                + len("\n\nSOURCE UNITS:\n\n\nQUESTION: ")
+            )
+            overhead = frameworks._answer_prompt_size([], units, [], question) - len(
+                frameworks._answer_context_prompt([], units, [], "")
+            )
+            if full_chars <= min(80_000, frameworks.MAX_PROMPT_CHARS - overhead):
+                answer = frameworks.ask(fw, units, question)
+                context = {
+                    "mode": "full",
+                    "framework_representation": "document",
+                    "partial": False,
+                    "selected_units": list(range(1, len(units) + 1)),
+                    "selected_view_ids": [],
+                    "selected_view_count": 0,
+                    "total_unit_count": len(units),
+                    "selected_unit_count": len(units),
+                    "omitted_unit_count": 0,
+                    "context_chars": full_chars,
+                    "context_budget_chars": min(
+                        80_000, frameworks.MAX_PROMPT_CHARS - overhead
+                    ),
                 }
-            if context["partial"] and not answer["answered"]:
-                answer["answer"] = (
-                    "No supported answer was established from the selected context. "
-                    "Other parts of the book were not included; this does not establish "
-                    "that the answer is absent from the whole book."
-                )
-        return {
-            "skill_id": row["skill_id"],
-            "revision": row["revision"],
-            **answer,
-            "context": context,
-        }
+            else:
+                numbers, selected, context = _select_answer_context(views, units, question)
+                if numbers:
+                    answer = frameworks.ask(
+                        fw,
+                        units,
+                        question,
+                        numbers,
+                        sorted({view["canonical_id"] for view in selected}),
+                        node_views=selected,
+                    )
+                else:
+                    answer = {
+                        "answer": "No matching source passages fit the answer context.",
+                        "units": [],
+                        "answered": False,
+                    }
+                if context["partial"] and not answer["answered"]:
+                    answer["answer"] = (
+                        "No supported answer was established from the selected context. "
+                        "Other parts of the book were not included; this does not establish "
+                        "that the answer is absent from the whole book."
+                    )
+            return {
+                "skill_id": row["skill_id"],
+                "revision": row["revision"],
+                **answer,
+                "context": context,
+            }
 
     # ------------------------------------------------------------------ search
 
@@ -2308,7 +2352,7 @@ class SkillStore:
         timeout: float = 1.0,
     ) -> dict[str, Any]:
         """Exact name first; then only skills whose needs are met; then rank by meaning (or words)."""
-        states = ("active", "draft") if include_drafts else ("active",)
+        states = ("active", "probation", "labile", "demoted", "draft") if include_drafts else ("active", "probation", "labile")
         latest: dict[str, dict[str, Any]] = {}
         for r in self._rows("SELECT * FROM skill_revisions ORDER BY revision DESC"):
             if r["state"] in states and (
@@ -2337,6 +2381,9 @@ class SkillStore:
                 "effects": json.loads(r["effects"]),
                 "scripts": bool(runnable(json.loads(r["attachments"]))),
                 "score": round(score, 4),
+                "posterior": self._posterior(r),
+                "needs_approval": bool(r["needs_approval"]),
+                "approved": bool(r["approved"]),
             }
 
         q = " ".join(query.lower().split())
@@ -2395,7 +2442,9 @@ class SkillStore:
             words = " ".join(w for w in re.findall(r"\w+", q) if w not in STOPWORDS)
             bm25 = PassageIndex(tuple(docs)).scores(words) if words else {}
             scores = [bm25.get(i, 0.0) for i in range(len(docs))]
-        ranked = sorted(zip(scores, eligible, strict=True), key=lambda p: -p[0])
+        scored = [(score * (0.5 + self._posterior(row)["lower_bound"]), row)
+                  for score, row in zip(scores, eligible, strict=True)]
+        ranked = sorted(scored, key=lambda pair: (-pair[0], pair[1]["skill_id"]))
         hits = [out(r, s) for s, r in ranked if s > 0][: max(1, min(int(limit), 20))]
         return {
             "skills": hits,
@@ -2411,10 +2460,16 @@ class SkillStore:
         if state not in STATES:
             raise ValueError(f"state is one of {sorted(STATES)}")
         row = self._skill(skill_id, revision)
+        if row["state"] == "retired" and state != "retired":
+            raise ValueError("retired skill revisions cannot be reactivated")
         if state == "active" and row["conversion"] not in ("completed", "native"):
             raise ValueError(
                 f"{row['name']} is not converted yet ({row['conversion']})"
             )
+        if state == "active" and (row["runs"] < 12 or self._posterior(row)["lower_bound"] < .5):
+            raise ValueError("activation requires verified local outcomes")
+        if state == "active" and row["needs_approval"] and not row["approved"]:
+            raise ValueError("effects require explicit approval")
         if state == "active" and row["framework"]:
             problems = _framework_problems(
                 json.loads(row["framework"]), json.loads(row["units"])
@@ -2424,7 +2479,7 @@ class SkillStore:
         with self._sql() as conn:
             if state == "active":  # one active revision per skill
                 conn.execute(
-                    "UPDATE skill_revisions SET state = 'draft' WHERE skill_id = ? AND state = 'active'",
+                    "UPDATE skill_revisions SET state = 'retired' WHERE skill_id = ? AND state = 'active'",
                     (row["skill_id"],),
                 )
             conn.execute(
@@ -2449,6 +2504,7 @@ class SkillStore:
                     for r in rows
                 ],
             )
+            conn.execute("DELETE FROM skill_outcome_events WHERE skill_id = ?", (row["skill_id"],))
             conn.execute(
                 "DELETE FROM skill_revisions WHERE skill_id = ?", (row["skill_id"],)
             )
@@ -2462,34 +2518,177 @@ class SkillStore:
             "forgotten": row["skill_id"],
             "name": row["name"],
             "revisions": len(rows),
-            "memory": [m for m in memory if m.get("cids") or m.get("passages")],
+            "memory": [m for m in memory if m.get("cids") or m.get("passages") or m.get("source_cids")],
         }
 
-    def outcome(
-        self, skill_id: str, revision: int, success: bool, evidence: str
-    ) -> dict[str, Any]:
+    @staticmethod
+    def _posterior(row: dict[str, Any]) -> dict[str, float]:
+        from mnemosyne.experience.stats import Posterior
+        successes, runs = float(row["successes"]), float(row["runs"])
+        posterior = Posterior(float(row.get("prior_alpha", 1)) + successes,
+                              float(row.get("prior_beta", 1)) + runs - successes, runs)
+        return {"mean": posterior.mean, "lower_bound": posterior.lower_bound,
+                "variance": posterior.variance, "outcomes": runs}
+
+    def approve_effects(self, skill_id: str, revision: int) -> dict[str, Any]:
+        """Record explicit host approval; this method never runs an effect."""
         row = self._skill(skill_id, revision)
         with self._sql() as conn:
-            conn.execute(
-                "UPDATE skill_revisions SET runs = runs + 1, successes = successes + ?, last_outcome = ? "
-                "WHERE skill_id = ? AND revision = ?",
-                (
-                    1 if success else 0,
-                    json.dumps(
-                        {
-                            "success": bool(success),
-                            "evidence": evidence[:2000],
-                            "at": _now(),
-                        }
-                    ),
-                    row["skill_id"],
-                    row["revision"],
-                ),
-            )
-        updated = self._skill(row["skill_id"], row["revision"])
-        return {
-            "skill_id": row["skill_id"],
-            "revision": row["revision"],
-            "runs": updated["runs"],
-            "successes": updated["successes"],
-        }
+            conn.execute("UPDATE skill_revisions SET approved = 1 WHERE skill_id = ? AND revision = ?",
+                         (row["skill_id"], revision))
+        return self.status(row["skill_id"], revision)
+
+    def learning_context(self, query: str, *, tenant_id: str, user_id: str,
+                         available_tools: list[str] | None = None,
+                         task_class: str = "") -> list[dict[str, Any]]:
+        """Return scoped source-backed candidates before the runtime captures its receipt."""
+        ranked = self.search(query, available=available_tools)["skills"]
+        candidates = []
+        for hit in ranked:
+            row = self._skill(hit["skill_id"], hit["revision"])
+            origin = json.loads(row["memory"]) if row.get("memory") else {}
+            if origin.get("tenant") != tenant_id or origin.get("user") != user_id:
+                continue
+            cids = list(dict.fromkeys(origin.get("source_cids") or [*origin.get("cids", []), *origin.get("passages", [])]))
+            if not cids or row["state"] == "retired" or (row["needs_approval"] and not row["approved"]):
+                continue
+            units = json.loads(row["units"])
+            candidates.append({
+                "id": row["skill_id"], "kind": "imported_skill", "revision": row["revision"],
+                "content": "\n".join(units), "steps": units, "state": row["state"],
+                "task_class": task_class, "scope": task_class,
+                "confidence": hit["posterior"]["mean"], "lower_bound": hit["posterior"]["lower_bound"],
+                "source_cids": cids, "source_origin": {"kind": "import", "source_sha": row["source_sha"],
+                    "tenant_id": tenant_id, "user_id": user_id},
+                "needs_approval": bool(row["needs_approval"]), "approved": bool(row["approved"]),
+                "effects": json.loads(row["effects"]),
+                "needs": json.loads(row["needs"]),
+                "framework": json.loads(row["framework"]) if row["framework"] else None,
+            })
+        return candidates
+
+    def mirror_learned_revision(self, skill_id: str, parent_revision: int, artifact: dict[str, Any]) -> dict[str, Any]:
+        """Append a verified native revision, atomically comparing its library parent."""
+        if artifact.get("state") != "active" or artifact.get("gate_passed") is not True:
+            raise ValueError("only gate-verified active artifacts can enter the skill library")
+        if not artifact.get("source_episode_ids") or not artifact.get("source_cids"):
+            raise ValueError("a learned revision requires live source provenance")
+        statistics = artifact.get("_library_statistics", {})
+        count, successes = statistics.get("verified_n", 0), statistics.get("verified_successes", 0)
+        if not isinstance(count, (int, float)) or not isinstance(successes, (int, float)) or not math.isfinite(count) or not math.isfinite(successes) or not 5 <= count or not 0 <= successes <= count:
+            raise ValueError("a learned revision requires verified local outcome statistics")
+        content = artifact.get("content")
+        if not isinstance(content, str) or not content:
+            raise ValueError("learned revision content is required")
+        with self._sql() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            existing = conn.execute("SELECT revision FROM skill_revisions WHERE skill_id = ? AND json_extract(meta, '$.native_artifact_id') = ?",
+                                    (skill_id, artifact["id"])).fetchone()
+            if existing is not None:
+                return {"skill_id":skill_id, "revision":existing["revision"], "duplicate":True}
+            row = conn.execute("SELECT * FROM skill_revisions WHERE skill_id = ? ORDER BY revision DESC LIMIT 1", (skill_id,)).fetchone()
+            if row is None or row["revision"] != parent_revision:
+                raise ValueError("skill library parent revision conflict")
+            effects = effects_of([{"content":content}], [])
+            changed = set(effects) != set(json.loads(row["effects"]))
+            if changed and effects and not artifact.get("approved"):
+                raise ValueError("changed effects require operator approval")
+            revision = parent_revision + 1
+            files = [("SKILL.md", content.encode("utf-8"))]
+            source_sha = _sha_of(files)
+            metadata = {**json.loads(row["meta"]), "native_artifact_id":artifact["id"],
+                        "source_episode_ids":artifact["source_episode_ids"]}
+            previous_memory = json.loads(row["memory"]) if row["memory"] else {}
+            memory = {**previous_memory, "source_cids":artifact["source_cids"]}
+            self._insert(skill_id, revision, row["name"], [content], source_sha,
+                         self._keep(source_sha, files), row["model"], metadata,
+                         json.loads(row["needs"]), [], None, state="active",
+                         applicability=row["applicability"], conversion="native", memory=memory, _connection=conn)
+            conn.execute("UPDATE skill_revisions SET runs = ?, successes = ?, approved = ?, needs_approval = ? WHERE skill_id = ? AND revision = ?",
+                         (count, successes, int(bool(artifact.get("approved") or not effects)), int(bool(effects)), skill_id, revision))
+        return {"skill_id":skill_id,"revision":revision,"duplicate":False}
+
+    def retract_source(self, cid: str) -> dict[str, Any]:
+        """Remove source-linked revision content and retire it, idempotently."""
+        removed, hashes = [], set()
+        with self._sql() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute("SELECT * FROM skill_revisions WHERE memory IS NOT NULL").fetchall()
+            for row in rows:
+                memory = json.loads(row["memory"])
+                if not any(cid in memory.get(key, []) for key in ("source_cids", "cids", "passages")):
+                    continue
+                removed.append({"skill_id":row["skill_id"],"revision":row["revision"]})
+                hashes.add(row["source_sha"])
+                tombstone = str(self.sources / ('erased-'+hashlib.sha256(f"{row['skill_id']}:{row['revision']}".encode()).hexdigest()))
+                conn.execute("UPDATE skill_revisions SET name = 'erased skill', aliases = '[]', applicability = '', needs = '[]', effects = '[]', attachments = '[]', meta = '{}', state = 'retired', units = '[]', framework = NULL, source_sha = '', source_dir = ?, memory = NULL, last_outcome = NULL, runs = 0, successes = 0 WHERE skill_id = ? AND revision = ?",
+                             (tombstone,row["skill_id"],row["revision"]))
+                conn.execute("DELETE FROM skill_outcome_events WHERE skill_id = ? AND revision = ?",(row["skill_id"],row["revision"]))
+            # Embeddings are reproducible caches and may contain the removed source.
+            if removed:
+                conn.execute("DELETE FROM skill_vectors")
+        for source_sha in hashes:
+            if source_sha and not self._rows("SELECT 1 FROM skill_revisions WHERE source_sha = ?",(source_sha,)):
+                shutil.rmtree(self.sources / source_sha, ignore_errors=True)
+                shutil.rmtree(self.cache / source_sha, ignore_errors=True)
+        return {"retracted":len(removed),"revisions":removed}
+
+    def retract_outcome(self, episode_id: str) -> dict[str, Any]:
+        """Idempotently remove an erased episode's contribution to revision utility."""
+        if not isinstance(episode_id, str) or not episode_id.strip():
+            raise ValueError("episode_id must be a nonempty string")
+        revisions = []
+        with self._sql() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            events = conn.execute("SELECT * FROM skill_outcome_events WHERE episode_id = ?", (episode_id,)).fetchall()
+            for event in events:
+                conn.execute("UPDATE skill_revisions SET runs = max(0, runs - 1), successes = max(0, successes - ?), last_outcome = NULL WHERE skill_id = ? AND revision = ?",
+                             (event["probability"], event["skill_id"], event["revision"]))
+                row = conn.execute("SELECT * FROM skill_revisions WHERE skill_id = ? AND revision = ?", (event["skill_id"], event["revision"])).fetchone()
+                if row is not None and row["state"] == "active" and (row["runs"] < 12 or self._posterior(dict(row))["lower_bound"] < .5):
+                    conn.execute("UPDATE skill_revisions SET state = 'probation' WHERE skill_id = ? AND revision = ?", (event["skill_id"], event["revision"]))
+                revisions.append({"skill_id": event["skill_id"], "revision": event["revision"]})
+            conn.execute("DELETE FROM skill_outcome_events WHERE episode_id = ?", (episode_id,))
+        return {"retracted": len(events), "revisions": revisions}
+
+    def outcome(self, skill_id: str, revision: int, success: bool | float, evidence: str,
+                *, episode_id: str | None = None) -> dict[str, Any]:
+        """Record an external outcome once per episode with a fixed weak prior."""
+        if type(success) is bool:
+            probability = float(success)
+        elif type(success) in {int, float} and math.isfinite(success) and -1 <= success <= 1:
+            probability = (float(success) + 1) / 2
+        else:
+            raise ValueError("outcome must be boolean or a finite scalar in [-1, 1]")
+        if not isinstance(evidence, str) or not evidence.strip():
+            raise ValueError("an external outcome requires evidence")
+        row = self._skill(skill_id, revision)
+        with self._sql() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if episode_id is not None:
+                if not isinstance(episode_id, str) or not episode_id.strip():
+                    raise ValueError("episode_id must be a nonempty string")
+                existing = conn.execute("SELECT probability, evidence FROM skill_outcome_events WHERE skill_id = ? AND revision = ? AND episode_id = ?",
+                    (row["skill_id"], revision, episode_id)).fetchone()
+                if existing is not None:
+                    if existing["probability"] != probability or existing["evidence"] != evidence:
+                        raise ValueError("episode outcome is immutable")
+                    return {"skill_id": row["skill_id"], "revision": revision,
+                            "runs": row["runs"], "successes": row["successes"], "duplicate": True}
+                conn.execute("INSERT INTO skill_outcome_events VALUES (?, ?, ?, ?, ?)",
+                             (row["skill_id"], revision, episode_id, probability, evidence))
+            conn.execute("UPDATE skill_revisions SET runs = runs + 1, successes = successes + ?, last_outcome = ? WHERE skill_id = ? AND revision = ?",
+                (probability, json.dumps({"success": success, "evidence": evidence[:2000], "at": _now()}), row["skill_id"], revision))
+            updated = dict(conn.execute("SELECT * FROM skill_revisions WHERE skill_id = ? AND revision = ?",
+                                        (row["skill_id"], revision)).fetchone())
+            posterior = self._posterior(updated)
+            # A lone unlucky outcome cannot retire a well-evidenced revision.
+            if updated["state"] in {"probation", "labile"} and updated["runs"] >= 12 and posterior["lower_bound"] >= .5 and (not updated["needs_approval"] or updated["approved"]):
+                conn.execute("UPDATE skill_revisions SET state = 'retired' WHERE skill_id = ? AND state = 'active' AND revision <> ?",
+                             (row["skill_id"], revision))
+                conn.execute("UPDATE skill_revisions SET state = 'active' WHERE skill_id = ? AND revision = ?", (row["skill_id"], revision))
+            elif updated["state"] == "active" and updated["runs"] >= 10 and posterior["mean"] < .4:
+                conn.execute("UPDATE skill_revisions SET state = 'demoted' WHERE skill_id = ? AND revision = ?", (row["skill_id"], revision))
+        updated = self._skill(row["skill_id"], revision)
+        return {"skill_id": row["skill_id"], "revision": revision, "runs": updated["runs"],
+                "successes": updated["successes"], "state": updated["state"], "posterior": self._posterior(updated)}

@@ -55,6 +55,7 @@ DEFAULT_CONSOLIDATION_PASSES = [
     "embedder",
     "promotion_gate",
     "user_model_updater",
+    "learning_reflect",
 ]
 REPLAY_PRIORITY_FACTORS = ("importance", "novelty", "surprise", "reward")
 DEFAULT_EMBED_BATCH_SIZE = 32
@@ -972,6 +973,13 @@ class ConsolidationWorker:
                     skipped.append("skill_inducer_no_candidates")
                     procedure_result["reason"] = "no_candidates_or_learning_store"
                 pass_results.append(PassResult(pass_name, status, procedure_result))
+                continue
+            if pass_name == "learning_reflect":
+                if branch != "main":
+                    raise ValueError("learning consolidation currently requires the main branch")
+                from mnemosyne.experience.runtime import LearningRuntime
+                details = LearningRuntime(self.engine).consolidate(tenant_id)
+                pass_results.append(PassResult(pass_name, "complete", details))
                 continue
             if pass_name == "forgetter":
                 forgetter_result = self._run_forgetter(tenant_id, branch, payload, evidence, mutation_budget)
@@ -2482,6 +2490,9 @@ class ConsolidationWorker:
         now = self._parse_datetime(payload.get("now")) or datetime.now(UTC)
         threshold = float(payload.get("utility_threshold", 0.18))
         actr_decay = max(float(getattr(self.policy, "actr_decay", 0.0)), 0.0)
+        from mnemosyne.experience.writer import LearningWriter
+        from mnemosyne.experience.lifecycle import outcome_lifecycle
+        learned = LearningWriter(self.engine).read(tenant_id) if branch == "main" else {"credit": {}, "stats": {}}
         evaluated: list[dict[str, Any]] = []
         demoted_cids: list[str] = []
         failed_cids: list[str] = []
@@ -2489,7 +2500,7 @@ class ConsolidationWorker:
             if not item.cid:
                 continue
             lifecycle = item.metadata.get("lifecycle") if isinstance(item.metadata, dict) else None
-            state = self._lifecycle_state(item, lifecycle)
+            state = outcome_lifecycle(self._lifecycle_state(item, lifecycle), item.cid, learned)
             scheduled_state, rehearsed = apply_rehearsal_schedule(state, now)
             next_state, changed = demotion_decision(
                 scheduled_state,
@@ -2584,6 +2595,8 @@ class ConsolidationWorker:
             ),
             access_count=int(ConsolidationWorker._safe_float(data.get("access_count"), 0.0)),
             last_accessed=ConsolidationWorker._parse_datetime(data.get("last_accessed")),
+            outcome_utility=ConsolidationWorker._safe_float(data.get("outcome_utility"), 0.0),
+            last_outcome_at=ConsolidationWorker._parse_datetime(data.get("last_outcome_at")),
             must_keep=must_keep,
             successful_rehearsals=int(ConsolidationWorker._safe_float(data.get("successful_rehearsals"), 0.0)),
             next_rehearsal_at=ConsolidationWorker._parse_datetime(data.get("next_rehearsal_at")),

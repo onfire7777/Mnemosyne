@@ -386,7 +386,6 @@ def compute_dynamic_standing(
     - If independent_source_count >= 1: starts at GROUNDED_FLOOR (0.51),
       scales with corroboration count (+0.10 per additional source up to 0.90),
       adds corroboration velocity bonus (+0.05 * tanh(corroboration_velocity)),
-      adds rehearsal bonus (+0.05 * min(1.0, access_velocity)),
       subtracts contradiction pressure (-0.15 * contradiction_count).
     """
     if independent_source_count <= 0:
@@ -395,8 +394,6 @@ def compute_dynamic_standing(
     score = GROUNDED_FLOOR + 0.10 * min(4, max(0, independent_source_count - 1))
     if corroboration_velocity > 0:
         score += 0.05 * math.tanh(corroboration_velocity)
-    if access_velocity > 0:
-        score += 0.05 * min(1.0, access_velocity)
     if contradiction_count > 0:
         score -= 0.15 * contradiction_count
         return max(0.0, min(0.99, round(score, 4)))
@@ -409,18 +406,22 @@ def compute_dynamic_salience(
     created_at: datetime | None = None,
     last_accessed_at: datetime | None = None,
     now: datetime | None = None,
+    outcome_utility: float = 0.0,
 ) -> tuple[float, float]:
-    """Dynamically compute (salience, access_velocity) from recency and rehearsal."""
+    """Compute salience from evidence age and resolved outcome utility.
+
+    Access velocity is returned only for audit compatibility.
+    """
     now = now or utc_now()
     created = created_at or now
     hours_elapsed = max(0.0, (now - created).total_seconds() / 3600.0)
     v_access = access_count / (hours_elapsed + 1.0)
 
-    last_access = last_accessed_at or created
+    last_access = created
     hours_since_access = max(0.0, (now - last_access).total_seconds() / 3600.0)
     recency_factor = math.exp(-0.05 * hours_since_access)
 
-    salience = 0.5 * base_salience + 0.3 * min(1.0, v_access) + 0.2 * recency_factor
+    salience = 0.5 * base_salience + 0.3 * max(0.0, min(1.0, outcome_utility)) + 0.2 * recency_factor
     clamped_salience = max(0.0, min(1.0, round(salience, 4)))
     return clamped_salience, round(v_access, 4)
 
@@ -430,6 +431,7 @@ def reconcile_observation(
     incoming: Observation,
     *,
     now: datetime | None = None,
+    evidence_getter: Any = None,
 ) -> tuple[Observation, bool]:
     """Reconcile an incoming observation with an existing active observation.
 
@@ -437,6 +439,8 @@ def reconcile_observation(
         (reconciled_observation, is_contradiction)
     """
     now = now or utc_now()
+    if evidence_getter is not None:
+        verify_observation_proof_quotes(incoming, evidence_getter)
     # Check if contents are identical or harmonious
     if existing.content.strip().lower() == incoming.content.strip().lower():
         # Reinforcement / corroboration
@@ -457,9 +461,17 @@ def reconcile_observation(
         )
 
         old_sources = existing.independent_source_count
-        new_sources = max(old_sources, incoming.independent_source_count, len(all_cids))
+        if evidence_getter is None:
+            new_sources = old_sources
+        else:
+            new_sources = compute_independent_source_count(
+                row for cid in all_cids if (row := evidence_getter(cid)) is not None
+            )
 
         delta_sources = max(0, new_sources - old_sources)
+        if delta_sources == 0:
+            # Repeated evidence does not earn standing or refresh salience.
+            return existing, False
         hours_elapsed = max(0.01, (now - existing.updated_at).total_seconds() / 3600.0)
         v_c = delta_sources / hours_elapsed
 
@@ -471,7 +483,7 @@ def reconcile_observation(
         )
         salience, v_acc = compute_dynamic_salience(
             base_salience=existing.salience,
-            access_count=existing.access_count + 1,
+            access_count=existing.access_count,
             created_at=existing.created_at,
             last_accessed_at=now,
             now=now,
@@ -493,7 +505,7 @@ def reconcile_observation(
             standing=standing,
             salience=salience,
             access_velocity=v_acc,
-            access_count=existing.access_count + 1,
+            access_count=existing.access_count,
             last_accessed_at=now,
             status="active",
             version=existing.version + 1,

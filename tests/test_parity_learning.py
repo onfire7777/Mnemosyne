@@ -358,8 +358,8 @@ def test_failure_attribution_without_failed_step_is_low_confidence() -> None:
         memory_version="v1",
     )
     attribution = learning.attribute_failure(learning.log_trajectory(trajectory))
-    assert attribution.cause == "outcome marked failure without failed step"
-    assert attribution.confidence == pytest.approx(0.45)
+    assert attribution.cause == "unresolved failure"
+    assert attribution.confidence == 0.0
 
 
 # --------------------------------------------------------------------------- #
@@ -754,6 +754,7 @@ def test_parametric_invariant_rail_values_are_pinned() -> None:
 
 def test_operating_policy_immutable_rails_are_pinned() -> None:
     rails = OperatingPolicy().immutable_rails
+    from mnemosyne.policy import LEARNING_RAILS
     assert set(rails) == {
         "retrieved_text_is_data_not_instruction",
         "writes_are_append_only_or_superseding",
@@ -763,6 +764,7 @@ def test_operating_policy_immutable_rails_are_pinned() -> None:
         "branch_promotion_requires_gate",
         "explicit_preferences_outrank_inferred",
         "erasure_propagates_to_derived_indexes",
+        *LEARNING_RAILS,
     }
     assert all(rails.values())
 

@@ -751,6 +751,7 @@ class SupportsRetrieve(Protocol):
         tenant_id: str,
         *,
         branch: str = "main",
+        record_access: bool = True,
     ) -> Any: ...
 
 
@@ -766,6 +767,7 @@ class SupportsCounterfactualEngine(Protocol):
         tenant_id: str,
         *,
         branch: str = "main",
+        record_access: bool = True,
     ) -> Any: ...
 
 
@@ -773,7 +775,7 @@ def _session_succeeds(engine: SupportsRetrieve, session: ReplaySession, *, branc
     # Mirror the promotion gate's success criterion exactly (gate.py): the
     # expected answer must surface in retrieved hit text and not be abstained.
     # Engine is structural (SupportsRetrieve) — not LocalMemoryEngine-only.
-    result = engine.retrieve(session.query, session.tenant_id, branch=branch)
+    result = engine.retrieve(session.query, session.tenant_id, branch=branch, record_access=False)
     rendered = "\n".join(getattr(hit, "text", "") for hit in result.hits)
     return session.expected_substring.lower() in rendered.lower() and not getattr(result, "abstained", False)
 

@@ -401,7 +401,7 @@ class AnticipatoryPrefetcher:
             if not allowed:
                 results.append(PrefetchResult(candidate, False, reason))
                 continue
-            retrieval = self.engine.retrieve(candidate.query, tenant_id, branch=branch, filt=dict(access_context or {}))
+            retrieval = self.engine.retrieve(candidate.query, tenant_id, branch=branch, filt=dict(access_context or {}), record_access=False)
             self.cache[(tenant_id, branch, candidate.query)] = retrieval
             results.append(PrefetchResult(candidate, True, reason, retrieval))
         return results

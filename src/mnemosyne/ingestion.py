@@ -685,7 +685,7 @@ class IngestionPipeline:
         if not query:
             return {"score": 0.0, "support": 1.0, "gate": "empty_content", "hit_count": 0}
         try:
-            result = self.engine.retrieve(query=query, tenant_id=tenant_id, branch=branch)
+            result = self.engine.retrieve(query=query, tenant_id=tenant_id, branch=branch, record_access=False)
         except Exception:
             return {"score": 1.0, "support": 0.0, "gate": "unmeasured_fail_open_to_review", "hit_count": 0}
         support = result.explain.get("confidence", {}).get("query_support", {}).get("score")
@@ -720,10 +720,9 @@ class IngestionPipeline:
             surprise = _bounded_signal(computed_surprise, default=0.0)
         else:
             surprise = _bounded_signal(metadata.get("surprise"), default=computed_surprise)
-        raw_reward = _bounded_signal(metadata.get("reward"), default=0.5 if request.actor == "user" else 0.25)
-        reward = raw_reward if trust_tier <= int(TrustTier.AUTHENTICATED) else min(raw_reward, 0.25)
-        if trust_tier >= int(TrustTier.UNTRUSTED_EXTERNAL):
-            reward = 0.0
+        # Ingested metadata cannot assert an outcome. The experience runtime
+        # supplies outcome utility after resolving a captured episode.
+        reward = 0.0
         weights = dict(getattr(self.engine.policy, "write_priority_weights", {}) or {})
         total = sum(max(float(value), 0.0) for value in weights.values()) or 1.0
         components = {

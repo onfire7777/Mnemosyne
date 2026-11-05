@@ -7,6 +7,57 @@ from dataclasses import asdict, dataclass, field
 from hashlib import sha256
 from typing import Any
 
+LEARNING_COMPONENTS = (
+    'routes',
+    'skills',
+    'items',
+    'lessons',
+    'three_factor',
+    'adaptive_rates',
+    'stiffness',
+    'deferred_resolution',
+    'reconsolidation',
+    'pattern_separation',
+    'schema',
+    'homeostasis',
+    'revalidation',
+    'dreamer',
+    'contingency',
+    'curiosity',
+    'exploration',
+    'fast_path',
+    'chunking',
+    'insight',
+    'metacognition',
+    'selective_import',
+)
+LEARNING_RAILS = (
+    'learning_reward_external_only',
+    'learning_salience_only',
+    'learning_after_access_policy',
+    'learning_changes_reversible',
+    'learning_bounded_steps',
+    'labile_updates_are_new_revisions',
+    'learning_freeze_on_regression',
+    'learning_tenant_scoped',
+    'learned_effects_need_approval',
+    'erasure_cascades_to_learning',
+    'credit_requires_contingency',
+    'no_use_only_strengthening',
+    'exploration_never_zero',
+    'symmetric_updates',
+    'goal_check_on_every_serve',
+    'reward_sources_allowlisted',
+    'replay_requires_new_evidence',
+    'scope_grows_by_evidence_only',
+    'retired_stays_retired',
+    'evidence_never_labile',
+    'predictions_write_once',
+    'slow_store_revisions_only',
+    'single_learning_write_path',
+    'learning_failures_are_defects',
+)
+
 CONSOLIDATION_CADENCE_TIERS = ("fast", "medium", "slow")
 _DEFAULT_CADENCE_TIER_PASSES: dict[str, tuple[str, ...]] = {
     "fast": ("replayer", "summarizer", "embedder"),
@@ -17,6 +68,7 @@ _DEFAULT_CADENCE_TIER_PASSES: dict[str, tuple[str, ...]] = {
         "skill_inducer",
         "forgetter",
         "user_model_updater",
+        "learning_reflect",
     ),
 }
 _DEFAULT_CADENCE_TIER_MIN_STEPS: dict[str, int] = {
@@ -44,6 +96,19 @@ class OperatingPolicy:
     explicit in the local engine.
     """
 
+    learning_enabled: bool = True
+    learning_modes: dict[str, str] = field(default_factory=lambda: {name: "active" for name in LEARNING_COMPONENTS})
+    learning_distill_mode: str = "deterministic"
+    learning_trace_lambda: float = 0.7
+    learning_trace_tau_minutes: int = 30
+    learning_exploration_rate: float = 0.1
+    learning_exploration_floor: float = 0.02
+    learning_resolution_window_minutes: int = 180
+    learning_probation_outcomes: dict[str, int] = field(default_factory=lambda: {"schema": 5, "standalone": 12})
+    learning_interleave_fraction: float = 0.3
+    learning_homeostasis_budget: float = 0.08
+    learning_contingency_min_samples: int = 8
+    learning_goal_check_comparison_rate: float = 0.05
     top_k: int = 8
     deep_top_k: int = 24
     token_budget: int = 4096
@@ -164,8 +229,53 @@ class OperatingPolicy:
             "branch_promotion_requires_gate": True,
             "explicit_preferences_outrank_inferred": True,
             "erasure_propagates_to_derived_indexes": True,
+            **{name: True for name in LEARNING_RAILS},
         }
     )
+
+    def __post_init__(self) -> None:
+        self._validate_learning()
+
+    def _validate_learning(self) -> None:
+        import math
+        if type(self.learning_enabled) is not bool:
+            raise ValueError("learning_enabled must be a boolean")
+        if not isinstance(self.learning_modes, dict) or set(self.learning_modes) - set(LEARNING_COMPONENTS):
+            raise ValueError("unknown learning component")
+        if any(not isinstance(value, str) or value not in {"off", "shadow", "active"} for value in self.learning_modes.values()):
+            raise ValueError("learning mode must be off, shadow or active")
+        if not isinstance(self.learning_distill_mode, str) or self.learning_distill_mode not in {"off", "deterministic", "provider"}:
+            raise ValueError("unknown learning distillation mode")
+        bounds = {
+            "learning_trace_lambda": (0, 1),
+            "learning_exploration_floor": (.02, 1),
+            "learning_exploration_rate": (.02, 1),
+            "learning_interleave_fraction": (0, 1),
+            "learning_homeostasis_budget": (0, .2),
+            "learning_goal_check_comparison_rate": (.05, 1),
+        }
+        for name, (minimum, maximum) in bounds.items():
+            value = getattr(self, name)
+            if type(value) not in {int, float} or not math.isfinite(value) or not minimum <= value <= maximum:
+                raise ValueError(f"{name} must remain within [{minimum}, {maximum}]")
+        if self.learning_exploration_rate < self.learning_exploration_floor:
+            raise ValueError("learning exploration rate cannot be below the floor")
+        for name, minimum, maximum in (
+            ("learning_trace_tau_minutes", 1, 1440),
+            ("learning_resolution_window_minutes", 1, 1440),
+            ("learning_contingency_min_samples", 8, 1000000),
+        ):
+            value = getattr(self, name)
+            if type(value) is not int or not minimum <= value <= maximum:
+                raise ValueError(f"{name} must remain within [{minimum}, {maximum}]")
+        probation = self.learning_probation_outcomes
+        if not isinstance(probation, dict) or set(probation) != {"schema", "standalone"}:
+            raise ValueError("learning probation needs schema and standalone outcome counts")
+        if any(type(probation[name]) is not int or probation[name] < floor
+               for name, floor in (("schema", 5), ("standalone", 12))):
+            raise ValueError("learning probation outcomes cannot be below the safety minimum")
+        if not isinstance(self.immutable_rails, dict) or any(self.immutable_rails.get(name) is not True for name in LEARNING_RAILS):
+            raise ValueError("learning guards cannot be disabled")
 
     def cadence_policy_fingerprint(self) -> str:
         """Stable digest of cadence routing plus mutation-rail bounds."""
@@ -198,6 +308,11 @@ class OperatingPolicy:
             return cls()
         policy = cls()
         for key, value in data.items():
+            if key.startswith("learning_") and key not in cls.__dataclass_fields__:
+                raise ValueError(f"unknown learning policy field: {key}")
+            if key == "immutable_rails" and isinstance(value, dict):
+                # Old persisted policy maps predate these mandatory rails.
+                value = {**policy.immutable_rails, **value}
             if key == "min_trust_tier":
                 policy.max_trust_tier = value
                 continue
@@ -222,4 +337,5 @@ class OperatingPolicy:
                             configured = value.pop(tier)
                             value.setdefault(numeric_tier, configured)
                 setattr(policy, key, value)
+        policy._validate_learning()
         return policy

@@ -401,7 +401,8 @@ class _FakeRetrieveEngine:
         self._hit_text = hit_text
         self._abstained = abstained
 
-    def retrieve(self, query: str, tenant_id: str, *, branch: str = "main"):
+    def retrieve(self, query: str, tenant_id: str, *, branch: str = "main", record_access: bool = True):
+        assert record_access is False
         del query, tenant_id, branch
 
         class _Hit:

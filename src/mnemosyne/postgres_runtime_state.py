@@ -217,6 +217,9 @@ class PostgresRuntimeState:
         payload = self._load_payload("learning", None)
         if payload is None:
             return self._load_learning_from_tables(learning)
+        if "engine_tenants" in payload:
+            learning.load_native(payload["engine_tenants"])
+            return learning
         learning.trajectories = {
             item.id: item for item in (Trajectory.from_dict(row) for row in payload.get("trajectories", []))
         }
@@ -230,22 +233,14 @@ class PostgresRuntimeState:
         }
         return learning
 
+    def migrate_learning(self, runtime, tenant_id: str) -> dict[str, int]:
+        from mnemosyne.runtime_state import migrate_legacy_learning
+        legacy = self.load_learning(LearningSystem(runtime.engine))
+        return migrate_legacy_learning(runtime, legacy, tenant_id)
+
     def save_learning(self, learning: LearningSystem) -> None:
-        trajectories = [item for item in learning.trajectories.values() if item.tenant_id == self.tenant_id]
-        trajectory_ids = {item.id for item in trajectories}
-        attributions = [item for item in learning.attributions.values() if item.trajectory_id in trajectory_ids]
-        lessons = [item for item in learning.lessons.values() if item.tenant_id == self.tenant_id]
-        procedures = [item for item in learning.procedures.values() if item.tenant_id == self.tenant_id]
-        self._save_payload(
-            "learning",
-            {
-                "trajectories": [item.to_dict() for item in trajectories],
-                "attributions": [item.to_dict() for item in attributions],
-                "lessons": [item.to_dict() for item in lessons],
-                "procedures": [item.to_dict() for item in procedures],
-            },
-        )
-        self._mirror_learning(trajectories, lessons, procedures)
+        tenants = learning.persist_native()
+        self._save_payload("learning", {"engine_tenants": [tenant for tenant in tenants if tenant == self.tenant_id]})
 
     def load_queue(self) -> InProcessQueue:
         return InProcessQueue.from_dict(self._load_payload("queue", _DEFAULT_RUNTIME_PAYLOAD["queue"]))

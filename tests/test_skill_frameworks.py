@@ -371,12 +371,12 @@ def test_import_is_usable_at_once_and_runs_nothing(store, tmp_path):
     assert result["effects"] == ["sends", "runs scripts"]
     plain = store.get(result["skill_id"])
     assert plain["file"] == "SKILL.md" and plain["text"] == SKILL and "scripts/post.py" in plain["files"]
-    assert store.status(result["skill_id"])["state"] == "active"
+    assert store.status(result["skill_id"])["state"] == "probation"
     with pytest.raises(ValueError, match="plain skill"):
         store.get(result["skill_id"], section="steps")
     status = _burnskill(store, result["skill_id"])
-    assert status["conversion"] == "completed" and status["coverage"]["complete"] and status["state"] == "active"
-    assert status["kind"] == "burnskill" and store.status(result["skill_id"], 1)["state"] == "draft"
+    assert status["conversion"] == "completed" and status["coverage"]["complete"] and status["state"] == "probation"
+    assert status["kind"] == "burnskill" and store.status(result["skill_id"], 1)["state"] == "probation"
     assert status["needs"] == ["slack"] and status["effects"] == ["sends", "runs scripts"]
     kept = Path(store._skill(result["skill_id"])["source_dir"])
     assert (kept / "SKILL.md").read_bytes() == SKILL.encode("utf-8")
@@ -456,7 +456,7 @@ def test_burnskill_round_trip(store, tmp_path):
     other = sk.SkillStore(str(tmp_path / "other" / "skills.sqlite"))
     back = other.import_skill(out["path"], "m")
     status = other.status(back["skill_id"])
-    assert status["conversion"] == "completed" and status["state"] == "active" and status["nodes"] == 4
+    assert status["conversion"] == "completed" and status["state"] == "probation" and status["nodes"] == 4
     assert (Path(other._skill(back["skill_id"])["source_dir"]) / "SKILL.md").read_bytes() == SKILL.encode("utf-8")
     assert other.get(back["skill_id"], section="document")["text"] == store.get(skill_id, section="document")["text"]
     assert other.import_skill(out["path"], "m")["unchanged"] is True
@@ -502,6 +502,9 @@ def test_search_state_and_forget(store, tmp_path):
     skill_id = store.import_skill(str(_skill_dir(tmp_path)), "m")["skill_id"]
     store.set_state(skill_id, "draft")
     assert store.search("post the weekly update")["skills"] == []  # drafts are not offered
+    store.approve_effects(skill_id, 1)
+    for index in range(12):
+        store.outcome(skill_id, 1, True, "verified local run", episode_id=f"local-{index}")
     store.set_state(skill_id, "active")
     assert store.search("post the weekly update", available=["slack"])["skills"][0]["name"] == "weekly-update"
     named = store.search("please do my weekly update now", available=["slack"])
@@ -582,7 +585,7 @@ def test_a_book_becomes_one_burnskill(store, tmp_path):
     book = store.import_skill(str(_epub(tmp_path / "Weekly Book.epub")), "m")
     assert book["kind"] == "burnskill" and book["status"] == "converting" and book["name"] == "Weekly Book"
     status = _done(store, book["skill_id"], book["revision"])
-    assert status["conversion"] == "completed" and status["state"] == "active" and status["kind"] == "burnskill"
+    assert status["conversion"] == "completed" and status["state"] == "probation" and status["kind"] == "burnskill"
     assert store.get(book["skill_id"], section="source")["text"].startswith("[Unit 1]\n[ch.1] Start")
     assert store.files(book["skill_id"]) == ["Weekly Book.epub"]
 

@@ -936,3 +936,89 @@ CREATE POLICY knowledge_pages_tenant_isolation ON knowledge_pages
   USING (tenant_id = mnemosyne_current_tenant())
   WITH CHECK (tenant_id = mnemosyne_current_tenant());
 
+
+-- Engine-native experience records.
+CREATE TABLE IF NOT EXISTS learning_receipts (
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  record_key TEXT NOT NULL,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  PRIMARY KEY (tenant_id, record_key)
+);
+ALTER TABLE learning_receipts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE learning_receipts FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS learning_receipts_tenant_isolation ON learning_receipts;
+CREATE POLICY learning_receipts_tenant_isolation ON learning_receipts
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+CREATE TABLE IF NOT EXISTS learning_episodes (
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  record_key TEXT NOT NULL,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  PRIMARY KEY (tenant_id, record_key)
+);
+ALTER TABLE learning_episodes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE learning_episodes FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS learning_episodes_tenant_isolation ON learning_episodes;
+CREATE POLICY learning_episodes_tenant_isolation ON learning_episodes
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+CREATE TABLE IF NOT EXISTS learning_credit (
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  record_key TEXT NOT NULL,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  PRIMARY KEY (tenant_id, record_key)
+);
+ALTER TABLE learning_credit ENABLE ROW LEVEL SECURITY;
+ALTER TABLE learning_credit FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS learning_credit_tenant_isolation ON learning_credit;
+CREATE POLICY learning_credit_tenant_isolation ON learning_credit
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+CREATE TABLE IF NOT EXISTS learning_stats (
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  record_key TEXT NOT NULL,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  PRIMARY KEY (tenant_id, record_key)
+);
+ALTER TABLE learning_stats ENABLE ROW LEVEL SECURITY;
+ALTER TABLE learning_stats FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS learning_stats_tenant_isolation ON learning_stats;
+CREATE POLICY learning_stats_tenant_isolation ON learning_stats
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+CREATE TABLE IF NOT EXISTS learning_artifacts (
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  record_key TEXT NOT NULL,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  PRIMARY KEY (tenant_id, record_key)
+);
+ALTER TABLE learning_artifacts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE learning_artifacts FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS learning_artifacts_tenant_isolation ON learning_artifacts;
+CREATE POLICY learning_artifacts_tenant_isolation ON learning_artifacts
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+CREATE TABLE IF NOT EXISTS learning_defects (
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  record_key TEXT NOT NULL,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  PRIMARY KEY (tenant_id, record_key)
+);
+ALTER TABLE learning_defects ENABLE ROW LEVEL SECURITY;
+ALTER TABLE learning_defects FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS learning_defects_tenant_isolation ON learning_defects;
+CREATE POLICY learning_defects_tenant_isolation ON learning_defects
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+CREATE TABLE IF NOT EXISTS learning_policy_state (
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  record_key TEXT NOT NULL,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  PRIMARY KEY (tenant_id, record_key)
+);
+ALTER TABLE learning_policy_state ENABLE ROW LEVEL SECURITY;
+ALTER TABLE learning_policy_state FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS learning_policy_state_tenant_isolation ON learning_policy_state;
+CREATE POLICY learning_policy_state_tenant_isolation ON learning_policy_state
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());

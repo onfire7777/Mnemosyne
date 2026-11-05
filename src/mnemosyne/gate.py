@@ -228,9 +228,11 @@ class PromotionGate:
         counterfactual_hook: CounterfactualHook | None = None,
         require_ignition: bool = False,
         policy: OperatingPolicy | None = None,
+        retrieval_context: Mapping[str, Any] | None = None,
     ):
         self.engine = engine
         self.cases = cases
+        self.retrieval_context = dict(retrieval_context or {})
         self.noise_margin = noise_margin
         # Optional §30.6 seam: when set, a counterfactual-replay verdict can veto an
         # otherwise-promotable candidate. Default ``None`` preserves prior behaviour.
@@ -297,7 +299,7 @@ class PromotionGate:
         failed: list[str] = []
         protected_regressions: list[str] = []
         for case in self.relevant_cases(candidate):
-            result = self.engine.retrieve(case.query, tenant_id=tenant_id, branch=branch, deep=case.tier != "smoke")
+            result = self.engine.retrieve(case.query, tenant_id=tenant_id, branch=branch, deep=case.tier != "smoke", record_access=False, filt=self.retrieval_context)
             rendered = "\n".join(hit.text for hit in result.hits)
             ok = case.expected_substring.lower() in rendered.lower() and not result.abstained
             if ok:
@@ -429,7 +431,7 @@ class PromotionGate:
         failed: list[str] = []
         protected_regressions: list[str] = []
         for case in self.group_relevant_cases(candidates):
-            result = self.engine.retrieve(case.query, tenant_id=tenant_id, branch=branch, deep=case.tier != "smoke")
+            result = self.engine.retrieve(case.query, tenant_id=tenant_id, branch=branch, deep=case.tier != "smoke", record_access=False)
             rendered = "\n".join(hit.text for hit in result.hits)
             ok = case.expected_substring.lower() in rendered.lower() and not result.abstained
             if ok:

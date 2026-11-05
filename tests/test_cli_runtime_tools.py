@@ -14400,53 +14400,33 @@ def test_cli_provider_check_fails_closed_when_command_key_provider_retains_shred
     assert "retained key after shred_key" in payload["checks"]["object_key_manager"]["error"]
 
 
+
+def seed_operator_curated_parametric_sources(store: Path) -> tuple[str, str]:
+    """Explicit curated transport inputs, independent of automatic learning admission."""
+    engine = LocalMemoryEngine(store_path=store)
+    try:
+        state = RuntimeState.from_store_path(store)
+        assert state is not None
+        learning = state.load_learning(LearningSystem(engine))
+        lesson = Lesson(tenant_id=TENANT, lesson_type="corrective", failure_signature="curated transport",
+                        content="Operator-curated provider transport input.", status="active", origin="curated")
+        procedure = Procedure(tenant_id=TENANT, kind="curated", name="Curated transport procedure",
+                              body="Read the operator-provided source.", signature={"source":"operator-curated"},
+                              status="validated", origin="curated")
+        learning.lessons[lesson.id] = lesson
+        learning.procedures[procedure.id] = procedure
+        state.save_learning(learning)
+        return lesson.id, procedure.id
+    finally:
+        engine.close()
+
+
 def test_cli_parametric_tier_can_use_command_provider(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     command, provider_state = fake_parametric_command(tmp_path)
     seed_grounded_gate_evidence(store, "verify with tools durable memory")
     seed_grounded_gate_evidence(store, "parametric protected suite query protected")
-    trajectory = run_cli(
-        store,
-        "trajectory-record",
-        "--tenant",
-        TENANT,
-        "--user",
-        USER,
-        "--session",
-        "session-parametric-provider",
-        "--task",
-        "parametric provider smoke",
-        "--steps",
-        json.dumps([{"name": "verify", "status": "failed", "error": "provider"}]),
-        "--outcome",
-        "failure",
-        "--reward",
-        "-1",
-        "--memory-version",
-        "v1",
-    )
-    lesson = run_cli(store, "lesson-propose", "--trajectory-id", trajectory["id"])
-    procedure = run_cli(store, "procedure-propose", "--lesson-id", lesson["id"])
-    run_cli(store, "procedure-validate", "--procedure-id", procedure["id"], *PARAMETRIC_AUTH)
-    run_cli(
-        store,
-        "lesson-promote",
-        "--lesson-id",
-        lesson["id"],
-        "--cases",
-        json.dumps(
-            [
-                {
-                    "id": "case-parametric-provider",
-                    "signature": "parametric provider smoke",
-                    "query": "verify with tools durable memory",
-                    "expected_substring": "verify with tools",
-                    "protected": True,
-                }
-            ]
-        ),
-        *PARAMETRIC_AUTH,
-    )
+    seed_operator_curated_parametric_sources(store)
     run_cli(
         store,
         "gate-case-add",
@@ -14864,7 +14844,7 @@ def test_cli_profile_record_explicit_and_trajectory_attribute_aliases_persist(tm
     assert attribution["trajectory_id"] == trajectory["id"]
     assert attribution["cause"] == "missing alias coverage"
     assert attribution["signature"] == "alias-persistence-check:missing-alias-coverage"
-    assert attribution["confidence"] == 0.75
+    assert attribution["confidence"] == 0.0
     assert "missing alias coverage" in attribution["evidence"][0]
 
 
@@ -15061,7 +15041,8 @@ def test_cli_prefetch_discard_and_learning_induce_aliases_persist(tmp_path: Path
     assert lesson["failure_signature"] == "direct-induce-aliases:direct-induce-gap"
     assert "direct induce gap" in lesson["content"]
     assert procedure["signature"] == {"failure_signature": lesson["failure_signature"]}
-    assert "Run a verification check" in procedure["body"]
+    assert procedure["body"] == "learn"
+    assert procedure["status"] == "candidate"
 
     discarded = run_cli(store, "discard", "--tenant", TENANT, "--branch", candidate_branch, *PARAMETRIC_AUTH)
     after_discard = run_cli(
@@ -15299,6 +15280,7 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
         "core",
         "--protected",
     )
+    curated_lesson, curated_procedure = seed_operator_curated_parametric_sources(store)
     artifact = run_cli(store, "parametric-propose", "--tenant", TENANT, *PARAMETRIC_AUTH)
     artifact_path = store.with_suffix(store.suffix + ".parametric") / TENANT / f"{artifact['id']}.json"
     proposal_record = json.loads(artifact_path.read_text(encoding="utf-8"))
@@ -15319,13 +15301,15 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
     rolled_back_search = run_cli(store, "procedure-search", "--tenant", TENANT, "--query", "date-math-deploy", "--status", "rolled_back")
     ops = run_cli(store, "ops-report", "--tenant", TENANT)
 
-    assert validated["status"] == "validated"
+    assert validated["status"] == "candidate"
+    assert validated["gate"]["promoted"] is False
+    assert validated["gate"]["failed_cases"] == ["outcome_grounded_sources_required"]
     assert lesson_search["lessons"][0]["id"] == lesson["id"]
     assert procedure_search["procedures"][0]["id"] == procedure["id"]
     assert outcome["outcome"] == "failure"
     assert outcome["passed"] is False
-    assert promoted["promoted"] is True
-    assert set(artifact["source_ids"]) == {lesson["id"], procedure["id"]}
+    assert promoted["promoted"] is False
+    assert set(artifact["source_ids"]) == {curated_lesson, curated_procedure}
     assert evaluated_artifact["artifact"]["id"] == artifact["id"]
     assert evaluated_artifact["promoted"] is True
     assert artifact["artifact_uri"].startswith("local-parametric://")
@@ -15336,10 +15320,11 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
     assert rolled_back_artifact["status"] == "rolled_back"
     assert rolled_back_artifact["rollback_ref"].startswith("rollback-")
     assert rollback_record["payload"]["phase"] == "rolled_back"
-    assert promoted_procedure["status"] == "promoted"
+    assert promoted_procedure["status"] == "candidate"
+    assert promoted_procedure["gate"]["promoted"] is False
     assert rolled_back["status"] == "rolled_back"
     assert rolled_back_search["procedures"][0]["id"] == procedure["id"]
-    assert ops["tripwires"]["gate_promotions"] >= 2
+    assert ops["tripwires"]["gate_promotions"] >= 1
     assert ops["tripwires"]["gate_rollbacks"] >= 2
 
 

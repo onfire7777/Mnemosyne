@@ -243,7 +243,8 @@ def test_dynamic_salience():
         last_accessed_at=past,
         now=now,
     )
-    assert salience_decayed < salience_fresh
+    assert salience_decayed == salience_fresh
+    assert v_decayed == v_fresh
 
 
 # ---------------------------------------------------------------------------
