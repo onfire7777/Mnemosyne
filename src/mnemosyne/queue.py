@@ -224,51 +224,46 @@ class PostgresQueue:
         with self.connect() as conn:
             with conn.cursor(row_factory=self._dict_row) as cur:
                 self._ensure_tenant(cur, db_tenant_id)
-                if kind:
-                    cur.execute(
-                        """
-                        SELECT id
-                        FROM runtime_jobs
-                        WHERE tenant_id = %s
-                          AND status IN ('queued', 'retry')
-                          AND kind = %s
-                        ORDER BY
-                          CASE
-                            WHEN payload #>> '{write_priority,effective_score}' ~ '^[0-9]+([.][0-9]+)?$'
-                            THEN (payload #>> '{write_priority,effective_score}')::DOUBLE PRECISION
-                            WHEN payload #>> '{write_priority,score}' ~ '^[0-9]+([.][0-9]+)?$'
-                            THEN (payload #>> '{write_priority,score}')::DOUBLE PRECISION
-                            ELSE 0.0
-                          END DESC,
-                          created_at ASC,
-                          id ASC
-                        FOR UPDATE SKIP LOCKED
-                        LIMIT 1
-                        """,
-                        (db_tenant_id, kind),
-                    )
-                else:
-                    cur.execute(
-                        """
-                        SELECT id
-                        FROM runtime_jobs
-                        WHERE tenant_id = %s
-                          AND status IN ('queued', 'retry')
-                        ORDER BY
-                          CASE
-                            WHEN payload #>> '{write_priority,effective_score}' ~ '^[0-9]+([.][0-9]+)?$'
-                            THEN (payload #>> '{write_priority,effective_score}')::DOUBLE PRECISION
-                            WHEN payload #>> '{write_priority,score}' ~ '^[0-9]+([.][0-9]+)?$'
-                            THEN (payload #>> '{write_priority,score}')::DOUBLE PRECISION
-                            ELSE 0.0
-                          END DESC,
-                          created_at ASC,
-                          id ASC
-                        FOR UPDATE SKIP LOCKED
-                        LIMIT 1
-                        """,
-                        (db_tenant_id,),
-                    )
+                # JSON null is deliberately retained: an explicitly invalid
+                # effective_score must not fall back to score (_job_priority).
+                # PG16 input validation keeps malformed values from aborting
+                # leasing; numeric also handles underscores and float overflow.
+                cur.execute(
+                    """
+                    SELECT id
+                    FROM runtime_jobs
+                    CROSS JOIN LATERAL (SELECT COALESCE(
+                        payload #> '{write_priority,effective_score}',
+                        payload #> '{write_priority,score}'
+                    ) AS priority_value) AS priority
+                    CROSS JOIN LATERAL (SELECT priority_value #>> '{}' AS priority_text) AS parsed
+                    WHERE tenant_id = %s
+                      AND status IN ('queued', 'retry')
+                      AND (%s::TEXT IS NULL OR kind = %s)
+                    ORDER BY
+                      CASE
+                        WHEN jsonb_typeof(priority_value) = 'boolean'
+                        THEN CASE WHEN priority_value = 'true'::JSONB THEN 1.0 ELSE 0.0 END
+                        WHEN priority_text ~* '^[[:space:]]*[+-]?0[xob]' THEN 0.0
+                        WHEN pg_input_is_valid(priority_text, 'double precision')
+                        THEN CASE WHEN priority_text::DOUBLE PRECISION = 'NaN'::DOUBLE PRECISION
+                             THEN 0.0
+                             ELSE GREATEST(0.0, LEAST(1.0, priority_text::DOUBLE PRECISION)) END
+                        WHEN pg_input_is_valid(priority_text, 'numeric')
+                        THEN CASE WHEN priority_text::NUMERIC >= 1.0 THEN 1.0
+                             WHEN priority_text::NUMERIC <= 0.0 THEN 0.0
+                             WHEN pg_input_is_valid((priority_text::NUMERIC)::TEXT, 'double precision')
+                             THEN (priority_text::NUMERIC)::DOUBLE PRECISION
+                             ELSE 0.0 END
+                        ELSE 0.0
+                      END DESC,
+                      created_at ASC,
+                      id ASC
+                    FOR UPDATE OF runtime_jobs SKIP LOCKED
+                    LIMIT 1
+                    """,
+                    (db_tenant_id, kind or None, kind or None),
+                )
                 row = cur.fetchone()
                 if row is None:
                     return None
@@ -288,20 +283,22 @@ class PostgresQueue:
                 return job
 
     def complete(self, job_id: str) -> None:
-        job = self._leased.pop(job_id, None)
+        job = self._leased.get(job_id)
+        self._update_status(job_id, status="complete", result=job.result if job else None)
+        self._leased.pop(job_id, None)
         if job:
             job.status = "complete"
             job.updated_at = datetime.now(UTC)
-        self._update_status(job_id, status="complete", result=job.result if job else None)
 
     def fail(self, job_id: str, error: str) -> None:
-        job = self._leased.pop(job_id, None) or self._get_job(job_id)
+        job = self._leased.get(job_id) or self._get_job(job_id)
         status = "dead" if job and job.attempts >= job.max_attempts else "retry"
+        self._update_status(job_id, status=status, last_error=error)
+        self._leased.pop(job_id, None)
         if job:
             job.status = status
             job.last_error = error
             job.updated_at = datetime.now(UTC)
-        self._update_status(job_id, status=status, last_error=error)
 
     def snapshot(self) -> dict[str, int]:
         db_tenant_id = self._tenant_db_id()
@@ -509,7 +506,7 @@ class SqliteQueue:
 
     def complete(self, job_id: str) -> None:
         with self._lock:
-            job = self._leased.pop(job_id, None)
+            job = self._leased.get(job_id)
             result = job.result if job else None
             now = datetime.now(UTC)
             self._conn.execute(
@@ -522,13 +519,14 @@ class SqliteQueue:
                     self.tenant_id,
                 ),
             )
+            self._leased.pop(job_id, None)
             if job:
                 job.status = "complete"
                 job.updated_at = now
 
     def fail(self, job_id: str, error: str) -> None:
         with self._lock:
-            job = self._leased.pop(job_id, None) or self._get_job(job_id)
+            job = self._leased.get(job_id) or self._get_job(job_id)
             status = "dead" if job and job.attempts >= job.max_attempts else "retry"
             now = datetime.now(UTC)
             self._conn.execute(
@@ -536,6 +534,7 @@ class SqliteQueue:
                 "updated_at = ? WHERE id = ? AND tenant_id = ?",
                 (status, error, dt_to_json(now), job_id, self.tenant_id),
             )
+            self._leased.pop(job_id, None)
             if job:
                 job.status = status
                 job.last_error = error
@@ -602,8 +601,16 @@ class QueueWorker:
             self.queue.fail(job.id, str(exc))
             self._metric(f"queue.job.{job.kind}.failed")
         else:
-            self.queue.complete(job.id)
-            self._metric(f"queue.job.{job.kind}.complete")
+            try:
+                self.queue.complete(job.id)
+            except (TypeError, ValueError) as exc:
+                # Invalid result serialization is a definite failed write.
+                # Operational errors may follow a committed write: propagate
+                # them instead of replaying a handler with side effects.
+                self.queue.fail(job.id, str(exc))
+                self._metric(f"queue.job.{job.kind}.failed")
+            else:
+                self._metric(f"queue.job.{job.kind}.complete")
         return job
 
     def drain(self, limit: int = 10, kind: str | None = None) -> list[QueueJob]:
@@ -633,8 +640,11 @@ def _job_priority(job: QueueJob) -> float:
     write_priority = job.payload.get("write_priority") if isinstance(job.payload, dict) else None
     if not isinstance(write_priority, dict):
         return 0.0
+    value = write_priority.get("effective_score", write_priority.get("score", 0.0))
+    if isinstance(value, int):
+        return float(max(0, min(1, value)))
     try:
-        score = float(write_priority.get("effective_score", write_priority.get("score", 0.0)))
+        score = float(value)
     except (TypeError, ValueError):
         return 0.0
     if score != score:

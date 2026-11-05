@@ -2999,13 +2999,15 @@ def test_runtime_job_handlers_drain_calibration_lifecycle_and_observability_jobs
     jobs = worker.drain(limit=4)
 
     assert [job.status for job in jobs] == ["complete", "complete", "complete", "complete"]
-    assert jobs[0].result["details"]["abstain"] is True
-    assert jobs[1].result["details"]["demoted"] == 1
-    assert jobs[1].result["details"]["rehearsed"] == 1
-    assert jobs[1].result["details"]["states"][1]["rehearsed"] is True
-    assert jobs[1].result["details"]["states"][1]["next_rehearsal_at"] == "2026-01-08T00:00:00+00:00"
-    assert jobs[2].result["details"]["passed"] is True
-    assert jobs[3].result["details"]["metrics"]["counters"]["observability.snapshots"] == 1
+    # Equal enqueue timestamps are ordered by job ID, not insertion order.
+    by_kind = {job.kind: job for job in jobs}
+    assert by_kind[CALIBRATE_JOB].result["details"]["abstain"] is True
+    assert by_kind[LIFECYCLE_SWEEP_JOB].result["details"]["demoted"] == 1
+    assert by_kind[LIFECYCLE_SWEEP_JOB].result["details"]["rehearsed"] == 1
+    assert by_kind[LIFECYCLE_SWEEP_JOB].result["details"]["states"][1]["rehearsed"] is True
+    assert by_kind[LIFECYCLE_SWEEP_JOB].result["details"]["states"][1]["next_rehearsal_at"] == "2026-01-08T00:00:00+00:00"
+    assert by_kind[EVAL_SUITE_JOB].result["details"]["passed"] is True
+    assert by_kind[OBSERVABILITY_SNAPSHOT_JOB].result["details"]["metrics"]["counters"]["observability.snapshots"] == 1
     assert engine.export_tenant(TENANT)["calibrations"][0]["memory_type"] == "fact"
     snapshot = metrics.snapshot()
     assert snapshot.counters["queue.job.calibrate.complete"] == 1
