@@ -187,7 +187,7 @@ def _meminfo_bytes() -> dict[str, int]:
 def sample_resources() -> dict[str, Any]:
     mem = _meminfo_bytes()
     usage = resource_mod.getrusage(resource_mod.RUSAGE_SELF)
-    rss_bytes = int(usage.ru_maxrss) * 1024
+    rss_bytes = int(usage.ru_maxrss) * (1 if sys.platform == "darwin" else 1024)
     load = list(os.getloadavg()) if hasattr(os, "getloadavg") else [0.0, 0.0, 0.0]
     swap_used = max(0, mem.get("SwapTotal", 0) - mem.get("SwapFree", 0))
     return {

@@ -5,8 +5,8 @@ adapters, MNEMOSYNE_PASSAGE_* from the environment), against a temporary SQLite 
 snapshot. Each database and its journals are copied during an observed stable file window,
 then backed up through a read-only connection to that private copy, including committed
 WAL data. Other files are copied. Databases and assets are not captured at one
-atomic instant across the whole directory. Each question scores the share of its gold
-evidence CIDs (or CID prefixes) found among the first five ranked records. Keep the question
+atomic instant across the whole directory. Each question scores the share of its distinct
+gold evidence CID strings (or CID prefixes) found among the first five ranked records. Keep the question
 file outside git when it is built from private conversations:
 
     [{"id": "name", "kind": "fact", "question": "What is my name?", "gold": ["c9165dc4b830"],
@@ -136,6 +136,7 @@ def snapshot_store(source: Path, target: Path) -> None:
 
 def main() -> None:
     from mnemosyne import cli
+    from mnemosyne.models import parse_dt
     from mnemosyne.retrieval import resolve_query_timezone
 
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -185,6 +186,16 @@ def main() -> None:
                 resolve_query_timezone(question["query_timezone"])
             except ValueError as exc:
                 ap.error(str(exc))
+        if "kind" in question and not isinstance(question["kind"], str):
+            ap.error("question kind must be a string when provided")
+        now = question.get("now")
+        if now is not None:
+            if not isinstance(now, str):
+                ap.error("question now must be an ISO 8601 timestamp")
+            try:
+                parse_dt(now)
+            except (ValueError, OverflowError):
+                ap.error("question now must be an ISO 8601 timestamp")
     with tempfile.TemporaryDirectory(prefix="store-recall-", ignore_cleanup_errors=True) as temp, ExitStack() as cleanup:
         store = Path(temp) / "store"
         snapshot_store(args.store, store)
@@ -229,8 +240,9 @@ def main() -> None:
             result = tools.search(tenant_id=args.tenant, query=q["question"], **kwargs)
             latencies.append((time.perf_counter() - asked) * 1000.0)
             top5 = ranked_evidence(result.get("hits", []))[:5]
-            found = [g for g in q["gold"] if any(cid.startswith(g) for cid in top5)]
-            score = len(found) / len(q["gold"])
+            gold = set(q["gold"])
+            found = [g for g in gold if any(cid.startswith(g) for cid in top5)]
+            score = len(found) / len(gold)
             per_kind[q.get("kind", "?")].append(score)
             rows_out.append({
                 "id": q["id"], "kind": q.get("kind"), "recall_at_5": score,
@@ -251,6 +263,7 @@ def main() -> None:
         "query_vectors_prepared": graph is not None,
         "query_preparation_seconds": round(query_preparation_seconds, 3),
         "seconds": round(seconds, 1), "rows": rows_out,
+        "seconds_scope": "query_loop_excluding_setup_indexing_preparation_cleanup_and_report_writing",
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=1), encoding="utf-8", newline="\n")
