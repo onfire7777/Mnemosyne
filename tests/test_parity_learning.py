@@ -267,20 +267,22 @@ def test_parametric_rails_fail_closed_on_violations(metrics: dict, metadata: dic
 def test_parametric_tier_proposal_uses_only_active_validated_sources() -> None:
     tier = ParametricTier()  # no trainer -> deterministic local shadow adapter
     lessons = [
-        Lesson(tenant_id=TENANT, lesson_type="corrective", failure_signature="sig", content="x", status="active"),
-        Lesson(tenant_id=TENANT, lesson_type="corrective", failure_signature="sig2", content="y", status="candidate"),
+        Lesson(tenant_id=TENANT, lesson_type="corrective", failure_signature="sig", content="x", status="active", origin="curated"),
+        Lesson(tenant_id=TENANT, lesson_type="corrective", failure_signature="sig2", content="y", status="candidate", origin="curated"),
+        Lesson(tenant_id=TENANT, lesson_type="corrective", failure_signature="unverified", content="z", status="active"),
     ]
     procedures = [
-        Procedure(tenant_id=TENANT, kind="checklist", name="p", body="b", signature={}, status="validated"),
-        Procedure(tenant_id=TENANT, kind="checklist", name="p2", body="b", signature={}, status="candidate"),
+        Procedure(tenant_id=TENANT, kind="checklist", name="p", body="b", signature={}, status="validated", origin="curated"),
+        Procedure(tenant_id=TENANT, kind="checklist", name="p2", body="b", signature={}, status="candidate", origin="curated"),
+        Procedure(tenant_id=TENANT, kind="checklist", name="unverified", body="b", signature={}, status="validated"),
     ]
     artifact = tier.propose_from_lessons(TENANT, lessons, procedures)
     assert artifact.adapter_kind == "local-shadow-adapter"
     assert artifact.status == "shadow"
-    # only the active lesson and validated procedure feed the adapter candidate
-    assert len(artifact.source_ids) == 2
-    assert lessons[1].id not in artifact.source_ids
-    assert procedures[1].id not in artifact.source_ids
+    # Explicit curated sources must still be active/validated. An unverified
+    # learned source cannot acquire authority merely by claiming that status.
+    assert set(artifact.source_ids) == {lessons[0].id, procedures[0].id}
+    assert all(item.id not in artifact.source_ids for item in lessons[1:] + procedures[1:])
 
 
 def test_parametric_artifact_store_roundtrips_and_blocks_traversal(tmp_path) -> None:

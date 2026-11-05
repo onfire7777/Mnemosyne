@@ -3226,6 +3226,7 @@ def test_parametric_tier_requires_validated_sources_and_protected_gate(tmp_path)
         failure_signature="retry-safe-tool",
         content="Retry safe tool calls after transient failures.",
         status="active",
+        origin="curated",
     )
     active_procedure = Procedure(
         tenant_id=TENANT,
@@ -3234,6 +3235,7 @@ def test_parametric_tier_requires_validated_sources_and_protected_gate(tmp_path)
         body="Verify idempotency before retrying.",
         signature={"failure_signature": "retry-safe-tool"},
         status="validated",
+        origin="curated",
     )
     artifact = tier.propose_from_lessons(TENANT, [active_lesson], [active_procedure])
     gate = GateResult(
@@ -3282,6 +3284,7 @@ def test_parametric_invariant_rails_reject_provider_mutation_rate(tmp_path) -> N
         failure_signature="unsafe-mutation",
         content="Reject broad mutation.",
         status="active",
+        origin="curated",
     )
 
     with pytest.raises(ValueError, match="mutation_rate exceeds 0.05"):
@@ -3296,6 +3299,7 @@ def test_parametric_invariant_rails_reject_mismatched_gate_candidate(tmp_path) -
         failure_signature="artifact-mismatch",
         content="Evaluate the exact proposed artifact.",
         status="active",
+        origin="curated",
     )
     artifact = tier.propose_from_lessons(TENANT, [lesson], [])
     gate = GateResult(
@@ -3326,6 +3330,7 @@ def test_parametric_invariant_rails_reject_low_gate_margin(tmp_path) -> None:
         failure_signature="low-margin",
         content="Require a margin over run-to-run noise.",
         status="active",
+        origin="curated",
     )
     artifact = tier.propose_from_lessons(TENANT, [lesson], [])
     gate = GateResult(

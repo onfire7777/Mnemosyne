@@ -150,6 +150,7 @@ def test_parametric_tier_attaches_immutable_rail_labels():
         failure_signature="rail-widening-attempt",
         content="never widen a rail",
         status="active",
+        origin="curated",
     )
     procedure = Procedure(
         tenant_id="tenant-rails",
@@ -158,6 +159,7 @@ def test_parametric_tier_attaches_immutable_rail_labels():
         body="check rails",
         signature={"inputs": [], "outputs": []},
         status="active",
+        origin="curated",
     )
     artifact = tier.propose_from_lessons("tenant-rails", [lesson], [procedure])
     required = set(ParametricInvariantRails().labels())
