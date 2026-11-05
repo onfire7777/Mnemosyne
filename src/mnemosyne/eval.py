@@ -153,9 +153,11 @@ def ndcg_at_k(retrieved: Sequence[str], relevant: set[str], k: int) -> float:
     if not relevant or k <= 0:
         return 0.0
     dcg = 0.0
+    remaining = set(relevant)
     for index, item in enumerate(list(retrieved)[:k]):
-        if item in relevant:
+        if item in remaining:
             dcg += 1.0 / math.log2(index + 2)
+            remaining.remove(item)
     ideal = sum(1.0 / math.log2(i + 2) for i in range(min(len(relevant), k)))
     return dcg / ideal if ideal > 0 else 0.0
 

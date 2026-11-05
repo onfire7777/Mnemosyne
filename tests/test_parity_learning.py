@@ -711,6 +711,18 @@ def test_retrieval_metrics_are_correct_and_bounded() -> None:
     assert 0.0 <= ndcg_at_k(["b", "a"], {"a"}, 5) <= 1.0
 
 
+def test_ndcg_duplicate_hits_preserve_ranks_and_relevance() -> None:
+    relevant = {"a", "b"}
+    assert ndcg_at_k(["a", "a", "a"], {"a"}, 3) == 1.0
+    assert ndcg_at_k(["a", "a", "b"], relevant, 3) == pytest.approx(
+        ndcg_at_k(["a", "irrelevant", "b"], relevant, 3)
+    )
+    assert ndcg_at_k(["a", "a", "b"], relevant, 2) == pytest.approx(
+        ndcg_at_k(["a"], relevant, 2)
+    )
+    assert relevant == {"a", "b"}
+
+
 def test_calibration_and_safety_metrics() -> None:
     assert expected_calibration_error([(1.0, True), (0.0, False)]) == pytest.approx(0.0)
     assert expected_calibration_error([(0.9, False), (0.9, False)]) == pytest.approx(0.9)

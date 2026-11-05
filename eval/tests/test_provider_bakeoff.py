@@ -4,6 +4,7 @@ import hashlib
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO))
@@ -17,6 +18,23 @@ from eval.provider_bakeoff.run import (  # noqa: E402
     run_provider_bakeoff,
     verify_candidate_license,
 )
+
+
+def test_resource_peak_rss_platform_units(monkeypatch):
+    from eval.provider_bakeoff import run
+
+    usage = SimpleNamespace(ru_maxrss=8192, ru_utime=1.0, ru_stime=0.5)
+    monkeypatch.setattr(run, "resource_mod", SimpleNamespace(
+        RUSAGE_SELF=0, getrusage=lambda _: usage,
+    ))
+    monkeypatch.setattr(run, "_meminfo_bytes", lambda: {})
+    monkeypatch.setattr(run, "_pss_or_working_set_bytes", lambda rss: rss)
+    for platform_name, expected in (("darwin", 8192), ("linux", 8192 * 1024)):
+        monkeypatch.setattr(run.sys, "platform", platform_name)
+        sample = run.sample_resources()
+        assert sample["process_rss_bytes"] == expected
+        assert sample["process_pss_or_working_set_bytes"] == expected
+        assert sample["cpu_seconds"] == 1.5
 
 
 def _write_slo_report(path: Path, *, recall: float, passed: bool = True) -> None:

@@ -37,6 +37,7 @@ def resolve_retrieved_doc_ids(
     """
 
     retrieved: list[str] = []
+    seen: set[str] = set()
     for hit in hits:
         metadata = hit.get("metadata")
         source_cids = (
@@ -47,7 +48,8 @@ def resolve_retrieved_doc_ids(
         provenance = hit.get("provenance", [])
         direct = cid_to_doc.get(hit.get("id")) if isinstance(hit.get("id"), str) else None
         if direct is not None:
-            if direct not in retrieved:
+            if direct not in seen:
+                seen.add(direct)
                 retrieved.append(direct)
             continue
         candidates = [
@@ -57,7 +59,8 @@ def resolve_retrieved_doc_ids(
         mapped = {cid_to_doc[cid] for cid in candidates if isinstance(cid, str) and cid in cid_to_doc}
         if len(mapped) == 1:
             doc_id = next(iter(mapped))
-            if doc_id not in retrieved:
+            if doc_id not in seen:
+                seen.add(doc_id)
                 retrieved.append(doc_id)
     return retrieved
 
@@ -83,6 +86,7 @@ def dcg_at_k(retrieved_ids: Sequence[str], relevant_ids: Iterable[str], k: int) 
     for rank, rid in enumerate(list(retrieved_ids)[:k], start=1):
         if rid in relevant:
             dcg += 1.0 / math.log2(rank + 1)
+            relevant.remove(rid)
     return dcg
 
 
