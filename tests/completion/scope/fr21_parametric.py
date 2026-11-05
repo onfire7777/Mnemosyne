@@ -98,7 +98,7 @@ def _tools(tmp: Path):
 
 
 def _seed_validated_lesson(tools) -> None:
-    """Give the learning system one active lesson + procedure to propose from."""
+    """Supply operator-curated transport inputs independently of learner admission."""
     from mnemosyne.learning import Lesson, Procedure
 
     lesson = Lesson(
@@ -107,6 +107,7 @@ def _seed_validated_lesson(tools) -> None:
         failure_signature="sig-x",
         content="verify with tools before writing durable memory",
         status="active",
+        origin="curated",
     )
     procedure = Procedure(
         tenant_id="t",
@@ -115,6 +116,7 @@ def _seed_validated_lesson(tools) -> None:
         body="1. detect 2. verify 3. correct 4. re-run protected cases",
         signature={"failure_signature": "sig-x"},
         status="active",
+        origin="curated",
     )
     tools.learning.lessons[lesson.id] = lesson
     tools.learning.procedures[procedure.id] = procedure
@@ -406,9 +408,9 @@ def _check_trainer_boundary_is_injected_subprocess_no_gpu() -> str | None:
     assert trainer.adapter_kind == "stand-in-lora"
     tier = ParametricTier(trainer=trainer)
     lesson = Lesson(tenant_id="t", lesson_type="corrective", failure_signature="s",
-                    content="c", status="active")
+                    content="c", status="active", origin="curated")
     procedure = Procedure(tenant_id="t", kind="checklist", name="p", body="b",
-                          signature={"failure_signature": "s"}, status="active")
+                          signature={"failure_signature": "s"}, status="active", origin="curated")
     artifact = tier.propose_from_lessons("t", [lesson], [procedure])
     # The injected trainer's adapter_kind + provider_invoked marker flow through.
     assert artifact.adapter_kind == "stand-in-lora"
@@ -425,9 +427,9 @@ def _check_default_tier_is_shadow_only_without_trainer() -> str | None:
     tier = ParametricTier()  # no trainer, no store
     assert tier.trainer is None
     lesson = Lesson(tenant_id="t", lesson_type="corrective", failure_signature="s",
-                    content="c", status="active")
+                    content="c", status="active", origin="curated")
     procedure = Procedure(tenant_id="t", kind="checklist", name="p", body="b",
-                          signature={"failure_signature": "s"}, status="active")
+                          signature={"failure_signature": "s"}, status="active", origin="curated")
     artifact = tier.propose_from_lessons("t", [lesson], [procedure])
     assert artifact.status == "shadow"
     assert artifact.adapter_kind == "local-shadow-adapter"
