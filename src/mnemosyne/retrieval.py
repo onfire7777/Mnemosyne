@@ -2805,7 +2805,8 @@ class CommandMediaEmbeddingProvider:
         metadata: dict[str, object] | None = None,
     ) -> list[float]:
         enforce_byte_limit(payload, limit=self.max_media_bytes, label="media embedding payload")
-        # closed before the command reads it (Windows locks an open temp file); deleted on exit
+        # Closed before the command reads it (Windows locks an open temp file, and a child must
+        # reopen the path); still deleted on context exit after success, failure or timeout.
         with tempfile.NamedTemporaryFile(delete_on_close=False) as tmp:
             tmp.write(payload)
             tmp.close()

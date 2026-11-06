@@ -317,11 +317,11 @@ class ParametricTier:
         self.required_rails = self.rails.labels()
 
     def propose_from_lessons(self, tenant_id: str, lessons: list[Lesson], procedures: list[Procedure]) -> ParametricArtifact:
-        active_lessons = [lesson.id for lesson in lessons if lesson.tenant_id == tenant_id and lesson.status == "active"]
-        active_procedures = [procedure.id for procedure in procedures if procedure.tenant_id == tenant_id and procedure.status in {"active", "validated"}]
+        active_lessons = [lesson for lesson in lessons if lesson.tenant_id == tenant_id and lesson.status == "active"]
+        active_procedures = [procedure for procedure in procedures if procedure.tenant_id == tenant_id and procedure.status in {"active", "validated"}]
         artifact = ParametricArtifact(
             tenant_id=tenant_id,
-            source_ids=active_lessons + active_procedures,
+            source_ids=[lesson.id for lesson in active_lessons] + [procedure.id for procedure in active_procedures],
             adapter_kind=self.trainer.adapter_kind if self.trainer else "local-shadow-adapter",
             immutable_rails=list(self.required_rails),
         )
@@ -330,8 +330,8 @@ class ParametricTier:
         if self.trainer and artifact.source_ids:
             provider = self.trainer.propose(
                 tenant_id,
-                lessons,
-                procedures,
+                active_lessons,
+                active_procedures,
                 artifact.source_ids,
                 artifact.immutable_rails,
             )
@@ -457,7 +457,7 @@ class ParametricArtifactStore:
         self.root = Path(root).expanduser().resolve()
 
     def write(self, artifact: ParametricArtifact, payload: dict[str, Any] | None = None) -> str:
-        path = self._io_path(self._path_for(artifact.tenant_id, artifact.id))
+        path = self._path_for(artifact.tenant_id, artifact.id)
         path.parent.mkdir(parents=True, exist_ok=True)
         artifact.artifact_uri = f"{self.uri_prefix}{artifact.tenant_id}/{artifact.id}.json"
         body = {
@@ -471,29 +471,43 @@ class ParametricArtifactStore:
 
     def read(self, artifact_uri: str) -> dict[str, Any]:
         tenant_id, artifact_id = self._parse_uri(artifact_uri)
-        path = self._io_path(self._path_for(tenant_id, artifact_id))
-        return json.loads(path.read_text(encoding="utf-8"))
+        path = self._path_for(tenant_id, artifact_id)
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            # Legacy artifacts are read-only here: never migrate or overwrite
+            # an aliased legacy path as a side effect of loading or updating.
+            raw = self._path_for(tenant_id, artifact_id, legacy=True).read_text(encoding="utf-8")
+        body = json.loads(raw)
+        identity = body.get("artifact") if isinstance(body, dict) else None
+        if (
+            not isinstance(identity, dict)
+            or identity.get("tenant_id") != tenant_id
+            or identity.get("id") != artifact_id
+        ):
+            raise ValueError("parametric artifact identity does not match URI")
+        return body
 
     def load_artifact(self, artifact_uri: str) -> ParametricArtifact:
         return ParametricArtifact.from_dict(self.read(artifact_uri)["artifact"])
 
     @staticmethod
     def _io_path(path: Path) -> Path:
-        # Only apply to absolute paths after _path_for resolves symlinks and
-        # verifies containment. Keep logical roots and artifact URIs unchanged.
-        if os.name != "nt":
-            return path
-        value = str(path)
-        if value.startswith("\\\\?\\"):
-            return path
-        if value.startswith("\\\\"):
-            return Path("\\\\?\\UNC\\" + value[2:])
-        return Path("\\\\?\\" + value)
+        # _path_for already returns this; kept for callers and tests of the old name.
+        return _long_path_safe(path)
 
-    def _path_for(self, tenant_id: str, artifact_id: str) -> Path:
+    def _path_for(self, tenant_id: str, artifact_id: str, *, legacy: bool = False) -> Path:
         self._validate_segment(tenant_id, "tenant")
         self._validate_segment(artifact_id, "artifact")
-        path = (self.root / tenant_id / f"{artifact_id}.json").resolve()
+        if legacy:
+            path = self.root / tenant_id / f"{artifact_id}.json"
+        else:
+            # Logical IDs remain case-sensitive even on case-insensitive
+            # filesystems. Version the layout without changing public URIs.
+            tenant_key = hashlib.sha256(tenant_id.encode("utf-8")).hexdigest()
+            artifact_key = hashlib.sha256(artifact_id.encode("utf-8")).hexdigest()
+            path = self.root / ".mnemosyne-v2" / tenant_key / f"{artifact_key}.json"
+        path = path.resolve()
         try:
             path.relative_to(self.root)
         except ValueError as exc:
@@ -513,7 +527,9 @@ class ParametricArtifactStore:
 
     @staticmethod
     def _validate_segment(value: str, label: str) -> None:
-        if not value or value in {".", ".."} or "/" in value or "\\" in value or ".." in value:
+        # A colon selects an NTFS alternate stream, not an ordinary artifact.
+        # Reject on every host so stored IDs retain the same meaning on replay.
+        if not value or value in {".", ".."} or "/" in value or "\\" in value or ":" in value or ".." in value:
             raise ValueError(f"invalid parametric {label} id")
 
 
