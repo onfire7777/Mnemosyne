@@ -9570,12 +9570,14 @@ def cmd_procedure_promote(args: argparse.Namespace) -> None:
 
 def cmd_lesson_search(args: argparse.Namespace) -> None:
     tools = load_tools(args)
-    emit(tools.lesson_search(args.signature, tenant_id=args.tenant, status=args.status, role="operator"))
+    emit(tools.lesson_search(args.signature, tenant_id=args.tenant, status=args.status,
+                             user_id=args.user, role=args.role))
 
 
 def cmd_procedure_search(args: argparse.Namespace) -> None:
     tools = load_tools(args)
-    emit(tools.procedure_search(args.query, tenant_id=args.tenant, status=args.status, role="operator"))
+    emit(tools.procedure_search(args.query, tenant_id=args.tenant, status=args.status,
+                                user_id=args.user, role=args.role))
 
 
 def cmd_framework_import(args: argparse.Namespace) -> None:
@@ -21431,12 +21433,16 @@ def build_parser() -> argparse.ArgumentParser:
     lesson_search.add_argument("--signature", required=True)
     lesson_search.add_argument("--tenant")
     lesson_search.add_argument("--status")
+    lesson_search.add_argument("--user")
+    lesson_search.add_argument("--role", choices=["reader", "agent", "consolidator", "operator"], default="operator")
     lesson_search.set_defaults(func=cmd_lesson_search)
 
     procedure_search = sub.add_parser("procedure-search")
     procedure_search.add_argument("--query", required=True)
     procedure_search.add_argument("--tenant")
     procedure_search.add_argument("--status")
+    procedure_search.add_argument("--user")
+    procedure_search.add_argument("--role", choices=["reader", "agent", "consolidator", "operator"], default="operator")
     procedure_search.set_defaults(func=cmd_procedure_search)
 
     framework_import = sub.add_parser("framework-import")
