@@ -13,12 +13,15 @@ This cleanup integrates the learning implementation with Mnemosyne's existing AP
 | Legacy induction | Existing evidence consolidation skips sources already owned by native episodes. |
 | Training sources | Automatic sources must have canonical active admission and provenance. Historical learned status claims are excluded. Explicit curated operator inputs retain their separate supported path. |
 | Shared calculations | One observed-step extraction contract and one Wilson numerical kernel, with each public API retaining its empty-sample semantics. |
+| Profile erasure | One branch-wide decision and persistence operation; direct engine callbacks preserve entries while another live branch still supports them. |
 
 Standalone manually imported skills retain their original validation path until native registration. This is deliberate API compatibility, not a second owner for runtime-managed skills.
 
 ## Regression coverage
 
 New tests cover immediate native skill ownership; promotion with and without control outcomes; duplicate and concurrent signals; failed consolidation retries; session-end maintenance; disabled-component outcomes; scoped library projections; source erasure; revision/rollback lineage; stale archive resurrection; concurrent compatibility edits; native metadata preservation; shared engine ownership after reload; and training-source filtering.
+
+The final isolation review also separates consolidation, abstraction, chunks, and candidate identities by user. Serving enforces artifact ownership independently of source readability. Native source identities preserve user/session provenance when different users produce identical text; supplied host evidence remains reused. Existing owner-matched identities remain stable during migration.
 
 Full-suite investigation also identified a pre-existing relation replay bug. Empty or inverted validity windows did not overlap themselves, so replay could repeatedly clone the same relation. Matching the same relation identity and window makes replay idempotent. Tests cover thin/full canaries and preserve distinct relation identities.
 

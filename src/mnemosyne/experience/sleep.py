@@ -101,6 +101,10 @@ def _candidate(
 ) -> dict:
     content = "\n".join(steps)
     episodes = sorted(episodes, key=lambda e: (e["created_at"], e["id"]))
+    owners = {(row.get("tenant_id"), row.get("user_id")) for row in episodes}
+    if len(owners) != 1:
+        raise ValueError("candidate sources must have one tenant and user")
+    tenant, user = next(iter(owners))
     source_ids = sorted(episode["id"] for episode in episodes)
     scope_match = (
         {"kind": "exact_query", "query": episodes[0].get("user_text", "")}
@@ -110,7 +114,7 @@ def _candidate(
     conditions = [scope_match["query"]] if scope_match and scope_match["query"] else []
     model = Lesson if kind == "lesson" else Procedure
     return model.native(**{
-        "id": digest([kind, task, content, scope_match]),
+        "id": digest([kind, tenant, user, task, content, scope_match]),
         "kind": kind,
         "task_class": task,
         "revision": parent["revision"] + 1 if parent else 1,
@@ -142,6 +146,36 @@ def _candidate(
     }).to_record()
 
 
+def _reuse_existing_identity(candidate: dict, state: dict) -> None:
+    """Keep pre-scope identities stable, including withdrawn revisions."""
+    if candidate["id"] in state["artifacts"]:
+        return
+    previous_id = digest([
+        candidate.get("content_kind", candidate["kind"]), candidate["task_class"],
+        candidate["content"], candidate.get("scope_match"),
+    ])
+    if candidate.get("separation_ref"):
+        previous_id = digest([previous_id, candidate["conditions"][0]])
+    elif candidate.get("replaces"):
+        previous_id = digest(["abstraction", previous_id, candidate["conditions"]])
+    if candidate.get("schema_ref"):
+        previous_id = digest(["schema", candidate["schema_ref"]["id"], candidate["content"]])
+    previous = state["artifacts"].get(previous_id)
+    if previous is None or (
+        previous.get("tenant_id"), previous.get("user_id")
+    ) != (candidate.get("tenant_id"), candidate.get("user_id")):
+        return
+    # A formerly mixed-user candidate is not an identity for either user's work.
+    if any(
+        (source.get("tenant_id"), source.get("user_id"))
+        != (candidate.get("tenant_id"), candidate.get("user_id"))
+        for key in previous.get("source_episode_ids", [])
+        if (source := state["episodes"].get(key)) is not None
+    ):
+        return
+    candidate["id"] = previous_id
+
+
 def _patch_parent(candidate: dict, artifacts: list[dict]) -> dict | None:
     matches = [
         item
@@ -163,6 +197,29 @@ def _patch_parent(candidate: dict, artifacts: list[dict]) -> dict | None:
         if matches
         else None
     )
+
+
+def _scoped_splits(state: dict, tenant: str) -> list[dict]:
+    splits = []
+    for user in sorted({row["user_id"] for row in state["episodes"].values()}):
+        scoped = {
+            **state,
+            "episodes": {key: row for key, row in state["episodes"].items()
+                         if row["user_id"] == user},
+            "artifacts": {key: row for key, row in state["artifacts"].items()
+                          if row.get("user_id") == user},
+        }
+        for split in propose_splits(scoped):
+            prior = state["policy"].get("pattern_splits", {}).get(split["id"])
+            prior_ids = [key for _, ids, _ in prior["groups"] for key in ids] if prior else []
+            if not prior_ids or any(
+                state["episodes"].get(key, {}).get("user_id") != user
+                for key in prior_ids
+            ):
+                split["id"] = digest([tenant, user, split["id"]])
+            split["user_id"] = user
+            splits.append(split)
+    return splits
 
 
 def consolidate(runtime, tenant: str) -> dict:
@@ -199,13 +256,10 @@ def consolidate(runtime, tenant: str) -> dict:
         if abs(episode["rpe"]) >= 0.2 or any(
             signal["kind"] == "correction" for signal in episode["signals"]
         ):
-            by_class[episode["task_class"]].append(episode)
+            by_class[(episode["user_id"], episode["task_class"])].append(episode)
     candidates = []
-    splits = (
-        propose_splits(snapshot)
-        if runtime._enabled(snapshot, "pattern_separation")
-        else []
-    )
+    splits = (_scoped_splits(snapshot, tenant)
+              if runtime._enabled(snapshot, "pattern_separation") else [])
     for split in splits:
         if split["id"] in snapshot["policy"].get("pattern_splits", {}):
             continue
@@ -217,14 +271,15 @@ def consolidate(runtime, tenant: str) -> dict:
             candidate["id"] = digest([candidate["id"], value])
             candidate["separation_ref"] = split["id"]
             candidates.append(candidate)
-    separated_tasks = {split["task_class"] for split in splits}
-    for task, episodes in by_class.items():
-        if task in separated_tasks:
+    separated_tasks = {(split["user_id"], split["task_class"]) for split in splits}
+    for (user, task), episodes in by_class.items():
+        if (user, task) in separated_tasks:
             continue
         successes = [
             episode
             for episode in snapshot["episodes"].values()
             if episode["task_class"] == task
+            and episode["user_id"] == user
             and episode["status"] == "resolved"
             and episode["reward"] > 0
         ]
@@ -262,6 +317,8 @@ def consolidate(runtime, tenant: str) -> dict:
             parent_ids = {parent["id"] for parent in parents}
             for row in snapshot["episodes"].values():
                 if row["status"] != "resolved" or row["reward"] <= 0:
+                    continue
+                if row["user_id"] != parents[0].get("user_id"):
                     continue
                 served = {
                     item["item_id"]
@@ -302,6 +359,7 @@ def consolidate(runtime, tenant: str) -> dict:
         candidates.extend(hypothesis_candidates)
     prepared = []
     for candidate in candidates:
+        _reuse_existing_identity(candidate, snapshot)
         existing = snapshot["artifacts"].get(candidate["id"])
         if existing and existing["state"] != "candidate":
             continue
@@ -345,6 +403,7 @@ def consolidate(runtime, tenant: str) -> dict:
                     "nodes": [candidate["framework_node"]],
                 }
                 candidate["id"] = digest(["schema", parent["id"], candidate["content"]])
+                _reuse_existing_identity(candidate, snapshot)
         if parent:
             candidate.update(
                 parent_revision=parent["id"], revision=parent["revision"] + 1
@@ -355,6 +414,7 @@ def consolidate(runtime, tenant: str) -> dict:
             row
             for row in snapshot["episodes"].values()
             if row["status"] == "resolved"
+            and row["user_id"] == candidate.get("user_id")
             and row["task_class"] == candidate["task_class"]
             and applies_to(candidate, row["task_class"], row["user_text"])
         ]
@@ -804,9 +864,9 @@ def _abstract_rules(state: dict) -> list[dict]:
             and not item.get("locked")
             and not item.get("pinned")
         ):
-            groups[(item["task_class"], item["content"])].append(item)
+            groups[(item.get("user_id"), item["task_class"], item["content"])].append(item)
     proposals = []
-    for (task, _), originals in groups.items():
+    for (user, task, _), originals in groups.items():
         if len(originals) < 2:
             continue
         conditions = sorted(
@@ -835,6 +895,7 @@ def _abstract_rules(state: dict) -> list[dict]:
             for row in state["episodes"].values()
             if row["id"] not in source_ids
             and row["status"] == "resolved"
+            and row["user_id"] == user
             and row["task_class"] == task
             and all(
                 token.casefold() in row["user_text"].casefold() for token in conditions
@@ -1072,10 +1133,10 @@ def mine_chunks(artifacts: list[dict], support: int = 5) -> list[dict]:
         if artifact.get("state") != "active":
             continue
         for index in range(max(0, len(artifact.get("steps", [])) - 1)):
-            occurrences[tuple(artifact["steps"][index : index + 2])].append(artifact)
+            occurrences[(artifact.get("user_id"), tuple(artifact["steps"][index : index + 2]))].append(artifact)
     return [
         {"steps": list(steps), "parents": sorted({row["id"] for row in rows})}
-        for steps, rows in occurrences.items()
+        for (_, steps), rows in occurrences.items()
         if len({row["id"] for row in rows}) >= support
         and len({row["task_class"] for row in rows}) >= 2
     ]

@@ -330,6 +330,10 @@ class LearningRuntime:
         )
         artifacts = []
         for item in state["artifacts"].values():
+            # Source readability does not transfer ownership of learned behavior.
+            # Match the owner scope used by framework and revalidation serving.
+            if item.get("user_id") != user_id:
+                continue
             if item["state"] not in {
                 "active",
                 "labile",
@@ -753,6 +757,7 @@ class LearningRuntime:
                         actor=actor,
                         source_type="learning_turn",
                         content=text,
+                        document_segment_id="learning:" + digest([tenant_id, user_id, session_id, actor]),
                         session_id=session_id,
                         trust_tier=0 if actor == "user" else 5,
                         metadata={
@@ -790,6 +795,7 @@ class LearningRuntime:
                             actor="tool",
                             source_type="learning_tool_result",
                             content=content,
+                            document_segment_id="learning:" + digest([tenant_id, user_id, session_id, "tool"]),
                             session_id=session_id,
                             trust_tier=1,
                             access_policy={
@@ -941,6 +947,7 @@ class LearningRuntime:
                             actor="user",
                             source_type="learning_correction",
                             content=evidence,
+                            document_segment_id="learning:" + digest([tenant_id, episode["user_id"], episode["session_id"], "user"]),
                             session_id=episode["session_id"],
                             trust_tier=1,
                             metadata={"reality_class": "external"},

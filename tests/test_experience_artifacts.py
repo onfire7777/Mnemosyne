@@ -262,6 +262,7 @@ def test_import_enters_probation_with_no_fabricated_local_outcome():
                 "revision": 3,
                 "content": "inspect\nverify",
                 "task_class": "ops",
+                "source_origin": {"source_sha": "abc", "tenant_id": "t", "user_id": "u"},
             },
         )["id"]
         == result["id"]
