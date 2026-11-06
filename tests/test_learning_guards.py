@@ -7,7 +7,7 @@ from mnemosyne.experience.guards import LearningGuardError, validate
 from mnemosyne.experience.monitors import diagnostics, run_monitors
 from mnemosyne.experience.receipts import digest
 from mnemosyne.experience.runtime import LearningRuntime
-from fault_injection.learning import baseline, credit, source_lookup
+from tests.fault_injection.learning import baseline, credit, source_lookup
 
 
 def test_valid_snapshot_passes_all_boundaries():

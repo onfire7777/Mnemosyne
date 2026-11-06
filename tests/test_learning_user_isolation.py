@@ -72,22 +72,20 @@ def test_identical_corrections_have_distinct_user_owned_ids():
 
 
 @pytest.mark.parametrize("retire", [False, True])
-def test_unscoped_existing_identity_is_reused_without_reviving_it(monkeypatch, retire):
+def test_unscoped_existing_identity_is_reused_without_reviving_it(retire):
     runtime = LearningRuntime(LocalMemoryEngine())
     for _ in range(2):
         capture(runtime, "alice", ["check"])
-    digest = sleep.digest
-
-    def old_digest(value):
-        if isinstance(value, list) and len(value) == 6 and value[0] == "procedure":
-            value = [value[0], *value[3:]]
-        return digest(value)
-
-    with monkeypatch.context() as patch:
-        patch.setattr(sleep, "digest", old_digest)
-        runtime.consolidate("t")
+    runtime.consolidate("t")
     original = next(iter(runtime.writer.read("t")["artifacts"].values()))
-    assert original["id"] == digest(["procedure", "inventory", "check", None])
+    # Persist the actual historical broad representation independently of the
+    # current generator's exact-query identity and scope behavior.
+    original.update(
+        id=sleep.digest(["procedure", "inventory", "check", None]),
+        scope_match=None,
+        conditions=[],
+    )
+    runtime.engine._learning_data["t"]["artifacts"] = {original["id"]: original}
     if retire:
         runtime.retire_artifact("t", original["id"])
     capture(runtime, "alice", ["check"])

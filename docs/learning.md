@@ -20,6 +20,12 @@ Artifacts move through candidate, probation, active, labile, demoted and termina
 
 The implementation reuses `LearningSystem`, `SkillStore`, `PromotionGate`, `LocalCritic`, the route and policy learners, background jobs, user profiles and the existing engine access controls. New coordination and storage live in `src/mnemosyne/experience`. The host integration guide explains automatic capture in SDK and Hermes adapters.
 
+The [unified ownership map](learning-unification.md) explains each preserved
+capability and its authoritative implementation. Provider-assisted induction
+supplements local induction; matching candidates retain combined provenance in
+one record. Existing callers and long-lived hosts share the current configured
+providers, skill library, and protected cases.
+
 ## Controls
 
 MCP tool names use underscores. Equivalent CLI commands use hyphens.

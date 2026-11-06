@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from mnemosyne.experience.guards import GUARD_CLASSES, LearningGuardError, validate
-from fault_injection.learning import baseline, corrupt, source_lookup
+from tests.fault_injection.learning import baseline, corrupt, source_lookup
 
 
 @pytest.mark.parametrize("code", GUARD_CLASSES)

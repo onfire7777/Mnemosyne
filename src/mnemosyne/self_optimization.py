@@ -1227,13 +1227,80 @@ class AdaptiveRouteWeighter:
             base["graph"] = min(self.max_weight, base.get("graph", 0.2) * 1.45)
         elif query_intent == "lexical":
             base["lexical"] = min(self.max_weight, base.get("lexical", 0.2) * 1.35)
-        total = sum(base.values()) or 1.0
-        return {k: round(v / total, 4) for k, v in base.items()}
+        return self.bounded_weights(base)
+
+    def bounded_weights(
+        self,
+        weights: Mapping[str, float],
+        *,
+        reference_weights: Mapping[str, float] | None = None,
+        max_change: float | None = None,
+    ) -> dict[str, float]:
+        """Normalize once within route bounds and optional per-route movement bounds.
+
+        Clipping before or after ordinary normalization can violate either the
+        bounds or the unit sum. Find the proportional allocation within both
+        constraints instead; native learning uses this same allocation with its
+        daily reference rather than implementing a second update rule.
+        """
+        if not weights:
+            return {}
+        if max_change is not None and (not math.isfinite(max_change) or max_change < 0):
+            raise ValueError("maximum route change must be finite and non-negative")
+        values = {key: float(value) for key, value in weights.items()}
+        if any(not math.isfinite(value) or value < 0 for value in values.values()):
+            raise ValueError("route weights must be finite and non-negative")
+        lower = {key: self.min_weight for key in values}
+        upper = {key: self.max_weight for key in values}
+        if max_change is not None:
+            reference = reference_weights or {}
+            for key in values:
+                anchor = float(reference.get(key, 1 / len(values)))
+                if not math.isfinite(anchor):
+                    raise ValueError("route reference weights must be finite")
+                lower[key] = max(lower[key], anchor - max_change)
+                upper[key] = min(upper[key], anchor + max_change)
+        if (any(lower[key] > upper[key] for key in values)
+                or sum(lower.values()) > 1 + 1e-12
+                or sum(upper.values()) < 1 - 1e-12):
+            raise ValueError("route bounds cannot contain a normalized allocation")
+        positive = {key: max(1e-12, value) for key, value in values.items()}
+
+        def allocate(scale: float) -> dict[str, float]:
+            return {key: min(upper[key], max(lower[key], value * scale))
+                    for key, value in positive.items()}
+
+        low, high = 0.0, 1.0
+        while sum(allocate(high).values()) < 1 - 1e-12:
+            high *= 2
+        for _ in range(64):
+            middle = (low + high) / 2
+            if sum(allocate(middle).values()) < 1:
+                low = middle
+            else:
+                high = middle
+        result = {key: min(upper[key], max(lower[key], round(value, 12)))
+                  for key, value in allocate(high).items()}
+        # Remove rounding residue without renormalizing past a cap or floor.
+        residual = 1.0 - sum(result.values())
+        for key in sorted(result):
+            change = (min(residual, upper[key] - result[key]) if residual > 0
+                      else max(residual, lower[key] - result[key]))
+            result[key] += change
+            residual -= change
+        return result
+
+    def restore_weights(self, tenant_id: str, weights: Mapping[str, float]) -> None:
+        """Restore the canonical persisted allocation without recording an outcome."""
+        self._weights[tenant_id] = self.bounded_weights(weights)
 
     def record_outcome(
         self,
         tenant_id: str,
         route_rewards: Mapping[str, float],
+        *,
+        reference_weights: Mapping[str, float] | None = None,
+        max_change: float | None = None,
     ) -> dict[str, float]:
         current = dict(
             self._weights.get(
@@ -1248,12 +1315,11 @@ class AdaptiveRouteWeighter:
                 counts[route] = 0
             bounded_reward = max(-1.0, min(1.0, float(reward)))
             updated = current[route] * math.exp(self.learning_rate * bounded_reward)
-            current[route] = max(self.min_weight, min(self.max_weight, updated))
+            current[route] = updated
             counts[route] = counts.get(route, 0) + 1
-        total = sum(current.values()) or 1.0
-        normalized = {k: max(self.min_weight, min(self.max_weight, v / total)) for k, v in current.items()}
-        norm_sum = sum(normalized.values()) or 1.0
-        final_weights = {k: round(v / norm_sum, 4) for k, v in normalized.items()}
+        final_weights = self.bounded_weights(
+            current, reference_weights=reference_weights, max_change=max_change
+        )
         self._weights[tenant_id] = final_weights
         return dict(final_weights)
 

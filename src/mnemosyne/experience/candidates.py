@@ -468,28 +468,26 @@ def parametric_export(runtime, tenant: str) -> dict:
             ):
                 verified.add(episode["id"])
         if len(verified) >= 200:
-            procedures.append(
-                Procedure(
-                    tenant_id=tenant,
-                    kind="procedure",
-                    name=artifact["id"],
-                    body=artifact["content"],
-                    signature={"task_class": artifact["task_class"]},
-                    status="active",
-                    n_trials=len(verified),
-                    id=artifact["id"],
-                    source_episode_ids=sorted(verified),
-                    source_cids=artifact["source_cids"],
-                    conditions=artifact.get("conditions", []),
-                )
-            )
+            # Preserve admission, ownership, revision, and source metadata across
+            # the native-to-parametric boundary. A new transport-only Procedure
+            # looks like an unverified historical claim to the existing tier.
+            record = deepcopy(artifact)
+            record.update(n_trials=len(verified),
+                          parametric_verified_episode_ids=sorted(verified))
+            procedure = Procedure.from_record(record)
+            if ParametricTier._eligible_source(procedure, tenant, {"active"}):
+                procedures.append(procedure)
     # This tier deliberately has no trainer. Its existing evaluate method still
     # requires an actual gate result and an active protected suite to promote.
     shadow = ParametricTier().propose_from_lessons(tenant, [], procedures)
     return {
         "schema": "mnemosyne.learning-parametric-export.v1",
         "artifact": shadow.to_dict(),
+        # Two serialization views of the same owned artifacts, never another
+        # store: retain the compatibility shape while native consumers preserve
+        # admission evidence, ownership, revisions, and verified-outcome lineage.
         "procedures": [item.to_dict() for item in procedures],
+        "procedure_records": [item.to_record() for item in procedures],
         "protected_suite": protected_suite_report(
             getattr(runtime, "protected_cases", [])
         ),

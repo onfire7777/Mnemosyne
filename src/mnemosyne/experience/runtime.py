@@ -97,6 +97,44 @@ class LearningRuntime:
         self.skill_store = skill_store
         self.writer = LearningWriter(engine)
 
+    def _dependency(self, name):
+        from .integration import learning_dependency
+
+        return learning_dependency(self, name, self.__dict__.get("_" + name))
+
+    @property
+    def skill_store(self):
+        return self._dependency("skill_store")
+
+    @skill_store.setter
+    def skill_store(self, value):
+        self._skill_store = value
+
+    @property
+    def lesson_distiller(self):
+        return self._dependency("lesson_distiller")
+
+    @lesson_distiller.setter
+    def lesson_distiller(self, value):
+        self._lesson_distiller = value
+
+    @property
+    def procedure_inducer(self):
+        return self._dependency("procedure_inducer")
+
+    @procedure_inducer.setter
+    def procedure_inducer(self, value):
+        self._procedure_inducer = value
+
+    @property
+    def protected_cases(self):
+        cases = self._dependency("protected_cases")
+        return [] if cases is None else cases
+
+    @protected_cases.setter
+    def protected_cases(self, value):
+        self._protected_cases = value
+
     def _enabled(self, state: dict, component: str) -> bool:
         policy = self.engine.policy
         enabled = state["policy"].get(
@@ -1403,28 +1441,6 @@ class LearningRuntime:
                 else None,
             },
         )
-        model = SelfModelStore()
-        learner = ContextualBanditLearner(model)
-        for key, row in records.items():
-            if row["task_class"] == task:
-                model.add_policy_outcome(
-                    PolicyOutcome(
-                        tenant_id=episode["tenant_id"],
-                        variant_id=row["variant_id"],
-                        reward=row["reward"],
-                        context={"task_class": task},
-                        id=key,
-                    )
-                )
-        chosen = learner.choose_variant(
-            episode["tenant_id"], variants, {"task_class": task}
-        )
-        state["policy"].setdefault("policy_candidates", {})[task] = {
-            "variant": chosen.to_dict(),
-            "status": "shadow",
-            "outcome_count": len(model.policy_outcomes),
-            "reason": "independent replay and protected verification required",
-        }
         candidate = variants[1]
         for event in episode.get("tool_events", []):
             measured = event.get("policy_replay")
@@ -1468,6 +1484,42 @@ class LearningRuntime:
                         "proxy_reward": None,
                         "source": "external_policy_replay",
                     }
+        # The paired replay and live result may describe the same episode and
+        # variant. Keep both source records for audit, but contribute only one
+        # observation to the existing bandit. A live observation takes precedence.
+        observations = {}
+        for key, row in records.items():
+            if row["task_class"] != task:
+                continue
+            identity = (row.get("episode_id", key), row["variant_id"])
+            previous = observations.get(identity)
+            if previous is None or (
+                previous.get("source") == "external_policy_replay"
+                and row.get("source") != "external_policy_replay"
+            ):
+                observations[identity] = row
+        model = SelfModelStore()
+        learner = ContextualBanditLearner(model)
+        for identity, row in observations.items():
+            model.add_policy_outcome(
+                PolicyOutcome(
+                    tenant_id=episode["tenant_id"],
+                    variant_id=row["variant_id"],
+                    reward=row["reward"],
+                    context={"task_class": task},
+                    id=digest(identity),
+                )
+            )
+        # Select only after incorporating this episode's verified replay.
+        chosen = learner.choose_variant(
+            episode["tenant_id"], variants, {"task_class": task}
+        )
+        state["policy"].setdefault("policy_candidates", {})[task] = {
+            "variant": chosen.to_dict(),
+            "status": "shadow",
+            "outcome_count": len(model.policy_outcomes),
+            "reason": "independent replay and protected verification required",
+        }
         rows = [
             row
             for row in records.values()

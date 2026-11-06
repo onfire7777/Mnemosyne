@@ -822,7 +822,9 @@ class MemoryTools:
                     if component is not None and getattr(component, "engine", engine) is not engine:
                         raise ValueError(f"{name} must use the restored learning engine")
         self.engine = engine
-        self.skill_store = skill_store or getattr(engine, "_learning_skill_store", None)
+        self.skill_store = skill_store if skill_store is not None else getattr(
+            engine, "_learning_configuration", {}).get(
+                "skill_store", getattr(engine, "_learning_skill_store", None))
         self.lesson_distiller = lesson_distiller
         self.procedure_inducer = procedure_inducer
         self.protected_cases = protected_cases
@@ -841,7 +843,7 @@ class MemoryTools:
         self.engine._learning_profile_erasure = lambda tenant, cid: MemoryTools._erase_profile_model(model, state, tenant, cid, engine=owner())
         self.engine._learning_tools = weakref.ref(self)
         from mnemosyne.experience.integration import configure_learning
-        configure_learning(engine, skill_store=self.skill_store, lesson_distiller=lesson_distiller,
+        configure_learning(engine, skill_store=skill_store, lesson_distiller=lesson_distiller,
                            procedure_inducer=procedure_inducer, protected_cases=protected_cases,
                            runtime_state=runtime_state)
 
@@ -3854,10 +3856,7 @@ class MemoryTools:
 
     def _learning_runtime(self):
         from mnemosyne.experience.integration import build_learning_runtime
-        runtime = build_learning_runtime(
-            self.engine, skill_store=self.skill_store, lesson_distiller=self.lesson_distiller,
-            procedure_inducer=self.procedure_inducer, protected_cases=self.protected_cases,
-            runtime_state=self.runtime_state)
+        runtime = build_learning_runtime(self.engine)
         self.skill_store = runtime.skill_store
         if self.skill_store is not None:
             self._remember_skills(self.skill_store)
@@ -4215,7 +4214,7 @@ class MemoryTools:
     def _skills(self) -> Any:
         from mnemosyne.experience.integration import learning_skill_store
 
-        skills = learning_skill_store(self.engine, self.skill_store, create=True)
+        skills = learning_skill_store(self.engine, create=True)
         self.skill_store = skills
         self._remember_skills(skills)
         return skills
@@ -4493,6 +4492,7 @@ class MemoryTools:
             target_sink="safety_rail",
         )
         self.learning.persist_native([tenant_id])
+        self.learning.load_native([tenant_id])
         artifact = self.parametric.propose_from_lessons(
             tenant_id,
             list(self.learning.lessons.values()),

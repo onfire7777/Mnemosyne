@@ -398,9 +398,25 @@ class LearningSystem:
         return trajectory.id
 
     def attribute_failure(self, trajectory_id: str) -> FailureAttribution:
+        from mnemosyne.experience.candidates import EXCLUDED_SOURCES
+        from mnemosyne.experience.signals import tool_signals
+
         trajectory = self.trajectories[trajectory_id]
-        failing_steps = [step for step in trajectory.steps if step.get("status") == "failed"]
-        causes = [str(step.get("error") or step.get("description") or step.get("name") or "failed step")
+
+        def failed(step):
+            if step.get("source") in EXCLUDED_SOURCES:
+                return False
+            if step.get("status") == "failed":
+                return True
+            try:
+                outcomes = tool_signals([step])
+            except (TypeError, ValueError):
+                return False
+            return any(row["value"] < 0 or (row["kind"] == "tests" and row["value"] < 1)
+                       for row in outcomes)
+
+        failing_steps = [step for step in trajectory.steps if failed(step)]
+        causes = [str(step.get("error") or step.get("description") or step.get("output") or step.get("name") or "failed step")
                   for step in failing_steps]
         cause = " | ".join(causes) if causes else "unresolved failure"
         signature = f"{trajectory.task}:{cause}".lower().replace(" ", "-")
@@ -413,35 +429,98 @@ class LearningSystem:
         self.persist_native()
         return attribution
 
+    def _retain_induced(self, item: Lesson | Procedure) -> Lesson | Procedure:
+        """Use the native candidate identity for observed experience, once.
+
+        Historical observations remain unverified. Repeated calls retain their
+        original identity instead of creating another learning history.
+        """
+        from mnemosyne.experience.receipts import digest
+        from mnemosyne.experience.sleep import _candidate, _reuse_existing_identity
+        from mnemosyne.experience.writer import LearningWriter
+
+        # Induction historically persists pending edits to the compatibility
+        # objects. Flush them through the shared conflict-aware writer before a
+        # deduplicated return refreshes those same objects from native state.
+        self.persist_native([item.tenant_id])
+        snapshot = LearningWriter(self.engine).read(item.tenant_id)
+        episodes = [snapshot["episodes"].get(key) for key in item.source_episode_ids]
+        if any(row and row.get("status") == "erased" for row in episodes):
+            raise ValueError("cannot induce from erased experience")
+        kind = "lesson" if isinstance(item, Lesson) else "procedure"
+        content = item.content if kind == "lesson" else item.body
+        native = bool(episodes) and all(row and row.get("status") == "resolved" for row in episodes)
+        if native:
+            row = _candidate(episodes[-1]["task_class"], content.splitlines(), episodes, kind=kind)
+            _reuse_existing_identity(row, snapshot)
+            if kind == "lesson":
+                row.update(lesson_type=item.lesson_type, failure_signature=item.failure_signature)
+            else:
+                row.update(procedure_kind=item.kind, name=item.name, signature=copy.deepcopy(item.signature))
+            item = type(item).from_record(row)
+        else:
+            row = item.to_record()
+            # Preserve IDs already issued by older versions of these APIs.
+            previous = next((candidate for candidate in snapshot["artifacts"].values()
+                             if candidate.get("origin") == "legacy"
+                             and candidate.get("kind") == kind
+                             and candidate.get("content") == content
+                             and candidate.get("task_class") == row.get("task_class")
+                             and sorted(candidate.get("source_episode_ids", [])) == sorted(item.source_episode_ids)
+                             and sorted(candidate.get("source_cids", [])) == sorted(item.source_cids)), None)
+            row["id"] = previous["id"] if previous else digest([
+                "historical-induction", kind, item.tenant_id,
+                row.get("task_class"), sorted(item.source_episode_ids), sorted(item.source_cids), content,
+            ])
+            item = type(item).from_record(row)
+        existing = snapshot["artifacts"].get(item.id)
+        if existing:
+            if existing.get("erased"):
+                raise ValueError("cannot induce an erased artifact")
+            self._refresh(item.tenant_id, snapshot)
+            return (self.lessons if kind == "lesson" else self.procedures)[item.id]
+        collection = self.lessons if kind == "lesson" else self.procedures
+        collection[item.id] = item
+        self.persist_native([item.tenant_id])
+        return collection[item.id]
+
     def induce_lesson(self, attribution: FailureAttribution) -> Lesson:
+        from mnemosyne.experience.candidates import correction_texts
+
         trajectory = self.trajectories[attribution.trajectory_id]
         # A failed episode establishes what happened, not an untested fix.
         content = "\n".join(attribution.evidence) or trajectory.task
+        if trajectory.to_record().get("status") == "resolved":
+            corrections = correction_texts(trajectory.to_record())
+            if corrections:
+                content = corrections[0]
         lesson = Lesson(
             tenant_id=trajectory.tenant_id, lesson_type="corrective",
             failure_signature=attribution.signature, content=content,
             source_episode_ids=[trajectory.id],
             source_cids=[trajectory.evidence_cid] if trajectory.evidence_cid else [],
         )
-        self.lessons[lesson.id] = lesson
-        self.persist_native()
-        return lesson
+        return self._retain_induced(lesson)
 
     def induce_procedure(self, lesson: Lesson) -> Procedure:
+        from mnemosyne.experience.candidates import expected_steps, observed_steps
+
         trajectories = [self.trajectories[key] for key in lesson.source_episode_ids
                         if key in self.trajectories]
         steps = [str(step.get("name") or step.get("description") or step.get("error"))
                  for trajectory in trajectories for step in trajectory.steps
                  if step.get("name") or step.get("description") or step.get("error")]
+        if trajectories and all(row.to_record().get("status") == "resolved" for row in trajectories):
+            episodes = [row.to_record() for row in trajectories]
+            corrections = [sequence for episode in episodes for sequence in expected_steps(episode)]
+            steps = corrections[0] if corrections else [step for episode in episodes for step in observed_steps(episode)]
         procedure = Procedure(
             tenant_id=lesson.tenant_id, kind="observed_sequence",
             name=f"Procedure for {lesson.failure_signature}", body="\n".join(steps) or lesson.content,
             signature={"failure_signature": lesson.failure_signature},
             source_episode_ids=list(lesson.source_episode_ids), source_cids=list(lesson.source_cids),
         )
-        self.procedures[procedure.id] = procedure
-        self.persist_native()
-        return procedure
+        return self._retain_induced(procedure)
 
     def _admit(self, item: Lesson | Procedure, cases: list[RegressionCase]) -> GateResult:
         from mnemosyne.experience.integration import build_learning_runtime
@@ -528,8 +607,7 @@ class LearningSystem:
                 content=verdict.correction
                 or verdict.detail,
             )
-            self.lessons[lesson.id] = lesson
-            self.persist_native()
+            lesson = self._retain_induced(lesson)
         return verdict, lesson
 
 
