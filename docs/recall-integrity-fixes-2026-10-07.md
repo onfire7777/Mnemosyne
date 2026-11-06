@@ -455,3 +455,287 @@ rejection, scanning and rejection of an unhashed lock-named file, preventing
 its reproduction, sibling-lock inventory rejection, and mutated command/lock
 rejection before destination creation. Zero failures/skips; this does not
 replace the outstanding full reproducibility and platform verification.
+
+### 2026-10-18: ranked-ID deduplication after repository split
+
+On clean baseline `a1953d89` in the migrated Mnemosyne `Repository` checkout,
+the shared ranked-ID resolver used repeated list membership checks. It now
+uses a set for membership while retaining the ordered result list. Direct-ID
+precedence and ambiguous-provenance rejection are unchanged. A regression
+covers aliases, duplicates across direct and projected hits, and iterator input.
+Focused store-recall and retrieval-integrity verification: **37 passed**.
+
+Five-repeat synthetic timing medians for two passes over unique IDs were
+0.013595 s before / 0.001356 s after for 2,000 hits (1,000 unique), and
+1.196131 s before / 0.014850 s after for 20,000 hits (10,000 unique).
+Both ordered outputs exactly matched the baseline. This removes quadratic
+deduplication work at the cost of an additional set of unique IDs; it is not
+an end-to-end benchmark, model-backed replay result, or full efficiency
+acceptance. No held-out benchmark or migrated Mnemetric code was touched.
+
+Follow-up measurement (seed 20261018): 1,000 synthetic mixed direct-ID,
+alias, malformed-provenance and projected-hit cases produced exactly the same
+ordered output as the baseline resolver. Additional traced Python peak
+allocation for the two-pass timing fixture was 12,513 / 43,640 bytes
+(baseline / set implementation) at 1,000 unique IDs, and 85,120 / 697,400
+bytes at 10,000 unique IDs. Inputs were allocated before tracing. This
+quantifies the speed/memory tradeoff; it is not process RSS, a bounded-memory
+guarantee, or full efficiency acceptance.
+
+Query-preparation validation now has four additional regression cases: short
+and long provider batches, a nonfinite final vector, and incorrect final-vector
+dimensions. Each verifies that rejecting one invalid batch leaves the existing
+query-vector cache unchanged, including no partial insertion of its valid
+prefix. The four cases and the existing deterministic batch-size ranking test
+passed (5 selected tests). No production logic changed. This covers one batch,
+not rollback of previously completed batches, and uses fake providers rather
+than model-backed replay evidence.
+
+Query preparation now rejects nonpositive, boolean and noninteger batch sizes
+before invoking the provider or changing the cache. Previously negative sizes
+silently skipped all preparation. Six boundary regressions plus the existing
+five preparation checks passed (11 selected tests); Ruff passed for the touched
+production and test files. Valid batch sizes and embedding providers are
+unchanged. This is input validation, not model-backed replay acceptance.
+
+After the production batch-size guard, combined verification of passage graph,
+store recall, retrieval integrity and shared metrics completed with **97 passed,
+zero failures/skips** on the `a1953d89` working tree plus these uncommitted
+changes. This is a selected compatibility check, not the full suite or the
+outstanding model-backed, cross-shard, Postgres and efficiency acceptance.
+
+Store-recall scoring now counts distinct gold CID strings, consistent with
+set-based recall: a hit on `a` for gold `[a, a, b]` scores 0.5, not 2/3.
+Existing CID-prefix matching is unchanged. Report tests verify per-row,
+per-kind and overall scores with and without graph preparation; all 28
+store-recall tests and the touched-file Ruff checks passed. No existing
+benchmark reports were rewritten. The preceding 97-test combined result
+predates this scoring change and is not a post-change full-suite claim.
+
+Optional question `kind` values are now validated as strings before store or
+provider loading. Lists/dictionaries previously failed grouping after search;
+mixed non-string and string keys could fail sorting after all searches. Four
+invalid-kind cases verify early rejection without an output report. All 32
+store-recall tests and touched-file Ruff checks passed. Missing kinds still
+use the existing `?` grouping. No model calls or historical report edits were
+made; full acceptance remains open.
+
+On fresh HEAD `ef0e51ca` (v1.7.0), the same four-file combined verification
+completed with **103 passed, zero failures/skips**, including the distinct-gold
+and optional-kind changes. This verifies selected compatibility with the newer
+HEAD plus this chat's uncommitted fixes, not the full suite, deployed connector,
+model-backed shard replay, or efficiency thresholds.
+
+Timestamp preflight now uses the shared `parse_dt` parser before store loading
+or query preparation. Six invalid `now` inputs fail early; report regressions
+also verify valid offset and Z timestamps reach search unchanged. Missing/null
+timestamps retain the existing omitted-time behavior. All 38 store-recall
+tests passed after these changes. The 103-test combined result predates this
+timestamp change; no models or historical benchmark reports were touched.
+
+An independent synthetic scoring check exercised the current scorer's AST
+expressions against a slice-based prefix oracle: **28,900 cases matched** over
+gold lists of lengths 1–4 and ranked lists of lengths 0–3 drawn from
+`a`, `ab`, `abc`, `b`. This includes duplicate annotations, duplicate hits and
+overlapping prefixes. It confirms the preserved prefix arithmetic, not that
+overlapping prefixes identify distinct evidence: one hit can still satisfy
+multiple different gold prefixes. No model, cache or benchmark artifact was
+used; this is not end-to-end retrieval or replay acceptance.
+
+Resource-helper reuse inspection: `eval/provider_bakeoff/run.py:sample_resources`
+sets `process_rss_bytes` to zero when Python's `resource` module is unavailable;
+`eval/latency/bench.py:sample_resources` directly calls that module. Neither
+inspected path supplies a verified Windows peak-RSS measurement for this work.
+Do not interpret the fallback zero as meeting the RAM ceiling or wire it into
+store-recall acceptance. This was source inspection only, not a resource run;
+the existing helpers and benchmark receipts were left unchanged.
+
+A separate existing Windows-capable path was found in
+`src/mnemosyne/cli.py:_peak_rss_mb`. A fresh-process smoke check returned `None`
+both before and after allocating/touching 8 MiB; the availability assertion
+failed. No model or store was loaded. This is a measurement-availability
+failure, not a measured RAM value or a retrieval regression. The helper's
+Windows ctypes call requires investigation before reusing it for acceptance;
+no production change was made in this check.
+
+Follow-up: the Windows helper now declares HANDLE-return and argument types
+for GetCurrentProcess/GetProcessMemoryInfo, avoiding implicit ctypes integer
+conversion at the native boundary. The Windows-native regression passed:
+peak memory is available, positive and nondecreasing across an 8 MiB touched
+allocation. Ruff passed for the helper's module and new test. This chat now
+also owns uncommitted `src/mnemosyne/cli.py` and
+`tests/test_cli_peak_memory.py`. This verifies helper availability only, not
+retrieval peak RAM, child/provider-process memory, or full efficiency acceptance.
+
+Follow-up failure-path coverage verifies that both a failed Windows memory
+API call and an unavailable native library return `None`, never a fabricated
+zero. All three peak-memory tests passed on Windows, with Ruff and diff checks
+passing. No further production change or model-backed measurement was made.
+
+A synthetic native-counter regression now verifies that a 5 GiB peak is
+reported as 5120.0 MiB without truncation, checking the supplied structure size
+as well. Four peak-memory tests and Ruff passed. The 5 GiB value is injected
+test data, not an allocation or measured workload peak.
+
+Post-timestamp/post-Windows-helper combined verification completed successfully:
+113 tests across `tests/test_passage_graph.py`, `tests/test_store_recall.py`,
+`tests/test_retrieval_integrity.py`, `eval/tests/test_metrics.py` and
+`tests/test_cli_peak_memory.py` (all pass markers, exit 0). This supersedes the
+103-test selected compatibility result for these changes only; it is not the
+full suite, model-backed shard replay, deployed connector or efficiency acceptance.
+
+Fresh-process synthetic resolver resource probe (20,000 direct hits, 10,000
+unique IDs) verified exact ordered output and recorded Windows process peak
+working set: 32.2 MiB after imports, 37.0 MiB after input construction, 37.5 MiB
+after resolution. These are lifetime high-water readings, not isolated live
+allocation deltas; the input and imports are included. This single synthetic
+probe uses the repaired native helper, not an independent measurement backend,
+and does not measure model/provider processes or establish the 2 GB acceptance
+criterion for a real retrieval workload.
+
+Independent API-wrapper corroboration used PowerShell/.NET `Get-Process`
+against the fresh Python probe's PID: external PeakWorkingSet64 was 34,324,480
+bytes (32.7 MiB), bracketed by helper readings of 32.4 and 32.8 MiB before/after
+the external query. This supports the helper's units and process identity;
+both wrappers ultimately observe Windows accounting. It does not validate
+retrieval workload peaks or provider-process aggregation. No new dependency,
+model, store, or benchmark artifact was used.
+
+Passage indexing now also rejects nonpositive, boolean and noninteger batch
+sizes before store access or provider work, matching query preparation's
+boundary. Six new regressions use an uninitialized graph to prove rejection
+precedes store access. The 12 selected invalid-batch-size tests passed and
+Ruff passed; the 113-test combined milestone predates this indexing change.
+
+Post-indexing-guard compatibility check on ef0e51ca: all 57 tests in
+tests/test_passage_graph.py passed (exit 0). The production MCP indexing caller
+uses the valid default batch size. This is focused graph/unit compatibility,
+not model-backed shard replay or full efficiency acceptance.
+
+Oct21 provider sampler units: eval/provider_bakeoff/run.py now preserves
+Darwin ru_maxrss bytes instead of multiplying them by 1024; other supported
+POSIX platforms retain the KiB conversion. One synthetic regression covers
+Darwin/Linux values, fallback PSS propagation and unchanged CPU arithmetic;
+it passed, as did Ruff for the sampler and its test file. These two files
+are now additionally owned uncommitted edits. No historical reports changed.
+Native macOS execution and end-to-end provider measurement were not checked;
+the Windows zero fallback remains unavailable measurement, not measured RSS.
+
+Post-sampler-change compatibility: all 20 eval/tests/test_provider_bakeoff.py
+tests passed (exit 0), including evidence/promotion gates, error denominators
+and deterministic decisions. This uses test fixtures, not model-backed
+provider acceptance; no signed benchmark history was rewritten.
+
+Oct21 latency sampler: the same Darwin byte-unit correction now applies in
+eval/latency/bench.py, with a retained regression in its test_latency_bench.py.
+Both files are newly owned edits (thirteen total). On Windows, the actual
+sampler and retained test function were AST-extracted and executed with fake
+resource counters: Darwin/Linux conversions, fallback propagation and CPU
+arithmetic passed. Ruff passed. The full module imports POSIX resource and
+was not imported or run; this is isolated logic verification, not native
+macOS/Linux, latency, model-backed or full efficiency acceptance.
+
+Oct22 native-validation availability check: wsl.exe exists, but `wsl --list
+--quiet` exited 1 and reported that Windows Subsystem for Linux is not
+installed. No installation or system configuration was attempted. Thus this
+host does not currently provide that route to native POSIX sampler validation;
+the isolated test evidence above remains the limit, not a native-platform pass.
+
+Oct22 timing provenance: store_recall reports now include seconds_scope,
+explicitly identifying seconds as query-loop duration excluding setup,
+indexing, query preparation, cleanup and report writing. Existing timing
+and score arithmetic are unchanged. All 38 store-recall tests and Ruff passed
+after this additive field; this does not supply end-to-end runtime evidence.
+
+Oct22 compact-CLI measurement-path inspection: preparation precedes the
+per-search timer, and peak_rss_mb is sampled after the result list is fully
+assembled but before emit. Therefore that process high-water includes retained
+results and prior process activity, but does not cover subsequent output
+serialization. Existing helper tests do not establish command-level memory
+coverage. No benchmark was rerun and no acceptance claim follows from this
+source inspection; a fresh-process command-level measurement remains needed.
+
+Oct22 compact command contract: two new tests invoke cmd_eval_query_batch with
+a synthetic query and fake search, proving search -> peak sample -> emit order
+and unchanged propagation of None or 5120.0 to the compact payload. Both passed
+and Ruff passed. Existing native helper tests were not rerun. This verifies
+command wiring only, not real retrieval memory, serialization peaks, or a
+fresh-process end-to-end measurement; the preceding acceptance gap remains.
+
+Oct26 combined compatibility on ef0e51ca: 141 tests passed, exit 0, across
+test_passage_graph, test_store_recall, test_retrieval_integrity,
+eval/tests/test_metrics, test_cli_peak_memory and test_provider_bakeoff.
+This combines the indexing guard, timing-scope field, provider unit correction
+and compact command contract added since the 113-test milestone. The POSIX-only
+latency module was excluded; no full suite, model-backed replay or end-to-end
+efficiency acceptance is implied. Do not rerun this unchanged selection.
+
+Oct26 serialization-boundary probe: a fresh Python process called the actual
+CLI emit on 2,000 synthetic result rows containing 4,096-character metadata
+strings, directing output to a character-counting sink. It emitted 8,611,833
+characters; native process peak rose from 35.0 to 47.8 MiB across emit. This
+demonstrates that the pre-emit compact memory field can miss a later peak.
+It is not a real retrieval workload, OS-pipe output measurement, independent
+memory-accounting backend, or model/provider acceptance. No private data,
+model calls, persistent store or benchmark-history artifacts were used.
+
+Oct26 compact memory provenance: compact query payloads now carry
+peak_rss_scope=current_process_lifetime_peak_before_output_serialization and
+peak_rss_unit=MiB. The legacy peak_rss_mb key/value and sampling point are
+unchanged. Both compact-command regressions passed with the new labels and
+Ruff passed; the 141-test milestone predates these additive fields. This
+documents the measurement boundary, not an extension of measured coverage.
+
+Oct26 serializer failure-boundary check: actual emit with a valid synthetic
+prefix and an unsupported object raised TypeError with empty captured stdout.
+Its serialize-before-print behavior therefore avoids partial JSON on encoding
+failure. A direct JSONEncoder.iterencode-to-stdout substitution would alter
+that behavior; it was not adopted as a memory shortcut. This check does not
+cover output-device failures or establish retrieval efficiency acceptance.
+
+Oct26 retained serialization-boundary regression: added the synthetic encoding
+failure check to tests/test_cli_peak_memory.py so future output-memory changes
+must preserve empty stdout on serialization failure. The one selected test and
+Ruff passed using the repository .venv interpreter. The default Python 3.14
+interpreter lacked pytest and Ruff; no dependencies were installed. Production
+serialization is unchanged; this is not an efficiency or full-suite result.
+
+Oct26 compact timing-boundary regression: extended the two existing compact
+memory propagation cases with a fake passage preparation step and deterministic
+clock. They verify preparation precedes both search timer reads, 25 ms is
+reported from those reads, and the memory sample follows search before emit.
+Both selected cases and Ruff passed. This confirms the query timing boundary
+with fixtures; it does not measure preparation cost or model-backed latency.
+
+Oct28 independent runner source review: ../_scratch/benchmark/run_2wiki.py
+still imports eval.public.runner.run_public_suite, while eval/public/runner.py
+is absent from this checkout after the Mnemetric split. The wrapper times CLI
+commands and total runtime but has no RSS measurement. It is not a standalone
+current-checkout replay/efficiency route. It was read, not executed or modified;
+no assets, caches or historical output bundles were opened. Reusing this route
+requires resolving the moved runner in the separately authorized benchmark
+environment, not recreating removed public modules here.
+
+Oct29 shared harness DCG correction: duplicate retrieved document IDs previously
+earned binary relevance gain repeatedly, allowing nDCG above one. dcg_at_k now
+removes each scored ID from its local relevant set, retaining original ranks
+and the top-k cutoff. A regression checks repeated gain, rank preservation and
+cutoff behavior. All ten eval/tests/test_metrics.py tests passed; Ruff and diff
+checks passed. This chat additionally owns that test file. Historical reports
+were not rewritten. This is shared harness scoring validation, not a fresh
+benchmark, model-backed replay or a review of the separate mnemosyne.eval scorer.
+
+Oct29 production evaluation scorer follow-up: src/mnemosyne/eval.py had the
+same repeated binary gain issue. Its ndcg_at_k now consumes a local copy of
+relevant IDs once per hit, preserving ranks, cutoff, the ideal denominator and
+the caller's set. The existing bounded-metrics test and new duplicate regression
+passed (two selected); Ruff and diff checks passed. This chat now also owns
+src/mnemosyne/eval.py and tests/test_parity_learning.py, sixteen files total.
+No historical scores were rewritten and no model-backed evaluation was run.
+
+Nov02 scoring corroboration: both corrected nDCG implementations matched an
+independent first-occurrence-position oracle on 17,472 synthetic cases (all
+three-ID sequences of lengths zero through five, all relevance subsets, and
+positive cutoffs one through six), within 1e-12. Scores remained bounded with
+the same tolerance. This covers duplicate/cutoff arithmetic, not invalid
+cutoff validation, retrieval quality, model-backed replay or efficiency.

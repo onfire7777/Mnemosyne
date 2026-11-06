@@ -21,9 +21,12 @@ import json
 import os
 import re
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from mnemosyne._file_lock import exclusive_file_lock
 
 
 def _canonical(record: dict[str, Any]) -> str:
@@ -114,7 +117,39 @@ class CIDJournal:
             os.fsync(fh.fileno())
         _fsync_dir(self.path.parent)
 
+    def validate_owner(self, tenant_id: str) -> None:
+        """Reject filename aliases of an existing tenant, retaining legacy rows."""
+        if any(row.get("tenant_id") not in (None, tenant_id) for row in self.records()):
+            raise ValueError("journal tenant ownership mismatch")
+
     def append(self, record: dict[str, Any]) -> None:
+        if "cid" not in record:
+            raise ValueError("journal records must carry a cid")
+        with exclusive_file_lock(self.path.with_suffix(self.path.suffix + ".lock")):
+            if record.get("tenant_id") is not None:
+                self.validate_owner(record["tenant_id"])
+            self._append_locked(record)
+
+    @contextmanager
+    def owned_append(self, tenant_id: str) -> Iterator[Callable[[dict[str, Any]], None]]:
+        """Hold tenant admission through an engine commit and its journal append."""
+        with exclusive_file_lock(self.path.with_suffix(self.path.suffix + ".lock")):
+            self.validate_owner(tenant_id)
+            active = True
+
+            def append_owned(record: dict[str, Any]) -> None:
+                if not active:
+                    raise RuntimeError("journal append scope is closed")
+                if record.get("tenant_id") != tenant_id:
+                    raise ValueError("journal tenant ownership mismatch")
+                self._append_locked(record)
+
+            try:
+                yield append_owned
+            finally:
+                active = False
+
+    def _append_locked(self, record: dict[str, Any]) -> None:
         if "cid" not in record:
             raise ValueError("journal records must carry a cid")
         self._repair_torn_tail()
@@ -128,40 +163,50 @@ class CIDJournal:
         """Parse the journal; return ``(records, torn_tail)``.
 
         Because ``append`` fsyncs every line, only the FINAL line can be
-        legitimately torn (crash in the buffered-write-to-fsync window), so an
-        unparseable final line stops iteration cleanly while an unparseable
-        non-final line is real corruption and raises json.JSONDecodeError.
+        legitimately torn (crash in the buffered-write-to-fsync window). A final
+        fragment without a newline is uncommitted even if it parses as JSON.
+        Every newline-terminated line must parse; corruption there raises
+        json.JSONDecodeError even when it is the final line.
         """
         records: list[dict[str, Any]] = []
         if not self.path.exists():
             return records, False
-        with open(self.path, encoding="utf-8") as fh:
-            lines = fh.read().splitlines()
-        last = len(lines) - 1
-        for i, raw in enumerate(lines):
+        data = self.path.read_bytes()
+        # Match repair-before-append: even parseable JSON is uncommitted until
+        # its terminating newline lands. Exclude that fragment without mutating
+        # the journal, and before decoding a potentially torn UTF-8 sequence.
+        torn_tail = bool(data and not data.endswith(b"\n"))
+        if torn_tail:
+            data = data[: data.rfind(b"\n") + 1]
+        lines = data.decode("utf-8").splitlines()
+        for raw in lines:
             line = raw.strip()
             if not line:
                 continue
-            try:
-                records.append(json.loads(line))
-            except json.JSONDecodeError:
-                if i == last:
-                    return records, True
-                raise
-        return records, False
+            records.append(json.loads(line))
+        return records, torn_tail
 
     def records(self) -> Iterator[dict[str, Any]]:
         """Yield complete records, tolerating a torn trailing line.
 
         A torn FINAL line (post-crash) yields the complete records then stops;
-        a bad non-final line raises json.JSONDecodeError. Callers needing the
+        a bad newline-terminated line raises json.JSONDecodeError. Callers needing the
         loud signal use ``verify_against(...).torn_tail``.
         """
         records, _ = self._read()
         yield from records
 
-    def _rewrite(self, transform: Callable[[dict[str, Any]], dict[str, Any] | None]) -> None:
+    def _rewrite(
+        self, transform: Callable[[dict[str, Any]], dict[str, Any] | None],
+        *, tenant_id: str | None = None,
+    ) -> None:
         """Atomic rewrite-and-swap: write tmp, fsync, rename over original."""
+        with exclusive_file_lock(self.path.with_suffix(self.path.suffix + ".lock")):
+            if tenant_id is not None:
+                self.validate_owner(tenant_id)
+            self._rewrite_locked(transform)
+
+    def _rewrite_locked(self, transform: Callable[[dict[str, Any]], dict[str, Any] | None]) -> None:
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
             for record in self.records():
@@ -173,7 +218,9 @@ class CIDJournal:
         os.replace(tmp, self.path)
         _fsync_dir(self.path.parent)
 
-    def tombstone(self, cid: str, *, salted_hash: str, erased_at: str) -> None:
+    def tombstone(
+        self, cid: str, *, salted_hash: str, erased_at: str, tenant_id: str | None = None,
+    ) -> None:
         def transform(record: dict[str, Any]) -> dict[str, Any] | None:
             if record.get("cid") != cid:
                 return record
@@ -186,10 +233,10 @@ class CIDJournal:
                 "kind": record.get("kind"),
             }
 
-        self._rewrite(transform)
+        self._rewrite(transform, tenant_id=tenant_id)
 
-    def purge(self, cid: str) -> None:
-        self._rewrite(lambda r: None if r.get("cid") == cid else r)
+    def purge(self, cid: str, *, tenant_id: str | None = None) -> None:
+        self._rewrite(lambda r: None if r.get("cid") == cid else r, tenant_id=tenant_id)
 
     def verify_against(self, ledger_cids: set[str]) -> JournalDivergence:
         records, torn_tail = self._read()

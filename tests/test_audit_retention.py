@@ -7,6 +7,8 @@ by a genuine build/verify/probe result; nothing is fabricated.
 
 from __future__ import annotations
 
+import os
+
 from mnemosyne.audit_chain import LOCAL_HMAC_PROVIDER, VAULT_HMAC_PROVIDER, local_hmac_provider
 from mnemosyne.audit_retention import (
     audit_evidence_complete,

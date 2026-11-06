@@ -196,7 +196,8 @@ def test_post_commit_journal_error_does_not_undo_committed_source(
         raise OSError("injected journal failure")
 
     with LocalMemoryEngine(path, journal_dir=tmp_path / "journal") as engine:
-        monkeypatch.setattr(CIDJournal, "append", fail)
+        # The write primitive under both CIDJournal.append and owned_append.
+        monkeypatch.setattr(CIDJournal, "_append_locked", fail)
         with pytest.raises(OSError, match="injected journal failure"):
             engine.append_evidence(incoming)
         assert engine.get_evidence("tenant", cid) is not None

@@ -151,7 +151,7 @@ def sample_resources() -> dict[str, Any]:
     mem = _meminfo_bytes()
     if resource_mod is not None:
         usage = resource_mod.getrusage(resource_mod.RUSAGE_SELF)
-        rss_bytes = int(usage.ru_maxrss) * 1024
+        rss_bytes = int(usage.ru_maxrss) * (1 if sys.platform == "darwin" else 1024)
         cpu_seconds = usage.ru_utime + usage.ru_stime
     else:
         rss_bytes = 0

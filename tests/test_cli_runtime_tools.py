@@ -26,6 +26,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 import pytest
+from mnemosyne.parametric import ParametricArtifactStore
 
 from mnemosyne.cli import (
     PRODUCTION_RELEASE_REQUIRED_COMMANDS,
@@ -1710,11 +1711,11 @@ def test_cli_provider_check_exercises_http_and_media_contracts(tmp_path: Path) -
             "--reranker-api-key",
             "rank-secret",
             "--media-extractor-command",
-            str(extractor),
+            join_command((sys.executable, str(extractor))),
             "--media-embedding-provider",
             "command",
             "--media-embedding-command",
-            str(embedder),
+            join_command((sys.executable, str(embedder))),
             "--media-embedding-dims",
             "3",
             "provider-check",
@@ -3069,8 +3070,8 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
                         "graph_backend": "apache-age",
                     },
                     "media": {
-                        "extractor": {"command": str(extractor)},
-                        "embedding": {"provider": "command", "command": str(embedder), "dims": 3},
+                        "extractor": {"command": join_command((sys.executable, str(extractor)))},
+                        "embedding": {"provider": "command", "command": join_command((sys.executable, str(embedder))), "dims": 3},
                     },
                     "object_key": {
                         "required": True,
@@ -4155,7 +4156,7 @@ def test_cli_ingests_binary_file_with_c2pa_verifier(tmp_path: Path) -> None:
     ingested = run_cli(
         store,
         "--c2pa-tool",
-        str(verifier_stub),
+        join_command((sys.executable, str(verifier_stub))),
         "--trusted-provenance-issuer",
         "issuer-a",
         "ingest",
@@ -4386,7 +4387,7 @@ def test_cli_ingest_c2pa_trust_policy_quarantines_untrusted_signer(tmp_path: Pat
     ingested = run_cli(
         store,
         "--c2pa-tool",
-        str(verifier_stub),
+        join_command((sys.executable, str(verifier_stub))),
         "--provenance-trust-policy",
         str(trust_policy),
         "ingest",
@@ -4452,7 +4453,7 @@ def test_cli_ingest_c2pa_without_trust_anchor_quarantines(tmp_path: Path) -> Non
     ingested = run_cli(
         store,
         "--c2pa-tool",
-        str(verifier_stub),
+        join_command((sys.executable, str(verifier_stub))),
         "ingest",
         "--tenant",
         TENANT,
@@ -4512,7 +4513,7 @@ def test_cli_c2pa_verifier_uses_actual_file_over_manifest_asset_path(tmp_path: P
     ingested = run_cli(
         store,
         "--c2pa-tool",
-        str(verifier_stub),
+        join_command((sys.executable, str(verifier_stub))),
         "--trusted-provenance-issuer",
         "issuer-a",
         "--trusted-provenance-root",
@@ -4582,7 +4583,7 @@ def test_cli_provenance_trust_check_validates_c2pa_roots(tmp_path: Path) -> None
         json.dumps(
             {
                 "name": "production-c2pa",
-                "tool": str(verifier_stub),
+                "tool": join_command((sys.executable, str(verifier_stub))),
                 "trusted_issuers": ["issuer-a"],
                 "trusted_roots": [trusted_root],
                 "trust_policy": {
@@ -4662,7 +4663,7 @@ def test_cli_provenance_trust_check_rejects_untrusted_root(tmp_path: Path) -> No
         json.dumps(
             {
                 "name": "production-c2pa",
-                "tool": str(verifier_stub),
+                "tool": join_command((sys.executable, str(verifier_stub))),
                 "trusted_issuers": ["issuer-a"],
                 "trusted_roots": [trusted_root],
                 "trust_policy": {
@@ -5223,7 +5224,7 @@ def test_cli_drains_media_extraction_job_with_command_provider(tmp_path: Path) -
         "--object-store",
         str(objects),
         "--media-extractor-command",
-        str(extractor),
+        join_command((sys.executable, str(extractor))),
         "ingest",
         "--tenant",
         TENANT,
@@ -5245,7 +5246,7 @@ def test_cli_drains_media_extraction_job_with_command_provider(tmp_path: Path) -
         "--object-store",
         str(objects),
         "--media-extractor-command",
-        str(extractor),
+        join_command((sys.executable, str(extractor))),
         "queue-drain",
         "--limit",
         "1",
@@ -14451,8 +14452,8 @@ def test_cli_parametric_tier_can_use_command_provider(tmp_path: Path) -> None:
         "lora-command-adapter",
     )
     artifact = run_cli(store, *provider_args, "parametric-propose", "--tenant", TENANT, *PARAMETRIC_AUTH)
-    artifact_path = store.with_suffix(store.suffix + ".parametric") / TENANT / f"{artifact['id']}.json"
-    proposal_record = json.loads(artifact_path.read_text(encoding="utf-8"))
+    artifact_store = ParametricArtifactStore(store.with_suffix(store.suffix + ".parametric"))
+    proposal_record = artifact_store.read(artifact["artifact_uri"])
     evaluated = run_cli(
         store,
         *provider_args,
@@ -14473,7 +14474,7 @@ def test_cli_parametric_tier_can_use_command_provider(tmp_path: Path) -> None:
         "provider rollback smoke",
         *PARAMETRIC_AUTH,
     )
-    rollback_record = json.loads(artifact_path.read_text(encoding="utf-8"))
+    rollback_record = artifact_store.read(artifact["artifact_uri"])
     calls = json.loads(provider_state.read_text(encoding="utf-8"))["calls"]
 
     assert artifact["adapter_kind"] == "lora-command-adapter"
@@ -15284,10 +15285,10 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
     )
     curated_lesson, curated_procedure = seed_operator_curated_parametric_sources(store)
     artifact = run_cli(store, "parametric-propose", "--tenant", TENANT, *PARAMETRIC_AUTH)
-    artifact_path = store.with_suffix(store.suffix + ".parametric") / TENANT / f"{artifact['id']}.json"
-    proposal_record = json.loads(artifact_path.read_text(encoding="utf-8"))
+    artifact_store = ParametricArtifactStore(store.with_suffix(store.suffix + ".parametric"))
+    proposal_record = artifact_store.read(artifact["artifact_uri"])
     evaluated_artifact = run_cli(store, "parametric-evaluate", "--artifact-uri", artifact["artifact_uri"], *PARAMETRIC_AUTH)
-    evaluated_record = json.loads(artifact_path.read_text(encoding="utf-8"))
+    evaluated_record = artifact_store.read(artifact["artifact_uri"])
     rolled_back_artifact = run_cli(
         store,
         "parametric-rollback",
@@ -15297,7 +15298,7 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
         "protected regression after deploy",
         *PARAMETRIC_AUTH,
     )
-    rollback_record = json.loads(artifact_path.read_text(encoding="utf-8"))
+    rollback_record = artifact_store.read(artifact["artifact_uri"])
     promoted_procedure = run_cli(store, "procedure-promote", "--procedure-id", procedure["id"], *PARAMETRIC_AUTH)
     rolled_back = run_cli(store, "procedure-rollback", "--procedure-id", procedure["id"], *PARAMETRIC_AUTH)
     rolled_back_search = run_cli(store, "procedure-search", "--tenant", TENANT, "--query", "date-math-deploy", "--status", "retired")

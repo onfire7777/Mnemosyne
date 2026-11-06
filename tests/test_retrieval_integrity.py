@@ -72,6 +72,19 @@ def test_ranked_passages_do_not_expand_provenance_into_corpus_order():
     assert resolve_retrieved_doc_ids(hits, mapping) == ["doc-b", "doc-c", "doc-a"]
 
 
+def test_ranked_passage_deduplication_preserves_first_occurrence_across_aliases():
+    mapping = {"a": "doc-a", "alias-a": "doc-a", "b": "doc-b", "c": "doc-c"}
+    hits = [
+        {"provenance": ["a", "alias-a"]},
+        {"id": "b", "provenance": ["c"]},
+        {"id": "alias-a"},
+        {"metadata": {"source_evidence_cids": ["b"]}},
+        {"provenance": ["a", "c"]},
+        {"id": "c"},
+    ]
+    assert resolve_retrieved_doc_ids(iter(hits), mapping) == ["doc-a", "doc-b", "doc-c"]
+
+
 def test_passage_retrieval_uses_rare_terms_and_keeps_rank_two_second():
     engine = LocalMemoryEngine(policy=OperatingPolicy(top_k=3))
     texts = ["Quasar telescope discovers nebula.", "Quasar observation of distant stars."]
