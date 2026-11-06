@@ -2399,6 +2399,7 @@ class AutoMemorySession:
                           used_lessons: list[str] | None = None) -> dict[str, Any]:
         """Atomically record user and assistant turns into working memory and durable evidence."""
         from mnemosyne.engine import WorkingMemoryItem
+        from mnemosyne.experience.receipts import source_segment_id
         from mnemosyne.ids import evidence_cid
         from mnemosyne.models import Evidence, utc_now
 
@@ -2408,6 +2409,7 @@ class AutoMemorySession:
         user_salience = score_turn_novelty(user_text)
 
         # 1. Mirror User Turn to durable Evidence
+        user_segment = source_segment_id(self.tenant_id, self.user_id, self.session_id, "user")
         cid_user = evidence_cid(
             user_text,
             tenant_id=self.tenant_id,
@@ -2416,6 +2418,7 @@ class AutoMemorySession:
             content_pointer=None,
             modality="text",
             sensitivity=0,
+            document_segment_id=user_segment,
         )
         ev_user = Evidence(
             tenant_id=self.tenant_id,
@@ -2423,6 +2426,7 @@ class AutoMemorySession:
             session_id=self.session_id,
             actor="user",
             source_type="chat",
+            document_segment_id=user_segment,
             content=user_text,
             branch=self.branch,
             cid=cid_user,
@@ -2456,6 +2460,7 @@ class AutoMemorySession:
                 log.debug("AutoMemorySession put_working user turn error: %s", exc)
 
         # 3. Mirror Assistant Turn to durable Evidence
+        assistant_segment = source_segment_id(self.tenant_id, self.user_id, self.session_id, "assistant")
         cid_asst = evidence_cid(
             assistant_text,
             tenant_id=self.tenant_id,
@@ -2464,6 +2469,7 @@ class AutoMemorySession:
             content_pointer=None,
             modality="text",
             sensitivity=0,
+            document_segment_id=assistant_segment,
         )
         ev_asst = Evidence(
             tenant_id=self.tenant_id,
@@ -2471,6 +2477,7 @@ class AutoMemorySession:
             session_id=self.session_id,
             actor="assistant",
             source_type="chat",
+            document_segment_id=assistant_segment,
             content=assistant_text,
             branch=self.branch,
             cid=cid_asst,
