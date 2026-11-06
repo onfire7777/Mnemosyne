@@ -92,6 +92,20 @@ The selector manifest, logs, and JUnit reports are retained under
 checkpoint is `bugfix-results.xml`. All 22 learning components remain active by
 default. No paid provider, model trainer, or external benchmark was run.
 
+The subsequent behavior-preserving simplification removes unused route counters,
+repeated legacy record conversions, and duplicate protected-case filtering. Skill
+library selection delegates directly to its existing resolver. No tests changed
+for this refactor. The final combined run again passed: **736 passed, 3 skipped in
+63.26 seconds** (`final-results.xml`). Skips cover unavailable Torch and PDF
+dependencies and a Windows-only path check. Ruff and `git diff --check` passed.
+
+An offline wheel build and isolated wheel-import smoke check also passed, including
+all 22 active defaults, shared legacy/native procedure identity, and durable
+reload. This follow-up wheel's SHA256 is
+`a1d9488db01acefcd46be41eb4d0155a522edfdcd550785f51ab23eaed62efd6`;
+its build log and smoke receipt are in the same validation directory. This is
+local package validation, not deployed-host or learning-benefit evidence.
+
 ## Separate benchmark ownership
 
 Mnemetric owns public benchmark reporting and archives. The public LongMemEval report and copied receipts added to Mnemosyne in `f73f90e9` were removed from its current tree. All 14 original JSON/JSONL receipts were byte-checked against Mnemetric: eight already existed in its October 29 evidence archive, and six development receipts were preserved in its `development/` subdirectory with hashes and provenance. Mnemetric's corrected report remains authoritative; the superseded report remains recoverable in Mnemosyne's Git history and a local backup.

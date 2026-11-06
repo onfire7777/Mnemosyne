@@ -12,6 +12,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
+from mnemosyne.gate import GATING_CASE_ORIGINS
+
 from .runtime import LearningRuntime, now
 
 
@@ -51,6 +53,11 @@ def configure_learning(engine, **configuration):
     engine._learning_configuration = current
 
 
+def _active_protected_cases(cases):
+    return [case for case in cases if case.protected
+            and case.origin in GATING_CASE_ORIGINS and case.mode == "active"]
+
+
 def learning_dependency(runtime, name, fallback=None):
     """Factory-created runtimes read one live configuration owned by the engine.
 
@@ -65,8 +72,7 @@ def learning_dependency(runtime, name, fallback=None):
         if cases is None:
             state = configuration.get("runtime_state")
             cases = state.load_gate_cases() if state is not None else fallback
-        return [case for case in (cases or []) if case.protected
-                and case.origin in {"curated", "genuine"} and case.mode == "active"]
+        return _active_protected_cases(cases or [])
     if name == "skill_store":
         fallback = getattr(runtime.engine, "_learning_skill_store", fallback)
     return configuration.get(name, fallback)
@@ -82,8 +88,7 @@ def build_learning_runtime(engine, *, skill_store=None, lesson_distiller=None,
     tools = getattr(engine, "_learning_tools", None)
     if isinstance(tools, weakref.ReferenceType):
         tools = tools()
-    runtime = LearningRuntime(engine, skill_store=learning_skill_store(
-        engine, configuration.get("skill_store")))
+    runtime = LearningRuntime(engine, skill_store=learning_skill_store(engine))
     runtime._shared_configuration = True
     for name in ("lesson_distiller", "procedure_inducer"):
         setattr(runtime, name, configuration.get(name) or getattr(tools, name, None))
@@ -91,8 +96,7 @@ def build_learning_runtime(engine, *, skill_store=None, lesson_distiller=None,
     state = configuration.get("runtime_state") or getattr(tools, "runtime_state", None)
     if cases is None:
         cases = state.load_gate_cases() if state is not None else getattr(engine, "_learning_protected_cases", [])
-    runtime.protected_cases = [case for case in cases if case.protected
-                               and case.origin in {"curated", "genuine"} and case.mode == "active"]
+    runtime.protected_cases = _active_protected_cases(cases)
     return runtime
 
 

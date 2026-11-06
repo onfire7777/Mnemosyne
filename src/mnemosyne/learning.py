@@ -457,7 +457,6 @@ class LearningSystem:
                 row.update(lesson_type=item.lesson_type, failure_signature=item.failure_signature)
             else:
                 row.update(procedure_kind=item.kind, name=item.name, signature=copy.deepcopy(item.signature))
-            item = type(item).from_record(row)
         else:
             row = item.to_record()
             # Preserve IDs already issued by older versions of these APIs.
@@ -472,14 +471,14 @@ class LearningSystem:
                 "historical-induction", kind, item.tenant_id,
                 row.get("task_class"), sorted(item.source_episode_ids), sorted(item.source_cids), content,
             ])
-            item = type(item).from_record(row)
+        item = type(item).from_record(row)
+        collection = self.lessons if kind == "lesson" else self.procedures
         existing = snapshot["artifacts"].get(item.id)
         if existing:
             if existing.get("erased"):
                 raise ValueError("cannot induce an erased artifact")
             self._refresh(item.tenant_id, snapshot)
-            return (self.lessons if kind == "lesson" else self.procedures)[item.id]
-        collection = self.lessons if kind == "lesson" else self.procedures
+            return collection[item.id]
         collection[item.id] = item
         self.persist_native([item.tenant_id])
         return collection[item.id]
@@ -490,8 +489,9 @@ class LearningSystem:
         trajectory = self.trajectories[attribution.trajectory_id]
         # A failed episode establishes what happened, not an untested fix.
         content = "\n".join(attribution.evidence) or trajectory.task
-        if trajectory.to_record().get("status") == "resolved":
-            corrections = correction_texts(trajectory.to_record())
+        episode = trajectory.to_record()
+        if episode.get("status") == "resolved":
+            corrections = correction_texts(episode)
             if corrections:
                 content = corrections[0]
         lesson = Lesson(
@@ -510,8 +510,8 @@ class LearningSystem:
         steps = [str(step.get("name") or step.get("description") or step.get("error"))
                  for trajectory in trajectories for step in trajectory.steps
                  if step.get("name") or step.get("description") or step.get("error")]
-        if trajectories and all(row.to_record().get("status") == "resolved" for row in trajectories):
-            episodes = [row.to_record() for row in trajectories]
+        episodes = [row.to_record() for row in trajectories]
+        if episodes and all(row.get("status") == "resolved" for row in episodes):
             corrections = [sequence for episode in episodes for sequence in expected_steps(episode)]
             steps = corrections[0] if corrections else [step for episode in episodes for step in observed_steps(episode)]
         procedure = Procedure(

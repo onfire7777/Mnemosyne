@@ -1212,7 +1212,6 @@ class AdaptiveRouteWeighter:
         self.min_weight = max(0.01, min(0.20, float(min_weight)))
         self.max_weight = max(0.30, min(0.90, float(max_weight)))
         self._weights: dict[str, dict[str, float]] = {}
-        self._counts: dict[str, dict[str, int]] = {}
 
     def get_weights(self, tenant_id: str, query_intent: str | None = None) -> dict[str, float]:
         base = dict(
@@ -1308,15 +1307,12 @@ class AdaptiveRouteWeighter:
                 {r: 1.0 / len(self.DEFAULT_ROUTES) for r in self.DEFAULT_ROUTES},
             )
         )
-        counts = self._counts.setdefault(tenant_id, {r: 0 for r in self.DEFAULT_ROUTES})
         for route, reward in route_rewards.items():
             if route not in current:
                 current[route] = 1.0 / len(self.DEFAULT_ROUTES)
-                counts[route] = 0
             bounded_reward = max(-1.0, min(1.0, float(reward)))
             updated = current[route] * math.exp(self.learning_rate * bounded_reward)
             current[route] = updated
-            counts[route] = counts.get(route, 0) + 1
         final_weights = self.bounded_weights(
             current, reference_weights=reference_weights, max_change=max_change
         )
