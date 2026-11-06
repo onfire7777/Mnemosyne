@@ -9570,12 +9570,12 @@ def cmd_procedure_promote(args: argparse.Namespace) -> None:
 
 def cmd_lesson_search(args: argparse.Namespace) -> None:
     tools = load_tools(args)
-    emit(tools.lesson_search(args.signature, tenant_id=args.tenant, status=args.status))
+    emit(tools.lesson_search(args.signature, tenant_id=args.tenant, status=args.status, role="operator"))
 
 
 def cmd_procedure_search(args: argparse.Namespace) -> None:
     tools = load_tools(args)
-    emit(tools.procedure_search(args.query, tenant_id=args.tenant, status=args.status))
+    emit(tools.procedure_search(args.query, tenant_id=args.tenant, status=args.status, role="operator"))
 
 
 def cmd_framework_import(args: argparse.Namespace) -> None:

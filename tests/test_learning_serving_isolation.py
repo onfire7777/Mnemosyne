@@ -1,6 +1,7 @@
 """Readable source evidence must not broaden a learned artifact's owner scope."""
 
 import pytest
+from types import SimpleNamespace
 
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.experience import candidates
@@ -8,6 +9,7 @@ from mnemosyne.experience.candidates import register_import
 from mnemosyne.experience.receipts import digest
 from mnemosyne.experience.runtime import LearningRuntime
 from mnemosyne.mcp_tools import MemoryTools
+from mnemosyne.learning import LearningSystem, Lesson, Procedure
 from mnemosyne.models import Evidence
 
 
@@ -119,3 +121,51 @@ def test_scoped_text_source_hard_delete_does_not_shred_a_blob(monkeypatch):
     assert tools.forget("t", cid, erasure_mode="hard_delete_legal")["erased"]
     assert tools.engine.get_evidence("t", cid) is None
     assert runtime.writer.read("t")["episodes"][result["episode_id"]]["status"] == "erased"
+
+
+@pytest.mark.parametrize("kind", ["lesson", "procedure"])
+def test_native_compatibility_reads_keep_owner_scope(kind, monkeypatch):
+    runtime = LearningRuntime(LocalMemoryEngine())
+    for index in range(2):
+        observed = runtime.observe_turn("t", "alice", str(index), "Check inventory", "checked",
+            tool_events=[] if kind == "lesson" else [{"name": "check", "output": "check", "success": True}])
+        runtime.record_signal("t", episode_id=observed["episode_id"],
+            kind="correction" if kind == "lesson" else "verifier",
+            value=-1 if kind == "lesson" else 1, evidence="Check inventory totals" if kind == "lesson" else "", final=True)
+    runtime.consolidate("t")
+    learning = LearningSystem(runtime.engine)
+    learning.load_native(["t"])
+    tools = MemoryTools(runtime.engine, learning=learning)
+    collection = learning.lessons if kind == "lesson" else learning.procedures
+    item = next(iter(collection.values()))
+    search = tools.lesson_search if kind == "lesson" else tools.procedure_search
+    key = "lessons" if kind == "lesson" else "procedures"
+    assert tools.get("t", item.id, user_id="alice")["record"]["id"] == item.id
+    with pytest.raises(KeyError):
+        tools.get("t", item.id, user_id="bob")
+    with pytest.raises(KeyError):
+        tools.get("t", item.id)
+    assert search("", tenant_id="t", user_id="bob")[key] == []
+    assert [row["id"] for row in search("", tenant_id="t", user_id="alice")[key]] == [item.id]
+    assert tools.get("t", item.id, role="operator")["record"]["id"] == item.id
+    assert [row["id"] for row in search("", tenant_id="t", role="operator")[key]] == [item.id]
+    from mnemosyne import cli
+
+    emitted = []
+    monkeypatch.setattr(cli, "load_tools", lambda args: tools)
+    monkeypatch.setattr(cli, "emit", emitted.append)
+    command = cli.cmd_lesson_search if kind == "lesson" else cli.cmd_procedure_search
+    command(SimpleNamespace(signature="", query="", tenant="t", status=None))
+    assert [row["id"] for row in emitted[0][key]] == [item.id]
+
+
+def test_curated_compatibility_records_keep_tenant_wide_reads():
+    tools = MemoryTools(LocalMemoryEngine())
+    lesson = Lesson("t", "corrective", "inventory", "Check inventory", origin="curated")
+    procedure = Procedure("t", "checklist", "inventory", "Check inventory", {}, origin="curated")
+    tools.learning.lessons[lesson.id] = lesson
+    tools.learning.procedures[procedure.id] = procedure
+    for item in (lesson, procedure):
+        assert tools.get("t", item.id, user_id="bob")["record"]["id"] == item.id
+    assert tools.lesson_search("inventory", tenant_id="t")["lessons"][0]["id"] == lesson.id
+    assert tools.procedure_search("inventory", tenant_id="t")["procedures"][0]["id"] == procedure.id

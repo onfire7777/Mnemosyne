@@ -2858,7 +2858,11 @@ class MemoryTools:
                 return {"kind": collection.rstrip("s"), "record": item}
         for collection, rows in (("lesson", self.learning.lessons.values()), ("procedure", self.learning.procedures.values())):
             for item in rows:
-                if item.tenant_id == tenant_id and item.id == id:
+                if (item.tenant_id == tenant_id and item.id == id
+                        and self._learning_record_readable(item, self._read_context(
+                            tenant_id, role=role, user_id=user_id, max_sensitivity=max_sensitivity,
+                            capability_tags=capability_tags, purpose=purpose, residency=residency,
+                            region=region, break_glass=break_glass, lawful_basis=lawful_basis))):
                     return {"kind": collection, "record": item.to_dict()}
         raise KeyError(f"memory record not found: {id}")
 
@@ -4369,7 +4373,36 @@ class MemoryTools:
         )
         return result
 
-    def lesson_search(self, signature: str, tenant_id: str | None = None, status: str | None = None) -> dict[str, Any]:
+    def _learning_record_readable(self, item, context: dict[str, Any]) -> bool:
+        """Keep the native owner boundary on historical compatibility reads."""
+        from mnemosyne.access_policy import may_read_item
+
+        record = item.to_record()
+        if record.get("erased"):
+            return False
+        if record.get("origin") == "legacy":
+            return True
+        principal = context.get("user_id") or context.get("principal")
+        administrative = context.get("role") == "operator" and not principal
+        if not administrative and (not principal or record.get("user_id") != principal):
+            return False
+        cids = record.get("source_cids", [])
+        for cid in cids:
+            source = self.engine.get_evidence(item.tenant_id, cid)
+            if source is None or source.erased or source.retired_at is not None:
+                return False
+            if not administrative:
+                decision = may_read_item(
+                    item_tenant_id=source.tenant_id, sensitivity=source.sensitivity,
+                    access_policy=source.access_policy, context=context,
+                    policy_max_sensitivity=self.engine.policy.max_sensitivity,
+                )
+                if not decision.allowed or decision.redacted:
+                    return False
+        return bool(cids)
+
+    def lesson_search(self, signature: str, tenant_id: str | None = None, status: str | None = None,
+                      user_id: str | None = None, role: WriteRole = "reader") -> dict[str, Any]:
         query = signature.lower()
         lessons = []
         for lesson in self.learning.lessons.values():
@@ -4377,18 +4410,23 @@ class MemoryTools:
                 continue
             if status and lesson.status != status:
                 continue
+            if not self._learning_record_readable(lesson, self._read_context(lesson.tenant_id, user_id=user_id, role=role)):
+                continue
             haystack = f"{lesson.failure_signature} {lesson.content}".lower()
             if query in haystack:
                 lessons.append(lesson.to_dict())
         return {"lessons": lessons}
 
-    def procedure_search(self, query: str, tenant_id: str | None = None, status: str | None = None) -> dict[str, Any]:
+    def procedure_search(self, query: str, tenant_id: str | None = None, status: str | None = None,
+                         user_id: str | None = None, role: WriteRole = "reader") -> dict[str, Any]:
         needle = query.lower()
         procedures = []
         for procedure in self.learning.procedures.values():
             if tenant_id and procedure.tenant_id != tenant_id:
                 continue
             if status and procedure.status != status:
+                continue
+            if not self._learning_record_readable(procedure, self._read_context(procedure.tenant_id, user_id=user_id, role=role)):
                 continue
             haystack = f"{procedure.name} {procedure.body} {procedure.signature}".lower()
             if needle in haystack:

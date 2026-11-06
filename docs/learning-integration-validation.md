@@ -2,6 +2,8 @@
 
 This cleanup integrates the learning implementation with Mnemosyne's existing APIs. All 22 learning components retain their `active` default. Explicit pause/off settings and mandatory provenance, outcome, effect-approval, and erasure guards remain effective.
 
+The implementation is integrated with the reorganized `dev`/`main` baseline `d0143fe8`, including its journal/SQLite tenant ownership, redacted retrieval, ingestion validation, queue recovery, and parametric artifact-path fixes. The local architecture work and separately edited source files are preserved.
+
 ## Ownership after cleanup
 
 | Area | Authoritative implementation |
