@@ -65,6 +65,33 @@ The three synthetic fixtures were refreshed only after repeated-run and thin/ful
 
 The exact 11-case selector manifest, pytest log, JUnit report, and scenario comparison logs are retained under `/Users/admin/.codex/tmp/mnemosyne-remaining-failures-20261105/`.
 
+## Learning ownership and synthesis follow-up
+
+The next audit joined the remaining legacy/native induction paths, retained local
+learning when providers are configured, coalesced equivalent proposals with all
+source and hypothesis links, and preserved old artifact identities and retirement.
+Exact-query identity and revision matching now use the same case equivalence as
+serving; repeated observations of one query do not create a broader duplicate.
+
+Long-lived SDK, worker, and MCP hosts share current engine-owned configuration.
+Direct skill tools resolve the same configured library. Training exports retain
+canonical admission and provenance, and compatibility refreshes preserve pending
+edits and conflict detection. Route adaptation shares bounded normalization;
+policy observations count each episode/variant once. Responsibilities and retained
+capabilities are listed in [Learning unification](learning-unification.md).
+
+After the behavioral fixes, **736 tests passed and 3 skipped in 62.25 seconds**:
+43 related learning, host, skill, calibration, and parametric test files plus the
+exact 11 previous failure cases. Default test collection also passed. A test-package
+collision discovered by combining skill and latency tests was fixed by making
+root test-helper imports explicit. This was a scoped regression run, not a rerun
+of the historical full-suite or a sealed learning-benefit benchmark.
+
+The selector manifest, logs, and JUnit reports are retained under
+`/Users/admin/.codex/tmp/mnemosyne-unified-learning-20261105/`; the behavioral
+checkpoint is `bugfix-results.xml`. All 22 learning components remain active by
+default. No paid provider, model trainer, or external benchmark was run.
+
 ## Separate benchmark ownership
 
 Mnemetric owns public benchmark reporting and archives. The public LongMemEval report and copied receipts added to Mnemosyne in `f73f90e9` were removed from its current tree. All 14 original JSON/JSONL receipts were byte-checked against Mnemetric: eight already existed in its October 29 evidence archive, and six development receipts were preserved in its `development/` subdirectory with hashes and provenance. Mnemetric's corrected report remains authoritative; the superseded report remains recoverable in Mnemosyne's Git history and a local backup.

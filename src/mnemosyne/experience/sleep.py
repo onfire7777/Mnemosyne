@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from copy import deepcopy
 from difflib import SequenceMatcher
 import re
 from math import ceil
@@ -92,6 +93,12 @@ def _gate(runtime, tenant: str, artifact: dict, episodes: list[dict]) -> bool:
     return evaluate_candidate(runtime, tenant, artifact, episodes)
 
 
+def _scope_identity(scope: dict | None) -> dict | None:
+    if scope and scope.get("kind") == "exact_query":
+        return {**scope, "query": scope["query"].casefold()}
+    return scope
+
+
 def _candidate(
     task: str,
     steps: list[str],
@@ -106,15 +113,16 @@ def _candidate(
         raise ValueError("candidate sources must have one tenant and user")
     tenant, user = next(iter(owners))
     source_ids = sorted(episode["id"] for episode in episodes)
+    queries = {episode.get("user_text", "").casefold() for episode in episodes}
     scope_match = (
         {"kind": "exact_query", "query": episodes[0].get("user_text", "")}
-        if len(source_ids) == 1
+        if len(queries) == 1
         else None
     )
     conditions = [scope_match["query"]] if scope_match and scope_match["query"] else []
     model = Lesson if kind == "lesson" else Procedure
     return model.native(**{
-        "id": digest([kind, tenant, user, task, content, scope_match]),
+        "id": digest([kind, tenant, user, task, content, _scope_identity(scope_match)]),
         "kind": kind,
         "task_class": task,
         "revision": parent["revision"] + 1 if parent else 1,
@@ -148,8 +156,6 @@ def _candidate(
 
 def _reuse_existing_identity(candidate: dict, state: dict) -> None:
     """Keep pre-scope identities stable, including withdrawn revisions."""
-    if candidate["id"] in state["artifacts"]:
-        return
     previous_id = digest([
         candidate.get("content_kind", candidate["kind"]), candidate["task_class"],
         candidate["content"], candidate.get("scope_match"),
@@ -160,7 +166,41 @@ def _reuse_existing_identity(candidate: dict, state: dict) -> None:
         previous_id = digest(["abstraction", previous_id, candidate["conditions"]])
     if candidate.get("schema_ref"):
         previous_id = digest(["schema", candidate["schema_ref"]["id"], candidate["content"]])
-    previous = state["artifacts"].get(previous_id)
+    previous = state["artifacts"].get(candidate["id"]) or state["artifacts"].get(previous_id)
+    scope = candidate.get("scope_match")
+    if previous is None and scope and not any(
+        candidate.get(key) for key in ("separation_ref", "replaces", "schema_ref")
+    ):
+        # Earlier IDs used original query casing, or a broad scope merely
+        # because the same query occurred twice. Keep their validated lifecycle
+        # and scope; changing the identity must not revive a retired procedure.
+        # ponytail: compatibility lookup is O(n) per missing identity; an indexed
+        # migration can replace it if historical artifact volume warrants it.
+        query = scope["query"].casefold()
+        for row in state["artifacts"].values():
+            if (row.get("tenant_id"), row.get("user_id")) != (
+                candidate.get("tenant_id"), candidate.get("user_id")
+            ):
+                continue
+            old_scope = row.get("scope_match")
+            old_ids = {
+                digest([candidate["kind"], candidate.get("tenant_id"), candidate.get("user_id"),
+                        candidate["task_class"], candidate["content"], old_scope]),
+                digest([candidate["kind"], candidate["task_class"], candidate["content"], old_scope]),
+            }
+            if row["id"] not in old_ids:
+                continue
+            sources = [state["episodes"].get(key) for key in row.get("source_episode_ids", [])]
+            same_query = (
+                old_scope and old_scope.get("kind") == "exact_query"
+                and old_scope.get("query", "").casefold() == query
+            ) or (
+                old_scope is None and len(sources) > 1 and not row.get("conditions")
+                and all(source and source.get("user_text", "").casefold() == query for source in sources)
+            )
+            if same_query:
+                previous = row
+                break
     if previous is None or (
         previous.get("tenant_id"), previous.get("user_id")
     ) != (candidate.get("tenant_id"), candidate.get("user_id")):
@@ -173,18 +213,45 @@ def _reuse_existing_identity(candidate: dict, state: dict) -> None:
         if (source := state["episodes"].get(key)) is not None
     ):
         return
-    candidate["id"] = previous_id
+    candidate["id"] = previous["id"]
+    candidate["scope_match"] = deepcopy(previous.get("scope_match"))
+    candidate["conditions"] = list(previous.get("conditions", []))
+
+
+def _combine_candidates(candidates: list[dict]) -> list[dict]:
+    """Keep one scoped candidate with all supporting episodes and proposal receipts."""
+    combined = {}
+    for candidate in candidates:
+        item = combined.setdefault(candidate["id"], dict(candidate))
+        for field in ("source_episode_ids", "source_cids", "explanation_sources"):
+            item[field] = sorted(set(item.get(field, [])) | set(candidate.get(field, [])))
+        records = [*item.get("proposal_records", []), *candidate.get("proposal_records", [])]
+        if candidate.get("proposal_record"):
+            records.append(candidate["proposal_record"])
+        if records:
+            item["proposal_records"] = list({digest(record): record for record in records}.values())
+            item["proposal_record"] = item["proposal_records"][0]
+        hypotheses = [*item.get("hypothesis_ids", []), *candidate.get("hypothesis_ids", [])]
+        if candidate.get("hypothesis_id"):
+            hypotheses.append(candidate["hypothesis_id"])
+        if hypotheses:
+            item["hypothesis_ids"] = sorted(set(hypotheses))
+            item["hypothesis_id"] = item["hypothesis_ids"][0]
+    return list(combined.values())
 
 
 def _patch_parent(candidate: dict, artifacts: list[dict]) -> dict | None:
+    scope = _scope_identity(candidate.get("scope_match"))
+    exact_query = scope and scope.get("kind") == "exact_query"
+    conditions = [value.casefold() if exact_query else value for value in candidate.get("conditions", [])]
     matches = [
         item
         for item in artifacts
         if item["task_class"] == candidate["task_class"]
         and item["kind"] == candidate["kind"]
         and item.get("user_id") == candidate.get("user_id")
-        and item.get("scope_match") == candidate.get("scope_match")
-        and item.get("conditions", []) == candidate.get("conditions", [])
+        and _scope_identity(item.get("scope_match")) == scope
+        and [value.casefold() if exact_query else value for value in item.get("conditions", [])] == conditions
         and item["state"] in {"active", "labile"}
         and (
             item["state"] == "labile"
@@ -351,15 +418,17 @@ def consolidate(runtime, tenant: str) -> dict:
     if distill_mode == "off":
         candidates, splits = [], []
     elif distill_mode == "provider":
-        candidates, provider_status = _provider_candidates(
+        proposals, provider_status = _provider_candidates(
             runtime, tenant, analysis_batch
         )
+        candidates.extend(proposals)
     hypothesis_candidates, hypothesis_updates = _tested_hypotheses(snapshot)
     if distill_mode != "off":
         candidates.extend(hypothesis_candidates)
     prepared = []
     for candidate in candidates:
         _reuse_existing_identity(candidate, snapshot)
+    for candidate in _combine_candidates(candidates):
         existing = snapshot["artifacts"].get(candidate["id"])
         if existing and existing["state"] != "candidate":
             continue
@@ -369,7 +438,7 @@ def consolidate(runtime, tenant: str) -> dict:
             for key in candidate["source_episode_ids"]
         ):
             continue
-        if existing and not (
+        if existing and existing.get("gate_evidence") and not (
             set(candidate["source_episode_ids"]) - set(existing["source_episode_ids"])
         ):
             continue
@@ -450,10 +519,11 @@ def consolidate(runtime, tenant: str) -> dict:
         created = 0
         for candidate in prepared:
             persist_protected_cases(state, candidate)
-            if candidate.get("hypothesis_id") and candidate.get("gate_passed"):
-                state["policy"]["hypotheses"][candidate["hypothesis_id"]].update(
-                    status="verified", candidate_id=candidate["id"]
-                )
+            if candidate.get("gate_passed"):
+                for hypothesis_id in candidate.get("hypothesis_ids", []):
+                    state["policy"]["hypotheses"][hypothesis_id].update(
+                        status="verified", candidate_id=candidate["id"]
+                    )
             for key in candidate["source_episode_ids"]:
                 for event in state["episodes"][key].get("tool_events", []):
                     if candidate.get("gate_passed") and event.get("reflection_id"):

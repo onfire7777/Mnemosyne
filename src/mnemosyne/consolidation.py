@@ -657,7 +657,8 @@ class ConsolidationWorker:
         self.summarizer = summarizer or DeterministicEvidenceSummarizer()
         from mnemosyne.experience.integration import configure_learning
         configure_learning(engine, lesson_distiller=lesson_distiller,
-                           procedure_inducer=procedure_inducer)
+                           procedure_inducer=procedure_inducer,
+                           protected_cases=gate_cases or None)
         configuration = getattr(engine, "_learning_configuration", {})
         self.lesson_distiller = configuration.get("lesson_distiller") or DeterministicLessonDistiller()
         self.procedure_inducer = configuration.get("procedure_inducer") or DeterministicProcedureInducer()
@@ -1854,9 +1855,29 @@ class ConsolidationWorker:
 
     def _learning_runtime(self):
         from mnemosyne.experience.integration import build_learning_runtime
-        return build_learning_runtime(
-            self.engine, protected_cases=self.gate.cases or None,
-            lesson_distiller=self.lesson_distiller, procedure_inducer=self.procedure_inducer)
+        runtime = build_learning_runtime(self.engine)
+        # These fallbacks are local defaults, not new explicit configuration.
+        runtime.lesson_distiller = self.lesson_distiller
+        runtime.procedure_inducer = self.procedure_inducer
+        return runtime
+
+    @property
+    def lesson_distiller(self):
+        return getattr(self.engine, "_learning_configuration", {}).get(
+            "lesson_distiller", self._lesson_distiller)
+
+    @lesson_distiller.setter
+    def lesson_distiller(self, value):
+        self._lesson_distiller = value
+
+    @property
+    def procedure_inducer(self):
+        return getattr(self.engine, "_learning_configuration", {}).get(
+            "procedure_inducer", self._procedure_inducer)
+
+    @procedure_inducer.setter
+    def procedure_inducer(self, value):
+        self._procedure_inducer = value
 
     def _legacy_learning_candidates(self, tenant_id: str, candidates: list[dict[str, Any]], *, branch: str = "main") -> list[dict[str, Any]]:
         """Native-observed evidence has one induction owner: experience sleep."""

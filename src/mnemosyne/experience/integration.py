@@ -17,7 +17,11 @@ from .runtime import LearningRuntime, now
 
 def learning_skill_store(engine, skill_store=None, *, create=False):
     """Resolve the same skill library for SDK, MCP, jobs and host adapters."""
-    store = skill_store if skill_store is not None else getattr(engine, "_learning_skill_store", None)
+    store = skill_store
+    if store is None:
+        store = getattr(engine, "_learning_configuration", {}).get("skill_store")
+    if store is None:
+        store = getattr(engine, "_learning_skill_store", None)
     if store is None:
         configured = os.environ.get("MNEMOSYNE_SKILLS_DB")
         root = getattr(engine, "root_dir", None)
@@ -47,6 +51,27 @@ def configure_learning(engine, **configuration):
     engine._learning_configuration = current
 
 
+def learning_dependency(runtime, name, fallback=None):
+    """Factory-created runtimes read one live configuration owned by the engine.
+
+    Directly constructed runtimes retain their local dependency assignments.
+    Long-lived SDK sessions and old workers cannot restore superseded settings.
+    """
+    if not getattr(runtime, "_shared_configuration", False):
+        return fallback
+    configuration = getattr(runtime.engine, "_learning_configuration", {})
+    if name == "protected_cases":
+        cases = configuration.get(name)
+        if cases is None:
+            state = configuration.get("runtime_state")
+            cases = state.load_gate_cases() if state is not None else fallback
+        return [case for case in (cases or []) if case.protected
+                and case.origin in {"curated", "genuine"} and case.mode == "active"]
+    if name == "skill_store":
+        fallback = getattr(runtime.engine, "_learning_skill_store", fallback)
+    return configuration.get(name, fallback)
+
+
 def build_learning_runtime(engine, *, skill_store=None, lesson_distiller=None,
                            procedure_inducer=None, protected_cases=None,
                            runtime_state=None):
@@ -59,6 +84,7 @@ def build_learning_runtime(engine, *, skill_store=None, lesson_distiller=None,
         tools = tools()
     runtime = LearningRuntime(engine, skill_store=learning_skill_store(
         engine, configuration.get("skill_store")))
+    runtime._shared_configuration = True
     for name in ("lesson_distiller", "procedure_inducer"):
         setattr(runtime, name, configuration.get(name) or getattr(tools, name, None))
     cases = configuration.get("protected_cases")

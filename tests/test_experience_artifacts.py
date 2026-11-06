@@ -537,7 +537,8 @@ def test_safety_screen_blocks_instruction_injection_candidate():
 def test_parametric_export_requires_two_hundred_distinct_credited_verified_successes():
     from mnemosyne.experience.candidates import parametric_export
 
-    item = artifact(id="proven", state="active")
+    item = artifact(id="proven", state="active", gate_passed=True,
+                    gate_evidence={"passed": True, "protected_ids": ["verified-source"]})
     state = {
         "artifacts": {"proven": item},
         "episodes": {},
@@ -558,6 +559,7 @@ def test_parametric_export_requires_two_hundred_distinct_credited_verified_succe
             assert parametric_export(runtime, "t")["procedures"] == []
     result = parametric_export(runtime, "t")
     assert result["procedures"][0]["n_trials"] == 200
+    assert result["artifact"]["source_ids"] == ["proven"]
     assert result["artifact"]["status"] == "shadow"
     assert (
         result["training_started"] is False

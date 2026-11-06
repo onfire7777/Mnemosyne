@@ -13,23 +13,13 @@ def update_routes(state: dict, task: str, rewards: dict[str, float]) -> None:
     previous = policy.setdefault("routes", {}).get(task, {})
     learner = AdaptiveRouteWeighter()
     if previous:
-        learner._weights[task] = dict(previous)
-    proposed = learner.record_outcome(task, rewards)
+        learner.restore_weights(task, previous)
     day = datetime.now(UTC).date().isoformat()
     daily = policy.setdefault("route_daily", {}).setdefault(
         task, {"day": day, "weights": dict(previous)}
     )
     if daily["day"] != day:
         daily.update(day=day, weights=dict(previous))
-    default = 1 / len(proposed)
-    policy["routes"][task] = {
-        route: max(
-            0.05,
-            min(
-                0.65,
-                daily["weights"].get(route, default) + 0.1,
-                max(daily["weights"].get(route, default) - 0.1, weight),
-            ),
-        )
-        for route, weight in proposed.items()
-    }
+    policy["routes"][task] = learner.record_outcome(
+        task, rewards, reference_weights=daily["weights"], max_change=0.1
+    )

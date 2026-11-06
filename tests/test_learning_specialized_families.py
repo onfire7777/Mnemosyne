@@ -83,7 +83,7 @@ def test_real_read_strengthening_fault_is_detected_by_f23(monkeypatch):
 def test_test_only_fault_fixture_reaches_writer_and_independent_family(
     code, monkeypatch
 ):
-    from fault_injection.learning import baseline, corrupt, source_lookup
+    from tests.fault_injection.learning import baseline, corrupt, source_lookup
 
     before = baseline()
     after = corrupt(code, before)
