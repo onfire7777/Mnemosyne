@@ -147,13 +147,17 @@ def _bounded_unit(value: object, *, default: float = 0.0) -> float:
 
 
 def _parse_unit_score(value: object) -> float | None:
+    # A bool or an out-of-range score is malformed, not a clamped 0 or 1: 2.0 must
+    # never read as maximal surprise and raise write authority.
+    if isinstance(value, bool):
+        return None
     try:
         parsed = float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return None
-    if parsed != parsed or parsed in {float("inf"), float("-inf")}:
+    if parsed != parsed or not 0.0 <= parsed <= 1.0:
         return None
-    return max(0.0, min(1.0, parsed))
+    return parsed
 
 
 def _non_negative_int(value: object, *, default: int = 0) -> int:
@@ -876,7 +880,10 @@ class ConsolidationWorker:
         gate_group_stats: dict[str, Any] | None = None
         no_write_data = self._contains_no_write_data(evidence, payload)
 
-        if not run_core_mutation:
+        if missing:
+            skipped.append("source_evidence_unavailable")
+            pass_results.append(PassResult("extractor", "skipped", {"reason": "source_evidence_unavailable"}))
+        elif not run_core_mutation:
             skipped.append("core_mutation_not_in_cadence_tier")
         elif prediction_gate["gate"] == "low_prediction_error_metadata_only":
             skipped.append("low_prediction_error_metadata_only")

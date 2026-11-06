@@ -21,6 +21,7 @@ from typing import Any
 from urllib import error as urlerror, request as urlrequest
 
 import pytest
+from mnemosyne.parametric import ParametricArtifactStore
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives import serialization
@@ -638,7 +639,7 @@ def test_command_media_embedding_provider_validates_json_contract(tmp_path: Path
      newline="\n")
     embedder.chmod(0o755)
 
-    vector = CommandMediaEmbeddingProvider(str(embedder), dims=3).embed_media(
+    vector = CommandMediaEmbeddingProvider([sys.executable, str(embedder)], dims=3).embed_media(
         b"media-bytes",
         media_type="image/png",
         modality="image",
@@ -4018,8 +4019,8 @@ def test_mcp_server_persists_parametric_artifacts_and_rolls_back(tmp_path: Path)
     )
 
     artifact = mcp_call(server, "parametric_propose", {"tenant_id": TENANT, **PARAMETRIC_AUTH})
-    artifact_path = store.with_suffix(store.suffix + ".parametric") / TENANT / f"{artifact['id']}.json"
-    proposal_record = json.loads(artifact_path.read_text(encoding="utf-8"))
+    artifact_store = ParametricArtifactStore(store.with_suffix(store.suffix + ".parametric"))
+    proposal_record = artifact_store.read(artifact["artifact_uri"])
     evaluated = mcp_call(
         server,
         "parametric_evaluate",
@@ -4034,7 +4035,7 @@ def test_mcp_server_persists_parametric_artifacts_and_rolls_back(tmp_path: Path)
             **PARAMETRIC_AUTH,
         },
     )
-    rollback_record = json.loads(artifact_path.read_text(encoding="utf-8"))
+    rollback_record = artifact_store.read(artifact["artifact_uri"])
 
     assert artifact["source_ids"] == []
     assert server.tools.learning.lessons[lesson["id"]].status == "candidate"
@@ -4095,14 +4096,14 @@ def test_mcp_server_parametric_tier_can_use_command_provider(tmp_path: Path) -> 
     )
 
     artifact = mcp_call(server, "parametric_propose", {"tenant_id": TENANT, **PARAMETRIC_AUTH})
-    artifact_path = store.with_suffix(store.suffix + ".parametric") / TENANT / f"{artifact['id']}.json"
-    proposal_record = json.loads(artifact_path.read_text(encoding="utf-8"))
+    artifact_store = ParametricArtifactStore(store.with_suffix(store.suffix + ".parametric"))
+    proposal_record = artifact_store.read(artifact["artifact_uri"])
     rolled_back = mcp_call(
         server,
         "parametric_rollback",
         {"artifact_uri": artifact["artifact_uri"], "reason": "provider rollback smoke", **PARAMETRIC_AUTH},
     )
-    rollback_record = json.loads(artifact_path.read_text(encoding="utf-8"))
+    rollback_record = artifact_store.read(artifact["artifact_uri"])
     calls = json.loads(provider_state.read_text(encoding="utf-8"))["calls"]
 
     assert artifact["adapter_kind"] == "test-time-command-adapter"

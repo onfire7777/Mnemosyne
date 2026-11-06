@@ -454,6 +454,21 @@ def test_resource_samples_are_taken_while_requests_are_active():
     assert any(window_start <= sample["sampled_monotonic"] <= window_end for sample in during)
 
 
+def test_peak_rss_platform_units(monkeypatch):
+    from types import SimpleNamespace
+
+    usage = SimpleNamespace(ru_maxrss=8192, ru_utime=1.0, ru_stime=0.5)
+    monkeypatch.setattr(bench.resource_mod, "getrusage", lambda _: usage)
+    monkeypatch.setattr(bench, "_meminfo_bytes", lambda: {})
+    monkeypatch.setattr(bench, "_pss_or_working_set_bytes", lambda rss: rss)
+    for platform_name, expected in (("darwin", 8192), ("linux", 8192 * 1024)):
+        monkeypatch.setattr(bench.sys, "platform", platform_name)
+        sample = bench.sample_resources()
+        assert sample["process_rss_bytes"] == expected
+        assert sample["process_pss_or_working_set_bytes"] == expected
+        assert sample["cpu_seconds"] == 1.5
+
+
 def test_swap_bytes_measure_consumption_not_capacity():
     receipt = bench.execute_pinned_workload(
         distribution=bench.DISTRIBUTION_WARM_SERIAL,

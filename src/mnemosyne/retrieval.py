@@ -23,10 +23,12 @@ from typing import Any, Callable, Mapping, Protocol, Sequence
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from mnemosyne.access_policy import (
+    apply_record_redactions,
     apply_statement_redactions,
     apply_text_redactions,
     effective_max_sensitivity,
     may_read_item,
+    unknown_access_policy_keys,
 )
 from mnemosyne.cid_lists import shared_or_copy
 from mnemosyne.command_line import split_command
@@ -3533,7 +3535,8 @@ class CommandMediaEmbeddingProvider:
         enforce_byte_limit(
             payload, limit=self.max_media_bytes, label="media embedding payload"
         )
-        # closed before the command reads it (Windows locks an open temp file); deleted on exit
+        # Closed before the command reads it (Windows locks an open temp file, and a child must
+        # reopen the path); still deleted on context exit after success, failure or timeout.
         with tempfile.NamedTemporaryFile(delete_on_close=False) as tmp:
             tmp.write(payload)
             tmp.close()
@@ -5506,6 +5509,8 @@ def working_memory_hits(
             continue
         if max_trust_tier is not None and trust_tier > max_trust_tier:
             continue
+        if policy_max_sensitivity is not None and sensitivity > policy_max_sensitivity:
+            continue
         access_policy = _working_json_object(
             _working_field(item, "access_policy", metadata.get("access_policy", {}))
         )
@@ -5526,6 +5531,8 @@ def working_memory_hits(
             if not decision.allowed:
                 continue
         else:
+            if unknown_access_policy_keys(access_policy):
+                continue
             policy_tenant = str(
                 access_policy.get("tenant")
                 or access_policy.get("tenant_id")
@@ -5539,7 +5546,10 @@ def working_memory_hits(
                     continue
             except (TypeError, ValueError):
                 continue
-            if access_policy.get("restricted") or access_policy.get("hold"):
+            if access_policy.get("restricted") or access_policy.get("hold") or any(
+                str(key).startswith("hold:") and bool(value)
+                for key, value in access_policy.items()
+            ):
                 continue
             if any(
                 key in access_policy
@@ -5555,6 +5565,13 @@ def working_memory_hits(
                     "residencies",
                     "lawful_basis",
                     "min_role_for_raw",
+                    "expires_at",
+                    "allowed_residencies",
+                    "allowed_residency_transfers",
+                    "cross_region_transfer",
+                    "region",
+                    "regions",
+                    "runtime_residency",
                 )
             ):
                 continue
@@ -5567,6 +5584,9 @@ def working_memory_hits(
             )
             if not content_for_hit:
                 continue
+            # The route may receive raw store rows; metadata can carry protected
+            # task text just as content can. Project it before ranking or return.
+            metadata, _ = apply_record_redactions(metadata, access_policy, decision)
         if privacy_metadata:
             metadata["privacy"] = privacy_metadata
         capability_tags = _working_field(
@@ -5583,10 +5603,11 @@ def working_memory_hits(
                 metadata.setdefault(field_name, field_value)
         task_text = _working_task_text(task_id=task_id, kind=kind, metadata=metadata)
         task_raw = lexical_score(query, task_text)
-        lex_content = lexical_score(query, content)
+        # Rank on what the caller may see: never on, or embed, the redacted-away text.
+        lex_content = lexical_score(query, content_for_hit)
         if embedder is not None and query_vec:
             try:
-                item_vec = embedder.embed(content)
+                item_vec = embedder.embed(content_for_hit)
                 dense_cos = max(0.0, cosine(query_vec, item_vec))
                 content_raw = 0.55 * lex_content + 0.45 * dense_cos
             except Exception:

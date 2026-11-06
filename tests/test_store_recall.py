@@ -34,15 +34,18 @@ def test_malformed_citations_are_not_character_ids():
 
 
 @pytest.mark.parametrize("prepare_vectors", [False, True])
-def test_report_uses_shared_interpolated_latency_percentiles(tmp_path, monkeypatch, prepare_vectors):
+@pytest.mark.parametrize("gold, expected_recall", [(["a"], 1.0), (["a", "a", "b"], 0.5)])
+def test_report_uses_shared_interpolated_latency_percentiles(
+    tmp_path, monkeypatch, prepare_vectors, gold, expected_recall,
+):
     from mnemosyne import cli
 
     store = tmp_path / "source"
     store.mkdir()
     questions = tmp_path / "questions.json"
     questions.write_text(json.dumps([
-        {"id": "q1", "question": "one", "gold": ["a"]},
-        {"id": "q2", "question": "two", "gold": ["a"]},
+        {"id": "q1", "question": "one", "gold": gold, "now": "2026-10-02T11:13:42-07:00"},
+        {"id": "q2", "question": "two", "gold": gold, "now": "2026-10-02T18:13:42Z"},
     ]), encoding="utf-8")
     output = tmp_path / "report.json"
     closed = []
@@ -52,13 +55,16 @@ def test_report_uses_shared_interpolated_latency_percentiles(tmp_path, monkeypat
         adapters=SimpleNamespace(passage_graph=graph if prepare_vectors else None, embedding=None),
         close=lambda: closed.append(True),
     )
-    tools = SimpleNamespace(
-        engine=engine,
-        search=lambda **kwargs: {
+    evaluated_times = []
+
+    def search(*, evaluated_at=None, **kwargs):
+        evaluated_times.append(evaluated_at)
+        return {
             "hits": [{"id": "a12345678901-first"}, {"id": "a12345678901-second"}],
             "abstained": False,
-        },
-    )
+        }
+
+    tools = SimpleNamespace(engine=engine, search=search)
     monkeypatch.setattr(cli, "load_tools", lambda args: tools)
     monkeypatch.setattr("sys.argv", [
         "store_recall", "--store", str(store), "--tenant", "synthetic",
@@ -71,15 +77,19 @@ def test_report_uses_shared_interpolated_latency_percentiles(tmp_path, monkeypat
 
     report = json.loads(output.read_text(encoding="utf-8"))
     assert report["latency_ms"] == {"p50": 20.0, "p95": 29.0}
-    assert report["recall_at_5"] == 1.0
+    assert report["recall_at_5"] == expected_recall
+    assert report["by_kind"] == {"?": expected_recall}
     for row in report["rows"]:
+        assert row["recall_at_5"] == expected_recall
         assert row["top5"] == ["a12345678901", "a12345678901"]
         assert row["top5_evidence_cids"] == ["a12345678901-first", "a12345678901-second"]
     assert report["latency_scope"] == "search_calls_excluding_setup_and_query_preparation"
+    assert report["seconds_scope"] == "query_loop_excluding_setup_indexing_preparation_cleanup_and_report_writing"
     assert report["query_vectors_prepared"] is prepare_vectors
     assert report["query_preparation_seconds"] == (2.0 if prepare_vectors else 0.0)
     assert preparations == ([["one", "two"]] if prepare_vectors else [])
     assert closed == [True]
+    assert evaluated_times == ["2026-10-02T11:13:42-07:00", "2026-10-02T18:13:42Z"]
 
 
 @pytest.mark.parametrize("stage", ["index", "prepare", "search"])
@@ -133,6 +143,10 @@ def test_failed_run_closes_engine_before_removing_store(tmp_path, monkeypatch, s
     [{"id": "q", "gold": ["a"], "question": " "}],
     [{"id": "q", "gold": ["a"], "question": 123}],
     [{"gold": ["a"], "question": "valid query"}],
+    *[[{"id": "q", "gold": ["a"], "question": "valid query", "kind": kind}]
+      for kind in [None, 1, [], {}]],
+    *[[{"id": "q", "gold": ["a"], "question": "valid query", "now": now}]
+      for now in ["", "not-a-date", "2026-02-30T00:00:00Z", 0, [], {}]],
 ])
 def test_invalid_questions_are_rejected_before_loading_store(tmp_path, monkeypatch, questions):
     from mnemosyne import cli
