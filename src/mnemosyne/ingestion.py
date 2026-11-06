@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import math
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -484,11 +485,11 @@ class IngestionPipeline:
         consolidation_metadata = _without_held_out_write_gate_labels(
             metadata.get("consolidation") if isinstance(metadata.get("consolidation"), dict) else {}
         )
-        # Computed prediction-error is the only gate signal. Client-supplied
-        # consolidation.prediction_error cannot raise or suppress authority.
+        # Computed prediction-error and the trust-capped write priority are the
+        # only gate signals: client-supplied copies cannot raise or suppress authority.
         consolidation_metadata["prediction_error"] = prediction_error["score"]
         consolidation_metadata["prediction_error_gate"] = prediction_error["gate"]
-        consolidation_metadata.setdefault("write_priority", write_priority)
+        consolidation_metadata["write_priority"] = write_priority
         metadata["consolidation"] = consolidation_metadata
         metadata["write_priority"] = write_priority
 
@@ -687,12 +688,28 @@ class IngestionPipeline:
         try:
             result = self.engine.retrieve(query=query, tenant_id=tenant_id, branch=branch)
         except Exception:
-            return {"score": 1.0, "support": 0.0, "gate": "unmeasured_fail_open_to_review", "hit_count": 0}
-        support = result.explain.get("confidence", {}).get("query_support", {}).get("score")
-        try:
-            support_score = float(support)
-        except (TypeError, ValueError):
-            support_score = 0.0 if not result.hits else 0.5
+            return {
+                "score": 0.0,
+                "support": 0.0,
+                "gate": "unmeasured_fail_closed_metadata_only",
+                "hit_count": 0,
+            }
+        explanation = result.explain if isinstance(result.explain, dict) else {}
+        confidence = explanation.get("confidence")
+        query_support = confidence.get("query_support") if isinstance(confidence, dict) else None
+        support = query_support.get("score") if isinstance(query_support, dict) else None
+        if (
+            type(support) not in (int, float)
+            or not math.isfinite(support)
+            or not 0.0 <= support <= 1.0
+        ):
+            return {
+                "score": 0.0,
+                "support": 0.0,
+                "gate": "unmeasured_fail_closed_metadata_only",
+                "hit_count": len(result.hits),
+            }
+        support_score = float(support)
         score = max(0.0, min(1.0, 1.0 - support_score))
         threshold = max(0.0, min(1.0, float(getattr(self.engine.policy, "prediction_error_threshold", 0.35))))
         return {
@@ -716,10 +733,13 @@ class IngestionPipeline:
         importance = _bounded_signal(metadata.get("importance"), default=0.65 if request.correction else 0.45)
         novelty = 0.0 if already_present else _bounded_signal(metadata.get("novelty"), default=0.65)
         computed_surprise = float(prediction_error.get("score", 0.0))
-        if trust_tier >= int(TrustTier.UNTRUSTED_EXTERNAL):
+        raw_surprise = metadata.get("surprise")
+        if trust_tier >= int(TrustTier.UNTRUSTED_EXTERNAL) or "surprise" not in metadata:
             surprise = _bounded_signal(computed_surprise, default=0.0)
+        elif type(raw_surprise) in (int, float) and 0.0 <= raw_surprise <= 1.0:
+            surprise = float(raw_surprise)
         else:
-            surprise = _bounded_signal(metadata.get("surprise"), default=computed_surprise)
+            surprise = 0.0  # a malformed supplied surprise fails closed, never to the computed value
         raw_reward = _bounded_signal(metadata.get("reward"), default=0.5 if request.actor == "user" else 0.25)
         reward = raw_reward if trust_tier <= int(TrustTier.AUTHENTICATED) else min(raw_reward, 0.25)
         if trust_tier >= int(TrustTier.UNTRUSTED_EXTERNAL):
