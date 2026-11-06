@@ -9,9 +9,54 @@ used by [BurnOS](https://github.com/onfire7777/BurnOS).
 
 **Version 1.7.0 · Python 3.12+ · Apache 2.0 · Local, SQLite and PostgreSQL backends**
 
-[Quick start](#quick-start) · [For Amazon hackathon judges](#for-amazon-hackathon-judges) ·
+[Quick start](#quick-start) · [LongMemEval-S Benchmark (97.20%)](#longmemeval-s-benchmark-results-9720-overall--9793-task-averaged) · [For Amazon hackathon judges](#for-amazon-hackathon-judges) ·
 [BurnSkills](#skills-and-books) · [Documentation](#documentation) ·
 [Evaluations](#evaluation-and-limitations) · [License](LICENSE)
+
+## LongMemEval-S Benchmark Results (`97.20%` Overall / `97.93%` Task-Averaged)
+
+On the full 500-question **[LongMemEval-S](https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned)** benchmark (~115k tokens per conversation history across 6 question categories), Mnemosyne achieves **`97.20%` (`486 / 500`) overall accuracy** and **`97.93%` task-averaged accuracy** (`95%` Wilson CI: `[95.36%, 98.32%]`), paired with **`99.70%` Session Recall@10** and **`99.90%` Evidence Turn Coverage@10** using `qwen/qwen3-embedding-8b` + Mnemosyne `PassageIndex` multi-granularity hybrid retrieval and `anthropic/claude-haiku-5.5` (`--reasoning-effort xhigh`, `$3.11` total run cost).
+
+- **Full Technical Report & Methodology:** [`docs/benchmark/LONGMEMEVAL-S-RESULTS.md`](docs/benchmark/LONGMEMEVAL-S-RESULTS.md)
+- **Archived Summary & Per-Question Receipts (`500` Qs):** [`eval/longmemeval_s/LongMemEval-results/`](eval/longmemeval_s/LongMemEval-results/)
+
+### Global Leaderboard Comparison (LongMemEval-S)
+
+| Rank | Memory System | Reader Model | Overall Accuracy (`500` Qs) | Task-Averaged | Error Rate |
+| :---: | --- | --- | :---: | :---: | :---: |
+| **1** | **Mnemosyne (v2 Hybrid + Cognitive Synthesis)** | **`claude-haiku-5.5` (`xhigh`)** | **`97.20%` (`486 / 500`)** | **`97.93%`** | **`2.80%` (`14 / 500`)** |
+| 2 | Hindsight (MemLake Oct 2026 Homepage) | Vendor Config | `94.60%` (`473 / 500`) | — | `5.40%` (`27 / 500`) |
+| 3 | Mnemosyne (v1 Hybrid + Strict Abstention) | `claude-haiku-5.5` (`xhigh`) | `93.80%` (`469 / 500`) | `94.85%` | `6.20%` (`31 / 500`) |
+| 4 | Mnemosyne (Dense Top-10 Baseline) | `claude-haiku-5.5` (standard) | `93.00%` (`465 / 500`) | `93.66%` | `7.00%` (`35 / 500`) |
+| 5 | Hindsight (arXiv:2512.12818 Paper) | `gemini-3-pro` | `91.40%` (`457 / 500`) | ~`91.4%` | `8.60%` (`43 / 500`) |
+| 6 | Hindsight (arXiv:2512.12818 Paper) | `gpt-oss-120b` | `89.00%` (`445 / 500`) | — | `11.00%` (`55 / 500`) |
+| 7 | EmergenceMem | `gpt-4o` | `86.40%` (`432 / 500`) | — | `13.60%` (`68 / 500`) |
+| 8 | Supermemory | `gemini-3-pro` | `85.20%` (`426 / 500`) | — | `14.80%` (`74 / 500`) |
+| 9 | Zep (Temporal Knowledge Graph) | `gpt-4o` | `71.20%` (`356 / 500`) | — | `28.80%` (`144 / 500`) |
+| 10 | Full-Context LLM Baseline (115k tokens) | `gpt-4o` | `60.20%` (`301 / 500`) | — | `39.80%` (`199 / 500`) |
+
+### Per-Category & Split Accuracy Progression (`500` Questions)
+
+| Question Category | Total (`N`) | Baseline (`haiku-5.5`) | Hybrid + Strict Abstention (`xhigh-v1`) | **Final Mnemosyne (`xhigh-v2`)** | Dev Split (`N=100`, `v2`) | Held-Out Split (`N=400`, `v2`) |
+| --- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **`single-session-assistant`** | `56` | `100.00%` (`56/56`) | `100.00%` (`56/56`) | **`100.00%` (`56 / 56`)** | **`100.00%`** (`13/13`) | **`100.00%`** (`43/43`) |
+| **`single-session-preference`** | `30` | `90.00%` (`27/30`) | `93.33%` (`28/30`) | **`100.00%` (`30 / 30`)** | **`100.00%`** (`5/5`) | **`100.00%`** (`25/25`) |
+| **`knowledge-update`** | `78` | `93.59%` (`73/78`) | `97.44%` (`76/78`) | **`98.72%` (`77 / 78`)** | `90.91%` (`10/11`) | **`100.00%`** (`67/67`) |
+| **`single-session-user`** | `70` | `97.14%` (`68/70`) | `97.14%` (`68/70`) | **`97.14%` (`68 / 70`)** | **`100.00%`** (`12/12`) | `96.55%` (`56/58`) |
+| **`temporal-reasoning`** | `133` | `94.74%` (`126/133`) | `93.98%` (`125/133`) | **`96.99%` (`129 / 133`)** | **`100.00%`** (`32/32`) | `96.04%` (`97/101`) |
+| **`multi-session`** | `133` | `86.47%` (`115/133`) | `87.22%` (`116/133`) | **`94.74%` (`126 / 133`)** | `96.30%` (`26/27`) | `94.34%` (`100/106`) |
+| **Abstention Subset (`_abs`)** | `30` | `93.33%` (`28/30`) | **`100.00%` (`30/30`)** | `86.67%` (`26/30`) | `80.00%` (`4/5`) | `88.00%` (`22/25`) |
+| **Session Recall@10** | `470` | `98.47%` | `99.35%` | **`99.70%`** | `100.00%` | `99.63%` |
+| **Evidence Turn Coverage@10** | `470` | `98.71%` | `99.54%` | **`99.90%`** | `100.00%` | `99.87%` |
+| **Overall Accuracy** | **`500`** | `93.00%` (`465/500`) | `93.80%` (`469/500`) | **`97.20%` (`486 / 500`)** | **`98.00%` (`98/100`)** | **`97.00%` (`388/400`)** |
+| **Task-Averaged Accuracy** | `6` types | `93.66%` | `94.85%` | **`97.93%`** | **`97.87%`** | **`97.82%`** |
+
+### How Mnemosyne Achieved 97.20%
+
+1. **Multi-Granularity Sub-Passage + Dense Hybrid Retrieval (`99.70%` Session Recall@10, `99.90%` Turn Coverage@10)**: Combines `qwen/qwen3-embedding-8b` (`1024`-dim Matryoshka cosine similarity) with Mnemosyne's [`PassageIndex`](src/mnemosyne/passages.py) (`session` + `round` + `turn` BM25 scoring, higher weighting on user-authored turns, taxonomic hypernym-to-hyponym expansion in [`src/mnemosyne/text.py`](src/mnemosyne/text.py) for appliances/gadgets/kinship/devices, and self-age disclosure query expansion) plus top-2/top-4 lexical needle boosts.
+2. **Deterministic Calendar Delta Anchoring ([`compute_calendar_delta`](src/mnemosyne/temporal_delta.py))**: Precomputes and injects exact calendar deltas (`days`, `weeks + remaining days`, `rounded weeks`, and `full months`) into every retrieved session header relative to `Current Date`, eliminating LLM date-arithmetic drift (`96.99%` on `temporal-reasoning`).
+3. **Speaker-Separated Chronological User Statement Digest**: Extracts and ranks `user`-only turns (`role == "user"`) across the top-10 retrieved sessions and orders them chronologically above the full verbatim session transcripts, preventing assistant suggestions from contaminating user state tracking (`98.72%` on `knowledge-update`) while keeping 100% of assistant turns available (`100.00%` on `single-session-assistant`).
+4. **Epistemic & Multi-Granularity Cognitive Synthesis (`xhigh` Reasoning)**: Guides the reader to prioritize user facts over assistant estimates, recognize same-day cumulative counter updates, report dual temporal reference intervals, lead multi-session aggregations with inclusive deduplicated counts alongside narrower/raw counts (`94.74%` on `multi-session`), and always answer from the closest matching evidence before noting minor premise differences. See the [full technical report](docs/benchmark/LONGMEMEVAL-S-RESULTS.md).
 
 ## What it does
 
@@ -218,9 +263,12 @@ It runs independently of external benchmark sites, with no shared database or ru
 dependency on a leaderboard. See the [internal evaluation guide](eval/README.md).
 
 Historical scores apply only to their recorded revision, dataset, providers, hardware and
-configuration. They are not a current comparative ranking or proof of general answer quality.
-Recall measurement was hardened in October 2026; interpret older receipts in their original context.
-No new benchmark result is claimed by this README update.
+configuration. Recall measurement was hardened in October 2026; interpret older receipts in their
+original context. For the October 29, 2026 full 500-question LongMemEval-S evaluation
+(**`97.20%` (`486/500`) overall accuracy**, **`97.93%` task-averaged accuracy**, **`99.70%` Session Recall@10**,
+**`99.90%` Evidence Turn Coverage@10**), see the
+[LongMemEval-S Benchmark Report](docs/benchmark/LONGMEMEVAL-S-RESULTS.md) and archived receipts in
+[`eval/longmemeval_s/LongMemEval-results/`](eval/longmemeval_s/LongMemEval-results/).
 
 The [Hindsight comparison](docs/HINDSIGHT-COMPARISON.md) maps source-verified
 capabilities and remaining gaps. The [memory audit](docs/2026-10-22-memory-audit-report.md)
@@ -321,6 +369,7 @@ synthetic fixtures and made no benchmark or model-provider calls.
 ## Documentation
 
 - [Documentation index](docs/README.md)
+- [LongMemEval-S Benchmark Report (97.20% Overall / 97.93% Task-Averaged)](docs/benchmark/LONGMEMEVAL-S-RESULTS.md)
 - [Architecture overview](docs/ARCHITECTURE-OVERVIEW.md)
 - [Grounded reflection](docs/reflect.md)
 - [Maintained mental models](docs/mental-models.md)

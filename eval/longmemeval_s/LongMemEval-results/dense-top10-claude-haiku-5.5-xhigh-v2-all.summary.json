@@ -1,0 +1,63 @@
+{
+ "questions": 500,
+ "accuracy": 0.972,
+ "accuracy_ci95": [
+  0.9536,
+  0.9832
+ ],
+ "accuracy_ci_method": "wilson",
+ "task_averaged_accuracy": 0.9793,
+ "by_type": {
+  "knowledge-update": {
+   "accuracy": 0.9872,
+   "n": 78
+  },
+  "multi-session": {
+   "accuracy": 0.9474,
+   "n": 133
+  },
+  "single-session-assistant": {
+   "accuracy": 1.0,
+   "n": 56
+  },
+  "single-session-preference": {
+   "accuracy": 1.0,
+   "n": 30
+  },
+  "single-session-user": {
+   "accuracy": 0.9714,
+   "n": 70
+  },
+  "temporal-reasoning": {
+   "accuracy": 0.9699,
+   "n": 133
+  }
+ },
+ "abstention": {
+  "accuracy": 0.8667,
+  "n": 30
+ },
+ "evidence_recall_at_k": 0.997,
+ "evidence_turn_coverage": 0.999,
+ "avg_prompt_tokens_est": 37261.158,
+ "cost_usd": 3.1106,
+ "cost_basis": "provider-reported USD",
+ "answers_cut_off": 0,
+ "answers_empty": 0,
+ "reader_tokens": 32000,
+ "reader_tokens_enforced": true,
+ "judge_tokens": 10,
+ "judge_tokens_enforced": true,
+ "reader": "anthropic/claude-haiku-5.5",
+ "reasoning_effort": "xhigh",
+ "judge": "openai/gpt-4o-mini-2024-07-18",
+ "inference_provider": "openrouter",
+ "model_names_are_requested": false,
+ "mode": "dense",
+ "embedding": "cloud:qwen/qwen3-embedding-8b",
+ "context": "sessions",
+ "top_k": 10,
+ "budget": null,
+ "cot": true,
+ "split": "all"
+}

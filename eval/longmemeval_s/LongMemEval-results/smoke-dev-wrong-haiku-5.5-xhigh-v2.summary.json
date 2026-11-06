@@ -1,0 +1,51 @@
+{
+ "questions": 6,
+ "accuracy": 0.6667,
+ "accuracy_ci95": [
+  0.3,
+  0.9032
+ ],
+ "accuracy_ci_method": "wilson",
+ "task_averaged_accuracy": 0.7222,
+ "by_type": {
+  "knowledge-update": {
+   "accuracy": 0.5,
+   "n": 2
+  },
+  "multi-session": {
+   "accuracy": 0.6667,
+   "n": 3
+  },
+  "single-session-user": {
+   "accuracy": 1.0,
+   "n": 1
+  }
+ },
+ "abstention": {
+  "accuracy": 1.0,
+  "n": 1
+ },
+ "evidence_recall_at_k": 1.0,
+ "evidence_turn_coverage": 1.0,
+ "avg_prompt_tokens_est": 35078.6667,
+ "cost_usd": 0.0376,
+ "cost_basis": "provider-reported USD",
+ "answers_cut_off": 0,
+ "answers_empty": 0,
+ "reader_tokens": 32000,
+ "reader_tokens_enforced": true,
+ "judge_tokens": 10,
+ "judge_tokens_enforced": true,
+ "reader": "anthropic/claude-haiku-5.5",
+ "reasoning_effort": "xhigh",
+ "judge": "openai/gpt-4o-mini-2024-07-18",
+ "inference_provider": "openrouter",
+ "model_names_are_requested": false,
+ "mode": "dense",
+ "embedding": "cloud:qwen/qwen3-embedding-8b",
+ "context": "sessions",
+ "top_k": 10,
+ "budget": null,
+ "cot": true,
+ "split": "dev"
+}

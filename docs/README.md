@@ -31,8 +31,9 @@ One-screen map of `docs/`. Lane discipline applies throughout: each document own
 
 Division of authority: Plan A builds, Plan B proves and publishes — no external claim originates in Plan A, and where either says "measured/published," Plan B is the authority. Both extend the performance blueprint's Waves and the standing dated specs. The original combined plan is archived (below).
 
-## Research (`research/`)
+## Research & Benchmarks (`research/`, `benchmark/`)
 
+- [benchmark/LONGMEMEVAL-S-RESULTS.md](benchmark/LONGMEMEVAL-S-RESULTS.md) — **97.20% (486/500) Overall / 97.93% Task-Averaged LongMemEval-S Benchmark Report**: full metrics breakdown, leaderboard comparison, progression across runs, and deep-dive into Mnemosyne's hybrid multi-granularity retrieval, deterministic temporal delta anchoring, speaker-separated user digest, and cognitive synthesis rules.
 - [HINDSIGHT-COMPARISON.md](HINDSIGHT-COMPARISON.md) — source-pinned capability comparison and delivery priorities.
 - [2026-10-22-memory-audit-report.md](2026-10-22-memory-audit-report.md) — implemented fixes, development evaluation receipts and remaining gaps.
 - [AI-Memory-Systems-Market-Research-2026.md](research/AI-Memory-Systems-Market-Research-2026.md) / `.pdf` — the competitive + benchmark landscape (systems, SWOTs, benchmark credibility problems). Ground-truth reference for Execution Plan B.
