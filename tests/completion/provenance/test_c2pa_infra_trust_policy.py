@@ -36,9 +36,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shlex
 import stat
-import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
