@@ -75,6 +75,10 @@ The second command writes separate `phase15-s4-warm.json` and
 `phase15-s4-concurrent.json` reports without relabeling the historical
 `latency_bench_latest.json` report.
 
+The repository tests generate these receipts in a temporary directory and check
+their format, provenance, and separation. Historical benchmark receipts remain
+in Mnemetric; running Mnemosyne's tests does not require copies of that archive.
+
 ## Local retrieval baseline and checks
 
 [`perf_e2e_bench.py`](perf_e2e_bench.py) measures warm `retrieve()` calls on

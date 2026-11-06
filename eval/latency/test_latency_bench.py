@@ -510,11 +510,25 @@ def test_concurrent_receipt_invalid_when_overlap_or_inflight_mismatch():
     assert "observed_overlap_mismatch" in reasons
 
 
-def test_phase15_reports_are_separate_synthetic_receipts():
-    assert WARM_REPORT.is_file()
-    assert CONCURRENT_REPORT.is_file()
-    warm = json.loads(WARM_REPORT.read_text(encoding="utf-8"))
-    concurrent = json.loads(CONCURRENT_REPORT.read_text(encoding="utf-8"))
+def test_phase15_reports_are_separate_synthetic_receipts(tmp_path, monkeypatch):
+    import bench_concurrent
+
+    # Historical benchmark evidence lives in Mnemetric. Exercise the retained
+    # writer here with fresh synthetic measurements, without restoring copies
+    # of that archive or replacing the repository's historical latest reports.
+    warm_path = tmp_path / WARM_REPORT.name
+    concurrent_path = tmp_path / CONCURRENT_REPORT.name
+    monkeypatch.setattr(bench, "PHASE15_S4_WARM_REPORT", warm_path)
+    monkeypatch.setattr(bench, "PHASE15_S4_CONCURRENT_REPORT", concurrent_path)
+    expected_sha, expected_clean = bench._git_identity()
+    latest_before = {
+        path: path.read_bytes() if path.exists() else None
+        for path in (LATEST_JSON, WARM_LATEST_JSON)
+    }
+    assert bench_concurrent.emit_phase15_s4_receipts() == (warm_path, concurrent_path)
+    assert warm_path.is_file() and concurrent_path.is_file()
+    warm = json.loads(warm_path.read_text(encoding="utf-8"))
+    concurrent = json.loads(concurrent_path.read_text(encoding="utf-8"))
     _assert_receipt_abi(warm, distribution="warm-serial", declared_concurrency=1)
     _assert_receipt_abi(
         concurrent,
@@ -529,12 +543,15 @@ def test_phase15_reports_are_separate_synthetic_receipts():
     assert warm["official_claim"] is False
     assert concurrent["official_claim"] is False
     stale_sha = "c3a16b7e0d1e593f6957a291f2ae61cd469a7359"
-    assert warm["identity"]["clean_tree"] is True
-    assert concurrent["identity"]["clean_tree"] is True
+    # A local run can have uncommitted work. Bind the reported cleanliness to
+    # the actual checkout instead of mislabeling fresh output as a clean run.
+    assert warm["identity"]["clean_tree"] is expected_clean
+    assert concurrent["identity"]["clean_tree"] is expected_clean
     assert warm["identity"]["repository_sha"] != stale_sha
     assert concurrent["identity"]["repository_sha"] != stale_sha
     for receipt in (warm, concurrent):
         sha = receipt["identity"]["repository_sha"]
+        assert sha == expected_sha
         shown = subprocess.check_output(
             ["git", "rev-parse", "--verify", sha],
             cwd=REPO_ROOT,
@@ -549,6 +566,8 @@ def test_phase15_reports_are_separate_synthetic_receipts():
         assert "execute_pinned_workload" in tree
         assert "_execute_with_deadline" in tree
         assert "future.result(timeout=" in tree
+    for path, before in latest_before.items():
+        assert (path.read_bytes() if path.exists() else None) == before
 
 
 def test_phase15_write_does_not_relabel_historical_latest():

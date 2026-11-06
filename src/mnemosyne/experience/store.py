@@ -6,6 +6,7 @@ import copy
 import json
 import threading
 from contextlib import contextmanager
+from uuid import uuid4
 
 TABLES = {
     "receipts": "learning_receipts",
@@ -263,8 +264,6 @@ class LearningStore:
             slot = digest([change["collection"], change["key"]])
             key_id = slots.get(slot)
             if key_id not in keyring:
-                from uuid import uuid4
-
                 key_id = str(uuid4())
                 slots[slot] = key_id
                 keyring[key_id] = {

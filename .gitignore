@@ -47,8 +47,9 @@ work/hindsight-comparison/controlled/raw/
 work/hindsight-comparison/controlled/run-*/contexts/
 work/hindsight-comparison/controlled/run-*/native-receipts/
 
-# Local duplicates/cache; durable receipts are in eval/longmemeval_s/LongMemEval-results/.
+# Local development outputs/cache; public benchmark archives belong to Mnemetric.
 /work/longmemeval-openrouter/
+/eval/longmemeval_s/LongMemEval-results/
 
 # Teamwork agent metadata and dispatch prompt
 .agents/

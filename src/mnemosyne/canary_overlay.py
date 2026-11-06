@@ -49,6 +49,16 @@ THIN_CANARIES_ENV = "MNEMOSYNE_THIN_CANARIES"
 _ACTIVE = ("active", "contested")
 
 
+def _relation_group_keys(subject: str, predicate: str) -> set[tuple[str, str]]:
+    """The normalized relation groups assertion supersession can close."""
+    predicates = {predicate.strip().lower()}
+    for aliases in ({"residence", "lives_in"}, {"education", "graduated_from"},
+                    {"works_at", "employed_by"}):
+        if predicates & aliases:
+            predicates.update(aliases)
+    return {(subject.strip().lower(), pred) for pred in predicates}
+
+
 def thin_canaries_enabled() -> bool:
     return os.environ.get(THIN_CANARIES_ENV, "1").strip().lower() not in {"0", "false", "no", "off"}
 
@@ -284,7 +294,7 @@ class CanaryOverlayMixin:
             return self._upsert_assertion_core(assertion, branch)
 
     def _overlay_materialize_group(self, name: str, overlay: CanaryOverlay, subject: str, predicate: str) -> None:
-        """Copy one assertion group into the overlay, exactly as a full branch holds it."""
+        """Copy one assertion group and its relation peers as a full branch holds them."""
         tenant_id = overlay.tenant_id
         self._overlay_flush_group(tenant_id, subject, predicate)
         for item in list(self._assertion_items.peers(tenant_id, overlay.parent, subject, predicate).values()):
@@ -293,6 +303,17 @@ class CanaryOverlayMixin:
                 clone = copy.deepcopy(item)
                 clone.branch = name
                 self._assertion_items[key] = clone
+        # Superseding a canary assertion also closes its relations. Detach only
+        # those peers so that this write cannot alter the parent's graph.
+        groups = _relation_group_keys(subject, predicate)
+        for item in list(self._relation_items.in_branch(tenant_id, overlay.parent).values()):
+            if (item.source.strip().lower(), item.predicate.strip().lower()) not in groups:
+                continue
+            key = self._branch_key(tenant_id, name, item.id)
+            if dict.get(self._relation_items, key) is None:
+                clone = copy.deepcopy(item)
+                clone.branch = name
+                self._relation_items[key] = clone
 
     def evidence_rows_for_reading(self) -> Any:
         """The evidence map for code that only READS rows (no settling, no copies).
@@ -411,6 +432,18 @@ class CanaryOverlayMixin:
                          if (item := dict.get(assertions, key)) is not None]
                 eager = touched + dirty + sorted(state.unstable)
             eager_groups = list(dict.fromkeys(eager))
+            # Assertion replay can temporarily close a main relation before a
+            # later assertion restores the active fact. A full branch retains
+            # independent relation inputs for its subsequent relation replay;
+            # preserve those same inputs before mutating main here.
+            relation_groups = set().union(*(
+                _relation_group_keys(*group) for group in eager_groups
+            ))
+            relation_snapshots = {
+                item.id: copy.deepcopy(item)
+                for item in relations.in_branch(tenant, into).values()
+                if (item.source.strip().lower(), item.predicate.strip().lower()) in relation_groups
+            }
             id_map: dict[str, str] = {}
             added_keys: list[str] = []
 
@@ -458,6 +491,8 @@ class CanaryOverlayMixin:
 
             # Relations: replay what can change, members before the canary's own relations.
             canary_relations = list(relations.in_branch(tenant, frm).values())
+            canary_relation_copies = {item.id: item for item in canary_relations
+                                     if dict.get(relations, self._branch_key(tenant, into, item.id)) is not None}
             touched_keys = [(rel.source, rel.predicate, rel.target) for rel in canary_relations]
             if state.first:
                 rel_eager = [(rel.source, rel.predicate, rel.target)
@@ -466,7 +501,9 @@ class CanaryOverlayMixin:
                 rel_dirty = [(rel.source, rel.predicate, rel.target) for key in state.born_last_relations
                              if (rel := dict.get(relations, key)) is not None]
                 rel_eager = touched_keys + rel_dirty + sorted(state.multi_relations)
-            rel_keys = list(dict.fromkeys(rel_eager))
+            rel_keys = list(dict.fromkeys(rel_eager + [
+                (rel.source, rel.predicate, rel.target) for rel in relation_snapshots.values()
+            ]))
             added_rel_keys: list[str] = []
 
             def replay_relation(rel: Any) -> None:
@@ -493,9 +530,11 @@ class CanaryOverlayMixin:
 
             for key3 in rel_keys:
                 for member in list(relations.peers(tenant, into, *key3).values()):
-                    replay_relation(copy.deepcopy(member))
+                    source = canary_relation_copies.get(member.id, relation_snapshots.get(member.id, member))
+                    replay_relation(copy.deepcopy(source))
             for rel in canary_relations:
-                replay_relation(rel)
+                if rel.id not in canary_relation_copies:
+                    replay_relation(rel)
 
             self.merge_log.append(report.to_dict())
             self._audit(tenant_id or "*", "engine", "merge", frm, report.to_dict())
@@ -708,7 +747,7 @@ class CanaryOverlayMixin:
         parent row untouched is observably the same. An inherited row whose copy a merge would
         re-insert has its group copied into the overlay first, and the copy is stamped.
         """
-        from mnemosyne.engine import _bounded_float, utc_now
+        from mnemosyne.engine import utc_now
 
         if self._read_only:
             return {"assertions": 0, "evidence": 0}
