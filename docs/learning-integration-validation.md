@@ -31,6 +31,22 @@ The PostgreSQL source-locked publication path also attempted schema-readiness DD
 
 The wheel builds successfully. An isolated import of the built wheel verifies all 22 active defaults, SDK external-outcome resolution, one canonical trajectory, and durable reload.
 
+## Final verification
+
+| Check | Result |
+| --- | --- |
+| Default suite, consolidated across eight partitions and final fix verification | 7,846 passed; 550 skipped; 10 retained golden-fixture mismatches. |
+| Current collection coverage | All 8,406 selected test cases accounted for; zero missing. The existing 191 configured deselections remain excluded. |
+| Final focused run in the actual main checkout | 1,362 passed; 115 skipped. |
+| Final skill-owner projection, serving, and host checks in main | 42 passed. |
+| Repeated current quality-gate runs | Bit-for-bit reproducibility and historical nonregression checks passed. |
+| Additional evaluation tests outside the default suite | 50 passed; one archived-receipt fixture unavailable, described below. |
+| Built-wheel isolation | Passed: installed-target imports, 22 active defaults, one canonical episode/compatibility view, separate-process reload, and same-text runtime/SDK capture for distinct users. |
+
+Counts are deduplicated by current test identity; overlapping fix-verification runs are not added twice. Superseded test identities and repeated collection-level skips are not counted as selected cases. Environment-dependent tests, including live PostgreSQL coverage, remain skipped rather than reported as passing.
+
+The final source wheel is `mnemosyne_memory-1.7.0-py3-none-any.whl`, SHA256 `6f412e4c88701d4db24649d1b10fba168d4c6d4bd99925747ac6edf138a90339`. All 118 source files in the integrated worktree match the actual main checkout. Validation logs, the per-case coverage audit, and the installed-wheel smoke scripts are retained locally under `/Users/admin/.codex/tmp/mnemosyne-learning-validation-20261105/`.
+
 ## Retained golden-fixture mismatches
 
 The legacy golden fixtures are not rewritten to make this cleanup appear green:
@@ -41,3 +57,5 @@ The legacy golden fixtures are not rewritten to make this cleanup appear green:
 Independent comparisons use the pre-cleanup checkpoint and the original main checkout. For the formerly nonterminating relation scenario, only the relation replay fix is injected into the baseline process; baseline files are not changed. In both branch modes, all four scenario query outputs match exactly. Complete rails/G0 dumps match. After normalizing learning audit IDs, growth/conflict differences are limited to the intended reduction in duplicate creation/reuse counters and canonical persistence audit events. With time frozen, all four complete pipeline retrieval surfaces match the pre-cleanup checkpoint exactly.
 
 Live PostgreSQL verification requires a configured PostgreSQL test database. Local/mock backend checks do not substitute for that environment or establish learning benefit on a sealed benchmark.
+
+The additional latency evaluation tests include one archived-receipt assertion outside the default suite: `test_phase15_reports_are_separate_synthetic_receipts`. Its required `phase15-s4-warm.json` and `phase15-s4-concurrent.json` were removed from Mnemosyne in `28f99b9a` when benchmark evidence moved to Mnemetric. The test and missing fixtures are unchanged on `origin/dev`. This validation does not fabricate replacement historical receipts; the live receipt-generation and ABI tests remain exercised.
