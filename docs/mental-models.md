@@ -203,10 +203,15 @@ direct reads; lists include only matching models. Signed MCP sessions bind the
 tenant, user, role, and source trust as on other authenticated tools. Mutation
 and requested refresh require write authorization.
 
-Ready and abstained views scan and fingerprint the authorized branch's evidence, assertions,
-relations, preferences, and policy, excluding read telemetry. Its cost grows with
-that corpus; incremental change tracking is not yet implemented. Pending and
-error views return no answer or source identifiers and need no corpus scan.
+Ready and abstained views fingerprint the authorized branch's evidence,
+assertions, relations, preferences, and policy, excluding read telemetry.
+After an initial snapshot, source revision records identify changed rows and
+their dependent projections. Ordinary updates revalidate that affected set.
+SQLite and PostgreSQL record changes in the source transaction. Local storage
+tracks supported writes and falls back to a complete snapshot for unknown or
+bulk mutations. Cold caches also establish a complete verified snapshot.
+Pending and error views return no answer or source identifiers and need no
+corpus snapshot.
 Lists filter the owner and read scope before deciding whether a scan is needed.
 New facts and corrections can
 invalidate an answer even when its old citations remain. Before returning a
@@ -255,8 +260,11 @@ with zero skips/failures and **9/9 live role checks**. Providers were determinis
 fixtures; lease expiry used a controlled clock with real database sessions.
 Production load, remote deployments and other PostgreSQL versions were not tested.
 
-Existing PostgreSQL deployments need the updated [schema](../sql/schema.sql)
-and the narrow `mental_models` DELETE grant in [roles.sql](../infra/postgres/roles.sql).
+Existing PostgreSQL deployments should apply the updated [schema](../sql/schema.sql),
+including the source revision tables and triggers, to enable incremental
+snapshots. A database without that tracking uses complete verified snapshots.
+Model deletion also needs the narrow `mental_models` DELETE grant in
+[roles.sql](../infra/postgres/roles.sql).
 That grant fixes owner-authorized model deletion and the branch foreign-key
 cascade. Model service ownership checks still apply; app DELETE on evidence,
 branches and audit rows remains denied. Apply the equivalent grant through the
@@ -264,9 +272,11 @@ deployment's migration process rather than rerunning role creation.
 
 Refresh uses reflection's bounded orchestrator and exact quotations or supported
 deterministic calculations. Citation validity does not guarantee that a chosen
-quotation answers the question well. Interval workers perform the same full
-freshness checks and bounded regeneration as explicit refresh. Incremental
-delta synthesis, wiki generation, and freeform model synthesis are not
-implemented. This feature makes no comparative ranking claim; the separate
+quotation answers the question well. Interval workers perform the same
+freshness checks and bounded regeneration as explicit refresh.
+`MentalModelService.delta_refresh` and consolidation-triggered invalidation
+support dependency-aware updates. Knowledge pages have their own source-backed
+projection service. Refresh continues to use the grounded answer contract.
+The separate
 [controlled comparison protocol](comparison-protocol.md) requires completed
 run receipts before reporting benchmark results.

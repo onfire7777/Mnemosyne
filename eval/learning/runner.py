@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ProcessPoolExecutor
+from functools import partial
 import hashlib
 import json
 import os
 from pathlib import Path
+import pickle
 import subprocess
 import tempfile
 from typing import Any
@@ -17,6 +20,64 @@ from .metrics import paired_interval
 
 DATASET = Path(__file__).resolve().parents[1] / "datasets" / "learning"
 MANIFEST = DATASET / "manifest.json"
+
+
+def _source_hashes():
+    repository = DATASET.parents[2]
+    paths = [
+        *Path(__file__).parent.glob("*.py"),
+        *repository.joinpath("src", "mnemosyne").rglob("*.py"),
+    ]
+    return {
+        str(path.relative_to(repository)): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in sorted(paths)
+    }
+
+
+def _run_case(
+    engine_factory, agent_factory, variant, protocol, episodes, checkpoint_dir, case
+):
+    from mnemosyne.experience.runtime import LearningRuntime
+
+    family, seed, arm = case
+    if (
+        arm.startswith("without_")
+        and load_manifest()["ablation_components"][arm] is None
+    ):
+        result = {
+            "family": family,
+            "seed": seed,
+            "arm": arm,
+            "rows": [],
+            "metrics": {},
+            "evidence": {},
+            "verified": False,
+            "supported": False,
+            "verification_reason": "runtime does not expose this mechanism ablation",
+        }
+    else:
+        with tempfile.TemporaryDirectory(prefix="mnem-learning-") as directory:
+            engine = engine_factory(Path(directory))
+            try:
+                result = run_stream(
+                    LearningRuntime(engine),
+                    family,
+                    seed,
+                    arm,
+                    variant=variant,
+                    episodes=episodes,
+                    protocol=protocol,
+                    agent=agent_factory(seed) if agent_factory else None,
+                )
+            finally:
+                if engine is not None and hasattr(engine, "close"):
+                    engine.close()
+    if checkpoint_dir is not None:
+        path = checkpoint_dir / f"f{family:02d}-seed{seed}-{arm}.json"
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(result, indent=2, allow_nan=False) + "\n")
+        temporary.replace(path)
+    return result
 
 
 def load_manifest() -> dict:
@@ -54,16 +115,17 @@ def run_stream(
     variant: str = "dev",
     episodes: int = 64,
     agent=None,
+    protocol="specialized-v1",
 ) -> dict:
     """Run the specialized environment; never substitute generic gold-choice flags."""
-    from .probes import run_specialized_probe
+    from .probes import run_specialized_probe, tenant_name
 
     if runtime is None:
         from mnemosyne.engine import LocalMemoryEngine
         from mnemosyne.experience.runtime import LearningRuntime
 
         runtime = LearningRuntime(LocalMemoryEngine())
-    tenant = f"probe-f{family}-{seed}-{arm}"
+    tenant = tenant_name(family, seed, arm, protocol)
     if arm.startswith("without_"):
         component = load_manifest()["ablation_components"][arm]
         if component is None:
@@ -80,7 +142,13 @@ def run_stream(
             }
         runtime.mode(tenant, component, "off")
     result = run_specialized_probe(
-        runtime, family, seed, budget=episodes, agent=agent, arm=arm
+        runtime,
+        family,
+        seed,
+        budget=episodes,
+        agent=agent,
+        arm=arm,
+        protocol=protocol,
     )
     result["variant"] = variant
     result["track"] = "model" if agent is not None else "scripted"
@@ -99,23 +167,41 @@ def build_report(
     episodes: int = 64,
     agent_factory=None,
     sealed_registry: Path | None = None,
+    workers: int = 1,
+    checkpoint_dir: Path | None = None,
+    protocol: str = "specialized-v1",
 ) -> dict:
-    from mnemosyne.experience.runtime import LearningRuntime
-
     manifest = load_manifest()
-    selected = list(family_ids or range(1, 27))
-    arm_names = list(arms or manifest["arms"])
+    selected = list(range(1, 27) if family_ids is None else family_ids)
+    arm_names = list(manifest["arms"] if arms is None else arms)
     if (
         split not in manifest["splits"]
         or not selected
         or any(f not in range(1, 27) for f in selected)
+        or len(set(selected)) != len(selected)
     ):
         raise ValueError("unknown split or family")
-    if not arm_names or any(arm not in manifest["arms"] for arm in arm_names):
+    if (
+        not arm_names
+        or any(arm not in manifest["arms"] for arm in arm_names)
+        or len(set(arm_names)) != len(arm_names)
+    ):
         raise ValueError("unknown benchmark arm")
     if episodes < 4:
         raise ValueError("episodes must be at least four")
+    if protocol not in {"specialized-v1", "common-pretraining-v2"}:
+        raise ValueError("unknown learning evaluation protocol")
+    if split == "sealed" and protocol != "specialized-v1":
+        raise ValueError("common-pretraining-v2 is a development-only protocol")
+    if type(workers) is not int or workers < 1:
+        raise ValueError("workers must be a positive integer")
+    if workers > 1:
+        try:
+            pickle.dumps((engine_factory, agent_factory))
+        except (pickle.PicklingError, AttributeError, TypeError) as error:
+            raise ValueError("parallel workers require picklable factories") from error
     repository = DATASET.parents[2]
+    source_hashes = _source_hashes()
     commit = subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=repository, text=True
     ).strip()
@@ -131,47 +217,29 @@ def build_report(
         reservation = reserve_sealed_run(
             sealed_registry or DATASET / "sealed_runs", commit
         )
-    results = []
-    for family in selected:
-        for seed in manifest["splits"][split]["seeds"]:
-            for arm in arm_names:
-                with tempfile.TemporaryDirectory(prefix="mnem-learning-") as directory:
-                    engine = engine_factory(Path(directory))
-                    runtime = LearningRuntime(engine)
-                    if (
-                        arm.startswith("without_")
-                        and manifest["ablation_components"][arm] is None
-                    ):
-                        results.append(
-                            {
-                                "family": family,
-                                "seed": seed,
-                                "arm": arm,
-                                "rows": [],
-                                "metrics": {},
-                                "evidence": {},
-                                "verified": False,
-                                "supported": False,
-                                "verification_reason": "runtime does not expose this mechanism ablation",
-                            }
-                        )
-                        if engine is not None and hasattr(engine, "close"):
-                            engine.close()
-                        continue
-                    try:
-                        result = run_stream(
-                            runtime,
-                            family,
-                            seed,
-                            arm,
-                            variant=manifest["splits"][split]["variant"],
-                            episodes=episodes,
-                            agent=agent_factory(seed) if agent_factory else None,
-                        )
-                    finally:
-                        if engine is not None and hasattr(engine, "close"):
-                            engine.close()
-                    results.append(result)
+    if checkpoint_dir is not None:
+        checkpoint_dir = Path(checkpoint_dir)
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    cases = [
+        (family, seed, arm)
+        for family in selected
+        for seed in manifest["splits"][split]["seeds"]
+        for arm in arm_names
+    ]
+    execute = partial(
+        _run_case,
+        engine_factory,
+        agent_factory,
+        manifest["splits"][split]["variant"],
+        protocol,
+        episodes,
+        checkpoint_dir,
+    )
+    if workers == 1:
+        results = [execute(case) for case in cases]
+    else:
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(execute, cases))
     comparisons = []
     missing_comparisons = []
 
@@ -188,11 +256,19 @@ def build_report(
         def pair_is_aligned(a, b):
             if a["seed"] != b["seed"]:
                 return False
+            if protocol == "common-pretraining-v2" and [
+                (r["query"], r["action"], r["expected"])
+                for r in a.get("setup_rows", [])
+            ] != [
+                (r["query"], r["action"], r["expected"])
+                for r in b.get("setup_rows", [])
+            ]:
+                return False
             if metric != "aulc":
                 return (
                     a.get("supported")
                     and b.get("supported")
-                    and a.get("probe") == b.get("probe") == "specialized-v1"
+                    and a.get("probe") == b.get("probe") == protocol
                     and a.get("episode_budget") == b.get("episode_budget")
                     and metric in a.get("evidence", {})
                     and metric in b.get("evidence", {})
@@ -200,8 +276,26 @@ def build_report(
             return (
                 a.get("metrics")
                 and b.get("metrics")
-                and [(r["query"], r["expected"], r["phase"]) for r in a["rows"]]
-                == [(r["query"], r["expected"], r["phase"]) for r in b["rows"]]
+                and [
+                    (
+                        r["query"],
+                        r["expected"],
+                        r["phase"],
+                        r.get("choices"),
+                        r.get("task_class"),
+                    )
+                    for r in a["rows"]
+                ]
+                == [
+                    (
+                        r["query"],
+                        r["expected"],
+                        r["phase"],
+                        r.get("choices"),
+                        r.get("task_class"),
+                    )
+                    for r in b["rows"]
+                ]
             )
 
         aligned = len(learned) == len(controls) == len(
@@ -276,6 +370,11 @@ def build_report(
             "commit": commit,
             "dirty": dirty,
             "episode_budget": episodes,
+            "workers": workers,
+            "protocol": protocol,
+            "estimand": "retention, adaptation and transfer after matched learning-enabled setup"
+            if protocol == "common-pretraining-v2"
+            else "learning from initially empty memory",
             "seeds": manifest["splits"][split]["seeds"],
             "split_checksum": manifest["split_hashes"][split],
             "manifest_sha256": hashlib.sha256(MANIFEST.read_bytes()).hexdigest(),
@@ -287,6 +386,8 @@ def build_report(
                 .with_name("model_agent.py" if agent_factory else "simulator.py")
                 .read_bytes()
             ).hexdigest(),
+            "source_sha256_at_start": source_hashes,
+            "source_changed_during_run": source_hashes != _source_hashes(),
             "sealed_reservation": str(reservation) if reservation else None,
         },
         "passed": passing,
@@ -302,6 +403,26 @@ def build_report(
     }
 
 
+def _make_engine(path, *, backend, postgres_dsn=None, in_memory=False):
+    if backend == "local":
+        from mnemosyne.engine import LocalMemoryEngine
+
+        return LocalMemoryEngine(store_path=None if in_memory else path / "store.json")
+    if backend == "sqlite":
+        from mnemosyne.sqlite_engine import SqliteEngine
+
+        return SqliteEngine(path / "store")
+    from mnemosyne.postgres_engine import PostgresEngine
+
+    return PostgresEngine(postgres_dsn)
+
+
+def _make_model_agent(seed, *, argv, model, temperature):
+    from .model_agent import CommandModelAgent, ModelConfiguration
+
+    return CommandModelAgent(ModelConfiguration(tuple(argv), model, temperature, seed))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--split", choices=["dev", "sealed"], default="dev")
@@ -312,6 +433,16 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--sealed-registry", type=Path, default=DATASET / "sealed_runs")
     parser.add_argument("--episodes", type=int, default=64)
+    parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument(
+        "--protocol",
+        choices=["specialized-v1", "common-pretraining-v2"],
+        default="specialized-v1",
+    )
+    parser.add_argument("--checkpoint-dir", type=Path)
+    parser.add_argument(
+        "--in-memory", action="store_true", help="Use isolated ephemeral local engines"
+    )
     parser.add_argument("--families", type=int, nargs="+", choices=range(1, 27))
     parser.add_argument("--arms", nargs="+", choices=load_manifest()["arms"])
     parser.add_argument(
@@ -320,37 +451,30 @@ def main():
     parser.add_argument("--model")
     parser.add_argument("--temperature", type=float, default=0.0)
     args = parser.parse_args()
-    if args.backend == "local":
-        from mnemosyne.engine import LocalMemoryEngine
-
-        def factory(path):
-            return LocalMemoryEngine(store_path=path / "store.json")
-    elif args.backend == "sqlite":
-        from mnemosyne.sqlite_engine import SqliteEngine
-
-        def factory(path):
-            return SqliteEngine(path / "store")
-    else:
-        from mnemosyne.postgres_engine import PostgresEngine
-
-        if not args.postgres_dsn:
-            parser.error("--postgres-dsn is required for postgres")
-
-        def factory(path):
-            return PostgresEngine(args.postgres_dsn)
+    if args.backend == "postgres" and not args.postgres_dsn:
+        parser.error("--postgres-dsn is required for postgres")
+    if args.backend != "local" and args.in_memory:
+        parser.error("--in-memory is only available with the local backend")
+    if args.backend == "postgres" and args.workers != 1:
+        parser.error("postgres streams share tenant names and must execute serially")
+    if args.backend == "postgres" and args.protocol == "common-pretraining-v2":
+        parser.error("common-pretraining-v2 requires an isolated engine store per arm")
+    factory = partial(
+        _make_engine,
+        backend=args.backend,
+        postgres_dsn=args.postgres_dsn,
+        in_memory=args.in_memory,
+    )
 
     agent_factory = None
     if args.agent_command_json:
-        from .model_agent import CommandModelAgent, ModelConfiguration
-
         argv = json.loads(args.agent_command_json)
         if not args.model or not isinstance(argv, list):
             parser.error("--agent-command-json requires a JSON argv array and --model")
 
-        def agent_factory(seed):
-            return CommandModelAgent(
-                ModelConfiguration(tuple(argv), args.model, args.temperature, seed)
-            )
+        agent_factory = partial(
+            _make_model_agent, argv=argv, model=args.model, temperature=args.temperature
+        )
     elif args.model:
         parser.error("--model requires --agent-command-json")
     report = build_report(
@@ -361,6 +485,9 @@ def main():
         family_ids=args.families,
         arms=args.arms,
         sealed_registry=args.sealed_registry,
+        workers=args.workers,
+        checkpoint_dir=args.checkpoint_dir,
+        protocol=args.protocol,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")

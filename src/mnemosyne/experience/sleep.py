@@ -318,6 +318,14 @@ def consolidate(runtime, tenant: str) -> dict:
     analysis_batch = list(
         {row["id"]: row for row in [*batch, *reflection_episodes]}.values()
     )
+    eligible_episodes = {
+        row["id"] for row in snapshot["episodes"].values()
+        if runtime._sources_live(tenant, row.get("source_cids", []), row.get("user_id"))
+    }
+    skipped_episodes = {
+        row["id"] for row in analysis_batch if row["id"] not in eligible_episodes
+    }
+    analysis_batch = [row for row in analysis_batch if row["id"] in eligible_episodes]
     by_class = defaultdict(list)
     for episode in analysis_batch:
         if abs(episode["rpe"]) >= 0.2 or any(
@@ -325,7 +333,10 @@ def consolidate(runtime, tenant: str) -> dict:
         ):
             by_class[(episode["user_id"], episode["task_class"])].append(episode)
     candidates = []
-    splits = (_scoped_splits(snapshot, tenant)
+    induction_snapshot = {**snapshot, "episodes": {
+        key: row for key, row in snapshot["episodes"].items() if key in eligible_episodes
+    }}
+    splits = (_scoped_splits(induction_snapshot, tenant)
               if runtime._enabled(snapshot, "pattern_separation") else [])
     for split in splits:
         if split["id"] in snapshot["policy"].get("pattern_splits", {}):
@@ -349,6 +360,7 @@ def consolidate(runtime, tenant: str) -> dict:
             and episode["user_id"] == user
             and episode["status"] == "resolved"
             and episode["reward"] > 0
+            and episode["id"] in eligible_episodes
         ]
         demonstrated = [steps for episode in successes if (steps := observed_steps(episode))]
         if len(demonstrated) >= 2 and (steps := common_sequence(demonstrated)):
@@ -426,9 +438,16 @@ def consolidate(runtime, tenant: str) -> dict:
     if distill_mode != "off":
         candidates.extend(hypothesis_candidates)
     prepared = []
+    skipped_candidates = 0
     for candidate in candidates:
         _reuse_existing_identity(candidate, snapshot)
     for candidate in _combine_candidates(candidates):
+        # Historical episodes can reference writes deferred by an older host.
+        # Keep their immutable history, but never reuse partially missing or
+        # erased provenance for a new learned behavior.
+        if not set(candidate["source_episode_ids"]) <= eligible_episodes:
+            skipped_candidates += 1
+            continue
         existing = snapshot["artifacts"].get(candidate["id"])
         if existing and existing["state"] != "candidate":
             continue
@@ -491,7 +510,10 @@ def consolidate(runtime, tenant: str) -> dict:
             candidate["state"] = "probation"
         prepared.append(candidate)
     hypotheses = (
-        _dream_hypotheses(runtime, tenant, batch, snapshot)
+        _dream_hypotheses(
+            runtime, tenant,
+            [row for row in batch if row["id"] in eligible_episodes], snapshot,
+        )
         if runtime._enabled(snapshot, "dreamer")
         else []
     )
@@ -572,7 +594,11 @@ def consolidate(runtime, tenant: str) -> dict:
                 0.08,
             )
             _homeostasis(state, budget=budget)
-        return {"replayed": len(batch), "candidates": created}
+        return {
+            "replayed": len(batch), "candidates": created,
+            "skipped_unavailable_source_episodes": len(skipped_episodes),
+            "skipped_unavailable_source_candidates": skipped_candidates,
+        }
 
     return runtime.writer.apply(
         tenant,

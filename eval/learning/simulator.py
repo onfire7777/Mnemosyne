@@ -26,8 +26,13 @@ class ScriptedAgent:
         self.epsilon = epsilon
 
     def act(
-        self, task: Task, context: Mapping[str, Any]
+        self,
+        task: Task,
+        context: Mapping[str, Any],
+        *,
+        explore: bool = True,
     ) -> tuple[str, list[str], list[str]]:
+        epsilon = self.epsilon if explore else 0.0
         procedures = list(context.get("procedures", [])) + list(
             context.get("skills", [])
         )
@@ -63,7 +68,7 @@ class ScriptedAgent:
                         continue
                     if isinstance(parsed, dict) and "status" in parsed:
                         matches.append(choice)
-            if matches and self.rng.random() >= self.epsilon:
+            if matches and self.rng.random() >= epsilon:
                 identifier = (
                     top.get("id", top.get("skill_id", ""))
                     if isinstance(top, Mapping)
@@ -77,7 +82,7 @@ class ScriptedAgent:
                     [identifier] if kind == "lesson" and identifier else [],
                 )
         hits = context.get("hits", context.get("retrieval", {}).get("hits", []))
-        if hits and self.rng.random() >= self.epsilon:
+        if hits and self.rng.random() >= epsilon:
             top = as_mapping(hits[0])
             matches = [
                 choice for choice in task.choices if choice in top.get("text", "")

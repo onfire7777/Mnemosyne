@@ -159,13 +159,13 @@ def test_fast_path_read_skips_export_on_unchanged_corpora(engine, monkeypatch):
 
     # Track calls to export_tenant_filtered
     export_counts = {"count": 0}
-    original_export = engine.export_tenant_filtered
+    original_export = engine.export_tenant
 
     def counted_export(*args, **kwargs):
         export_counts["count"] += 1
         return original_export(*args, **kwargs)
 
-    monkeypatch.setattr(engine, "export_tenant_filtered", counted_export)
+    monkeypatch.setattr(engine, "export_tenant", counted_export)
 
     # Perform 25 repeated reads on the unchanged branch
     for _ in range(25):
@@ -209,13 +209,13 @@ def test_clear_watermark_cache_invalidates_snapshot_cache(engine, monkeypatch):
     assert service.get(CTX, mid)["status"] == "ready"
 
     export_counts = {"count": 0}
-    original_export = engine.export_tenant_filtered
+    original_export = engine.export_tenant
 
     def counted_export(*args, **kwargs):
         export_counts["count"] += 1
         return original_export(*args, **kwargs)
 
-    monkeypatch.setattr(engine, "export_tenant_filtered", counted_export)
+    monkeypatch.setattr(engine, "export_tenant", counted_export)
 
     # First read uses cache
     service.get(CTX, mid)

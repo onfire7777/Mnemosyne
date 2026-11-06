@@ -11,6 +11,7 @@ import copy
 import hashlib
 import json
 import re
+import threading
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -25,6 +26,7 @@ from mnemosyne.answering import (
     public_grounded_answer,
 )
 from mnemosyne.retrieval import classify_scoped_evidence, derived_source_cids, query_time_window
+from mnemosyne.mental_model_sources import SourceSnapshot, register_source_cache_engine
 from mnemosyne.mental_model_refresh import (
     cancel_lease,
     new_schedule,
@@ -345,6 +347,9 @@ class MentalModelService:
         self.engine = engine
         self.provider_factory = provider_factory
         self._snapshot_cache: dict[tuple[str, str, str, str | None], tuple[str, datetime | None, tuple[str, dict[str, dict[str, Any]]]]] = {}
+        if hasattr(engine, "__dict__"):
+            engine.__dict__.setdefault("_mental_model_source_lock", threading.RLock())
+        register_source_cache_engine(engine)
 
     def _get_cache(self) -> dict[Any, Any]:
         if not hasattr(self.engine, "_mental_model_snapshot_cache"):
@@ -362,6 +367,8 @@ class MentalModelService:
                 self.engine._mental_model_snapshot_cache.clear()
             except Exception:
                 pass
+        if hasattr(self.engine, "_mental_model_source_cache"):
+            self.engine._mental_model_source_cache.clear()
 
     def invalidate_watermark(self, tenant_id: str | None = None, branch: str | None = None) -> None:
         """Invalidate cached snapshots matching tenant_id and branch (or all if None)."""
@@ -372,6 +379,7 @@ class MentalModelService:
         ]
         for k in to_del:
             cache.pop(k, None)
+            getattr(self.engine, "_mental_model_source_cache", {}).pop(k, None)
 
     def mutation_watermark(self, context: AnswerReadContext) -> str:
         """Return the current lightweight branch/tenant mutation watermark digest.
@@ -388,6 +396,15 @@ class MentalModelService:
         branch = context.branch
         parts: list[Any] = [tenant_id, branch]
 
+        source_revision = getattr(engine, "mental_model_source_revision", None)
+        if (callable(source_revision) and not callable(getattr(engine, "_connect", None))
+                and not hasattr(engine, "_store_version")):
+            # An unavailable change stream must never become a reusable error
+            # digest. Callers fail closed and can retry after storage recovers.
+            revision = source_revision(tenant_id)
+            return (str(uuid4()) if revision is None else
+                    _digest([tenant_id, branch, revision, engine.policy.to_dict()]))
+
         if callable(getattr(engine, "mutation_watermark", None)):
             try:
                 return str(engine.mutation_watermark(tenant_id, branch))
@@ -402,6 +419,8 @@ class MentalModelService:
 
         if hasattr(engine, "_store_version"):
             parts.append(getattr(engine, "_store_version"))
+            from mnemosyne.cid_lists import evidence_epoch
+            parts.append(evidence_epoch())
 
         if hasattr(engine, "audit_log") and isinstance(engine.audit_log, list):
             parts.append(len(engine.audit_log))
@@ -483,7 +502,30 @@ class MentalModelService:
         return _digest(parts)
 
     def _lock(self) -> Any:
-        return getattr(self.engine, "_lock", None) or nullcontext()
+        return (getattr(self.engine, "_lock", None)
+                or getattr(self.engine, "_mental_model_source_lock", None) or nullcontext())
+
+    def _source_watermark(self, context: AnswerReadContext) -> str:
+        revision = getattr(self.engine, "mental_model_source_revision", None)
+        if callable(revision):
+            value = revision(context.tenant_id)
+            if value is None:
+                return str(uuid4())
+            return _digest([context.tenant_id, context.branch,
+                            value, self.engine.policy.to_dict()])
+        return self._mutation_watermark(context)
+
+    def _fingerprint_matches(self, context: AnswerReadContext, fingerprint: str, saved: Any) -> bool:
+        if fingerprint == saved:
+            return True
+        # Existing records used the canonical whole-corpus digest. A cold
+        # baseline verifies that digest once, then tracks its equivalent v2
+        # digest without rewriting records or retaining obsolete authority.
+        key = (context.tenant_id, context.branch, _canonical(_scope(context)),
+               context.as_of.isoformat() if context.as_of is not None else None)
+        state = getattr(self.engine, "_mental_model_source_cache", {}).get(key)
+        return (state is not None and saved == state.legacy_fingerprint
+                and fingerprint == state.baseline_fingerprint)
 
     def _publication_guard(self, context: AnswerReadContext) -> Any:
         guard = getattr(self.engine, "mental_model_guard", None)
@@ -506,7 +548,14 @@ class MentalModelService:
         return record
 
     def _snapshot(self, context: AnswerReadContext) -> tuple[str, dict[str, dict[str, Any]]]:
+        with self._lock(), getattr(self.engine, "_mental_model_source_lock", None) or nullcontext():
+            return self._snapshot_locked(context)
+
+    def _snapshot_locked(self, context: AnswerReadContext) -> tuple[str, dict[str, dict[str, Any]]]:
         scope = _scope(context)
+        source_revision = getattr(self.engine, "mental_model_source_revision", None)
+        if callable(source_revision) and source_revision(context.tenant_id) is not None:
+            return self._incremental_snapshot(context, scope)
         filt = context.to_filter()
         exported = self.engine.export_tenant_filtered(context.tenant_id, filt)
         corpus: dict[str, Any] = {"scope": scope, "policy": self.engine.policy.to_dict()}
@@ -555,10 +604,55 @@ class MentalModelService:
         result_snapshot = (_digest(corpus), evidence)
         as_of_key = context.as_of.isoformat() if context.as_of is not None else None
         cache_key = (context.tenant_id, context.branch, _canonical(scope), as_of_key)
-        watermark = self._mutation_watermark(context)
+        watermark = self._source_watermark(context)
         cache = self._get_cache()
         cache[cache_key] = (watermark, earliest_expiry, (result_snapshot[0], copy.deepcopy(evidence)))
         return result_snapshot
+
+    def _incremental_snapshot(self, context: AnswerReadContext, scope: dict[str, Any]) -> tuple[str, dict[str, dict[str, Any]]]:
+        engine = self.engine
+        if not hasattr(engine, "_mental_model_source_cache"):
+            engine._mental_model_source_cache = {}
+        key = (context.tenant_id, context.branch, _canonical(scope),
+               context.as_of.isoformat() if context.as_of is not None else None)
+        # Native/SQLite writers take their engine lock before cache locks.
+        # Keep that order even for direct internal snapshot callers.
+        with self._lock(), engine._mental_model_source_lock:
+            revision = engine.mental_model_source_revision(context.tenant_id)
+            state = engine._mental_model_source_cache.get(key)
+            try:
+                if state is None or revision < state.revision:
+                    state = SourceSnapshot(engine, context, scope, revision)
+                    state.load(engine.export_tenant(context.tenant_id))
+                elif revision != state.revision:
+                    changes = engine.mental_model_source_changes(context.tenant_id, context.branch, state.revision)
+                    if any(change[0] == "*" for change in changes):
+                        state = SourceSnapshot(engine, context, scope, revision)
+                        state.load(engine.export_tenant(context.tenant_id))
+                    else:
+                        state.patch(changes, engine.mental_model_source_rows(context.tenant_id, changes))
+                        state.revision = revision
+                if state.policy != _canonical(engine.policy.to_dict()):
+                    state.refresh(set(state.raw))
+                import mnemosyne.access_policy as access_policy_mod
+                now = getattr(access_policy_mod, "datetime", datetime).now(UTC)
+                expired = state.expired(now)
+                if expired:
+                    state.refresh(expired)
+                if engine.mental_model_source_revision(context.tenant_id) != revision:
+                    raise ValueError("source changed during snapshot")
+                result = state.result()
+                engine._mental_model_source_cache[key] = state
+                deadline = state.expiries[0][0] if state.expiries else None
+                watermark = _digest([context.tenant_id, context.branch, revision, engine.policy.to_dict()])
+                self._get_cache()[key] = (watermark, deadline, result)
+                # Rows are replaced, never mutated, by SourceSnapshot. Detach
+                # the index without walking every source's nested metadata.
+                return result[0], dict(result[1])
+            except BaseException:
+                engine._mental_model_source_cache.pop(key, None)
+                self._get_cache().pop(key, None)
+                raise
 
     def _get_ready_snapshot(
         self, context: AnswerReadContext, record: dict[str, Any]
@@ -581,16 +675,16 @@ class MentalModelService:
 
         cached_watermark, earliest_expiry, (fingerprint, evidence) = entry
 
-        watermark = self._mutation_watermark(context)
+        watermark = self._source_watermark(context)
         if cached_watermark != watermark:
             cache.pop(cache_key, None)
             return None
 
-        if fingerprint != record.get("corpus_fingerprint"):
+        if not self._fingerprint_matches(context, fingerprint, record.get("corpus_fingerprint")):
             return None
 
         import mnemosyne.access_policy as access_policy_mod
-        now = context.as_of or getattr(access_policy_mod, "datetime", datetime).now(UTC)
+        now = getattr(access_policy_mod, "datetime", datetime).now(UTC)
         if earliest_expiry is not None and now >= earliest_expiry:
             cache.pop(cache_key, None)
             return None
@@ -600,7 +694,9 @@ class MentalModelService:
                 cache.pop(cache_key, None)
                 return None
 
-        return fingerprint, copy.deepcopy(evidence)
+        # This private snapshot is shared by list() across independently cited
+        # models. Public views copy their own claims and never expose these rows.
+        return fingerprint, evidence
 
     @staticmethod
     def _answer_valid(record: dict[str, Any], evidence: dict[str, dict[str, Any]]) -> bool:
@@ -678,7 +774,7 @@ class MentalModelService:
                     else:
                         fingerprint, evidence = self._snapshot(context)
                 clock = _question_clock(record["question"], context)
-                fresh = fingerprint == record.get("corpus_fingerprint") and record.get("time_fingerprint") == clock
+                fresh = self._fingerprint_matches(context, fingerprint, record.get("corpus_fingerprint")) and record.get("time_fingerprint") == clock
                 ready = fresh and record.get("status") == "ready" and self._answer_valid(record, evidence)
                 stale = not (ready or (fresh and record.get("status") == "abstained"))
             except Exception:

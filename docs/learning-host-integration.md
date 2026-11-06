@@ -63,6 +63,49 @@ The profile-scoped adapter is in `mnemosyne.hosts.hermes`. The plugin entry poin
 
 The plugin requires Mnemosyne to be installed in the Python environment used by Hermes. Place `integrations/hermes` in the target profile's memory-plugin directory and select the `mnemosyne` provider through Hermes configuration.
 
+## Codex
+
+`mnemosyne.hosts.codex.CodexAdapter` handles `SessionStart`, `UserPromptSubmit`,
+`PostToolUse`, `Stop`, and `SessionEnd`. The entry point in
+`integrations/codex/hook.py` binds it to a local authenticated `runtime` module
+that supplies `STATE`, `TENANT`, `USER`, `open_facade`, `locked`, and `invoke`.
+The existing MCP configuration and provider credentials stay in that local
+runtime configuration.
+
+The adapter keeps durable per-session state and validates a recovered
+transcript's session and turn identities. Completed command records preserve
+exit codes and actual test output. A standalone pytest invocation can provide
+test counts. Arbitrary shell output, compound commands, and a zero exit code
+alone do not establish a successful task outcome.
+
+The `integrations/codex/automatic_learning.py` entry point advances consolidation
+when recorded outcomes, artifact state, learning controls, or protected cases
+change. Successful passes record their resulting input fingerprint. Trainer
+validation failures remain retryable on the next scheduled worker pass.
+
+If a prompt hook was missed, a completed transcript turn can still be recorded.
+That recovered turn carries only an existing matching context receipt, so a
+later retrieval cannot receive credit for earlier work. Retry reconciliation
+and migration of older hook state prevent duplicate episodes after a restart.
+Subagent instructions have an internal origin and are excluded from human-turn
+capture.
+
+Only retained source evidence enters a new episode's provenance. If an older
+episode refers to unavailable evidence, consolidation excludes that episode
+from induction and reports the skipped count while retaining its history.
+
+## Task identity
+
+Automatic task identity includes the complete Unicode-normalized request and
+the available tool set. Outer whitespace and tool ordering are normalized.
+Case, internal whitespace, identifiers, numbers, negation, and request details
+remain distinct. New automatic identities use the `lexical:v3:` namespace. Earlier identities
+and their outcome history remain readable under their original keys.
+
+Hosts that know two differently worded requests represent the same task can
+supply the same `task_type` to `prepare_context`. That explicit class is the
+supported contract for sharing learning across semantic paraphrases.
+
 
 ## Final serving and verification behavior
 

@@ -48,6 +48,7 @@ class ModelConfiguration:
             "model": self.model,
             "temperature": self.temperature,
             "seed": self.seed,
+            "timeout_seconds": self.timeout_seconds,
             "prompt_sha256": hashlib.sha256(PROMPT.encode()).hexdigest(),
             "transport": "mnemosyne.command-json",
             "command": list(self.command),
@@ -86,14 +87,19 @@ class CommandModelAgent:
         )
         if not isinstance(result, dict) or not isinstance(result.get("action"), str):
             raise ValueError("Model response must contain a string action")
-        available = {
-            str(item.get("id"))
-            for key in ("skills", "procedures", "lessons", "chunks")
-            for item in context.get(key, [])
-            if isinstance(item, dict)
-        }
+        if result["action"] not in task.choices:
+            raise ValueError("Model action must be one of the permitted choices")
         used = []
-        for key in ("used_skills", "used_lessons"):
+        for key, sources in (
+            ("used_skills", ("skills", "procedures", "chunks")),
+            ("used_lessons", ("lessons",)),
+        ):
+            available = {
+                str(item["id"])
+                for source in sources
+                for item in context.get(source, [])
+                if isinstance(item, dict) and item.get("id")
+            }
             values = result.get(key, [])
             if not isinstance(values, list) or any(
                 not isinstance(v, str) or v not in available for v in values
@@ -106,6 +112,7 @@ class CommandModelAgent:
                     json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
                 ).hexdigest(),
                 "action": result["action"],
+                "provider_metadata": result.get("provider_metadata", {}),
                 **cfg.metadata(),
             }
         )

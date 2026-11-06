@@ -12,7 +12,7 @@ import copy
 import importlib
 import random
 import time
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import patch
@@ -87,23 +87,73 @@ def artifacts(context):
     ]
 
 
+def tenant_name(family, seed, arm, protocol):
+    if protocol == "specialized-v1":
+        return f"probe-f{family}-{seed}-{arm}"
+    suffix = ""
+    if "-isolated-" in arm:
+        suffix = arm[arm.index("-isolated-") :]
+    elif arm.endswith("-unchunked"):
+        suffix = "-unchunked"
+    return f"probe-v2-f{family}-{seed}{suffix}"
+
+
 class Environment:
     def __init__(
-        self, runtime, family, seed, *, budget=64, agent=None, arm="learning_on"
+        self,
+        runtime,
+        family,
+        seed,
+        *,
+        budget=64,
+        agent=None,
+        arm="learning_on",
+        protocol="specialized-v1",
     ):
         self.runtime = runtime
         self.engine = runtime.engine
         self.family, self.seed, self.budget, self.arm = family, seed, budget, arm
-        self.tenant = f"probe-f{family}-{seed}-{arm}"
+        self.tenant = tenant_name(family, seed, arm, protocol)
         self.rng = random.Random(seed)
         self.agent = agent or ScriptedAgent(seed)
         self.rows, self.operations = [], []
+        self.setup_rows = []
+        self.protocol = protocol
+        self._pretraining_depth = 0
         self.evidence, self.notes = {}, []
         self.clock = VirtualClock()
         self.sequence = 0
 
     def state(self):
         return self.runtime.writer.read(self.tenant)
+
+    @contextmanager
+    def pretraining(self):
+        """Use matched learning-enabled setup before applying evaluation arms."""
+        if self.protocol == "specialized-v1" or self._pretraining_depth:
+            yield
+            return
+        policy = self.state()["policy"]
+        modes = dict(policy.get("modes", {}))
+        enabled = policy.get("enabled", True)
+        evaluation_arm = self.arm
+        self.arm = "common_pretraining"
+        self._pretraining_depth += 1
+        try:
+            if not enabled:
+                self.runtime.resume(self.tenant)
+            for component, mode in modes.items():
+                if mode != "active":
+                    self.runtime.mode(self.tenant, component, "active")
+            yield
+        finally:
+            self._pretraining_depth -= 1
+            self.arm = evaluation_arm
+            for component, mode in modes.items():
+                if mode != "active":
+                    self.runtime.mode(self.tenant, component, mode)
+            if not enabled:
+                self.runtime.pause(self.tenant)
 
     def source(self, text, *, actor="user", metadata=None, user="u"):
         cid = self.engine.append_evidence(
@@ -160,6 +210,12 @@ class Environment:
         phase=None,
     ):
         """Execute the selected symbolic operations; equality is the external oracle."""
+        record = record and not self._pretraining_depth
+        phase = phase or (
+            "train" if not record or len(self.rows) < self.budget // 2 else "test"
+        )
+        if phase not in {"train", "test"}:
+            raise ValueError("phase must be train or test")
         self.sequence += 1
         session = session or f"s-{self.sequence}"
         started = time.perf_counter()
@@ -175,10 +231,25 @@ class Environment:
             "inspect -> skip",
             "skip -> inspect",
         ]
-        choices = tuple(dict.fromkeys(alternatives))
+        choices = list(dict.fromkeys(alternatives))
+        # Choice position must not reveal the private contract. Use a separate
+        # task-derived stream so choices stay paired across memory arms.
+        random.Random(digest([self.family, self.seed, query, task, steps])).shuffle(
+            choices
+        )
+        choices = tuple(choices)
         public_task = Task(self.family, self.sequence, query, task, choices, gold)
-        selected, used_skills, used_lessons = self.agent.act(public_task, context)
-        if action is not None:
+        competence = self.protocol == "common-pretraining-v2" and phase == "test"
+        if action is None:
+            if isinstance(self.agent, ScriptedAgent):
+                selected, used_skills, used_lessons = self.agent.act(
+                    public_task, context, explore=not competence
+                )
+            else:
+                selected, used_skills, used_lessons = self.agent.act(
+                    public_task, context
+                )
+        else:
             selected = action
             used_skills = used_lessons = []
         actual = selected.split(" -> ")
@@ -199,11 +270,6 @@ class Environment:
             "output": "Executed sequence: " + " -> ".join(actual),
             "context_features": features or {},
         }
-        phase = phase or (
-            "train" if not record or len(self.rows) < self.budget // 2 else "test"
-        )
-        if phase not in {"train", "test"}:
-            raise ValueError("phase must be train or test")
         if feedback and not success and phase == "train":
             verdict["expected_steps"] = list(steps)
         events.append(verdict)
@@ -234,7 +300,10 @@ class Environment:
             "episode_id": identifier,
             "receipt_id": context["receipt_id"],
             "query": query,
+            "choices": list(choices),
             "phase": phase,
+            "setup": bool(self._pretraining_depth),
+            "decision_policy": "heldout_competence" if competence else "on_policy",
             "success": success,
             "action": selected,
             "expected": gold,
@@ -245,6 +314,8 @@ class Environment:
         }
         if record:
             self.rows.append(row)
+        elif self._pretraining_depth:
+            self.setup_rows.append(row)
         self.operations.append({"operation": "turn", **row, "fixture": not record})
         self.clock.advance(seconds=1)
         return row
@@ -271,12 +342,13 @@ class Environment:
         ]
 
     def train(self, steps, task="procedure", *, prefix="Practice", count=None):
-        self.demonstrate(steps, task)
-        for index in range(count or self.budget):
-            self.turn(f"{prefix} instance {index}", steps, task=task)
-            if index % 8 == 7:
-                self.sleep()
-        self.sleep()
+        with self.pretraining():
+            self.demonstrate(steps, task)
+            for index in range(count or self.budget):
+                self.turn(f"{prefix} instance {index}", steps, task=task)
+                if index % 8 == 7:
+                    self.sleep()
+            self.sleep()
         return [
             a
             for a in self.state()["artifacts"].values()
@@ -306,10 +378,10 @@ def _route(e):
             ("cobalt requires turquoise", graph, "dependency"),
         )[index % 2]
         context = e.context(query, task, session=f"route-{index}")
-        channel = "lexical" if task == "lookup" else "graph_ppr"
+        channels = {"lexical", "lexical_bm25"} if task == "lookup" else {"graph_ppr"}
         success = any(
             (gold == h["id"] or gold in h.get("provenance", []))
-            and channel in str(h.get("channel", "")).split("+")
+            and channels.intersection(str(h.get("channel", "")).split("+"))
             for h in context["hits"]
         )
         row = e.turn(
@@ -429,11 +501,26 @@ def _revision(e):
             for a in trials
             if a.get("ab_trial", {}).get("status") in {"revert", "inconclusive"}
         ]
-        if verdicts:
+        if verdicts and "revert_episodes" not in e.evidence:
+            state = e.state()
+            e.require(
+                all(a.get("state") == "retired" for a in verdicts)
+                and not state["artifacts"][incumbent].get("pending_revision"),
+                "Revision trial ended without retiring its rejected candidate",
+            )
+            context = e.context(f"Full schema record {index}", "revision")
+            e.require(
+                not {a["id"] for a in verdicts} & {a["id"] for a in artifacts(context)},
+                "Rejected revision was served after its trial ended",
+            )
             e.evidence["revert_episodes"] = len(e.rows) - start
             e.operations.append({"operation": "revision_revert", "artifacts": verdicts})
-            return
-    e.require(False, "No completed candidate-versus-incumbent reversion was observed")
+            if e.protocol == "specialized-v1":
+                return
+    e.require(
+        "revert_episodes" in e.evidence,
+        "No completed candidate-versus-incumbent reversion was observed",
+    )
 
 
 def _poison(e):
@@ -606,6 +693,7 @@ def _separation(e):
             budget=e.budget,
             agent=e.agent if not isinstance(e.agent, ScriptedAgent) else None,
             arm=e.arm + "-isolated-" + feature,
+            protocol=e.protocol,
         )
         reference.clock = e.clock
         for component, mode in e.state()["policy"].get("modes", {}).items():
@@ -650,7 +738,7 @@ def _separation(e):
     e.evidence["negative_transfer"] = max(0.0, *deltas)
 
 
-def _schema(e):
+def _prepare_schema(e):
     from mnemosyne.experience.candidates import register_import
 
     steps = ["inspect", "verify"]
@@ -684,6 +772,12 @@ def _schema(e):
         for a in e.state()["artifacts"].values()
         if a["state"] == "active" and a.get("framework")
     ]
+    return active
+
+
+def _schema(e):
+    with e.pretraining():
+        active = _prepare_schema(e)
     e.require(
         active, "Imported framework did not become an active source-backed schema"
     )
@@ -698,11 +792,15 @@ def _schema(e):
             )
         e.sleep()
         for a in e.state()["artifacts"].values():
-            if a["state"] == "active" and a.get("created_at") > active[0]["created_at"]:
-                milestones.setdefault(
-                    "consistent" if a.get("schema_ref") else "inconsistent",
-                    len(e.rows) - start,
-                )
+            if a["state"] != "active" or a.get("created_at") <= active[0]["created_at"]:
+                continue
+            if (
+                a.get("task_class") == "schema"
+                and a.get("schema_ref", {}).get("id") == active[0]["id"]
+            ):
+                milestones.setdefault("consistent", len(e.rows) - start)
+            elif a.get("task_class") == "inconsistent" and not a.get("schema_ref"):
+                milestones.setdefault("inconsistent", len(e.rows) - start)
     e.require(
         set(milestones) == {"consistent", "inconsistent"},
         "Both consistent and inconsistent promotions must be observed",
@@ -720,7 +818,10 @@ def _long_gap(e):
         previous_day = days
         e.sleep()
         row = e.turn(
-            f"Retention after {days} days", ["inspect", "verify"], task="retained"
+            f"Retention after {days} days",
+            ["inspect", "verify"],
+            task="retained",
+            phase="test" if e.protocol == "common-pretraining-v2" else None,
         )
         samples.append(row["success"])
     e.evidence["long_gap_success"] = sum(samples) / len(samples)
@@ -1046,6 +1147,7 @@ def _chunks(e):
         budget=e.budget,
         agent=e.agent if not isinstance(e.agent, ScriptedAgent) else None,
         arm=e.arm + "-unchunked",
+        protocol=e.protocol,
     )
     reference.clock = e.clock
     for component, mode in e.state()["policy"].get("modes", {}).items():
@@ -1171,7 +1273,11 @@ def _hindsight(e):
         after["artifacts"][a["id"]]["state"] in {"demoted", "retired", "archived"}
         for a in active
     )
-    known = [r for r in e.rows if r["episode_id"] != row["episode_id"]]
+    known = [
+        r
+        for r in [*getattr(e, "setup_rows", []), *e.rows]
+        if r["episode_id"] != row["episode_id"]
+    ]
     e.require(known, "No paired decision/outcome observations")
     # Pairwise ranking error uses independently verified successes/failures.
     # Equal predictions earn half an error; Brier error remains a separate value.
@@ -1378,10 +1484,15 @@ def run_specialized_probe(
     budget=64,
     agent=None,
     arm="learning_on",
+    protocol="specialized-v1",
 ) -> dict[str, Any]:
     if family not in PROBES or budget < 4:
         raise ValueError("F1–F26 and budget >= 4 are required")
-    e = Environment(runtime, family, seed, budget=budget, agent=agent, arm=arm)
+    if protocol not in {"specialized-v1", "common-pretraining-v2"}:
+        raise ValueError("unknown learning evaluation protocol")
+    e = Environment(
+        runtime, family, seed, budget=budget, agent=agent, arm=arm, protocol=protocol
+    )
     reason = None
     with e.clock:
         if arm in {"memory_frozen", "no_memory"}:
@@ -1398,13 +1509,28 @@ def run_specialized_probe(
     e.evidence["guard_detections"] = len(after["defects"]) - len(before["defects"])
     verdict = verify_family(family, e.evidence)
     missing = [key for key in REQUIRED[family] if key not in e.evidence]
+    on_policy = [row for row in e.rows if row["decision_policy"] == "on_policy"]
+    competence = [
+        row for row in e.rows if row["decision_policy"] == "heldout_competence"
+    ]
     return {
         "family": family,
         "seed": seed,
         "arm": arm,
-        "probe": "specialized-v1",
+        "probe": protocol,
         "episode_budget": budget,
         "rows": e.rows,
+        "setup_rows": e.setup_rows,
+        "training_on_policy_metrics": learning_metrics(
+            [r["success"] for r in on_policy], [r["latency_ms"] for r in on_policy]
+        )
+        if on_policy
+        else {},
+        "heldout_competence_metrics": learning_metrics(
+            [r["success"] for r in competence], [r["latency_ms"] for r in competence]
+        )
+        if competence
+        else {},
         "operations": e.operations,
         "evidence": e.evidence,
         "metrics": learning_metrics(

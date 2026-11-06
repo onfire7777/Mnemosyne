@@ -161,6 +161,8 @@ required_tables = [
   "trajectories",
   "self_model",
   "mental_models",
+  "memory_source_revisions",
+  "memory_source_changes",
   "knowledge_pages",
   "observations",
   "documents",

@@ -2109,6 +2109,51 @@ class SqliteEngine:
             conn = self._connect(tenant_id)
             return conn.total_changes, conn.execute("PRAGMA data_version").fetchone()[0]
 
+    def mental_model_source_revision(self, tenant_id: str) -> int:
+        with self._lock:
+            row = self._connect(tenant_id).execute(
+                "SELECT revision FROM memory_source_revisions WHERE tenant_id = ?", (tenant_id,)
+            ).fetchone()
+            return int(row[0]) if row else 0
+
+    def mental_model_source_changes(self, tenant_id: str, branch: str, after: int) -> list[tuple[str, str, str]]:
+        if type(after) is not int or after < 0:
+            raise ValueError("source revision must be a nonnegative integer")
+        with self._lock:
+            current = self.mental_model_source_revision(tenant_id)
+            rows = self._connect(tenant_id).execute(
+                "SELECT collection, branch, item_id FROM memory_source_changes "
+                "WHERE tenant_id = ? AND revision > ? AND revision <= ? ORDER BY revision LIMIT 4097",
+                (tenant_id, after, current),
+            ).fetchall()
+        if len(rows) != current - after or len(rows) > 4096:
+            return [("*", "*", "*")]
+        return list(dict.fromkeys(tuple(row) for row in rows if row[1] in {branch, "*"}))
+
+    def mental_model_source_rows(self, tenant_id: str, changes: list[tuple[str, str, str]]) -> list[dict[str, Any]]:
+        result = []
+        parsers = {"evidence": _evidence_from_row, "assertions": _assertion_from_row,
+                   "relations": _relation_from_row}
+        with self._lock:
+            conn = self._connect(tenant_id)
+            for collection, branch, item_id in changes:
+                if collection == "preferences":
+                    row = conn.execute("SELECT record FROM preferences WHERE tenant_id = ? AND id = ?", (tenant_id, item_id)).fetchone()
+                    record = json.loads(row[0]) if row else None
+                else:
+                    if collection not in parsers:
+                        raise ValueError("unknown source collection")
+                    column = "cid" if collection == "evidence" else "id"
+                    row = conn.execute(
+                        f"SELECT * FROM {collection} WHERE tenant_id = ? AND branch = ? AND {column} = ?",
+                        (tenant_id, branch, item_id),
+                    ).fetchone()
+                    record = parsers[collection](row).to_dict() if row else None
+                    if record and record.get("erased"):
+                        record = None
+                result.append({"key": (collection, branch, item_id), "record": record})
+        return result
+
     def main_evidence(self, tenant_id: str) -> list[Evidence]:
         """Every live main-branch evidence row of the tenant, in insertion order."""
         conn = self._connect(tenant_id)
@@ -2539,6 +2584,8 @@ class SqliteEngine:
                     trust_tier=ev.trust_tier,
                     capability_tags=ev.capability_tags,
                 )
+            from mnemosyne.mental_model_sources import purge_source_snapshot_caches
+            self._after_source_commit(lambda: purge_source_snapshot_caches(self, tenant_id))
             return True
 
     @contextmanager
@@ -5789,6 +5836,9 @@ class SqliteEngine:
             if result.get("erased") and branch == "main":
                 from mnemosyne.experience.runtime import LearningRuntime
                 LearningRuntime(self).erase(tenant_id, cid)
+            if result.get("erased"):
+                from mnemosyne.mental_model_sources import purge_source_snapshot_caches
+                self._after_source_commit(lambda: purge_source_snapshot_caches(self, tenant_id))
             return result
 
     def _forget_impl(

@@ -165,3 +165,68 @@ def test_process_control_exception_still_propagates(engine):
     source(engine)
     with pytest.raises(KeyboardInterrupt):
         orchestrator(engine).answer(REQUEST, Reader(response=KeyboardInterrupt()))
+
+
+def test_replay_accepts_channel_changes_for_identical_authorized_evidence(
+    engine, monkeypatch
+):
+    source(engine)
+    original = engine.retrieve
+    after_reader = False
+
+    def varying_channels(*args, **kwargs):
+        result = original(*args, **kwargs)
+        for hit in result.hits:
+            hit.channel = (
+                "postgres_fts+rerank"
+                if after_reader
+                else "postgres_fts+postgres_pgvector+rerank"
+            )
+        return result
+
+    def advance_reader():
+        nonlocal after_reader
+        after_reader = True
+
+    monkeypatch.setattr(engine, "retrieve", varying_channels)
+    result = orchestrator(engine).answer(REQUEST, Reader(callback=advance_reader))
+    assert result.answer == "Friday"
+    assert not result.abstained
+    assert result.failure_kind is None
+    assert result.trace.hops
+    assert all(hop.channels == ("postgres_fts+rerank",) for hop in result.trace.hops)
+
+
+@pytest.mark.parametrize(
+    "changed_field",
+    ["index", "queries", "retrieved_cids", "evidence_fingerprint", "context"],
+)
+def test_replay_rejects_changes_to_hop_evidence_and_authorization(
+    engine, monkeypatch, changed_field
+):
+    source(engine)
+    runner = orchestrator(engine)
+    original = runner.assemble
+    calls = 0
+
+    def changed_hop(request):
+        nonlocal calls
+        calls += 1
+        result = original(request)
+        if calls == 1:
+            return result
+        first, *rest = result.trace.hops
+        changes = {
+            "index": first.index + 1,
+            "queries": ("a different request",),
+            "retrieved_cids": ("a different source",),
+            "evidence_fingerprint": "a different fingerprint",
+            "context": replace(first.context, user_id="a different reader"),
+        }
+        hop = replace(first, **{changed_field: changes[changed_field]})
+        return replace(result, trace=replace(result.trace, hops=(hop, *rest)))
+
+    monkeypatch.setattr(runner, "assemble", changed_hop)
+    result = runner.answer(REQUEST, Reader())
+    assert_internal_failure(result, "replay_drift")
+    assert not result.evidence

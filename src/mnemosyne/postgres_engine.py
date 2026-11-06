@@ -3371,6 +3371,79 @@ class PostgresEngine:
             raise ValueError("mental model guard tenant scope mismatch")
         return state[1]
 
+    def mental_model_source_revision(self, tenant_id: str) -> int | None:
+        with self._mental_model_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                db_tenant = _stable_uuid("tenant", tenant_id)
+                self._set_tenant(cur, db_tenant)
+                # Old deployments remain usable through the uncached snapshot
+                # path until the operator applies the additive schema migration.
+                # Probe catalogs without issuing DDL or aborting a read lease.
+                cur.execute("""
+                    SELECT to_regclass('memory_source_revisions'), to_regclass('memory_source_changes'),
+                           (SELECT count(*) FROM pg_trigger
+                            WHERE tgname = 'memory_source_change' AND tgenabled IN ('O', 'A')
+                              AND tgrelid IN ('evidence'::regclass, 'assertions'::regclass,
+                                             'relations'::regclass, 'preferences'::regclass))
+                """)
+                availability = cur.fetchone()
+                if not availability[0] or not availability[1] or availability[2] != 4:
+                    return None
+                cur.execute("SELECT revision FROM memory_source_revisions WHERE tenant_id = %s", (db_tenant,))
+                row = cur.fetchone()
+                return int(row[0]) if row else 0
+
+    def mental_model_source_changes(self, tenant_id: str, branch: str, after: int) -> list[tuple[str, str, str]]:
+        if type(after) is not int or after < 0:
+            raise ValueError("source revision must be a nonnegative integer")
+        with self._mental_model_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                db_tenant = _stable_uuid("tenant", tenant_id)
+                self._set_tenant(cur, db_tenant)
+                cur.execute("SELECT revision FROM memory_source_revisions WHERE tenant_id = %s", (db_tenant,))
+                head = cur.fetchone()
+                current = int(head[0]) if head else 0
+                cur.execute(
+                    "SELECT collection, branch, item_id FROM memory_source_changes "
+                    "WHERE tenant_id = %s AND revision > %s AND revision <= %s ORDER BY revision LIMIT 4097",
+                    (db_tenant, after, current),
+                )
+                rows = cur.fetchall()
+                if len(rows) != current - after or len(rows) > 4096:
+                    return [("*", "*", "*")]
+                return list(dict.fromkeys(tuple(row) for row in rows if row[1] in {branch, "*"}))
+
+    def mental_model_source_rows(self, tenant_id: str, changes: list[tuple[str, str, str]]) -> list[dict[str, Any]]:
+        result = []
+        with self._mental_model_connection(tenant_id) as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                db_tenant = _stable_uuid("tenant", tenant_id)
+                self._set_tenant(cur, db_tenant)
+                for collection, branch, item_id in changes:
+                    if collection not in {"evidence", "assertions", "relations", "preferences"}:
+                        raise ValueError("unknown source collection")
+                    column = "cid" if collection == "evidence" else "id"
+                    key = _cid_to_bytes(item_id) if collection == "evidence" else item_id
+                    branch_filter = "" if collection == "preferences" else " AND s.branch = %s"
+                    params = (db_tenant, key) if collection == "preferences" else (db_tenant, key, branch)
+                    cur.execute(
+                        f"SELECT s.*, t.name AS tenant_name FROM {collection} s JOIN tenants t ON t.id = s.tenant_id "
+                        f"WHERE s.tenant_id = %s AND s.{column} = %s{branch_filter}", params,
+                    )
+                    row = cur.fetchone()
+                    record = None
+                    if row is not None:
+                        if collection == "evidence" and not row["erased"]:
+                            record = _row_to_evidence(row, item_id).to_dict()
+                        elif collection == "assertions":
+                            record = _row_to_assertion(row).to_dict()
+                        elif collection == "relations":
+                            record = _row_to_relation(row, tenant_id).to_dict()
+                        elif collection == "preferences":
+                            record = _row_to_preference(row, tenant_id).to_dict()
+                    result.append({"key": (collection, branch, item_id), "record": record})
+        return result
+
     @contextmanager
     def _mental_model_connection(self, tenant_id: str):
         """Reuse only an explicitly pinned publication transaction."""
@@ -3960,6 +4033,8 @@ class PostgresEngine:
                     trust_tier=row["trust_tier"],
                     capability_tags=list(row["capability_tags"] or []),
                 )
+        from mnemosyne.mental_model_sources import purge_source_snapshot_caches
+        self._after_source_commit(lambda: purge_source_snapshot_caches(self, tenant_id))
         return True
 
     def _apply_schema_fast_path_projection_status(
@@ -7119,6 +7194,9 @@ class PostgresEngine:
                 self._passage_bm25_index = None
             if result.get("erased"):
                 self._after_source_commit(self._purge_erased_embedding_cache)
+            if result.get("erased"):
+                from mnemosyne.mental_model_sources import purge_source_snapshot_caches
+                self._after_source_commit(lambda: purge_source_snapshot_caches(self, tenant_id))
             return result
 
     def _purge_erased_embedding_cache(self) -> None:

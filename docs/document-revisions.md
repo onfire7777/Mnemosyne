@@ -19,8 +19,9 @@ r3 = docs.append(ctx, "handbook", "New office opens in May.", operation_id="op-3
 view = docs.get(ctx, "handbook")  # DocumentView(revision=3, content=..., segment_cids=...)
 ```
 
-The service accepts an already authenticated `AnswerReadContext`; it is not an
-authentication boundary. There is no MCP tool for documents yet.
+The service accepts an already authenticated `AnswerReadContext`. MCP and CLI
+expose create, replace, append, get, and branch reconciliation through the same
+service and enforce their authenticated caller scope.
 
 ## Semantics
 
@@ -73,11 +74,19 @@ ALTER TABLE evidence ADD COLUMN IF NOT EXISTS retired_at TIMESTAMPTZ;
 GRANT DELETE ON documents TO mnemosyne_app;
 ```
 
-## Not yet implemented
+## Extraction and branch reconciliation
 
-Automatic model extraction of facts from new segments needs a durable,
-crash-safe job queue. Branch merges reject differing document manifests;
-automatic reconciliation and an MCP transport are still pending.
+`auto_extract=True` returns deterministic fact and observation candidates for
+new segments. Reused segments are skipped. `extract_changed_segments` also
+exposes this operation explicitly. These candidates retain source identifiers
+and still require the usual validation before promotion.
+
+`reconcile_branch_manifests` handles document reconciliation explicitly. An
+ordinary branch merge continues to reject conflicting manifests so the caller
+can resolve them through that operation. Provider-assisted extraction and a
+background extraction queue require separate configuration and integration.
+
+## Existing-data repair
 
 Older persisted manifests whose source rows already have inconsistent sensitivity
 are not automatically migrated. Republishing through `replace` creates protected

@@ -14,7 +14,7 @@ from .guards import require
 from .receipts import ContextReceipt, ROUTE_OF_CHANNEL, ServedItem, digest, source_segment_id
 from .signals import reward, signal, tool_signals, user_signals
 from .stats import Posterior, contingency_lower_bound, wilson_interval
-from .task_class import classify
+from .task_class import METHOD as TASK_CLASS_METHOD, classify
 from .traces import plastic_rate, stiff_step, trace
 from .writer import LearningWriter
 
@@ -185,7 +185,7 @@ class LearningRuntime:
                 )
                 for name in COMPONENTS
             },
-            "task_class_method": "explicit-or-lexical-hash",
+            "task_class_method": TASK_CLASS_METHOD,
             "open_defects": sum(
                 row["status"] != "verified" for row in state["defects"].values()
             ),
@@ -843,6 +843,12 @@ class LearningRuntime:
                         )
                     )
                 )
+        # An engine may return a deterministic CID while deferring storage at
+        # its self-generation budget. Only retained evidence is provenance.
+        cids = [
+            cid for cid in dict.fromkeys(cids)
+            if self._sources_live(tenant_id, [cid], user_id)
+        ]
         signals = tool_signals(tool_events or [])
         served_ids = {
             item["item_id"] for receipt in receipts for item in receipt["items"]
@@ -1609,19 +1615,52 @@ class LearningRuntime:
             "enabled", getattr(self.engine.policy, "learning_enabled", True)
         ) or state["policy"].get("frozen", False):
             return
+        task, user = episode["task_class"], episode.get("user_id")
+        installed = {
+            item["id"] for item in state["artifacts"].values()
+            if item.get("user_id") == user
+            and (item["task_class"] == task or task in item.get("task_classes", []))
+            and item["state"] in {"active", "labile"}
+        }
+        learned_routes = state["policy"].get("routes", {}).get(task)
+        verified_policy = (
+            state["policy"].get("active_policy_variants", {}).get(task)
+            and state["policy"].get("policy_evaluations", {}).get(task, {}).get("gate", {}).get("promoted")
+        )
+        if not (installed or learned_routes or verified_policy):
+            return
+
+        def participated(row):
+            receipts = [
+                state["receipts"][key] for key in row.get("receipt_ids", [])
+                if key in state["receipts"]
+            ]
+            # Historical records predate receipts. Their installed learned
+            # behavior remains eligible for the original regression monitor.
+            if not receipts:
+                return True
+            return any(
+                receipt.get("effective_policy", {}).get("applied_route_weights")
+                or verified_policy and receipt.get("effective_policy", {}).get("applied_policy_variant")
+                or any(item["item_id"] in installed for item in receipt["items"])
+                for receipt in receipts
+            )
+
         rows = sorted(
             [
                 row
                 for row in state["episodes"].values()
                 if row["status"] == "resolved"
-                and row["task_class"] == episode["task_class"]
+                and row["task_class"] == task
+                and row.get("user_id") == user
+                and participated(row)
             ],
             key=lambda row: (row["created_at"], row["id"]),
         )
         checkpoints = state["policy"].setdefault("last_good", {})
-        task = episode["task_class"]
-        if task not in checkpoints and episode.get("reward", 0) > 0:
-            checkpoints[task] = self._behavior_checkpoint(state, task)
+        checkpoint_key = task if user is None else digest([task, user])
+        if checkpoint_key not in checkpoints and episode.get("reward", 0) > 0:
+            checkpoints[checkpoint_key] = self._behavior_checkpoint(state, task, user)
         if len(rows) < 40:
             return
         previous = sum(row["reward"] > 0 for row in rows[-40:-20]) / 20
@@ -1635,7 +1674,7 @@ class LearningRuntime:
                 "before": previous,
                 "after": current,
             }
-            checkpoint = checkpoints.get(task, {})
+            checkpoint = checkpoints.get(checkpoint_key, {})
             for key, value in checkpoint.get("policy", {}).items():
                 if value is None:
                     state["policy"].setdefault(key, {}).pop(task, None)
@@ -1645,6 +1684,7 @@ class LearningRuntime:
             for artifact in state["artifacts"].values():
                 if (
                     artifact["task_class"] == episode["task_class"]
+                    and artifact.get("user_id") == user
                     and not artifact.get("pinned")
                     and not artifact.get("locked")
                     and artifact["state"] in {"active", "labile"}
@@ -1658,10 +1698,10 @@ class LearningRuntime:
                     )
             state["policy"]["breaker"]["restored_last_good"] = bool(checkpoint)
         elif current >= previous:
-            checkpoints[task] = self._behavior_checkpoint(state, task)
+            checkpoints[checkpoint_key] = self._behavior_checkpoint(state, task, user)
 
     @staticmethod
-    def _behavior_checkpoint(state: dict, task: str) -> dict:
+    def _behavior_checkpoint(state: dict, task: str, user_id: str | None = None) -> dict:
         return {
             "policy": {
                 key: copy.deepcopy(state["policy"].get(key, {}).get(task))
@@ -1671,6 +1711,7 @@ class LearningRuntime:
                 item["id"]: item["state"]
                 for item in state["artifacts"].values()
                 if item["task_class"] == task
+                and item.get("user_id") == user_id
                 and item["state"] not in {"retired", "archived", "rejected"}
             },
         }

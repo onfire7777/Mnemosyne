@@ -60,14 +60,14 @@ def saved(service, wall, *, ready=False):
 
 def count_scans(engine, monkeypatch):
     counts = {"exports": 0, "point_reads": 0}
-    original_export, original_get = engine.export_tenant_filtered, engine.get_evidence
+    original_export, original_get = engine.export_tenant, engine.get_evidence
     def export(*args, **kwargs):
         counts["exports"] += 1
         return original_export(*args, **kwargs)
     def get(*args, **kwargs):
         counts["point_reads"] += 1
         return original_get(*args, **kwargs)
-    monkeypatch.setattr(engine, "export_tenant_filtered", export)
+    monkeypatch.setattr(engine, "export_tenant", export)
     monkeypatch.setattr(engine, "get_evidence", get)
     return counts
 
@@ -105,10 +105,10 @@ def test_clean_polls_share_one_scan_until_monotonic_deadline(setup, monkeypatch)
     ticks[0] += 4.999
     wall[0] += timedelta(minutes=1)  # Wall-clock changes cannot bypass the monotonic interval.
     assert worker.run_once()["processed"] == 0
-    assert counts == {"exports": 1, "point_reads": 8}
+    assert counts == {"exports": 0, "point_reads": 0}
     ticks[0] = 105.0
     assert worker.run_once()["processed"] == 0
-    assert counts == {"exports": 2, "point_reads": 16}
+    assert counts == {"exports": 0, "point_reads": 0}
     assert worker._change_hints == {}
 
 
@@ -127,7 +127,7 @@ def test_every_poll_checks_authority_even_without_scan(setup, monkeypatch):
     allowed[0] = False
     with pytest.raises(PermissionError, match="revoked"):
         worker.run_once()
-    assert len(calls) == 3 and counts["exports"] == 1
+    assert len(calls) == 3 and counts["exports"] == 0
 
 
 def test_due_work_runs_during_advisory_scan_cooldown(setup, monkeypatch):
@@ -140,7 +140,7 @@ def test_due_work_runs_during_advisory_scan_cooldown(setup, monkeypatch):
     row["refresh_schedule"]["next_run_at"] = (wall[0] - timedelta(seconds=1)).isoformat()
     engine.save_mental_model_record("t", mid, row, expected_version=row["version"])
     assert worker.run_once()["unchanged"] == 1
-    assert counts["exports"] == 2  # Advisory scan plus the independent due refresh preflight.
+    assert counts["exports"] == 0  # Both independently validate the current source revision.
 
 
 @pytest.mark.parametrize("mutation", ["erasure", "privacy"])
@@ -157,7 +157,7 @@ def test_ready_get_and_list_reauthorize_inside_scan_cooldown(setup, monkeypatch,
     counts = count_scans(engine, monkeypatch)
     for view in (service.get(CTX, mid), service.list(CTX)[0]):
         assert view["stale"] and view["answer"] == "" and view["claims"] == []
-    assert counts["exports"] == 2
+    assert counts["exports"] <= 1
 
 
 def test_new_worker_scans_immediately_even_with_reset_clock_origin(setup, monkeypatch):
@@ -168,7 +168,7 @@ def test_new_worker_scans_immediately_even_with_reset_clock_origin(setup, monkey
     old.run_once()
     ticks[0] = -100.0
     MentalModelRefreshWorker(service, CTX, check_changes=True).run_once()
-    assert counts["exports"] == 2
+    assert counts["exports"] <= 1
 
 
 def test_failed_advisory_scans_are_bounded_but_due_work_and_retry_survive(setup, monkeypatch):

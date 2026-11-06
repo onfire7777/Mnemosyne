@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+import math
 from eval.harness.metrics import bootstrap_mean_interval, percentile
 
 
@@ -55,6 +56,8 @@ def paired_interval(
 ) -> dict:
     if len(candidate) != len(baseline) or not candidate:
         raise ValueError("paired seed results must be nonempty and equally sized")
+    if any(not math.isfinite(value) for value in (*candidate, *baseline)):
+        raise ValueError("paired seed results must be finite")
     interval = bootstrap_mean_interval(
         [a - b for a, b in zip(candidate, baseline, strict=True)], seed=seed
     )

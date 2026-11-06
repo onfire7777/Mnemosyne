@@ -2434,7 +2434,9 @@ class AutoMemorySession:
         )
         if hasattr(self.engine, "append_evidence"):
             self.engine.append_evidence(ev_user, branch=self.branch)
-        self._session_evidence_cids.append(cid_user)
+        user_stored = self.engine.get_evidence(self.tenant_id, cid_user, self.branch) is not None
+        if user_stored:
+            self._session_evidence_cids.append(cid_user)
         self._last_user_turn_text = user_text
         self._last_user_evidence_cid = cid_user
 
@@ -2452,8 +2454,8 @@ class AutoMemorySession:
             expires_at=expires,
             evidence_ids=[cid_user],
             salience=user_salience,
-        )
-        if hasattr(self.engine, "put_working"):
+        ) if user_stored else None
+        if item_user is not None and hasattr(self.engine, "put_working"):
             try:
                 self.engine.put_working(item_user)
             except Exception as exc:
@@ -2485,7 +2487,9 @@ class AutoMemorySession:
         )
         if hasattr(self.engine, "append_evidence"):
             self.engine.append_evidence(ev_asst, branch=self.branch)
-        self._session_evidence_cids.append(cid_asst)
+        assistant_stored = self.engine.get_evidence(self.tenant_id, cid_asst, self.branch) is not None
+        if assistant_stored:
+            self._session_evidence_cids.append(cid_asst)
 
         # 4. Store Assistant Turn in Working Memory
         item_asst = WorkingMemoryItem(
@@ -2501,8 +2505,8 @@ class AutoMemorySession:
             expires_at=expires,
             evidence_ids=[cid_asst],
             salience=0.50,
-        )
-        if hasattr(self.engine, "put_working"):
+        ) if assistant_stored else None
+        if item_asst is not None and hasattr(self.engine, "put_working"):
             try:
                 self.engine.put_working(item_asst)
             except Exception as exc:
@@ -2510,7 +2514,7 @@ class AutoMemorySession:
 
         # 5. Extract Active Goals & Constraints from User Turn
         goal_match = re.search(r"(?:my goal is|i want to|aim to|need to|objective is)\s+([^.!?\n]+)", user_text, re.IGNORECASE)
-        if goal_match:
+        if goal_match and user_stored:
             goal_text = goal_match.group(0).strip()
             if goal_text not in self._active_goals:
                 self._active_goals.append(goal_text)
@@ -2536,7 +2540,7 @@ class AutoMemorySession:
                         log.debug("AutoMemorySession put_working goal error: %s", exc)
 
         constraint_match = re.search(r"(?:always|never|must|prefer)\s+([^.!?\n]+)", user_text, re.IGNORECASE)
-        if constraint_match:
+        if constraint_match and user_stored:
             constraint_text = constraint_match.group(0).strip()
             if constraint_text not in self._active_constraints:
                 self._active_constraints.append(constraint_text)
@@ -2568,7 +2572,8 @@ class AutoMemorySession:
             learning_episode = observe_completed_turn(
                 self.learning_runtime, self.tenant_id, self.user_id, self.session_id,
                 user_text, assistant_text, tool_events=tool_events,
-                receipt_ids=[receipt] if receipt else [], source_cids=[cid_user, cid_asst],
+                receipt_ids=[receipt] if receipt else [],
+                source_cids=([cid_user] if user_stored else []) + ([cid_asst] if assistant_stored else []),
                 used_skills=used_skills, used_lessons=used_lessons,
                 feedback=lambda episode_id: self._learning_tools._capture_learning_user_feedback(
                     self.learning_runtime, self.tenant_id, self.user_id, self.session_id,

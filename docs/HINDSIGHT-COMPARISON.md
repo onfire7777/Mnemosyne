@@ -117,7 +117,7 @@ specific correctness gaps. The later [document revision implementation and tests
 also delivered the registry, revision retirement and durable publication receipts.
 Automatic model extraction from changed segments remains unfinished; unchanged
 source occurrences are already reused. See the [source transaction contract](source-transactions.md)
-and [remaining document limits](document-revisions.md#not-yet-implemented).
+and [existing-data repair](document-revisions.md#existing-data-repair).
 No comparative score is claimed.
 
 ## Prioritized delivery plan

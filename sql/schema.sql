@@ -1022,3 +1022,102 @@ DROP POLICY IF EXISTS learning_policy_state_tenant_isolation ON learning_policy_
 CREATE POLICY learning_policy_state_tenant_isolation ON learning_policy_state
   USING (tenant_id = mnemosyne_current_tenant())
   WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
+-- Transactional source revisions serialize tenant source changes before commit.
+-- A BIGSERIAL audit cursor alone can skip a transaction that commits out of order.
+CREATE TABLE IF NOT EXISTS memory_source_revisions (
+  tenant_id UUID PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
+  revision BIGINT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS memory_source_changes (
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  revision BIGINT NOT NULL,
+  collection TEXT NOT NULL,
+  branch TEXT NOT NULL,
+  item_id TEXT NOT NULL,
+  PRIMARY KEY (tenant_id, revision)
+);
+ALTER TABLE memory_source_revisions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE memory_source_revisions FORCE ROW LEVEL SECURITY;
+ALTER TABLE memory_source_changes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE memory_source_changes FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS memory_source_revisions_tenant ON memory_source_revisions;
+CREATE POLICY memory_source_revisions_tenant ON memory_source_revisions
+  USING (tenant_id = mnemosyne_current_tenant()) WITH CHECK (tenant_id = mnemosyne_current_tenant());
+DROP POLICY IF EXISTS memory_source_changes_tenant ON memory_source_changes;
+CREATE POLICY memory_source_changes_tenant ON memory_source_changes
+  USING (tenant_id = mnemosyne_current_tenant()) WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
+CREATE OR REPLACE FUNCTION mnemosyne_record_source_change()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+  source_row JSONB;
+  source_rows JSONB[];
+  next_revision BIGINT;
+  source_tenant UUID;
+  source_id TEXT;
+  source_collection TEXT;
+BEGIN
+  IF TG_OP = 'UPDATE'
+     AND (to_jsonb(OLD) - ARRAY['embedding', 'embedding_partition', 'lexeme', 'access_count', 'last_accessed', 'last_accessed_at', 'salience'])
+       = (to_jsonb(NEW) - ARRAY['embedding', 'embedding_partition', 'lexeme', 'access_count', 'last_accessed', 'last_accessed_at', 'salience']) THEN
+    RETURN NULL;
+  END IF;
+  IF TG_OP = 'UPDATE' THEN
+    source_rows := ARRAY[to_jsonb(OLD), to_jsonb(NEW)];
+  ELSIF TG_OP = 'DELETE' THEN
+    source_rows := ARRAY[to_jsonb(OLD)];
+  ELSE
+    source_rows := ARRAY[to_jsonb(NEW)];
+  END IF;
+  FOREACH source_row IN ARRAY source_rows LOOP
+    source_tenant := (source_row->>'tenant_id')::uuid;
+    IF TG_TABLE_NAME = 'evidence' THEN
+      source_id := encode((source_row->>'cid')::bytea, 'hex');
+    ELSE
+      source_id := source_row->>'id';
+    END IF;
+    source_collection := TG_TABLE_NAME;
+    IF TG_OP = 'DELETE' THEN
+      DELETE FROM memory_source_changes WHERE tenant_id = source_tenant
+        AND collection = TG_TABLE_NAME AND item_id = source_id;
+      source_collection := '*';
+      source_id := '*';
+    END IF;
+    INSERT INTO memory_source_revisions(tenant_id, revision) VALUES (source_tenant, 1)
+      ON CONFLICT(tenant_id) DO UPDATE SET revision = memory_source_revisions.revision + 1
+      RETURNING revision INTO next_revision;
+    INSERT INTO memory_source_changes(tenant_id, revision, collection, branch, item_id)
+      VALUES (source_tenant, next_revision, source_collection,
+              CASE WHEN TG_OP = 'DELETE' THEN '*' ELSE COALESCE(source_row->>'branch', '*') END, source_id);
+  END LOOP;
+  RETURN NULL;
+END;
+$$;
+
+DO $$
+DECLARE source_table TEXT;
+BEGIN
+  FOREACH source_table IN ARRAY ARRAY['evidence', 'assertions', 'relations', 'preferences'] LOOP
+    EXECUTE format('DROP TRIGGER IF EXISTS memory_source_change ON %I', source_table);
+    EXECUTE format('CREATE TRIGGER memory_source_change AFTER INSERT OR UPDATE OR DELETE ON %I FOR EACH ROW EXECUTE FUNCTION mnemosyne_record_source_change()', source_table);
+  END LOOP;
+END;
+$$;
+
+-- Existing installations apply this migration after roles.sql has run. Fresh
+-- installations receive the same privileges from roles.sql's all-table grants.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mnemosyne_app') THEN
+    GRANT SELECT, INSERT, UPDATE ON memory_source_revisions TO mnemosyne_app;
+    GRANT SELECT, INSERT, DELETE ON memory_source_changes TO mnemosyne_app;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mnemosyne_consolidator') THEN
+    GRANT SELECT, INSERT, UPDATE, DELETE ON memory_source_revisions, memory_source_changes TO mnemosyne_consolidator;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mnemosyne_readonly') THEN
+    GRANT SELECT ON memory_source_revisions, memory_source_changes TO mnemosyne_readonly;
+  END IF;
+END;
+$$;

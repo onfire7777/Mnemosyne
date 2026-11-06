@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 import unicodedata
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from typing import Any, Literal, Mapping, Protocol, Sequence
 
@@ -893,7 +893,10 @@ class GroundedAnswerOrchestrator:
         if replayed.abstained or (
             replayed.trace.evidence_fingerprint != assembled.trace.evidence_fingerprint
             or replayed.evidence != assembled.evidence
-            or replayed.trace.hops != assembled.trace.hops
+            # Cache warming can change channel labels without changing evidence.
+            # Keep every other hop field in the replay comparison.
+            or tuple(replace(hop, channels=()) for hop in replayed.trace.hops)
+            != tuple(replace(hop, channels=()) for hop in assembled.trace.hops)
         ):
             return self._abstain("replay_drift")
         try:

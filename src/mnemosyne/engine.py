@@ -3221,6 +3221,9 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         # (including belief.py's direct-dict writers) already reach, even when
         # store_path is unset — so any committed write invalidates the memo.
         self._store_version = 0
+        self._source_change_revision = 0
+        self._source_change_events: list[tuple[int, str, str, str, str]] = []
+        self._source_change_epoch = evidence_epoch()
         self._retrieval_result_cache_nonce = secrets.token_hex(16)
         # Entries carry the earliest future access-policy expiry in scope: the
         # scan is time-dependent through expires_at, so a cached result is only
@@ -3320,6 +3323,43 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             effective_filter.get("_retrieval_deep", False),
             self._retrieval_policy_deadline_token(tenant_id, branch),
         )
+
+    def _record_source_change(self, change: tuple[str, str, str, str] | bool) -> None:
+        self._source_change_revision += 1
+        if change is True:
+            # Unknown/bulk writes and erasures invalidate every cached raw row.
+            # Discard identifiers from old events on this reset as well.
+            self._source_change_events = [(self._source_change_revision, "*", "*", "*", "*")]
+        else:
+            self._source_change_events.append((self._source_change_revision, *change))
+            if len(self._source_change_events) > 4096:
+                self._source_change_events = [(self._source_change_revision, "*", "*", "*", "*")]
+        self._source_change_epoch = evidence_epoch()
+
+    def mental_model_source_revision(self, tenant_id: str) -> int:
+        with self._lock:
+            if self._source_change_epoch != evidence_epoch():
+                self._record_source_change(True)
+            return self._source_change_revision
+
+    def mental_model_source_changes(self, tenant_id: str, branch: str, after: int) -> list[tuple[str, str, str]]:
+        with self._lock:
+            return list(dict.fromkeys(
+                (collection, row_branch, item_id)
+                for revision, tenant, collection, row_branch, item_id in self._source_change_events
+                if revision > after and tenant in {tenant_id, "*"} and row_branch in {branch, "*"}
+            ))
+
+    def mental_model_source_rows(self, tenant_id: str, changes: list[tuple[str, str, str]]) -> list[dict[str, Any]]:
+        result = []
+        with self._lock:
+            for collection, branch, cid in changes:
+                if collection != "evidence":
+                    raise ValueError("unknown incremental native source collection")
+                source = self.get_evidence(tenant_id, cid, branch)
+                result.append({"key": (collection, branch, cid),
+                               "record": source.to_dict() if source else None})
+        return result
 
     def _retrieval_policy_deadline_token(
         self, tenant_id: str, branch: str
@@ -4425,6 +4465,15 @@ class LocalMemoryEngine(CanaryOverlayMixin):
     def _bump_store_version(self) -> None:
         """The memo-invalidating half of ``_persist``, for writes that are not persisted."""
         self._store_version += 1
+        self._record_source_change(True)
+
+    def _persist_source_change(self, change: tuple[str, str, str, str] | bool) -> None:
+        previous = getattr(self, "_source_change_hint", True)
+        self._source_change_hint = change
+        try:
+            self._persist()
+        finally:
+            self._source_change_hint = previous
 
     def _persist(self) -> None:
         state = self._source_transaction_state
@@ -4436,6 +4485,9 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         # Every mutator funnels through here; bump BEFORE the store_path early
         # return so in-memory engines invalidate the candidate memo too.
         self._store_version += 1
+        source_change = getattr(self, "_source_change_hint", True)
+        if source_change:
+            self._record_source_change(source_change)
         self._passage_bm25_index = None
         if self._persistence_aborted:
             raise RuntimeError("deferred persistence transaction was aborted")
@@ -4790,6 +4842,8 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 raise
             finally:
                 self._source_transaction_state = None
+            for action in state.get("after_commit", []):
+                action()
             journal_error: Exception | None = None
             for action, record in state["journal"]:
                 try:
@@ -4826,6 +4880,13 @@ class LocalMemoryEngine(CanaryOverlayMixin):
 
     def _append_source_journal(self, record: dict[str, Any]) -> None:
         self._write_source_journal("append", record)
+
+    def _after_source_commit(self, action: Any) -> None:
+        state = self._source_transaction_state
+        if state is None:
+            action()
+        else:
+            state.setdefault("after_commit", []).append(action)
 
     def get_document_record(
         self,
@@ -4987,7 +5048,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             before_version = self._store_version
             self.mental_models[key] = saved
             try:
-                self._persist()
+                self._persist_source_change(False)
             except BaseException:
                 if current is None:
                     self.mental_models.pop(key, None)
@@ -5018,7 +5079,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             before_version = self._store_version
             del self.mental_models[key]
             try:
-                self._persist()
+                self._persist_source_change(False)
             except BaseException:
                 self.mental_models[key] = current
                 self._store_version = before_version
@@ -5824,7 +5885,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                         trust_tier=ev.trust_tier,
                         capability_tags=ev.capability_tags,
                     )
-                    self._persist()
+                    self._persist_source_change((ev.tenant_id, "evidence", branch, cid))
                     return cid
                 budget_report: dict[str, Any] | None = None
                 if reality_class in {
@@ -5869,7 +5930,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                             trust_tier=ev.trust_tier,
                             capability_tags=ev.capability_tags,
                         )
-                        self._persist()
+                        self._persist_source_change((ev.tenant_id, "evidence", branch, cid))
                         return cid
                 stored = copy.deepcopy(ev)
                 stored.cid = cid
@@ -5910,7 +5971,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     trust_tier=ev.trust_tier,
                     capability_tags=ev.capability_tags,
                 )
-                self._persist()
+                self._persist_source_change((ev.tenant_id, "evidence", branch, cid))
             if self._journal_dir is not None:
                 (journal_append or self._append_source_journal)(
                     {
@@ -6067,7 +6128,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     trust_tier=ev.trust_tier,
                     capability_tags=ev.capability_tags,
                 )
-                self._persist()
+                self._persist_source_change((tenant_id, "evidence", branch, cid))
                 return False
             ev.embedding = list(embedding)
             ev.metadata = dict(ev.metadata)
@@ -6089,7 +6150,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 trust_tier=ev.trust_tier,
                 capability_tags=ev.capability_tags,
             )
-            self._persist()
+            self._persist_source_change((tenant_id, "evidence", branch, cid))
             return True
 
     def update_evidence_metadata(
@@ -6151,7 +6212,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     trust_tier=ev.trust_tier,
                     capability_tags=ev.capability_tags,
                 )
-                self._persist()
+                self._persist_source_change((tenant_id, "evidence", branch, cid))
             return True
 
     def backfill_evidence_privacy(
@@ -6217,7 +6278,9 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 trust_tier=ev.trust_tier,
                 capability_tags=ev.capability_tags,
             )
-            self._persist()
+            self._persist_source_change((tenant_id, "evidence", branch, cid))
+            from mnemosyne.mental_model_sources import purge_source_snapshot_caches
+            self._after_source_commit(lambda: purge_source_snapshot_caches(self, tenant_id))
             return True
 
     def upsert_assertion(self, assertion: Assertion, branch: str = "main") -> str:
@@ -8568,7 +8631,11 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         erasure_mode: ErasureMode | str = ErasureMode.TOMBSTONE_RECOMPUTE,
     ) -> dict[str, Any]:
         with self.source_transaction(tenant_id, branch):
-            return self._forget_scoped(tenant_id, cid, branch, requested_by, erasure_mode)
+            result = self._forget_scoped(tenant_id, cid, branch, requested_by, erasure_mode)
+            if result.get("erased"):
+                from mnemosyne.mental_model_sources import purge_source_snapshot_caches
+                self._after_source_commit(lambda: purge_source_snapshot_caches(self, tenant_id))
+            return result
 
     def _forget_scoped(
         self,

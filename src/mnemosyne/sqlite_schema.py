@@ -550,3 +550,29 @@ ENSURE_STATEMENTS.extend(
     "payload TEXT NOT NULL, PRIMARY KEY (tenant_id, record_key))"
     for table in LEARNING_TABLES
 )
+
+# Transaction-coupled source changes let maintained answers revalidate only the
+# affected source dependency closure. These tables contain identifiers only.
+ENSURE_STATEMENTS.extend([
+    "CREATE TABLE IF NOT EXISTS memory_source_revisions (tenant_id TEXT PRIMARY KEY, revision INTEGER NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS memory_source_changes (tenant_id TEXT NOT NULL, revision INTEGER NOT NULL, collection TEXT NOT NULL, branch TEXT NOT NULL, item_id TEXT NOT NULL, PRIMARY KEY (tenant_id, revision))",
+])
+for _source_table in ("evidence", "assertions", "relations", "preferences"):
+    for _operation in ("INSERT", "UPDATE", "DELETE"):
+        _sides = ("OLD", "NEW") if _operation == "UPDATE" else (("OLD",) if _operation == "DELETE" else ("NEW",))
+        _body = []
+        for _side in _sides:
+            _id = f"{_side}.cid" if _source_table == "evidence" else f"{_side}.id"
+            _branch = "'*'" if _source_table == "preferences" else f"{_side}.branch"
+            if _operation == "DELETE":
+                _body.append(f"DELETE FROM memory_source_changes WHERE tenant_id = OLD.tenant_id AND collection = '{_source_table}' AND item_id = {_id};")
+                _collection, _branch, _id = "*", "'*'", "'*'"
+            else:
+                _collection = _source_table
+            _body.extend([
+                f"INSERT INTO memory_source_revisions VALUES ({_side}.tenant_id, 1) ON CONFLICT(tenant_id) DO UPDATE SET revision = revision + 1;",
+                f"INSERT INTO memory_source_changes SELECT {_side}.tenant_id, revision, '{_collection}', {_branch}, {_id} FROM memory_source_revisions WHERE tenant_id = {_side}.tenant_id;",
+            ])
+        ENSURE_STATEMENTS.append(
+            f"CREATE TRIGGER IF NOT EXISTS memory_source_{_source_table}_{_operation.lower()} AFTER {_operation} ON {_source_table} BEGIN {' '.join(_body)} END"
+        )
