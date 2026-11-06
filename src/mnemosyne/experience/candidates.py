@@ -315,18 +315,24 @@ def register_import(runtime, tenant: str, candidate: dict) -> dict:
     """Admit a source import to local probation without manufacturing an outcome."""
     origin = candidate.get("source_origin", {})
     user = origin.get("user_id")
-    identity = digest(
-        [
-            "import",
-            candidate["id"],
-            candidate.get("revision", 1),
-            candidate.get("task_class", ""),
-        ]
-    )
+    source_identity = [
+        candidate["id"],
+        candidate.get("revision", 1),
+        candidate.get("task_class", ""),
+    ]
+    identity = digest(["import", tenant, user, *source_identity])
+    legacy_identity = digest(["import", *source_identity])
     snapshot = runtime.writer.read(tenant)
-    if identity in snapshot["artifacts"]:
-        runtime._sync_library_revision_states(tenant)
-        return snapshot["artifacts"][identity]
+    for key in (identity, legacy_identity):
+        existing = snapshot["artifacts"].get(key)
+        if existing and existing.get("tenant_id") == tenant and existing.get("user_id") == user:
+            runtime._sync_library_revision_states(tenant)
+            return existing
+    # Keep a matching pre-scope pending import's persisted identity too, while
+    # preventing another owner's pending row from being replaced.
+    pending_origin = snapshot["policy"].get("pending_imports", {}).get(legacy_identity, {}).get("source_origin", {})
+    if pending_origin.get("tenant_id") == tenant and pending_origin.get("user_id") == user:
+        identity = legacy_identity
     timestamp = datetime.now(UTC)
     episode_id = "import-" + identity
     episode = Trajectory.native(**{
