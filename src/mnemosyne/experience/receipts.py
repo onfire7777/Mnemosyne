@@ -32,6 +32,11 @@ def digest(value: object) -> str:
     ).hexdigest()
 
 
+def source_segment_id(tenant: str, user: str, session: str, actor: str) -> str:
+    """Stable custody for inline host text without inventing a blob pointer."""
+    return "learning:" + digest([tenant, user, session, actor])
+
+
 @dataclass(frozen=True)
 class ServedItem:
     kind: str

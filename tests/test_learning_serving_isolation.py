@@ -8,9 +8,12 @@ from mnemosyne.experience import candidates
 from mnemosyne.experience.candidates import register_import
 from mnemosyne.experience.receipts import digest
 from mnemosyne.experience.runtime import LearningRuntime
+from mnemosyne.frameworks import AutoMemorySession
+from mnemosyne.hosts.hermes import HermesAdapter
 from mnemosyne.mcp_tools import MemoryTools
 from mnemosyne.learning import LearningSystem, Lesson, Procedure
 from mnemosyne.models import Evidence
+from mnemosyne.sqlite_engine import SqliteEngine
 
 
 @pytest.mark.parametrize("source_access", [
@@ -104,10 +107,15 @@ def test_created_learning_sources_keep_user_session_and_actor_custody():
     assert len(set(sources)) == 12
 
 
-def test_scoped_text_source_hard_delete_does_not_shred_a_blob(monkeypatch):
+@pytest.mark.parametrize("host", ["runtime", "sdk"])
+def test_scoped_text_source_hard_delete_does_not_shred_a_blob(monkeypatch, host):
     tools = MemoryTools(LocalMemoryEngine())
     runtime = tools._learning_runtime()
-    result = runtime.observe_turn("t", "alice", "s", "text to erase", "")
+    if host == "sdk":
+        session = AutoMemorySession(tools.engine, "t", "alice", session_id="s", auto_consolidate=False)
+        result = session.post_turn_capture("text to erase", "response")["learning_episode"]
+    else:
+        result = runtime.observe_turn("t", "alice", "s", "text to erase", "")
     episode = runtime.writer.read("t")["episodes"][result["episode_id"]]
     cid = episode["source_cids"][0]
     source = tools.engine.get_evidence("t", cid)
@@ -155,7 +163,7 @@ def test_native_compatibility_reads_keep_owner_scope(kind, monkeypatch):
     monkeypatch.setattr(cli, "load_tools", lambda args: tools)
     monkeypatch.setattr(cli, "emit", emitted.append)
     command = cli.cmd_lesson_search if kind == "lesson" else cli.cmd_procedure_search
-    command(SimpleNamespace(signature="", query="", tenant="t", status=None))
+    command(SimpleNamespace(signature="", query="", tenant="t", status=None, user=None, role="operator"))
     assert [row["id"] for row in emitted[0][key]] == [item.id]
 
 
@@ -169,3 +177,31 @@ def test_curated_compatibility_records_keep_tenant_wide_reads():
         assert tools.get("t", item.id, user_id="bob")["record"]["id"] == item.id
     assert tools.lesson_search("inventory", tenant_id="t")["lessons"][0]["id"] == lesson.id
     assert tools.procedure_search("inventory", tenant_id="t")["procedures"][0]["id"] == procedure.id
+
+
+@pytest.mark.parametrize("backend", ["local", "sqlite"])
+@pytest.mark.parametrize("host", ["sdk", "mcp", "hermes"])
+def test_host_same_text_keeps_user_session_and_actor_custody(tmp_path, backend, host):
+    engine = LocalMemoryEngine() if backend == "local" else SqliteEngine(tmp_path / "sqlite")
+    runtime = LearningRuntime(engine)
+    source_ids = []
+    for user, session_id in (("alice", "same"), ("bob", "same"), ("alice", "other")):
+        events = [{"name": "inspect", "output": "same text", "verdict": True}]
+        if host == "sdk":
+            session = AutoMemorySession(engine, "t", user, session_id=session_id, auto_consolidate=False)
+            result = session.post_turn_capture("same text", "same text", tool_events=events)["learning_episode"]
+        elif host == "mcp":
+            result = MemoryTools(engine).observe_turn("t", user, session_id, "same text", "same text", tool_events=events)
+        else:
+            adapter = HermesAdapter(runtime, tenant_id="t", user_id=user)
+            adapter.initialize(session_id)
+            result = adapter.sync_turn("same text", "same text", messages=[{"role": "tool", "content": events[0]}])
+        episode = runtime.episode("t", result["episode_id"])
+        assert episode["status"] == "resolved"
+        rows = [engine.get_evidence("t", cid) for cid in episode["source_cids"]]
+        assert len(rows) == 3
+        assert {row.user_id for row in rows} == {user}
+        assert {row.session_id for row in rows} == {session_id}
+        assert {row.actor for row in rows} == {"user", "assistant", "tool"}
+        source_ids.extend(episode["source_cids"])
+    assert len(set(source_ids)) == 9

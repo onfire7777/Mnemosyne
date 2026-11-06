@@ -11,7 +11,7 @@ from mnemosyne.ids import new_id
 from mnemosyne.models import Evidence
 from mnemosyne.learning import Trajectory
 from .guards import require
-from .receipts import ContextReceipt, ROUTE_OF_CHANNEL, ServedItem, digest
+from .receipts import ContextReceipt, ROUTE_OF_CHANNEL, ServedItem, digest, source_segment_id
 from .signals import reward, signal, tool_signals, user_signals
 from .stats import Posterior, contingency_lower_bound, wilson_interval
 from .task_class import classify
@@ -757,7 +757,7 @@ class LearningRuntime:
                         actor=actor,
                         source_type="learning_turn",
                         content=text,
-                        document_segment_id="learning:" + digest([tenant_id, user_id, session_id, actor]),
+                        document_segment_id=source_segment_id(tenant_id, user_id, session_id, actor),
                         session_id=session_id,
                         trust_tier=0 if actor == "user" else 5,
                         metadata={
@@ -795,7 +795,7 @@ class LearningRuntime:
                             actor="tool",
                             source_type="learning_tool_result",
                             content=content,
-                            document_segment_id="learning:" + digest([tenant_id, user_id, session_id, "tool"]),
+                            document_segment_id=source_segment_id(tenant_id, user_id, session_id, "tool"),
                             session_id=session_id,
                             trust_tier=1,
                             access_policy={
@@ -947,7 +947,7 @@ class LearningRuntime:
                             actor="user",
                             source_type="learning_correction",
                             content=evidence,
-                            document_segment_id="learning:" + digest([tenant_id, episode["user_id"], episode["session_id"], "user"]),
+                            document_segment_id=source_segment_id(tenant_id, episode["user_id"], episode["session_id"], "user"),
                             session_id=episode["session_id"],
                             trust_tier=1,
                             metadata={"reality_class": "external"},
