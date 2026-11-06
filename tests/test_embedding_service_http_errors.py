@@ -1,5 +1,6 @@
 """Exercise malformed request handling on the actual stdlib HTTP transport."""
 
+import errno
 import http.client
 import importlib.util
 import json
@@ -39,7 +40,13 @@ def _post(address, body, length):
         connection.request("POST", "/embed", body=body, headers={"Content-Length": length})
         # A negative length previously read until EOF; close only our write
         # half so the regression cannot hang while the response remains readable.
-        connection.sock.shutdown(socket.SHUT_WR)
+        try:
+            connection.sock.shutdown(socket.SHUT_WR)
+        except OSError as exc:
+            # An invalid header can be rejected and closed before this
+            # half-close. Still read and assert the server's HTTP response.
+            if exc.errno != errno.ENOTCONN:
+                raise
         try:
             response = connection.getresponse()
         except http.client.RemoteDisconnected:
