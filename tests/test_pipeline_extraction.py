@@ -11,15 +11,17 @@ channel counts and adapters block — for seeded stores across four scenarios:
 * an abstention-triggering low-support query (hits present, insufficient
   query-term coverage).
 
-They were captured GREEN against the shipped duplicated pipeline before the
-extraction into ``mnemosyne.pipeline`` and act as the extraction's oracle: the
-shared orchestrator must reproduce every surface byte-identically.
+Originally captured before the extraction into ``mnemosyne.pipeline``, these
+snapshots now pin the approved shared pipeline and default-on learning rails.
+The shared orchestrator must reproduce every recorded surface byte-identically.
 
-Determinism: the local hashing embedder, similarity reranker, activation,
-standing, and calibration paths are all bit-deterministic for fresh seeded
-stores (verified across processes, wall-clock gaps, and both kernel modes —
-kernel byte-parity is proven separately by tests/test_native_parity.py), so
-score bits are asserted exactly via ``float.hex()``.
+Determinism: seed timestamps and the retrieval evaluation instant are fixed.
+The engine clock is fixed too, because assertion insertion assigns its own
+transaction timestamp and current graph reads check relation validity against
+that clock. Recency therefore cannot depend on test execution time.
+The local hashing embedder, similarity reranker, activation, standing, and
+calibration paths retain exact ``float.hex()`` assertions; kernel byte-parity
+is tested separately by tests/test_native_parity.py.
 
 Regenerate (only with an explicit spec-sanctioned behavior change):
 
@@ -29,8 +31,10 @@ Regenerate (only with an explicit spec-sanctioned behavior change):
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Assertion, Evidence, Relation, RetrievalResult
@@ -38,6 +42,7 @@ from mnemosyne.models import Assertion, Evidence, Relation, RetrievalResult
 GOLDEN_PATH = Path(__file__).parent / "data" / "pipeline_extraction_goldens.json"
 
 TENANT = "tenant-pipe"
+REFERENCE_TIME = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _seeded_engine() -> tuple[LocalMemoryEngine, str]:
@@ -58,6 +63,7 @@ def _seeded_engine() -> tuple[LocalMemoryEngine, str]:
                     actor="user",
                     source_type="seed",
                     content=content,
+                    created_at=REFERENCE_TIME,
                     trust_tier=2,
                     access_policy={"tenant": TENANT},
                 )
@@ -71,6 +77,8 @@ def _seeded_engine() -> tuple[LocalMemoryEngine, str]:
             predicate="lives in",
             object="operations wiki",
             confidence=0.9,
+            valid_from=REFERENCE_TIME,
+            transaction_time=REFERENCE_TIME,
             source_evidence_cids=[cids[0]],
             status="active",
             trust_tier=2,
@@ -85,6 +93,8 @@ def _seeded_engine() -> tuple[LocalMemoryEngine, str]:
             predicate="run at",
             object="two in the morning",
             confidence=0.8,
+            valid_from=REFERENCE_TIME,
+            transaction_time=REFERENCE_TIME,
             source_evidence_cids=[cids[1]],
             status="active",
             trust_tier=2,
@@ -99,6 +109,7 @@ def _seeded_engine() -> tuple[LocalMemoryEngine, str]:
             predicate="emits",
             target="topaz glow",
             confidence=0.85,
+            valid_from=REFERENCE_TIME,
             source_evidence_cids=[cids[2]],
             access_policy={"tenant": TENANT},
         )
@@ -137,25 +148,30 @@ def _surface(result: RetrievalResult) -> dict[str, Any]:
     }
 
 
+@patch("mnemosyne.engine.utc_now", lambda: REFERENCE_TIME)
 def build_all_surfaces() -> dict[str, dict[str, Any]]:
     """Every scenario on a FRESH engine (retrieve mutates read-marks)."""
 
     surfaces: dict[str, dict[str, Any]] = {}
     engine, tenant = _seeded_engine()
     surfaces["fast"] = _surface(
-        engine.retrieve("deployment runbook operations", tenant_id=tenant, branch="main", deep=False)
+        engine.retrieve("deployment runbook operations", tenant_id=tenant, branch="main", deep=False,
+                        filt={"evaluated_at": REFERENCE_TIME.isoformat()})
     )
     engine, tenant = _seeded_engine()
     surfaces["deep"] = _surface(
-        engine.retrieve("beacon topaz glow", tenant_id=tenant, branch="main", deep=True)
+        engine.retrieve("beacon topaz glow", tenant_id=tenant, branch="main", deep=True,
+                        filt={"evaluated_at": REFERENCE_TIME.isoformat()})
     )
     empty = LocalMemoryEngine()
     surfaces["empty"] = _surface(
-        empty.retrieve("deployment runbook", tenant_id="tenant-empty", branch="main", deep=False)
+        empty.retrieve("deployment runbook", tenant_id="tenant-empty", branch="main", deep=False,
+                       filt={"evaluated_at": REFERENCE_TIME.isoformat()})
     )
     engine, tenant = _seeded_engine()
     surfaces["low_support_abstention"] = _surface(
-        engine.retrieve("glow quantum espresso protocols", tenant_id=tenant, branch="main", deep=False)
+        engine.retrieve("glow quantum espresso protocols", tenant_id=tenant, branch="main", deep=False,
+                        filt={"evaluated_at": REFERENCE_TIME.isoformat()})
     )
     return surfaces
 
@@ -228,10 +244,12 @@ def test_goldens_cover_expected_explain_keyset() -> None:
         "rails",
         "read_marks",
         "reality_monitoring",
+        "routes",
         "rrf_k",
         "schema_fast_path",
         "semantic_entropy",
         "standing",
+        "working_memory",
         "workspace_broadcast",
         "workspace_retrieval_advisory",
     ]

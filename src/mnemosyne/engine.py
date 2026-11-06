@@ -50,7 +50,7 @@ from mnemosyne.calibration import (
 )
 from mnemosyne.consciousness import RealityMonitor
 from mnemosyne.branch_index import BranchIndexedStore, indexed
-from mnemosyne.canary_overlay import CanaryOverlayMixin
+from mnemosyne.canary_overlay import CanaryOverlayMixin, _relation_group_keys
 from mnemosyne.cid_lists import (
     CidList,
     SharedMap,
@@ -6246,26 +6246,16 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         except (AttributeError, TypeError):
             rel_items = list(self.relations.values())
 
-        subj_low = subject.strip().lower()
-        pred_low = predicate.strip().lower()
         obj_low = obj.strip().lower()
-
-        canonical_preds = {pred_low}
-        if pred_low in {"residence", "lives_in"}:
-            canonical_preds.update({"residence", "lives_in"})
-        elif pred_low in {"education", "graduated_from"}:
-            canonical_preds.update({"education", "graduated_from"})
-        elif pred_low in {"works_at", "employed_by"}:
-            canonical_preds.update({"works_at", "employed_by"})
+        relation_groups = _relation_group_keys(subject, predicate)
 
         for rel in rel_items:
             if getattr(rel, "tenant_id", None) != tenant_id:
                 continue
             if getattr(rel, "branch", None) != branch:
                 continue
-            if getattr(rel, "source", "").strip().lower() != subj_low:
-                continue
-            if getattr(rel, "predicate", "").strip().lower() not in canonical_preds:
+            if (getattr(rel, "source", "").strip().lower(),
+                    getattr(rel, "predicate", "").strip().lower()) not in relation_groups:
                 continue
             if getattr(rel, "target", "").strip().lower() != obj_low:
                 continue

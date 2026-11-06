@@ -12,8 +12,16 @@ cites only the evidence it came from, not the whole batch; name co-occurrence ma
 search keeps relevance order (no U-curve). g0-write-gating was re-dumped on 5 Nov 2026 for one
 deliberate change from codex/complete-ai-memory-prs: an erased source now stops extraction with
 the reason source_evidence_unavailable, where it used to read candidate_extraction_not_configured
-(rows[5], the erasure case); nothing else in the dump moved. Otherwise regenerate
-only from the engine the fixtures were dumped from:
+(rows[5], the erasure case); nothing else in that dump moved.
+
+The three synthetic fixtures were refreshed again on 5 Nov 2026 for the integrated,
+default-on learning stack, current retrieval rails, and corrected canary relation replay.
+Thin/full branch outputs and independent repeated runs must agree before a refresh.
+The harness authenticates encrypted audit payloads before normalizing internal ids;
+it retains every payload field, envelope key id, and encryption timestamp. See
+docs/learning-integration-validation.md for the scoped regression evidence.
+
+To reproduce the original historical baseline instead:
 
     python eval/perf/golden_equivalence.py dump --scenario NAME --src <2083ffc4 checkout>/src --out x.json
 """

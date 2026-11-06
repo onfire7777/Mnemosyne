@@ -31,31 +31,44 @@ The PostgreSQL source-locked publication path also attempted schema-readiness DD
 
 The wheel builds successfully. An isolated import of the built wheel verifies all 22 active defaults, SDK external-outcome resolution, one canonical trajectory, and durable reload.
 
-## Final verification
+## Original integration verification
 
 | Check | Result |
 | --- | --- |
-| Default suite, consolidated across eight partitions and final fix verification | 7,846 passed; 550 skipped; 10 retained golden-fixture mismatches. |
+| Default suite, consolidated across eight partitions and final fix verification | 7,846 passed; 550 skipped; 10 golden-fixture mismatches, resolved by the targeted follow-up below. |
 | Current collection coverage | All 8,406 selected test cases accounted for; zero missing. The existing 191 configured deselections remain excluded. |
 | Final focused run in the actual main checkout | 1,362 passed; 115 skipped. |
 | Final skill-owner projection, serving, and host checks in main | 42 passed. |
 | Repeated current quality-gate runs | Bit-for-bit reproducibility and historical nonregression checks passed. |
-| Additional evaluation tests outside the default suite | 50 passed; one archived-receipt fixture unavailable, described below. |
+| Additional evaluation tests outside the default suite | 50 passed; one archived-receipt failure, resolved by the targeted follow-up below. |
 | Built-wheel isolation | Passed: installed-target imports, 22 active defaults, one canonical episode/compatibility view, separate-process reload, and same-text runtime/SDK capture for distinct users. |
 
 Counts are deduplicated by current test identity; overlapping fix-verification runs are not added twice. Superseded test identities and repeated collection-level skips are not counted as selected cases. Environment-dependent tests, including live PostgreSQL coverage, remain skipped rather than reported as passing.
 
-The final source wheel is `mnemosyne_memory-1.7.0-py3-none-any.whl`, SHA256 `6f412e4c88701d4db24649d1b10fba168d4c6d4bd99925747ac6edf138a90339`. All 118 source files in the integrated worktree match the actual main checkout. Validation logs, the per-case coverage audit, and the installed-wheel smoke scripts are retained locally under `/Users/admin/.codex/tmp/mnemosyne-learning-validation-20261105/`.
+The original integration wheel is `mnemosyne_memory-1.7.0-py3-none-any.whl`, SHA256 `6f412e4c88701d4db24649d1b10fba168d4c6d4bd99925747ac6edf138a90339`. At that integration checkpoint, all 118 source files in the integrated worktree matched the main checkout. This wheel predates the targeted fixes below and was not rebuilt for that follow-up. Validation logs, the per-case coverage audit, and the installed-wheel smoke scripts are retained locally under `/Users/admin/.codex/tmp/mnemosyne-learning-validation-20261105/`.
 
-## Retained golden-fixture mismatches
+## Targeted follow-up: all 11 failures resolved
 
-The legacy golden fixtures are not rewritten to make this cleanup appear green:
+Only the 11 previously failing cases were rerun together: **11 passed in 20.26 seconds**, with no skips or failures. The full suite was not rerun for this follow-up; the earlier counts above remain historical results.
 
-- Six cases in `test_golden_equivalence.py` already disagree with the pre-cleanup baseline. They cover growth, rails, and conflicts in both branch modes. The G0 scenarios pass.
-- Four cases in `test_pipeline_extraction.py` already disagree with the pre-cleanup retrieval surface, including old rail lists and scores. Their exact float-bit comparison also depends on elapsed time in the current salience calculation.
+| Previously failing cases | Fix and verification |
+| --- | --- |
+| Six golden-equivalence cases: growth, rails, and conflicts in thin/full branch modes | Corrected thin-canary relation isolation and replay, made synthetic encrypted audit comparison deterministic, and refreshed the three snapshots for the integrated default-on learning behavior. Every scenario repeats exactly and has identical complete output across both branch modes. |
+| Four pipeline snapshots: fast, deep, empty, and low support | Fixed seed, engine, and evaluation timestamps so salience does not depend on wall-clock age. Refreshed the approved retrieval and learning-rail surfaces while retaining exact float-bit, hit-order, adapter, and explanation comparisons. |
+| One latency receipt case | Exercises the real local synthetic receipt writer into a temporary directory, validates both distributions and receipt identities, and verifies historical latest reports are untouched. No dependency on Mnemetric's archived files remains. |
 
-Independent comparisons use the pre-cleanup checkpoint and the original main checkout. For the formerly nonterminating relation scenario, only the relation replay fix is injected into the baseline process; baseline files are not changed. In both branch modes, all four scenario query outputs match exactly. Complete rails/G0 dumps match. After normalizing learning audit IDs, growth/conflict differences are limited to the intended reduction in duplicate creation/reuse counters and canonical persistence audit events. With time frozen, all four complete pipeline retrieval surfaces match the pre-cleanup checkpoint exactly.
+The canary fix copies only relation peers of touched assertion groups and snapshots relation inputs before assertion replay can mutate their validity windows. Inherited copies replay once; newly added relations replay separately. The canary path and ordinary supersession path share one predicate-alias matcher. Both retain tenant and branch isolation.
 
-Live PostgreSQL verification requires a configured PostgreSQL test database. Local/mock backend checks do not substitute for that environment or establish learning benefit on a sealed benchmark.
+The golden harness still uses real authenticated encryption. It authenticates each returned audit envelope with its referenced key before erasure can destroy that key, then requires the exact captured token and matching key ID when canonicalizing persisted output. Complete decrypted payloads, envelope key IDs, and encryption timestamps remain compared; internal IDs use the existing canonical relabeling. Unknown or altered tokens fail. Deterministic test-only clock/entropy overrides restore their original bindings on normal and exceptional exit. Production encryption remains unchanged; the learning store's only adjustment is moving its UUID import to module scope.
 
-The additional latency evaluation tests include one archived-receipt assertion outside the default suite: `test_phase15_reports_are_separate_synthetic_receipts`. Its required `phase15-s4-warm.json` and `phase15-s4-concurrent.json` were removed from Mnemosyne in `28f99b9a` when benchmark evidence moved to Mnemetric. The test and missing fixtures are unchanged on `origin/dev`. This validation does not fabricate replacement historical receipts; the live receipt-generation and ABI tests remain exercised.
+The three synthetic fixtures were refreshed only after repeated-run and thin/full equality checks passed. The G0 fixture was not changed. All 22 learning components retain their active defaults. Ruff and `git diff --check` passed on the changed files.
+
+The exact 11-case selector manifest, pytest log, JUnit report, and scenario comparison logs are retained under `/Users/admin/.codex/tmp/mnemosyne-remaining-failures-20261105/`.
+
+## Separate benchmark ownership
+
+Mnemetric owns public benchmark reporting and archives. The public LongMemEval report and copied receipts added to Mnemosyne in `f73f90e9` were removed from its current tree. All 14 original JSON/JSONL receipts were byte-checked against Mnemetric: eight already existed in its October 29 evidence archive, and six development receipts were preserved in its `development/` subdirectory with hashes and provenance. Mnemetric's corrected report remains authoritative; the superseded report remains recoverable in Mnemosyne's Git history and a local backup.
+
+Mnemosyne retains its runtime, internal regression fixtures, and independent development runner. Local runner output is ignored by Git. This correction runs no external benchmark and changes no public scores.
+
+Live PostgreSQL verification still requires a configured PostgreSQL test database. The targeted local checks do not establish learning benefit on a sealed benchmark.

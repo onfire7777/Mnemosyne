@@ -15,7 +15,9 @@ The runtime is deterministic and implementation independent: the clock is frozen
 step and advances one second before every captured row, every consolidation job and the
 query phase; ids are counters, and the dump relabels them in a content-sorted traversal so
 two engines that create different numbers of internal ids still compare equal when the
-observable state is equal.
+observable state is equal. Synthetic audit encryption uses seeded keys/IVs and the same
+logical clock. Real ciphertext is authenticated and decrypted before its complete payload
+is relabelled, so opaque encryption cannot hide equivalent internal id renumbering.
 
 Branch bookkeeping is excluded on purpose (approved contract, see the PR): canary branches,
 the per-merge ``upsert_assertion.noop_or_reinforce`` rows and the branch/merge/discard audit
@@ -62,6 +64,7 @@ class LogicalClock:
     def __init__(self) -> None:
         self.base = _dt.datetime(2026, 1, 1, tzinfo=_dt.UTC)
         self.step = 0
+        self.sealed_payloads: dict[str, Any] = {}
 
     def now(self) -> _dt.datetime:
         return self.base + _dt.timedelta(seconds=self.step)
@@ -95,10 +98,33 @@ def deterministic_runtime() -> Any:
             return clock.now().replace(tzinfo=None)
 
     import uuid as real_uuid
+    import cryptography.fernet as fernet_module
 
     import mnemosyne.ids as ids_module
 
     counter = [0]
+    entropy_counter = [0]
+
+    def synthetic_entropy(size: int) -> bytes:
+        """Reproducible entropy for synthetic fixtures only, never production keys."""
+        output = bytearray()
+        while len(output) < size:
+            entropy_counter[0] += 1
+            output.extend(hashlib.sha256(
+                f"mnemosyne-golden-entropy:{entropy_counter[0]}".encode()
+            ).digest())
+        return bytes(output[:size])
+
+    def synthetic_uuid4() -> Any:
+        return real_uuid.UUID(bytes=synthetic_entropy(16), version=4)
+
+    class DependencyProxy:
+        def __init__(self, original: Any, **overrides: Any) -> None:
+            self.original = original
+            self.overrides = overrides
+
+        def __getattr__(self, name: str) -> Any:
+            return self.overrides[name] if name in self.overrides else getattr(self.original, name)
 
     class CountingUuid:
         """Stands in for the uuid module inside mnemosyne.ids: new_id() - and every dataclass
@@ -113,85 +139,123 @@ def deterministic_runtime() -> Any:
             return real_uuid.UUID(f"00000000-0000-4000-8000-{counter[0]:012x}")
 
     patched: list[tuple[Any, str, Any]] = [(ids_module, "uuid", ids_module.uuid)]
-    ids_module.uuid = CountingUuid()
-    for name, module in list(sys.modules.items()):
-        if module is None or not any(name == p or name.startswith(p + ".") for p in ("mnemosyne", "eval")):
-            continue
-        if getattr(module, "datetime", None) is real_datetime:
-            patched.append((module, "datetime", real_datetime))
-            module.datetime = FakeDateTime
-
-    from mnemosyne.consolidation import ConsolidationWorker
-    from mnemosyne.mcp_tools import MemoryTools
-
-    def ticking(owner: Any, attr: str) -> None:
-        original = getattr(owner, attr)
-
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            clock.tick()
-            return original(*args, **kwargs)
-
-        patched.append((owner, attr, original))
-        setattr(owner, attr, wrapper)
-
-    ticking(MemoryTools, "capture")
-    ticking(ConsolidationWorker, "run_job")
-
-    # Mark the audit rows a merge writes while REPLAYING items that were already on the target
-    # branch - the legacy engine re-upserts every unchanged copy on every merge, so those rows
-    # are per-merge bookkeeping (approved contract), not facts about the memory.
-    from mnemosyne.engine import LocalMemoryEngine
-
-    original_merge = LocalMemoryEngine.merge
-
-    def marking_merge(self: Any, frm: str, into: str = "main", tenant_id: str | None = None) -> Any:
-        # Raw rows: the public attribute would settle the engine's thin canaries and hide the
-        # fast path this harness exists to check.
-        rows = getattr(self, "_assertion_items", None)
-        existing = {item.id for item in dict.values(rows if rows is not None else self.assertions)
-                    if item.branch == into}
-        start = len(self.audit_log)
-        report = original_merge(self, frm, into=into, tenant_id=tenant_id)
-        for row in self.audit_log[start:]:
-            if str(row.get("op", "")).startswith("upsert_assertion") and row.get("target_id") in existing:
-                row[REPLAY_MARK] = True
-        return report
-
-    patched.append((LocalMemoryEngine, "merge", original_merge))
-    LocalMemoryEngine.merge = marking_merge
-
-    # A forget fans out over every branch holding the record. Legacy keeps every merged canary
-    # forever, so it also writes one audit row and one deletion-log row per leftover canary; the
-    # new engine discards merged canaries (approved contract). Rows of a forget AIMED AT a canary
-    # branch are canary bookkeeping; the main branch's rows are compared in full.
-    original_forget = LocalMemoryEngine.forget
-
-    def marking_forget(self: Any, tenant_id: str, cid: str, branch: str = "main", *args: Any, **kwargs: Any) -> Any:
-        if (self.branches.get(branch) or {}).get("kind") != "canary":
-            return original_forget(self, tenant_id, cid, branch, *args, **kwargs)
-        audit_start, deletion_start = len(self.audit_log), len(self.deletion_log)
-
-        def mark() -> None:
-            for row in [*self.audit_log[audit_start:], *self.deletion_log[deletion_start:]]:
-                row[CANARY_MARK] = True
-
-        # forget saves the store itself: mark the rows before that save, or the mark is lost.
-        persist = self._persist
-
-        def marking_persist(*a: Any, **k: Any) -> Any:
-            mark()
-            return persist(*a, **k)
-
-        self._persist = marking_persist
-        try:
-            return original_forget(self, tenant_id, cid, branch, *args, **kwargs)
-        finally:
-            del self._persist
-            mark()
-
-    patched.append((LocalMemoryEngine, "forget", original_forget))
-    LocalMemoryEngine.forget = marking_forget
     try:
+        ids_module.uuid = CountingUuid()
+        original_uuid4 = real_uuid.uuid4
+        # Keep the real Fernet implementation, including authentication. Replace its
+        # module-local dependencies rather than mutating the shared os/time modules.
+        for attr, replacement in (
+            ("os", DependencyProxy(fernet_module.os, urandom=synthetic_entropy)),
+            ("time", DependencyProxy(fernet_module.time, time=lambda: clock.now().timestamp())),
+        ):
+            patched.append((fernet_module, attr, getattr(fernet_module, attr)))
+            setattr(fernet_module, attr, replacement)
+        from mnemosyne.experience.store import LearningStore
+
+        original_seal = LearningStore._seal_event
+
+        def authenticated_seal(state: Any, event: Any) -> Any:
+            sealed = original_seal(state, event)
+            # Authenticate the returned envelopes with their actual referenced key,
+            # while it is live: source erasure intentionally destroys it later.
+            for change in sealed["changes"]:
+                for side in ("before", "after"):
+                    envelope = change[side]
+                    if not isinstance(envelope, dict) or "sealed" not in envelope:
+                        continue
+                    key_id = envelope["key_id"]
+                    key = state["policy"]["audit_keys"][key_id]["secret"]
+                    cipher = fernet_module.Fernet(key.encode())
+                    token = envelope["sealed"].encode()
+                    clock.sealed_payloads[envelope["sealed"]] = {
+                        "key_id": key_id,
+                        "authenticated_payload": json.loads(cipher.decrypt(token)),
+                        "encrypted_at": cipher.extract_timestamp(token),
+                    }
+            return sealed
+
+        patched.append((LearningStore, "_seal_event", LearningStore.__dict__["_seal_event"]))
+        LearningStore._seal_event = staticmethod(authenticated_seal)
+        for name, module in list(sys.modules.items()):
+            if module is None or not any(name == p or name.startswith(p + ".") for p in ("mnemosyne", "eval")):
+                continue
+            if getattr(module, "datetime", None) is real_datetime:
+                patched.append((module, "datetime", real_datetime))
+                module.datetime = FakeDateTime
+            if getattr(module, "uuid4", None) is original_uuid4:
+                patched.append((module, "uuid4", original_uuid4))
+                module.uuid4 = synthetic_uuid4
+
+        from mnemosyne.consolidation import ConsolidationWorker
+        from mnemosyne.mcp_tools import MemoryTools
+
+        def ticking(owner: Any, attr: str) -> None:
+            original = getattr(owner, attr)
+
+            def wrapper(*args: Any, **kwargs: Any) -> Any:
+                clock.tick()
+                return original(*args, **kwargs)
+
+            patched.append((owner, attr, original))
+            setattr(owner, attr, wrapper)
+
+        ticking(MemoryTools, "capture")
+        ticking(ConsolidationWorker, "run_job")
+
+        # Mark the audit rows a merge writes while REPLAYING items that were already on the target
+        # branch - the legacy engine re-upserts every unchanged copy on every merge, so those rows
+        # are per-merge bookkeeping (approved contract), not facts about the memory.
+        from mnemosyne.engine import LocalMemoryEngine
+
+        original_merge = LocalMemoryEngine.merge
+
+        def marking_merge(self: Any, frm: str, into: str = "main", tenant_id: str | None = None) -> Any:
+            # Raw rows: the public attribute would settle the engine's thin canaries and hide the
+            # fast path this harness exists to check.
+            rows = getattr(self, "_assertion_items", None)
+            existing = {item.id for item in dict.values(rows if rows is not None else self.assertions)
+                        if item.branch == into}
+            start = len(self.audit_log)
+            report = original_merge(self, frm, into=into, tenant_id=tenant_id)
+            for row in self.audit_log[start:]:
+                if str(row.get("op", "")).startswith("upsert_assertion") and row.get("target_id") in existing:
+                    row[REPLAY_MARK] = True
+            return report
+
+        patched.append((LocalMemoryEngine, "merge", original_merge))
+        LocalMemoryEngine.merge = marking_merge
+
+        # A forget fans out over every branch holding the record. Legacy keeps every merged canary
+        # forever, so it also writes one audit row and one deletion-log row per leftover canary; the
+        # new engine discards merged canaries (approved contract). Rows of a forget AIMED AT a canary
+        # branch are canary bookkeeping; the main branch's rows are compared in full.
+        original_forget = LocalMemoryEngine.forget
+
+        def marking_forget(self: Any, tenant_id: str, cid: str, branch: str = "main", *args: Any, **kwargs: Any) -> Any:
+            if (self.branches.get(branch) or {}).get("kind") != "canary":
+                return original_forget(self, tenant_id, cid, branch, *args, **kwargs)
+            audit_start, deletion_start = len(self.audit_log), len(self.deletion_log)
+
+            def mark() -> None:
+                for row in [*self.audit_log[audit_start:], *self.deletion_log[deletion_start:]]:
+                    row[CANARY_MARK] = True
+
+            # forget saves the store itself: mark the rows before that save, or the mark is lost.
+            persist = self._persist
+
+            def marking_persist(*a: Any, **k: Any) -> Any:
+                mark()
+                return persist(*a, **k)
+
+            self._persist = marking_persist
+            try:
+                return original_forget(self, tenant_id, cid, branch, *args, **kwargs)
+            finally:
+                del self._persist
+                mark()
+
+        patched.append((LocalMemoryEngine, "forget", original_forget))
+        LocalMemoryEngine.forget = marking_forget
         yield clock
     finally:
         for owner, attr, original in reversed(patched):
@@ -427,7 +491,7 @@ def run(name: str, data_dir: Path | None = None) -> dict[str, Any]:
     spec = scenario(name, data_dir)
     with deterministic_runtime() as clock, tempfile.TemporaryDirectory(prefix="mneme-golden-") as temp:
         if callable(spec):
-            return canonical({"scenario": name, "result": spec()})
+            return canonical({"scenario": name, "result": spec()}, clock.sealed_payloads)
         work = Path(temp)
         store = work / "store.json"
         _cli(_gate_case_argv(store, spec["gate_content"]))
@@ -467,7 +531,8 @@ def run(name: str, data_dir: Path | None = None) -> dict[str, Any]:
         answers = _cli(["--backend", "local", "--store", str(store), "--evaluation-read-only", "eval-query-batch",
                         "--input-jsonl", str(queries)])
         state = {tenant: _main_state(store, tenant) for tenant in spec["tenants"]}
-        return canonical({"scenario": name, "steps": steps, "queries": answers, "state": state})
+        return canonical({"scenario": name, "steps": steps, "queries": answers, "state": state},
+                         clock.sealed_payloads)
 
 
 # --------------------------------------------------------------------------- canonical form
@@ -536,8 +601,23 @@ def _owned_id_labels(state: Any) -> dict[str, str]:
     return labels
 
 
-def canonical(dump: dict[str, Any]) -> dict[str, Any]:
+def canonical(dump: dict[str, Any], sealed_payloads: dict[str, Any] | None = None) -> dict[str, Any]:
     dump = json.loads(json.dumps(_drop_volatile(dump), sort_keys=True, default=str))
+    if sealed_payloads is not None:
+        def unseal(value: Any) -> Any:
+            if isinstance(value, dict):
+                value = dict(value)
+                if isinstance(value.get("sealed"), str):
+                    payload = dict(sealed_payloads[value["sealed"]])
+                    if payload.pop("key_id") != value.get("key_id"):
+                        raise AssertionError("Persisted audit envelope key changed")
+                    value["sealed"] = payload
+                return {k: unseal(v) for k, v in value.items()}
+            if isinstance(value, list):
+                return [unseal(v) for v in value]
+            return value
+
+        dump = unseal(dump)
     if isinstance(dump.get("state"), dict):
         dump["state"] = {t: _sort_state(s) for t, s in dump["state"].items()}
     labels = _owned_id_labels(dump.get("state"))
