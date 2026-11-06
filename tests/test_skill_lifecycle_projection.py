@@ -162,6 +162,39 @@ def test_shared_store_projection_does_not_change_other_tenant(tmp_path):
     assert store.status(skill_id) == before
 
 
+def test_reassigned_library_revision_projects_only_current_owner(tmp_path):
+    runtime, store, skill_id, original, _ = managed_skill(tmp_path)
+    old_episode = observe(runtime, "old-owner", success=True)
+    previous = deepcopy(runtime.writer.read("t")["artifacts"][original["id"]])
+    content = "Read the release checklist."
+    cid = runtime.engine.append_evidence(Evidence(
+        tenant_id="t", user_id="next-owner", actor="user", source_type="skill_import",
+        content=content, document_segment_id="next-owner-import",
+        access_policy={"tenant": "t", "allow_principals": ["next-owner"]},
+    ))
+    store.remembered(skill_id, 1, {"tenant": "t", "user": "next-owner", "source_cids": [cid]})
+    context = runtime.prepare_context("t", "next-owner", "next-session", "release-guide", task_type="release")
+    current = next(item for item in runtime.writer.read("t")["artifacts"].values()
+                   if item.get("user_id") == "next-owner")
+    assert current["id"] != original["id"]
+    assert store.status(skill_id)["native_states"] == {current["id"]: "probation"}
+    assert store.status(skill_id)["posterior"]["outcomes"] == 0
+
+    observed = runtime.observe_turn("t", "next-owner", "next-session", "release-guide", "checked",
+                                    receipt_ids=[context["receipt_id"]],
+                                    tool_events=[{"name": "benchmark_verifier", "success": False}])
+    runtime.record_signal("t", episode_id=observed["episode_id"], kind="verifier", value=-1, final=True)
+    events = store._rows("SELECT episode_id FROM skill_outcome_events WHERE skill_id = ? AND revision = 1", (skill_id,))
+    assert {row["episode_id"] for row in events} == {observed["episode_id"]}
+    assert old_episode not in {row["episode_id"] for row in events}
+    assert store.status(skill_id)["posterior"]["outcomes"] == 1
+    runtime.writer.apply("t", "current_owner_state", lambda state: state["artifacts"][current["id"]].update(state="demoted"))
+    runtime._sync_library_revision_states("t")
+    assert store.status(skill_id)["state"] == "demoted"
+    assert store.status(skill_id)["native_states"] == {current["id"]: "demoted"}
+    assert runtime.writer.read("t")["artifacts"][original["id"]] == previous
+
+
 def test_disabled_skill_component_does_not_collect_delayed_receipt_outcome(tmp_path):
     from mnemosyne.experience.runtime import stat_key
 

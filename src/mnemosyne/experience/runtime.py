@@ -1948,15 +1948,19 @@ class LearningRuntime:
                 except ValueError:
                     continue
                 owner = json.loads(library_row.get("memory") or "{}")
-                if owner.get("tenant") != tenant_id or any(
-                    item.get("tenant_id") != tenant_id or item.get("user_id") != owner.get("user")
-                    for item in artifacts
-                ):
+                if owner.get("tenant") != tenant_id:
                     continue
+                # A library revision can move to another memory owner. Prior
+                # owners keep their native records without entering or blocking
+                # the current owner's library projection.
+                artifacts = [item for item in artifacts
+                             if item.get("tenant_id") == tenant_id
+                             and item.get("user_id") == owner.get("user")]
                 identities = {(item["id"], item["revision"]) for item in artifacts}
                 outcomes = []
                 for episode in state["episodes"].values():
                     if (episode.get("status") != "resolved"
+                            or episode.get("user_id") != owner.get("user")
                             or not episode.get("learning_collected", True)
                             or not episode.get("learning_components", {}).get("skills", True)
                             or not any(
