@@ -594,11 +594,13 @@ def consolidate(runtime, tenant: str) -> dict:
                 0.08,
             )
             _homeostasis(state, budget=budget)
-        return {
-            "replayed": len(batch), "candidates": created,
-            "skipped_unavailable_source_episodes": len(skipped_episodes),
-            "skipped_unavailable_source_candidates": skipped_candidates,
-        }
+        result = {"replayed": len(batch), "candidates": created}
+        if skipped_episodes or skipped_candidates:
+            result.update(
+                skipped_unavailable_source_episodes=len(skipped_episodes),
+                skipped_unavailable_source_candidates=skipped_candidates,
+            )
+        return result
 
     return runtime.writer.apply(
         tenant,

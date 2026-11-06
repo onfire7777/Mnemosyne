@@ -1126,6 +1126,29 @@ def test_postgres_mcp_runtime_state_persists_profile_learning_and_command_parame
             "source_trust_tier": 0,
         },
     )
+    unverified = reloaded.call_tool("parametric_propose", {"tenant_id": tenant, "role": "operator", "source_trust_tier": 0})
+    assert unverified["source_ids"] == []
+    assert unverified["metrics"].get("provider_invoked", 0.0) == 0.0
+
+    # The failed historical episode remains ineligible. Operator-curated
+    # transport records exercise the command provider and native persistence.
+    from mnemosyne.experience.writer import LearningWriter
+    from mnemosyne.learning import LearningSystem, Lesson, Procedure
+    from mnemosyne.postgres_runtime_state import PostgresRuntimeState
+
+    learning_engine = PostgresEngine(dsn)
+    learning = LearningSystem(learning_engine)
+    curated_lesson = Lesson(
+        tenant, "corrective", "postgres-runtime-state", "Verify runtime state with tools.",
+        status="active", origin="curated",
+    )
+    curated_procedure = Procedure(
+        tenant, "checklist", "postgres-runtime-state", "Reload and verify runtime state.", {},
+        status="validated", origin="curated",
+    )
+    learning.import_legacy({"lessons": [curated_lesson.to_dict()],
+                            "procedures": [curated_procedure.to_dict()]}, [tenant])
+    PostgresRuntimeState(dsn, tenant_id=tenant).save_learning(learning)
     artifact = reloaded.call_tool("parametric_propose", {"tenant_id": tenant, "role": "operator", "source_trust_tier": 0})
     evaluated = reloaded.call_tool(
         "parametric_evaluate",
@@ -1157,7 +1180,7 @@ def test_postgres_mcp_runtime_state_persists_profile_learning_and_command_parame
     assert rolled_back["rollback"]["rollback_verified"] is False
     assert [call["action"] for call in provider_calls] == ["propose", "rollback"]
     assert provider_calls[0]["tenant_id"] == tenant
-    assert provider_calls[0]["source_ids"] == [lesson["id"], procedure["id"]]
+    assert provider_calls[0]["source_ids"] == [curated_lesson.id, curated_procedure.id]
     assert provider_calls[-1]["protected_cases"] == ["parametric-protected-0"]
 
     engine = PostgresEngine(dsn)
@@ -1180,9 +1203,12 @@ def test_postgres_mcp_runtime_state_persists_profile_learning_and_command_parame
 
     assert runtime_rows == 2
     assert preferences == 1
-    assert trajectories == 1
-    assert lessons == 1
-    assert procedures == 1
+    assert trajectories == lessons == procedures == 0
+    native = LearningWriter(engine).read(tenant)
+    assert trajectory["id"] in native["episodes"]
+    assert {lesson["id"], procedure["id"], curated_lesson.id, curated_procedure.id} <= native["artifacts"].keys()
+    assert not native["artifacts"][lesson["id"]].get("gate_passed")
+    assert not native["artifacts"][procedure["id"]].get("gate_passed")
 
 
 def test_postgres_local_rank_fallback_uses_policy_sensitivity_live() -> None:

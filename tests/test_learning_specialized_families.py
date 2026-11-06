@@ -261,6 +261,141 @@ def test_local_adapter_constrains_usage_to_served_ids(monkeypatch):
     assert answer["provider_metadata"]["model"] == "local-test"
 
 
+def test_local_adapter_preserves_served_content_without_administrative_bloat(
+    monkeypatch,
+):
+    import io
+    from eval.learning import ollama_adapter
+
+    requests = []
+
+    def respond(request, timeout):
+        requests.append(json.loads(request.data))
+        return io.BytesIO(
+            json.dumps(
+                {
+                    "done": True,
+                    "done_reason": "stop",
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "action": "inspect",
+                                "used_skill_index": 0,
+                                "used_lesson_index": -1,
+                            }
+                        )
+                    },
+                }
+            ).encode()
+        )
+
+    monkeypatch.setattr(ollama_adapter, "urlopen", respond)
+    public_request = {
+        "query": "Execute the device contract",
+        "choices": ["inspect", "skip"],
+        "task_class": "device",
+    }
+    answer = ollama_adapter.respond(
+        {
+            "schema": "mnemosyne.learning-agent.v1",
+            "model": "local-test",
+            "system": PROMPT,
+            "seed": 11,
+            "temperature": 0,
+            "request": public_request,
+            "memory": {
+                "receipt_id": "internal",
+                "effective_policy": {"large": "x" * 100_000},
+                "hits": [
+                    {
+                        "id": "source",
+                        "text": "Device contract",
+                        "metadata": {"large": "x" * 50_000},
+                    }
+                ],
+                "procedures": [
+                    {
+                        "id": "procedure",
+                        "steps": ["inspect"],
+                        "goal": "device",
+                        "conditions": ["verified"],
+                    }
+                ],
+                "verification_requests": [
+                    {
+                        "id": "proposal",
+                        "content": "Please test inspect",
+                        "steps": ["inspect"],
+                        "instruction_authority": "none",
+                    }
+                ],
+            },
+        }
+    )
+    request = requests[0]
+    body = json.loads(request["messages"][1]["content"])
+    assert body["request"] == public_request
+    assert body["memory"]["hits"] == [{"id": "source", "text": "Device contract"}]
+    assert body["memory"]["procedures"][0]["steps"] == ["inspect"]
+    assert "verification_requests" not in body["memory"]
+    assert (
+        "receipt_id" not in body["memory"] and "effective_policy" not in body["memory"]
+    )
+    assert request["options"]["num_ctx"] == ollama_adapter.CONTEXT_TOKENS
+    assert answer["provider_metadata"]["input_bytes"] <= ollama_adapter.MAX_PROMPT_BYTES
+
+
+def test_local_adapter_rejects_oversize_content_before_calling_model(monkeypatch):
+    from eval.learning import ollama_adapter
+
+    monkeypatch.setattr(
+        ollama_adapter,
+        "urlopen",
+        lambda *args, **kwargs: pytest.fail("oversize input must not be sent"),
+    )
+    with pytest.raises(ValueError, match="context bound"):
+        ollama_adapter.respond(
+            {
+                "schema": "mnemosyne.learning-agent.v1",
+                "model": "local-test",
+                "system": PROMPT,
+                "seed": 11,
+                "temperature": 0,
+                "request": {"choices": ["inspect"]},
+                "memory": {
+                    "hits": [
+                        {"id": "source", "text": "x" * ollama_adapter.MAX_PROMPT_BYTES}
+                    ]
+                },
+            }
+        )
+
+
+def test_local_adapter_rejects_provider_reported_truncation(monkeypatch):
+    import io
+    from eval.learning import ollama_adapter
+
+    monkeypatch.setattr(
+        ollama_adapter,
+        "urlopen",
+        lambda *args, **kwargs: io.BytesIO(
+            json.dumps({"truncated": True, "done": True}).encode()
+        ),
+    )
+    with pytest.raises(ValueError, match="truncated input"):
+        ollama_adapter.respond(
+            {
+                "schema": "mnemosyne.learning-agent.v1",
+                "model": "local-test",
+                "system": PROMPT,
+                "seed": 11,
+                "temperature": 0,
+                "request": {"choices": ["inspect"]},
+                "memory": {},
+            }
+        )
+
+
 def test_common_pretraining_is_matched_and_excluded_from_evaluation_rows():
     from eval.learning.probes import Environment
 

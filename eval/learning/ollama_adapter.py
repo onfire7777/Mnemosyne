@@ -9,17 +9,58 @@ from pathlib import Path
 import sys
 from urllib.request import Request, urlopen
 
+CONTEXT_TOKENS = 16384
+MAX_PROMPT_BYTES = 7000
+MEMORY_FIELDS = (
+    "id",
+    "kind",
+    "title",
+    "text",
+    "content",
+    "summary",
+    "answer",
+    "steps",
+    "conditions",
+    "goal",
+    "scope",
+    "scope_match",
+    "task_class",
+    "provenance",
+    "trust_tier",
+    "instruction_authority",
+)
+
+
+def task_memory(context: dict) -> dict:
+    """Preserve surfaced task content and identity, excluding administrative state."""
+    packed = {
+        key: [
+            {field: item[field] for field in MEMORY_FIELDS if field in item}
+            for item in context.get(key, [])
+        ]
+        for key in (
+            "hits",
+            "skills",
+            "procedures",
+            "chunks",
+            "lessons",
+            "knowledge_pages",
+        )
+    }
+    return packed
+
 
 def respond(payload: dict, *, timeout_seconds: float = 55) -> dict:
     if payload.get("schema") != "mnemosyne.learning-agent.v1":
         raise ValueError("unsupported learning-agent protocol")
 
+    memory = task_memory(payload["memory"])
     identifiers = {
         name: sorted(
             {
                 item["id"]
                 for key in keys
-                for item in payload["memory"].get(key, [])
+                for item in memory.get(key, [])
                 if isinstance(item, dict) and item.get("id")
             }
         )
@@ -44,9 +85,11 @@ def respond(payload: dict, *, timeout_seconds: float = 55) -> dict:
                 "content": json.dumps(
                     {
                         "request": payload["request"],
-                        "memory": payload["memory"],
+                        "memory": memory,
                         "artifact_indexes": identifiers,
-                    }
+                    },
+                    separators=(",", ":"),
+                    ensure_ascii=False,
                 ),
             },
         ],
@@ -71,8 +114,19 @@ def respond(payload: dict, *, timeout_seconds: float = 55) -> dict:
             "temperature": payload["temperature"],
             "seed": payload["seed"],
             "num_predict": 128,
+            "num_ctx": CONTEXT_TOKENS,
         },
     }
+    # The local tokenizer is byte based. This conservative bound leaves more
+    # than half the explicit context for chat framing and generated output.
+    # Oversized task content fails rather than being silently dropped.
+    input_bytes = sum(
+        len(message["content"].encode()) for message in request["messages"]
+    )
+    if input_bytes > MAX_PROMPT_BYTES:
+        raise ValueError(
+            f"packed model input exceeds {MAX_PROMPT_BYTES}-byte context bound"
+        )
     http_request = Request(
         "http://127.0.0.1:11434/api/chat",
         data=json.dumps(request).encode(),
@@ -81,6 +135,8 @@ def respond(payload: dict, *, timeout_seconds: float = 55) -> dict:
     )
     with urlopen(http_request, timeout=timeout_seconds) as response:
         result = json.load(response)
+    if result.get("truncated"):
+        raise ValueError("local model reported a truncated input")
     if not result.get("done") or result.get("done_reason") == "length":
         raise ValueError("local model did not finish its response")
     answer = json.loads(result["message"]["content"])
@@ -103,6 +159,10 @@ def respond(payload: dict, *, timeout_seconds: float = 55) -> dict:
     }
     answer["provider_metadata"]["decoding"] = request["options"]
     answer["provider_metadata"]["keep_alive"] = request["keep_alive"]
+    answer["provider_metadata"]["input_bytes"] = input_bytes
+    answer["provider_metadata"]["model_prompt_sha256"] = hashlib.sha256(
+        json.dumps(request["messages"], sort_keys=True).encode()
+    ).hexdigest()
     return answer
 
 

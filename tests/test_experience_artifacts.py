@@ -406,6 +406,7 @@ def test_low_surprise_resolution_does_not_distill():
     }
     runtime = SimpleNamespace(
         _enabled=lambda state, component: component != "dreamer",
+        _sources_live=lambda *args: True,
         writer=SimpleNamespace(
             read=lambda tenant: deepcopy(state),
             apply=lambda tenant, operation, mutation, **kwargs: mutation(state),
