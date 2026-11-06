@@ -423,6 +423,40 @@ def test_common_pretraining_is_matched_and_excluded_from_evaluation_rows():
     assert workloads[0] == workloads[1] == workloads[2]
 
 
+def test_frozen_common_pretraining_serves_acquired_behavior_without_updates():
+    from eval.learning.probes import Environment, artifacts
+
+    runtime = LearningRuntime(LocalMemoryEngine())
+    e = Environment(
+        runtime, 11, 11, budget=4, arm="memory_frozen", protocol="common-pretraining-v2"
+    )
+    runtime.pause(e.tenant)
+    with e.clock:
+        with e.pretraining():
+            e.demonstrate(["inspect", "verify"])
+        before = e.state()
+        assert before["artifacts"]
+        contexts = [
+            e.context(f"Frozen request {index}", session=f"frozen-{index}")
+            for index in range(50)
+        ]
+        assert any(artifacts(context) for context in contexts)
+        e.turn(
+            "Frozen request 0",
+            ["inspect", "verify"],
+            action="inspect -> verify",
+            context=contexts[0],
+            session="frozen-0",
+            phase="test",
+        )
+        e.sleep()
+        after = e.state()
+    assert not after["policy"]["enabled"]
+    for collection in ("artifacts", "stats", "credit"):
+        assert after[collection] == before[collection]
+    assert after["policy"].get("routes") == before["policy"].get("routes")
+
+
 def test_competence_policy_follows_memory_and_does_not_get_an_oracle_fallback():
     from eval.learning.simulator import ScriptedAgent
 

@@ -120,6 +120,7 @@ class Environment:
         self.setup_rows = []
         self.protocol = protocol
         self._pretraining_depth = 0
+        self._common_pretraining_completed = False
         self.evidence, self.notes = {}, []
         self.clock = VirtualClock()
         self.sequence = 0
@@ -154,6 +155,7 @@ class Environment:
                     self.runtime.mode(self.tenant, component, mode)
             if not enabled:
                 self.runtime.pause(self.tenant)
+            self._common_pretraining_completed = True
 
     def source(self, text, *, actor="user", metadata=None, user="u"):
         cid = self.engine.append_evidence(
@@ -172,14 +174,27 @@ class Environment:
         return cid
 
     def context(self, query, task="procedure", *, session=None):
-        result = self.runtime.prepare_context(
-            self.tenant,
-            "u",
-            session or f"s-{self.sequence}",
-            query,
-            available_tools=["verify"],
-            task_type=task,
+        frozen_serving = (
+            self.protocol == "common-pretraining-v2"
+            and self._common_pretraining_completed
+            and not self._pretraining_depth
+            and (self.arm == "memory_frozen" or self.arm.startswith("memory_frozen-"))
+            and not self.state()["policy"].get("frozen", False)
         )
+        if frozen_serving:
+            self.runtime.resume(self.tenant)
+        try:
+            result = self.runtime.prepare_context(
+                self.tenant,
+                "u",
+                session or f"s-{self.sequence}",
+                query,
+                available_tools=["verify"],
+                task_type=task,
+            )
+        finally:
+            if frozen_serving:
+                self.runtime.pause(self.tenant)
         if (
             self.arm == "no_memory"
             or self.arm.startswith("no_memory-isolated-")
