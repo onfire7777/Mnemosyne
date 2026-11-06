@@ -226,14 +226,22 @@ TAXONOMIC_EXPANSIONS: dict[str, tuple[str, ...]] = {
     "parents": ("mother", "father", "mom", "dad"),
     # Appliances & Devices (hypernyms -> concrete hyponyms)
     "appliance": (
-        "espresso machine", "air fryer", "blender", "toaster", "stand mixer",
+        "espresso machine", "air fryer", "instant pot", "blender", "toaster", "stand mixer",
         "microwave", "coffee maker", "food processor", "dishwasher", "kettle",
         "juicer", "cooker", "smoker", "grill",
     ),
     "appliances": (
-        "espresso machine", "air fryer", "blender", "toaster", "stand mixer",
+        "espresso machine", "air fryer", "instant pot", "blender", "toaster", "stand mixer",
         "microwave", "coffee maker", "food processor", "dishwasher", "kettle",
         "juicer", "cooker", "smoker", "grill",
+    ),
+    "gadget": (
+        "instant pot", "air fryer", "espresso machine", "blender", "toaster", "stand mixer",
+        "coffee maker", "food processor", "kettle", "juicer", "cooker",
+    ),
+    "gadgets": (
+        "instant pot", "air fryer", "espresso machine", "blender", "toaster", "stand mixer",
+        "coffee maker", "food processor", "kettle", "juicer", "cooker",
     ),
     # Sports & athletic events (hypernyms -> concrete hyponyms)
     "sport": (

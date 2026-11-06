@@ -90,6 +90,10 @@ class EmbeddingCache:
             "CREATE TABLE IF NOT EXISTS vec (key TEXT PRIMARY KEY, v BLOB NOT NULL)"
         )
         self._lock = threading.Lock()
+        self._mem: dict[str, np.ndarray] = {
+            key: np.frombuffer(blob, dtype=np.float16).astype(np.float32)
+            for key, blob in self._conn.execute("SELECT key, v FROM vec")
+        }
         self.tokens = 0
         self.cost = 0.0
         self.requests = 0
@@ -100,34 +104,11 @@ class EmbeddingCache:
         ).hexdigest()
 
     def _load(self, keys: list[str]) -> dict[str, np.ndarray]:
-        found: dict[str, np.ndarray] = {}
-        with self._lock:
-            for start in range(0, len(keys), 900):
-                chunk = keys[start : start + 900]
-                marks = ",".join("?" * len(chunk))
-                for key, blob in self._conn.execute(
-                    f"SELECT key, v FROM vec WHERE key IN ({marks})", chunk
-                ):
-                    found[key] = np.frombuffer(blob, dtype=np.float16).astype(
-                        np.float32
-                    )
-        return found
+        return {key: self._mem[key] for key in keys if key in self._mem}
 
     def missing(self, texts: list[str]) -> list[str]:
         by_key = {self.key(text): text for text in dict.fromkeys(texts)}
-        have: set[str] = set()
-        keys = list(by_key)
-        with self._lock:
-            for start in range(0, len(keys), 900):
-                chunk = keys[start : start + 900]
-                marks = ",".join("?" * len(chunk))
-                have.update(
-                    row[0]
-                    for row in self._conn.execute(
-                        f"SELECT key FROM vec WHERE key IN ({marks})", chunk
-                    )
-                )
-        return [text for key, text in by_key.items() if key not in have]
+        return [text for key, text in by_key.items() if key not in self._mem]
 
     def vectors(self, texts: list[str]) -> np.ndarray:
         """One row per text, in order; every text must have been embedded (see ensure)."""
@@ -176,12 +157,14 @@ class EmbeddingCache:
             for number, fut in enumerate(as_completed(futures), 1):
                 batch, vectors = fut.result()
                 with self._lock, self._conn:
+                    rows_to_insert = []
+                    for text, vector in zip(batch, vectors):
+                        k = self.key(text)
+                        self._mem[k] = vector.astype(np.float32)
+                        rows_to_insert.append((k, vector.tobytes()))
                     self._conn.executemany(
                         "INSERT OR REPLACE INTO vec (key, v) VALUES (?, ?)",
-                        [
-                            (self.key(text), vector.tobytes())
-                            for text, vector in zip(batch, vectors)
-                        ],
+                        rows_to_insert,
                     )
                 if label and (number % 25 == 0 or number == len(batches)):
                     print(
@@ -296,10 +279,13 @@ class CachedProvider:
         self.misses = 0
 
     def embed(self, text: str) -> list[float]:
-        if self.cache.missing([text]):
+        k = self.cache.key(text)
+        vec = self.cache._mem.get(k)
+        if vec is None:
             self.misses += 1
             self.cache.ensure([text], workers=1)
-        return self.cache.vectors([text])[0].astype(float).tolist()
+            vec = self.cache._mem[k]
+        return vec.astype(float).tolist()
 
     def embed_many(self, texts: list[str]) -> list[list[float]]:
         return [self.embed(text) for text in texts]

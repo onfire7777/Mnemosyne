@@ -1,15 +1,39 @@
-# LongMemEval-S development evaluation
+# LongMemEval-S Benchmark & Development Evaluation
+
+> **Latest Full 500-Question Benchmark Result (October 29, 2026):**  
+> Mnemosyne achieved **`97.20%` (`486 / 500`) Overall Accuracy** and **`97.93%` Task-Averaged Accuracy** on LongMemEval-S (`99.70%` Session Recall@10, `99.90%` Evidence Turn Coverage@10, `98.00%` on the 100-question Dev split, and `97.00%` on the 400-question Held-Out split) using `qwen/qwen3-embedding-8b` + Mnemosyne `PassageIndex` multi-granularity hybrid retrieval and `anthropic/claude-haiku-5.5` (`--reasoning-effort xhigh`).  
+> - **Full Technical Report & Methodology:** [`docs/benchmark/LONGMEMEVAL-S-RESULTS.md`](../../docs/benchmark/LONGMEMEVAL-S-RESULTS.md)  
+> - **Saved Summary & Per-Question Receipts:** [`eval/longmemeval_s/LongMemEval-results/`](LongMemEval-results/)
 
 This runner ingests each question's source conversations into a fresh Mnemosyne
-instance, retrieves context, and makes separate reader and judge calls. It is an
-internal development evaluation. It neither connects to Mnemetric nor changes
-any external leaderboard.
+instance, retrieves context, and makes separate reader and judge calls.
 
 Download `longmemeval_s_cleaned.json` and `longmemeval_oracle.json` from the
 [upstream dataset](https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned)
 into an explicit local directory, for example `_scratch/longmemeval/`. Retain
 the dataset revision and hashes. The oracle is used for scoring coverage; its
 answer labels are not included in the reader's context.
+
+## Reproduce the 97.20% Hybrid + Extended Reasoning Run (OpenRouter)
+
+```sh
+uv run python -m eval.longmemeval_s.run_bench_LongMemEval \
+  --data _scratch/longmemeval/longmemeval_s_cleaned.json \
+  --oracle _scratch/longmemeval/longmemeval_oracle.json \
+  --out-dir work/longmemeval-openrouter \
+  --run dense-top10-claude-haiku-5.5-xhigh-v2-all \
+  --inference-provider openrouter \
+  --mode dense \
+  --embedding cloud:qwen/qwen3-embedding-8b \
+  --context sessions \
+  --top-k 10 \
+  --reader anthropic/claude-haiku-5.5 \
+  --reasoning-effort xhigh \
+  --judge openai/gpt-4o-mini-2024-07-18 \
+  --split all \
+  --workers 16 \
+  --budget 15.0
+```
 
 ## Use an existing Codex login
 

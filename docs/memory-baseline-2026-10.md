@@ -38,6 +38,9 @@ The split is fixed by sha256 of the question id: 100 development, 400 held out.
 The 0.281 in `eval/reports/m1.2-longmemeval-retrieval.md` (July 2026) predates the retrieval
 integrity fixes (batch-wide provenance, U-curve reordering, wall-clock activation).
 
+**Update (29 October 2026 — Full 500-Question LongMemEval-S Answer & Retrieval Evaluation):**
+With hybrid `qwen/qwen3-embedding-8b` + Mnemosyne multi-granularity `PassageIndex` (`session` + `round` + `turn` BM25 + taxonomic and self-age disclosure query expansion), top-10 retrieval reached **`99.70%` Session Recall@10** (`100.00%` on `dev`, `99.63%` on `heldout`) and **`99.90%` Evidence Turn Coverage@10**, and end-to-end QA with `anthropic/claude-haiku-5.5` (`--reasoning-effort xhigh`) reached **`97.20%` (`486 / 500`) overall accuracy** and **`97.93%` task-averaged accuracy** (`98.00%` on `dev`, `97.00%` on `heldout`). See [`docs/benchmark/LONGMEMEVAL-S-RESULTS.md`](benchmark/LONGMEMEVAL-S-RESULTS.md).
+
 ## 3. HippoRAG multi-hop (held-out, from `docs/passage-graph.md`)
 
 | recall@5 | BM25 passages | passage graph | graph + rerank top 10 |

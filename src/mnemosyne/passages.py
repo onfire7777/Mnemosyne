@@ -28,6 +28,7 @@ import time
 from array import array
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
@@ -576,6 +577,7 @@ _IRREGULAR_VERB_MAP = {
 }
 
 
+@lru_cache(maxsize=65536)
 def _stem_passage_token(tok: str) -> str:
     from mnemosyne.retrieval import normalise_query_term
 
@@ -902,6 +904,15 @@ class PassageIndex:
             st = _stem_passage_token(term)
             stem_expanded[st] = max(stem_expanded[st], qc)
 
+        if re.search(
+            r"\b(?:how\s+old\s+(?:was|am)\s+i|years?\s+(?:older|younger)\b.*\bthan\s+(?:me|when\s+i)|average\s+age\s+of\s+me)\b",
+            query,
+            re.IGNORECASE,
+        ):
+            for u_st, u_qc in (("age", 1.35), ("turn", 1.55), ("30-year-old", 2.5), ("32-year-old", 2.5)):
+                stem_expanded[u_st] = max(stem_expanded[u_st], u_qc)
+                expanded_counts[u_st] = max(expanded_counts.get(u_st, 0.0), u_qc)
+
         return expanded_counts, dict(stem_expanded)
 
     def scores(self, query: str) -> dict[int, float]:
@@ -952,7 +963,7 @@ class PassageIndex:
 
         # User-turn self-age disclosure expansion for comparative/multi-session age queries
         if re.search(
-            r"\b(?:how\s+old\s+was\s+i|years?\s+(?:older|younger)\b.*\bthan\s+me|average\s+age\s+of\s+me)\b",
+            r"\b(?:how\s+old\s+(?:was|am)\s+i|years?\s+(?:older|younger)\b.*\bthan\s+(?:me|when\s+i)|average\s+age\s+of\s+me)\b",
             query,
             re.IGNORECASE,
         ):
