@@ -3393,6 +3393,14 @@ class PostgresEngine:
                 row = cur.fetchone()
                 return int(row[0]) if row else 0
 
+    def list_branches(self, tenant_id: str) -> list[str]:
+        with self._mental_model_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                tenant = _stable_uuid("tenant", tenant_id)
+                self._set_tenant(cur, tenant)
+                cur.execute("SELECT name FROM branches WHERE tenant_id = %s ORDER BY name", (tenant,))
+                return [row[0] for row in cur.fetchall()]
+
     def mental_model_source_changes(self, tenant_id: str, branch: str, after: int) -> list[tuple[str, str, str]]:
         if type(after) is not int or after < 0:
             raise ValueError("source revision must be a nonnegative integer")

@@ -840,6 +840,9 @@ class MemoryTools:
         self._grounded_provider_factory = grounded_provider_factory
         import weakref
         model, state, owner = self.user_model, self.runtime_state, weakref.ref(self.engine)
+        self.user_model.bind_source_custody(
+            lambda tenant, user, cids: MemoryTools._readable_profile_sources(owner(), tenant, user, cids)
+        )
         self.engine._learning_profile_erasure = lambda tenant, cid: MemoryTools._erase_profile_model(model, state, tenant, cid, engine=owner())
         self.engine._learning_tools = weakref.ref(self)
         from mnemosyne.experience.integration import configure_learning
@@ -3409,6 +3412,24 @@ class MemoryTools:
 
     def profile_context(self, tenant_id: str, user_id: str, scope: dict[str, Any] | None = None) -> dict[str, Any]:
         return self.user_model.context_packet(tenant_id, user_id, scope or {})
+
+    @staticmethod
+    def _readable_profile_sources(engine, tenant_id: str, user_id: str, cids: list[str]) -> set[str]:
+        from mnemosyne.retrieval import projection_sources_readable
+
+        if engine is None:
+            return set()
+        context = MemoryTools._read_context(tenant_id, user_id=user_id)
+        requested = set(cids)
+        readable = set()
+        branches = engine.list_branches(tenant_id)
+        for cid in requested:
+            if any(projection_sources_readable(
+                engine, [cid], tenant_id=tenant_id, branch=branch,
+                filt=context, policy=engine.policy,
+            ) for branch in branches):
+                readable.add(cid)
+        return readable
 
     def profile_get_relevant(self, tenant_id: str, user_id: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
         return self.profile_context(tenant_id, user_id, scope=context)

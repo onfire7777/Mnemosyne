@@ -3342,6 +3342,10 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 self._record_source_change(True)
             return self._source_change_revision
 
+    def list_branches(self, tenant_id: str) -> list[str]:
+        with self._lock:
+            return sorted(self.branches)
+
     def mental_model_source_changes(self, tenant_id: str, branch: str, after: int) -> list[tuple[str, str, str]]:
         with self._lock:
             return list(dict.fromkeys(
@@ -4842,8 +4846,13 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 raise
             finally:
                 self._source_transaction_state = None
+            callback_error: BaseException | None = None
             for action in state.get("after_commit", []):
-                action()
+                try:
+                    action()
+                except BaseException as error:
+                    if callback_error is None:
+                        callback_error = error
             journal_error: Exception | None = None
             for action, record in state["journal"]:
                 try:
@@ -4852,6 +4861,8 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     # A failed append must not skip a later privacy erasure.
                     if journal_error is None:
                         journal_error = error
+            if callback_error is not None:
+                raise callback_error
             if journal_error is not None:
                 raise journal_error
 

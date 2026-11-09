@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import math
 import random
+from contextvars import copy_context
 from datetime import UTC, datetime, timedelta
 from mnemosyne.ids import new_id
 
@@ -2000,7 +2001,17 @@ class LearningRuntime:
         self._sync_library_revision_states(tenant_id)
         profile_erasure = getattr(self.engine, "_learning_profile_erasure", None)
         if profile_erasure is not None:
-            profile_erasure(tenant_id, cid)
+            # Profile cleanup may read other branches and persist side-state.
+            # Keep it outside the source transaction while retaining the
+            # facade's engine-scoped deferral context and rollback semantics.
+            context = copy_context()
+            def cleanup():
+                return context.run(profile_erasure, tenant_id, cid)
+            after_commit = getattr(self.engine, "_after_source_commit", None)
+            if after_commit is not None:
+                after_commit(cleanup)
+            else:
+                cleanup()
         return result
 
     def flush_skill_erasures(self, tenant_id: str) -> None:

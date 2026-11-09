@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
@@ -627,6 +627,11 @@ class UserModel:
         # Repeated-similar threshold (>=2): a single user slip never promotes a
         # strategy and never a durable judgment (blueprint §24).
         self.support_strategy_threshold = max(2, support_strategy_threshold)
+        self._source_custody: Callable[[str, str, list[str]], set[str]] | None = None
+
+    def bind_source_custody(self, resolver: Callable[[str, str, list[str]], set[str]]) -> None:
+        """Bind the live evidence authority used by every context packet read."""
+        self._source_custody = resolver
 
     def add_entry(self, entry: UserModelEntry) -> str:
         for current in self.entries.values():
@@ -771,6 +776,33 @@ class UserModel:
                 continue
             evidence.append(cid)
         return evidence
+
+    def _validated_profile_sources(self, entry: UserModelEntry) -> list[str]:
+        active: set[str] = set()
+        complete: set[str] = set()
+        pending = [(entry, False)]
+        while pending:
+            current, leaving = pending.pop()
+            if leaving:
+                active.remove(current.id)
+                complete.add(current.id)
+                continue
+            if current.id in complete:
+                continue
+            if current.id in active or len(active) + len(complete) >= 10000:
+                raise ValueError("invalid profile source chain")
+            sources = current.source_evidence_cids
+            if not isinstance(sources, (list, tuple)) or any(
+                not isinstance(cid, str) or not cid or cid != cid.strip() for cid in sources
+            ):
+                raise ValueError("invalid profile sources")
+            active.add(current.id)
+            pending.append((current, True))
+            for cid in reversed(sources):
+                prior = self.entries.get(cid)
+                if prior is not None and prior.tenant_id == entry.tenant_id and prior.user_id == entry.user_id:
+                    pending.append((prior, False))
+        return self.originating_evidence_cids(entry)
 
     def retract_citing(self, tenant_id: str, cid: str, *, at: datetime | None = None) -> list[str]:
         """Retract every entry built on erased evidence, including corrections.
@@ -919,11 +951,72 @@ class UserModel:
         )
         latent = self.latent_profiles.get((tenant_id, user_id))
         strategies = self.active_support_strategies(tenant_id, user_id, scope)
+        entry_sources = {}
+        invalid_entries: set[str] = set()
+        for entry in active:
+            try:
+                entry_sources[entry.id] = self._validated_profile_sources(entry)
+            except ValueError:
+                entry_sources[entry.id] = []
+                invalid_entries.add(entry.id)
+        events = {event.id: event for event in self.mistake_events
+                  if event.tenant_id == tenant_id and event.user_id == user_id}
+        strategy_sources = {}
+        invalid_strategies: set[str] = set()
+        for strategy in strategies:
+            sources = []
+            if not isinstance(strategy.supporting_event_ids, (list, tuple)) or any(
+                not isinstance(event_id, str) or not event_id for event_id in strategy.supporting_event_ids
+            ):
+                strategy_sources[strategy.id] = []
+                invalid_strategies.add(strategy.id)
+                continue
+            for event_id in strategy.supporting_event_ids:
+                event = events.get(event_id)
+                if (event is None or event.pattern != strategy.pattern
+                        or not self._scope_matches(event.scope, strategy.scope)):
+                    invalid_strategies.add(strategy.id)
+                    continue
+                cids = event.scope.get("_learning_source_cids", [])
+                if not isinstance(cids, (list, tuple)) or any(
+                    not isinstance(cid, str) or not cid or cid != cid.strip() for cid in cids
+                ):
+                    invalid_strategies.add(strategy.id)
+                    continue
+                sources.extend(cids)
+            strategy_sources[strategy.id] = sources
+        # Older consolidated latent records carry their provenance in this
+        # stable summary field rather than a separate source list.
+        latent_match = re.search(r"(?:^|\|\s*)source_cids=([^|]+)", latent.summary) if latent else None
+        latent_sources = ([cid.strip() for cid in latent_match[1].split(",") if cid.strip() != "none"]
+                          if latent_match else [])
+        requested = {cid for sources in [*entry_sources.values(), *strategy_sources.values(), latent_sources]
+                     for cid in sources}
+        allowed = requested
+        if self._source_custody is not None and requested:
+            try:
+                allowed = self._source_custody(tenant_id, user_id, sorted(requested))
+            except Exception:
+                allowed = set()
+        active = [entry for entry in active
+                  if entry.id not in invalid_entries and set(entry_sources[entry.id]) <= allowed]
+        strategies = [strategy for strategy in strategies
+                      if strategy.id not in invalid_strategies and set(strategy_sources[strategy.id]) <= allowed]
+        if not set(latent_sources) <= allowed:
+            latent = None
+
+        def public_record(item):
+            record = item.to_dict()
+            # Internal drift history can describe a different, now-erased
+            # source from the one supporting the current statement.
+            record.get("scope", {}).pop("drift_history", None)
+            return record
+
         return {
-            "authoritative": [entry.to_dict() for entry in active if entry.kind != UserMemoryKind.INFERRED_PREFERENCE],
-            "inferred": [entry.to_dict() for entry in active if entry.kind == UserMemoryKind.INFERRED_PREFERENCE],
+            "authoritative": [public_record(entry) for entry in active if entry.kind != UserMemoryKind.INFERRED_PREFERENCE],
+            "inferred": [public_record(entry) for entry in active if entry.kind == UserMemoryKind.INFERRED_PREFERENCE],
             "latent_advisory": latent.to_dict() if latent else None,
-            "support_strategies": [strategy.to_dict() for strategy in strategies],
+            "support_strategies": [public_record(strategy) for strategy in strategies],
             "rules": {
                 "hard_instruction_outranks_inference": True,
                 "latent_never_overrides_explicit": True,

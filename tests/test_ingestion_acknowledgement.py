@@ -113,3 +113,108 @@ def test_mcp_only_requests_indexing_for_created_evidence(pipeline, monkeypatch):
     rejected = tools.ingest(**kwargs)
     assert indexed == [(request.tenant_id, "main")]
     assert created["created"] and duplicate["idempotent"] and not rejected["stored"]
+
+
+@pytest.mark.parametrize("rollback", [False, True])
+def test_bound_profile_cleanup_follows_outer_source_commit(pipeline, rollback):
+    from contextvars import ContextVar
+
+    tools = MemoryTools(engine=pipeline.engine, ingestion=pipeline)
+    request = _request()
+    source = pipeline.ingest(request)
+    profile = tools.profile_record_explicit(
+        request.tenant_id, request.user_id, "Prefers observatory updates.",
+        source_evidence_cids=[source.cid],
+    )
+    entry = tools.user_model.entries[profile["id"]]
+    original_statement = entry.statement
+    marker = ContextVar("profile-cleanup-test", default="outside")
+    cleanup_observations = []
+    cleanup = pipeline.engine._learning_profile_erasure
+
+    def observe_cleanup(tenant, cid):
+        transaction = pipeline.engine._source_transaction_state
+        if callable(transaction):
+            transaction = transaction()
+        cleanup_observations.append((marker.get(), transaction))
+        return cleanup(tenant, cid)
+
+    pipeline.engine._learning_profile_erasure = observe_cleanup
+
+    class Abort(Exception):
+        pass
+
+    try:
+        with pipeline.engine.source_transaction(request.tenant_id):
+            token = marker.set("scheduled")
+            try:
+                pipeline.engine.forget(request.tenant_id, source.cid)
+            finally:
+                marker.reset(token)
+            assert entry.status == "active" and entry.statement == original_statement
+            if rollback:
+                raise Abort
+    except Abort:
+        pass
+
+    if rollback:
+        assert cleanup_observations == []
+        assert pipeline.engine.get_evidence(request.tenant_id, source.cid) is not None
+        assert entry.status == "active" and entry.statement == original_statement
+    else:
+        assert cleanup_observations == [("scheduled", None)]
+        assert pipeline.engine.get_evidence(request.tenant_id, source.cid) is None
+        assert entry.status != "active" and entry.statement != original_statement
+        # Tombstone replay keeps the completed cleanup idempotent.
+        pipeline.engine.forget(request.tenant_id, source.cid)
+        assert entry.status != "active" and entry.statement != original_statement
+
+
+def test_bound_profile_cleanup_failure_keeps_erasure_and_can_retry(pipeline, monkeypatch, tmp_path):
+    if isinstance(pipeline.engine, (LocalMemoryEngine, SqliteEngine)):
+        pipeline.engine._journal_dir = tmp_path / "source-journal"
+    tools = MemoryTools(engine=pipeline.engine, ingestion=pipeline)
+    request = _request()
+    source = pipeline.ingest(request)
+    profile = tools.profile_record_explicit(
+        request.tenant_id, request.user_id, "Prefers observatory updates.",
+        source_evidence_cids=[source.cid],
+    )
+    from mnemosyne.answering import AnswerReadContext
+    from mnemosyne.mental_models import MentalModelService
+    service = MentalModelService(pipeline.engine)
+    service._snapshot(AnswerReadContext(tenant_id=request.tenant_id, user_id=request.user_id, role="agent"))
+    cached = list(pipeline.engine._mental_model_source_cache.values())
+    callback = pipeline.engine._learning_profile_erasure
+    calls = []
+
+    def fail_once(tenant, cid):
+        calls.append(cid)
+        if len(calls) == 1:
+            raise RuntimeError("profile store temporarily unavailable")
+        return callback(tenant, cid)
+
+    monkeypatch.setattr(pipeline.engine, "_learning_profile_erasure", fail_once)
+    with pytest.raises(RuntimeError, match="profile store temporarily unavailable"):
+        pipeline.engine.forget(request.tenant_id, source.cid)
+    assert pipeline.engine.get_evidence(request.tenant_id, source.cid) is None
+    assert all(not state.raw and not state.evidence for state in cached)
+    context = tools.profile_context(request.tenant_id, request.user_id)
+    relevant = tools.profile_get_relevant(request.tenant_id, request.user_id)
+    assert all(row["id"] != profile["id"] for row in context["authoritative"])
+    assert all(row["id"] != profile["id"] for row in relevant["authoritative"])
+    packet = tools.user_model.context_packet(request.tenant_id, request.user_id, {})
+    assert all(row["id"] != profile["id"] for row in packet["authoritative"])
+    prepared = tools.prepare_context(request.tenant_id, request.user_id, "profile-read", "observatory")
+    assert all(row["id"] != profile["id"] for row in prepared["user_model"]["authoritative"])
+    from mnemosyne.frameworks import AutoMemorySession
+    with AutoMemorySession(pipeline.engine, request.tenant_id, request.user_id,
+                           session_id="sdk-profile-read", auto_consolidate=False) as session:
+        assert "Prefers observatory updates." not in session.pre_turn_retrieve("observatory")["context_text"]
+    if isinstance(pipeline.engine, (LocalMemoryEngine, SqliteEngine)):
+        from mnemosyne.journal import journal_filename
+        journal = pipeline.engine._journal_dir / journal_filename(request.tenant_id)
+        assert request.content not in journal.read_text()
+    pipeline.engine.forget(request.tenant_id, source.cid)
+    assert tools.user_model.entries[profile["id"]].status != "active"
+    assert calls == [source.cid, source.cid]
