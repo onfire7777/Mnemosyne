@@ -270,6 +270,16 @@ cascade. Model service ownership checks still apply; app DELETE on evidence,
 branches and audit rows remains denied. Apply the equivalent grant through the
 deployment's migration process rather than rerunning role creation.
 
+For existing roles, the source tracking tables also need the grants normally
+provided by `roles.sql` and its default privileges.
+
+```sql
+GRANT SELECT, INSERT, UPDATE ON memory_source_revisions, memory_source_changes
+  TO mnemosyne_app, mnemosyne_consolidator;
+GRANT SELECT ON memory_source_revisions, memory_source_changes TO mnemosyne_readonly;
+GRANT DELETE ON memory_source_changes TO mnemosyne_consolidator;
+```
+
 Refresh uses reflection's bounded orchestrator and exact quotations or supported
 deterministic calculations. Citation validity does not guarantee that a chosen
 quotation answers the question well. Interval workers perform the same

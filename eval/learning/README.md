@@ -10,6 +10,21 @@ PYTHONPATH=src .venv/bin/python -m eval.learning.runner --split dev --families 2
 
 Omit `--families` and `--arms` to run all families, five preregistered seeds, and all 28 arms. Local, SQLite, and PostgreSQL engine factories are available via `--backend`; PostgreSQL requires an explicitly supplied `--postgres-dsn` and uses that database. A development or incomplete report exits with status 1 unless all report gates pass. This is not a claim of production performance.
 
+`--workers 4 --in-memory` runs isolated Local streams in worker processes.
+`--checkpoint-dir /tmp/learning-streams` retains each completed stream as an
+atomic JSON receipt. Reports include source hashes and flag source changes
+during execution. Keep the checkout fixed for the duration of a run.
+
+The default protocol is `specialized-v1`. The separate development protocol
+`--protocol common-pretraining-v2` gives prerequisite-based retention,
+adaptation, and transfer tasks matched learning-enabled setup before applying
+each arm's controls. Setup rows remain in the report and are excluded from
+the evaluation curve. The scripted agent keeps its 0.1 training exploration
+and uses learned behavior without deliberate exploration in held-out competence
+checks. Reports separate training performance from held-out competence and
+require matching setup and evaluation sequences for paired comparisons.
+This protocol is available for Local and SQLite development runs.
+
 ## Executable environments
 
 | Families | Operations and independent observations |
@@ -37,6 +52,15 @@ PYTHONPATH=src .venv/bin/python -m eval.learning.runner --split dev --families 2
 ```
 
 The fixed system prompt hash, model, temperature, preregistered seed, command and request hashes are recorded. The model receives only the public query, permitted choices, task class, and surfaced memory. It never receives the private expected action. Reported use of an unserved artifact is rejected. A requested seed is not evidence that a provider is deterministic. Tests exercise this transport with a local process; they make no external model calls.
+
+For an installed Ollama model, `eval.learning.ollama_adapter` supplies the
+command protocol through the loopback Ollama endpoint. Run it from the checkout,
+for example with `--agent-command-json '["/absolute/path/to/python", "-m",
+"eval.learning.ollama_adapter", "--timeout-seconds", "180", "--trace-dir",
+"/tmp/learning-model-traces"]' --model qwen3:1.7b`. It retains request and
+response receipts, uses bounded output, and maps model-selected indices to
+actually served artifact IDs. The command transport independently checks those
+IDs. Model loading and generation time count toward the configured timeout.
 
 ## Evidence and limitations
 

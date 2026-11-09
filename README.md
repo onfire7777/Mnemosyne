@@ -44,7 +44,7 @@ works with any model, and is the memory behind [BurnOS](https://github.com/onfir
 | Memory-poisoning attacks blocked | **59 / 59**, with 0 / 8 false alarms on benign controls | [Quality gate report](eval/reports/QUALITY_GATE_SUMMARY.md#5-safety--guardrails-verification) |
 | Abstention on unanswerable questions (balanced accuracy) | **1.00** | [Quality gate report](eval/reports/QUALITY_GATE_SUMMARY.md) |
 | Current value ranked above a superseded one | **1.00** | [Quality gate report](eval/reports/QUALITY_GATE_SUMMARY.md) |
-| Automated tests | about 7,100, across Local, SQLite and live PostgreSQL | [CI workflow](.github/workflows/ci.yml) |
+| Regression validation | 8,668 selected cases, with pass/skip accounting across Local, SQLite and live PostgreSQL | [Validation report](docs/learning-integration-validation.md#2026-11-06-reliability-follow-up) |
 
 Every number links to its receipt. The quality gate is an offline, deterministic, provider-free
 suite with frozen inputs and published checksums, so anyone can reproduce it. The LongMemEval
@@ -70,6 +70,11 @@ compared like for like.
 | Experience learning | Capture outcomes, learn bounded retrieval utility, and revise source-backed procedures and skills through guarded probation and testing. |
 
 Learning is enabled by default for the learning host APIs. Hosts forward turns and real tool outcomes through the [learning integration](docs/learning-host-integration.md). [Learning documentation](docs/learning.md) describes controls and the remaining evaluation work.
+
+The completed development learning matrix does **not** pass the broad acceptance gate.
+A longer scripted procedure test demonstrates a task-specific benefit; the local model
+comparison does not demonstrate an adaptive advantage over frozen memory. See the
+[measurements and limitations](docs/learning-integration-validation.md#complete-development-matrix).
 
 The core runtime starts without a model service. Model-based skill conversion, remote embeddings
 and other provider-backed features require their own configuration and may incur provider charges.
