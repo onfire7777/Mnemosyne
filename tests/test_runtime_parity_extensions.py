@@ -2720,6 +2720,8 @@ def test_postgres_runtime_state_isolates_tenant_side_state() -> None:
                     "trajectories": "SELECT count(*) FROM trajectories WHERE tenant_id = %s",
                     "lessons": "SELECT count(*) FROM lessons WHERE tenant_id = %s",
                     "procedures": "SELECT count(*) FROM procedures WHERE tenant_id = %s",
+                    "learning_episodes": "SELECT count(*) FROM learning_episodes WHERE tenant_id = %s",
+                    "learning_artifacts": "SELECT count(*) FROM learning_artifacts WHERE tenant_id = %s",
                     "eval_cases": (
                         "SELECT count(*) FROM eval_cases "
                         "WHERE tenant_id = %s AND origin = 'runtime_state'"
@@ -2733,9 +2735,11 @@ def test_postgres_runtime_state_isolates_tenant_side_state() -> None:
         "runtime_state": 5,
         "preferences": 1,
         "user_latent": 1,
-        "trajectories": 1,
-        "lessons": 1,
-        "procedures": 1,
+        "trajectories": 0,
+        "lessons": 0,
+        "procedures": 0,
+        "learning_episodes": 1,
+        "learning_artifacts": 2,
         "eval_cases": 1,
     }
     assert mirror_counts(state_a) == expected_counts
