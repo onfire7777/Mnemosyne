@@ -147,8 +147,11 @@ def test_engine_passes(monkeypatch):
 
 def test_missed_units_are_repaired_not_rebuilt(monkeypatch):
     calls = []
+    model = "test/missed-unit-repair"
 
     def partial(system, user, max_tokens=0, task="", shared=""):
+        if fx.MODEL.get() != model:
+            return fake_chat(system, user, max_tokens, task, shared)
         calls.append((task, user))
         if task == "extract":
             return {"nodes": [{"type": "step", "title": "First", "content": "x", "units": [1]}]}
@@ -159,7 +162,11 @@ def test_missed_units_are_repaired_not_rebuilt(monkeypatch):
         return fake_chat(system, user, max_tokens, task, shared)
 
     monkeypatch.setattr(fx, "chat_json", partial)
-    fw = fx.build("s", ["a", "b", "c"])
+    # An unrelated conversion can use this global provider while the test runs.
+    with fx.model_scope("test/unrelated-conversion"):
+        fx.chat_json("", "", task="extract", shared="[Unit 1]\na")
+    with fx.model_scope(model):
+        fw = fx.build("s", ["a", "b", "c"])
     tasks = [t for t, _ in calls]
     assert tasks.count("extract") == 1 and tasks.count("extend") == 1  # no second extraction from nothing
     assert fw["passes"] == 2 and fw["coverage"]["complete"] and [n["title"] for n in fw["nodes"]] == ["First", "Second"]

@@ -510,9 +510,11 @@ def test_zero_delete_audit_integrity(engine_bundle: tuple[Any, str, str]) -> Non
     elif isinstance(engine, PostgresEngine):
         import psycopg
         from psycopg.rows import dict_row
+        from mnemosyne.postgres_engine import _stable_uuid
 
         with psycopg.connect(engine.dsn, row_factory=dict_row) as conn:
             with conn.cursor() as cur:
+                engine._set_tenant(cur, _stable_uuid("tenant", tenant))
                 cur.execute(
                     """
                     SELECT w.item_id, w.status, w.superseded_by, w.metadata
