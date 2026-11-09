@@ -3194,14 +3194,14 @@ class MemoryTools:
         ]
         if still_holding:
             result["branches_still_holding"] = still_holding
-        if erased_branches and not still_holding:
+        if not still_holding:
             # Erasure propagates to what was built on the erased words: a profile
             # entry citing this record is retracted, its statement blanked, and
             # the report says so.
             # Closed entries are blanked too. The returned ids are every
             # entry that changed, so a forget that only blanks residue still
             # saves.
-            profile_erasure = self._erase_profile_model(self.user_model, self.runtime_state, tenant_id, cid)
+            profile_erasure = self._erase_profile_model(self.user_model, self.runtime_state, tenant_id, cid, engine=self.engine)
             retracted = profile_erasure["retracted_profile_entries"]
             if retracted:
                 existing = result.get("propagated")
@@ -3929,21 +3929,66 @@ class MemoryTools:
             # source operation inside the active main-branch transaction.
             return {"profile_entries": 0, "mistake_events": 0, "support_strategies": 0,
                     "retracted_profile_entries": []}
-        changed = user_model.retract_citing(tenant_id, cid)
-        for entry_id in changed:
-            user_model.entries[entry_id].scope.pop("drift_history", None)
-        removed = {event.id for event in user_model.mistake_events
-                   if event.tenant_id == tenant_id and cid in event.scope.get("_learning_source_cids", [])}
-        user_model.mistake_events = [event for event in user_model.mistake_events if event.id not in removed]
-        strategies = [key for key, strategy in user_model.support_strategies.items()
-                      if strategy.tenant_id == tenant_id and removed.intersection(strategy.supporting_event_ids)]
-        for key in strategies:
-            del user_model.support_strategies[key]
-        if changed or removed or strategies:
-            if runtime_state is not None:
-                runtime_state.save_user_model(user_model)
-        return {"profile_entries":len(changed), "mistake_events":len(removed), "support_strategies":len(strategies),
-                "retracted_profile_entries": changed}
+        import copy
+        before = copy.deepcopy((user_model.entries, user_model.latent_profiles,
+                                user_model.mistake_events, user_model.support_strategies))
+        try:
+            affected = {cid, *user_model.dependent_entry_ids(tenant_id, cid)}
+            changed = user_model.retract_citing(tenant_id, cid)
+            for entry_id in changed:
+                user_model.entries[entry_id].scope.pop("drift_history", None)
+            source_verdicts: dict[tuple[str, str], bool] = {}
+
+            def unsupported_sources(user_id, sources):
+                if any(not isinstance(source, str) or not source for source in sources):
+                    return True
+                if any(source in affected for source in sources):
+                    return True
+                if engine is None:
+                    return False
+                pending = [source for source in sources if (user_id, source) not in source_verdicts]
+                if pending:
+                    readable = MemoryTools._readable_profile_sources(engine, tenant_id, user_id, pending)
+                    source_verdicts.update({(user_id, source): source in readable for source in pending})
+                return any(not source_verdicts[(user_id, source)] for source in sources)
+
+            histories_changed = False
+            for entry in user_model.entries.values():
+                if entry.tenant_id != tenant_id:
+                    continue
+                history = entry.scope.get("drift_history", [])
+                retained = [row for row in history if isinstance(row, dict)
+                            and (row.get("entry_id") is None or isinstance(row.get("entry_id"), str))
+                            and row.get("entry_id") not in affected
+                            and not unsupported_sources(entry.user_id, [row["new_evidence_cid"]]
+                                                        if row.get("new_evidence_cid") else [])] if isinstance(history, list) else []
+                if retained != history:
+                    histories_changed = True
+                    if retained:
+                        entry.scope["drift_history"] = retained
+                    else:
+                        entry.scope.pop("drift_history", None)
+            latent_removed = []
+            for key, profile in list(user_model.latent_profiles.items()):
+                if profile.tenant_id == tenant_id and unsupported_sources(profile.user_id, profile.source_cids()):
+                    del user_model.latent_profiles[key]
+                    latent_removed.append(key)
+            removed = {event.id for event in user_model.mistake_events
+                       if event.tenant_id == tenant_id and cid in event.scope.get("_learning_source_cids", [])}
+            user_model.mistake_events = [event for event in user_model.mistake_events if event.id not in removed]
+            strategies = [key for key, strategy in user_model.support_strategies.items()
+                          if strategy.tenant_id == tenant_id and removed.intersection(strategy.supporting_event_ids)]
+            for key in strategies:
+                del user_model.support_strategies[key]
+            if changed or removed or strategies or histories_changed or latent_removed:
+                if runtime_state is not None:
+                    runtime_state.save_user_model(user_model)
+            return {"profile_entries":len(changed), "mistake_events":len(removed), "support_strategies":len(strategies),
+                    "retracted_profile_entries": changed}
+        except BaseException:
+            (user_model.entries, user_model.latent_profiles,
+             user_model.mistake_events, user_model.support_strategies) = before
+            raise
 
     def _capture_learning_user_feedback(self, runtime, tenant_id: str, user_id: str,
                                         session_id: str, user_text: str, episode_id: str,

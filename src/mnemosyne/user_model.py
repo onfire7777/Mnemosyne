@@ -523,6 +523,11 @@ class LatentUserProfile:
             "updated_at": self.updated_at.astimezone(UTC).isoformat(),
         }
 
+    def source_cids(self) -> list[str]:
+        match = re.search(r"(?:^|\|\s*)source_cids=([^|]+)", self.summary)
+        return ([cid.strip() for cid in match[1].split(",") if cid.strip() != "none"]
+                if match else [])
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "LatentUserProfile":
         copy = dict(data)
@@ -816,18 +821,7 @@ class UserModel:
         """
 
         moment = at or datetime.now(UTC)
-        dependent: set[str] = set()
-        progressed = True
-        while progressed:
-            progressed = False
-            for entry in self.entries.values():
-                if entry.tenant_id != tenant_id or entry.id in dependent:
-                    continue
-                if cid in entry.source_evidence_cids or any(
-                    source in dependent for source in entry.source_evidence_cids
-                ):
-                    dependent.add(entry.id)
-                    progressed = True
+        dependent = self.dependent_entry_ids(tenant_id, cid)
         changed: list[str] = []
         for entry in self.entries.values():
             if entry.id not in dependent:
@@ -843,6 +837,21 @@ class UserModel:
             if mutated:
                 changed.append(entry.id)
         return changed
+
+    def dependent_entry_ids(self, tenant_id: str, cid: str) -> set[str]:
+        dependent: set[str] = set()
+        progressed = True
+        while progressed:
+            progressed = False
+            for entry in self.entries.values():
+                if entry.tenant_id != tenant_id or entry.id in dependent:
+                    continue
+                if cid in entry.source_evidence_cids or any(
+                    source in dependent for source in entry.source_evidence_cids
+                ):
+                    dependent.add(entry.id)
+                    progressed = True
+        return dependent
 
     def set_latent_profile(self, profile: LatentUserProfile) -> None:
         self.latent_profiles[(profile.tenant_id, profile.user_id)] = profile
@@ -987,9 +996,7 @@ class UserModel:
             strategy_sources[strategy.id] = sources
         # Older consolidated latent records carry their provenance in this
         # stable summary field rather than a separate source list.
-        latent_match = re.search(r"(?:^|\|\s*)source_cids=([^|]+)", latent.summary) if latent else None
-        latent_sources = ([cid.strip() for cid in latent_match[1].split(",") if cid.strip() != "none"]
-                          if latent_match else [])
+        latent_sources = latent.source_cids() if latent else []
         requested = {cid for sources in [*entry_sources.values(), *strategy_sources.values(), latent_sources]
                      for cid in sources}
         allowed = requested
