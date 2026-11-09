@@ -1,17 +1,57 @@
 # Mnemosyne
 
-### Persistent memory and reusable skills for AI agents
+### Long-term memory for AI agents that cites its sources, keeps its history and never takes orders from what it reads
 
-Mnemosyne gives an assistant context it can carry into the next conversation: searchable evidence,
-time-aware beliefs, reusable procedures, and skills grounded in their original sources.
-It runs locally, exposes a Model Context Protocol (MCP) server, and supplies the memory runtime
-used by [BurnOS](https://github.com/onfire7777/BurnOS).
+Most AI memory is a pile of text snippets with a similarity search on top. Mnemosyne is a memory
+*compiler*: everything an assistant learns is kept as source evidence, turned into time-aware
+beliefs with provenance, checked by regression gates before it is trusted, and recalled with
+citations - or not at all. It runs on your own machine, speaks the Model Context Protocol (MCP),
+works with any model, and is the memory behind [BurnOS](https://github.com/onfire7777/BurnOS).
 
 **Version 1.7.0 · Python 3.12+ · Apache 2.0 · Local, SQLite and PostgreSQL backends**
 
-[Quick start](#quick-start) · [For Amazon hackathon judges](#for-amazon-hackathon-judges) ·
+[Why Mnemosyne](#why-mnemosyne) · [Results](#results) · [Quick start](#quick-start) ·
 [BurnSkills](#skills-and-books) · [Documentation](#documentation) ·
 [Evaluations](#evaluation-and-limitations) · [License](LICENSE)
+
+## Why Mnemosyne
+
+- **It answers from evidence, or it says it does not know.** Grounded `reflect` gathers authorized
+  memory over bounded hops, replays every citation against its source and abstains when the
+  support is missing or has changed. Generated text is never written back as evidence.
+- **It remembers how things changed, not just the latest value.** Facts are bitemporal: when
+  something was true is kept apart from when it was learned. A correction supersedes the old
+  belief instead of overwriting it, so you can ask what was true at any past moment.
+- **What it reads cannot give it orders.** Trust tiers, capabilities and sensitivity limits decide
+  what may become a belief or an instruction. Low-trust content stays data, and memory changes
+  pass a promotion gate before they are trusted.
+- **Forgetting is real.** Erasure propagates through everything derived from a source, on every
+  branch, with signed deletion records - not a soft hide.
+- **You can try a change before you commit to it.** Memory has branches: experiment, then merge
+  or discard.
+- **It learns procedures as well as facts.** Agent Skills, Markdown and whole PDF or EPUB books
+  become source-linked BurnSkills that any MCP client can use as prompts.
+- **It is yours.** The core runs offline with no model service and no account. Bring any model
+  for embeddings or answers; switch whenever you like and keep the same memory.
+
+## Results
+
+| What was measured | Result | Evidence |
+| --- | --- | --- |
+| LongMemEval-S answer accuracy, all 500 questions | **92.4%** (462/500); held-out 400: **91.5%** | [Score audit](docs/2026-10-22-memory-audit-report.md#what-the-score-actually-means) |
+| Retrieval recall@5, frozen 144-query quality gate (dev + held-out) | **0.987** (nDCG@5 0.958) | [Quality gate report](eval/reports/QUALITY_GATE_SUMMARY.md) |
+| Confidence calibration error (ECE, lower is better) | **0.022** | [Quality gate report](eval/reports/QUALITY_GATE_SUMMARY.md) |
+| Memory-poisoning attacks blocked | **59 / 59**, with 0 / 8 false alarms on benign controls | [Quality gate report](eval/reports/QUALITY_GATE_SUMMARY.md#5-safety--guardrails-verification) |
+| Abstention on unanswerable questions (balanced accuracy) | **1.00** | [Quality gate report](eval/reports/QUALITY_GATE_SUMMARY.md) |
+| Current value ranked above a superseded one | **1.00** | [Quality gate report](eval/reports/QUALITY_GATE_SUMMARY.md) |
+| Automated tests | about 7,100, across Local, SQLite and live PostgreSQL | [CI workflow](.github/workflows/ci.yml) |
+
+Every number links to its receipt. The quality gate is an offline, deterministic, provider-free
+suite with frozen inputs and published checksums, so anyone can reproduce it. The LongMemEval
+score comes from one recorded configuration; Hindsight publishes 94.6% on the same benchmark
+under different models and conditions, so the two are not a controlled comparison. We publish
+how each score was produced, failures included, and claim a ranking only when a run is
+compared like for like.
 
 ## What it does
 
@@ -33,49 +73,6 @@ Learning is enabled by default for the learning host APIs. Hosts forward turns a
 
 The core runtime starts without a model service. Model-based skill conversion, remote embeddings
 and other provider-backed features require their own configuration and may incur provider charges.
-
-## For Amazon hackathon judges
-
-This repository is the **memory and skill runtime** behind BurnOS. The complete Windows
-voice-assistant experience, its video, development history, feedback and setup instructions live
-in the [BurnOS submission guide](https://github.com/onfire7777/BurnOS/tree/main/docs/hackathon).
-Mnemosyne can also be run and inspected independently using the instructions below.
-Neither project is an official Amazon product or a verified deployment to an Alexa device.
-
-The [Amazon Developer Hackathon rules](https://amazonappdev2026.devpost.com/rules) distinguish
-the Alexa+ self-hosted MCP route from the simulated-experience alternative. For the MCP route,
-use **Streamable HTTP with protocol 2025-11-25 or later**, not the legacy JSON-RPC HTTP or stdio
-transport. The [organizer FAQ](https://amazonappdev2026.devpost.com/details/faqs) explains the
-available demonstration paths. This README documents the server; it does not establish that a
-particular demo or Devpost entry satisfies every submission requirement.
-
-### Inspect the runtime
-
-1. Follow the quick start to capture fictional context and retrieve it from a fresh process.
-2. Start the SDK Streamable HTTP server below and connect an MCP client to `/mcp`.
-3. Initialize the connection, list tools and call `capture` and `search`. Tool schemas returned
-   by the server are the authority for arguments. Inspect prompts and resources for active skills.
-4. For the end-user workflow and its demonstrated scope, follow the BurnOS submission guide.
-
-The local memory example needs no paid service or credentials. Live model conversion and
-conversation are separate features with provider requirements; access to the full submitted
-experience must be arranged in the submission's judge instructions.
-
-### Changes during the hackathon window
-
-Mnemosyne predates the event. These dated commits document subsequent work, rather than
-presenting the entire repository as newly created:
-
-| Date | Update | Source |
-| --- | --- | --- |
-| October 16, 2026 | Framework-building refactor and audited skill effects | [v1.4.0](https://github.com/onfire7777/Mnemosyne/commit/2ae2a3aa), [v1.4.1](https://github.com/onfire7777/Mnemosyne/commit/edddea3e) |
-| October 17, 2026 | Immediate skill use, optional BurnSkill conversion, book imports, MCP prompts/resources and validation | [v1.5.0](https://github.com/onfire7777/Mnemosyne/commit/d81ae5a0) |
-| October 17, 2026 | MCP SDK 2.3 integration and protocol negotiation fixes | [v1.6.0](https://github.com/onfire7777/Mnemosyne/commit/111c0858), [v1.6.1](https://github.com/onfire7777/Mnemosyne/commit/a01528e4) |
-| October 17, 2026 | Public benchmark separation and recall-measurement validation fixes | [Repository split](https://github.com/onfire7777/Mnemosyne/commit/28f99b9a), [recall fixes](https://github.com/onfire7777/Mnemosyne/commit/a1953d89) |
-| October 18, 2026 | Whole-book mapping, parallel chapter builds, cached/resumable conversion and Codex model support | [v1.7.0](https://github.com/onfire7777/Mnemosyne/commit/ef0e51ca) |
-
-An Open Source mini-challenge entry must separately identify its contribution URL, repository,
-GitHub username and contribution explanation. Being public alone does not constitute that entry.
 
 ## Quick start
 
@@ -111,7 +108,7 @@ uv run --locked mneme-mcp --help
 
 ### MCP server
 
-Recommended for Streamable HTTP clients and evaluation of the Alexa+ MCP route:
+Recommended for Streamable HTTP clients:
 
 ```bash
 uv run --locked mneme-mcp --store .mnemosyne/mcp-store.json \
@@ -119,7 +116,7 @@ uv run --locked mneme-mcp --store .mnemosyne/mcp-store.json \
 ```
 
 Connect the client to `http://127.0.0.1:8765/mcp`; health is at `/healthz`.
-Use protocol `2025-11-25` in the client's initialize request for the hackathon MCP route.
+Send protocol `2025-11-25` in the client's initialize request.
 The SDK transport is distinct from the legacy `--http` JSON-RPC endpoint.
 
 For a local stdio client:
