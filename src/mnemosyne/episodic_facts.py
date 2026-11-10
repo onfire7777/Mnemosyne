@@ -1130,6 +1130,85 @@ _OPEN_DOMAIN_STOP_SUBJECTS = frozenset(
 )
 
 
+def split_episodic_clauses(text: str) -> list[str]:
+    """Split independent coordinated claims, retaining the explicit speaker.
+
+    Noun conjunctions ("coffee and tea") stay intact. An omitted subject is
+    inherited only before a recognizable verb, never from arbitrary prose.
+    """
+    clauses: list[str] = []
+    for sentence in re.split(r"(?<=[.!?])\s+|[;\n]+", text or ""):
+        speaker = re.match(r"(?i)^\s*(I|We)\b", sentence)
+        parts = re.split(
+            r"(?i)\s+(?:and|but)\s+(?=(?:I|we|my|our)\b|"
+            r"(?:work|works|worked|live|lived|reside|resided|like|love|prefer|hate|"
+            r"own|use|have|am|was|speak|study|studied|graduated|moved|decided)\b)",
+            sentence,
+        )
+        for index, part in enumerate(parts):
+            part = part.strip()
+            if not part:
+                continue
+            if index and speaker and not re.match(r"(?i)^(I|we|my|our)\b", part):
+                part = speaker.group(1) + " " + part
+            clauses.append(part)
+    return clauses
+
+
+def _historical_state_window(text: str, reference_time: datetime):
+    """Return only an attested past-state window, never an inferred move date."""
+    past = re.search(
+        r"(?i)\b(?:I|we)\s+(?:used\s+to\s+|did\s+(?:not\s+)?|was\b|were\b|lived\b|resided\b|"
+        r"worked\b|liked\b|preferred\b|owned\b|spoke\b)", text,
+    ) or re.search(r"(?i)\b(?:my|our)\s+[^.!?]+?\s+(?:was|were)\b", text)
+    if not past:
+        return None
+    start, end, precision = parse_relative_or_prose_date(text, reference_time=reference_time)
+    # A date following 'since' asserts a start, not a closing boundary. Bare
+    # past tense likewise supplies no known end; store that uncertainty.
+    bounded = bool(re.search(r"(?i)\b(?:in|on|during)\s+|\b(?:last|ago|yesterday)\b", text))
+    if not bounded or re.search(r"(?i)\bsince\b", text):
+        end = None
+    return start, end + timedelta(seconds=1) if end is not None else None, precision
+
+
+def _apply_historical_state_window(
+    text: str, assertions: list[Assertion], relations: list[Relation], reference_time: datetime,
+) -> None:
+    from mnemosyne.assertion_semantics import assertion_predicate_key
+
+    window = _historical_state_window(text, reference_time)
+    if window is None:
+        return
+    past_start, past_end, precision = window
+    state_predicates = {"residence", "work_at", "work_for", "is_a", "name", "like", "prefer", "own", "speak"}
+    historical = [a for a in assertions if assertion_predicate_key(a.predicate)[0] in state_predicates]
+    for assertion in historical:
+        assertion.scope["temporal_context"] = "historical"
+        assertion.qualifiers.update({
+            "temporal_context": "historical", "current_state": "unknown",
+            "validity_semantics": "attested_interval", "end_known": past_end is not None,
+        })
+        if past_start is not None:
+            assertion.valid_from = past_start
+        else:
+            assertion.qualifiers["start_known"] = False
+        assertion.valid_to = past_end
+        assertion.status = "superseded"
+    if historical:
+        historical_keys = {(a.subject, a.object) for a in historical}
+        for relation in list(relations):
+            if (relation.source, relation.target) not in historical_keys:
+                continue
+            if past_end is None:
+                # Relations have no historical/unknown-time state. Do not
+                # turn a historical statement with unknown end into a live edge.
+                relations.remove(relation)
+            else:
+                relation.valid_from = past_start or relation.valid_from
+                relation.valid_to = past_end
+
+
 def _strip_temporal_affixes(clause: str) -> str:
     s = clause.strip().strip(",.;!")
     # Strip leading temporal phrase followed by comma
@@ -1211,6 +1290,9 @@ def _normalize_open_predicate(raw_pred: str) -> str:
     # Strip leading auxiliary if followed by a main verb/adjective phrase
     p = re.sub(r"^(?:am|is|are|was|were|have\s+been|has\s+been|had\s+been)\s+", "", p)
     p = re.sub(r"[^a-z0-9]+", "_", p).strip("_")
+    p = re.sub(r"^no_longer_", "not_", p)
+    p = re.sub(r"^worked_", "work_", p)
+    p = {"liked": "like", "preferred": "prefer", "owned": "own", "spoke": "speak"}.get(p, p)
     return p or "relates_to"
 
 
@@ -1258,20 +1340,7 @@ def extract_open_domain_facts(
     relations: list[Relation] = []
     seen: set[tuple[str, str, str]] = set()
 
-    raw_sentences = [
-        s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+", text or "") if s.strip()
-    ]
-    if not raw_sentences and (text or "").strip():
-        raw_sentences = [text.strip()]
-    sentence_pairs: list[tuple[str, str]] = []
-    for rs in raw_sentences:
-        sub_clauses = re.split(
-            r"\s+and\s+(?=(?:I|we|he|she|they|the\s+[a-z]+|[A-Z][a-z]+)\s+(?:am|is|are|was|were|prefer|prefers|like|likes|use|uses|deployed|migrated|built|switched|adopted)\b)",
-            rs,
-        )
-        for sc in sub_clauses:
-            if sc.strip():
-                sentence_pairs.append((sc.strip(), rs))
+    sentence_pairs = [(clause, clause) for clause in split_episodic_clauses(text)]
 
     for sentence, parent_sentence in sentence_pairs:
         if sentence.endswith("?"):
@@ -1314,6 +1383,22 @@ def extract_open_domain_facts(
             qualifiers["temporal_precision"] = precision
 
         matched_svo: tuple[str, str, str] | None = None
+        m_owned = re.match(r"(?i)^(?:my|our)\s+([a-z][a-z ]{0,40}?)\s+(?:is|are|was|were)\s+(.+)$", cleaned)
+        if m_owned:
+            owned_object = m_owned.group(2).strip()
+            negative = bool(re.match(r"(?i)^not\s+", owned_object))
+            matched_svo = (
+                _normalize_open_subject("I", speaker_role),
+                ("not_" if negative else "") + _normalize_open_predicate(m_owned.group(1)),
+                re.sub(r"(?i)^not\s+", "", owned_object),
+            )
+        m_identity = re.match(r"(?i)^(I|we)\s+(?:am|are|was|were)\s+((?:not\s+)?(?:a|an)\s+.+)$", cleaned)
+        if m_identity:
+            obj = m_identity.group(2)
+            negative = bool(re.match(r"(?i)^not\s+", obj))
+            obj = re.sub(r"(?i)^(?:not\s+)?(?:a|an)\s+", "", obj)
+            matched_svo = (_normalize_open_subject(m_identity.group(1), speaker_role),
+                           "not_is_a" if negative else "is_a", obj)
 
         # Pattern 1: Copula + adjective/participle + preposition
         # e.g., "I am allergic to shellfish", "The service is deployed on Kubernetes"
@@ -1323,7 +1408,7 @@ def extract_open_domain_facts(
             r"(?P<obj>[A-Za-z0-9$][^.!?]{0,120})$",
             cleaned,
         )
-        if m_cop_prep:
+        if m_cop_prep and matched_svo is None:
             subj = _normalize_open_subject(m_cop_prep.group("subj"), speaker_role)
             pred = _normalize_open_predicate(m_cop_prep.group("pred"))
             obj = m_cop_prep.group("obj").strip().strip(",.;")
@@ -1336,7 +1421,7 @@ def extract_open_domain_facts(
             m_svo = re.match(
                 r"^(?P<subj>I|We|i|we|(?:My|Our|The|A|An|my|our|the|a|an)\s+[A-Za-z][A-Za-z0-9_.-]*(?:\s+[A-Za-z0-9_.-]+){0,2}|[A-Z][A-Za-z0-9_.-]*(?:\s+[A-Z][A-Za-z0-9_.-]*){0,3})\s+"
                 r"(?P<pred>(?:(?:do|does|did|can|could|will|would|should|must|have|has|had)\s+(?:not\s+|never\s+)?)?"
-                r"[a-z]{3,}(?:ed|es|s|ing)?(?:\s+(?:to|on|in|for|with|from|at|into|over))?)\s+"
+                r"(?:(?:no\s+longer|never|not)\s+)?[a-z]{3,}(?:ed|es|s|ing)?(?:\s+(?:to|on|in|for|with|from|at|into|over))?)\s+"
                 r"(?P<obj>[A-Za-z0-9$][^.!?]{0,120})$",
                 cleaned,
             )
@@ -1344,7 +1429,7 @@ def extract_open_domain_facts(
                 raw_subj = m_svo.group("subj")
                 raw_pred = m_svo.group("pred").strip()
                 raw_obj = m_svo.group("obj").strip().strip(",.;")
-                pred_first = raw_pred.split()[0].lower()
+                pred_first = re.sub(r"^(?:no\s+longer|never|not)\s+", "", raw_pred).split()[0].lower()
                 if pred_first not in _OPEN_DOMAIN_STOP_SUBJECTS and raw_obj:
                     subj = _normalize_open_subject(raw_subj, speaker_role)
                     pred = _normalize_open_predicate(raw_pred)
@@ -1400,6 +1485,11 @@ def extract_open_domain_facts(
                         access_policy=policy,
                     )
                 )
+
+                newest_relations = [relations[-1]]
+                _apply_historical_state_window(sentence, [a], newest_relations, ref_time)
+                if not newest_relations:
+                    relations.pop()
 
     return OpenDomainFacts(assertions=assertions, relations=relations)
 
@@ -1536,7 +1626,7 @@ def extract_episodic_facts(
         relations.append(r)
 
     # Split text into sentence/clause candidates while preserving context
-    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+", text) if s.strip()]
+    sentences = split_episodic_clauses(text)
     if not sentences:
         sentences = [text.strip()]
 
@@ -1595,6 +1685,7 @@ def extract_episodic_facts(
             current_sentence_qualifiers["occurrence_end"] = IsoDateTime(occ_end)
             current_sentence_qualifiers["temporal_precision"] = precision
         before_count = len(assertions)
+        before_relation_count = len(relations)
 
         # ----------------------------------------------------------------------
         # 1. Residence & Location
@@ -1620,9 +1711,19 @@ def extract_episodic_facts(
                 add_relation(effective_subject, "lives_in", loc, vf=dt)
                 add_relation(effective_subject, "residence", loc, vf=dt)
 
+        m_negative_residence = re.search(
+            r"(?i)\b(?:I|we)\s+(?:(?:do|did)\s+not|no\s+longer|never)\s+"
+            r"(?:live|reside)\s+in\s+([^.!?;]+)", s_clean,
+        )
+        if m_negative_residence:
+            loc = _clean_location(_strip_temporal_affixes(m_negative_residence.group(1)))
+            if loc:
+                add_assertion(effective_subject, "not_residence", loc)
+                add_relation(effective_subject, "not_residence", loc)
+
         # Current residence: "I live in Sacramento", "I currently live in Sacramento", "I reside in Sacramento"
         m_live = re.search(
-            r"(?i)(?:(?:in|since)\s+([A-Za-z0-9, ]+?),?\s+)?(?:I|we)\s+(?:currently\s+)?(?:live|reside|lived|resided)\s+in\s+([A-Z][A-Za-z0-9\s'.-]+?)(?:\s+(?:in|since)\s+([A-Za-z0-9, ]+?))?(?:[.,;]|\s+with|\s+and|\s*$)",
+            r"(?i)(?:(?:in|since)\s+([A-Za-z0-9, ]+?),?\s+)?(?:I|we)\s+(?:currently\s+|used\s+to\s+)?(?:live|reside|lived|resided)\s+in\s+([A-Z][A-Za-z0-9\s'.-]+?)(?:\s+(?:in|since)\s+([A-Za-z0-9, ]+?))?(?:[.,;]|\s+with|\s+and|\s*$)",
             s_clean,
         )
         if m_live:
@@ -2049,5 +2150,10 @@ def extract_episodic_facts(
                 if rkey not in seen_relations:
                     seen_relations.add(rkey)
                     relations.append(orel)
+
+        new_assertions = assertions[before_count:]
+        new_relations = relations[before_relation_count:]
+        _apply_historical_state_window(s_clean, new_assertions, new_relations, ref_time)
+        relations[before_relation_count:] = new_relations
 
     return ExtractedFacts(assertions=assertions, relations=relations)

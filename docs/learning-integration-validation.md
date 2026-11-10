@@ -1,5 +1,77 @@
 # Learning integration validation — 2026-11-05
 
+## 2026-11-10 semantic memory and measured learning pipeline
+
+This follow-up repairs five observed gaps without changing benchmark definitions,
+protected-case requirements, probation thresholds, or causal promotion gates:
+
+- The Codex host recognizes real completed pytest executions behind supported
+  `env`, `uv run`, `poetry run`, `pipenv run`, timeout and directory-change wrappers,
+  including long-duration summaries. Printed JSON, contradictory exit status and
+  ambiguous shell pipelines cannot manufacture verification. A receipt-bound
+  `--report-use` protocol records applied lessons and references actual external
+  checker results; merely displaying a lesson or passing generic tests earns no
+  lesson-specific credit.
+- Shared assertion semantics reconcile affirmative/negative corrections and
+  preserve unrelated values and owners. Historical statements retain their
+  reported interval or an explicitly unknown end; they do not become current
+  residence claims or timeless graph edges.
+- Direct-user formation handles names, occupations, May dates and coordinated
+  claims, while excluding conversational commands and uncertain statements.
+  New authenticated user turns carry grounded provenance. A deterministic preview
+  identifies unsupported automatic projections without changing raw evidence.
+- Task matching tolerates bounded grammatical variants and incidental tools.
+  Portable procedures require literal source evidence from distinct workspaces,
+  retain explicit source bindings and require a current workspace binding.
+  Embedded routines need a checker associated with the actual routine calls;
+  unrelated successful checks cannot verify them.
+- The automatic worker now runs measured adapter evaluation and activation.
+  The local logistic memory predictor trains only on external outcome labels,
+  reserves disjoint held-out episodes, executes the full protected suite and
+  requires measured Brier-score improvement above the existing noise margin.
+  Caller-supplied success flags can veto but cannot establish a pass. Prediction
+  uses the evaluated calculation and current calibration; provider calls happen
+  outside the learning write transaction. Expiry, access revocation, erasure,
+  changed source artifacts, changed embeddings and protected-case failure stop
+  serving. Rollback removes the active adapter binding. This trains a small
+  memory success predictor, not the underlying language model.
+
+Focused verification: **640 passed, 3 skipped** across 34 selected files in
+44.93 seconds. A final transaction-boundary change passed **146 focused checks**
+in 6.30 seconds. Together these cover **641 distinct passing cases and 3
+skips**, including measured train/evaluate/activate/reload/rollback, source
+revocation, host checker attribution, SQLite semantics and portable procedures.
+No full suite or broad benchmark was run. Ruff and `git diff --check` passed.
+The PostgreSQL semantic implementation shares the corrected helper, but a live
+PostgreSQL test was skipped because no test DSN was available.
+
+The offline wheel build and isolated installed-wheel smoke passed. All 17 changed
+package modules matched the installed wheel payload. Wheel SHA256:
+`b1c490aadd85eda566d29dd58a1f2427700c7fe409fdf6c52a4091270263b9ad`.
+
+After consistent SQLite backups, the live repair quarantined two unsupported
+automatic assertions and expired access to their two graph projections. It
+preserved the original source messages and their timestamps. Three retained
+outcome records were reprocessed through the guarded, audited repair path;
+no historical reward changed and no missing receipt or success was invented.
+Raw tool events, evidence, predictions, receipts and erased episodes remained
+unchanged, and a repeated outcome repair made no changes.
+
+The deployed hook, worker and trainer were verified through a fresh authenticated
+host, and the scheduled maintenance worker completed successfully after deployment.
+The live checkpoint had 38 episodes, 3 resolved outcomes, 35 legacy candidate
+artifacts and zero credited or eligible training artifacts. Automatic training
+therefore correctly remained `waiting_for_validated_sources`; the isolated
+pipeline tests do not establish a live learning benefit. The native MCP status
+reported task matching version v5. Long-lived Python clients can retain imported
+modules until they reconnect; fresh host processes load the deployed code.
+
+Evidence, backups, exact selectors, JUnit output, deployment hashes and live
+receipts are in `/Users/admin/.codex/tmp/mnemosyne-semantic-learning-20261109/`:
+`final-selectors.json`, `final-focused.xml`, `final-delta.xml`, `test-summary.json`,
+`wheel-smoke.json`, `live-repair.json`, `host-deployment.json`, and `fresh-host.json`.
+
+
 ## 2026-11-09 live memory and outcome repair
 
 This follow-up closes five concrete gaps in the running memory pipeline:

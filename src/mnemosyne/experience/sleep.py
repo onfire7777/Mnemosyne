@@ -23,6 +23,8 @@ from .candidates import (
     persist_protected_cases,
     observed_steps,
     expected_steps,
+    portable_observed_steps,
+    has_workspace_template,
 )
 from .revisions import install_revision, score_trials, propagate_children, inherit_library_lineage, recompute_trial
 from .schema import assimilate
@@ -123,7 +125,7 @@ def _candidate(
     )
     conditions = [scope_match["query"]] if scope_match and scope_match["query"] else []
     model = Lesson if kind == "lesson" else Procedure
-    return model.native(**{
+    record = model.native(**{
         "id": digest([kind, tenant, user, task, content, _scope_identity(scope_match)]),
         "kind": kind,
         "task_class": task,
@@ -154,6 +156,19 @@ def _candidate(
         "next_revalidation_at": (datetime.now(UTC) + timedelta(days=1)).isoformat(),
         "revalidation_step": 0,
     }).to_record()
+    if kind != "lesson":
+        from .candidates import _action_data
+        record["needs"] = sorted({value["tool"] for step in steps
+                                  if (value := _action_data(step))})
+    if has_workspace_template(steps):
+        record["action_template"] = {
+            "version": 1, "variable": "workspace",
+            "binding_required": True,
+            "binding_instruction": "Bind workspace to the explicit current execution directory before use; source bindings are provenance only.",
+            "bindings": [{"episode_id": row["id"], "value": portable_observed_steps(row)[1]}
+                         for row in sorted(episodes, key=lambda row: row["id"])],
+        }
+    return record
 
 
 def _reuse_existing_identity(candidate: dict, state: dict) -> None:
@@ -443,6 +458,12 @@ def consolidate(runtime, tenant: str) -> dict:
         demonstrated = [steps for episode in successes if (steps := observed_steps(episode))]
         if len(demonstrated) >= 2 and (steps := common_sequence(demonstrated)):
             candidates.append(_candidate(task, steps, successes))
+        portable = [portable_observed_steps(episode) for episode in successes]
+        if (len(portable) >= 2 and all(root for _, root in portable)
+                and len({root for _, root in portable}) >= 2):
+            steps = common_sequence([sequence for sequence, _ in portable])
+            if has_workspace_template(steps):
+                candidates.append(_candidate(task, steps, successes))
         for episode in episodes:
             for text in correction_texts(episode):
                 lesson = _candidate(task, [text], [episode], kind="lesson")

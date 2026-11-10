@@ -20,7 +20,9 @@ from pathlib import Path
 from typing import Any, Literal, Protocol, Sequence, runtime_checkable
 
 from mnemosyne import text as text_kernels
-from mnemosyne.assertion_semantics import assertion_is_additive, assertion_replacement_id
+from mnemosyne.assertion_semantics import (
+    assertion_predicate_key, assertion_replacement_id, assertions_same_value, assertions_conflict,
+)
 from mnemosyne.access_policy import (
     VECTOR_PARTITION_PUBLIC,
     apply_relation_redactions,
@@ -6381,15 +6383,14 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             )
             peers = [
                 item
-                for item in self.assertions.peers(
-                    incoming.tenant_id, branch, incoming.subject, incoming.predicate
-                ).values()
+                for item in self.assertions.in_branch(incoming.tenant_id, branch).values()
                 if item.tenant_id == incoming.tenant_id
                 and item.branch == branch
                 and item.user_id == incoming.user_id
                 and item.subject == incoming.subject
-                and item.predicate == incoming.predicate
+                and assertion_predicate_key(item.predicate)[0] == assertion_predicate_key(incoming.predicate)[0]
                 and item.scope == incoming.scope
+                and incoming.status in {"active", "contested"}
                 and item.status in {"active", "contested"}
             ]
             replacement_id = assertion_replacement_id(
@@ -6398,13 +6399,13 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     (item.calibration for item in peers if item.id == incoming.id), None
                 ),
             )
-            same = [item for item in peers if item.object == incoming.object]
+            same = [item for item in peers if assertions_same_value(item, incoming)]
 
             conflicts = [
                 item for item in peers
-                if item.object != incoming.object and (replacement_id is not None or not same)
+                if not assertions_same_value(item, incoming) and (replacement_id is not None or not same)
                 and (item.id == replacement_id if replacement_id is not None
-                     else not assertion_is_additive(incoming.predicate))
+                     else assertions_conflict(item, incoming))
             ]
             successor_id = max(same, key=lambda item: item.confidence).id if same else incoming.id
             if conflicts:

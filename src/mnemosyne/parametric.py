@@ -421,6 +421,69 @@ class ParametricTier:
             )
         return ParametricPromotionDecision(True, "parametric artifact promoted in isolated tier", artifact, gate_result.to_dict())
 
+    def evaluate_measured(self, artifact, protected_cases, *, allow_activation=True):
+        """Run a configured evaluator; a caller flag can veto, never grant, promotion."""
+        def deactivate():
+            rollback = getattr(self.trainer, "rollback", None)
+            if rollback:
+                rollback(artifact, "measured reevaluation did not pass", protected_cases=protected_cases)
+        if not protected_suite_is_gating(protected_cases):
+            deactivate()
+            artifact.status = "shadow"
+            if self.artifact_store:
+                self.artifact_store.write(artifact, {"phase": "shadow", "reason": "non-gating protected suite"})
+            return ParametricPromotionDecision(False, "active non-synthetic protected regression suite required", artifact)
+        evaluator = getattr(self.trainer, "evaluate", None)
+        if not self.artifact_store or not evaluator:
+            deactivate()
+            artifact.status = "shadow"
+            if self.artifact_store:
+                self.artifact_store.write(artifact, {"phase": "shadow", "reason": "measured evaluator unavailable"})
+            return ParametricPromotionDecision(False, "measured adapter evaluator required", artifact)
+        stored = self.artifact_store.read(artifact.artifact_uri)
+        for key in ("id", "tenant_id", "source_ids", "adapter_kind", "immutable_rails"):
+            if stored["artifact"][key] != getattr(artifact, key):
+                raise ValueError("parametric proposal identity changed before evaluation")
+        provider = stored["payload"].get("provider", {})
+        try:
+            gate = evaluator(artifact, provider, protected_cases)
+        except Exception:
+            deactivate()
+            raise
+        if not isinstance(gate, GateResult):
+            raise ValueError("adapter evaluator must return a measured GateResult")
+        if not allow_activation:
+            gate.promoted = False
+        decision = self.evaluate(artifact, gate, protected_cases)
+        if not decision.promoted:
+            deactivate()
+        if decision.promoted:
+            activate = getattr(self.trainer, "activate", None)
+            if activate:
+                try:
+                    activate(artifact, provider)
+                except Exception:
+                    self.rollback(artifact, "activation failed", protected_cases)
+                    raise
+        return decision
+
+    def predict(self, tenant, user, query, baseline, *, state=None):
+        predictor = getattr(self.trainer, "predict", None)
+        result = predictor(tenant, user, query, baseline, state=state) if predictor else None
+        if result and self.artifact_store:
+            try:
+                artifact = self.artifact_store.load_artifact(
+                    f"{self.artifact_store.uri_prefix}{tenant}/{result['artifact_id']}.json")
+                if artifact.status != "promoted":
+                    return None
+            except (OSError, ValueError, KeyError):
+                return None
+        return result
+
+    def prediction_is_current(self, tenant, user, prediction, state):
+        validate = getattr(self.trainer, "prediction_is_current", None)
+        return bool(validate and validate(tenant, user, prediction, state))
+
     def rollback(
         self,
         artifact: ParametricArtifact,
@@ -486,9 +549,12 @@ class ParametricArtifactStore:
         path = self._path_for(artifact.tenant_id, artifact.id)
         path.parent.mkdir(parents=True, exist_ok=True)
         artifact.artifact_uri = f"{self.uri_prefix}{artifact.tenant_id}/{artifact.id}.json"
+        previous_payload = {}
+        if path.exists():
+            previous_payload = self.read(artifact.artifact_uri).get("payload", {})
         body = {
             "artifact": artifact.to_dict(),
-            "payload": payload or {},
+            "payload": {**previous_payload, **(payload or {})},
         }
         tmp = path.with_suffix(path.suffix + ".tmp")
         tmp.write_text(json.dumps(body, indent=2, sort_keys=True), encoding="utf-8", newline="\n")

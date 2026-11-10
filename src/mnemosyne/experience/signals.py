@@ -132,6 +132,12 @@ def tool_signals(events: list[dict]) -> list[dict]:
         call_id = event.get("call_id", event.get("source_call_id"))
         if isinstance(call_id, str):
             item["call_id"] = call_id
+        checked = event.get("checked_call_ids")
+        if isinstance(checked, list) and checked and all(isinstance(value, str) and value for value in checked):
+            item["checked_call_ids"] = list(checked)
+        tested = event.get("tested_steps")
+        if isinstance(tested, list) and tested and all(isinstance(value, str) and value for value in tested):
+            item["tested_steps"] = list(tested)
     return _current_checks(result)
 
 
@@ -199,17 +205,63 @@ def verified_target_outcome(artifact: dict, episode: dict) -> float | None:
     general = [item for item in verified if not item.get("target_ids")]
     if not general:
         return None
-    from .candidates import expected_steps, compatible_observed_steps, ordered_subset
+    from .candidates import (
+        EXCLUDED_SOURCES, action_occurrence, expected_steps, compatible_observed_steps,
+        observed_action, sequence_occurrence,
+    )
     steps = artifact.get("steps", [])
     expected = expected_steps(episode)
     if expected:
-        matches = any(steps == sequence for sequence in expected)
-    else:
-        observed = compatible_observed_steps(steps, episode)
-        matches = bool(steps) and (ordered_subset(steps, observed) if artifact.get("kind") == "chunk" else steps == observed)
-    if not matches:
-        return -1.0 if expected else None
-    return reward(general)
+        matches = any(len(steps) == len(sequence)
+                      and sequence_occurrence(steps, sequence) is not None
+                      for sequence in expected)
+        return reward(general) if matches else -1.0
+    occurrence = action_occurrence(artifact, episode)
+    if occurrence is None:
+        return None
+    observed = compatible_observed_steps(steps, episode)
+    if len(steps) == len(observed):
+        return reward(general)
+
+    # An embedded routine needs a checker associated with its actual calls.
+    # Proximity to an unrelated successful test run is not verification.
+    observed_events = episode.get("tool_events", [])
+    if episode.get("event_parser_version", 0) >= 2:
+        from mnemosyne.hosts.codex import reparse_retained_events
+        observed_events = reparse_retained_events(observed_events)
+    events = [event for event in observed_events
+              if event.get("source") not in EXCLUDED_SOURCES]
+    outcomes = []
+    prior = []
+    for event in events:
+        checks = [item for item in tool_signals([event])
+                  if item in general and item["kind"] in {"tests", "verifier"}]
+        if checks:
+            checked = checks[0].get("checked_call_ids", [])
+            ids = [row.get("call_id", row.get("source_call_id")) for row in prior]
+            if (checked and len(checked) == len(set(checked))
+                    and all(ids.count(key) == 1 for key in checked)):
+                selected = [row for row, key in zip(prior, ids, strict=True) if key in checked]
+                if action_occurrence(artifact, {"tool_events": selected}) is not None:
+                    outcomes.extend(checks)
+            elif checks[0].get("tested_steps"):
+                tested = checks[0]["tested_steps"]
+                actual = compatible_observed_steps(steps, {"tool_events": prior})
+                if (sequence_occurrence(tested, actual) is not None
+                        and sequence_occurrence(steps, tested,
+                                                contiguous=artifact.get("kind") == "chunk") is not None):
+                    outcomes.extend(checks)
+        if event.get("name") != "benchmark_verifier" and observed_action(event) is not None:
+            prior.append(event)
+    # A checker may be part of the operation itself (for example a test runner).
+    operation_checks = [
+        [item for item in tool_signals([prior[index]]) if item in general
+         and item["kind"] in {"tests", "verifier"}]
+        for index in occurrence
+    ]
+    if all(operation_checks):
+        outcomes.extend(item for checked in operation_checks for item in checked)
+    return reward(_current_checks(outcomes)) if outcomes else None
 
 
 def reprocessed_episode(episode: dict, artifacts: dict, receipts: dict) -> dict:
@@ -219,15 +271,21 @@ def reprocessed_episode(episode: dict, artifacts: dict, receipts: dict) -> dict:
     source/receipt identities. LearningWriter retains the original row in its
     encrypted audit. Erased and imported histories are never reconstructed.
     """
-    if episode.get("outcome_version", 1) >= 2 or episode.get("status") not in {"resolved", "unknown"}:
+    if episode.get("status") not in {"resolved", "unknown"}:
         return deepcopy(episode)
-    events = episode.get("tool_events", [])
+    from mnemosyne.hosts.codex import reparse_retained_events
+    original_events = episode.get("tool_events", [])
+    events = reparse_retained_events(original_events)
+    if episode.get("outcome_version", 1) >= 2 and (
+        episode.get("event_parser_version", 0) >= 2 or events == original_events
+    ):
+        return deepcopy(episode)
     automatic = Counter()
     def core(item):
         return item["kind"], item["value"], item["weight"], item.get("evidence", "")
-    for event in events:
+    for event in original_events:
         legacy = dict(event)
-        if type(legacy.get("exit_code")) is int and legacy["exit_code"] != 0:
+        if episode.get("outcome_version", 1) < 2 and type(legacy.get("exit_code")) is int and legacy["exit_code"] != 0:
             legacy.update(outcome_scope="task", final=True)
         for item in tool_signals([legacy]):
             automatic[core(item)] += 1
@@ -241,6 +299,7 @@ def reprocessed_episode(episode: dict, artifacts: dict, receipts: dict) -> dict:
     updated = deepcopy(episode)
     updated["signals"] = [*tool_signals(events), *manual]
     updated["outcome_version"] = 2
+    updated["event_parser_version"] = 2
     value = reward(updated["signals"])
     updated.update(reward=value, rpe=None if value is None else value - (2 * episode["prediction"] - 1),
                    status="unknown" if value is None else "resolved", target_outcomes={})

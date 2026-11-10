@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from copy import deepcopy
 import json
+from pathlib import PurePosixPath
 
 from mnemosyne.gate import Candidate, PromotionGate, RegressionCase
 from mnemosyne.learning import LocalCritic, Procedure, Trajectory
@@ -170,6 +171,119 @@ def compatible_observed_steps(steps: list[str], episode: dict) -> list[str]:
             and event.get("source") not in EXCLUDED_SOURCES]
 
 
+WORKSPACE_VARIABLE = {"variable": "workspace"}
+
+
+def _action_data(step: str) -> dict:
+    try:
+        value = json.loads(step)
+    except (ValueError, TypeError):
+        return {}
+    return value if isinstance(value, dict) and value.get("type") == "tool_action" else {}
+
+
+def _workspace(value) -> bool:
+    return (isinstance(value, str) and value.startswith("/") and value != "/"
+            and str(PurePosixPath(value)) == value and ".." not in PurePosixPath(value).parts)
+
+
+def template_workspace(step: str, workspace: str) -> str:
+    """Abstract only cwd; executable, entities, flags and all arguments stay literal."""
+    value = _action_data(step)
+    if value.get("cwd") != workspace or not _workspace(workspace):
+        return step
+    remaining = {key: deepcopy(item) for key, item in value.items() if key != "cwd"}
+    # Host adapters retain the original arguments as well as normalized cwd.
+    # Bind only those explicit cwd fields when they agree with the observation.
+    if isinstance(remaining.get("arguments"), dict):
+        for key in ("cwd", "workdir"):
+            if remaining["arguments"].get(key) == workspace:
+                remaining["arguments"][key] = WORKSPACE_VARIABLE
+    # A command tied to the old root cannot safely become a portable operation.
+    if workspace in json.dumps(remaining, ensure_ascii=False):
+        return step
+    return json.dumps({**remaining, "cwd": WORKSPACE_VARIABLE}, sort_keys=True,
+                      ensure_ascii=False, allow_nan=False)
+
+
+def has_workspace_template(steps: list[str]) -> bool:
+    return any(_action_data(step).get("cwd") == WORKSPACE_VARIABLE for step in steps)
+
+
+def portable_observed_steps(episode: dict) -> tuple[list[str], str | None]:
+    steps = observed_steps(episode)
+    roots = {value for step in steps if _workspace(value := _action_data(step).get("cwd"))}
+    if len(roots) != 1:
+        return steps, None
+    root = next(iter(roots))
+    return [template_workspace(step, root) for step in steps], root
+
+
+def sequence_occurrence(steps: list[str], sequence: list[str], *, contiguous=False) -> list[int] | None:
+    """Find an ordered occurrence with one consistent, explicit workspace binding."""
+    if not steps:
+        return None
+    roots = {None}
+    if has_workspace_template(steps):
+        roots = {value for step in sequence if _workspace(value := _action_data(step).get("cwd"))}
+    for root in sorted(roots, key=lambda value: value or ""):
+        comparable = [template_workspace(step, root) if root else step for step in sequence]
+        if contiguous:
+            for start in range(len(sequence) - len(steps) + 1):
+                if comparable[start:start + len(steps)] == steps:
+                    return list(range(start, start + len(steps)))
+        else:
+            indices = []
+            for index, step in enumerate(comparable):
+                if step == steps[len(indices)]:
+                    indices.append(index)
+                    if len(indices) == len(steps):
+                        return indices
+    return None
+
+
+def action_occurrence(artifact: dict, episode: dict) -> list[int] | None:
+    return sequence_occurrence(artifact.get("steps", []),
+                               compatible_observed_steps(artifact.get("steps", []), episode),
+                               contiguous=artifact.get("kind") == "chunk")
+
+
+def validate_action_template(artifact: dict, episodes: list[dict]) -> bool:
+    if not has_workspace_template(artifact.get("steps", [])):
+        return not artifact.get("action_template")
+    proof = artifact.get("action_template", {})
+    if (proof.get("version") != 1 or proof.get("variable") != "workspace"
+            or proof.get("binding_required") is not True):
+        return False
+    bindings = []
+    for episode in sorted(episodes, key=lambda row: row["id"]):
+        _, root = portable_observed_steps(episode)
+        if not root or action_occurrence(artifact, episode) is None:
+            return False
+        bindings.append({"episode_id": episode["id"], "value": root})
+    return len({row["value"] for row in bindings}) >= 2 and bindings == proof.get("bindings")
+
+
+def grounded_action_template(artifact: dict, episodes: list[dict], quotes: list[dict]) -> bool:
+    """Verify every variable-bearing operation against retained literal evidence."""
+    if not validate_action_template(artifact, episodes):
+        return False
+    if {row["id"] for row in episodes} != set(artifact.get("source_episode_ids", [])):
+        return False
+    for episode in episodes:
+        if (episode.get("tenant_id"), episode.get("user_id")) != (
+            artifact.get("tenant_id"), artifact.get("user_id")
+        ):
+            return False
+        observed = observed_steps(episode)
+        for index in action_occurrence(artifact, episode) or []:
+            if not any(quote.get("episode_id") == episode["id"]
+                       and quote.get("cid") in episode.get("source_cids", [])
+                       and quote.get("quote") == observed[index] for quote in quotes):
+                return False
+    return True
+
+
 def ordered_subset(steps: list[str], expected: list[str]) -> bool:
     iterator = iter(expected)
     return all(any(value == step for value in iterator) for step in steps)
@@ -182,31 +296,25 @@ def candidate_score(artifact: dict, episode: dict) -> float | None:
         return float(artifact["content"] in corrections) if corrections else None
     expected = expected_steps(episode)
     if expected:
-        match = any(artifact["steps"] == sequence for sequence in expected)
+        match = any(len(artifact["steps"]) == len(sequence)
+                    and sequence_occurrence(artifact["steps"], sequence) is not None
+                    for sequence in expected)
         if artifact.get("kind") == "chunk":
-            match = any(
-                any(
-                    sequence[index : index + len(artifact["steps"])]
-                    == artifact["steps"]
-                    for index in range(len(sequence) - len(artifact["steps"]) + 1)
-                )
-                for sequence in expected
-            )
+            match = any(sequence_occurrence(artifact["steps"], sequence, contiguous=True)
+                        is not None for sequence in expected)
         return float(match)
     if (episode.get("reward") or 0) > 0 and any(
         s["kind"] in {"verifier", "tests"} for s in episode.get("signals", [])
     ):
         observed = compatible_observed_steps(artifact["steps"], episode)
         if observed:
-            if artifact.get("kind") == "chunk":
-                return float(
-                    any(
-                        observed[index : index + len(artifact["steps"])]
-                        == artifact["steps"]
-                        for index in range(len(observed) - len(artifact["steps"]) + 1)
-                    )
-                )
-            return float(ordered_subset(artifact["steps"], observed))
+            if action_occurrence(artifact, episode) is None:
+                return 0.0
+            if len(artifact["steps"]) < len(observed):
+                from .signals import verified_target_outcome
+                outcome = verified_target_outcome({"id": None, **artifact}, episode)
+                return None if outcome is None else float(outcome > 0)
+            return 1.0
     return None
 
 
@@ -220,12 +328,21 @@ def ground_quotes(
     if artifact.get("content_kind", artifact.get("kind")) == "lesson":
         sources.sort(key=lambda pair: pair[1] is None or pair[1].actor != "user")
     quotes = []
-    for step in artifact["steps"]:
+    quoted_steps = [(step, None) for step in artifact["steps"]]
+    if has_workspace_template(artifact["steps"]):
+        if not validate_action_template(artifact, episodes):
+            return []
+        quoted_steps = [
+            (observed_steps(episode)[index], episode["id"])
+            for episode in episodes for index in (action_occurrence(artifact, episode) or [])
+        ]
+    for step, source_episode_id in quoted_steps:
         found = None
         for episode, source in sources:
             if (
                 source
                 and not source.erased
+                and (source_episode_id is None or source_episode_id == episode["id"])
                 and (
                     source.actor == "tool"
                     or (

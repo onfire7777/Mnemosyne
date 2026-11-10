@@ -49,6 +49,15 @@ def now() -> datetime:
     return datetime.now(UTC)
 
 
+def calibrate_prediction(prediction: float, state: dict) -> float:
+    """Apply the same observed calibration to live and evaluated predictions."""
+    policy = state.get("policy", {})
+    row = policy.get("calibration_bins", {}).get(str(min(9, int(prediction * 10))), {})
+    if policy.get("calibration_version") == 2 and row.get("n", 0) >= 20:
+        return (row["successes"] + 1) / (row["n"] + 2)
+    return prediction
+
+
 def _posterior(row: dict | None) -> Posterior:
     return Posterior.from_dict(row)
 
@@ -623,6 +632,13 @@ class LearningRuntime:
             )
             served.append(ServedItem("item", hit["id"], routes, rank))
 
+        tier = getattr(self.engine, "_learning_configuration", {}).get("parametric")
+        # Embedding and protected retrieval may call providers. Prepare the
+        # model's additive contribution before acquiring the learning write lock.
+        model_contribution = tier.predict(tenant_id, user_id, query, 0.0, state=state) if (
+            tier and self._enabled(state, "metacognition")
+        ) else None
+
         def capture(current):
             chosen = selected
             chosen_exploration = exploration
@@ -706,15 +722,16 @@ class LearningRuntime:
                     for item in chosen
                 ]
                 prediction = 1 / (1 + math.exp(-sum(logits) / len(logits)))
-            raw_prediction = prediction
-            bin_key = str(min(9, int(raw_prediction * 10)))
-            calibration = current["policy"].get("calibration_bins", {}).get(bin_key, {})
-            if (
-                self._enabled(current, "metacognition")
-                and current["policy"].get("calibration_version") == 2
-                and calibration.get("n", 0) >= 20
+            baseline_prediction = prediction
+            parametric_prediction = None
+            if model_contribution and self._enabled(current, "metacognition") and tier.prediction_is_current(
+                tenant_id, user_id, model_contribution, current
             ):
-                prediction = (calibration["successes"] + 1) / (calibration["n"] + 2)
+                prediction = 0.5 * prediction + model_contribution["prediction"]
+                parametric_prediction = {**model_contribution, "prediction": prediction}
+            raw_prediction = prediction
+            if self._enabled(current, "metacognition"):
+                prediction = calibrate_prediction(prediction, current)
             selected_items = [
                 ServedItem(item["kind"], item["id"], (), rank, item["revision"])
                 for rank, item in enumerate(chosen, 1)
@@ -736,6 +753,8 @@ class LearningRuntime:
                 task_scope_query=task_scope_query,
                 task_match=task_match,
                 raw_prediction=raw_prediction,
+                baseline_prediction=baseline_prediction,
+                parametric_prediction=parametric_prediction,
                 effective_policy=effective_policy,
                 policy_variant_id=active_variant["id"]
                 if active_variant
@@ -956,7 +975,7 @@ class LearningRuntime:
                         session_id=session_id,
                         trust_tier=1 if actor == "user" else 5,
                         metadata={
-                            "reality_class": "external"
+                            "reality_class": "grounded"
                             if actor == "user"
                             else "self_generated"
                         },

@@ -5,7 +5,7 @@ import re
 
 from .receipts import digest
 
-METHOD = "explicit-or-full-request-with-bounded-equivalence-v4"
+METHOD = "explicit-or-full-request-with-bounded-equivalence-v5"
 
 _ACTION_FORMS = (
     ("list", r"(?:list|enumerate|(?:give|show)(?: me)? a list of)"),
@@ -30,8 +30,29 @@ def _request_contract(query: str) -> tuple[str, str] | None:
     for action, pattern in _ACTION_FORMS:
         match = re.match(pattern + r"\s+(.+)$", request, flags=re.IGNORECASE | re.DOTALL)
         if match:
-            return action, match.group(1)
+            subject = match.group(1)
+            # Only grammatical prose gets article/terminal punctuation folding.
+            # Code, paths, quoted strings, flags and decimal literals stay exact.
+            prose = re.fullmatch(r"(?:the )?([A-Za-z][A-Za-z0-9 ]*\b(?:report|reports|bug|bugs|check|checks|test|tests|file|files|summary|summaries))[.!?]?", subject)
+            if prose:
+                subject = prose.group(1)
+            return action, subject
     return None
+
+
+def _required_tools(episode: dict, receipt: dict) -> set[str]:
+    from .candidates import EXCLUDED_SOURCES, observed_action
+
+    observed = {event["name"] for event in episode.get("tool_events", [])
+                if event.get("source") not in EXCLUDED_SOURCES
+                and event.get("name") != "benchmark_verifier"
+                and observed_action(event) is not None}
+    # Without an observed trace there is no basis to declare a tool incidental.
+    return observed or set(receipt.get("available_tools", []))
+
+
+def _compatible_tools(episode: dict, old: dict, tools: list[str]) -> bool:
+    return _required_tools(episode, old) <= set(tools)
 
 
 def scope_query(episode: dict) -> str:
@@ -63,7 +84,7 @@ def resolve_task(query, tools, task_type, *, tenant_id, user_id, risk_level,
         receipts = [state["receipts"][key] for key in episode.get("receipt_ids", [])
                     if key in state["receipts"]]
         if not any(
-            set(receipt.get("available_tools", [])) == set(tools)
+            _compatible_tools(episode, receipt, tools)
             and receipt.get("risk_level", "normal") == (risk_level or "normal")
             for receipt in receipts
         ) or not source_is_live(episode.get("source_cids", [])):
@@ -75,10 +96,10 @@ def resolve_task(query, tools, task_type, *, tenant_id, user_id, risk_level,
         row["user_text"] != scope_query(row), row["user_text"] != query,
         row["created_at"], row["id"],
     ))
-    if prior["user_text"] == query and scope_query(prior) == query:
+    if prior["user_text"] == query and scope_query(prior) == query and prior["task_class"] == task:
         return prior["task_class"], query, None
     return prior["task_class"], scope_query(prior), {
-        "method": "bounded_request_equivalence:v1", "matched_episode_id": prior["id"],
+        "method": "bounded_request_equivalence:v2", "matched_episode_id": prior["id"],
         "source_cids": list(prior["source_cids"]),
     }
 
@@ -93,7 +114,7 @@ def validated_scope_query(receipt: dict, state: dict) -> str | None:
     prior = state["episodes"].get(proof.get("matched_episode_id"), {})
     contract = _request_contract(query)
     if (
-        proof.get("method") != "bounded_request_equivalence:v1"
+        proof.get("method") not in {"bounded_request_equivalence:v1", "bounded_request_equivalence:v2"}
         or prior.get("status") not in {"open", "resolved"}
         or prior.get("tenant_id") != receipt.get("tenant_id")
         or prior.get("user_id") != receipt.get("user_id")
@@ -106,7 +127,9 @@ def validated_scope_query(receipt: dict, state: dict) -> str | None:
     old_receipts = [state["receipts"][key] for key in prior.get("receipt_ids", [])
                     if key in state["receipts"]]
     if not any(
-        set(old.get("available_tools", [])) == set(receipt.get("available_tools", []))
+        (_compatible_tools(prior, old, receipt.get("available_tools", []))
+         if proof.get("method") == "bounded_request_equivalence:v2"
+         else set(old.get("available_tools", [])) == set(receipt.get("available_tools", [])))
         and old.get("risk_level", "normal") == receipt.get("risk_level", "normal")
         for old in old_receipts
     ):

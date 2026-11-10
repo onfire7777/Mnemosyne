@@ -9,7 +9,9 @@ from collections.abc import Mapping
 from hashlib import sha256
 from typing import Any
 
-from mnemosyne.assertion_semantics import assertion_is_additive, assertion_replacement_id
+from mnemosyne.assertion_semantics import (
+    assertion_predicate_key, assertion_replacement_id, assertions_same_value, assertions_conflict,
+)
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Assertion, BeliefRevisionReport, Contradiction, Justification, parse_dt, utc_now
 from mnemosyne.standing import STANDING_FN_VERSION
@@ -56,6 +58,8 @@ class BeliefRevisionCore:
         ``SUPERSEDE`` (different object, strictly newer valid time), or
         ``CONTEST`` (different object, not newer) — the AGM minimal-change rule.
         """
+        if assertion.status not in {"active", "candidate", "contested"}:
+            return "ADD"
         peers = [
             item
             for item in self.engine.assertions.values()
@@ -63,7 +67,7 @@ class BeliefRevisionCore:
             and item.branch == branch
             and item.user_id == assertion.user_id
             and item.subject == assertion.subject
-            and item.predicate == assertion.predicate
+            and assertion_predicate_key(item.predicate)[0] == assertion_predicate_key(assertion.predicate)[0]
             and item.scope == assertion.scope
             and item.status in {"active", "contested"}
         ]
@@ -75,14 +79,16 @@ class BeliefRevisionCore:
         )
         if not peers:
             return "ADD"
-        same = [item for item in peers if item.object == assertion.object]
+        same = [item for item in peers if assertions_same_value(item, assertion)]
         if same and (replacement_id is None or any(item.id == replacement_id for item in same)):
             best = max(same, key=lambda item: item.confidence)
             if assertion.confidence > best.confidence or set(assertion.source_evidence_cids) - set(best.source_evidence_cids):
                 return "UPDATE"
             return "NOOP"
-        peers = [item for item in peers if item.id == replacement_id] if replacement_id else peers
-        if replacement_id is None and assertion_is_additive(assertion.predicate):
+        peers = [item for item in peers if item.id == replacement_id] if replacement_id else [
+            item for item in peers if assertions_conflict(item, assertion)
+        ]
+        if not peers:
             return "ADD"
         # Trust-based supersession: a strictly more-trusted assertion (lower tier
         # number; tier 0 = direct user) supersedes a less-trusted conflicting
@@ -108,13 +114,13 @@ class BeliefRevisionCore:
         """
         operation = self.classify(assertion, branch)
         before = {
-            item.id: item
+            item.id: copy.deepcopy(item)
             for item in self.engine.assertions.values()
             if item.tenant_id == assertion.tenant_id
             and item.branch == branch
             and item.user_id == assertion.user_id
             and item.subject == assertion.subject
-            and item.predicate == assertion.predicate
+            and assertion_predicate_key(item.predicate)[0] == assertion_predicate_key(assertion.predicate)[0]
             and item.scope == assertion.scope
             and item.status in {"active", "contested"}
         }
@@ -135,7 +141,7 @@ class BeliefRevisionCore:
         if operation in {"SUPERSEDE", "CONTEST"}:
             for peer in before.values():
                 target = assertion.calibration.get("replaces_assertion_id")
-                if peer.object != assertion.object and (target is None or peer.id == target):
+                if (assertions_conflict(peer, assertion) if target is None else peer.id == target):
                     contradictions.append(self.engine.add_contradiction(Contradiction(assertion.tenant_id, peer.id, assertion_id)))
         affected = sorted(
             item.id
@@ -144,7 +150,7 @@ class BeliefRevisionCore:
             and item.branch == branch
             and item.user_id == assertion.user_id
             and item.subject == assertion.subject
-            and item.predicate == assertion.predicate
+            and assertion_predicate_key(item.predicate)[0] == assertion_predicate_key(assertion.predicate)[0]
             and item.scope == assertion.scope
         )
         self.engine._persist()

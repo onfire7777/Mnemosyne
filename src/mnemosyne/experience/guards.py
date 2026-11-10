@@ -666,11 +666,14 @@ def _validate_artifacts(
                     quote_code,
                     "quote does not occur in live evidence",
                 )
+            from .candidates import grounded_action_template
+
             require(
-                all(
+                (grounded_action_template(artifact, [after["episodes"][eid] for eid in source_ids], quotes)
+                 if artifact.get("action_template") else all(
                     any(step in quote["quote"] for quote in quotes)
                     for step in artifact.get("steps", [])
-                ),
+                )),
                 quote_code,
                 "servable steps must occur in recorded quotes",
             )

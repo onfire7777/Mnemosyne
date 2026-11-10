@@ -4,6 +4,7 @@ import json
 import sys
 import traceback
 from datetime import UTC, datetime
+from pathlib import Path
 
 from runtime import STATE, TENANT, USER, invoke, locked, open_facade
 
@@ -18,6 +19,7 @@ def adapter():
         open_facade=open_facade,
         locked=locked,
         invoke=invoke,
+        report_command=[sys.executable, str(Path(__file__).resolve()), "--report-use"],
     )
 
 
@@ -27,7 +29,12 @@ def handle(payload):
 
 if __name__ == "__main__":
     try:
-        output = handle(json.load(sys.stdin))
+        payload = json.load(sys.stdin)
+        if sys.argv[1:] == ["--report-use"]:
+            payload["hook_event_name"] = "MemoryUse"
+        elif sys.argv[1:]:
+            raise ValueError("unsupported lifecycle hook arguments")
+        output = handle(payload)
     except Exception as error:
         STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
         with (STATE / "hook-errors.log").open("a") as log:

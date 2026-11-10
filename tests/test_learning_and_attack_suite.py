@@ -401,7 +401,10 @@ def test_parametric_facade_rollback_drill_authorization_and_evidence_shape(
         source_trust_tier=0,
     )
 
-    assert evaluated["promoted"] is True
+    # This command provider has no evaluator. Persisted cases are not evidence
+    # that those cases ran, and a caller boolean cannot promote an adapter.
+    assert evaluated["promoted"] is False
+    assert evaluated["reason"] == "measured adapter evaluator required"
     assert evaluated["protected_suite"]["source"] == "runtime_state"
     assert rolled_back["status"] == "rolled_back"
     assert rolled_back["metrics"]["rolled_back"] == 1.0

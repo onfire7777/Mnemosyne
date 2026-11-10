@@ -16,7 +16,9 @@ from hashlib import sha256
 from typing import Any, Mapping, Sequence
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from mnemosyne.assertion_semantics import assertion_is_additive, assertion_replacement_id
+from mnemosyne.assertion_semantics import (
+    assertion_predicate_key, assertion_replacement_id, assertions_same_value, assertions_conflict,
+)
 from mnemosyne.access_policy import (
     AccessDecision,
     apply_relation_redactions,
@@ -4276,7 +4278,7 @@ class PostgresEngine:
                     """
                     SELECT * FROM assertions
                     WHERE tenant_id = %s AND branch = %s AND subject = %s
-                      AND predicate = %s AND scope = %s
+                      AND scope = %s
                       AND user_id IS NOT DISTINCT FROM %s
                       AND status IN ('active', 'contested')
                     ORDER BY trust_tier ASC, valid_from DESC
@@ -4286,25 +4288,27 @@ class PostgresEngine:
                         db_tenant_id,
                         branch,
                         incoming.subject,
-                        incoming.predicate,
                         self._jsonb(incoming.scope),
                         db_user_id,
                     ),
                 )
-                peers = list(cur.fetchall())
+                peers = [row for row in cur.fetchall()
+                         if incoming.status in {"active", "contested"}
+                         and assertion_predicate_key(row["predicate"])[0]
+                         == assertion_predicate_key(incoming.predicate)[0]]
                 replacement_id = assertion_replacement_id(
                     incoming.calibration, {str(row["id"]) for row in peers},
                     replayed_calibration=next(
                         (dict(row["calibration"] or {}) for row in peers if str(row["id"]) == incoming.id), None
                     ),
                 )
-                same = [row for row in peers if row["object"] == incoming.object]
+                same = [row for row in peers if assertions_same_value(row, incoming)]
 
                 conflicts = [
                     row for row in peers
-                    if row["object"] != incoming.object and (replacement_id is not None or not same)
+                    if not assertions_same_value(row, incoming) and (replacement_id is not None or not same)
                     and (str(row["id"]) == replacement_id if replacement_id is not None
-                         else not assertion_is_additive(incoming.predicate))
+                         else assertions_conflict(row, incoming))
                 ]
                 successor_id = str(same[0]["id"]) if same else incoming.id
                 if conflicts:

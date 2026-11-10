@@ -100,8 +100,30 @@ def test_trainer_validation_error_can_recover_without_new_outcomes(tmp_path):
         return SimpleNamespace(status="shadow", id="trained", metrics={})
 
     facade.tools.parametric.propose_from_lessons = train
+    facade.tools.parametric.evaluate_measured = lambda *args: SimpleNamespace(reason="measured evaluator unavailable", promoted=False)
     path = tmp_path / "worker.json"
     assert advance(facade, "t", path)["training"]["status"] == "waiting_for_evidence"
     assert advance(facade, "t", path)["training"]["status"] == "shadow"
     advance(facade, "t", path)
     assert len(attempts) == 2
+
+
+def test_shadow_evaluation_retries_when_memory_changes_without_new_episode(tmp_path, monkeypatch):
+    from mnemosyne.hosts import codex_learning
+
+    facade, _, _, _, _ = host()
+    facade.tools.learning.lessons['one'] = object()
+    facade.tools.parametric._eligible_source = lambda *args: True
+    calls = []
+    facade.tools.parametric.propose_from_lessons = lambda *args: (
+        calls.append(1) or SimpleNamespace(status='shadow', id='trained', metrics={}))
+    facade.tools.parametric.evaluate_measured = lambda *args: SimpleNamespace(reason='protected case missing', promoted=False)
+    clock = [1000]
+    monkeypatch.setattr(codex_learning.time, 'time', lambda: clock[0])
+    path = tmp_path / 'worker.json'
+    advance(facade, 't', path)
+    advance(facade, 't', path)
+    assert len(calls) == 1
+    clock[0] += 301
+    advance(facade, 't', path)
+    assert len(calls) == 2

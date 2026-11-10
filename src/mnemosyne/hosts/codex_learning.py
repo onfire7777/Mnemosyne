@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import time
 from pathlib import Path
 
 
@@ -12,6 +13,10 @@ def _fingerprint(facade, runtime, tenant):
     state = runtime.writer.read(tenant)
     status = runtime.status(tenant)
     payload = {
+        "pipeline_version": 2,
+        "trainer": type(getattr(facade.tools.parametric, "trainer", None)).__qualname__,
+        "trainer_configuration": getattr(getattr(facade.tools.parametric, "trainer", None),
+                                         "configuration_fingerprint", lambda: None)(),
         "episodes": [
             row for _, row in sorted(state["episodes"].items())
             if row["status"] == "resolved"
@@ -38,7 +43,9 @@ def advance(facade, tenant, state_path):
     state_path = Path(state_path)
     runtime = facade.tools._learning_runtime()
     previous = json.loads(state_path.read_text()) if state_path.exists() else {}
-    if previous.get("fingerprint") == _fingerprint(facade, runtime, tenant):
+    if previous.get("fingerprint") == _fingerprint(facade, runtime, tenant) and (
+        not previous.get("retry_after") or time.time() < previous["retry_after"]
+    ):
         return previous
     state = runtime.writer.read(tenant)
     report = {
@@ -64,12 +71,20 @@ def advance(facade, tenant, state_path):
     elif eligible:
         try:
             artifact = tier.propose_from_lessons(tenant, lessons, procedures)
+            cases = [case for case in facade.runtime_state.load_gate_cases()
+                     if case.protected and case.mode == "active"]
+            decision = tier.evaluate_measured(artifact, cases)
             report["training"] = {
                 "status": artifact.status,
                 "artifact_id": artifact.id,
                 "metrics": artifact.metrics,
-                "activation": "requires measured protected evaluation",
+                "activation": decision.reason,
+                "promoted": decision.promoted,
             }
+            if not decision.promoted:
+                # Protected memory or evaluator availability can change without
+                # a new episode. Retry conservatively without a training loop.
+                report["retry_after"] = time.time() + 300
         except ValueError as error:
             report["training"] = {"status": "waiting_for_evidence", "reason": str(error)}
             retryable = True

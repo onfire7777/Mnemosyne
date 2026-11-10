@@ -41,7 +41,7 @@ from mnemosyne.engine import (
 from mnemosyne.episodic_facts import extract_episodic_facts
 from mnemosyne.ids import canonical_json, evidence_cid, new_id
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
-from mnemosyne.gate import Candidate, GATING_CASE_ORIGINS, GateResult, PromotionGate, RegressionCase
+from mnemosyne.gate import Candidate, GATING_CASE_ORIGINS, PromotionGate, RegressionCase
 from mnemosyne.learning import LearningSystem, Trajectory, counterfactual_replay_score
 from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES, enforce_byte_limit
 from mnemosyne.models import Assertion, Evidence, Preference, Relation, parse_dt
@@ -848,7 +848,7 @@ class MemoryTools:
         from mnemosyne.experience.integration import configure_learning
         configure_learning(engine, skill_store=skill_store, lesson_distiller=lesson_distiller,
                            procedure_inducer=procedure_inducer, protected_cases=protected_cases,
-                           runtime_state=runtime_state)
+                           runtime_state=runtime_state, parametric=self.parametric)
 
     @staticmethod
     def _working_time(value: str | datetime, name: str) -> datetime:
@@ -4628,7 +4628,7 @@ class MemoryTools:
                 if case.protected and case.origin in GATING_CASE_ORIGINS and case.mode == "active"
             ]
             if persisted:
-                return persisted[:protected_case_count], "runtime_state"
+                return persisted, "runtime_state"
         return (
             [
                 RegressionCase(
@@ -4671,20 +4671,12 @@ class MemoryTools:
             and protected_case_count > 0
             and protected_count >= protected_case_count
         )
-        effective_promoted = gate_promoted and suite_gating
-        regressions = list(protected_regressions or [])
-        if gate_promoted and not suite_gating:
-            regressions.append("protected-suite-non-gating")
-        gate = GateResult(
-            candidate_id=artifact.id,
-            promoted=effective_promoted,
-            protected_regressions=regressions,
-            failed_cases=[],
-            passed_cases=[case.id for case in cases] if suite_gating else [],
-            margin=1.0 if effective_promoted else 0.0,
-            rollback_branch=None,
+        # Caller booleans and reported regressions can only veto activation.
+        # Passing case IDs are produced exclusively by the measured evaluator.
+        decision = self.parametric.evaluate_measured(
+            artifact, cases,
+            allow_activation=bool(gate_promoted and suite_gating and not protected_regressions),
         )
-        decision = self.parametric.evaluate(artifact, gate, cases)
         self.metrics.record_gate(promoted=decision.promoted, rolled_back=not decision.promoted)
         self._save_metrics()
         result = decision.to_dict()
