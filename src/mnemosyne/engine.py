@@ -9113,6 +9113,17 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 working.access_policy = access_policy
             for working_key, _ in working_removals:
                 self.working_memory.pop(working_key, None)
+            from mnemosyne.erasure_ids import redact_source_audit_payload
+            audit_targets = {identifier for name in (
+                "retracted_assertions", "trimmed_assertions", "expired_relations", "trimmed_relations",
+                "retracted_preferences", "trimmed_preferences",
+            ) for identifier in propagated[name]}
+            for record in self.audit_log:
+                if record.get("tenant_id") == tenant_id:
+                    record["diff"] = redact_source_audit_payload(
+                        record.get("diff", {}), affected_cids,
+                        target_affected=record.get("target_id") in audit_targets, branch=branch,
+                    )
             # Spec §7 privacy invariant 13: a hard delete is unrecoverable, so NO
             # retained record may carry the erased cid — not the deletion_log
             # evidence_cid, not the provenance arrays / standing-cascade refs inside

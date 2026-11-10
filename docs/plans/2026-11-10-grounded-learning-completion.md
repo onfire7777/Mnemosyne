@@ -64,6 +64,10 @@ that every arbitrary project can be reproduced in the bounded sandbox.
 - 598 checks passed. One optional live PostgreSQL check was skipped because
   `MNEMOSYNE_POSTGRES_DSN` was not configured. The full suite was not run.
 - Ruff and whitespace checks passed for the changed files.
+- A final erasure probe identified retained source text in derived audit
+  payloads. Local, SQLite, and PostgreSQL erasure now scrub those payloads while
+  retaining audit event identity. The focused erasure/host selection passed 58
+  checks; two live PostgreSQL cases were skipped without a configured DSN.
 - All 148 packaged Python sources matched the checkout. An isolated installed
   package converted an actual configuration read into two assertions and one
   maintained page; a sandboxed Python experiment reproduced one failure and
@@ -71,3 +75,19 @@ that every arbitrary project can be reproduced in the bounded sandbox.
 - A fresh authenticated MCP session reported v7, all 22 components enabled,
   and zero guard failures. Current chat capabilities were refreshed from its
   actual available tool manifest.
+
+### Observed live rollout
+
+The backed-up personal store completed deterministic recovery of 58 retained
+episodes in 97.4 seconds, creating 589 assertions with no recovery errors. The
+initial resulting state contained 482 active assertions, 38 contested claims,
+69 superseded claims, and two existing quarantined claims. Nine maintained
+pages were published; a subsequent project-memory query retrieved a page with
+three retained source references.
+
+Scheduled maintenance was restarted and completed successfully. It consumed
+two queued provider reviews, retained 265 pending reviews for bounded future
+passes, and reported no retrieval-index backlog or indexing errors. The live
+learner remains enabled with its promotion gates intact; training still awaits
+qualifying verified outcomes. Historical facts and isolated experiment results
+were not converted into artificial learning credit.

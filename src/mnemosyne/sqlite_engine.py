@@ -6268,6 +6268,23 @@ class SqliteEngine:
                             descriptor["item_id"],
                         ),
                     )
+                from mnemosyne.erasure_ids import redact_source_audit_payload
+                audit_targets = {identifier for name in (
+                    "retracted_assertions", "trimmed_assertions", "expired_relations", "trimmed_relations",
+                    "retracted_preferences", "trimmed_preferences",
+                ) for identifier in propagated[name]}
+                for row in conn.execute(
+                    "SELECT seq, record FROM audit_log WHERE tenant_id = ?", (tenant_id,),
+                ).fetchall():
+                    record = json.loads(row["record"])
+                    diff = redact_source_audit_payload(
+                        record.get("diff", {}), affected_cids,
+                        target_affected=record.get("target_id") in audit_targets, branch=branch,
+                    )
+                    if diff != record.get("diff", {}):
+                        record["diff"] = diff
+                        conn.execute("UPDATE audit_log SET record = ? WHERE seq = ?",
+                                     (json_text(record), row["seq"]))
                 # deletion_log — spec §7 invariant 13: NO retained record for a hard
                 # delete may carry the erased cid (deletion evidence_cid, the
                 # provenance/standing-cascade refs inside `propagated`, or the audit

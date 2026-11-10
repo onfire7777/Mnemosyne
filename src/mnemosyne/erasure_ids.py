@@ -164,3 +164,38 @@ def redact_erased_cids(value: Any, placeholder_map: Mapping[str, str]) -> Any:
     if isinstance(value, (list, tuple)):
         return [redact_erased_cids(item, placeholder_map) for item in value]
     return value
+
+
+def redact_source_audit_payload(
+    diff: Mapping[str, Any], affected_cids: set[str], *,
+    target_affected: bool = False, branch: str = "main",
+) -> dict[str, Any]:
+    """Remove source-derived audit snapshots while keeping event custody.
+
+    The audit envelope (event/target ids, action, actor and timestamp) is kept
+    by callers. Explicit provenance also covers old reinforcement snapshots;
+    affected target ids cover legacy projection audits without source fields.
+    No plaintext matching or cross-tenant inference is involved.
+    """
+    if diff.get("branch", branch) != branch:
+        return dict(diff)
+
+    def depends(value: Any) -> bool:
+        if isinstance(value, Mapping):
+            for key, item in value.items():
+                if key in {"source_cid", "evidence_cid"} and isinstance(item, str) and item in affected_cids:
+                    return True
+                if key in {"source_evidence_cids", "source_cids", "evidence_ids"} and isinstance(item, (list, tuple)):
+                    if any(isinstance(cid, str) and cid in affected_cids for cid in item):
+                        return True
+                if depends(item):
+                    return True
+        elif isinstance(value, (list, tuple)):
+            return any(depends(item) for item in value)
+        return False
+
+    if not target_affected and not depends(diff):
+        return dict(diff)
+    # Even origin labels and tags inside an arbitrary diff can contain source
+    # text. Event identity and custody remain in the enclosing audit record.
+    return {"source_payload_erased": True}

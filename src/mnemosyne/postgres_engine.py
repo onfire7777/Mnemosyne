@@ -7608,6 +7608,21 @@ class PostgresEngine:
                         (db_tenant_id, row["intention_id"]),
                     )
                     propagated["removed_intentions"].append(row["intention_id"])
+                from mnemosyne.erasure_ids import redact_source_audit_payload
+                audit_targets = {identifier for name in (
+                    "retracted_assertions", "trimmed_assertions", "expired_relations", "trimmed_relations",
+                    "retracted_preferences", "trimmed_preferences",
+                ) for identifier in propagated[name]}
+                cur.execute("SELECT id, target_id, diff FROM audit_log WHERE tenant_id = %s", (db_tenant_id,))
+                for audit_row in cur.fetchall():
+                    original_diff = dict(audit_row["diff"] or {})
+                    diff = redact_source_audit_payload(
+                        original_diff, affected_cids,
+                        target_affected=str(audit_row["target_id"]) in audit_targets, branch=branch,
+                    )
+                    if diff != original_diff:
+                        cur.execute("UPDATE audit_log SET diff = %s WHERE id = %s",
+                                    (self._jsonb(diff), audit_row["id"]))
                 # Spec §7 privacy invariant 13: NO retained record for a hard delete
                 # may carry the erased cid (a salted sha256 of the content, so
                 # sha256(guess) could confirm it) — not the deletion_log evidence_cid,
