@@ -4708,14 +4708,16 @@ class SqliteEngine:
         )
         with self._lock:
             conn = self._connect(assertion.tenant_id)
-            self._require_branch(conn, assertion.tenant_id, branch)
-            oracle = self._assertion_oracle(conn, assertion.tenant_id, branch)
-            before = {item.id: item.to_dict() for item in oracle.assertions.values()}
-            before_relations = {
-                item.id: item.to_dict() for item in oracle.relations.values()
-            }
-            result_id = oracle.upsert_assertion(copy.deepcopy(assertion), branch=branch)
             with conn:
+                if not conn.in_transaction:
+                    conn.execute("BEGIN IMMEDIATE")
+                self._require_branch(conn, assertion.tenant_id, branch)
+                oracle = self._assertion_oracle(conn, assertion.tenant_id, branch)
+                before = {item.id: item.to_dict() for item in oracle.assertions.values()}
+                before_relations = {
+                    item.id: item.to_dict() for item in oracle.relations.values()
+                }
+                result_id = oracle.upsert_assertion(copy.deepcopy(assertion), branch=branch)
                 for item in oracle.assertions.values():
                     if item.tenant_id != assertion.tenant_id or item.branch != branch:
                         continue

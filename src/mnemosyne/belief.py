@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from hashlib import sha256
 from typing import Any
 
+from mnemosyne.assertion_semantics import assertion_is_additive, assertion_replacement_id
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Assertion, BeliefRevisionReport, Contradiction, Justification, parse_dt, utc_now
 from mnemosyne.standing import STANDING_FN_VERSION
@@ -60,19 +61,29 @@ class BeliefRevisionCore:
             for item in self.engine.assertions.values()
             if item.tenant_id == assertion.tenant_id
             and item.branch == branch
+            and item.user_id == assertion.user_id
             and item.subject == assertion.subject
             and item.predicate == assertion.predicate
             and item.scope == assertion.scope
             and item.status in {"active", "contested"}
         ]
+        replacement_id = assertion_replacement_id(
+            assertion.calibration, {item.id for item in peers},
+            replayed_calibration=next(
+                (item.calibration for item in peers if item.id == assertion.id), None
+            ),
+        )
         if not peers:
             return "ADD"
         same = [item for item in peers if item.object == assertion.object]
-        if same:
+        if same and (replacement_id is None or any(item.id == replacement_id for item in same)):
             best = max(same, key=lambda item: item.confidence)
             if assertion.confidence > best.confidence or set(assertion.source_evidence_cids) - set(best.source_evidence_cids):
                 return "UPDATE"
             return "NOOP"
+        peers = [item for item in peers if item.id == replacement_id] if replacement_id else peers
+        if replacement_id is None and assertion_is_additive(assertion.predicate):
+            return "ADD"
         # Trust-based supersession: a strictly more-trusted assertion (lower tier
         # number; tier 0 = direct user) supersedes a less-trusted conflicting
         # peer regardless of valid time — the belief-core analogue of the
@@ -101,6 +112,7 @@ class BeliefRevisionCore:
             for item in self.engine.assertions.values()
             if item.tenant_id == assertion.tenant_id
             and item.branch == branch
+            and item.user_id == assertion.user_id
             and item.subject == assertion.subject
             and item.predicate == assertion.predicate
             and item.scope == assertion.scope
@@ -122,15 +134,18 @@ class BeliefRevisionCore:
         contradictions: list[str] = []
         if operation in {"SUPERSEDE", "CONTEST"}:
             for peer in before.values():
-                if peer.object != assertion.object:
+                target = assertion.calibration.get("replaces_assertion_id")
+                if peer.object != assertion.object and (target is None or peer.id == target):
                     contradictions.append(self.engine.add_contradiction(Contradiction(assertion.tenant_id, peer.id, assertion_id)))
         affected = sorted(
             item.id
             for item in self.engine.assertions.values()
             if item.tenant_id == assertion.tenant_id
             and item.branch == branch
+            and item.user_id == assertion.user_id
             and item.subject == assertion.subject
             and item.predicate == assertion.predicate
+            and item.scope == assertion.scope
         )
         self.engine._persist()
         atms = {

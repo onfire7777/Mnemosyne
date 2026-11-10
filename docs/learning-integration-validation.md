@@ -1,5 +1,96 @@
 # Learning integration validation — 2026-11-05
 
+## 2026-11-09 live memory and outcome repair
+
+This follow-up closes five concrete gaps in the running memory pipeline:
+
+- Codex completion processing drains every completed turn in order, keeps a
+  durable per-turn ledger, and passes an owner-scoped observation ID through the
+  native runtime. Retrying after a post-capture error resumes processing without
+  duplicating the episode or resurrecting an erased turn. The maintenance worker
+  retries pending completions before advancing consolidation; failure reports
+  identify the stage. A mixed positive/negative contradiction pair no longer
+  crashes the dreamer.
+- Member-valued predicates, including pets, family, preferences, and interests,
+  retain independent values. Explicit replacement names the owned assertion it
+  supersedes. Local, SQLite, PostgreSQL, and historical graph reads share this
+  distinction; single-valued attributes retain their revision behavior.
+- Diagnostic command exits do not become task failures by default. A retry
+  replaces only the same identified check, independent failures remain, and an
+  explicitly final task verdict can close attempted checks. Verification credit
+  belongs to the targeted memory or the procedure whose observed steps match.
+  Merely serving a lesson beside a passing test does not verify the lesson.
+  Activation requires sufficient independently verified successes as well as
+  the existing control and improvement evidence.
+- Conservative request equivalence recognizes bounded action paraphrases while
+  retaining entities, negation, constraints, tools, risk, owner, and live source
+  custody. Receipts retain the original request and the equivalence proof.
+  Procedures retain observed commands, arguments, working directories, and
+  conditions in their original source evidence. This is bounded equivalence,
+  not unrestricted semantic clustering.
+- Public capture and completed-turn capture form structured facts from supported
+  direct user statements. Each projection retains the original source and its
+  owner, trust, time, expiry, and access constraints. Quoted/code examples,
+  uncertain statements, imports, and self-generated material do not become
+  direct user facts. Projection retries are idempotent. Preference extraction
+  uses the same direct-statement boundary. Raw tool traces remain stored and
+  available through explicit/deep history, while ordinary recall prioritizes
+  substantive memory.
+
+`LearningRuntime.reprocess_outcomes` is an explicit, audited maintenance repair.
+It recomputes derived rewards from retained tool observations, preserves original
+source records, receipts and predictions, and leaves erased/imported episodes
+alone. Affected derived credit and policy decisions are re-evaluated; unrelated
+learning statistics retain their history. It supplies no invented outcomes or
+post-hoc context receipts.
+
+The full suite and broad benchmark are deliberately not run for this follow-up.
+Existing benchmark definitions and historical reports are unchanged.
+
+Final focused integration: **554 passed, 0 skipped in 51.13 seconds** across 25
+explicit test files. The final source/test snapshot remained unchanged during
+that run. Ruff and `git diff --check` passed. Existing skill fixtures now identify
+the skill their verifier checks; all probation, control, source-custody and
+improvement requirements remain intact. PostgreSQL changes were reviewed and
+linted, but no live PostgreSQL database was exercised.
+
+The offline wheel build and isolated installed-wheel smoke passed, including
+multiple simultaneous pet values, source-backed fact formation, SQLite reopen,
+observation retry idempotency and diagnostic-versus-test outcome interpretation.
+All 20 changed package modules matched the installed wheel payload. Wheel SHA256:
+`09306105a20d92e398de485afa4e768d92dfa644337c7bf63de416c946b95627`.
+
+Exact selectors, JUnit output, source hashes, wheel validation, consistent
+pre-repair backups and live repair receipts are retained in
+`/Users/admin/.codex/tmp/mnemosyne-actual-memory-20261109/` (`final-selectors.json`,
+`final-focused.xml`, `final-source-sha256.json`, `wheel-smoke.json`,
+`live-repair.json`, and `live-host/`). The final scheduled worker checkpoint at
+2026-11-10 02:20:20 UTC completed without errors or duplicate capture; the
+LaunchAgent remained enabled with last exit code zero.
+
+Live validation used the existing personal SQLite store after consistent backups.
+Five pre-v2 episodes were reprocessed through the audited maintenance path. The
+553-event episode's reward changed from `-0.3805642633` to `0.9959595960` using
+its retained test outcomes; the four unknown outcomes remained unknown. Original
+source records, receipts, predictions and erased episodes were unchanged, and
+repeating the repair made no further changes. No additional eligible direct-user
+facts were found for backfill, so no new facts were manufactured.
+
+The deployed Codex hook and worker recovered three missed completed turns once,
+retaining their actual 5, 228 and 11 tool events. No matching historical receipts
+or usable verification signals were available for those turns, so recovery did
+not create retrospective receipts or award success. The original maintenance
+LaunchAgent was restored and its next complete run processed one more eligible
+completion without error. At this checkpoint the store held 16 episodes
+(1 resolved, 5 unknown, 6 open, 4 erased), 16 receipts, 35 candidate artifacts,
+and no credited or eligible parametric-training artifacts. Those counts are a
+live checkpoint, not a claim that promotion gates have been satisfied.
+
+Fresh authenticated calls and the scheduled worker load the new runtime. Existing
+open-chat MCP processes retain previously imported Python modules and require a
+Codex/MCP reconnect to load the new code. Automated control of Codex settings is
+unavailable in this environment; the existing processes were not terminated.
+
 ## 2026-11-09 memory effectiveness fixes
 
 This follow-up addresses observed memory behavior through the existing runtime

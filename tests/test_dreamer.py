@@ -249,3 +249,15 @@ def test_shadow_workspace_controller_rejects_replaced_dreamer_factory() -> None:
         assert "SandboxedDreamer" in str(exc)
     else:
         raise AssertionError("replaced dreamer factory was accepted")
+
+
+def test_contradiction_with_both_states_selects_a_real_opposing_pair():
+    from mnemosyne.dreamer import _detect_pair_contradiction
+
+    result = _detect_pair_contradiction(
+        "The feature was disabled and is now enabled.",
+        "The feature is enabled.",
+        idf_map={"feature": 2.0},
+    )
+    assert result is not None
+    assert result[1] == "disabled vs enabled"

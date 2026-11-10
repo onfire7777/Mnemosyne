@@ -1100,6 +1100,7 @@ def _diverse_learning_search(
     k: int,
     filt: dict[str, Any],
     source_scope: Callable[[Hit], tuple[Any, ...]],
+    include_operational: bool = False,
 ) -> list[Hit]:
     """Refill slots consumed by repeated turns, with bounded backend work.
 
@@ -1110,12 +1111,25 @@ def _diverse_learning_search(
     width = k
     while True:
         hits = search(query, width, filt)
-        distinct = _distinct_learning_turns(hits, source_scope)
+        distinct = _distinct_learning_turns(_relevant_memory_hits(hits, include_operational), source_scope)
         if len(distinct) >= k or len(hits) < width or width >= 4096:
             return distinct[:k]
         if len(distinct) == len(hits):
             return distinct[:k]
         width = min(4096, width * 2)
+
+
+def _relevant_memory_hits(hits: list[Hit], include_operational: bool) -> list[Hit]:
+    """Keep audit traces in the ledger and explicit history, outside ordinary recall.
+
+    This is relevance selection, not source authorization: learned artifacts can
+    still prove their provenance against the retained original tool output.
+    """
+    if include_operational:
+        return hits
+    return [hit for hit in hits if not (
+        hit.kind == "evidence" and hit.metadata.get("source_type") == "learning_tool_result"
+    )]
 
 
 def _source_only_local_routes(adapters: RetrievalAdapters, routes: list[list[Hit]]) -> bool:
@@ -1828,7 +1842,8 @@ def run_retrieval_pipeline(
 
     def search_relevance(search, count, filt):
         if diversify_learning:
-            return _diverse_learning_search(search, query, count, filt, source_scope)
+            return _diverse_learning_search(search, query, count, filt, source_scope,
+                                             include_operational=bool(effective_filter.get("include_operational")))
         return search(query, count, filt)
 
     if window is not None:
@@ -2123,7 +2138,8 @@ def run_retrieval_pipeline(
         )
     collapsed_turns = 0
     if diversify_learning:
-        fused = _distinct_learning_turns(fused, source_scope)
+        fused = _distinct_learning_turns(
+            _relevant_memory_hits(fused, bool(effective_filter.get("include_operational"))), source_scope)
     if working:
         fused, collapsed_turns = _collapse_session_duplicates(fused)
     # Passage and graph-ranked search keep their relevance order: the local hashing

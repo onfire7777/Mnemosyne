@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Literal, Protocol, Sequence, runtime_checkable
 
 from mnemosyne import text as text_kernels
+from mnemosyne.assertion_semantics import assertion_is_additive, assertion_replacement_id
 from mnemosyne.access_policy import (
     VECTOR_PARTITION_PUBLIC,
     apply_relation_redactions,
@@ -6307,6 +6308,8 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         predicate: str,
         obj: str,
         valid_to: datetime | None,
+        *,
+        source_evidence_cids: Sequence[str] | None = None,
     ) -> None:
         """Synchronize relation supersession when an assertion is superseded.
 
@@ -6327,6 +6330,8 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             if getattr(rel, "tenant_id", None) != tenant_id:
                 continue
             if getattr(rel, "branch", None) != branch:
+                continue
+            if source_evidence_cids is not None and not set(source_evidence_cids).intersection(rel.source_evidence_cids):
                 continue
             if (getattr(rel, "source", "").strip().lower(),
                     getattr(rel, "predicate", "").strip().lower()) not in relation_groups:
@@ -6381,13 +6386,109 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 ).values()
                 if item.tenant_id == incoming.tenant_id
                 and item.branch == branch
+                and item.user_id == incoming.user_id
                 and item.subject == incoming.subject
                 and item.predicate == incoming.predicate
                 and item.scope == incoming.scope
                 and item.status in {"active", "contested"}
             ]
+            replacement_id = assertion_replacement_id(
+                incoming.calibration, {item.id for item in peers},
+                replayed_calibration=next(
+                    (item.calibration for item in peers if item.id == incoming.id), None
+                ),
+            )
             same = [item for item in peers if item.object == incoming.object]
-            if same:
+
+            conflicts = [
+                item for item in peers
+                if item.object != incoming.object and (replacement_id is not None or not same)
+                and (item.id == replacement_id if replacement_id is not None
+                     else not assertion_is_additive(incoming.predicate))
+            ]
+            successor_id = max(same, key=lambda item: item.confidence).id if same else incoming.id
+            if conflicts:
+                current = min(
+                    conflicts,
+                    key=lambda item: (item.trust_tier, -item.valid_from.timestamp()),
+                )
+                inc_vf = _to_utc_opt(incoming.valid_from) or datetime.min.replace(
+                    tzinfo=UTC
+                )
+                cur_vf = _to_utc_opt(current.valid_from) or datetime.min.replace(
+                    tzinfo=UTC
+                )
+                if incoming.trust_tier < current.trust_tier:
+                    if inc_vf > cur_vf:
+                        current.valid_to = incoming.valid_from
+                    else:
+                        current.valid_to = current.valid_from + timedelta(
+                            microseconds=1
+                        )
+                    current.status = "superseded"
+                    current.superseded_by = successor_id
+                    incoming.version = current.version + 1
+                    incoming.justification_id = new_id()
+                    op = "upsert_assertion.trust_supersede"
+                elif incoming.trust_tier > current.trust_tier:
+                    incoming.status = "superseded"
+                    incoming.superseded_by = current.id
+                    op = "upsert_assertion.trust_rejected"
+                elif inc_vf > cur_vf:
+                    current.valid_to = incoming.valid_from
+                    current.status = "superseded"
+                    incoming.version = current.version + 1
+                    incoming.justification_id = new_id()
+                    current.superseded_by = successor_id
+                    op = "upsert_assertion.supersede"
+                elif inc_vf == cur_vf:
+                    current.status = "contested"
+                    incoming.status = "contested"
+                    incoming.justification_id = current.justification_id or new_id()
+                    self._rebalance_contested([current, incoming])
+                    op = "upsert_assertion.contest"
+                else:
+                    incoming.status = "superseded"
+                    incoming.valid_to = current.valid_from
+                    op = "upsert_assertion.historical_superseded"
+                if op in {
+                    "upsert_assertion.supersede",
+                    "upsert_assertion.trust_supersede",
+                }:
+                    self._sync_relation_supersession(
+                        tenant_id=incoming.tenant_id,
+                        branch=branch,
+                        subject=current.subject,
+                        predicate=current.predicate,
+                        obj=current.object,
+                        valid_to=current.valid_to,
+                        source_evidence_cids=current.source_evidence_cids if current.user_id is not None else None,
+                    )
+                elif op == "upsert_assertion.historical_superseded":
+                    self._sync_relation_supersession(
+                        tenant_id=incoming.tenant_id,
+                        branch=branch,
+                        subject=incoming.subject,
+                        predicate=incoming.predicate,
+                        obj=incoming.object,
+                        valid_to=incoming.valid_to,
+                        source_evidence_cids=incoming.source_evidence_cids if incoming.user_id is not None else None,
+                    )
+                if audit:
+                    self._audit(
+                        incoming.tenant_id,
+                        "engine",
+                        op,
+                        incoming.id,
+                        {
+                            "conflict_with": current.id,
+                            "source_evidence_cids": incoming.source_evidence_cids,
+                        },
+                        source="assertion",
+                        trust_tier=incoming.trust_tier,
+                    )
+
+            if same and (replacement_id is None or incoming.status != "superseded"):
                 winner = max(same, key=lambda item: item.confidence)
                 before = _row_snapshot(winner, _ASSERTION_TIMES) if audit else None
                 winner.access_policy = merge_access_policies(
@@ -6418,85 +6519,6 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 self._persist() if persist else self._bump_store_version()
                 return winner.id
 
-            conflicts = [item for item in peers if item.object != incoming.object]
-            if conflicts:
-                current = min(
-                    conflicts,
-                    key=lambda item: (item.trust_tier, -item.valid_from.timestamp()),
-                )
-                inc_vf = _to_utc_opt(incoming.valid_from) or datetime.min.replace(
-                    tzinfo=UTC
-                )
-                cur_vf = _to_utc_opt(current.valid_from) or datetime.min.replace(
-                    tzinfo=UTC
-                )
-                if incoming.trust_tier < current.trust_tier:
-                    if inc_vf > cur_vf:
-                        current.valid_to = incoming.valid_from
-                    else:
-                        current.valid_to = current.valid_from + timedelta(
-                            microseconds=1
-                        )
-                    current.status = "superseded"
-                    current.superseded_by = incoming.id
-                    incoming.version = current.version + 1
-                    incoming.justification_id = new_id()
-                    op = "upsert_assertion.trust_supersede"
-                elif incoming.trust_tier > current.trust_tier:
-                    incoming.status = "superseded"
-                    incoming.superseded_by = current.id
-                    op = "upsert_assertion.trust_rejected"
-                elif inc_vf > cur_vf:
-                    current.valid_to = incoming.valid_from
-                    current.status = "superseded"
-                    incoming.version = current.version + 1
-                    incoming.justification_id = new_id()
-                    current.superseded_by = incoming.id
-                    op = "upsert_assertion.supersede"
-                elif inc_vf == cur_vf:
-                    current.status = "contested"
-                    incoming.status = "contested"
-                    incoming.justification_id = current.justification_id or new_id()
-                    self._rebalance_contested([current, incoming])
-                    op = "upsert_assertion.contest"
-                else:
-                    incoming.status = "superseded"
-                    incoming.valid_to = current.valid_from
-                    op = "upsert_assertion.historical_superseded"
-                if op in {
-                    "upsert_assertion.supersede",
-                    "upsert_assertion.trust_supersede",
-                }:
-                    self._sync_relation_supersession(
-                        tenant_id=incoming.tenant_id,
-                        branch=branch,
-                        subject=current.subject,
-                        predicate=current.predicate,
-                        obj=current.object,
-                        valid_to=current.valid_to,
-                    )
-                elif op == "upsert_assertion.historical_superseded":
-                    self._sync_relation_supersession(
-                        tenant_id=incoming.tenant_id,
-                        branch=branch,
-                        subject=incoming.subject,
-                        predicate=incoming.predicate,
-                        obj=incoming.object,
-                        valid_to=incoming.valid_to,
-                    )
-                if audit:
-                    self._audit(
-                        incoming.tenant_id,
-                        "engine",
-                        op,
-                        incoming.id,
-                        {
-                            "conflict_with": current.id,
-                            "source_evidence_cids": incoming.source_evidence_cids,
-                        },
-                        source="assertion",
-                        trust_tier=incoming.trust_tier,
-                    )
 
             key = self._branch_key(incoming.tenant_id, branch, incoming.id)
             self.assertions[key] = incoming

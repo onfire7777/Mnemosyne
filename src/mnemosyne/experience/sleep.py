@@ -13,7 +13,7 @@ from mnemosyne.skills import effects_of
 from mnemosyne.learning import Lesson, Procedure
 from .receipts import digest
 from .runtime import stat_key
-from .stats import Posterior, prob_better, contingency_lower_bound
+from .stats import Posterior, prob_better, contingency_lower_bound, wilson_interval
 from .candidates import (
     evaluate_candidate,
     ground_quotes,
@@ -24,10 +24,11 @@ from .candidates import (
     observed_steps,
     expected_steps,
 )
-from .revisions import install_revision, score_trials, propagate_children, inherit_library_lineage
+from .revisions import install_revision, score_trials, propagate_children, inherit_library_lineage, recompute_trial
 from .schema import assimilate
 from .separation import propose_splits
 from .revalidate import revalidate
+from .task_class import scope_query
 
 
 def common_sequence(sequences: list[list[str]]) -> list[str]:
@@ -114,9 +115,9 @@ def _candidate(
         raise ValueError("candidate sources must have one tenant and user")
     tenant, user = next(iter(owners))
     source_ids = sorted(episode["id"] for episode in episodes)
-    queries = {episode.get("user_text", "").casefold() for episode in episodes}
+    queries = {scope_query(episode).casefold() for episode in episodes}
     scope_match = (
-        {"kind": "exact_query", "query": episodes[0].get("user_text", "")}
+        {"kind": "exact_query", "query": scope_query(episodes[0])}
         if len(queries) == 1
         else None
     )
@@ -260,7 +261,7 @@ def _corrected_revisions(state: dict) -> list[dict]:
             (row for row in state["episodes"].values()
              if row["status"] == "resolved"
              and row["user_id"] == parent.get("user_id")
-             and applies_to(parent, row["task_class"], row["user_text"])),
+             and applies_to(parent, row["task_class"], scope_query(row))),
             key=lambda row: (row["created_at"], row["id"]),
         )
         corrections = []
@@ -582,7 +583,7 @@ def consolidate(runtime, tenant: str) -> dict:
             if row["status"] == "resolved"
             and row["user_id"] == candidate.get("user_id")
             and row["task_class"] == candidate["task_class"]
-            and applies_to(candidate, row["task_class"], row["user_text"])
+            and applies_to(candidate, row["task_class"], scope_query(row))
             and (
                 not candidate.get("revision_evidence")
                 or row["id"] in candidate["revision_evidence"]["current_episode_ids"]
@@ -998,7 +999,8 @@ def _shrink_routes(state: dict) -> None:
 def _compile_knowledge(state: dict) -> None:
     by_task = defaultdict(list)
     for artifact in state["artifacts"].values():
-        if artifact["kind"] == "lesson" and artifact["state"] == "active":
+        if (artifact["kind"] == "lesson" and artifact["state"] == "active"
+                and artifact["id"] not in state["policy"].get("outcome_quarantine", {})):
             by_task[artifact["task_class"]].append(artifact)
     active_pages = {}
     for task, artifacts in by_task.items():
@@ -1149,7 +1151,7 @@ def activation_supported(
     return bool(
         tested.n >= threshold and control.n >= 8
         and row.get("verified_n", 0) >= threshold
-        and row.get("verified_successes", 0) > 0
+        and wilson_interval(row.get("verified_successes", 0), row.get("verified_n", 0)).low >= 0.5
         and bound is not None and bound > 0
         and (prob_better(tested, control) if superiority is None else superiority) >= 0.9
         and artifact.get("gate_passed")
@@ -1158,6 +1160,85 @@ def activation_supported(
         and (not artifact.get("ab_trial") or artifact.get("ab_passed"))
         and not artifact.get("abstraction_pending")
     )
+
+
+def repair_reprocessed_lifecycle(runtime, state: dict, tasks: set[str]) -> None:
+    """Withdraw behavior whose repaired observations no longer support it."""
+    affected = {key for key, item in state["artifacts"].items()
+                if item["task_class"] in tasks}
+    invalid = set()
+    quarantine = state["policy"].setdefault("outcome_quarantine", {})
+    for key in affected:
+        item = state["artifacts"][key]
+        if item["state"] in {"retired", "archived", "rejected"}:
+            continue
+        repaired = deepcopy(item)
+        if item.get("ab_trial"):
+            repaired["ab_trial"] = recompute_trial(state, item)
+            repaired["ab_passed"] = repaired["ab_trial"]["status"] == "promote"
+        supported = activation_supported(runtime, state, repaired)
+        if not item.get("locked") and not item.get("pinned"):
+            if item.get("ab_trial"):
+                item.update(ab_trial=repaired["ab_trial"], ab_passed=repaired["ab_passed"])
+            row = state["stats"].get(stat_key(item["kind"], key, item["revision"], item["task_class"]), {})
+            if "confidence" in item:
+                if row.get("n", 0):
+                    item["confidence"] = Posterior.from_dict(row).mean
+                else:
+                    item.pop("confidence")
+        if item["state"] in {"active", "labile"} and not supported:
+            invalid.add(key)
+        elif supported:
+            quarantine.pop(key, None)
+    for _ in range(len(state["artifacts"])):
+        parents = {
+            key for key, item in state["artifacts"].items()
+            if item["state"] in {"active", "labile", "probation"}
+            and ({ref["id"] for ref in item.get("children", [])}
+                 | set(item.get("chunk_parent_ids", []))
+                 | {item.get("schema_ref", {}).get("id")}) & invalid
+        }
+        if parents <= invalid:
+            break
+        invalid.update(parents)
+    for key in invalid:
+        item = state["artifacts"][key]
+        if item.get("locked") or item.get("pinned"):
+            quarantine[key] = {"reason": "reprocessed_outcomes_require_verification",
+                               "task_class": item["task_class"]}
+            if item.get("ab_trial"):
+                quarantine[key]["recomputed_trial"] = recompute_trial(state, item)
+        else:
+            item.update(state="probation", revalidation_reason="outcomes_reprocessed")
+            item.pop("labile_until", None)
+    for key in ("active_policy_variants", "policy_candidates", "policy_gate_evidence", "policy_tripwires"):
+        for task in tasks:
+            state["policy"].get(key, {}).pop(task, None)
+    for key, checkpoint in list(state["policy"].get("last_good", {}).items()):
+        if key in tasks or affected.intersection(checkpoint.get("artifacts", {})):
+            state["policy"]["last_good"].pop(key)
+    for key, job in list(state["policy"].get("skill_revision_outbox", {}).items()):
+        if job.get("artifact_id") in affected | invalid:
+            state["policy"]["skill_revision_outbox"].pop(key)
+    _compile_knowledge(state)
+
+
+def release_outcome_quarantine(state: dict, target: str) -> None:
+    item = state["artifacts"][target]
+    blocked = state["policy"].get("outcome_quarantine", {}).get(target)
+    if blocked is None or item.get("locked") or item.get("pinned"):
+        return
+    item["state"] = "probation"
+    if blocked.get("recomputed_trial"):
+        item["ab_trial"] = blocked["recomputed_trial"]
+        item["ab_passed"] = item["ab_trial"]["status"] == "promote"
+    if "confidence" in item:
+        row = state["stats"].get(stat_key(item["kind"], target, item["revision"], item["task_class"]), {})
+        if row.get("n", 0):
+            item["confidence"] = Posterior.from_dict(row).mean
+        else:
+            item.pop("confidence")
+    state["policy"]["outcome_quarantine"].pop(target)
 
 
 def _lifecycle(runtime, state: dict, tenant: str = "") -> None:

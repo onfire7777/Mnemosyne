@@ -13,9 +13,9 @@ from mnemosyne.models import Evidence
 from mnemosyne.learning import Trajectory
 from .guards import require
 from .receipts import ContextReceipt, ROUTE_OF_CHANNEL, ServedItem, digest, source_segment_id
-from .signals import reward, signal, tool_signals, user_signals
+from .signals import reward, signal, tool_signals, user_signals, verified_target_outcome, receipt_target
 from .stats import Posterior, contingency_lower_bound, wilson_interval
-from .task_class import METHOD as TASK_CLASS_METHOD, classify
+from .task_class import METHOD as TASK_CLASS_METHOD, classify, resolve_task
 from .traces import plastic_rate, stiff_step, trace
 from .writer import LearningWriter
 
@@ -299,6 +299,11 @@ class LearningRuntime:
         }
         self.expire(tenant_id)
         state = self.writer.read(tenant_id)
+        task, task_scope_query, task_match = resolve_task(
+            query, tools, task_type, tenant_id=tenant_id, user_id=user_id,
+            risk_level=risk_level, state=state,
+            source_is_live=lambda cids: self._sources_live(tenant_id, cids, user_id),
+        )
         if self.skill_store is not None and self._collects(state, "selective_import"):
             from .candidates import register_import
 
@@ -371,6 +376,8 @@ class LearningRuntime:
             # Match the owner scope used by framework and revalidation serving.
             if item.get("user_id") != user_id:
                 continue
+            if item["id"] in state["policy"].get("outcome_quarantine", {}):
+                continue
             if item["state"] not in {
                 "active",
                 "labile",
@@ -412,7 +419,7 @@ class LearningRuntime:
                 continue
             from .candidates import applies_to
 
-            if not applies_to(item, task, query):
+            if not applies_to(item, task, task_scope_query):
                 continue
             stats = self._target_posterior(
                 state, item["kind"], item["id"], item["revision"], task
@@ -631,13 +638,13 @@ class LearningRuntime:
                     and live.get("user_id") == user_id
                     and live.get("gate_passed")
                     and not live.get("ab_trial")
-                    and applies_to(live, task, query)
+                    and applies_to(live, task, task_scope_query)
                 ]
                 has_incumbent = any(
                     item["id"] in eligible_artifact_ids
                     and item["state"] in {"active", "labile"}
                     and item.get("user_id") == user_id
-                    and applies_to(item, task, query)
+                    and applies_to(item, task, task_scope_query)
                     for item in current["artifacts"].values()
                 )
                 if not self._enabled(current, "exploration") or has_incumbent:
@@ -726,6 +733,8 @@ class LearningRuntime:
             ).to_dict()
             receipt.update(
                 query=query,
+                task_scope_query=task_scope_query,
+                task_match=task_match,
                 raw_prediction=raw_prediction,
                 effective_policy=effective_policy,
                 policy_variant_id=active_variant["id"]
@@ -754,6 +763,7 @@ class LearningRuntime:
                 available_tools=tools,
                 source_cids=sorted(
                     {cid for item in chosen for cid in item["source_cids"]}
+                    | set((task_match or {}).get("source_cids", []))
                 ),
             )
             current["receipts"][receipt["id"]] = receipt
@@ -774,7 +784,7 @@ class LearningRuntime:
             tenant_id,
             user_id,
             task,
-            query,
+            task_scope_query,
             state=state,
             selected_artifact_ids=selected_ids,
         )
@@ -783,7 +793,7 @@ class LearningRuntime:
                 self, tenant_id, user_id, item, state
             )
         requests = verification_requests(
-            self, tenant_id, user_id, task, query, state=state
+            self, tenant_id, user_id, task, task_scope_query, state=state
         )
         if comparison_sample:
             requests.append(
@@ -827,8 +837,19 @@ class LearningRuntime:
         used_skills: list | None = None,
         used_lessons: list | None = None,
         source_cids: list[str] | None = None,
+        observation_id: str | None = None,
     ) -> dict:
         state = self.writer.read(tenant_id)
+        observation_key = None
+        if observation_id is not None:
+            if not isinstance(observation_id, str) or not observation_id.strip() or len(observation_id) > 512:
+                raise ValueError("observation_id must be a nonempty host-namespaced string of at most 512 characters")
+            observation_key = digest(["host_observation", tenant_id, user_id, session_id, observation_id])
+            existing = state["episodes"].get(observation_key)
+            if existing is not None:
+                return {"episode_id": existing["id"], "already_observed": True,
+                        "erased": existing["status"] == "erased",
+                        "memory_formation": self._project_episode_memory(tenant_id, existing)}
         supplied = []
         for cid in source_cids or []:
             source = self.engine.get_evidence(tenant_id, cid)
@@ -933,7 +954,7 @@ class LearningRuntime:
                         content=text,
                         document_segment_id=source_segment_id(tenant_id, user_id, session_id, actor),
                         session_id=session_id,
-                        trust_tier=0 if actor == "user" else 5,
+                        trust_tier=1 if actor == "user" else 5,
                         metadata={
                             "reality_class": "external"
                             if actor == "user"
@@ -955,6 +976,10 @@ class LearningRuntime:
             }:
                 continue
             content = str(event.get("output") or event.get("evidence") or "")
+            from .candidates import observed_action
+            action = observed_action(event)
+            if action and action != event.get("name"):
+                content = action + ("\n" + content if content else "")
             for field in ("expected_steps", "corrective_steps", "tested_steps"):
                 steps = event.get(field)
                 if isinstance(steps, list) and all(
@@ -973,6 +998,7 @@ class LearningRuntime:
                             document_segment_id=source_segment_id(tenant_id, user_id, session_id, "tool"),
                             session_id=session_id,
                             trust_tier=1,
+                            metadata={"memory_role": "operational"},
                             access_policy={
                                 "tenant": tenant_id,
                                 "allow_principals": [user_id],
@@ -1018,7 +1044,7 @@ class LearningRuntime:
             if len(matches) == 1 and matches[0] not in normalized_skills:
                 normalized_skills.append(matches[0])
         normalized_lessons = [item for item in used_lessons or [] if item in served_ids]
-        episode_id = new_id()
+        episode_id = observation_key or new_id()
         timestamp = now()
         episode = Trajectory.from_record({
             "id": episode_id,
@@ -1029,12 +1055,17 @@ class LearningRuntime:
             if receipts
             else classify(user_text, []),
             "receipt_ids": list(receipt_ids or []),
-            "source_cids": cids,
+            "source_cids": sorted(set(cids) | {
+                cid for receipt in receipts
+                for cid in (receipt.get("task_match") or {}).get("source_cids", [])
+            }),
             "signals": signals,
             "tool_events": copy.deepcopy(tool_events or []),
             "used_skills": normalized_skills,
             "used_lessons": normalized_lessons,
             "user_text": user_text,
+            "task_scope_query": receipts[-1].get("task_scope_query", user_text)
+            if receipts else user_text,
             "cited_cids": sorted(
                 {
                     cid
@@ -1054,6 +1085,7 @@ class LearningRuntime:
                 )
             ).isoformat(),
             "prediction": receipts[-1]["prediction"] if receipts else 0.5,
+            "outcome_version": 2,
             "reward": None,
             "rpe": None,
             "turn_index": len(
@@ -1073,6 +1105,7 @@ class LearningRuntime:
                 "feedback_for_episode_id": prior["id"],
                 "task_class": prior["task_class"],
                 "user_text": prior["user_text"],
+                "task_scope_query": prior.get("task_scope_query", prior["user_text"]),
                 "source_cids": sorted({correction_source_cid, *prior["source_cids"]}),
                 "receipt_ids": [],
                 "tool_events": [],
@@ -1084,6 +1117,8 @@ class LearningRuntime:
             }).to_record()
 
         def observe(current):
+            if observation_key is not None and observation_key in current["episodes"]:
+                return observation_key, None, True
             if any(
                 receipt_id in row["receipt_ids"]
                 for row in current["episodes"].values()
@@ -1105,12 +1140,31 @@ class LearningRuntime:
             current["policy"].setdefault("turns", {})[session_id] = (
                 episode["turn_index"] + 1
             )
-            return feedback_id
+            return episode_id, feedback_id, False
 
-        feedback_id = self.writer.apply(tenant_id, "observe", observe)
+        episode_id, feedback_id, already_observed = self.writer.apply(tenant_id, "observe", observe)
         if feedback_id is not None:
             self.resolve(tenant_id, feedback_id)
-        return {"episode_id": episode_id}
+        stored = self.episode(tenant_id, episode_id)
+        formation = self._project_episode_memory(tenant_id, stored)
+        if already_observed:
+            return {"episode_id": episode_id, "already_observed": True,
+                    "erased": stored["status"] == "erased", "memory_formation": formation}
+        return {"episode_id": episode_id, "memory_formation": formation}
+
+    def _project_episode_memory(self, tenant_id: str, episode: dict) -> list[dict]:
+        """Retry idempotent projections after durable capture, outside its transaction."""
+        from mnemosyne.memory_formation import project_direct_user_memory
+
+        if episode["status"] == "erased":
+            return []
+        return [
+            project_direct_user_memory(self.engine, tenant_id, cid)
+            for cid in episode.get("source_cids", [])
+            if (source := self.engine.get_evidence(tenant_id, cid)) is not None
+            and source.actor == "user" and source.user_id == episode["user_id"]
+            and source.content == episode.get("user_text")
+        ]
 
     def episode(self, tenant_id: str, episode_id: str) -> dict:
         return self.writer.read(tenant_id)["episodes"][episode_id]
@@ -1125,9 +1179,14 @@ class LearningRuntime:
         evidence: str = "",
         final: bool = False,
         source_cid: str | None = None,
+        target_ids: list[str] | None = None,
     ) -> dict:
         self.expire(tenant_id)
         item = signal(kind, value, evidence)
+        if target_ids is not None:
+            if not isinstance(target_ids, list) or any(not isinstance(key, str) or not key for key in target_ids):
+                raise ValueError("target_ids must contain nonempty artifact identifiers")
+            item["target_ids"] = sorted(set(target_ids))
         correction_cid = None
         if kind == "correction" and evidence.strip():
             current = self.writer.read(tenant_id)
@@ -1187,6 +1246,13 @@ class LearningRuntime:
                     raise ValueError("receipt must identify one observed episode")
                 target = candidates[0]
             episode = state["episodes"][target]
+            if item.get("target_ids"):
+                eligible = {
+                    candidate["item_id"] for key in episode["receipt_ids"]
+                    for candidate in state["receipts"][key].get("eligible_targets", state["receipts"][key]["items"])
+                }
+                if not set(item["target_ids"]).issubset(eligible):
+                    raise ValueError("verification target was not eligible for this observed turn")
             if episode["status"] != "open":
                 if item in episode["signals"]:
                     return target
@@ -1225,6 +1291,16 @@ class LearningRuntime:
             if outcome is None:
                 return episode
             episode["rpe"] = outcome - (2 * episode["prediction"] - 1)
+            if episode.get("outcome_version", 1) >= 2:
+                episode["target_outcomes"] = {}
+                for receipt_id in episode["receipt_ids"]:
+                    for item in state["receipts"][receipt_id]["items"]:
+                        artifact = receipt_target(item, state["artifacts"])
+                        value = verified_target_outcome(artifact, episode) if artifact else None
+                        if value is not None:
+                            episode["target_outcomes"][artifact["id"]] = {
+                                "value": value, "rpe": value - (2 * episode["prediction"] - 1),
+                            }
             for receipt_id in episode["receipt_ids"]:
                 receipt = state["receipts"][receipt_id]
                 require(
@@ -1313,6 +1389,82 @@ class LearningRuntime:
                     state["policy"].get("surprised", {}).pop(task, None)
                     return
 
+    def reprocess_outcomes(self, tenant_id: str) -> dict:
+        """Audited repair of legacy derived rewards from retained real tool events."""
+        from .signals import reprocessed_episode
+
+        def repair(state):
+            changed = []
+            tasks = set()
+            for key, episode in list(state["episodes"].items()):
+                updated = reprocessed_episode(episode, state["artifacts"], state["receipts"])
+                if updated != episode:
+                    state["episodes"][key] = updated
+                    changed.append(key)
+                    tasks.add(episode["task_class"])
+            if not changed:
+                return {"reprocessed": 0, "episode_ids": []}
+            # Credit is derived, not new evidence. Retract only affected tasks;
+            # unrelated learned utility retains its original audited increments.
+            state["credit"] = {key: row for key, row in state["credit"].items()
+                               if row["task_class"] not in tasks}
+            affected_stats = {stat_key("class", task, 1, task) for task in tasks}
+            for receipt in state["receipts"].values():
+                if receipt["task_class"] in tasks:
+                    affected_stats.update(
+                        stat_key(item["kind"], item["item_id"], item["revision"], receipt["task_class"])
+                        for item in [*receipt["items"], *receipt.get("eligible_targets", [])]
+                    )
+            affected_stats.update(
+                stat_key(row["kind"], row["id"], row["revision"], row["task_class"])
+                for row in state["artifacts"].values() if row["task_class"] in tasks
+            )
+            state["stats"] = {key: row for key, row in state["stats"].items() if key not in affected_stats}
+            for episode in sorted(state["episodes"].values(), key=lambda row: (row["created_at"], row["id"])):
+                if (episode["task_class"] in tasks and episode["status"] == "resolved"
+                        and episode.get("learning_collected", True)):
+                    self._credit(state, episode, rebuild=True)
+            from .sleep import repair_reprocessed_lifecycle
+            repair_reprocessed_lifecycle(self, state, tasks)
+            for key in ("routes", "route_daily"):
+                for task in tasks:
+                    state["policy"].get(key, {}).pop(task, None)
+            bins = {}
+            for episode in state["episodes"].values():
+                if episode["status"] != "resolved" or not any(
+                    item["kind"] in {"verifier", "tests"} for item in episode["signals"]
+                ) or not episode.get("receipt_ids"):
+                    continue
+                receipt = state["receipts"][episode["receipt_ids"][-1]]
+                raw = receipt.get("raw_prediction")
+                policy = receipt.get("effective_policy", {})
+                if raw is None or not policy.get("learning_enabled", True) or policy.get("learning_frozen", False):
+                    continue
+                if policy.get("learning_modes", {}).get("metacognition", "active") not in {"active", "shadow"}:
+                    continue
+                row = bins.setdefault(str(min(9, int(raw * 10))), {"n": 0, "successes": 0.0})
+                row["n"] += 1
+                row["successes"] += (episode["reward"] + 1) / 2
+            state["policy"]["calibration_bins"] = bins
+            state["policy"]["calibration_version"] = 2
+            for key in ("policy_outcomes", "policy_replay_pairs"):
+                values = state["policy"].get(key)
+                if isinstance(values, list):
+                    state["policy"][key] = [row for row in values if row.get("episode_id") not in changed]
+                elif isinstance(values, dict):
+                    state["policy"][key] = {name: row for name, row in values.items() if row.get("episode_id") not in changed}
+            for task in tasks:
+                state["policy"].setdefault("surprised", {})[task] = True
+            # Clear only derivations of changed episodes so normal replay can
+            # reconsider them once, under unchanged promotion requirements.
+            for key in changed:
+                state["policy"].get("replayed", {}).pop(key, None)
+            return {"reprocessed": len(changed), "episode_ids": changed}
+
+        result = self.writer.apply(tenant_id, "outcome_reprocess", repair)
+        self._sync_library_revision_states(tenant_id)
+        return result
+
     def _flush_skill_outbox(self, tenant_id: str) -> None:
         if self.skill_store is None:
             return
@@ -1351,6 +1503,15 @@ class LearningRuntime:
             component = "skills" if kind in {"skill", "chunk"} else "lessons" if kind in {"lesson", "procedure"} else "items"
             if not episode.get("learning_components", {}).get(component, True):
                 continue
+            artifact = state["artifacts"].get(target)
+            target_result = episode.get("target_outcomes", {}).get(target)
+            verified_outcome = target_result["value"] if served and target_result else None
+            if episode.get("outcome_version", 1) < 2 and served and any(
+                row["kind"] in {"verifier", "tests", "critic", "rating"} for row in episode["signals"]
+            ):
+                verified_outcome = outcome
+            target_error = target_result["rpe"] if served and target_result else episode["rpe"]
+            target_probability = (verified_outcome + 1) / 2 if verified_outcome is not None else probability
             key = stat_key(kind, target, revision, task)
             row = state["stats"].setdefault(
                 key,
@@ -1366,26 +1527,23 @@ class LearningRuntime:
             )
             prefix = "served" if served else "control"
             row[prefix + "_n"] += 1
-            row[prefix + "_successes"] += probability
+            row[prefix + "_successes"] += target_probability
             if served:
-                if any(
-                    item["kind"] in {"verifier", "tests", "critic", "rating"}
-                    for item in episode["signals"]
-                ):
+                if verified_outcome is not None:
                     row["verified_n"] = row.get("verified_n", 0) + 1
                     row["verified_successes"] = (
-                        row.get("verified_successes", 0.0) + probability
+                        row.get("verified_successes", 0.0) + target_probability
                     )
                 previous_outcome = row.get("last_outcome")
                 row["reversals"] = row.get("reversals", 0) + int(
                     previous_outcome is not None
-                    and (previous_outcome > 0) != (outcome > 0)
+                    and (previous_outcome > 0) != (target_probability > 0.5)
                 )
-                row["last_outcome"] = outcome
+                row["last_outcome"] = 2 * target_probability - 1
                 row["last_outcome_at"] = episode["resolved_at"]
                 row["volatility"] = row["reversals"] / max(1, row["served_n"] - 1)
                 posterior = _posterior(row)
-                posterior.update(probability)
+                posterior.update(target_probability)
                 row.update(posterior.to_dict())
             lower = contingency_lower_bound(
                 row["served_successes"],
@@ -1455,7 +1613,7 @@ class LearningRuntime:
                 if self._enabled(state, "adaptive_rates")
                 else 0.1
             )
-            delta = max(-1.0, min(1.0, episode["rpe"]))
+            delta = max(-1.0, min(1.0, target_error))
             step = rate * eligibility * delta
             if self._enabled(state, "stiffness"):
                 step = stiff_step(
@@ -1468,8 +1626,7 @@ class LearningRuntime:
                         and credit["target_kind"] == kind
                         and credit["task_class"] != task
                     ),
-                    verified_failure=outcome < 0
-                    and any(s["kind"] == "verifier" for s in episode["signals"]),
+                    verified_failure=verified_outcome is not None and verified_outcome < 0,
                 )
             old_utility = row["utility"]
             if kind == "item":
@@ -1494,8 +1651,8 @@ class LearningRuntime:
                 route_rewards[route] = route_rewards.get(
                     route, 0
                 ) + delta * eligibility / max(1, len(served["routes"]))
-            if outcome > 0:
-                row["importance"] += probability
+            if target_probability > 0.5:
+                row["importance"] += target_probability
             credit_id = digest([episode["id"], kind, target, revision])
             state["credit"][credit_id] = {
                 "episode_id": episode["id"],
@@ -1505,7 +1662,7 @@ class LearningRuntime:
                 "task_class": task,
                 "share": share,
                 "trace": eligibility,
-                "delta": episode["rpe"],
+                "delta": target_error,
                 "rate": rate,
                 "step": row["utility"] - old_utility,
                 "contingency_lb": lower,
@@ -1516,7 +1673,7 @@ class LearningRuntime:
             if (
                 artifact
                 and share >= 0.3
-                and episode["rpe"] <= -0.5
+                and target_error <= -0.5
                 and self._enabled(state, "reconsolidation")
             ):
                 if not artifact.get("pinned") and artifact["state"] == "active":
@@ -1982,6 +2139,8 @@ class LearningRuntime:
     def pin(self, tenant_id: str, target: str, pinned: bool = True) -> dict:
         def change(state):
             state["artifacts"][target]["pinned"] = bool(pinned)
+            from .sleep import release_outcome_quarantine
+            release_outcome_quarantine(state, target)
             return state["artifacts"][target]
 
         return self.writer.apply(tenant_id, "pin", change)
@@ -1989,6 +2148,8 @@ class LearningRuntime:
     def lock(self, tenant_id: str, target: str, locked: bool = True) -> dict:
         def change(state):
             state["artifacts"][target]["locked"] = bool(locked)
+            from .sleep import release_outcome_quarantine
+            release_outcome_quarantine(state, target)
             return state["artifacts"][target]
 
         return self.writer.apply(tenant_id, "lock", change)
@@ -2010,6 +2171,8 @@ class LearningRuntime:
                 ):
                     erasure_terms.append(row["id"])
                     row["query"] = ""
+                    row["task_scope_query"] = ""
+                    row["task_match"] = None
                     row["items"] = [
                         item for item in row["items"] if item["item_id"] != cid
                     ]
@@ -2031,6 +2194,8 @@ class LearningRuntime:
                 for receipt_id in state["episodes"][episode_id]["receipt_ids"]:
                     receipt = state["receipts"][receipt_id]
                     receipt["query"] = ""
+                    receipt["task_scope_query"] = ""
+                    receipt["task_match"] = None
                     erasure_terms.append(receipt_id)
             erasure_terms.extend(affected)
             for episode_id in affected:
@@ -2262,11 +2427,26 @@ class LearningRuntime:
                         for receipt_id in episode.get("receipt_ids", [])
                         for item in state["receipts"].get(receipt_id, {}).get("items", [])
                     }
-                    if identities.intersection(served):
-                        outcomes.append({"episode_id": episode["id"],
-                                         "probability": (episode["reward"] + 1) / 2})
+                    matched = identities.intersection(served)
+                    if not matched:
+                        continue
+                    if episode.get("outcome_version", 1) >= 2:
+                        values = [episode["target_outcomes"][identifier]["value"]
+                                  for identifier, _ in matched
+                                  if identifier in episode.get("target_outcomes", {})]
+                        if not values:
+                            continue
+                        probability = (min(values) + 1) / 2
+                    else:
+                        probability = (episode["reward"] + 1) / 2
+                    outcomes.append({"episode_id": episode["id"], "probability": probability})
+                projected = [
+                    {**item, "state": "probation"}
+                    if item["id"] in state["policy"].get("outcome_quarantine", {}) else item
+                    for item in artifacts
+                ]
                 store.sync_learning_revision(
-                    skill_id, revision, artifacts, outcomes=outcomes,
+                    skill_id, revision, projected, outcomes=outcomes,
                 )
 
     def _flush_skill_revision_outbox(self, tenant_id: str) -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from copy import deepcopy
+import json
 
 from mnemosyne.gate import Candidate, PromotionGate, RegressionCase
 from mnemosyne.learning import LocalCritic, Procedure, Trajectory
@@ -100,21 +101,73 @@ def expected_steps(episode: dict) -> list[list[str]]:
     return result
 
 
+def observed_action(event: dict) -> str | None:
+    """Represent an observed operation as data, retaining its literal inputs."""
+    name = event.get("name")
+    if not isinstance(name, str) or not name.strip():
+        return None
+    if event.get("status") not in {None, "completed", "complete", "succeeded", "failed", "success", "failure"}:
+        return None
+    fields = {key: event[key] for key in ("command", "arguments", "cwd", "conditions")
+              if key in event and event[key] is not None}
+    if not fields:
+        return name
+    if "command" in fields:
+        command = fields["command"]
+        if not (
+            isinstance(command, str) and command.strip()
+            or isinstance(command, list) and command
+            and all(isinstance(value, str) for value in command)
+        ):
+            return None
+    if "cwd" in fields and not isinstance(fields["cwd"], str):
+        return None
+    try:
+        encoded = json.dumps({"type": "tool_action", "tool": name, **fields},
+                             sort_keys=True, ensure_ascii=False, allow_nan=False)
+    except (TypeError, ValueError):
+        return None
+    return encoded if len(encoded) <= 32768 else None
+
+
+def _is_observed_action(step: str) -> bool:
+    try:
+        value = json.loads(step)
+    except (ValueError, TypeError):
+        return False
+    return isinstance(value, dict) and value.get("type") == "tool_action"
+
+
 def observed_steps(episode: dict) -> list[str]:
-    """Preserve nonblank external tool names exactly, in observed order.
+    """Preserve literal external actions in observed order.
 
     Names are executable identifiers: never stringify arbitrary values or trim
     accepted strings. Missing source means host-recorded, as elsewhere in capture.
     Verifier pseudo-events and model-authored traces are not execution steps.
     """
-    return [
-        event["name"]
-        for event in episode.get("tool_events", [])
-        if isinstance(event.get("name"), str)
-        and event["name"].strip()
-        and event["name"] != "benchmark_verifier"
-        and event.get("source") not in EXCLUDED_SOURCES
-    ]
+    steps = []
+    for event in episode.get("tool_events", []):
+        if (
+            not isinstance(event.get("name"), str) or not event["name"].strip()
+            or event["name"] == "benchmark_verifier"
+            or event.get("source") in EXCLUDED_SOURCES
+        ):
+            continue
+        action = observed_action(event)
+        if action is None:
+            return []
+        steps.append(action)
+    return steps
+
+
+def compatible_observed_steps(steps: list[str], episode: dict) -> list[str]:
+    """Keep persisted name-only procedures comparable to their original events."""
+    if any(_is_observed_action(step) for step in steps):
+        return observed_steps(episode)
+    return [event["name"] for event in episode.get("tool_events", [])
+            if isinstance(event.get("name"), str) and event["name"].strip()
+            and event["name"] != "benchmark_verifier"
+            and event.get("source") not in EXCLUDED_SOURCES]
 
 
 def ordered_subset(steps: list[str], expected: list[str]) -> bool:
@@ -143,7 +196,7 @@ def candidate_score(artifact: dict, episode: dict) -> float | None:
     if (episode.get("reward") or 0) > 0 and any(
         s["kind"] in {"verifier", "tests"} for s in episode.get("signals", [])
     ):
-        observed = observed_steps(episode)
+        observed = compatible_observed_steps(artifact["steps"], episode)
         if observed:
             if artifact.get("kind") == "chunk":
                 return float(
@@ -191,10 +244,10 @@ def ground_quotes(
     return quotes
 
 
-def _user_correction_proofs(artifact, source_cases, snapshot, external_case_ids):
-    """Bind internal retention cases to actual, negatively signed user corrections."""
+def _source_retention_proofs(artifact, source_cases, snapshot, external_case_ids):
+    """Bind internal retention cases to actual corrections or observed actions."""
     candidates = []
-    if artifact.get("kind") == "lesson" and artifact.get("origin") == "learned":
+    if artifact.get("origin") == "learned":
         candidates.extend(zip(source_cases, artifact["source_quotes"], strict=True))
     for row in snapshot["policy"].get("protected_cases", {}).values():
         if (
@@ -219,14 +272,24 @@ def _user_correction_proofs(artifact, source_cases, snapshot, external_case_ids)
             and case.signature == episode.get("task_class")
             and episode.get("user_id") == artifact.get("user_id")
             and quote["cid"] in episode.get("source_cids", [])
-            and any(
+        ):
+            correction = any(
                 signal.get("kind") == "correction" and signal.get("value", 0) < 0
                 and signal.get("source") not in EXCLUDED_SOURCES
                 and signal.get("evidence") == quote["quote"]
                 for signal in episode.get("signals", [])
             )
-        ):
-            proofs[case.id] = quote
+            action = (
+                _is_observed_action(quote["quote"])
+                and any(signal.get("kind") in {"verifier", "tests"}
+                        and signal.get("value", 0) > 0
+                        for signal in episode.get("signals", []))
+                and any(event.get("source") not in EXCLUDED_SOURCES
+                        and observed_action(event) == quote["quote"]
+                        for event in episode.get("tool_events", []))
+            )
+            if correction or action:
+                proofs[case.id] = {"quote": quote, "kind": "user" if correction else "tool"}
     return proofs
 
 
@@ -265,7 +328,7 @@ def evaluate_candidate(
     ]
     external_cases = list(getattr(runtime, "protected_cases", []))
     protected.extend(external_cases)
-    quote_proofs = _user_correction_proofs(
+    quote_proofs = _source_retention_proofs(
         artifact, source_cases, snapshot, {case.id for case in external_cases},
     )
     cases = list({case.id: case for case in [*source_cases, *protected]}.values())
@@ -294,22 +357,24 @@ def evaluate_candidate(
         artifact["source_cids"],
     )
     candidate_cases = []
-    verified_quote_cases = []
+    verified_quote_cases = {"user": [], "tool": []}
 
     def verify_quote(case, branch):
-        quote = quote_proofs.get(case.id)
-        if quote is None:
+        proof = quote_proofs.get(case.id)
+        if proof is None:
             return None
+        quote = proof["quote"]
         source = runtime.engine.get_evidence(tenant, quote["cid"], branch=branch)
         verified = bool(
             source is not None and not source.erased
             and source.tenant_id == tenant and source.user_id == artifact.get("user_id")
-            and source.actor == "user" and source.trust_tier <= 1
-            and source.content == quote["quote"]
+            and source.actor == proof["kind"] and source.trust_tier <= 1
+            and (source.content == quote["quote"] if proof["kind"] == "user"
+                 else quote["quote"] in source.content)
             and runtime._sources_live(tenant, [quote["cid"]], artifact.get("user_id"))
         )
         if verified:
-            verified_quote_cases.append(case.id)
+            verified_quote_cases[proof["kind"]].append(case.id)
         return verified
 
     def check(engine, branch):
@@ -368,8 +433,10 @@ def evaluate_candidate(
         "admission_only": imported,
         "replay_episode_ids": [row["episode_id"] for row in scores],
     }
-    if verified_quote_cases:
-        artifact["gate_evidence"]["user_source_quote_case_ids"] = sorted(verified_quote_cases)
+    if verified_quote_cases["user"]:
+        artifact["gate_evidence"]["user_source_quote_case_ids"] = sorted(verified_quote_cases["user"])
+    if verified_quote_cases["tool"]:
+        artifact["gate_evidence"]["tool_action_source_case_ids"] = sorted(verified_quote_cases["tool"])
     artifact["gate_passed"] = passed
     if not passed:
         artifact["pending_reason"] = "external_verification_pending_or_failed"

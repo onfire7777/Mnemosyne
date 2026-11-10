@@ -136,7 +136,8 @@ def test_reading_never_updates_statistics():
 
 def test_signal_weights_and_zero_exit_are_not_success():
     assert tool_signals([{"exit_code": 0}]) == []
-    assert tool_signals([{"exit_code": 2}])[0]["value"] == -1
+    assert tool_signals([{"exit_code": 2}]) == []
+    assert tool_signals([{"exit_code": 2, "outcome_scope": "task", "final": True}])[0]["value"] == -1
     assert tool_signals([{"passed": 3, "failed": 1}])[0]["value"] == 0.5
     assert user_signals("thanks")[0]["weight"] == 0.3
     assert user_signals("No, that is wrong.")[0]["value"] == -1

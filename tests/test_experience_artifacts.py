@@ -1166,17 +1166,19 @@ def test_normal_runtime_serves_compiled_lesson_page_after_real_probation():
             "t", "u", f"tested-{index}", query, task_type=task
         )
         assert context["lessons"]
+        output = "- Release ready."
         row = runtime.observe_turn(
             "t",
             "u",
             f"tested-{index}",
             query,
-            "",
+            output,
             receipt_ids=[context["receipt_id"]],
             tool_events=[
                 {
                     "name": "benchmark_verifier",
-                    "success": True,
+                    "success": all(line.startswith("- ") for line in output.splitlines()),
+                    "target_ids": [learned["id"]],
                     "output": "format passed",
                 }
             ],

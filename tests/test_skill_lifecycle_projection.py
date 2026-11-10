@@ -39,7 +39,8 @@ def observe(runtime, session, *, success, served=True):
         "t", "u", session, "release-guide", "checked",
         receipt_ids=[context["receipt_id"]],
         used_skills=[item["id"] for item in context["skills"]],
-        tool_events=[{"name": "benchmark_verifier", "success": success,
+        tool_events=[{"name": "release_checklist_verifier", "verdict": success,
+                      "target_ids": [item["id"] for item in context["skills"]],
                       "output": "passed" if success else "failed"}],
     )
     runtime.record_signal("t", episode_id=result["episode_id"], kind="verifier",
@@ -182,7 +183,8 @@ def test_reassigned_library_revision_projects_only_current_owner(tmp_path):
 
     observed = runtime.observe_turn("t", "next-owner", "next-session", "release-guide", "checked",
                                     receipt_ids=[context["receipt_id"]],
-                                    tool_events=[{"name": "benchmark_verifier", "success": False}])
+                                    tool_events=[{"name": "release_checklist_verifier", "verdict": False,
+                                                  "target_ids": [current["id"]]}])
     runtime.record_signal("t", episode_id=observed["episode_id"], kind="verifier", value=-1, final=True)
     events = store._rows("SELECT episode_id FROM skill_outcome_events WHERE skill_id = ? AND revision = 1", (skill_id,))
     assert {row["episode_id"] for row in events} == {observed["episode_id"]}

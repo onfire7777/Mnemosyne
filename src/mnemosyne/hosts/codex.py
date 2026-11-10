@@ -12,6 +12,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from mnemosyne.experience.integration import _after_outcomes, build_learning_runtime
+from mnemosyne.experience.receipts import digest
 
 
 def redact(value):
@@ -37,6 +38,18 @@ def _text(content):
             if isinstance(part, dict) and isinstance(part.get("text"), str)
         )
     return ""
+
+
+def _instant(value):
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value, UTC)
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+        except (ValueError, OverflowError):
+            return None
+    return None
 
 
 def _is_subagent(metadata):
@@ -106,7 +119,8 @@ def _test_counts(command, output, exit_code):
     return {"passed": passed, "failed": failed}
 
 
-def _tool_event(name, response, *, tool_id=None, command=None, status=None):
+def _tool_event(name, response, *, tool_id=None, command=None, status=None,
+                arguments=None, cwd=None):
     structured = response if isinstance(response, dict) else {}
     output = redact(
         structured.get("aggregated_output", structured.get("output", response))
@@ -118,8 +132,18 @@ def _tool_event(name, response, *, tool_id=None, command=None, status=None):
     }
     if tool_id:
         event["tool_use_id"] = str(tool_id)
+        event["call_id"] = str(tool_id)
+        event["source_call_id"] = str(tool_id)
     if command:
         event["command"] = redact(_command_text(command))
+    if cwd:
+        event["cwd"] = redact(str(cwd))
+    if isinstance(arguments, (dict, list)):
+        event["arguments"] = json.loads(redact(arguments))
+    if command:
+        event["check_id"] = "command:" + digest([_command_text(command), cwd])
+    elif isinstance(arguments, (dict, list)):
+        event["check_id"] = "tool:" + digest([name, arguments])
     status = status or structured.get("status")
     if status:
         event["status"] = status
@@ -133,6 +157,15 @@ def _tool_event(name, response, *, tool_id=None, command=None, status=None):
         "failure",
     }:
         return event
+    if isinstance(structured.get("check_id"), str) and structured["check_id"].strip():
+        event["check_id"] = structured["check_id"]
+    if structured.get("outcome_scope") in {"task", "check", "diagnostic"}:
+        event["outcome_scope"] = structured["outcome_scope"]
+    if type(structured.get("final")) is bool:
+        event["final"] = structured["final"]
+    targets = structured.get("target_ids")
+    if isinstance(targets, list) and all(isinstance(key, str) and key.strip() for key in targets):
+        event["target_ids"] = targets
     for key in ("exit_code", "passed", "failed"):
         value = structured.get(key)
         if type(value) is int and (key == "exit_code" or value >= 0):
@@ -208,7 +241,8 @@ def _read_transcript(path, session):
             turn_id = payload.get("turn_id")
             if payload.get("type") == "task_started" and turn_id:
                 turns.setdefault(
-                    turn_id, {"turn_id": turn_id, "tool_events": [], "used_skills": []}
+                    turn_id, {"turn_id": turn_id, "tool_events": [], "used_skills": [],
+                              "started_at": row.get("timestamp") or payload.get("started_at")}
                 )
                 continue
             if turn_id not in turns or payload.get("thread_id", session) != session:
@@ -219,6 +253,7 @@ def _read_transcript(path, session):
                     "assistant_text", _text(payload.get("last_agent_message"))
                 )
                 turn["complete"] = True
+                turn["completed_at"] = row.get("timestamp") or payload.get("completed_at")
             if (
                 payload.get("type") != "item_completed"
                 or payload.get("thread_id") != session
@@ -227,9 +262,10 @@ def _read_transcript(path, session):
             item = payload.get("item", {})
             if item.get("type") == "UserMessage":
                 turn["prompt"] = redact(_text(item.get("content")))
-            elif item.get("type") == "AgentMessage" and item.get("phase") == "final":
+            elif item.get("type") == "AgentMessage" and item.get("phase") in {"final", "final_answer"}:
                 turn["assistant_text"] = redact(_text(item.get("content")))
                 turn["complete"] = True
+                turn["completed_at"] = row.get("timestamp")
             elif item.get("type") == "CommandExecution":
                 event = _tool_event(
                     "shell",
@@ -237,6 +273,8 @@ def _read_transcript(path, session):
                     tool_id=item.get("id"),
                     command=item.get("command"),
                     status=item.get("status"),
+                    cwd=item.get("cwd"),
+                    arguments={"command": item.get("command"), "cwd": item.get("cwd")},
                 )
                 turn["tool_events"] = _merge_events(turn["tool_events"], [event])
             elif item.get("type") == "McpToolCall":
@@ -247,6 +285,7 @@ def _read_transcript(path, session):
                         item.get("result", {}),
                         tool_id=item.get("id"),
                         status=item.get("status"),
+                        arguments=item.get("arguments"),
                     )
                     turn["tool_events"] = _merge_events(turn["tool_events"], [event])
                 elif str(item.get("tool", "")).endswith("skill_get"):
@@ -289,12 +328,12 @@ class CodexAdapter:
             os.fsync(stream.fileno())
         temporary.replace(path)
 
-    def _transcript(self, payload, state, session):
+    def _transcript(self, payload, state, session, *, all_completed=False):
         path = payload.get("transcript_path") or state.get("transcript_path")
         if not path:
             matches = list(self.transcript_root.glob(f"**/rollout-*-{session}.jsonl"))
             if len(matches) != 1:
-                return None
+                return [] if all_completed else None
             path = matches[0]
         path = Path(path).expanduser().resolve()
         turns = _read_transcript(path, session)
@@ -304,16 +343,9 @@ class CodexAdapter:
             return None
         state.pop("unsupported_origin", None)
         requested = payload.get("turn_id")
-        return next(
-            (
-                turn
-                for turn in reversed(turns)
-                if turn.get("complete")
-                and turn.get("prompt")
-                and (not requested or turn["turn_id"] == requested)
-            ),
-            None,
-        )
+        completed = [turn for turn in turns if turn.get("complete") and turn.get("prompt")
+                     and (not requested or turn["turn_id"] == requested)]
+        return completed if all_completed else (completed[-1] if completed else None)
 
     def _prepare(self, facade, state, path, session):
         if state.get("receipt_id"):
@@ -325,8 +357,89 @@ class CodexAdapter:
             session,
         )
         state["receipt_id"] = context["receipt_id"]
+        state.setdefault("prepared_turns", {})[state["turn_id"]] = context["receipt_id"]
         self._save(path, state)
         return context
+
+    def _observe_completed(self, facade, state, path, session, turn):
+        turn_id = turn["turn_id"]
+        observed = state.setdefault("observed_turns", {})
+        if turn_id in observed:
+            return
+        runtime = build_learning_runtime(facade.engine)
+        episodes = runtime.writer.read(self.tenant_id)["episodes"]
+        receipt_id = state.setdefault("prepared_turns", {}).get(turn_id)
+        learning = runtime.writer.read(self.tenant_id)
+        receipt = learning["receipts"].get(receipt_id, {})
+        if (receipt.get("user_id") != self.user_id or receipt.get("session_id") != session
+                or receipt.get("query") != turn["prompt"]):
+            receipt_id = None
+        prior = next((row for row in episodes.values()
+                      if row.get("user_id") == self.user_id and row.get("session_id") == session
+                      and receipt_id and receipt_id in row.get("receipt_ids", [])), None)
+        pending = state.setdefault("pending_observations", {})
+        if turn_id not in pending:
+            cutoff = _instant(state.get("legacy_capture_cutoff"))
+            completed = _instant(turn.get("completed_at"))
+            if prior is None and receipt_id is None and cutoff is not None and (
+                completed is None or completed <= cutoff
+            ):
+                state.setdefault("skipped_legacy_turns", {})[turn_id] = "unidentifiable_before_capture_boundary"
+                self._save(path, state)
+                return
+            pending[turn_id] = {**turn, "receipt_id": receipt_id}
+            self._save(path, state)
+        record = pending[turn_id]
+        if prior is not None:
+            if prior.get("status") != "erased":
+                runtime.resolve(self.tenant_id, prior["id"])
+                _after_outcomes(runtime, self.tenant_id, self.user_id)
+            result = {"episode_id": prior["id"]}
+        else:
+            result = self.invoke(facade, "observe_turn", {
+                "session_id": session,
+                "user_text": record["prompt"],
+                "assistant_text": record.get("assistant_text", ""),
+                "tool_events": record.get("tool_events", []),
+                "receipt_ids": [record["receipt_id"]] if record.get("receipt_id") else [],
+                "used_skills": list(dict.fromkeys(record.get("used_skills", []))),
+                "observation_id": "codex:" + turn_id,
+            }, session)
+        observed[turn_id] = result.get("episode_id", result.get("id"))
+        state["observed_turn"] = turn_id
+        pending.pop(turn_id, None)
+        if state.get("turn_id") == turn_id:
+            state["tool_events"] = []
+        self._save(path, state)
+
+    def recover_completed(self, *, max_sessions=8):
+        """Retry known host sessions using their complete transcript records."""
+        report = {"checked_sessions": 0, "captured_turns": 0, "errors": []}
+        paths = sorted(self.state_dir.glob("session-*.json"),
+                       key=lambda item: item.stat().st_mtime, reverse=True)
+        for path in paths:
+            if report["checked_sessions"] >= max_sessions:
+                break
+            try:
+                state = json.loads(path.read_text())
+                session = state.get("session_id")
+                if not session:
+                    continue
+                turns = self._transcript({}, state, session, all_completed=True) or []
+                observed = set(state.get("observed_turns", {}))
+                skipped = set(state.get("skipped_legacy_turns", {}))
+                if not state.get("pending_observations") and not any(
+                    turn["turn_id"] not in observed | skipped for turn in turns
+                ):
+                    continue
+                report["checked_sessions"] += 1
+                self.handle({"hook_event_name": "Stop", "session_id": session,
+                             "transcript_path": state.get("transcript_path")})
+                after = json.loads(path.read_text())
+                report["captured_turns"] += len(set(after.get("observed_turns", {})) - observed)
+            except Exception as error:
+                report["errors"].append({"state_file": path.name, "error": type(error).__name__})
+        return report
 
     def handle(self, payload):
         session = str(payload.get("session_id") or "")
@@ -348,6 +461,17 @@ class CodexAdapter:
             if state.get("session_id", session) != session:
                 raise ValueError("Codex hook state belongs to another session")
             state["session_id"] = session
+            if state.get("turn_id") and state.get("receipt_id"):
+                state.setdefault("prepared_turns", {}).setdefault(state["turn_id"], state["receipt_id"])
+            if state.get("pending_observation") and state.get("prompt"):
+                state.setdefault("pending_observations", {}).setdefault(state["turn_id"], {
+                    "turn_id": state["turn_id"], "prompt": state["prompt"],
+                    "assistant_text": state.get("assistant_text", ""),
+                    "tool_events": state.get("tool_events", []),
+                    "used_skills": state.get("used_skills", []),
+                    "receipt_id": state.get("receipt_id"),
+                })
+                state.pop("pending_observation", None)
             if state.get("observed_turn"):
                 state.setdefault("observed_turns", {}).setdefault(
                     state["observed_turn"], None
@@ -374,17 +498,13 @@ class CodexAdapter:
                     state.get("turn_id")
                     if state.get("prompt") == prompt
                     and state.get("observed_turn") != state.get("turn_id")
+                    and state.get("turn_id") not in state.get("observed_turns", {})
                     else uuid4().hex
                 )
                 if state.get("turn_id") != turn_id:
-                    state = {
-                        "session_id": session,
-                        "turn_id": turn_id,
-                        "prompt": prompt,
-                        "tool_events": [],
-                        "observed_turns": state.get("observed_turns", {}),
-                        "transcript_path": state.get("transcript_path"),
-                    }
+                    state.update(turn_id=turn_id, prompt=prompt, tool_events=[], used_skills=[])
+                    for key in ("receipt_id", "assistant_text", "complete", "ended_at"):
+                        state.pop(key, None)
                 context = self._prepare(facade, state, path, session)
                 if context is None:
                     return {}
@@ -419,6 +539,8 @@ class CodexAdapter:
                         payload.get("tool_response", {}),
                         tool_id=payload.get("tool_use_id"),
                         command=command,
+                        cwd=arguments.get("cwd") if isinstance(arguments, dict) else None,
+                        arguments=arguments,
                     )
                     state["tool_events"] = _merge_events(
                         state.get("tool_events", []), [tool_event]
@@ -427,106 +549,56 @@ class CodexAdapter:
                 return {}
             if event not in {"Stop", "SessionEnd"}:
                 return {}
-            recovered = self._transcript(payload, state, session)
+            recovered = self._transcript(payload, state, session, all_completed=True)
             if state.get("unsupported_origin"):
                 return {}
-            can_observe = recovered is not None or not state.get("transcript_path")
-            if recovered:
-                if state.get("turn_id") != recovered["turn_id"]:
-                    state = {
-                        "session_id": session,
-                        "observed_turns": state.get("observed_turns", {}),
-                        "transcript_path": state.get("transcript_path"),
-                        **recovered,
-                    }
-                else:
-                    state.update(
-                        prompt=recovered["prompt"],
-                        assistant_text=recovered.get("assistant_text", ""),
-                        tool_events=_merge_events(
-                            state.get("tool_events", []), recovered["tool_events"]
-                        ),
-                    )
-                    state["used_skills"] = list(
-                        dict.fromkeys(
-                            state.get("used_skills", []) + recovered["used_skills"]
-                        )
-                    )
-            elif not can_observe and event == "Stop":
-                return {}
-            turn_id = state.get("turn_id")
-            observed = state.setdefault("observed_turns", {})
-            if (
-                can_observe
-                and state.get("prompt")
-                and turn_id
-                and state.get("observed_turn") != turn_id
-                and turn_id not in observed
-            ):
+            recovered = recovered or []
+            if state.get("capture_version", 0) < 3:
                 runtime = build_learning_runtime(facade.engine)
                 learning = runtime.writer.read(self.tenant_id)
-                episodes = learning["episodes"]
-                if state.get("pending_observation", {}).get("turn_id") != turn_id:
-                    state["pending_observation"] = {
-                        "turn_id": turn_id,
-                        "prior_episode_ids": list(episodes),
-                    }
-                    self._save(path, state)
-                prior_ids = set(state["pending_observation"]["prior_episode_ids"])
-                receipt_id = state.get("receipt_id")
-                receipt = learning["receipts"].get(receipt_id, {})
-                if (
-                    receipt.get("user_id") != self.user_id
-                    or receipt.get("session_id") != session
-                    or receipt.get("query") != state["prompt"]
-                ):
-                    receipt_id = None
-                prior = next(
-                    (
-                        row
-                        for row in episodes.values()
-                        if row.get("user_id") == self.user_id
-                        and row.get("session_id") == session
-                        and row.get("user_text") == state["prompt"]
-                        and (
-                            receipt_id in row.get("receipt_ids", [])
-                            if receipt_id
-                            else row["id"] not in prior_ids
-                            and row.get("tool_events", [])
-                            == state.get("tool_events", [])
-                        )
-                    ),
-                    None,
-                )
-                if prior is not None:
-                    if prior.get("tool_events") and prior.get("status") == "open":
-                        prior = runtime.resolve(self.tenant_id, prior["id"])
-                    _after_outcomes(runtime, self.tenant_id, self.user_id)
-                result = prior or self.invoke(
-                    facade,
-                    "observe_turn",
-                    {
-                        "session_id": session,
-                        "user_text": state["prompt"],
-                        "assistant_text": redact(
-                            state.get(
-                                "assistant_text",
-                                payload.get("last_assistant_message") or "",
-                            )
-                        ),
-                        "tool_events": state.get("tool_events", []),
-                        "receipt_ids": [receipt_id] if receipt_id else [],
-                        "used_skills": list(
-                            dict.fromkeys(state.get("used_skills", []))
-                        ),
-                    },
-                    session,
-                )
-                observed[turn_id] = result.get("episode_id", result.get("id"))
-                state.update(observed_turn=turn_id, tool_events=[])
-                state.pop("pending_observation", None)
-                self._save(path, state)
-            if event == "SessionEnd" and not state.get("ended_at"):
+                known_turns = {turn["turn_id"] for turn in recovered}
+                known_turns.update(state.get("prepared_turns", {}))
+                known_ids = {digest(["host_observation", self.tenant_id, self.user_id,
+                                    session, "codex:" + key]) for key in known_turns}
+                legacy_times = [_instant(row.get("created_at"))
+                                for row in learning["episodes"].values()
+                                if row.get("session_id") == session and row.get("user_id") == self.user_id
+                                and row["id"] not in known_ids and not row.get("feedback_for_episode_id")]
+                cutoff = max((value for value in legacy_times if value is not None), default=None)
+                if cutoff is None:
+                    prepared_ids = set(state.get("prepared_turns", {}).values())
+                    prepared_times = [_instant(row.get("created_at"))
+                                      for key, row in learning["receipts"].items()
+                                      if key in prepared_ids and row.get("user_id") == self.user_id
+                                      and row.get("session_id") == session]
+                    cutoff = min((value for value in prepared_times if value is not None), default=None)
+                state["legacy_capture_cutoff"] = cutoff.isoformat() if cutoff else None
+                state["capture_version"] = 3
+            if not state.get("transcript_path") and state.get("prompt") and state.get("turn_id"):
+                recovered.append({
+                    "turn_id": state["turn_id"], "prompt": state["prompt"],
+                    "assistant_text": redact(state.get("assistant_text") or payload.get("last_assistant_message") or ""),
+                    "tool_events": state.get("tool_events", []),
+                    "used_skills": state.get("used_skills", []),
+                })
+            queued = dict(state.get("pending_observations", {}))
+            for turn in recovered:
+                if turn["turn_id"] == state.get("turn_id"):
+                    turn["tool_events"] = _merge_events(state.get("tool_events", []), turn["tool_events"])
+                    turn["used_skills"] = list(dict.fromkeys(state.get("used_skills", []) + turn.get("used_skills", [])))
+                queued.setdefault(turn["turn_id"], turn)
+            waiting = [turn for turn in queued.values()
+                       if turn["turn_id"] not in state.get("observed_turns", {})
+                       and turn["turn_id"] not in state.get("skipped_legacy_turns", {})]
+            for turn in waiting[:8]:
+                self._observe_completed(facade, state, path, session, turn)
+            if event == "SessionEnd":
+                state["end_requested"] = True
+            self._save(path, state)
+            remaining = any(turn["turn_id"] not in state.get("observed_turns", {})
+                            and turn["turn_id"] not in state.get("skipped_legacy_turns", {})
+                            for turn in waiting)
+            if state.get("end_requested") and not remaining and not state.get("ended_at"):
                 self.invoke(facade, "end_session", {"session_id": session}, session)
                 state["ended_at"] = datetime.now(UTC).isoformat()
                 self._save(path, state)

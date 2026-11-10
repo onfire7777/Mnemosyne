@@ -19646,6 +19646,7 @@ def cmd_observe_turn(args: argparse.Namespace) -> None:
         receipt_ids=args.receipt_ids,
         used_skills=args.used_skills,
         used_lessons=args.used_lessons,
+        observation_id=getattr(args, "observation_id", None),
         role=args.role,
         source_trust_tier=args.source_trust_tier,
     ))
@@ -19662,6 +19663,7 @@ def cmd_record_signal(args: argparse.Namespace) -> None:
         receipt_id=args.receipt_id,
         evidence=args.evidence,
         final=args.final,
+        target_ids=getattr(args, "target_ids", None),
         role=args.role,
         source_trust_tier=args.source_trust_tier,
     ))

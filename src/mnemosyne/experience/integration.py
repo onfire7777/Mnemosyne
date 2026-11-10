@@ -150,14 +150,25 @@ def _after_outcomes(runtime, tenant_id, user_id):
 def observe_completed_turn(runtime, tenant_id, user_id, session_id, user_text,
                            assistant_text, *, tool_events=None, receipt_ids=None,
                            used_skills=None, used_lessons=None, source_cids=None,
-                           feedback=None):
+                           feedback=None, observation_id=None):
     """Capture once, resolve actual outcomes promptly, and run one cadence."""
     observed = runtime.observe_turn(
         tenant_id, user_id, session_id, user_text, assistant_text,
         tool_events=tool_events, receipt_ids=receipt_ids, used_skills=used_skills,
-        used_lessons=used_lessons, source_cids=source_cids)
-    if feedback is not None:
+        used_lessons=used_lessons, source_cids=source_cids,
+        observation_id=observation_id)
+    if observed.get("erased"):
+        return observed
+    if feedback is not None and not runtime.writer.read(tenant_id)["policy"].get(
+        "host_feedback_done", {}
+    ).get(observed["episode_id"]):
         feedback(observed["episode_id"])
+        runtime.writer.apply(
+            tenant_id, "host_feedback_complete",
+            lambda state: state["policy"].setdefault("host_feedback_done", {}).update(
+                {observed["episode_id"]: True}
+            ),
+        )
     if tool_events:
         runtime.resolve(tenant_id, observed["episode_id"])
     consolidation = _after_outcomes(runtime, tenant_id, user_id)

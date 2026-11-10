@@ -16,6 +16,7 @@ from hashlib import sha256
 from typing import Any, Mapping, Sequence
 from uuid import NAMESPACE_URL, UUID, uuid5
 
+from mnemosyne.assertion_semantics import assertion_is_additive, assertion_replacement_id
 from mnemosyne.access_policy import (
     AccessDecision,
     apply_relation_redactions,
@@ -4276,8 +4277,10 @@ class PostgresEngine:
                     SELECT * FROM assertions
                     WHERE tenant_id = %s AND branch = %s AND subject = %s
                       AND predicate = %s AND scope = %s
+                      AND user_id IS NOT DISTINCT FROM %s
                       AND status IN ('active', 'contested')
                     ORDER BY trust_tier ASC, valid_from DESC
+                    FOR UPDATE
                     """,
                     (
                         db_tenant_id,
@@ -4285,11 +4288,98 @@ class PostgresEngine:
                         incoming.subject,
                         incoming.predicate,
                         self._jsonb(incoming.scope),
+                        db_user_id,
                     ),
                 )
                 peers = list(cur.fetchall())
+                replacement_id = assertion_replacement_id(
+                    incoming.calibration, {str(row["id"]) for row in peers},
+                    replayed_calibration=next(
+                        (dict(row["calibration"] or {}) for row in peers if str(row["id"]) == incoming.id), None
+                    ),
+                )
                 same = [row for row in peers if row["object"] == incoming.object]
-                if same:
+
+                conflicts = [
+                    row for row in peers
+                    if row["object"] != incoming.object and (replacement_id is not None or not same)
+                    and (str(row["id"]) == replacement_id if replacement_id is not None
+                         else not assertion_is_additive(incoming.predicate))
+                ]
+                successor_id = str(same[0]["id"]) if same else incoming.id
+                if conflicts:
+                    current = conflicts[0]
+                    current_valid_from = parse_dt(current["valid_from"]) or utc_now()
+                    current_trust_tier = int(current["trust_tier"])
+                    inc_vf = _to_utc_opt(incoming.valid_from) or datetime.min.replace(
+                        tzinfo=UTC
+                    )
+                    cur_vf = _to_utc_opt(current_valid_from) or datetime.min.replace(
+                        tzinfo=UTC
+                    )
+                    if incoming.trust_tier < current_trust_tier:
+                        incoming.version = int(current["version"]) + 1
+                        incoming.status = "active"
+                        current_valid_to = (
+                            incoming.valid_from
+                            if inc_vf > cur_vf
+                            else current_valid_from + timedelta(microseconds=1)
+                        )
+                        cur.execute(
+                            "UPDATE assertions SET valid_to = %s, status = 'superseded', superseded_by = %s WHERE id = %s",
+                            (current_valid_to, successor_id, current["id"]),
+                        )
+                        self._sync_relation_supersession(
+                            tenant_id=incoming.tenant_id,
+                            branch=branch,
+                            subject=str(current["subject"]),
+                            predicate=str(current["predicate"]),
+                            obj=str(current["object"]),
+                            valid_to=current_valid_to,
+                            source_evidence_cids=_bytes_list_to_cids(current["source_evidence_cids"]) if db_user_id is not None else None,
+                            cur=cur,
+                        )
+                    elif incoming.trust_tier > current_trust_tier:
+                        incoming.status = "superseded"
+                        incoming.superseded_by = str(current["id"])
+                    elif inc_vf > cur_vf:
+                        incoming.version = int(current["version"]) + 1
+                        incoming.status = "active"
+                        cur.execute(
+                            "UPDATE assertions SET valid_to = %s, status = 'superseded', superseded_by = %s WHERE id = %s",
+                            (incoming.valid_from, successor_id, current["id"]),
+                        )
+                        self._sync_relation_supersession(
+                            tenant_id=incoming.tenant_id,
+                            branch=branch,
+                            subject=str(current["subject"]),
+                            predicate=str(current["predicate"]),
+                            obj=str(current["object"]),
+                            valid_to=incoming.valid_from,
+                            source_evidence_cids=_bytes_list_to_cids(current["source_evidence_cids"]) if db_user_id is not None else None,
+                            cur=cur,
+                        )
+                    elif inc_vf == cur_vf:
+                        incoming.status = "contested"
+                        cur.execute(
+                            "UPDATE assertions SET status = 'contested' WHERE id = %s",
+                            (current["id"],),
+                        )
+                    else:
+                        incoming.status = "superseded"
+                        incoming.valid_to = current_valid_from
+                        self._sync_relation_supersession(
+                            tenant_id=incoming.tenant_id,
+                            branch=branch,
+                            subject=incoming.subject,
+                            predicate=incoming.predicate,
+                            obj=incoming.object,
+                            valid_to=current_valid_from,
+                            source_evidence_cids=incoming.source_evidence_cids if db_user_id is not None else None,
+                            cur=cur,
+                        )
+
+                if same and (replacement_id is None or incoming.status != "superseded"):
                     winner = same[0]
                     merged_access_policy = merge_access_policies(
                         [dict(winner["access_policy"] or {}), incoming.access_policy],
@@ -4344,75 +4434,6 @@ class PostgresEngine:
                     )
                     return str(winner["id"])
 
-                conflicts = [row for row in peers if row["object"] != incoming.object]
-                if conflicts:
-                    current = conflicts[0]
-                    current_valid_from = parse_dt(current["valid_from"]) or utc_now()
-                    current_trust_tier = int(current["trust_tier"])
-                    inc_vf = _to_utc_opt(incoming.valid_from) or datetime.min.replace(
-                        tzinfo=UTC
-                    )
-                    cur_vf = _to_utc_opt(current_valid_from) or datetime.min.replace(
-                        tzinfo=UTC
-                    )
-                    if incoming.trust_tier < current_trust_tier:
-                        incoming.version = int(current["version"]) + 1
-                        incoming.status = "active"
-                        current_valid_to = (
-                            incoming.valid_from
-                            if inc_vf > cur_vf
-                            else current_valid_from + timedelta(microseconds=1)
-                        )
-                        cur.execute(
-                            "UPDATE assertions SET valid_to = %s, status = 'superseded', superseded_by = %s WHERE id = %s",
-                            (current_valid_to, incoming.id, current["id"]),
-                        )
-                        self._sync_relation_supersession(
-                            tenant_id=incoming.tenant_id,
-                            branch=branch,
-                            subject=str(current["subject"]),
-                            predicate=str(current["predicate"]),
-                            obj=str(current["object"]),
-                            valid_to=current_valid_to,
-                            cur=cur,
-                        )
-                    elif incoming.trust_tier > current_trust_tier:
-                        incoming.status = "superseded"
-                        incoming.superseded_by = str(current["id"])
-                    elif inc_vf > cur_vf:
-                        incoming.version = int(current["version"]) + 1
-                        incoming.status = "active"
-                        cur.execute(
-                            "UPDATE assertions SET valid_to = %s, status = 'superseded', superseded_by = %s WHERE id = %s",
-                            (incoming.valid_from, incoming.id, current["id"]),
-                        )
-                        self._sync_relation_supersession(
-                            tenant_id=incoming.tenant_id,
-                            branch=branch,
-                            subject=str(current["subject"]),
-                            predicate=str(current["predicate"]),
-                            obj=str(current["object"]),
-                            valid_to=incoming.valid_from,
-                            cur=cur,
-                        )
-                    elif inc_vf == cur_vf:
-                        incoming.status = "contested"
-                        cur.execute(
-                            "UPDATE assertions SET status = 'contested' WHERE id = %s",
-                            (current["id"],),
-                        )
-                    else:
-                        incoming.status = "superseded"
-                        incoming.valid_to = current_valid_from
-                        self._sync_relation_supersession(
-                            tenant_id=incoming.tenant_id,
-                            branch=branch,
-                            subject=incoming.subject,
-                            predicate=incoming.predicate,
-                            obj=incoming.object,
-                            valid_to=current_valid_from,
-                            cur=cur,
-                        )
 
                 embedding_partition = vector_partition_for_item(
                     sensitivity=int(incoming.sensitivity),
@@ -4585,6 +4606,7 @@ class PostgresEngine:
         valid_to: datetime | None,
         *,
         cur: Any | None = None,
+        source_evidence_cids: Sequence[str] | None = None,
     ) -> None:
         """Synchronize relation supersession in PostgreSQL storage."""
         if valid_to is None:
@@ -4614,6 +4636,8 @@ class PostgresEngine:
             rows = c.fetchall()
             for row in rows:
                 rel = _row_to_relation(row, tenant_id)
+                if source_evidence_cids is not None and not set(source_evidence_cids).intersection(rel.source_evidence_cids):
+                    continue
                 if rel.source.strip().lower() != subj_low:
                     continue
                 if rel.predicate.strip().lower() not in canonical_preds:

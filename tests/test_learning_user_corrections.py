@@ -110,6 +110,7 @@ def test_verified_lesson_reuse_promotes_only_after_real_trial_outcomes():
             "t", "u", "chat", QUERY, output, receipt_ids=[context["receipt_id"]],
             used_lessons=used, tool_events=[{
                 "source": "tool", "verdict": verified,
+                "target_ids": used,
                 "output": "JSON object validation passed" if verified else "JSON object validation failed",
             }],
         )

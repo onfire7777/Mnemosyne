@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 
 from .receipts import digest
-from .signals import WEIGHTS
+from .signals import WEIGHTS, verified_target_outcome, reprocessed_episode, receipt_target
 
 GUARD_CLASSES = tuple([f"X{i}" for i in range(1, 23)] + [f"E{i}" for i in range(1, 5)])
 STATES = {
@@ -82,6 +82,8 @@ def _forbidden_inputs(value, code: str) -> None:
 
 
 def _validate_receipts(before: dict, after: dict, operation: str) -> None:
+    from .task_class import validated_scope_query
+
     if operation != "erasure":
         require(
             before["receipts"].keys() <= after["receipts"].keys(),
@@ -102,6 +104,8 @@ def _validate_receipts(before: dict, after: dict, operation: str) -> None:
             )
         if receipt_id in before["receipts"]:
             continue
+        scope_query = validated_scope_query(receipt, after)
+        require(scope_query is not None, "X9", "invalid task scope equivalence")
         if receipt.get("mode") == "fast":
             require(
                 receipt.get("goal_checked") is True,
@@ -129,7 +133,7 @@ def _validate_receipts(before: dict, after: dict, operation: str) -> None:
             )
             require(
                 all(
-                    condition.casefold() in receipt.get("query", "").casefold()
+                    condition.casefold() in scope_query.casefold()
                     for condition in artifact.get("conditions", [])
                 ),
                 "X9",
@@ -194,6 +198,9 @@ def _validate_episodes(before: dict, after: dict, operation: str) -> None:
             ):
                 require(
                     episode == previous or (
+                        operation == "outcome_reprocess"
+                        and episode == reprocessed_episode(previous, after["artifacts"], after["receipts"])
+                    ) or (
                         operation == "compatibility_save"
                         and {key: value for key, value in episode.items() if key != "failure_attribution"}
                             == {key: value for key, value in previous.items() if key != "failure_attribution"}
@@ -215,6 +222,17 @@ def _validate_episodes(before: dict, after: dict, operation: str) -> None:
                 "erased episode retains source content",
             )
         if episode.get("status") == "resolved":
+            for target, result in episode.get("target_outcomes", {}).items():
+                require(_finite(result.get("value"), -1, 1)
+                        and result.get("rpe") == result["value"] - (2 * episode["prediction"] - 1),
+                        "X13", "target prediction error must match its recorded outcome")
+                if not previous or previous.get("status") == "open":
+                    item = next((item for rid in episode["receipt_ids"]
+                                 for item in after["receipts"][rid]["items"] if item["item_id"] == target), None)
+                    artifact = receipt_target(item, after["artifacts"]) if item else None
+                    require(artifact is not None
+                            and verified_target_outcome(artifact, episode) == result["value"],
+                            "X7", "target verification requires its own external evidence")
             require(
                 _finite(episode.get("reward"), -1, 1),
                 "X7",
@@ -252,7 +270,7 @@ def _validate_credit(
             "credit requires positive matched contingency",
         )
         require(
-            row.get("delta") == episode.get("rpe"),
+            row.get("delta") == episode.get("target_outcomes", {}).get(row.get("target_id"), {}).get("rpe", episode.get("rpe")),
             "X13",
             "credit must use recorded prediction error",
         )
@@ -298,25 +316,24 @@ def _validate_stats(
         if episode.get("status") != "resolved":
             continue
         task = episode["task_class"]
-        keys = {digest(["class", task, 1, task])}
+        probability = (episode["reward"] + 1) / 2
+        general_verified = any(signal.get("kind") in {"verifier", "tests", "critic", "rating"}
+                               for signal in episode.get("signals", []))
+        keys = {digest(["class", task, 1, task]): (probability, general_verified)}
         for receipt_id in episode.get("receipt_ids", []):
             for item in after["receipts"][receipt_id].get("items", []):
-                keys.add(
-                    digest([item["kind"], item["item_id"], item["revision"], task])
-                )
-        probability = (episode["reward"] + 1) / 2
-        for key in keys:
+                result = episode.get("target_outcomes", {}).get(item["item_id"])
+                target_probability = (result["value"] + 1) / 2 if result else probability
+                checked = bool(result) if episode.get("outcome_version", 1) >= 2 else general_verified
+                keys[digest([item["kind"], item["item_id"], item["revision"], task])] = (target_probability, checked)
+        for key, (probability, checked) in keys.items():
             count, successes, failures = outcome_bounds.get(key, (0, 0.0, 0.0))
             outcome_bounds[key] = (
                 count + 1,
                 successes + probability,
                 failures + 1 - probability,
             )
-        if any(
-            signal.get("kind") in {"verifier", "tests", "critic", "rating"}
-            for signal in episode.get("signals", [])
-        ):
-            for key in keys:
+            if checked:
                 verified_count, verified_successes = verified_bounds.get(key, (0, 0.0))
                 verified_bounds[key] = (
                     verified_count + 1,
@@ -361,6 +378,8 @@ def _validate_stats(
         old_utility = previous.get("utility", 1)
         if utility == old_utility or operation in {"erasure", "rollback"}:
             continue
+        if operation == "outcome_reprocess" and utility == 1:
+            continue  # Retract utility derived from superseded outcome interpretation.
         normalization = operation == "consolidate" and abs(utility - 1) <= abs(
             old_utility - 1
         )
@@ -564,7 +583,7 @@ def _validate_artifacts(
                 "effects need approval",
             )
             if previous and previous.get("state") not in {"active", "labile"}:
-                from .stats import Posterior, prob_better
+                from .stats import Posterior, prob_better, wilson_interval
 
                 key = digest(
                     [
@@ -591,11 +610,19 @@ def _validate_artifacts(
                 require(
                     row.get("verified_n", 0)
                     >= (5 if artifact.get("schema_ref") else 12)
-                    and row.get("verified_successes", 0) > 0,
+                    and wilson_interval(
+                        row.get("verified_successes", 0), row.get("verified_n", 0)
+                    ).low >= 0.5,
                     "X7",
                     "activation requires external verification beyond acceptance feedback",
                 )
-        if "confidence" in artifact:
+        quarantined_snapshot = (
+            artifact_id in after["policy"].get("outcome_quarantine", {})
+            and (operation == "outcome_reprocess"
+                 or artifact_id in before["policy"].get("outcome_quarantine", {}))
+            and previous == artifact and (artifact.get("pinned") or artifact.get("locked"))
+        )
+        if "confidence" in artifact and not quarantined_snapshot:
             key = digest(
                 [
                     artifact["kind"],

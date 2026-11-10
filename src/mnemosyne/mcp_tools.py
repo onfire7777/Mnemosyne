@@ -1369,6 +1369,20 @@ class MemoryTools:
             modality=evidence.modality,
             sensitivity=int(evidence.sensitivity),
         )
+        from mnemosyne.memory_formation import direct_user_clauses
+        if actor == "user" and direct_user_clauses(content, include_directives=True):
+            # Preserve a compatible legacy capture, but never deduplicate one
+            # person's first-person statement into another person's source.
+            previous = self.engine.get_evidence(tenant_id, expected_cid, branch)
+            if previous is None or previous.user_id != user_id or previous.actor != actor:
+                from mnemosyne.experience.receipts import digest
+                evidence.document_segment_id = "capture:" + digest([tenant_id, user_id, source_type])
+                expected_cid = evidence_cid(
+                    evidence.content, tenant_id=tenant_id, user_id=user_id,
+                    source_type=source_type, content_pointer=evidence.content_pointer,
+                    modality=evidence.modality, sensitivity=int(evidence.sensitivity),
+                    document_segment_id=evidence.document_segment_id,
+                )
         existed_before = self.engine.get_evidence(tenant_id, expected_cid, branch) is not None
         cid = self.engine.append_evidence(evidence, branch=branch)
         stored = self.engine.get_evidence(tenant_id, cid, branch) is not None
@@ -1377,6 +1391,12 @@ class MemoryTools:
         idempotent = existed_before and stored and same_cid
         if created:
             self._index_later(tenant_id, branch)
+
+        formation = None
+        if (stored and same_cid and
+                self.engine.get_evidence(tenant_id, cid, branch).user_id == user_id):
+            from mnemosyne.memory_formation import project_direct_user_memory
+            formation = project_direct_user_memory(self.engine, tenant_id, cid, branch)
 
         working_item_id: str | None = None
         if mirror_turn:
@@ -1426,6 +1446,7 @@ class MemoryTools:
             "created": created,
             "idempotent": idempotent,
             "working_item_id": working_item_id,
+            "memory_formation": formation,
         }
 
     def ingest(
@@ -2996,15 +3017,23 @@ class MemoryTools:
         if isinstance(new, dict) and "trust_tier" in new:
             _require_trust_tier(new["trust_tier"], field="new.trust_tier")
         normalized_valid_from = _parse_valid_from(valid_from)
-        existing = self.get(tenant_id, id, branch=branch)
+        existing = self.get(tenant_id, id, branch=branch, user_id=user_id, role=role)
         if existing["kind"] != "assertion":
             raise ValueError("supersede currently supports assertion records")
-        record = existing["record"]
+        # The authorized projection omits internal owner and scope fields.
+        # Copy those from the same source row after the public read succeeds.
+        record = next(
+            row for row in self.engine.export_tenant(tenant_id)["assertions"]
+            if row["id"] == id and row.get("branch", "main") == branch
+        )
+        if record.get("user_id") not in {None, user_id}:
+            raise PermissionError("replacement target belongs to another user")
         new_object = new.get("object_value", new.get("object"))
         if new_object is None:
             raise ValueError("supersede requires new.object_value or new.object")
         assertion = Assertion(
             tenant_id=tenant_id,
+            user_id=record.get("user_id"),
             subject=str(new.get("subject", record["subject"])),
             predicate=str(new.get("predicate", record["predicate"])),
             object=str(new_object),
@@ -3014,6 +3043,7 @@ class MemoryTools:
             trust_tier=int(new.get("trust_tier", record.get("trust_tier", int(TrustTier.USER_AUTHORED)))),
             sensitivity=int(new.get("sensitivity", record.get("sensitivity", 1))),
             access_policy=dict(new.get("access_policy", record.get("access_policy") or {"tenant": tenant_id})),
+            calibration={"replaces_assertion_id": id},
         )
         if normalized_valid_from is not None:
             assertion.valid_from = normalized_valid_from
@@ -3840,6 +3870,7 @@ class MemoryTools:
         lawful_basis: str | list[str] | None = None,
     ) -> dict[str, Any]:
         from mnemosyne.access_policy import may_read_item
+        from mnemosyne.assertion_semantics import assertion_is_additive
         from mnemosyne.retrieval import projection_sources_readable
 
         moment = parse_dt(time)
@@ -3852,15 +3883,15 @@ class MemoryTools:
         )
         context["branch"] = branch
         assertions = self.engine.as_of(subject, predicate, moment, tenant_id=tenant_id, branch=branch)
-        latest_by_scope: dict[str, datetime] = {}
-        for item in assertions:
-            scope_key = canonical_json(item.scope)
-            latest_by_scope[scope_key] = max(latest_by_scope.get(scope_key, item.valid_from), item.valid_from)
-        assertions = [
-            item
-            for item in assertions
-            if item.valid_from == latest_by_scope[canonical_json(item.scope)]
-        ]
+        if not assertion_is_additive(predicate):
+            latest_by_scope: dict[tuple[str | None, str], datetime] = {}
+            for item in assertions:
+                scope_key = (item.user_id, canonical_json(item.scope))
+                latest_by_scope[scope_key] = max(latest_by_scope.get(scope_key, item.valid_from), item.valid_from)
+            assertions = [
+                item for item in assertions
+                if item.valid_from == latest_by_scope[(item.user_id, canonical_json(item.scope))]
+            ]
         assertions.sort(key=lambda item: (canonical_json(item.scope), item.valid_from, item.object, item.id))
         readable = []
         for item in assertions:
@@ -4006,26 +4037,35 @@ class MemoryTools:
         if not runtime._enabled(state, "lessons"):
             return
         episode = state["episodes"][episode_id]
-        scope = {} if re.search(r"\b(?:i (?:would )?prefer|from now on|always)\b", user_text, re.IGNORECASE) else {"session_id": session_id}
-        source_cids = [cid for cid in episode.get("source_cids", [])
-                       if (source := self.engine.get_evidence(tenant_id, cid)) is not None
-                       and source.actor == "user" and source.content == user_text]
-        if not source_cids:
+        from mnemosyne.memory_formation import direct_user_clauses
+        sources = [source for cid in episode.get("source_cids", [])
+                   if (source := self.engine.get_evidence(tenant_id, cid)) is not None
+                   and source.actor == "user" and source.user_id == user_id
+                   and source.content == user_text and source.trust_tier <= 1
+                   and runtime._sources_live(tenant_id, [cid], user_id)]
+        if not sources:
             return
-        scope["_learning_source_cids"] = source_cids
-        preference = re.search(
-            r"\b(?:i (?:would )?prefer|from now on|please (?:use|keep|respond)|(?:use|write|respond)\b.{0,100}\binstead)\b",
-            user_text, re.IGNORECASE,
-        )
-        if preference and not any(entry.tenant_id == tenant_id and entry.user_id == user_id
-                                  and entry.statement == user_text and entry.scope == scope
-                                  for entry in self.user_model.entries.values()):
-            self.profile_record_explicit(tenant_id, user_id, user_text, scope=scope,
-                                         source_evidence_cids=source_cids)
-        if re.search(r"\b(?:i (?:made (?:a|the) mistake|forgot|keep forgetting|missed|misread)|my mistake)\b",
-                     user_text, re.IGNORECASE):
-            self.profile_record_mistake(tenant_id, user_id, pattern=user_text,
-                description=user_text, scope=scope, role=role, source_trust_tier=int(TrustTier.USER_AUTHORED))
+        source_cids = [source.cid for source in sources]
+        for clause in direct_user_clauses(sources[0], include_directives=True):
+            scope = {} if re.match(r"(?:i (?:would )?prefer|from now on|always)\b", clause, re.IGNORECASE) else {"session_id": session_id}
+            scope["_learning_source_cids"] = source_cids
+            preference = re.match(
+                r"(?:i (?:would )?prefer|from now on|please (?:use|keep|respond)|(?:use|write|respond)\b.{0,100}\binstead)\b",
+                clause, re.IGNORECASE,
+            )
+            if preference and not any(entry.tenant_id == tenant_id and entry.user_id == user_id
+                                      and entry.statement == clause and entry.scope == scope
+                                      for entry in self.user_model.entries.values()):
+                self.profile_record_explicit(tenant_id, user_id, clause, scope=scope,
+                                             source_evidence_cids=source_cids)
+            if re.match(r"(?:i (?:made (?:a|the) mistake|forgot|keep forgetting|missed|misread)|my mistake)\b",
+                        clause, re.IGNORECASE) and not any(
+                    event.tenant_id == tenant_id and event.user_id == user_id
+                    and event.pattern == clause and event.scope == scope
+                    for event in self.user_model.mistake_events):
+                self.profile_record_mistake(tenant_id, user_id, pattern=clause,
+                    description=clause, scope=scope, role=role,
+                    source_trust_tier=int(TrustTier.USER_AUTHORED))
 
     def observe_turn(self, tenant_id: str, user_id: str, session_id: str,
                      user_text: str, assistant_text: str,
@@ -4033,7 +4073,8 @@ class MemoryTools:
                      receipt_ids: list[str] | None = None, used_skills: list[str] | None = None,
                      used_lessons: list[str] | None = None, role: WriteRole = "agent",
                      source_trust_tier: int = 1,
-                     session_identity: SessionIdentity | None = None) -> dict[str, Any]:
+                     session_identity: SessionIdentity | None = None,
+                     observation_id: str | None = None) -> dict[str, Any]:
         self._learning_session(tenant_id, user_id, session_id, session_identity)
         self._learning_access("observe_turn", role, source_trust_tier)
         if tool_events and source_trust_tier > 1:
@@ -4044,6 +4085,7 @@ class MemoryTools:
             runtime, tenant_id, user_id, session_id, user_text, assistant_text,
             tool_events=tool_events, receipt_ids=receipt_ids, used_skills=used_skills,
             used_lessons=used_lessons,
+            observation_id=observation_id,
             feedback=lambda episode_id: self._capture_learning_user_feedback(
                 runtime, tenant_id, user_id, session_id, user_text, episode_id,
                 role, source_trust_tier))
@@ -4051,6 +4093,7 @@ class MemoryTools:
     def record_signal(self, tenant_id: str, user_id: str, session_id: str,
                       kind: str, value: float, episode_id: str | None = None,
                       receipt_id: str | None = None, evidence: str = "", final: bool = False,
+                      target_ids: list[str] | None = None,
                       role: WriteRole = "agent", source_trust_tier: int = 1,
                       session_identity: SessionIdentity | None = None) -> dict[str, Any]:
         self._learning_session(tenant_id, user_id, session_id, session_identity)
@@ -4065,7 +4108,8 @@ class MemoryTools:
             raise PermissionError("signal target belongs to a different learning session")
         from mnemosyne.experience.integration import record_completed_signal
         return record_completed_signal(runtime, tenant_id, user_id,
-            episode_id=matches[0]['id'], kind=kind, value=value, evidence=evidence, final=final)
+            episode_id=matches[0]['id'], kind=kind, value=value, evidence=evidence, final=final,
+            target_ids=target_ids)
 
     def end_session(self, tenant_id: str, user_id: str, session_id: str,
                     role: WriteRole = "agent", source_trust_tier: int = 1,

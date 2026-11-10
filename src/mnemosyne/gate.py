@@ -233,6 +233,9 @@ class PromotionGate:
         self.engine = engine
         self.cases = cases
         self.retrieval_context = dict(retrieval_context or {})
+        # Regression cases inspect retained evidence, including execution traces.
+        # Ordinary recall's relevance filter must not hide a case's source.
+        self.retrieval_context.setdefault("include_operational", True)
         self.noise_margin = noise_margin
         # Optional §30.6 seam: when set, a counterfactual-replay verdict can veto an
         # otherwise-promotable candidate. Default ``None`` preserves prior behaviour.

@@ -553,8 +553,9 @@ def _detect_pair_contradiction(
         l_pos, l_neg = left_toks & pos_set, left_toks & neg_set
         r_pos, r_neg = right_toks & pos_set, right_toks & neg_set
         if (l_pos and r_neg) or (l_neg and r_pos):
-            v1 = sorted(l_pos or l_neg)[0]
-            v2 = sorted(r_neg if l_pos else r_pos)[0]
+            left_values, right_values = (l_pos, r_neg) if l_pos and r_neg else (l_neg, r_pos)
+            v1 = sorted(left_values)[0]
+            v2 = sorted(right_values)[0]
             score = round(min(0.99, 0.78 + 0.08 * min(subj_idf, 2.5)), 4)
             return subject, f"{v1} vs {v2}", score
 

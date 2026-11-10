@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 import textwrap
+from datetime import UTC, datetime, timedelta
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
@@ -99,6 +100,8 @@ def write_transcript(tmp_path, turns, *, session="session"):
             }
             for item in items
         )
+    for row in rows:
+        row["timestamp"] = (datetime.now(UTC) + timedelta(minutes=1)).isoformat()
     path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
     return path
 
@@ -141,8 +144,10 @@ def test_stop_recovers_a_new_turn_when_prompt_hook_was_missed(tmp_path):
     assert episodes[0]["receipt_ids"] == [old_receipt]
     assert episodes[1]["receipt_ids"] == []
     assert episodes[1]["tool_events"][0]["passed"] == 2
-    assert (
-        host.engine.get_evidence("t", episodes[1]["source_cids"][1]).content == "fixed"
+    assert any(
+        source.actor == "assistant" and source.content == "fixed"
+        for cid in episodes[1]["source_cids"]
+        if (source := host.engine.get_evidence("t", cid)) is not None
     )
 
 
@@ -502,3 +507,171 @@ def test_hook_process_accepts_json_and_retries_across_processes(tmp_path):
     assert episodes[0]["reward"] == 1
     assert episodes[0]["receipt_ids"] == []
     engine.close()
+
+
+def test_host_observation_identity_retries_without_recapturing_sources(tmp_path):
+    host = LocalHost(tmp_path)
+    context = host.runtime.prepare_context("t", "u", "session", "request")
+    arguments = dict(
+        session_id="session", user_text="request", assistant_text="response",
+        receipt_ids=[context["receipt_id"]], observation_id="codex:turn-one",
+    )
+    first = host.runtime.observe_turn("t", "u", **arguments)
+    source_count = len(host.engine.export_tenant("t")["evidence"])
+    second = host.runtime.observe_turn("t", "u", **arguments)
+    assert first["episode_id"] == second["episode_id"]
+    assert second["already_observed"] is True
+    assert len(host.episodes()) == 1
+    assert len(host.engine.export_tenant("t")["evidence"]) == source_count
+
+
+def test_erased_host_observation_identity_blocks_transcript_resurrection(tmp_path):
+    host = LocalHost(tmp_path)
+    arguments = dict(session_id="session", user_text="erase this request",
+                     assistant_text="erase this response", observation_id="codex:erased")
+    first = host.runtime.observe_turn("t", "u", **arguments)
+    cid = host.episodes()[0]["source_cids"][0]
+    host.runtime.erase("t", cid)
+    count = len(host.engine.export_tenant("t")["evidence"])
+    replay = host.runtime.observe_turn("t", "u", **arguments)
+    assert replay["episode_id"] == first["episode_id"]
+    assert replay["erased"] is True
+    assert len(host.episodes()) == 1
+    assert host.episodes()[0]["status"] == "erased"
+    assert len(host.engine.export_tenant("t")["evidence"]) == count
+
+
+def test_host_observation_identity_includes_user_and_session(tmp_path):
+    host = LocalHost(tmp_path)
+    results = [host.runtime.observe_turn("t", user, session, "request", "response",
+                                       observation_id="codex:shared")
+               for user, session in (("u", "first"), ("u", "second"), ("other", "first"))]
+    assert len({row["episode_id"] for row in results}) == 3
+
+
+def test_stop_drains_all_missed_completed_turns_in_order(tmp_path):
+    host = LocalHost(tmp_path)
+    transcript = write_transcript(tmp_path, [
+        ("one", "first request", [], "first answer"),
+        ("two", "second request", [], "second answer"),
+        ("three", "still running", [], None),
+    ])
+    host.event("Stop", transcript_path=str(transcript))
+    host.event("Stop", transcript_path=str(transcript))
+    assert [row["user_text"] for row in host.episodes()] == ["first request", "second request"]
+    assert all(not row["receipt_ids"] for row in host.episodes())
+
+
+def test_failed_completion_survives_next_prompt_and_recovers_once(tmp_path):
+    host = LocalHost(tmp_path)
+    transcript = write_transcript(tmp_path, [("one", "first request", [], "first answer")])
+    host.event("UserPromptSubmit", turn_id="one", prompt="first request")
+    host.fail_after_observe = True
+    with pytest.raises(OSError):
+        host.event("Stop", transcript_path=str(transcript))
+    host.event("UserPromptSubmit", turn_id="two", prompt="second request")
+    write_transcript(tmp_path, [
+        ("one", "first request", [], "first answer"),
+        ("two", "second request", [], "second answer"),
+    ])
+    host.event("Stop", transcript_path=str(transcript))
+    assert [row["user_text"] for row in host.episodes()] == ["first request", "second request"]
+    assert all(len(row["receipt_ids"]) == 1 for row in host.episodes())
+
+
+def test_worker_recovery_drains_more_than_one_batch_without_recapturing(tmp_path):
+    host = LocalHost(tmp_path)
+    transcript = write_transcript(tmp_path, [(str(i), f"request {i}", [], f"answer {i}") for i in range(11)])
+    host.event("UserPromptSubmit", turn_id="10", prompt="request 10", transcript_path=str(transcript))
+    first = host.adapter.recover_completed()
+    second = host.adapter.recover_completed()
+    third = host.adapter.recover_completed()
+    assert [first["captured_turns"], second["captured_turns"], third["captured_turns"]] == [8, 3, 0]
+    assert len(host.episodes()) == 11
+
+
+def test_verified_command_metadata_preserves_check_and_execution_identity(tmp_path):
+    from mnemosyne.hosts.codex import _tool_event
+
+    first = _tool_event("shell", {"exit_code": 0, "output": "2 passed in 0.1s"},
+                        command=["python", "-m", "pytest", "-q"], cwd="/work",
+                        tool_id="first", arguments={"command": "python -m pytest -q"})
+    second = _tool_event("shell", {"exit_code": 0, "output": "2 passed in 0.1s"},
+                         command=["python", "-m", "pytest", "-q"], cwd="/work", tool_id="second")
+    assert first["check_id"] == second["check_id"]
+    assert first["call_id"] != second["call_id"]
+    assert first["cwd"] == "/work"
+    assert first["arguments"] == {"command": "python -m pytest -q"}
+    assert first["passed"] == 2
+
+
+def test_explicit_verifier_target_scope_is_preserved_without_inference():
+    from mnemosyne.hosts.codex import _tool_event
+
+    scoped = _tool_event("validator", {"verdict": True, "target_ids": ["artifact"],
+                                       "outcome_scope": "task", "final": True}, tool_id="call")
+    assert scoped["target_ids"] == ["artifact"]
+    assert scoped["outcome_scope"] == "task" and scoped["final"] is True
+    unscoped = _tool_event("validator", {"verdict": True}, tool_id="other")
+    assert "target_ids" not in unscoped
+    assert "outcome_scope" not in unscoped
+
+
+def test_legacy_erased_turn_is_not_recreated_by_transcript_backfill(tmp_path):
+    host = LocalHost(tmp_path)
+    original = host.runtime.observe_turn("t", "u", "session", "erased request", "erased answer")
+    host.runtime.erase("t", host.episodes()[0]["source_cids"][0])
+    transcript = write_transcript(tmp_path, [("old", "erased request", [], "erased answer")])
+    rows = [json.loads(line) for line in transcript.read_text().splitlines()]
+    for row in rows:
+        row["timestamp"] = "2000-01-01T00:00:00Z"
+    transcript.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+    host.event("Stop", transcript_path=str(transcript))
+    assert [row["id"] for row in host.episodes()] == [original["episode_id"]]
+    assert host.episodes()[0]["status"] == "erased"
+    state = json.loads(next((tmp_path / "state").glob("session-*.json")).read_text())
+    assert state["skipped_legacy_turns"] == {"old": "unidentifiable_before_capture_boundary"}
+
+
+def test_profile_feedback_retries_failure_and_marks_only_success(tmp_path):
+    host = LocalHost(tmp_path)
+    calls = []
+    def feedback(episode_id):
+        calls.append(episode_id)
+        if len(calls) == 1:
+            raise OSError("profile persistence failed")
+    arguments = dict(session_id="s", user_text="request", assistant_text="answer",
+                     observation_id="codex:profile-retry", feedback=feedback)
+    with pytest.raises(OSError, match="profile persistence"):
+        observe_completed_turn(host.runtime, "t", "u", **arguments)
+    assert not host.runtime.writer.read("t")["policy"].get("host_feedback_done")
+    result = observe_completed_turn(host.runtime, "t", "u", **arguments)
+    observe_completed_turn(host.runtime, "t", "u", **arguments)
+    assert calls == [result["episode_id"], result["episode_id"]]
+    assert host.runtime.writer.read("t")["policy"]["host_feedback_done"] == {result["episode_id"]: True}
+    assert len(host.episodes()) == 1
+
+
+def test_session_end_is_preserved_until_all_recovery_batches_finish(tmp_path):
+    host = LocalHost(tmp_path)
+    transcript = write_transcript(tmp_path, [(str(i), f"request {i}", [], f"answer {i}") for i in range(11)])
+    host.event("SessionEnd", transcript_path=str(transcript))
+    host.adapter.recover_completed()
+    assert len(host.episodes()) == 11
+    assert {row["status"] for row in host.episodes()} == {"unknown"}
+
+
+def test_worker_ignores_unprepared_history_before_capture_started(tmp_path):
+    host = LocalHost(tmp_path)
+    host.event("UserPromptSubmit", turn_id="new", prompt="new request")
+    transcript = write_transcript(tmp_path, [
+        ("old", "unprepared historical request", [], "historical answer"),
+        ("new", "new request", [], "new answer"),
+    ])
+    rows = [json.loads(line) for line in transcript.read_text().splitlines()]
+    for row in rows:
+        if row.get("payload", {}).get("turn_id") == "old":
+            row["timestamp"] = "2000-01-01T00:00:00Z"
+    transcript.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+    host.event("Stop", transcript_path=str(transcript))
+    assert [row["user_text"] for row in host.episodes()] == ["new request"]

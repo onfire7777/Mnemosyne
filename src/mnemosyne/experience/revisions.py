@@ -85,97 +85,76 @@ def install_revision(
     state["artifacts"][candidate["id"]] = candidate
 
 
+def _trial_evidence(state: dict, candidate: dict, parent: dict, trial: dict) -> dict:
+    for episode in sorted(state["episodes"].values(), key=lambda e: (e["created_at"], e["id"])):
+        if (
+            episode["status"] != "resolved" or episode["id"] in trial["episode_ids"]
+            or episode["task_class"] != candidate["task_class"]
+            or episode["created_at"] <= candidate["created_at"]
+        ):
+            continue
+        assignments = [state["receipts"][rid].get("revision_trial")
+                       for rid in episode["receipt_ids"] if rid in state["receipts"]]
+        assignment = next((value for value in assignments
+                           if value and value.get("candidate_id") == candidate["id"]), None)
+        if not assignment:
+            continue
+        arm = assignment.get("arm")
+        expected = ab_assignment(episode["tenant_id"], candidate["task_class"],
+                                 assignment["trial_key"], parent["id"])
+        if arm != expected:
+            continue
+        target = candidate if arm == "candidate" else parent
+        served = [item for rid in episode["receipt_ids"]
+                  for item in state["receipts"][rid]["items"]]
+        if not any(item["item_id"] == target["id"] and item["revision"] == target["revision"]
+                   for item in served):
+            continue
+        result = episode.get("target_outcomes", {}).get(target["id"])
+        if episode.get("outcome_version", 1) >= 2 and result is None:
+            continue
+        value = result["value"] if result is not None else episode["reward"]
+        trial[arm + "_n"] += 1
+        trial[arm + "_successes"] += (value + 1) / 2
+        trial["episode_ids"].append(episode["id"])
+        if ab_decision(trial["candidate_successes"], trial["candidate_n"],
+                       trial["incumbent_successes"], trial["incumbent_n"]) != "pending":
+            break
+    trial["status"] = ab_decision(trial["candidate_successes"], trial["candidate_n"],
+                                  trial["incumbent_successes"], trial["incumbent_n"])
+    return trial
+
+
+def recompute_trial(state: dict, candidate: dict) -> dict:
+    """Rebuild a prior trial solely from its original assigned observations."""
+    trial = {**candidate["ab_trial"], "status": "pending", "candidate_n": 0,
+             "incumbent_n": 0, "candidate_successes": 0.0,
+             "incumbent_successes": 0.0, "episode_ids": []}
+    parent = state["artifacts"].get(trial["incumbent_id"])
+    return _trial_evidence(state, candidate, parent, trial) if parent else trial
+
+
 def score_trials(state: dict) -> None:
     for candidate in list(state["artifacts"].values()):
         trial = candidate.get("ab_trial")
-        if (
-            not trial
-            or trial["status"] != "pending"
-            or candidate["state"] != "probation"
-        ):
+        if (not trial or trial["status"] != "pending" or candidate["state"] != "probation"
+                or candidate.get("pinned") or candidate.get("locked")):
             continue
         parent = state["artifacts"].get(trial["incumbent_id"])
         if not parent or parent.get("pinned") or parent.get("locked"):
             continue
-        for episode in sorted(
-            state["episodes"].values(), key=lambda e: (e["created_at"], e["id"])
-        ):
-            if (
-                episode["status"] != "resolved"
-                or episode["id"] in trial["episode_ids"]
-                or episode["task_class"] != candidate["task_class"]
-            ):
-                continue
-            if episode["created_at"] <= candidate["created_at"]:
-                continue
-            # Assignment is persisted on the receipt before the outcome. Observing a
-            # revision by chance is not a randomized A/B observation.
-            assignments = [
-                state["receipts"][rid].get("revision_trial")
-                for rid in episode["receipt_ids"]
-                if rid in state["receipts"]
-            ]
-            assignment = next(
-                (
-                    a
-                    for a in assignments
-                    if a and a.get("candidate_id") == candidate["id"]
-                ),
-                None,
-            )
-            if not assignment:
-                continue
-            arm = assignment.get("arm")
-            expected = ab_assignment(
-                episode["tenant_id"],
-                candidate["task_class"],
-                assignment["trial_key"],
-                parent["id"],
-            )
-            if arm != expected:
-                continue
-            served = [
-                item
-                for rid in episode["receipt_ids"]
-                for item in state["receipts"][rid]["items"]
-            ]
-            target = candidate if arm == "candidate" else parent
-            if not any(
-                item["item_id"] == target["id"]
-                and item["revision"] == target["revision"]
-                for item in served
-            ):
-                continue
-            trial[arm + "_n"] += 1
-            trial[arm + "_successes"] += (episode["reward"] + 1) / 2
-            trial["episode_ids"].append(episode["id"])
-            verdict = ab_decision(
-                trial["candidate_successes"],
-                trial["candidate_n"],
-                trial["incumbent_successes"],
-                trial["incumbent_n"],
-            )
-            if verdict != "pending":
-                break
-        decision = ab_decision(
-            trial["candidate_successes"],
-            trial["candidate_n"],
-            trial["incumbent_successes"],
-            trial["incumbent_n"],
-        )
+        trial = _trial_evidence(state, candidate, parent, trial)
+        decision = trial["status"]
         if decision == "pending":
             continue
-        trial["status"] = decision
         if decision == "promote":
-            # Ordinary probation and approval gates still govern activation.
             candidate["ab_passed"] = True
         else:
             candidate["state"] = "retired"
             parent.pop("pending_revision", None)
             state["policy"].setdefault("reflection_queue", {})[candidate["id"]] = {
                 "reason": "revision_" + decision,
-                "episode_ids": trial["episode_ids"][:],
-                "incumbent_id": parent["id"],
+                "episode_ids": trial["episode_ids"][:], "incumbent_id": parent["id"],
             }
 
 
