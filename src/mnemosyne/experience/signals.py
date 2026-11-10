@@ -15,9 +15,25 @@ WEIGHTS = {
     "acceptance": 0.3,
     "rating": 0.9,
 }
+FEEDBACK_PREFIX = r"(?:(?:no|actually)(?:[,!.]\s*|\s+))?"
 CORRECTIONS = (
-    r"\bno[,! ]",
-    r"\b(?:wrong|incorrect|actually|instead|i meant|please correct)\b",
+    r"(?:wrong|incorrect)[.!]*$",
+    FEEDBACK_PREFIX
+    + r"(?:(?:that|this|it|your (?:answer|response|solution|code|result)) (?:is|was)|that's|it's|you're|you are) "
+    + r"(?:(?:still|actually) )?(?:wrong|incorrect|mistaken|not (?:right|correct|what i (?:asked|meant)))\b",
+    FEEDBACK_PREFIX
+    + r"(?:this|that|it)(?: still)? (?:doesn't|does not|didn't|did not) work\b",
+    FEEDBACK_PREFIX + r"(?:this|that|it)(?: still)? failed\b",
+    r"no[,!.]\s*(?:please )?(?:use|return|respond|format|do not|don't)\b",
+    FEEDBACK_PREFIX
+    + r"(?:please )?(?:use|return|respond with|format)\b[^\n]*\binstead\b",
+    FEEDBACK_PREFIX
+    + r"(?:please )?(?:correct|fix|revise) (?:it|that|your (?:answer|response|solution|code)|the (?:previous|last) (?:answer|response|solution|code))\b(?!\s*,?\s*(?:if|unless)\b)",
+    r"(?:no[,!.]\s*|correction:\s*)i meant\b(?!\s+to\b)",
+)
+REASKS = (
+    r"(?:please )?try again(?:[.!]|$|,\s*(?:(?:that|this|it) )?(?:failed|didn't work|did not work)\b)",
+    r"you (?:didn't|did not|haven't|have not) answer (?:my|the|that|previous) question\b",
 )
 ACCEPTANCE = r"^(?:thanks|thank you|great|perfect|that works|correct)[.!\s]*$"
 
@@ -95,18 +111,18 @@ def tool_signals(events: list[dict]) -> list[dict]:
 
 
 def user_signals(text: str, previous_text: str = "") -> list[dict]:
-    normalized = text.strip().lower()
-    if any(re.search(pattern, normalized) for pattern in CORRECTIONS):
+    normalized = text.strip().lower().replace("’", "'")
+    # Quoted examples are data, not feedback about the prior response. The
+    # boundaries preserve apostrophes in contractions such as "doesn't".
+    feedback = re.sub(
+        r""""[^"\n]*"|“[^”\n]*”|(?<!\w)'[^'\n]*'(?!\w)""", "", normalized
+    ).strip()
+    if any(re.match(pattern, feedback) for pattern in CORRECTIONS):
         return [signal("correction", -1, text)]
     if re.fullmatch(ACCEPTANCE, normalized):
         return [signal("acceptance", 0.6, text)]
-    if previous_text:
-        a, b = (
-            set(re.findall(r"\w+", normalized)),
-            set(re.findall(r"\w+", previous_text.lower())),
-        )
-        if a and b and len(a & b) / len(a | b) >= 0.6:
-            return [signal("reask", -0.6, text)]
+    if previous_text and any(re.match(pattern, feedback) for pattern in REASKS):
+        return [signal("reask", -0.6, text)]
     return []
 
 

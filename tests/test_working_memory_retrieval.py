@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from mnemosyne.engine import LocalMemoryEngine, WorkingMemoryItem
+from mnemosyne.models import Evidence
 from mnemosyne.retrieval import build_working_memory_hits, working_memory_hits
 from mnemosyne.security import SystemPromptSinkError, assemble_system_prompt
 
@@ -49,6 +50,17 @@ def _item(
     }
     row.update(overrides)
     return row
+
+
+def _attach_sources(engine: LocalMemoryEngine, rows: list[dict[str, object]]) -> None:
+    for row in rows:
+        cid = engine.append_evidence(Evidence(
+            tenant_id=TENANT, user_id="user-working-route", actor="user",
+            source_type="working-origin", content=f"custody {row['item_id']}",
+            session_id=SESSION, created_at=row["created_at"], trust_tier=0,
+            access_policy={"tenant": TENANT},
+        ))
+        row["evidence_ids"] = [cid]
 
 
 def test_working_route_is_tenant_session_scoped_and_ttl_is_half_open() -> None:
@@ -184,6 +196,7 @@ def test_pipeline_fuses_working_as_fourth_channel_and_shares_budget() -> None:
         _item("small", content="Deploy now."),
         _item("oversize", content="Deploy " + ("very-long-context " * 100)),
     ]
+    _attach_sources(engine, rows)
     calls: list[tuple[str, str, datetime]] = []
 
     def list_working(tenant_id: str, session_id: str, *, as_of: datetime) -> list[object]:
@@ -248,6 +261,7 @@ def test_result_cache_key_changes_at_evaluation_boundary(monkeypatch: pytest.Mon
     monkeypatch.setenv("MNEMOSYNE_PARALLEL_CHANNELS", "0")
     engine = LocalMemoryEngine()
     rows = [_item("cache-item", expires_at=EVALUATED_AT + timedelta(minutes=1))]
+    _attach_sources(engine, rows)
     calls = 0
 
     def list_working(tenant_id: str, session_id: str, *, as_of: datetime) -> list[object]:

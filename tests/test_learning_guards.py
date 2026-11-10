@@ -5,9 +5,24 @@ import pytest
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.experience.guards import LearningGuardError, validate
 from mnemosyne.experience.monitors import diagnostics, run_monitors
-from mnemosyne.experience.receipts import digest
+from mnemosyne.experience.receipts import ContextReceipt, digest
 from mnemosyne.experience.runtime import LearningRuntime
 from tests.fault_injection.learning import baseline, credit, source_lookup
+
+
+def _attach_forecast_receipts(state):
+    """Give calibration fixtures the immutable forecasts they intend to score."""
+    state["receipts"] = {}
+    for identifier, episode in state["episodes"].items():
+        episode.update(tenant_id="t", user_id="u", session_id=f"session-{identifier}")
+        receipt = ContextReceipt(
+            id=f"forecast-{identifier}", tenant_id="t", user_id="u",
+            session_id=episode["session_id"], task_class=episode["task_class"],
+            prediction=episode["prediction"], policy_version="fixture",
+            created_at="2026-11-05T12:00:00+00:00", turn_index=0,
+        ).to_dict()
+        state["receipts"][receipt["id"]] = receipt
+        episode["receipt_ids"] = [receipt["id"]]
 
 
 def test_valid_snapshot_passes_all_boundaries():
@@ -110,6 +125,7 @@ def test_calibration_monitor_does_not_judge_a_small_sample():
             id=str(index), receipt_ids=[], prediction=1.0, reward=-1.0, rpe=-2.0
         )
         state["episodes"][str(index)] = episode
+    _attach_forecast_receipts(state)
     assert not any(row["class"] == "X5" for row in diagnostics(state))
 
 
@@ -129,6 +145,7 @@ def test_calibration_monitor_rejects_systematically_wrong_predictions():
         }
         for index in range(100)
     }
+    _attach_forecast_receipts(state)
     failures = diagnostics(state)
     assert any(row["class"] == "X5" and row["value"] == 1 for row in failures)
 
@@ -176,6 +193,7 @@ def test_balanced_stationary_predictions_have_no_calibration_defect():
         }
         for index in range(100)
     }
+    _attach_forecast_receipts(state)
     assert diagnostics(state) == []
 
 
@@ -225,6 +243,7 @@ def test_calibration_monitor_accounts_for_finite_sample_uncertainty():
                 "signals": [],
                 "receipt_ids": [],
             }
+    _attach_forecast_receipts(state)
     assert diagnostics(state) == []
 
 

@@ -22,6 +22,7 @@ from .candidates import (
     correction_texts,
     persist_protected_cases,
     observed_steps,
+    expected_steps,
 )
 from .revisions import install_revision, score_trials, propagate_children, inherit_library_lineage
 from .schema import assimilate
@@ -156,6 +157,8 @@ def _candidate(
 
 def _reuse_existing_identity(candidate: dict, state: dict) -> None:
     """Keep pre-scope identities stable, including withdrawn revisions."""
+    if candidate.get("revision_evidence"):
+        return
     previous_id = digest([
         candidate.get("content_kind", candidate["kind"]), candidate["task_class"],
         candidate["content"], candidate.get("scope_match"),
@@ -240,6 +243,76 @@ def _combine_candidates(candidates: list[dict]) -> list[dict]:
     return list(combined.values())
 
 
+def _corrected_revisions(state: dict) -> list[dict]:
+    """Propose exact-query revisions after independently verified corrections."""
+    proposals = []
+    for parent in state["artifacts"].values():
+        scope = parent.get("scope_match") or {}
+        if (
+            parent["kind"] != "procedure"
+            or parent["state"] not in {"active", "labile"}
+            or parent.get("locked") or parent.get("pinned")
+            or parent.get("pending_revision")
+            or scope.get("kind") != "exact_query"
+        ):
+            continue
+        episodes = sorted(
+            (row for row in state["episodes"].values()
+             if row["status"] == "resolved"
+             and row["user_id"] == parent.get("user_id")
+             and applies_to(parent, row["task_class"], row["user_text"])),
+            key=lambda row: (row["created_at"], row["id"]),
+        )
+        corrections = []
+        for index, row in enumerate(episodes):
+            orders = expected_steps(row)
+            served = any(
+                item["item_id"] == parent["id"]
+                and item["revision"] == parent["revision"]
+                for rid in row["receipt_ids"]
+                for item in state["receipts"].get(rid, {}).get("items", [])
+            )
+            if (
+                row["reward"] < 0 and served
+                and any(s["kind"] in {"verifier", "tests"} and s["value"] < 0
+                        for s in row["signals"])
+                and orders and all(order == orders[0] for order in orders)
+                and orders[0] != parent["steps"]
+            ):
+                corrections.append((index, row, orders[0]))
+        if not corrections:
+            continue
+        index, correction, steps = corrections[-1]
+        current = episodes[index:]
+        supported = [
+            row for row in current[1:]
+            if row["reward"] > 0 and observed_steps(row) == steps
+            and any(s["kind"] in {"verifier", "tests"} and s["value"] > 0
+                    for s in row["signals"])
+        ]
+        if len(supported) < 2:
+            continue
+        proposal = _candidate(parent["task_class"], steps, [correction, *supported])
+        if any(
+            (score := candidate_score(proposal, row)) is not None and score < 1
+            for row in current
+        ):
+            continue
+        proposal["id"] = digest([
+            "corrected_revision", parent["id"], parent["revision"], correction["id"],
+            proposal["id"],
+        ])
+        proposal["revision_evidence"] = {
+            "incumbent_id": parent["id"],
+            "incumbent_revision": parent["revision"],
+            "correction_episode_id": correction["id"],
+            "support_episode_ids": [row["id"] for row in supported],
+            "current_episode_ids": [row["id"] for row in current],
+        }
+        proposals.append(proposal)
+    return proposals
+
+
 def _patch_parent(candidate: dict, artifacts: list[dict]) -> dict | None:
     scope = _scope_identity(candidate.get("scope_match"))
     exact_query = scope and scope.get("kind") == "exact_query"
@@ -255,6 +328,10 @@ def _patch_parent(candidate: dict, artifacts: list[dict]) -> dict | None:
         and item["state"] in {"active", "labile"}
         and (
             item["state"] == "labile"
+            or (
+                candidate.get("revision_evidence", {}).get("incumbent_id") == item["id"]
+                and candidate["revision_evidence"]["incumbent_revision"] == item["revision"]
+            )
             or SequenceMatcher(None, item["content"], candidate["content"]).ratio()
             >= 0.85
         )
@@ -421,6 +498,7 @@ def consolidate(runtime, tenant: str) -> dict:
             candidates.append(candidate)
     if runtime._enabled(snapshot, "insight"):
         candidates.extend(_abstract_rules(snapshot))
+    candidates.extend(_corrected_revisions(induction_snapshot))
     distill_mode = getattr(
         getattr(getattr(runtime, "engine", None), "policy", None),
         "learning_distill_mode",
@@ -505,6 +583,10 @@ def consolidate(runtime, tenant: str) -> dict:
             and row["user_id"] == candidate.get("user_id")
             and row["task_class"] == candidate["task_class"]
             and applies_to(candidate, row["task_class"], row["user_text"])
+            and (
+                not candidate.get("revision_evidence")
+                or row["id"] in candidate["revision_evidence"]["current_episode_ids"]
+            )
         ]
         if evaluate_candidate(runtime, tenant, candidate, episodes, replay):
             candidate["state"] = "probation"

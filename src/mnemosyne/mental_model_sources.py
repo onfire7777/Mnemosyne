@@ -15,7 +15,7 @@ from contextlib import nullcontext
 from datetime import datetime
 from typing import Any
 
-from mnemosyne.access_policy import expiry_deadline, filter_export_for_context
+from mnemosyne.access_policy import evidence_expiry_deadline, filter_export_for_context
 from mnemosyne.retrieval import classify_scoped_evidence, derived_evidence_readable, derived_source_cids
 
 COLLECTIONS = ("evidence", "assertions", "relations", "preferences")
@@ -117,8 +117,7 @@ class SourceSnapshot:
         self.dependencies[key] = deps
         for cid in deps:
             self.dependents.setdefault(cid, set()).add(key)
-        policy = row.get("access_policy")
-        expires = expiry_deadline(policy.get("expires_at")) if isinstance(policy, dict) else None
+        expires = evidence_expiry_deadline(row.get("access_policy"), row.get("metadata"))
         if expires is not None:
             heapq.heappush(self.expiries, (expires, key))
 

@@ -529,6 +529,10 @@ def filter_export_for_context(
         ):
             omit("evidence", "document_owner_mismatch")
             continue
+        deadline = evidence_expiry_deadline(item.get("access_policy"), item.get("metadata"))
+        if deadline is not None and deadline <= datetime.now(UTC):
+            omit("evidence", "expired")
+            continue
         if evidence_gate is not None and not evidence_gate(item):
             omit("evidence", "source_custody_denied")
             continue
@@ -1033,11 +1037,40 @@ def expiry_deadline(value: Any) -> datetime | None:
         return None
     try:
         parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError:
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC)
+    except (ValueError, OverflowError):
         return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)
+
+
+def evidence_expiry_deadline(
+    access_policy: Mapping[str, Any] | None,
+    metadata: Mapping[str, Any] | None = None,
+) -> datetime | None:
+    """Earliest explicit expiry of a retained source, normalized to UTC.
+
+    Capture stores transient expiry in metadata. ``valid_until`` is also kept
+    by historical imports. Both constrain present source custody alongside
+    access-policy expiry, without modifying the stored record. A populated
+    malformed expiry is already expired, so it cannot silently become durable.
+    """
+    deadlines = []
+    for container, keys in (
+        (access_policy, ("expires_at",)),
+        (metadata, ("expires_at", "valid_until")),
+    ):
+        if not isinstance(container, Mapping):
+            continue
+        for key in keys:
+            value = container.get(key)
+            if value is None or value == "":
+                continue
+            deadline = expiry_deadline(value)
+            if deadline is None:
+                return datetime.min.replace(tzinfo=UTC)
+            deadlines.append(deadline)
+    return min(deadlines, default=None)
 
 
 def _expired(value: Any) -> bool:

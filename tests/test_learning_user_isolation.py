@@ -62,9 +62,8 @@ def test_identical_corrections_have_distinct_user_owned_ids():
     artifacts = list(runtime.writer.read("t")["artifacts"].values())
     assert {row["user_id"] for row in artifacts} == {"alice", "bob"}
     assert len({row["id"] for row in artifacts}) == 2
-    assert all(row["state"] == "candidate" for row in artifacts)
-    assert all(row["pending_reason"] == "external_verification_pending_or_failed"
-               for row in artifacts)
+    assert all(row["state"] == "probation" for row in artifacts)
+    assert all(row["gate_evidence"]["user_source_quote_case_ids"] for row in artifacts)
     for item in artifacts:
         assert {runtime.engine.get_evidence("t", cid).user_id
                 for cid in item["source_cids"]} == {item["user_id"]}

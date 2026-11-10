@@ -14782,6 +14782,8 @@ def test_cli_provider_check_fails_closed_on_bad_skill_inducer(tmp_path: Path) ->
 
 def test_cli_profile_record_explicit_and_trajectory_attribute_aliases_persist(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
+    first = seed_grounded_gate_evidence(store, "Prefer deterministic CLI evidence.")
+    second = seed_grounded_gate_evidence(store, "Keep CLI validation reproducible.")
 
     profile = run_cli(
         store,
@@ -14797,9 +14799,9 @@ def test_cli_profile_record_explicit_and_trajectory_attribute_aliases_persist(tm
         "--confidence",
         "0.83",
         "--evidence-cid",
-        "cid-explicit-a",
+        first,
         "--evidence-cid",
-        "cid-explicit-b",
+        second,
     )
     profile_context = run_cli(
         store,
@@ -14820,7 +14822,7 @@ def test_cli_profile_record_explicit_and_trajectory_attribute_aliases_persist(tm
     assert profile_entry["statement"] == "Prefer deterministic CLI evidence."
     assert profile_entry["scope"] == {"surface": "cli", "project": "mnemosyne"}
     assert profile_entry["confidence"] == 0.83
-    assert profile_entry["source_evidence_cids"] == ["cid-explicit-a", "cid-explicit-b"]
+    assert profile_entry["source_evidence_cids"] == [first, second]
 
     trajectory = run_cli(
         store,

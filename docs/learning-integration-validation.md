@@ -1,5 +1,82 @@
 # Learning integration validation — 2026-11-05
 
+## 2026-11-09 memory effectiveness fixes
+
+This follow-up addresses observed memory behavior through the existing runtime
+and shared retrieval pipeline:
+
+- Repeated captured requests no longer fill ordinary relevance results with the
+  same text. Duplicate candidates trigger a bounded refill, with original source
+  identities, author separation, and authorization preserved. Explicit history,
+  deep, and passage reads retain their individual occurrences.
+- Gated probationary memories without an active incumbent receive paired trial
+  allocations, so they can collect useful served and control outcomes sooner.
+  Promotion still requires the existing verified-outcome counts and causal
+  confidence checks. Reading or preparing context alone cannot promote a memory.
+- A failed procedure followed by an explicit external correction and independent
+  successful executions can propose an exact-query revision. Old successes no
+  longer veto that changed procedure before its comparison trial. Historical
+  episodes remain intact; current conflicting outcomes, protected cases, live
+  source custody, and the existing revision promotion gates still apply.
+- Calibration learns against the raw forecast input while preserving the emitted
+  prediction and its hash. Previously mixed calibration buckets rebuild from new
+  receipts. Turns that never received a forecast no longer create false
+  miscalibration defects or freeze learning.
+- Clear user corrections remain learnable after an earlier tool verdict has
+  closed the turn. A separate, source-linked feedback record retains the later
+  correction without rewriting the original outcome or reusing its receipt.
+  Neutral follow-ups, quoted criticism, and repeated questions no longer create
+  automatic failure rewards merely because they contain correction keywords.
+- Exact user corrections can pass the internal source-retention check using the
+  live, authorized user quote. Factual regression cases still require their
+  normal retrieval result and confidence; a retained correction enters probation
+  and still needs observed trial outcomes before promotion.
+- Transient capture metadata (`expires_at` and imported `valid_until`) now
+  constrains current recall alongside access-policy expiry. Derived facts,
+  profiles, learning sources, maintained-answer snapshots, and source-backed
+  working memory share this boundary. Warm caches recheck time-dependent
+  custody without deleting the historical source record.
+- Exploratory withholding preserves `must_keep` evidence and protected-case
+  sources. Learning source checks share retrieval's current, transitive custody
+  checks, including access-policy expiry, retirement, quarantine, and erasure.
+  Retained assistant provenance remains distinct from external outcome authority.
+
+The focused regressions exercise real Local/SQLite stores, actual receipt-bound
+outcomes, revision trials through promotion, persistence/reload, and negative
+cases for source custody and ownership. Trial allocation and receipt insertion
+share the existing store transaction, including across SQLite engine instances;
+retrieval and provider work stay outside it. This follow-up changes no benchmark
+definitions or thresholds and does not replace the historical evaluation results
+below.
+
+Final focused integration: **689 passed, 83 skipped in 122.78 seconds** across
+31 explicit selectors covering the changed learning, retrieval, source-custody,
+working-memory, maintained-answer, and host paths. Environment-dependent skips
+remain skips, not passes. Ruff and `git diff --check` passed. The source/test
+snapshot remained unchanged throughout verification.
+
+The offline wheel build and isolated installed-wheel smoke passed: SQLite
+calibration persisted across reload, repeated requests left the stored answer
+retrievable, and expired evidence remained stored but absent from current
+recall. All changed package files matched the wheel payload. Wheel SHA256:
+`3201dfb3a9df2b60d62191fed912b7addfdedf7f135d57a1069e560432175aa8`.
+
+Exact selectors, JUnit results, source hashes, original failing reproductions,
+and the installed-wheel receipt are retained locally in
+`/Users/admin/.codex/tmp/mnemosyne-learning-effectiveness-20261109/`
+(`ship-focused-selectors.json`, `ship-focused.xml`, `ship-source-sha256.json`,
+and `ship-wheel-smoke.json`). These are focused local checks, not a new broad
+benchmark result or deployed-host validation.
+
+The full-repository test run was stopped at the user's request and was not
+restarted. Its profile fixture used nonexistent source IDs; the fixture now
+captures real evidence and is included in the focused verification. Existing
+working-route fixtures likewise retain their routing assertions with real source
+custody. Correction-admission fixtures now assert probation with explicit
+user-quote gate evidence. No full-suite pass is claimed for this follow-up.
+
+## Original 2026-11-05 integration
+
 This cleanup integrates the learning implementation with Mnemosyne's existing APIs. All 22 learning components retain their `active` default. Explicit pause/off settings and mandatory provenance, outcome, effect-approval, and erasure guards remain effective.
 
 The implementation is integrated with the reorganized `dev`/`main` baseline `d0143fe8`, including its journal/SQLite tenant ownership, redacted retrieval, ingestion validation, queue recovery, and parametric artifact-path fixes. The local architecture work and separately edited source files are preserved.

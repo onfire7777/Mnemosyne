@@ -26,7 +26,7 @@ from mnemosyne.access_policy import (
     apply_statement_redactions,
     apply_text_redactions,
     effective_max_sensitivity,
-    expiry_deadline,
+    evidence_expiry_deadline,
     filter_export_for_context,
     may_embed_item,
     may_read_item,
@@ -1906,9 +1906,9 @@ def _access_context_key(context: Mapping[str, Any] | None) -> str | None:
         return None
 
 
-def _policy_expires(access_policy: Any) -> bool:
-    """An access policy whose verdict depends on the wall clock (``expires_at``)."""
-    return isinstance(access_policy, Mapping) and bool(access_policy.get("expires_at"))
+def _policy_expires(access_policy: Any, metadata: Any = None) -> bool:
+    """Whether a source's readability can depend on an explicit expiry."""
+    return evidence_expiry_deadline(access_policy, metadata) is not None
 
 
 @lru_cache(maxsize=1 << 18)
@@ -3225,8 +3225,8 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         self._source_change_events: list[tuple[int, str, str, str, str]] = []
         self._source_change_epoch = evidence_epoch()
         self._retrieval_result_cache_nonce = secrets.token_hex(16)
-        # Entries carry the earliest future access-policy expiry in scope: the
-        # scan is time-dependent through expires_at, so a cached result is only
+        # Entries carry the earliest future source or access-policy expiry:
+        # the scan is time-dependent, so a cached result is only
         # valid until that first allow→deny flip (None = no pending flip).
         self._candidate_memo: OrderedDict[
             tuple[Any, ...], tuple[datetime | None, list[Hit]]
@@ -7955,7 +7955,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         facts = _RowSecurity()
         # Ancestor policies may expire independently. Do not memoize derived
         # security facts beyond this operation without their entire closure.
-        facts.expires = _policy_expires(ev.access_policy) or is_derived_evidence(ev)
+        facts.expires = _policy_expires(ev.access_policy, ev.metadata) or is_derived_evidence(ev)
         if not derived_evidence_readable(
             self,
             ev,
@@ -8100,17 +8100,17 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 status="active",
                 erased=ev.erased,
             )
-            if _policy_expires(ev.access_policy):
+            if _policy_expires(ev.access_policy, ev.metadata):
                 cacheable = False
                 if not decision.allowed:
                     return None, cacheable
             elif not decision.allowed:
                 return None, all(
-                    not _policy_expires(row.access_policy) for row in source_rows
+                    not _policy_expires(row.access_policy, row.metadata) for row in source_rows
                 )
             source_rows.append(ev)
         cacheable = all(
-            not _policy_expires(row.access_policy) and not is_derived_evidence(row)
+            not _policy_expires(row.access_policy, row.metadata) and not is_derived_evidence(row)
             for row in source_rows
         )
 
@@ -9581,8 +9581,8 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             if entry is not None:
                 deadline, cached = entry
                 if deadline is not None and now >= deadline:
-                    # An access_policy.expires_at in scope has passed: the
-                    # scan's may_read_item decisions changed with NO write, so
+                    # A source or access-policy expiry in scope has passed:
+                    # the scan's read decisions changed with NO write, so
                     # the entry is stale despite the unchanged version key.
                     del self._candidate_memo[key]
                     cached = None
@@ -9606,36 +9606,36 @@ class LocalMemoryEngine(CanaryOverlayMixin):
     def _candidate_memo_deadline(
         self, tenant_id: Any, branch: Any, now: datetime
     ) -> datetime | None:
-        """Earliest future ``expires_at`` across the rows a candidate scan reads.
+        """Earliest future expiry across the rows a candidate scan reads.
 
-        ``may_read_item`` is time-dependent only through ``expires_at`` (a
-        monotone allow→deny flip), so a memoized scan stays valid exactly until
+        Explicit source and policy expiries cause a monotone allow→deny flip,
+        so a memoized scan stays valid exactly until
         the first future deadline in scope. Denied-for-other-reasons rows are
         included conservatively: their deadline costs one extra rescan, never a
         wrong cached hit.
         """
         deadline: datetime | None = None
-        policies = (
+        records = (
             *(
-                ev.access_policy
+                ev
                 for ev in self.evidence.in_branch(tenant_id, branch).values()
                 if ev.tenant_id == tenant_id and ev.branch == branch
             ),
             *(
-                a.access_policy
+                a
                 for a in self.assertions.in_branch(tenant_id, branch).values()
                 if a.tenant_id == tenant_id and a.branch == branch
             ),
             *(
-                p.access_policy
+                p
                 for p in self.preferences.values()
                 if p.tenant_id == tenant_id
             ),
         )
-        for policy in policies:
-            if not policy:
-                continue
-            candidate = expiry_deadline(policy.get("expires_at"))
+        for record in records:
+            candidate = evidence_expiry_deadline(
+                record.access_policy, getattr(record, "metadata", None)
+            )
             if (
                 candidate is not None
                 and candidate > now

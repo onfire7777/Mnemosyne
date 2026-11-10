@@ -38,16 +38,22 @@ def diagnostics(state: dict, *, source_lookup=None) -> list[dict]:
         if episode.get("status") == "resolved":
             by_class[episode["task_class"]].append(episode)
     for task, episodes in sorted(by_class.items()):
-        predictions = [
-            episode
-            for episode in episodes
-            if all(
-                _active_component(
-                    state["receipts"].get(receipt_id, {}), "metacognition"
-                )
+        predictions = []
+        for episode in episodes:
+            receipts = [
+                state["receipts"].get(receipt_id)
                 for receipt_id in episode.get("receipt_ids", [])
-            )
-        ]
+            ]
+            if receipts and all(
+                receipt is not None
+                and all(
+                    receipt.get(key) == episode.get(key)
+                    for key in ("tenant_id", "user_id", "session_id")
+                )
+                and _active_component(receipt, "metacognition")
+                for receipt in receipts
+            ):
+                predictions.append(episode)
         if len(predictions) >= CALIBRATION_MIN_EPISODES:
             bins = defaultdict(list)
             for episode in predictions:

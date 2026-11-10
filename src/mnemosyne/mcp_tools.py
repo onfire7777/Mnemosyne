@@ -930,19 +930,25 @@ class MemoryTools:
         session_identity: SessionIdentity | None = None,
         limit: int | None = None, kinds: list[str] | None = None,
     ) -> dict[str, Any]:
-        self._authorize_working(
+        identity = self._authorize_working(
             session_identity, tenant_id=tenant_id, session_id=session_id,
             user_id=user_id, agent_id=agent_id,
         )
+        from mnemosyne.retrieval import readable_working_items
+
         clock = self._working_time(as_of, "as_of")
-        items = select_working_items(
-            [
-                item for item in self.engine.list_working(tenant_id, session_id, as_of=clock)
-                if self._working_matches(item, user_id=user_id, agent_id=agent_id, task_id=task_id, branch=branch)
-            ],
-            kinds=kinds,
-            limit=limit,
+        items = [
+            item for item in self.engine.list_working(tenant_id, session_id, as_of=clock)
+            if self._working_matches(item, user_id=user_id, agent_id=agent_id, task_id=task_id, branch=branch)
+        ]
+        items = readable_working_items(
+            self.engine, items, tenant_id=tenant_id, policy=self.engine.policy,
+            filt=self._read_context(
+                tenant_id, role=identity.role, user_id=user_id,
+                capability_tags=list(identity.capabilities),
+            ),
         )
+        items = select_working_items(items, kinds=kinds, limit=limit)
         return {"as_of": clock.isoformat(), "items": [item.to_dict() for item in items]}
 
     def working_promote(

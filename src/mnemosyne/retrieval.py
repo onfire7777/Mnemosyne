@@ -27,6 +27,7 @@ from mnemosyne.access_policy import (
     apply_statement_redactions,
     apply_text_redactions,
     effective_max_sensitivity,
+    evidence_expiry_deadline,
     may_read_item,
     unknown_access_policy_keys,
 )
@@ -3923,6 +3924,12 @@ def evidence_current_for_context(item: Any, filt: Mapping[str, Any] | None) -> b
     """Document lifecycle and owner gate shared by every current-read path."""
     if _item_field(item, "retired_at") is not None:
         return False
+    deadline = evidence_expiry_deadline(
+        _item_field(item, "access_policy"), _item_field(item, "metadata")
+    )
+    # Historical selection cannot widen the current source-custody boundary.
+    if deadline is not None and deadline <= utc_now():
+        return False
     if _item_field(item, "document_segment_id") is not None:
         owner = _item_field(item, "user_id")
         return (
@@ -4209,6 +4216,28 @@ def projection_sources_readable(
         filt=filt,
         policy=policy,
     )
+
+
+def readable_working_items(
+    ops: Any,
+    items: Sequence[Any],
+    *,
+    tenant_id: str,
+    filt: Mapping[str, Any],
+    policy: OperatingPolicy,
+) -> list[Any]:
+    """Apply current source custody before working text is ranked or returned.
+
+    Working stores validate originating evidence in main, independently of the
+    working item's display branch. Reads preserve that same source identity.
+    """
+    return [
+        item for item in items
+        if projection_sources_readable(
+            ops, _working_field(item, "evidence_ids", []),
+            tenant_id=tenant_id, branch="main", filt=filt, policy=policy,
+        )
+    ]
 
 
 def _evidence_sources_readable(

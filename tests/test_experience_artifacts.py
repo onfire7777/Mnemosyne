@@ -675,8 +675,8 @@ def test_explicit_user_correction_creates_a_scoped_quote_backed_lesson():
     assert lessons[0]["content"] == "Use bullet points in release notes."
     assert lessons[0]["source_quotes"][0]["quote"] == lessons[0]["content"]
     assert lessons[0]["scope_match"]["query"] == "Format the release notes"
-    assert lessons[0]["state"] == "candidate"
-    assert lessons[0]["pending_reason"] == "external_verification_pending_or_failed"
+    assert lessons[0]["state"] == "probation"
+    assert lessons[0]["gate_evidence"]["user_source_quote_case_ids"]
 
 
 def test_curiosity_adds_posterior_variance_times_class_need_to_replay():

@@ -39,7 +39,7 @@ from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime, timezone
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
 from mnemosyne.cid_lists import shared_or_copy
@@ -68,6 +68,7 @@ from mnemosyne.retrieval import (
     query_time_window,
     window_support_query,
     prospective_memory_hits,
+    readable_working_items,
     require_supported_query_mode,
     resolve_query_timezone,
     schema_fast_path_rerank,
@@ -379,6 +380,10 @@ def _working_memory_route(
             return [], report
         items = _scope_working_items(
             list(list_working(tenant_id, session_id, as_of=evaluated_at) or []), effective_filter
+        )
+        items = readable_working_items(
+            ops, items, tenant_id=tenant_id,
+            filt=effective_filter, policy=policy,
         )
         embedder = getattr(getattr(ops, "adapters", None), "embedding", None)
         if embedder is None:
@@ -1053,6 +1058,64 @@ def deduplicate_observation_preferred(
         "source_expansion_budget_tokens": source_expansion_budget_tokens,
     }
     return combined, report
+
+
+def _distinct_learning_turns(
+    hits: list[Hit], source_scope: Callable[[Hit], tuple[Any, ...]],
+) -> list[Hit]:
+    """Keep one readable representative of identical captured conversation text.
+
+    Capturing the same request in different chats creates distinct source CIDs.
+    Those records retain their custody and history, but repeating their text in
+    a relevance result adds no information. Never merge scores or provenance:
+    repetition is not corroboration. Other evidence and temporal routes retain
+    their individual occurrences.
+    """
+    first: dict[tuple[Any, ...], Hit] = {}
+    scopes: dict[tuple[Any, ...], set[tuple[Any, ...]]] = {}
+    distinct = []
+    for hit in hits:
+        if hit.kind == "evidence" and hit.metadata.get("source_type") == "learning_turn":
+            key = (
+                hit.tenant_id, hit.branch, hit.metadata.get("actor"), hit.text,
+                hit.trust_tier, hit.sensitivity, hit.metadata.get("reality_class"),
+                json.dumps(hit.metadata.get("privacy"), sort_keys=True),
+            )
+            if key in first:
+                if key not in scopes:
+                    scopes[key] = {source_scope(first[key])}
+                scope = source_scope(hit)
+                if scope in scopes[key]:
+                    continue
+                scopes[key].add(scope)
+            else:
+                first[key] = hit
+        distinct.append(hit)
+    return distinct
+
+
+def _diverse_learning_search(
+    search: Callable[[str, int, dict[str, Any]], list[Hit]],
+    query: str,
+    k: int,
+    filt: dict[str, Any],
+    source_scope: Callable[[Hit], tuple[Any, ...]],
+) -> list[Hit]:
+    """Refill slots consumed by repeated turns, with bounded backend work.
+
+    Ordinary searches still perform exactly one backend call. Widen only when
+    duplicate captured turns have crowded a full candidate page. All reads use
+    the same authorization filter; no raw corpus or private text is consulted.
+    """
+    width = k
+    while True:
+        hits = search(query, width, filt)
+        distinct = _distinct_learning_turns(hits, source_scope)
+        if len(distinct) >= k or len(hits) < width or width >= 4096:
+            return distinct[:k]
+        if len(distinct) == len(hits):
+            return distinct[:k]
+        width = min(4096, width * 2)
 
 
 def _source_only_local_routes(adapters: RetrievalAdapters, routes: list[list[Hit]]) -> bool:
@@ -1743,6 +1806,31 @@ def run_retrieval_pipeline(
     )
     window_explain: dict[str, Any] | None = None
     window_hits: list[Hit] = []
+    diversify_learning = (
+        window is None and not deep and not passage_mode and passage_graph is None
+        and not effective_filter.get("as_of") and not _SEQUENCE_ORDER_RE.search(query)
+    )
+    source_scopes = {}
+
+    def source_scope(hit):
+        key = (hit.tenant_id, hit.branch, hit.id)
+        if key not in source_scopes:
+            source = ops.get_evidence(hit.tenant_id, hit.id, branch=hit.branch)
+            # Owner identity stays private and is read only after a collision.
+            # Missing or non-text sources retain their individual hit identity.
+            source_scopes[key] = (
+                ("owner", source.user_id, source.actor, source.content_pointer)
+                if source is not None and source.user_id
+                and source.source_type == "learning_turn" and source.modality == "text"
+                else ("item", *key)
+            )
+        return source_scopes[key]
+
+    def search_relevance(search, count, filt):
+        if diversify_learning:
+            return _diverse_learning_search(search, query, count, filt, source_scope)
+        return search(query, count, filt)
+
     if window is not None:
         window_hits, window_explain = _time_window_route(
             ops, window, effective_filter, tenant_id=tenant_id, branch=branch, passage_graph=passage_graph, k=k
@@ -1816,8 +1904,8 @@ def run_retrieval_pipeline(
         graph, prospective, working, working_explain = [], [], [], {}
     elif parallel_channels_enabled():
         with ThreadPoolExecutor(max_workers=5) as pool:
-            dense_future = pool.submit(ops.vector_search, query, policy.rerank_width, effective_filter)
-            lexical_future = pool.submit(ops.lexical_search, query, policy.rerank_width, effective_filter)
+            dense_future = pool.submit(search_relevance, ops.vector_search, policy.rerank_width, effective_filter)
+            lexical_future = pool.submit(search_relevance, ops.lexical_search, policy.rerank_width, effective_filter)
             graph_future = pool.submit(
                 ops.graph_ppr,
                 tokenize(query),
@@ -1853,8 +1941,8 @@ def run_retrieval_pipeline(
             prospective = prospective_future.result()
             working, working_explain = working_future.result() if working_future is not None else ([], {})
     else:
-        dense = ops.vector_search(query, policy.rerank_width, effective_filter)
-        lexical = ops.lexical_search(query, policy.rerank_width, effective_filter)
+        dense = search_relevance(ops.vector_search, policy.rerank_width, effective_filter)
+        lexical = search_relevance(ops.lexical_search, policy.rerank_width, effective_filter)
         graph = _fast_graph_hits(
             ops.graph_ppr(
                 tokenize(query),
@@ -1893,7 +1981,7 @@ def run_retrieval_pipeline(
     ):
         # Reauthorize the complete source corpus, not only the first channel's top
         # hits. The passage route builds BM25 solely from readable, redacted text.
-        sources = ops.lexical_search(query, width, {**effective_filter, "query_mode": "passages"})
+        sources = search_relevance(ops.lexical_search, width, {**effective_filter, "query_mode": "passages"})
         include_quarantined = bool(effective_filter.get("include_quarantined", False))
         default_max_trust = int(TrustTier.UNTRUSTED_EXTERNAL) if include_quarantined else policy.max_trust_tier
         max_trust = int(effective_filter.get("max_trust_tier", effective_filter.get("min_trust_tier", default_max_trust)))
@@ -2034,6 +2122,8 @@ def run_retrieval_pipeline(
             if not passage_mode or dense else lexical
         )
     collapsed_turns = 0
+    if diversify_learning:
+        fused = _distinct_learning_turns(fused, source_scope)
     if working:
         fused, collapsed_turns = _collapse_session_duplicates(fused)
     # Passage and graph-ranked search keep their relevance order: the local hashing

@@ -290,6 +290,8 @@ class PromotionGate:
         candidate: Candidate,
         apply_candidate: Callable[[LocalMemoryEngine, str], None],
         pre_merge_check: Callable[[LocalMemoryEngine, str], str | None] | None = None,
+        *,
+        _case_evaluator: Callable[[RegressionCase, str], bool | None] | None = None,
     ) -> GateResult:
         branch = candidate.branch
         self._reset_branch(branch, tenant_id)
@@ -299,9 +301,11 @@ class PromotionGate:
         failed: list[str] = []
         protected_regressions: list[str] = []
         for case in self.relevant_cases(candidate):
-            result = self.engine.retrieve(case.query, tenant_id=tenant_id, branch=branch, deep=case.tier != "smoke", record_access=False, filt=self.retrieval_context)
-            rendered = "\n".join(hit.text for hit in result.hits)
-            ok = case.expected_substring.lower() in rendered.lower() and not result.abstained
+            ok = _case_evaluator(case, branch) if _case_evaluator is not None else None
+            if ok is None:
+                result = self.engine.retrieve(case.query, tenant_id=tenant_id, branch=branch, deep=case.tier != "smoke", record_access=False, filt=self.retrieval_context)
+                rendered = "\n".join(hit.text for hit in result.hits)
+                ok = case.expected_substring.lower() in rendered.lower() and not result.abstained
             if ok:
                 passed.append(case.id)
             else:

@@ -160,34 +160,74 @@ def candidate_score(artifact: dict, episode: dict) -> float | None:
 def ground_quotes(
     runtime, tenant: str, artifact: dict, episodes: list[dict]
 ) -> list[dict]:
+    sources = [
+        (episode, runtime.engine.get_evidence(tenant, cid))
+        for episode in episodes for cid in episode["source_cids"]
+    ]
+    if artifact.get("content_kind", artifact.get("kind")) == "lesson":
+        sources.sort(key=lambda pair: pair[1] is None or pair[1].actor != "user")
     quotes = []
     for step in artifact["steps"]:
         found = None
-        for episode in episodes:
-            for cid in episode["source_cids"]:
-                source = runtime.engine.get_evidence(tenant, cid)
-                if (
-                    source
-                    and not source.erased
-                    and (
-                        source.actor == "tool"
-                        or (
-                            artifact.get("origin") == "imported"
-                            or artifact.get("content_kind", artifact.get("kind"))
-                            == "lesson"
-                        )
-                        and source.actor == "user"
+        for episode, source in sources:
+            if (
+                source
+                and not source.erased
+                and (
+                    source.actor == "tool"
+                    or (
+                        artifact.get("origin") == "imported"
+                        or artifact.get("content_kind", artifact.get("kind")) == "lesson"
                     )
-                    and step in source.content
-                ):
-                    found = {"episode_id": episode["id"], "cid": cid, "quote": step}
-                    break
-            if found:
+                    and source.actor == "user"
+                )
+                and step in source.content
+            ):
+                found = {"episode_id": episode["id"], "cid": source.cid, "quote": step}
                 break
         if not found:
             return []
         quotes.append(found)
     return quotes
+
+
+def _user_correction_proofs(artifact, source_cases, snapshot, external_case_ids):
+    """Bind internal retention cases to actual, negatively signed user corrections."""
+    candidates = []
+    if artifact.get("kind") == "lesson" and artifact.get("origin") == "learned":
+        candidates.extend(zip(source_cases, artifact["source_quotes"], strict=True))
+    for row in snapshot["policy"].get("protected_cases", {}).values():
+        if (
+            row.get("reason") == "retain_verified_source_quote"
+            and row.get("user_id") == artifact.get("user_id")
+            and len(row.get("source_cids", [])) == 1
+            and len(row.get("source_episode_ids", [])) == 1
+        ):
+            case = RegressionCase.from_dict(row["case"])
+            candidates.append((case, {
+                "episode_id": row["source_episode_ids"][0],
+                "cid": row["source_cids"][0], "quote": case.query,
+            }))
+    proofs = {}
+    for case, quote in candidates:
+        episode = snapshot["episodes"].get(quote["episode_id"], {})
+        if (
+            case.id not in external_case_ids
+            and case.id == "source-" + digest(quote)[:20]
+            and case.protected and case.origin == "genuine" and case.mode == "active"
+            and case.query == case.expected_substring == quote["quote"]
+            and case.signature == episode.get("task_class")
+            and episode.get("user_id") == artifact.get("user_id")
+            and quote["cid"] in episode.get("source_cids", [])
+            and any(
+                signal.get("kind") == "correction" and signal.get("value", 0) < 0
+                and signal.get("source") not in EXCLUDED_SOURCES
+                and signal.get("evidence") == quote["quote"]
+                for signal in episode.get("signals", [])
+            )
+        ):
+            proofs[case.id] = quote
+    return proofs
 
 
 def evaluate_candidate(
@@ -216,13 +256,18 @@ def evaluate_candidate(
     source_cases = [
         _source_case(artifact, quote) for quote in artifact["source_quotes"]
     ]
-    recorded = runtime.writer.read(tenant)["policy"].get("protected_cases", {})
+    snapshot = runtime.writer.read(tenant)
+    recorded = snapshot["policy"].get("protected_cases", {})
     protected = [
         RegressionCase.from_dict(row["case"])
         for row in recorded.values()
         if row.get("user_id") == artifact.get("user_id")
     ]
-    protected.extend(getattr(runtime, "protected_cases", []))
+    external_cases = list(getattr(runtime, "protected_cases", []))
+    protected.extend(external_cases)
+    quote_proofs = _user_correction_proofs(
+        artifact, source_cases, snapshot, {case.id for case in external_cases},
+    )
     cases = list({case.id: case for case in [*source_cases, *protected]}.values())
     protected = [
         case
@@ -249,6 +294,23 @@ def evaluate_candidate(
         artifact["source_cids"],
     )
     candidate_cases = []
+    verified_quote_cases = []
+
+    def verify_quote(case, branch):
+        quote = quote_proofs.get(case.id)
+        if quote is None:
+            return None
+        source = runtime.engine.get_evidence(tenant, quote["cid"], branch=branch)
+        verified = bool(
+            source is not None and not source.erased
+            and source.tenant_id == tenant and source.user_id == artifact.get("user_id")
+            and source.actor == "user" and source.trust_tier <= 1
+            and source.content == quote["quote"]
+            and runtime._sources_live(tenant, [quote["cid"]], artifact.get("user_id"))
+        )
+        if verified:
+            verified_quote_cases.append(case.id)
+        return verified
 
     def check(engine, branch):
         if artifact.get("origin") == "imported":
@@ -273,7 +335,8 @@ def evaluate_candidate(
         return None
 
     result = gate.evaluate(
-        tenant, proposal, lambda engine, branch: None, pre_merge_check=check
+        tenant, proposal, lambda engine, branch: None, pre_merge_check=check,
+        _case_evaluator=verify_quote,
     )
     replay = sorted(
         replay_episodes or episodes, key=lambda e: (e["created_at"], e["id"])
@@ -305,6 +368,8 @@ def evaluate_candidate(
         "admission_only": imported,
         "replay_episode_ids": [row["episode_id"] for row in scores],
     }
+    if verified_quote_cases:
+        artifact["gate_evidence"]["user_source_quote_case_ids"] = sorted(verified_quote_cases)
     artifact["gate_passed"] = passed
     if not passed:
         artifact["pending_reason"] = "external_verification_pending_or_failed"

@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from typing import Any, Callable, Mapping, Sequence
 from uuid import uuid4
 
+from mnemosyne.access_policy import evidence_expiry_deadline
 from mnemosyne.answering import (
     AnswerLimits,
     AnswerReadContext,
@@ -588,15 +589,9 @@ class MentalModelService:
                     stable["source_policy_sha256"] = _digest(raw.access_policy)
                     evidence[cid] = copy.deepcopy(row)
 
-                    if isinstance(raw.access_policy, dict):
-                        exp_str = raw.access_policy.get("expires_at")
-                        if isinstance(exp_str, str):
-                            try:
-                                exp_dt = datetime.fromisoformat(exp_str).astimezone(UTC)
-                                if earliest_expiry is None or exp_dt < earliest_expiry:
-                                    earliest_expiry = exp_dt
-                            except (ValueError, TypeError):
-                                pass
+                    deadline = evidence_expiry_deadline(raw.access_policy, raw.metadata)
+                    if deadline is not None and (earliest_expiry is None or deadline < earliest_expiry):
+                        earliest_expiry = deadline
 
                 included.append(stable)
             corpus[collection] = sorted(included, key=_canonical)

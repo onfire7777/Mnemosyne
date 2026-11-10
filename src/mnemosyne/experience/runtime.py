@@ -255,28 +255,26 @@ class LearningRuntime:
     def _sources_live(
         self, tenant: str, cids: list[str], user_id: str | None = None
     ) -> bool:
-        from mnemosyne.access_policy import may_read_item
+        from mnemosyne.retrieval import projection_sources_readable
+        from mnemosyne.security import TrustTier
 
-        for cid in cids:
-            evidence = self.engine.get_evidence(tenant, cid)
-            if evidence is None or evidence.erased:
-                return False
-            if (
-                user_id is not None
-                and not may_read_item(
-                    item_tenant_id=tenant,
-                    sensitivity=evidence.sensitivity,
-                    access_policy=evidence.access_policy,
-                    context={
-                        "tenant_id": tenant,
-                        "principal": user_id,
-                        "role": "reader",
-                    },
-                    policy_max_sensitivity=self.engine.policy.max_sensitivity,
-                ).allowed
-            ):
-                return False
-        return bool(cids)
+        return bool(cids) and projection_sources_readable(
+            self.engine,
+            cids,
+            tenant_id=tenant,
+            branch="main",
+            filt={
+                "tenant_id": tenant,
+                "user_id": user_id,
+                "principal": user_id,
+                "role": "reader",
+                # This checks retained provenance, whose episode may contain
+                # assistant text. Promotion gates separately require external
+                # source quotes and verified outcomes for learned authority.
+                "max_trust_tier": int(TrustTier.UNTRUSTED_EXTERNAL),
+            },
+            policy=self.engine.policy,
+        )
 
     def prepare_context(
         self,
@@ -484,21 +482,72 @@ class LearningRuntime:
         else:
             hits, eligible_hits = [], []
         if not high_risk and self._enabled(state, "exploration"):
-            hits = [
-                hit
-                for hit in hits
-                if rng.random()
-                >= max(
-                    getattr(self.engine.policy, "learning_exploration_floor", 0.02),
-                    getattr(self.engine.policy, "learning_exploration_rate", 0.1),
-                )
-            ]
+            protected_cids = {
+                cid
+                for case in state["policy"].get("protected_cases", {}).values()
+                if case.get("user_id") in {None, user_id}
+                for cid in case.get("source_cids", [])
+            }
+            retained = []
+            source_protection = {}
+            withholding_rate = max(
+                getattr(self.engine.policy, "learning_exploration_floor", 0.02),
+                getattr(self.engine.policy, "learning_exploration_rate", 0.1),
+            )
+            for hit in hits:
+                if rng.random() >= withholding_rate:
+                    retained.append(hit)
+                    continue
+                source_ids = list(hit.get("provenance", []))
+                if hit.get("kind") == "evidence":
+                    source_ids.append(hit["id"])
+                protected = bool(protected_cids.intersection(source_ids))
+                for cid in source_ids:
+                    key = (hit.get("branch", "main"), cid)
+                    if key not in source_protection:
+                        source = self.engine.get_evidence(tenant_id, cid, branch=key[0])
+                        metadata = source.metadata if source else {}
+                        lifecycle = metadata.get("lifecycle")
+                        source_protection[key] = bool(
+                            metadata.get("must_keep")
+                            or isinstance(lifecycle, dict) and lifecycle.get("must_keep")
+                        )
+                    protected = protected or source_protection[key]
+                if protected:
+                    retained.append(hit)
+            hits = retained
+        # Retrieval may outlive source expiry or a custody update. Refresh the
+        # small applicable set before allocating or exposing any learned item.
+        artifacts = [
+            item for item in artifacts
+            if self._sources_live(tenant_id, item.get("source_cids", []), user_id)
+        ]
+        eligible_artifact_ids = {item["id"] for item in artifacts}
+        fast_eligible = bool(
+            fast_eligible and best_known["id"] in eligible_artifact_ids
+        )
         active = [item for item in artifacts if item["state"] in {"active", "labile"}]
         candidates = [
             item for item in artifacts if item["state"] in {"probation", "demoted"}
         ]
         active.sort(key=lambda item: (-item["lower_bound"], item["id"]))
-        if exploration and candidates:
+        probation = [
+            item
+            for item in candidates
+            if item["state"] == "probation"
+            and item.get("gate_passed")
+            and not item.get("ab_trial")
+        ]
+        standalone_trial = (
+            not active
+            and bool(probation)
+            and not high_risk
+            and self._enabled(state, "exploration")
+            and getattr(self.engine.policy, "learning_exploration_rate", 0.1) < 1
+        )
+        if not standalone_trial:
+            probation = []
+        if not standalone_trial and exploration and candidates:
             # Thompson sampling expresses uncertainty, using tested outcome posteriors only.
             candidates.sort(
                 key=lambda item: rng.betavariate(
@@ -547,22 +596,6 @@ class LearningRuntime:
                 "trial_key": trial_key,
             }
             break
-        prediction = _posterior(
-            state["stats"].get(stat_key("class", task, 1, task))
-        ).mean
-        if selected:
-            logits = [
-                math.log(
-                    max(0.001, min(0.999, item["confidence"]))
-                    / (1 - max(0.001, min(0.999, item["confidence"])))
-                )
-                for item in selected
-            ]
-            prediction = 1 / (1 + math.exp(-sum(logits) / len(logits)))
-        bin_key = str(min(9, int(prediction * 10)))
-        calibration = state["policy"].get("calibration_bins", {}).get(bin_key, {})
-        if self._enabled(state, "metacognition") and calibration.get("n", 0) >= 20:
-            prediction = (calibration["successes"] + 1) / (calibration["n"] + 2)
         mode = "fast" if fast_eligible else "deliberate"
         turn_index = state["policy"].get("turns", {}).get(session_id, 0)
         served = []
@@ -582,57 +615,153 @@ class LearningRuntime:
                 )
             )
             served.append(ServedItem("item", hit["id"], routes, rank))
-        served += [
-            ServedItem(item["kind"], item["id"], (), rank, item["revision"])
-            for rank, item in enumerate(selected, 1)
-        ]
-        receipt = ContextReceipt(
-            new_id(),
-            tenant_id,
-            user_id,
-            session_id,
-            task,
-            prediction,
-            digest(effective_policy),
-            now().isoformat(),
-            turn_index,
-            tuple(served),
-        ).to_dict()
-        receipt.update(
-            query=query,
-            effective_policy=effective_policy,
-            policy_variant_id=active_variant["id"]
-            if active_variant
-            else self._policy_variants(task)[0].id,
-            mode=mode,
-            full_retrieval_performed=full_retrieval_performed,
-            comparison_sample=bool(comparison_sample),
-            goal_checked=mode == "fast",
-            exploration=exploration,
-            risk_level="high" if high_risk else risk_level or "normal",
-            revision_trial=revision_trial,
-            eligible_targets=[
-                {"kind": "item", "item_id": hit["id"], "revision": 1}
-                for hit in eligible_hits
-            ]
-            + [
-                {
-                    "kind": item["kind"],
-                    "item_id": item["id"],
-                    "revision": item["revision"],
-                }
-                for item in artifacts
-            ],
-            available_tools=tools,
-            source_cids=sorted(
-                {cid for item in selected for cid in item["source_cids"]}
-            ),
-        )
 
         def capture(current):
+            chosen = selected
+            chosen_exploration = exploration
+            trial_record = None
+            if probation:
+                # Receipt insertion and allocation share one transaction. Other
+                # preparations cannot reserve the same place in a trial pair.
+                trial_choices = [
+                    live for item in probation
+                    if (live := current["artifacts"].get(item["id"]))
+                    and live["state"] == "probation"
+                    and live["revision"] == item["revision"]
+                    and live.get("user_id") == user_id
+                    and live.get("gate_passed")
+                    and not live.get("ab_trial")
+                    and applies_to(live, task, query)
+                ]
+                has_incumbent = any(
+                    item["id"] in eligible_artifact_ids
+                    and item["state"] in {"active", "labile"}
+                    and item.get("user_id") == user_id
+                    and applies_to(item, task, query)
+                    for item in current["artifacts"].values()
+                )
+                if not self._enabled(current, "exploration") or has_incumbent:
+                    trial_choices = []
+                chosen = []
+                chosen_exploration = False
+                if trial_choices:
+                    trials = [
+                        row["probation_trial"]
+                        for row in current["receipts"].values()
+                        if row.get("user_id") == user_id
+                        and row.get("task_class") == task
+                        and row.get("probation_trial")
+                    ]
+                    counts = {
+                        item["id"]: sum(
+                            trial["candidate_id"] == item["id"]
+                            and trial["revision"] == item["revision"]
+                            for trial in trials
+                        )
+                        for item in trial_choices
+                    }
+                    candidate = min(
+                        trial_choices, key=lambda item: (counts[item["id"]], item["id"])
+                    )
+                    posterior = self._target_posterior(
+                        current, candidate["kind"], candidate["id"], candidate["revision"], task
+                    )
+                    candidate = {
+                        **candidate,
+                        "confidence": posterior.mean,
+                        "lower_bound": posterior.lower_bound,
+                        "low_confidence": posterior.lower_bound < 0.8,
+                    }
+                    index = counts[candidate["id"]]
+                    assignment = digest([
+                        tenant_id, user_id, task, candidate["id"],
+                        candidate["revision"], index // 2,
+                    ])
+                    first_served = int(assignment[:16], 16) % 2 == 0
+                    chosen_exploration = (index % 2 == 0) == first_served
+                    trial_record = {
+                        "candidate_id": candidate["id"],
+                        "revision": candidate["revision"],
+                        "index": index,
+                        "arm": "served" if chosen_exploration else "control",
+                    }
+                    if chosen_exploration:
+                        chosen = [{**candidate, "exploration": True}]
+            prediction = _posterior(
+                current["stats"].get(stat_key("class", task, 1, task))
+            ).mean
+            if chosen:
+                logits = [
+                    math.log(
+                        max(0.001, min(0.999, item["confidence"]))
+                        / (1 - max(0.001, min(0.999, item["confidence"])))
+                    )
+                    for item in chosen
+                ]
+                prediction = 1 / (1 + math.exp(-sum(logits) / len(logits)))
+            raw_prediction = prediction
+            bin_key = str(min(9, int(raw_prediction * 10)))
+            calibration = current["policy"].get("calibration_bins", {}).get(bin_key, {})
+            if (
+                self._enabled(current, "metacognition")
+                and current["policy"].get("calibration_version") == 2
+                and calibration.get("n", 0) >= 20
+            ):
+                prediction = (calibration["successes"] + 1) / (calibration["n"] + 2)
+            selected_items = [
+                ServedItem(item["kind"], item["id"], (), rank, item["revision"])
+                for rank, item in enumerate(chosen, 1)
+            ]
+            receipt = ContextReceipt(
+                new_id(),
+                tenant_id,
+                user_id,
+                session_id,
+                task,
+                prediction,
+                digest(effective_policy),
+                now().isoformat(),
+                turn_index,
+                tuple(served + selected_items),
+            ).to_dict()
+            receipt.update(
+                query=query,
+                raw_prediction=raw_prediction,
+                effective_policy=effective_policy,
+                policy_variant_id=active_variant["id"]
+                if active_variant
+                else self._policy_variants(task)[0].id,
+                mode=mode,
+                full_retrieval_performed=full_retrieval_performed,
+                comparison_sample=bool(comparison_sample),
+                goal_checked=mode == "fast",
+                exploration=chosen_exploration,
+                probation_trial=trial_record,
+                risk_level="high" if high_risk else risk_level or "normal",
+                revision_trial=revision_trial,
+                eligible_targets=[
+                    {"kind": "item", "item_id": hit["id"], "revision": 1}
+                    for hit in eligible_hits
+                ]
+                + [
+                    {
+                        "kind": item["kind"],
+                        "item_id": item["id"],
+                        "revision": item["revision"],
+                    }
+                    for item in artifacts
+                ],
+                available_tools=tools,
+                source_cids=sorted(
+                    {cid for item in chosen for cid in item["source_cids"]}
+                ),
+            )
             current["receipts"][receipt["id"]] = receipt
+            return receipt, chosen
 
-        self.writer.apply(tenant_id, "capture", capture)
+        receipt, selected = self.writer.apply(tenant_id, "capture", capture)
+        prediction = receipt["prediction"]
+        exploration = receipt["exploration"]
         from .candidates import (
             learning_knowledge_context,
             materialize_framework,
@@ -738,9 +867,10 @@ class LearningRuntime:
             for e in state["episodes"].values()
             if e["session_id"] == session_id
             and e["user_id"] == user_id
-            and e["status"] == "open"
+            and not e.get("feedback_for_episode_id")
         ]
         previous.sort(key=lambda e: (e["created_at"], e["id"]))
+        followup_feedback = None
         for episode in previous[-1:]:
             age = (
                 now() - datetime.fromisoformat(episode["created_at"])
@@ -753,7 +883,12 @@ class LearningRuntime:
                 )
                 else ""
             )
-            replies = user_signals(user_text, previous_query) if age <= 900 else []
+            replies = user_signals(user_text, previous_query) if 0 <= age <= 900 else []
+            if episode["status"] != "open":
+                corrections = [item for item in replies if item["kind"] == "correction"]
+                if episode["status"] == "resolved" and corrections:
+                    followup_feedback = (episode, corrections)
+                continue
             for item in replies:
                 self.record_signal(
                     tenant_id,
@@ -811,6 +946,7 @@ class LearningRuntime:
                     )
                 )
             )
+        correction_source_cid = cids[0] if user_text else None
         for event in tool_events or []:
             if event.get("source") in {
                 "assistant",
@@ -921,9 +1057,31 @@ class LearningRuntime:
             "reward": None,
             "rpe": None,
             "turn_index": len(
-                [e for e in state["episodes"].values() if e["session_id"] == session_id]
+                [e for e in state["episodes"].values()
+                 if e["session_id"] == session_id and not e.get("feedback_for_episode_id")]
             ),
         }).to_record()
+        feedback = None
+        if (
+            followup_feedback is not None and correction_source_cid in cids
+            and self._sources_live(tenant_id, followup_feedback[0]["source_cids"], user_id)
+        ):
+            prior, corrections = followup_feedback
+            feedback = Trajectory.from_record({
+                **episode,
+                "id": digest(["followup_feedback", prior["id"], correction_source_cid]),
+                "feedback_for_episode_id": prior["id"],
+                "task_class": prior["task_class"],
+                "user_text": prior["user_text"],
+                "source_cids": sorted({correction_source_cid, *prior["source_cids"]}),
+                "receipt_ids": [],
+                "tool_events": [],
+                "used_skills": [],
+                "used_lessons": [],
+                "cited_cids": [],
+                "signals": corrections,
+                "prediction": 0.5,
+            }).to_record()
 
         def observe(current):
             if any(
@@ -932,12 +1090,26 @@ class LearningRuntime:
                 for receipt_id in episode["receipt_ids"]
             ):
                 raise ValueError("receipt was consumed concurrently")
+            feedback_id = None
+            if feedback is not None:
+                latest = max(
+                    (row for row in current["episodes"].values()
+                     if row["session_id"] == session_id and row["user_id"] == user_id
+                     and not row.get("feedback_for_episode_id")),
+                    key=lambda row: (row["created_at"], row["id"]), default=None,
+                )
+                if latest is not None and latest["id"] == feedback["feedback_for_episode_id"]:
+                    current["episodes"].setdefault(feedback["id"], feedback)
+                    feedback_id = feedback["id"]
             current["episodes"][episode_id] = episode
             current["policy"].setdefault("turns", {})[session_id] = (
                 episode["turn_index"] + 1
             )
+            return feedback_id
 
-        self.writer.apply(tenant_id, "observe", observe)
+        feedback_id = self.writer.apply(tenant_id, "observe", observe)
+        if feedback_id is not None:
+            self.resolve(tenant_id, feedback_id)
         return {"episode_id": episode_id}
 
     def episode(self, tenant_id: str, episode_id: str) -> dict:
@@ -1071,14 +1243,26 @@ class LearningRuntime:
             if self._collects(state, "metacognition") and any(
                 signal["kind"] in {"verifier", "tests"} for signal in episode["signals"]
             ):
-                bin_key = str(min(9, int(episode["prediction"] * 10)))
-                calibration = (
-                    state["policy"]
-                    .setdefault("calibration_bins", {})
-                    .setdefault(bin_key, {"n": 0, "successes": 0.0})
+                receipt = (
+                    state["receipts"][episode["receipt_ids"][-1]]
+                    if episode["receipt_ids"]
+                    else {}
                 )
-                calibration["n"] += 1
-                calibration["successes"] += (outcome + 1) / 2
+                raw_prediction = receipt.get("raw_prediction")
+                # Earlier bins mixed calibrated outputs with raw inputs. Those
+                # observations cannot be inverted, so rebuild from new receipts.
+                if raw_prediction is not None:
+                    if state["policy"].get("calibration_version") != 2:
+                        state["policy"]["calibration_bins"] = {}
+                        state["policy"]["calibration_version"] = 2
+                    bin_key = str(min(9, int(raw_prediction * 10)))
+                    calibration = (
+                        state["policy"]
+                        .setdefault("calibration_bins", {})
+                        .setdefault(bin_key, {"n": 0, "successes": 0.0})
+                    )
+                    calibration["n"] += 1
+                    calibration["successes"] += (outcome + 1) / 2
             if self._enabled(state, "skills"):
                 for receipt_id in episode["receipt_ids"]:
                     for item in state["receipts"][receipt_id]["items"]:
@@ -1852,7 +2036,8 @@ class LearningRuntime:
             for episode_id in affected:
                 row = state["episodes"][episode_id]
                 keep = {"id", "tenant_id", "user_id", "session_id", "task_class", "created_at",
-                        "expires_at", "turn_index", "receipt_ids", "prediction", "reward", "rpe"}
+                        "expires_at", "turn_index", "receipt_ids", "prediction", "reward", "rpe",
+                        "feedback_for_episode_id"}
                 for name in list(row):
                     if name not in keep:
                         row.pop(name)

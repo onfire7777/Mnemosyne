@@ -43,6 +43,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from mnemosyne.access_policy import evidence_expiry_deadline
 from mnemosyne.cid_lists import evidence_epoch
 
 THIN_CANARIES_ENV = "MNEMOSYNE_THIN_CANARIES"
@@ -662,7 +663,7 @@ class CanaryOverlayMixin:
                         parent_filt, evidence_items=(ev,), assertion_items=(), include_preferences=False
                     )
                     entry = (_evidence_fields(ev), hits[0] if hits else None)
-                    if not _expires(ev.access_policy):
+                    if not _expires(ev.access_policy, ev.metadata):
                         evidence_cache[key] = entry
                 if entry[1] is not None:
                     out.append(entry[1])
@@ -815,9 +816,9 @@ class CanaryOverlayMixin:
         return {"assertions": touched_assertions, "evidence": touched_evidence}
 
 
-def _expires(access_policy: Any) -> bool:
+def _expires(access_policy: Any, metadata: Any = None) -> bool:
     """A row whose readability changes with time is never served from the projection cache."""
-    return isinstance(access_policy, dict) and bool(access_policy.get("expires_at"))
+    return evidence_expiry_deadline(access_policy, metadata) is not None
 
 
 def _evidence_fields(ev: Any) -> tuple[Any, ...]:
