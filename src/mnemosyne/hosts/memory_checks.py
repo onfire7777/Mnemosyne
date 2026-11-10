@@ -9,6 +9,7 @@ from copy import deepcopy
 from dataclasses import asdict
 import json
 import shlex
+from types import SimpleNamespace
 
 from mnemosyne.experience.receipts import digest
 from mnemosyne.local_paths import normalize_workspace
@@ -48,7 +49,9 @@ def freeze_contracts(engine, tenant, hits, pages, delivered_pages, item_sources)
                                                          'assertion', identifier)
         contract = getattr(projection, 'calibration', {}).get('verification_contract')
         if isinstance(contract, dict) and contract.get('source_cid') in item_sources[identifier]:
-            frozen[identifier] = [{**deepcopy(contract), '_projection': {
+            frozen[identifier] = [{**deepcopy(contract),
+                **({'file': projection.scope['file']} if projection.scope.get('file') else {}),
+                '_projection': {
                 'kind': 'assertion', 'id': identifier, 'branch': hit.get('branch', 'main'),
                 'fingerprint': _fingerprint(projection)}}]
     for page in pages:
@@ -114,6 +117,35 @@ def _same_workspace(actual, expected):
     return actual is not None and actual == expected
 
 
+def _read_observation(contract, event):
+    """Use the same deterministic parser as capture, with actual tool bytes only.
+
+    A reread is independent evidence of a stored claim, not a task-success
+    label. File custody is mandatory so equal keys from other files cannot
+    confirm a memory. No model or assistant-generated statement is a checker.
+    """
+    from mnemosyne.project_observations import extract_observed_claims, _complete_config_snapshot
+
+    output = event.get('output') or event.get('stdout')
+    if not contract.get('file') or not isinstance(output, str) or not output:
+        return None
+    source = SimpleNamespace(actor='tool', cid='current-tool-' + event['call_id'],
+                             content=output, metadata={})
+    claims = [claim for claim in extract_observed_claims(source, event=event)
+              if claim.subject == contract.get('subject')
+              and claim.predicate == contract.get('predicate')
+              and claim.scope.get('file') == contract['file']]
+    if claims:
+        values = {claim.object for claim in claims}
+        return next(iter(values)) == contract.get('object') if len(values) == 1 else None
+    snapshot = _complete_config_snapshot(source, event, None)
+    if (snapshot is not None and snapshot['scope'].get('file') == contract['file']
+            and str(contract.get('predicate', '')).startswith('configuration.')
+            and contract['predicate'] not in snapshot['keys']):
+        return False
+    return None
+
+
 def _check(contract, event):
     if (event.get('source') != 'tool' or event.get('evidence_rejected')
             or not event.get('call_id') or not event.get('check_id')
@@ -135,6 +167,8 @@ def _check(contract, event):
         # Contradictory results from one observation are ambiguous.
         if len(matches) == 1 and 'object' in matches[0]:
             return matches[0]['object'] == contract.get('object')
+        if not matches:
+            return _read_observation(contract, event)
     return None
 
 

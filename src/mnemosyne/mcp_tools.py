@@ -2038,18 +2038,25 @@ class MemoryTools:
 
         return MentalModelService(self.engine, provider_factory=self._grounded_provider_factory)
 
-    @staticmethod
     def _mental_model_context(
-        tenant_id: str, user_id: str, branch: str, role: WriteRole,
+        self, tenant_id: str, user_id: str, branch: str, role: WriteRole,
         source_trust_tier: int | None, max_trust_tier: int | None,
         max_sensitivity: int | None, capability_tags: list[str] | None,
         purpose: list[str] | None, residency: str | None, region: str | None,
         lawful_basis: list[str] | None, break_glass: bool, as_of: str | None,
+        *, model_id: str | None = None,
     ) -> AnswerReadContext:
         for field, value in (("tenant_id", tenant_id), ("user_id", user_id), ("branch", branch)):
             _require_text(value, field=field)
         if type(break_glass) is not bool or break_glass:
             raise ValueError("mental models cannot persist break_glass access")
+        # Existing models keep their saved read ceiling when a caller does not
+        # specify one. In particular, pre-separation models may have persisted
+        # a ceiling derived from writer provenance; never widen that history.
+        if model_id is not None and max_trust_tier is None:
+            record = self.engine.get_mental_model_record(tenant_id, model_id, branch)
+            if record is not None and record.get("owner_id") == user_id:
+                max_trust_tier = (record.get("scope") or {}).get("max_trust_tier")
         return AnswerReadContext(
             tenant_id=tenant_id, user_id=user_id, branch=branch, role=role,
             source_trust_tier=source_trust_tier, max_trust_tier=max_trust_tier,
@@ -2126,7 +2133,7 @@ class MemoryTools:
         context = self._mental_model_context(
             tenant_id, user_id, branch, role, source_trust_tier, max_trust_tier,
             max_sensitivity, capability_tags, purpose, residency, region,
-            lawful_basis, break_glass, as_of,
+            lawful_basis, break_glass, as_of, model_id=model_id,
         )
         if refresh_if_stale:
             self._authorize_mental_model_write("mental_model_refresh", context)
@@ -2154,7 +2161,19 @@ class MemoryTools:
             max_sensitivity, capability_tags, purpose, residency, region,
             lawful_basis, break_glass, as_of,
         )
-        return self._mental_model_service().list(context)
+        service = self._mental_model_service()
+        result = service.list(context)
+        if max_trust_tier is None:
+            # A default list also discovers older, more restrictive saved
+            # scopes. Read each under its own ceiling; all other scope fields
+            # still have to match exactly in the service.
+            ceilings = {record.get("scope", {}).get("max_trust_tier")
+                        for record in self.engine.list_mental_model_records(tenant_id, branch)
+                        if record.get("owner_id") == user_id}
+            for ceiling in sorted(value for value in ceilings if type(value) is int
+                                  and 0 <= value <= self.engine.policy.max_trust_tier):
+                result.extend(service.list(context.narrow(max_trust_tier=ceiling)))
+        return result
 
     def mental_model_refresh(
         self,
@@ -2181,7 +2200,7 @@ class MemoryTools:
         context = self._mental_model_context(
             tenant_id, user_id, branch, role, source_trust_tier, max_trust_tier,
             max_sensitivity, capability_tags, purpose, residency, region,
-            lawful_basis, break_glass, as_of,
+            lawful_basis, break_glass, as_of, model_id=model_id,
         )
         self._authorize_mental_model_write("mental_model_refresh", context)
         return self._mental_model_service().refresh(context, model_id, force=force)
@@ -2216,7 +2235,7 @@ class MemoryTools:
         context = self._mental_model_context(
             tenant_id, user_id, branch, role, source_trust_tier, max_trust_tier,
             max_sensitivity, capability_tags, purpose, residency, region,
-            lawful_basis, break_glass, as_of,
+            lawful_basis, break_glass, as_of, model_id=model_id,
         )
         self._authorize_mental_model_write("mental_model_update", context)
         return self._mental_model_service().update(context, model_id, name=name, question=question, expected_version=expected_version)
@@ -2251,7 +2270,7 @@ class MemoryTools:
         context = self._mental_model_context(
             tenant_id, user_id, branch, role, source_trust_tier, max_trust_tier,
             max_sensitivity, capability_tags, purpose, residency, region,
-            lawful_basis, break_glass, as_of,
+            lawful_basis, break_glass, as_of, model_id=model_id,
         )
         self._authorize_mental_model_write("mental_model_schedule", context)
         return self._mental_model_service().schedule(
@@ -2283,7 +2302,7 @@ class MemoryTools:
         context = self._mental_model_context(
             tenant_id, user_id, branch, role, source_trust_tier, max_trust_tier,
             max_sensitivity, capability_tags, purpose, residency, region,
-            lawful_basis, break_glass, as_of,
+            lawful_basis, break_glass, as_of, model_id=model_id,
         )
         self._authorize_mental_model_write("mental_model_delete", context)
         return self._mental_model_service().delete(context, model_id, expected_version=expected_version)
@@ -2310,7 +2329,7 @@ class MemoryTools:
         context = self._mental_model_context(
             tenant_id, user_id, branch, role, source_trust_tier, max_trust_tier,
             max_sensitivity, capability_tags, purpose, residency, region,
-            lawful_basis, break_glass, as_of,
+            lawful_basis, break_glass, as_of, model_id=model_id,
         )
         return self._mental_model_service().history(context, model_id)
 
@@ -3965,7 +3984,10 @@ class MemoryTools:
         from mnemosyne.knowledge_maintenance import read_knowledge_context
         supplemental["knowledge_pages"] = read_knowledge_context(
             self.engine, AnswerReadContext(tenant_id=tenant_id, user_id=user_id,
-                role="reader", source_trust_tier=source_trust_tier), query)
+                # source_trust_tier authenticates this request's write provenance;
+                # it is not the least-trusted source this reader may inspect.
+                # The normal policy and per-source ACL checks still govern reads.
+                role="reader", max_trust_tier=self.engine.policy.max_trust_tier), query)
         return runtime.prepare_context(tenant_id, user_id, session_id,
             _require_text(query, field="query"), available_tools, task_type, risk_level,
             workspace=workspace, read_scope=read_scope, supplemental_context=supplemental,

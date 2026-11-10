@@ -240,7 +240,7 @@ def test_signed_mcp_reflect_binds_scope_role_and_trust_before_every_hop(tmp_path
             session_id="current-session",
         ))
         args = {"session_token": token, "question": "When does Ada's project launch?",
-                "role": "operator", "source_trust_tier": 5}
+                "role": "operator", "source_trust_tier": 5, "max_trust_tier": 0}
         response = call_reflect(server, args)
         assert response.get("isError", False) is False, response
         assert response["structuredContent"]["answer"] == "Friday"

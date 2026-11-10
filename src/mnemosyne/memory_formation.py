@@ -145,7 +145,7 @@ def _semantic_context(engine, source, snapshot) -> dict:
 def project_direct_user_memory(
     engine, tenant_id: str, cid: str, branch: str = "main", *,
     semantic_proposer=None, semantic_reviewer=None, timezone: str | None = None, agent_id: str = "codex",
-    session_id: str | None = None,
+    session_id: str | None = None, provider_cursor=None,
 ) -> dict:
     """Project trusted user evidence through the existing episodic extractor."""
     result = {"source_cid": cid, "assertion_ids": [], "relation_ids": [], "count": 0,
@@ -209,7 +209,8 @@ def project_direct_user_memory(
         batches.append((clause, facts))
     semantic = build_semantic_projection(source, policy, all_clauses, proposer=semantic_proposer, reviewer=semantic_reviewer,
         supported_clauses={clause for clause, facts in batches if facts.assertions},
-        context=_semantic_context(engine, source, snapshot))
+        context=_semantic_context(engine, source, snapshot), provider_cursor=provider_cursor)
+    result.update(semantic.coverage)
     result["rejected_proposals"] = semantic.rejected
     # Recovery needs the review outcome even when the proposal itself was
     # retained in quarantine. Otherwise a transient provider failure would

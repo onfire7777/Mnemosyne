@@ -8,7 +8,7 @@ import time
 
 from mnemosyne.experience.receipts import digest
 
-PROJECTION_VERSION = 2
+PROJECTION_VERSION = 3
 
 
 def maintenance_context(engine, tenant_id, user_id):
@@ -24,8 +24,8 @@ def maintenance_context(engine, tenant_id, user_id):
 
 def _retryable(value):
     if isinstance(value, dict):
-        if value.get('provider_unavailable') or value.get('reason') in {
-            'provider_failed', 'provider_unavailable', 'reviewer_unavailable', 'review_failed',
+        if value.get('provider_unavailable') or value.get('coverage_stalled') or value.get('reason') in {
+            'provider_failed', 'provider_unavailable', 'reviewer_unavailable', 'review_failed', 'provider_input_budget',
         }:
             return True
         return any(_retryable(item) for item in value.values())
@@ -68,17 +68,18 @@ def advance_project_memory(runtime, tenant_id, user_id, checkpoint_path, *, limi
     except (OSError, ValueError):
         checkpoint = {}
     scope = {'tenant_id': tenant_id, 'user_id': user_id}
-    compatible = (checkpoint.get('version') in {1, PROJECTION_VERSION}
+    compatible = (checkpoint.get('version') in {1, 2, PROJECTION_VERSION}
                   and checkpoint.get('scope', scope) == scope)
     completed = checkpoint.get('completed', {}) if compatible else {}
     retries = checkpoint.get('retries', {}) if compatible else {}
     provider_queue = checkpoint.get('provider_queue', {}) if compatible else {}
     provider_completed = checkpoint.get('provider_completed', {}) if compatible else {}
-    if compatible and checkpoint.get('version') == 1:
-        # Version one completed whole episodes without a durable source queue.
-        # Revisit their idempotent deterministic projection once to discover
-        # pending provider sources; keep genuine failure backoff intact.
+    if compatible and checkpoint.get('version') != PROJECTION_VERSION:
+        # Earlier checkpoints declared whole sources done after a single
+        # bounded proposal. Revisit deterministic snapshots and source coverage
+        # once while retaining genuine failures' retry backoff.
         completed = {}
+        provider_completed = {}
     timestamp = time.time()
     state = runtime.writer.read(tenant_id)
     rows = sorted((row for row in state['episodes'].values()
@@ -146,13 +147,25 @@ def advance_project_memory(runtime, tenant_id, user_id, checkpoint_path, *, limi
         item.update(_next_attempt(item, time.time()))
         _save_checkpoint(path, state)
         try:
-            results = runtime._project_episode_memory(tenant_id, by_id[item['episode_id']],
-                                                       provider_cids={item['source_cid']})
+            options = {'provider_cids': {item['source_cid']}}
+            if 'cursor' in item:
+                options['provider_cursors'] = {item['source_cid']: item['cursor']}
+            results = runtime._project_episode_memory(tenant_id, by_id[item['episode_id']], **options)
             report['created'] += sum(result.get('created_count', 0) for result in results)
             report['provider_processed'] += 1
+            continuation = next((result for result in results
+                if result.get('source_cid') == item['source_cid'] and result.get('provider_pending')), None)
+            if continuation is not None and isinstance(continuation.get('provider_cursor'), dict):
+                # Keep the position and stall count even while backing off,
+                # so a window that adds nothing is eventually passed.
+                item['cursor'] = continuation['provider_cursor']
             if not _retryable(results):
-                provider_completed[key] = {name: item[name] for name in ('episode_id', 'source_cid', 'fingerprint')}
-                provider_queue.pop(key, None)
+                if continuation is not None:
+                    item['attempts'] = 0
+                    item['next_attempt'] = 0
+                else:
+                    provider_completed[key] = {name: item[name] for name in ('episode_id', 'source_cid', 'fingerprint')}
+                    provider_queue.pop(key, None)
         except Exception as error:
             report['errors'].append({'episode_id': item['episode_id'], 'source_cid': item['source_cid'],
                                      'phase': 'provider', 'type': type(error).__name__})

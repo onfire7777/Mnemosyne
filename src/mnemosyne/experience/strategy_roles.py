@@ -15,6 +15,10 @@ INSTRUCTIONS = {
     "verify": "Run the relevant independent check against the current target and inspect its result.",
     "reproduce": "Reproduce the reported failure with an independent check before changing the target.",
 }
+READ_TOOLS = {"read_file", "read", "search", "rg", "grep", "list_files", "view_file",
+              "open_file", "read_resource", "fetch", "web_search", "find_in_files",
+              "get_file_contents", "list_directory", "view_image", "screenshot"}
+WRITE_TOOLS = {"apply_patch", "edit_file", "write_file", "replace_in_file", "create_file"}
 
 
 def action_role(event):
@@ -25,19 +29,24 @@ def action_role(event):
     checks = [row for row in tool_signals([event]) if row["kind"] in {"tests", "verifier"}]
     if checks and (event.get("output") or event.get("evidence")):
         return "verify"
-    if name in {"read_file", "read", "search", "rg", "grep", "list_files", "view_file"}:
+    if name in READ_TOOLS:
         return "inspect"
-    if name in {"apply_patch", "edit_file", "write_file", "replace_in_file"}:
+    if name in WRITE_TOOLS:
         return "modify"
     command = event.get("command")
     if not isinstance(command, str):
         return None
     try:
-        parts = shlex.split(command)
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|<>()")
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        parts = list(lexer)
     except ValueError:
         return None
-    if not parts or any(token in {";", "&&", "||", "|", ">", ">>", "<"} for token in parts):
+    if not parts or any(token and all(char in ";&|<>()" for char in token) for token in parts):
         return None
+    if parts[0] == "pwd" and all(part in {"-L", "-P"} for part in parts[1:]) and event.get("exit_code", 0) == 0:
+        return "context"
     if parts[0] in {"rg", "grep", "cat", "head", "tail", "ls", "find"}:
         return "inspect"
     if parts[:2] in (["git", "status"], ["git", "diff"], ["git", "show"], ["git", "log"]):
@@ -46,7 +55,7 @@ def action_role(event):
 
 
 def trace_roles(episode):
-    """Unknown operations are not silently assumed to be safe workflow stages."""
+    """Keep observed check/edit cycles; unknown side effects still refuse transfer."""
     from .candidates import observed_action
     stages = []
     for index, event in enumerate(episode.get("tool_events", [])):
@@ -54,6 +63,8 @@ def trace_roles(episode):
             continue
         action = observed_action(event)
         role = action_role(event)
+        if role == "context":
+            continue  # Only recognized side-effect-free context queries.
         if not action or not role:
             return None
         if stages and stages[-1]["role"] == role:
@@ -68,12 +79,25 @@ def trace_roles(episode):
         if any(signal["value"] < 0 for signal in initial):
             stages[0]["role"] = "reproduce"
     roles = [stage["role"] for stage in stages]
-    if roles not in (["inspect", "modify", "verify"], ["reproduce", "inspect", "modify", "verify"]):
+    if not roles or roles[-1] != "verify" or roles[0] not in {"inspect", "reproduce"}:
+        return None
+    # Observation/check workflows and repeated repair/check cycles are useful
+    # beyond a single three-step code edit. Every mutation must follow actual
+    # inspection or a reproduced failure, and the trace must end in a check.
+    inspected = roles[0] == "reproduce"
+    for role in roles:
+        if role == "inspect":
+            inspected = True
+        if role == "modify" and not inspected:
+            return None
+    if len(roles) < 2 or len(roles) > 16:
         return None
     return stages
 
 
 def canonical_steps(roles):
+    if not roles:
+        return []
     conditional = roles[0] == "reproduce"
     return [json.dumps({"type": "strategy_stage", "role": role,
                         "when": "initial_check_failed" if conditional and i else "always",
@@ -95,8 +119,8 @@ def abstract_proof(episodes, receipts):
         if not contract or not stages:
             return None
         from .signals import tool_signals
-        if not all(signal["value"] > 0 for index in stages[-1]["indices"]
-                   for signal in tool_signals([row["tool_events"][index]])):
+        checks = tool_signals([row["tool_events"][index] for index in stages[-1]["indices"]])
+        if not checks or not all(signal["value"] > 0 for signal in checks):
             return None
         evidence.append({"episode_id": row["id"], "contract": contract, "stages": stages})
     roles = [stage["role"] for stage in evidence[0]["stages"]]
@@ -116,8 +140,7 @@ def abstract_score(artifact, episode):
     if not stages or [row["role"] for row in stages] != proof.get("roles"):
         return None
     from .signals import reward, tool_signals
-    checks = [signal for index in stages[-1]["indices"]
-              for signal in tool_signals([episode["tool_events"][index]])
+    checks = [signal for signal in tool_signals([episode["tool_events"][index] for index in stages[-1]["indices"]])
               if signal["kind"] in {"tests", "verifier"}]
     value = reward(checks)
     return None if value is None else float(value > 0)
@@ -134,8 +157,8 @@ def role_tools_available(roles, tools):
     names = {re.split(r"\.|__", str(tool))[-1].casefold() for tool in tools}
     shell = bool(names & {"exec", "exec_command", "shell", "bash", "python", "run_command"})
     return all({
-        "inspect": shell or bool(names & {"read", "read_file", "search", "rg", "grep", "view_file"}),
-        "modify": bool(names & {"apply_patch", "edit_file", "write_file", "replace_in_file"}),
+        "inspect": shell or bool(names & READ_TOOLS),
+        "modify": bool(names & WRITE_TOOLS),
         "verify": shell or bool(names & {"checker", "external_checker", "run_tests", "verifier"}),
         "reproduce": shell or bool(names & {"checker", "external_checker", "run_tests", "verifier"}),
     }.get(role, False) for role in roles)
@@ -164,7 +187,7 @@ def propose_abstract_strategies(state, limit=8):
         candidate = _candidate(first["task_class"], steps, rows)
         candidate.update(id=digest(["abstract-strategy", key]), strategy_contract=proof, scope_match=None,
                          conditions=proof["shape"]["constraints"], needs=[],
-                         explanation="These conditional workflow stages were independently observed on distinct targets; bind every stage to the current target and inspect the new results.")
+                         explanation="These workflow stages and their concrete source traces were independently observed on distinct targets; bind each stage to the current target. Earlier failed checks remain diagnostic evidence, never success. Inspect the final independent check.")
         result.append(candidate)
         if len(result) >= limit:
             break

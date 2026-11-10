@@ -49,7 +49,7 @@ def test_schedule_forwards_complete_scope_and_options(recorded_tools):
         "interval_seconds": 600, "enabled": False, "expected_version": 3,
     }
     assert context.tenant_id == "tenant-a" and context.user_id == "user-a"
-    assert context.to_filter()["max_trust_tier"] == 1
+    assert context.to_filter()["max_trust_tier"] == 2
     assert context.max_sensitivity == 2 and context.capability_tags == ("memory",)
     assert context.purpose == ("assist",) and context.lawful_basis == ("consent",)
     assert context.residency == "us" and context.region == "us-west"

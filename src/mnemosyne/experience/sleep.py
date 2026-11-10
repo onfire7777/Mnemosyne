@@ -617,10 +617,12 @@ def consolidate(runtime, tenant: str) -> dict:
         if evaluate_candidate(runtime, tenant, candidate, episodes, replay):
             candidate["state"] = "probation"
         prepared.append(candidate)
+    proposal_misses = {}
     hypotheses = (
         _dream_hypotheses(
             runtime, tenant,
             [row for row in batch if row["id"] in eligible_episodes], snapshot,
+            proposal_misses,
         )
         if runtime._enabled(snapshot, "dreamer")
         else []
@@ -695,6 +697,8 @@ def consolidate(runtime, tenant: str) -> dict:
             state["policy"].setdefault("hypotheses", {}).setdefault(
                 hypothesis["id"], hypothesis
             )
+        if proposal_misses:
+            state["policy"].setdefault("environment_proposal_misses", {}).update(proposal_misses)
         if runtime._enabled(state, "homeostasis"):
             budget = getattr(
                 getattr(getattr(runtime, "engine", None), "policy", None),
@@ -722,7 +726,8 @@ def consolidate(runtime, tenant: str) -> dict:
 
 
 def _dream_hypotheses(
-    runtime, tenant: str, episodes: list[dict], state: dict | None = None
+    runtime, tenant: str, episodes: list[dict], state: dict | None = None,
+    proposal_misses: dict | None = None,
 ) -> list[dict]:
     from mnemosyne.dreamer import SandboxedDreamer
     from .hypotheses import experiment_proposals, factual_proposals, typed_hypothesis
@@ -765,7 +770,7 @@ def _dream_hypotheses(
     from .environment_experiments import environment_proposals
     return [*hypotheses, *factual_proposals(runtime, tenant, episodes),
             *experiment_proposals(runtime, tenant, experiment_episodes),
-            *environment_proposals(runtime, tenant, experiment_episodes)]
+            *environment_proposals(runtime, tenant, experiment_episodes, misses=proposal_misses)]
 
 
 def _reflection_batch(state: dict) -> tuple[list[dict], dict]:

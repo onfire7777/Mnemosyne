@@ -34,8 +34,9 @@ from mnemosyne.security import SecurityPolicy
 SCHEMA = "mnemosyne.automatic-knowledge/v1"
 _TAG = "automatic-knowledge"
 _PRONOUNS = {"i", "me", "my", "we", "our", "you", "your", "it", "this", "that", "they", "he", "she"}
-_SECTIONS = ("Established facts", "Observed configuration", "Observed facts", "Decisions",
-             "Pending commitments", "Resolved commitments", "Observed command outcomes", "Uncertainty")
+_SECTIONS = ("Decisions", "Preferences and constraints", "Known failure modes", "Pending commitments",
+             "Established facts", "Observed configuration", "Observed facts",
+             "Observed command outcomes", "Resolved commitments", "Uncertainty")
 _STOP_WORDS = set("a an the what which who where when how is are was were do does did my our your we i it this that about know tell me more of for to in on with and or".split())
 _TERM_EQUIVALENTS = {"runs": "run", "running": "run", "operates": "run", "operating": "run",
                      "hosts": "host", "hosting": "host", "hosted": "host", "deployed": "deploy",
@@ -46,6 +47,49 @@ _TERM_EQUIVALENTS = {"runs": "run", "running": "run", "operates": "run", "operat
 def _terms(text: str) -> set[str]:
     return {_TERM_EQUIVALENTS.get(term, term) for term in re.findall(r"\w+", _normal(text).replace("_", " "))
             if term not in _STOP_WORDS and len(term) > 1}
+
+
+def _durable_role(predicate: str) -> str | None:
+    terms = set(re.findall(r"\w+", predicate.casefold().replace("_", " ")))
+    if terms & {"decided", "decision", "chose", "chosen", "rationale"}:
+        return "Decisions"
+    if terms & {"prefer", "prefers", "preference", "requires", "constraint", "must", "prohibits"}:
+        return "Preferences and constraints"
+    if terms & {"failure", "fails", "failed", "pitfall", "workaround", "avoid"}:
+        return "Known failure modes"
+    return None
+
+
+def _claim_priority(claim: dict[str, Any], demand_terms: set[str] | None = None) -> float:
+    """Useful durable facts beat incidental fresh observations, with source custody unchanged."""
+    role = _durable_role(str(claim.get("predicate", ""))) or claim.get("section")
+    base = {"Decisions": 4.0, "Preferences and constraints": 4.0, "Known failure modes": 4.0,
+            "Pending commitments": 3.8, "Established facts": 2.5, "Observed configuration": 2.0,
+            "Observed facts": 2.0, "Uncertainty": 1.5, "Resolved commitments": 0.8,
+            "Observed command outcomes": 0.5}.get(role, 2.0)
+    terms = _terms(" ".join(str(claim.get(k, "")) for k in ("subject", "predicate", "object", "text")))
+    demand = len(terms & (demand_terms or set())) / max(1, len(demand_terms or ()))
+    support = min(1.0, math.log2(max(1, len(set(claim.get("source_evidence_cids") or [])))) / 2)
+    return base + 5 * demand + support
+
+
+def _ordered_claims(claims: list[dict[str, Any]], demand_terms: set[str] | None = None):
+    """Diversify sections and predicate families without inventing or merging claims."""
+    # Only the diversity bonus changes between picks; usefulness is fixed.
+    remaining = [(_claim_priority(claim, demand_terms),
+                  str(claim.get("predicate", "")).split(".", 1)[0], claim) for claim in claims]
+    sections: dict[str, int] = defaultdict(int)
+    families: dict[str, int] = defaultdict(int)
+    while remaining:
+        def score(row):
+            priority, family, claim = row
+            return (priority + 1 / (1 + sections[claim["section"]]) + 1 / (1 + families[family]),
+                    claim.get("observed_at") or "", claim["assertion_id"])
+        selected = max(remaining, key=score)
+        remaining.remove(selected)
+        sections[selected[2]["section"]] += 1
+        families[selected[1]] += 1
+        yield selected[2]
 
 
 def _embedding_identity(engine) -> str:
@@ -197,6 +241,8 @@ def _claim(engine: Any, context: AnswerReadContext, row: dict[str, Any]) -> dict
     predicate = _normal(str(row.get("predicate", "")))
     if epistemic == "reported_belief" or row["status"] == "contested":
         section = "Uncertainty"
+    elif _durable_role(predicate):
+        section = _durable_role(predicate)
     elif epistemic in {"observed_tool", "consolidated_evidence"}:
         section = {"configuration": "Observed configuration", "command_outcome": "Observed command outcomes"}.get(meta.get("observation_kind"), "Observed facts")
     elif meta.get("commitment_state") in {"completed", "cancelled"}:
@@ -282,7 +328,7 @@ def _render(title: str, claims: list[dict[str, Any]], links: list[dict[str, Any]
         lines += ["", "## Overview"]
         for (subject, epistemic), facts in sorted(grouped.items()):
             properties = []
-            for claim in facts:
+            for claim in facts[:3]:
                 relation = claim["predicate"].replace("_", " ")
                 value = claim["object"]
                 scope = ", ".join(f"{key}: {value}" for key, value in sorted(claim.get("scope", {}).items())
@@ -338,8 +384,7 @@ def read_knowledge_context(engine: Any, context: AnswerReadContext, query: str, 
             if current is None or current.version != page.version or not automatic_page_current(engine, current, context):
                 continue
         claims = []
-        for claim in sorted(page.maintenance.get("claims", []),
-                            key=lambda c: -len(terms & _terms(" ".join(str(c.get(k, "")) for k in ("text", "subject", "predicate", "object"))))):
+        for claim in _ordered_claims(page.maintenance.get("claims", []), terms):
             candidate = claims + [copy.deepcopy(claim)]
             if len(_render(page.title, candidate, []).encode("utf-8")) <= remaining:
                 claims = candidate
@@ -562,20 +607,32 @@ class KnowledgeMaintenanceWorker:
                             canonical_key, titles[key] = named_key, title
                 if canonical_key is None:
                     continue
+                demand_terms = set()
+                for cid in self._requests.get(key, [])[-32:]:
+                    source = self.engine.get_evidence(self.context.tenant_id, cid, self.context.branch)
+                    if source is not None and source.user_id == self.context.user_id and projection_sources_readable(
+                            self.engine, [cid], tenant_id=self.context.tenant_id, branch=self.context.branch,
+                            filt=self.context.to_filter(), policy=self.engine.policy):
+                        demand_terms.update(_terms(source.content[:4000]) - _terms(titles[key]))
                 seen = set()
                 page_tokens = 0
-                for row in sorted(rows, key=lambda r: (r.get("transaction_time", ""), r["id"]), reverse=True):
+                admitted = []
+                for row in sorted(rows, key=lambda r: (_claim_priority(r, demand_terms), r.get("transaction_time", ""), r["id"]), reverse=True):
                     if monotonic() >= deadline:
                         break
                     claim = _claim(self.engine, self.context, row)
                     if claim is None:
                         continue
+                    admitted.append(claim)
+                for claim in _ordered_claims(admitted, demand_terms):
                     text_key = _normal(claim["text"])
                     if text_key in seen:
                         continue
                     combined_tokens = (len(_render(titles[key], claims + [claim], []).encode("utf-8")) + 3) // 4
-                    if len(claims) >= self.max_claims or combined_tokens > self.max_tokens:
+                    if len(claims) >= self.max_claims:
                         break
+                    if combined_tokens > self.max_tokens:
+                        continue
                     seen.add(text_key)
                     claims.append(claim)
                     page_tokens = combined_tokens
@@ -601,7 +658,7 @@ class KnowledgeMaintenanceWorker:
                              branch=self.context.branch, filt=self.context.to_filter(), policy=self.engine.policy)][:12]
                 cids = sorted(set(cids).union(*(link["source_evidence_cids"] for link in links)))
                 identity = _embedding_identity(self.engine)
-                fingerprint = _digest([[c["fingerprint"] for c in claims], links, identity, 2])
+                fingerprint = _digest([[c["fingerprint"] for c in claims], links, identity, 3])
                 embedding_allowed = bool(claims) and all(c["embedding_allowed"] for c in claims)
                 if previous and previous.status == "active" and previous.maintenance.get("fingerprint") == fingerprint:
                     retry_at = parse_dt(previous.maintenance.get("embedding_retry_at"))
@@ -623,7 +680,7 @@ class KnowledgeMaintenanceWorker:
                     status="active" if claims else "stale",
                     maintenance={"schema": SCHEMA, "topic_key": canonical_key, "context": asdict(self.context),
                                  "claims": claims, "fingerprint": fingerprint, "related_topics": links,
-                                 "derivation_version": 2, "embedding": embedding, "embedding_identity": identity,
+                                 "derivation_version": 3, "embedding": embedding, "embedding_identity": identity,
                                  "embedding_retry_at": (utc_now() + timedelta(seconds=60)).isoformat() if embedding_allowed and not embedding else None})
                 if not claims:
                     if previous is None or (previous.status == "stale" and not previous.content_markdown):

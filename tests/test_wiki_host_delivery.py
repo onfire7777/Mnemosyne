@@ -26,7 +26,7 @@ def seed(engine, count=12):
 
 def test_large_wiki_fits_final_envelope_by_complete_claims(tmp_path):
     host = LocalHost(tmp_path)
-    context = seed(host.engine)
+    context = seed(host.engine, count=24)
     [original] = read_knowledge_context(host.engine, context, "What storage does Atlas use?")
     envelope = {"memory_use_reporting": {"command": ["python", "hook.py", "--report-use"],
         "session_id": "session", "turn_id": "turn"}}

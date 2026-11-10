@@ -324,6 +324,8 @@ class AnswerReadContext:
     user_id: str | None = None
     role: str = "reader"
     source_identity: str | None = None
+    # Provenance of this caller's input, used for write authorization. It must
+    # not become a filter on the independent trust labels of readable sources.
     source_trust_tier: int | None = None
     min_trust_tier: int | None = None
     max_trust_tier: int | None = None
@@ -397,13 +399,6 @@ class AnswerReadContext:
             value["purpose"] = list(self.purpose)
         if self.lawful_basis:
             value["lawful_basis"] = list(self.lawful_basis)
-        if self.source_trust_tier is not None:
-            current = value.get("max_trust_tier")
-            value["max_trust_tier"] = (
-                self.source_trust_tier
-                if current is None
-                else min(int(current), self.source_trust_tier)
-            )
         return value
 
     def narrow(self, **changes: Any) -> AnswerReadContext:

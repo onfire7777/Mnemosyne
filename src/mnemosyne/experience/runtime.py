@@ -1187,7 +1187,7 @@ class LearningRuntime:
                 )
             ).isoformat(),
             "prediction": receipts[-1]["prediction"] if receipts else 0.5,
-            "outcome_version": 2,
+            "outcome_version": 3,
             "reward": None,
             "rpe": None,
             "turn_index": len(
@@ -1256,7 +1256,8 @@ class LearningRuntime:
                     "erased": stored["status"] == "erased", "memory_formation": formation}
         return {"episode_id": episode_id, "memory_formation": formation}
 
-    def _project_episode_memory(self, tenant_id: str, episode: dict, *, provider_cids: set[str] | None = None) -> list[dict]:
+    def _project_episode_memory(self, tenant_id: str, episode: dict, *, provider_cids: set[str] | None = None,
+                                provider_cursors: dict | None = None) -> list[dict]:
         """Retry idempotent projections after durable capture, outside its transaction."""
         from mnemosyne.memory_formation import project_direct_user_memory
         from mnemosyne.project_observations import project_observed_memory, project_grounded_synthesis, _independent_content
@@ -1287,7 +1288,8 @@ class LearningRuntime:
                     semantic_proposer=config.get("semantic_proposer") if use_provider else None,
                     semantic_reviewer=config.get("semantic_reviewer") if use_provider else None,
                     timezone=source.metadata.get("source_timezone", config.get("source_timezone")),
-                    session_id=episode.get("session_id")))
+                    session_id=episode.get("session_id"),
+                    provider_cursor=(provider_cursors or {}).get(source.cid)))
                 if not use_provider and config.get("semantic_proposer") is not None:
                     projections[-1]["provider_pending"] = True
             elif source.actor == "tool":
@@ -1299,7 +1301,8 @@ class LearningRuntime:
                     event = matches[0] if len(matches) == 1 else None
                 projections.append(project_observed_memory(self.engine, tenant_id, source.cid,
                     event=event, proposer=config.get("project_observation_proposer") if use_provider else None,
-                    reviewer=config.get("semantic_reviewer") if use_provider else None))
+                    reviewer=config.get("semantic_reviewer") if use_provider else None,
+                    provider_cursor=(provider_cursors or {}).get(source.cid)))
                 if (not use_provider and config.get("project_observation_proposer") is not None
                         and _independent_content(event or {}) and len(source.content) >= 40):
                     projections[-1]["provider_pending"] = True
@@ -1423,6 +1426,14 @@ class LearningRuntime:
             episode = state["episodes"][episode_id]
             if episode["status"] != "open":
                 return episode
+            from .signals import OUTCOME_VERSION, reprocessed_episode
+            if episode.get("outcome_version", 1) < OUTCOME_VERSION:
+                # Open episodes may span a runtime upgrade. Repair their
+                # derived signals before they can produce new credit.
+                migrated = reprocessed_episode({**episode, "status": "unknown"},
+                                               state["artifacts"], state["receipts"])
+                for field in ("signals", "outcome_version", "event_parser_version"):
+                    episode[field] = migrated[field]
             outcome = reward(episode["signals"])
             # A factual/command check can validate a memory while the task is
             # still ungraded. Retain that evidence without manufacturing a

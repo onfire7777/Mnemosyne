@@ -21,6 +21,7 @@ def host():
         status=lambda tenant: {"modes": {}, "enabled": True,
                                "frozen": state["policy"].get("frozen", False)},
         consolidate=consolidate,
+        _enabled=lambda state, component: not state["policy"].get("dreamer_off"),
     )
     facade = SimpleNamespace(
         runtime_state=SimpleNamespace(load_gate_cases=lambda: list(cases)),
@@ -46,6 +47,112 @@ def test_protected_cases_and_existing_outcome_changes_reconsider_learning(tmp_pa
     state["episodes"]["episode"]["reward"] = 1
     advance(facade, "t", path)
     assert calls == ["t"] * 4
+
+
+def test_captured_failure_wakes_learning_before_task_resolution(tmp_path):
+    facade, _, state, _, calls = host()
+    path = tmp_path / "worker.json"
+    advance(facade, "t", path)
+    state["episodes"]["pending"] = {
+        "id": "pending", "status": "open", "source_cids": ["source"],
+        "tool_events": [{"source": "tool", "experiment_environment": {"kind": "python"}}],
+    }
+    advance(facade, "t", path)
+    advance(facade, "t", path)
+    assert calls == ["t", "t"]
+
+
+def test_unproposed_real_failure_retries_without_a_new_task(tmp_path, monkeypatch):
+    from mnemosyne.hosts import codex_learning
+
+    facade, _, state, _, calls = host()
+    clock = [1000.0]
+    monkeypatch.setattr(codex_learning.time, "time", lambda: clock[0])
+    environment = {"version": 1, "kind": "sqlite", "setup": ["CREATE TABLE x(v)"],
+                   "baseline": ["INSERT INTO x VALUES(0)"],
+                   "checks": [{"query": "SELECT v FROM x", "expected_rows": [[1]]}]}
+    state["episodes"]["pending"] = {
+        "id": "pending", "status": "open", "source_cids": ["source"], "user_id": "u",
+        "tool_events": [{"source": "tool", "verdict": False,
+                         "experiment_environment": environment}],
+    }
+    path = tmp_path / "worker.json"
+    assert advance(facade, "t", path)["retry_after"] == 1300
+    advance(facade, "t", path)
+    assert calls == ["t"]
+    clock[0] = 1301
+    advance(facade, "t", path)
+    assert calls == ["t", "t"]
+    state["policy"]["hypotheses"] = {"h": {
+        "user_id": "u", "environment_cohort": "cohort", "status": "inconclusive",
+        "review_complete": True, "source_cids": ["source"],
+        "prediction_candidate_status": "probation",
+        "review_contract": {"sandbox_check": {"environment": environment}},
+        "environment_result": {"status": "improved"},
+    }}
+    report = advance(facade, "t", path)
+    assert calls == ["t", "t", "t"]
+    assert "retry_after" not in report
+
+
+def test_failure_retry_follows_recorded_backoff_and_then_stops(tmp_path, monkeypatch):
+    from mnemosyne.experience.environment_experiments import MAX_MISSES, _miss_key
+    from mnemosyne.hosts import codex_learning
+
+    facade, _, state, _, _ = host()
+    monkeypatch.setattr(codex_learning.time, "time", lambda: 1000.0)
+    environment = {"version": 1, "kind": "sqlite", "setup": ["CREATE TABLE x(v)"],
+                   "baseline": ["INSERT INTO x VALUES(0)"],
+                   "checks": [{"query": "SELECT v FROM x", "expected_rows": [[1]]}]}
+    episode = {"id": "pending", "status": "open", "source_cids": ["source"], "user_id": "u",
+               "tool_events": [{"source": "tool", "verdict": False,
+                                "experiment_environment": environment}]}
+    state["episodes"]["pending"] = episode
+    misses = state["policy"]["environment_proposal_misses"] = {
+        _miss_key(episode, environment): {"n": 2, "next_attempt": 5000.0}}
+    assert advance(facade, "t", tmp_path / "backoff.json")["retry_after"] == 5000.0
+    state["policy"]["dreamer_off"] = True
+    assert "retry_after" not in advance(facade, "t", tmp_path / "off.json")
+    del state["policy"]["dreamer_off"]
+    next(iter(misses.values()))["n"] = MAX_MISSES
+    assert "retry_after" not in advance(facade, "t", tmp_path / "exhausted.json")
+
+
+def test_legacy_outcomes_repaired_before_consolidation(tmp_path):
+    from mnemosyne.experience.signals import OUTCOME_VERSION
+
+    facade, runtime, state, _, calls = host()
+    state["episodes"]["old"] = {
+        "id": "old", "status": "resolved", "outcome_version": 2, "reward": 0.8,
+    }
+
+    def repair(tenant):
+        calls.append("repair")
+        state["episodes"]["old"].update(outcome_version=OUTCOME_VERSION, reward=-1)
+        return {"reprocessed": 1, "episode_ids": ["old"]}
+
+    runtime.reprocess_outcomes = repair
+    report = advance(facade, "t", tmp_path / "worker.json")
+    assert calls == ["repair", "t"]
+    assert report["outcome_repair"] == {"reprocessed": 1}
+    assert report["progress"]["stage"] == "awaiting_memory_use"
+    advance(facade, "t", tmp_path / "worker.json")
+    assert calls == ["repair", "t"]
+
+
+def test_progress_distinguishes_captured_used_verified_and_learned():
+    from mnemosyne.hosts.codex_learning import learning_progress
+
+    state = {"episodes": {"forgotten": {"status": "erased"},
+                          "task": {"status": "resolved"}}, "credit": {}}
+    assert learning_progress(state)["captured_episodes"] == 1
+    assert learning_progress(state)["stage"] == "awaiting_memory_use"
+    state["episodes"]["task"]["cited_cids"] = ["actually-used"]
+    assert learning_progress(state)["stage"] == "awaiting_target_verification"
+    state["episodes"]["task"]["target_outcomes"] = {"actually-used": {"value": 1}}
+    assert learning_progress(state)["stage"] == "collecting_controlled_evidence"
+    state["credit"]["observed"] = {"target_id": "actually-used"}
+    assert learning_progress(state)["stage"] == "learning_from_verified_use"
 
 
 def test_checkpoint_tracks_post_consolidation_state_and_retries_failure(tmp_path):

@@ -59,9 +59,12 @@ def valid_environment(environment):
         if "source_hashes" in environment and environment["source_hashes"] != {
                 name: hashlib.sha256(content.encode()).hexdigest() for name, content in environment["files"].items()}:
             return False
-        if environment.get("runner") == "pytest":
+        runner = environment.get("runner")
+        if runner == "pytest" or (runner == "unittest" and "tests" in environment):
+            # The isolated pytest runner has no discovery mode: it always needs
+            # the explicit captured selection.
             tests = environment.get("tests")
-            return (isinstance(tests, list) and 1 <= len(tests) <= 16
+            return (isinstance(tests, list) and 1 <= len(tests) <= 64
                     and all(isinstance(test, str) and test.split("::")[0] in environment["files"] for test in tests))
         return environment.get("test_pattern", "test*.py") in {"test*.py", "test_*.py", "*_test.py"}
     return False
@@ -214,13 +217,17 @@ def _python_variant(environment, replacement):
             selector = json.dumps(environment["tests"])
         else:
             runner.write_text("import contextlib,json,os,sys,unittest\n"
-                          "sys.path.insert(0,sys.argv[1])\n"
+                          "sys.path[:0]=[sys.argv[1],os.path.join(sys.argv[1],'src')]\n"
                           "with open(os.devnull,'w') as sink,contextlib.redirect_stdout(sink),contextlib.redirect_stderr(sink):\n"
-                          " suite=unittest.TestLoader().discover(sys.argv[1],pattern=sys.argv[2])\n"
+                          " selection=json.loads(sys.argv[2])\n"
+                          " loader=unittest.TestLoader()\n"
+                          " suite=loader.loadTestsFromNames([p[:-3].replace('/','.') for p in selection['tests']]) if 'tests' in selection else loader.discover(sys.argv[1],pattern=selection['pattern'])\n"
                           " result=unittest.TextTestRunner(stream=sink).run(suite)\n"
-                          "print(json.dumps({'passed':result.testsRun-len(result.failures)-len(result.errors),"
-                          "'failed':len(result.failures)+len(result.errors),'total':result.testsRun}))\n")
-            selector = environment.get("test_pattern", "test*.py")
+                          " failed=len(result.failures)+len(result.errors)+len(result.unexpectedSuccesses)\n"
+                          "print(json.dumps({'passed':result.testsRun-failed-len(result.skipped)-len(result.expectedFailures),"
+                          "'failed':failed,'total':result.testsRun,'failed_tests':[test.id() for test,_ in result.failures+result.errors]}))\n")
+            selector = json.dumps({"tests": environment["tests"]} if "tests" in environment else
+                                  {"pattern": environment.get("test_pattern", "test*.py")})
         command = _sandbox_command([str(Path(sys.executable).resolve()), "-I", "-S", str(runner), str(root), selector], root)
         if command is None:
             return {"status": "inconclusive", "reason": "os_sandbox_unavailable"}
@@ -252,23 +259,93 @@ def run_environment_experiment(environment, alternative):
 def comparison(baseline, candidate):
     if any(row.get("status") == "inconclusive" for row in (baseline, candidate)):
         return {"status": "inconclusive", "reason": "environment_unavailable", "baseline": baseline, "candidate": candidate}
-    improved = candidate.get("failed", 1) == 0 and candidate.get("passed", 0) > 0 and baseline.get("failed", 0) > 0
+    improved = (candidate.get("failed", 1) == 0 and baseline.get("failed", 0) > 0
+                and candidate.get("passed", 0) >= baseline.get("passed", 0) + baseline.get("failed", 0))
     return {"status": "improved" if improved else "not_improved", "baseline": baseline, "candidate": candidate,
             "scope": "isolated_environment_comparison", "live_task_outcome": False}
 
 
-def environment_proposals(runtime, tenant, episodes, limit=2):
+MAX_ATTEMPTS = 6
+MAX_MISSES = 6
+
+
+def _attempts_ready(attempts):
+    return len(attempts) < MAX_ATTEMPTS and not any(not row.get("review_complete") or
+        row.get("environment_result", {}).get("status") == "improved" for row in attempts)
+
+
+def _alternative_key(alternative):
+    from .receipts import digest
+    return digest({key: value for key, value in (alternative or {}).items()
+                   if key in {"files", "statements"}})
+
+
+def _miss_key(episode, environment):
+    from .receipts import digest
+    return digest(["environment-proposal", episode["id"], environment])
+
+
+def _failed_environments(episode):
+    """Captured environments whose own retained check actually failed."""
+    from .signals import tool_signals
+    if episode.get("status") == "erased":
+        return
+    for event in episode.get("tool_events", []):
+        environment = event.get("experiment_environment")
+        if (event.get("source") == "tool" and valid_environment(environment)
+                and any(item["value"] < 0 for item in tool_signals([event]))):
+            yield event, environment
+
+
+def environment_retry_at(state):
+    """Earliest time bounded proposal work is due, or None when nothing remains.
+
+    Waiting for a review or a live outcome is not proposal work. A proposal
+    that produced nothing is retried with backoff a bounded number of times,
+    so an unlearnable failure cannot poll the provider indefinitely.
+    """
+    policy = state.get("policy", {})
+    hypotheses = list(policy.get("hypotheses", {}).values())
+    misses = policy.get("environment_proposal_misses", {})
+    due = None
+    for episode in state.get("episodes", {}).values():
+        for _, environment in _failed_environments(episode):
+            attempts = [row for row in hypotheses if row.get("environment_cohort")
+                        and row.get("user_id") == episode.get("user_id")
+                        and row.get("review_contract", {}).get("sandbox_check", {}).get("environment") == environment
+                        and set(row.get("source_cids", [])) & set(episode.get("source_cids", []))]
+            miss = misses.get(_miss_key(episode, environment), {})
+            if not _attempts_ready(attempts) or miss.get("n", 0) >= MAX_MISSES:
+                continue
+            at = miss.get("next_attempt", 0)
+            due = at if due is None else min(due, at)
+    return due
+
+
+def environment_retry_pending(state):
+    return environment_retry_at(state) is not None
+
+
+def environment_proposals(runtime, tenant, episodes, limit=2, misses=None):
+    """Queue bounded repairs for captured failures.
+
+    ``misses`` receives backoff updates for environments that produced no new
+    proposal; the caller persists them with the same consolidation write.
+    """
     from .hypotheses import typed_hypothesis
     from .receipts import digest
     result = []
-    existing = runtime.writer.read(tenant)["policy"].get("hypotheses", {})
+    policy = runtime.writer.read(tenant)["policy"]
+    existing = policy.get("hypotheses", {})
+    recorded = policy.get("environment_proposal_misses", {})
+    misses = {} if misses is None else misses
     proposer = getattr(runtime.engine, "_learning_configuration", {}).get("environment_experiment_proposer")
+    timestamp, calls = time.time(), 0
     for episode in sorted(episodes, key=lambda row: (row.get("created_at", ""), row["id"]), reverse=True):
-        if episode.get("status") != "resolved" or (episode.get("reward") or 0) >= 0:
-            continue
-        for event in episode.get("tool_events", []):
-            environment = event.get("experiment_environment")
-            if event.get("source") != "tool" or not valid_environment(environment):
+        for event, environment in _failed_environments(episode):
+            miss_key = _miss_key(episode, environment)
+            miss = recorded.get(miss_key, {})
+            if miss.get("n", 0) >= MAX_MISSES or miss.get("next_attempt", 0) > timestamp:
                 continue
             for cid in episode.get("source_cids", []):
                 if not runtime._sources_live(tenant, [cid], episode.get("user_id")):
@@ -277,19 +354,31 @@ def environment_proposals(runtime, tenant, episodes, limit=2):
                 if not source or source.actor != "tool" or source.metadata.get("experiment_environment") != environment:
                     continue
                 cohort = digest([tenant, episode["user_id"], cid, environment])
-                if any(row.get("environment_cohort") == cohort for row in existing.values()):
+                attempts = [row for row in existing.values() if row.get("environment_cohort") == cohort]
+                if not _attempts_ready(attempts):
                     continue
-                alternatives = environment.get("alternatives", [])
+                previous = [{"alternative": row.get("review_contract", {}).get("sandbox_check", {}).get("alternative"),
+                             "result": row.get("environment_result")} for row in attempts]
+                attempted = {_alternative_key(row["alternative"]) for row in previous}
+                alternatives = [row for row in environment.get("alternatives", []) if _alternative_key(row) not in attempted]
                 if not alternatives and callable(proposer):
+                    if calls >= limit:
+                        break  # Provider work per pass is bounded; this stays due.
+                    calls += 1
                     try:
                         proposed = proposer(environment=deepcopy(environment), failure=event.get("output", ""),
-                                            task=episode.get("user_text", ""))
+                                            task=episode.get("user_text", ""), previous_attempts=deepcopy(previous))
                     except Exception:
                         proposed = None
                     alternatives = proposed.get("alternatives", []) if isinstance(proposed, dict) else []
-                alternatives = [row for row in alternatives if valid_alternative(environment, row)][:2]
+                alternatives = [row for row in alternatives if valid_alternative(environment, row)
+                                and _alternative_key(row) not in attempted][:min(2, MAX_ATTEMPTS - len(attempts))]
                 if not alternatives:
-                    continue
+                    # Nothing new to test is not proof of an unlearnable
+                    # failure, so retry later, but never without bound.
+                    count = miss.get("n", 0) + 1
+                    misses[miss_key] = {"n": count, "next_attempt": timestamp + 300 * 3 ** (count - 1)}
+                    break
                 for alternative in alternatives:
                     identity = "environment:" + digest([cohort, alternative])
                     check = {"version": 1, "kind": "isolated_environment", "environment": deepcopy(environment),

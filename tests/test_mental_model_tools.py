@@ -61,7 +61,7 @@ def test_every_operation_forwards_complete_immutable_scope(recorded_tools, opera
     assert called == operation
     assert context.tenant_id == "tenant-a" and context.user_id == "user-a"
     assert context.role == "agent" and context.branch == "main"
-    assert context.to_filter()["max_trust_tier"] == 1
+    assert context.to_filter()["max_trust_tier"] == 2
     assert context.max_sensitivity == 2 and context.capability_tags == ("memory",)
     assert context.purpose == ("assist",) and context.lawful_basis == ("consent",)
     assert context.residency == "us" and context.region == "us-west"

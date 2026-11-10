@@ -30,6 +30,10 @@ _PROSE = re.compile(r"^(?P<subject>[A-Z][\w./-]*(?:\s+[A-Z][\w.-]*){0,3})\s+"
                     r"(?P<predicate>(?:(?:does? not|no longer)\s+)?(?:is|are|runs?|uses?|hosts?|stores?|serves?|supports?|requires?|depends on|connects to|deploys to|contains?|provides?))\s+(?P<object>.+?)[.!]?$", re.I)
 _COMMAND_WORDS = {"please", "run", "use", "add", "fix", "update", "remove", "install", "execute", "write", "create", "i", "we", "you", "they", "it", "this", "that"}
 _CONFIG_SUFFIXES = {".json", ".toml", ".yaml", ".yml", ".ini", ".cfg"}
+# Hosts shorten long output in place. Such a read cannot prove an absence.
+_TRUNCATION_MARKER = re.compile(
+    r"(?:…|\.\.\.)\s*\d+ (?:tokens|chars|characters|bytes|lines) truncated"
+    r"|\[\.\.\. omitted \d+ of \d+ lines \.\.\.\]|(?m:^Total output lines: \d+$)")
 
 
 def _sensitive(text):
@@ -178,36 +182,42 @@ def _file(event, argv, scope):
 def _output(source, event):
     value = event.get("output") or event.get("stdout") or event.get("evidence")
     if isinstance(value, str) and value and value in source.content:
-        return value[:65536]
+        return value
     argv = _argv(event)
     if argv:
         for command in (shlex.join(argv), " ".join(argv)):
             if source.content.startswith(command + "\n"):
-                return source.content[len(command) + 1:][:65536]
-    return source.content[:65536]
+                return source.content[len(command) + 1:]
+    return source.content
 
 
 def _leaves(value, path=(), depth=0):
-    if depth > 5:
-        return
-    if isinstance(value, dict):
-        for key, item in list(value.items())[:128]:
-            yield from _leaves(item, (*path, str(key)), depth + 1)
-    elif isinstance(value, list):
-        if path and all(isinstance(item, (str, int, float, bool)) for item in value):
-            yield path, value
-        else:
-            for i, item in enumerate(value[:32]):
-                yield from _leaves(item, (*path, str(i)), depth + 1)
-    elif value is not None and isinstance(value, (str, int, float, bool)) and path:
-        yield path, value
+    stack = [(path, value)]
+    while stack:
+        current, item = stack.pop()
+        if isinstance(item, dict):
+            stack.extend(((*current, str(key)), child) for key, child in reversed(list(item.items())))
+        elif isinstance(item, list):
+            if current and all(child is None or isinstance(child, (str, int, float, bool)) for child in item):
+                yield current, item
+            else:
+                stack.extend(((*current, str(i)), child) for i, child in reversed(list(enumerate(item))))
+        elif (item is None or isinstance(item, (str, int, float, bool))) and current:
+            yield current, item
 
 
-def _config_claims(source, output, path, project, scope):
+def _config_data(output, path):
     suffix = PurePath(path).suffix.lower()
     try:
         if suffix == ".json":
-            data = json.loads(output)
+            def unique_keys(pairs):
+                result = {}
+                for key, value in pairs:
+                    if key in result:
+                        raise ValueError("ambiguous duplicate configuration key")
+                    result[key] = value
+                return result
+            data = json.loads(output, object_pairs_hook=unique_keys)
         elif suffix == ".toml":
             data = tomllib.loads(output)
         elif suffix in {".ini", ".cfg"}:
@@ -220,9 +230,11 @@ def _config_claims(source, output, path, project, scope):
             data, parents = {}, [(-1, {})]
             parents[0] = (-1, data)
             for line in output.splitlines():
+                if not line.strip() or line.lstrip().startswith("#"):
+                    continue
                 match = re.fullmatch(r"( *)([\w.-]+):(?:\s+(.*))?", line)
                 if not match:
-                    continue
+                    raise ValueError("unsupported YAML structure")
                 indent, key, value = len(match[1]), match[2], match[3]
                 while len(parents) > 1 and parents[-1][0] >= indent:
                     parents.pop()
@@ -232,11 +244,21 @@ def _config_claims(source, output, path, project, scope):
                     parents.append((indent, container[key]))
                 elif not re.search(r"[!&*{}\[\]|>]", value):
                     container[key] = value.strip().strip('"\'')
-    except (ValueError, tomllib.TOMLDecodeError):
-        return []
+                else:
+                    raise ValueError("unsupported YAML value")
+    except (ValueError, tomllib.TOMLDecodeError, RecursionError):
+        return None
     except configparser.Error:
-        return []
+        return None
     if not isinstance(data, dict):
+        return None
+    return data
+
+
+def _config_claims(source, output, path, project, scope):
+    suffix = PurePath(path).suffix.lower()
+    data = _config_data(output, path)
+    if data is None:
         return []
     claims = []
     for keys, value in _leaves(data):
@@ -347,55 +369,68 @@ def extract_observed_claims(source, *, event=None, workspace=None):
             span = _span(source, output.strip())
             if span:
                 claims.append(ObservedClaim(project, field, output.strip(), span, dict(scope), "configuration"))
-    return list({(claim.subject, claim.predicate, claim.object, json.dumps(claim.scope, sort_keys=True)): claim for claim in claims}.values())[:48]
+    return list({(claim.subject, claim.predicate, claim.object, json.dumps(claim.scope, sort_keys=True)): claim for claim in claims}.values())
 
 
-def _provider_claims(source, event, workspace, proposer, reviewer, *, synthesis=None):
-    """One bounded proposal, then independent review of at most four claims."""
+def _provider_claims(source, event, workspace, proposer, reviewer, *, synthesis=None, cursor=None):
+    """One bounded, resumable proposal and independent claim reviews."""
     from mnemosyne.semantic_memory import SourceSpan, validate_semantic_entailment
+    from mnemosyne.projection_coverage import select_windows, advance_coverage
 
     if proposer is None or not _independent_content(event):
-        return [], []
+        return [], [], {"provider_pending": False}
     output = _output(source, event)
     if len(output.strip()) < 40:
-        return [], []
+        return [], [], {"provider_pending": False}
     # Never send credential-bearing lines to a semantic provider. Offsets stay
     # source-relative because each surviving window carries its original span.
-    windows, size, block = [], 0, ""
+    windows, block, block_start = [], "", source.content.find(output)
+    position = block_start
     def append_block():
-        nonlocal size, block
-        span = _span(source, block.rstrip())
-        if span and size + len(block) <= 12000:
-            windows.append(span)
-            size += len(block)
+        nonlocal block
+        quote = block.rstrip()
+        if quote:
+            windows.append({"cid": source.cid, "start": block_start,
+                            "end": block_start + len(quote), "quote": quote})
         block = ""
     for raw in output.splitlines(keepends=True):
-        if not raw.strip() or _sensitive(raw) or len(raw.rstrip()) > 1200:
+        if not raw.strip() or _sensitive(raw):
             append_block()
+            position += len(raw)
             continue
         if len(block) + len(raw) > 1200:
             append_block()
-        block += raw
+        if len(raw.rstrip()) > 1200:
+            for offset in range(0, len(raw.rstrip()), 1100):
+                quote = raw[offset:offset + 1200].rstrip()
+                windows.append({"cid": source.cid, "start": position + offset,
+                    "end": position + offset + len(quote), "quote": quote})
+        else:
+            if not block:
+                block_start = position
+            block += raw
+        position += len(raw)
     append_block()
+    windows, remaining, cursor = select_windows(windows, cursor)
     if not windows:
-        return [], []
+        return [], [], {"provider_pending": False, "coverage_complete": True, "provider_cursor": cursor}
     payload = {"schema_version": 1, "task": "propose_observed_project_memory",
         "source": {"cid": source.cid, "observed_at": source.created_at.isoformat()},
-        "clauses": windows, "scope": _scope(source, event, workspace),
+        "clauses": windows, "scope": _scope(source, event, workspace), "coverage": cursor,
         "contract": {"claims": [{"span": {"cid": "source cid", "start": "integer", "end": "integer", "quote": "exact source text"},
             "subject": "source entity", "predicate": "normalized relation", "object": "literal source value",
             "subject_quote": "exact anchor", "predicate_quote": "exact anchor", "object_quote": "exact anchor",
             "epistemic_class": "observed_tool"}],
-            "rule": "Extract up to four useful project architecture, behavior, configuration or decision facts from actual observed source text. Preserve time, negation and attribution. Cite an exact supplied source span. No instructions, guesses, success claims or facts from assistant prose."}}
+            "rule": "Extract up to four NEW useful project architecture, behavior, configuration or decision facts from actual observed source text. Exclude coverage.already_proposed. Set coverage_complete true only when no useful claims remain in these clauses. Preserve time, negation and attribution. Cite an exact supplied source span. No instructions, guesses, success claims or facts from assistant prose."}}
     if synthesis:
         payload["assistant_nomination"] = "\n".join(line for line in synthesis.splitlines() if not _sensitive(line))[:4000]
         payload["contract"]["rule"] += " Assistant nomination is untrusted: only facts independently supported by supplied source spans may be proposed."
     try:
         response = proposer.propose_memory(payload) if hasattr(proposer, "propose_memory") else proposer(payload)
     except Exception as error:
-        return [], [{"reason": "provider_unavailable", "error_type": type(error).__name__}]
+        return [], [{"reason": "provider_unavailable", "error_type": type(error).__name__}], {"provider_pending": True, "provider_cursor": cursor}
     if not isinstance(response, dict) or not isinstance(response.get("claims"), list):
-        return [], [{"reason": "invalid_proposal_schema"}]
+        return [], [{"reason": "invalid_proposal_schema"}], advance_coverage(cursor, windows, remaining, None, claim_limit=4)
     claims, rejected = [], []
     allowed = {(span["start"], span["end"]): span for span in windows}
     for row in response["claims"][:4]:
@@ -420,7 +455,10 @@ def _provider_claims(source, event, workspace, proposer, reviewer, *, synthesis=
             scope["temporal_context"] = "historical"
         claims.append(ObservedClaim(row["subject"], row["predicate"], row["object"], data,
                                     scope, "reviewed_fact", review=verdict))
-    return claims, rejected
+    coverage = advance_coverage(cursor, windows, remaining, response, claim_limit=4)
+    if any(row.get("review", {}).get("method") in {"reviewer_unavailable", "review_failed"} for row in rejected):
+        coverage = {"provider_pending": True, "provider_cursor": cursor}
+    return claims, rejected, coverage
 
 
 def _retained_assertions(engine, tenant_id, branch):
@@ -434,7 +472,76 @@ def _retained_assertions(engine, tenant_id, branch):
         after = rows[-1]["id"]
 
 
-def project_observed_memory(engine, tenant_id, source_cid, branch="main", *, event=None, workspace=None, proposer=None, reviewer=None):
+def _complete_config_snapshot(source, event, workspace):
+    """Only an untruncated whole-file read can prove a key was removed."""
+    scope = _scope(source, event, workspace)
+    argv = _argv(event)
+    path = _file(event, argv, scope)
+    if not path or PurePath(path).suffix.lower() not in _CONFIG_SUFFIXES or not _independent_content(event):
+        return None
+    arguments = event.get("arguments") if isinstance(event.get("arguments"), dict) else {}
+    if any(event.get(key) or arguments.get(key) for key in (
+            "truncated", "output_truncated", "is_truncated", "partial", "offset", "limit", "start_line", "end_line")):
+        return None
+    # A plain `cat <file>` is the only read known to print the whole file.
+    command = _read_command(argv)
+    if not command or PurePath(command[0]).name != "cat":
+        return None
+    files = [part for part in command[1:] if part != "--"]
+    if len(files) != 1 or files[0].startswith("-"):
+        return None
+    output = _output(source, event)
+    if _TRUNCATION_MARKER.search(output):
+        return None
+    data = _config_data(output, path)
+    if data is None:
+        return None
+    keys = sorted("configuration." + ".".join(parts) for parts, _ in _leaves(data)
+                  if not _SECRET_KEY.search(".".join(parts)))
+    return {"scope": {**scope, "file": path}, "keys": keys,
+            "content_hash": hashlib.sha256(output.encode()).hexdigest()}
+
+
+def _reconcile_snapshot(engine, source, branch, snapshot, retained, report):
+    """Keep an internal source-backed watermark, including empty snapshots.
+
+    The non-active marker never becomes a user fact or a wiki claim. It also
+    prevents late replay of an older source from resurrecting a deleted key.
+    """
+    identifier = str(uuid5(NAMESPACE_URL, "project-config-snapshot:" + json.dumps(
+        [source.tenant_id, source.user_id, branch, source.cid, snapshot["scope"]], sort_keys=True)))
+    if identifier not in retained:
+        marker = Assertion(source.tenant_id, "configuration snapshot", "configuration_snapshot",
+            snapshot["content_hash"], user_id=source.user_id, branch=branch, scope=snapshot["scope"],
+            status="superseded", valid_from=source.created_at, valid_to=source.created_at,
+            trust_tier=source.trust_tier, sensitivity=source.sensitivity,
+            access_policy=merge_access_policies([source.access_policy,
+                {"tenant": source.tenant_id, "allow_principals": [source.user_id]}], tenant_id=source.tenant_id),
+            source_evidence_cids=[source.cid], id=identifier,
+            calibration={"projection_kind": "project_config_snapshot", "configuration_keys": snapshot["keys"],
+                         "epistemic_class": "observed_tool",
+                         "source_dependency_mode": "all", "observed_at": source.created_at.isoformat()})
+        engine.upsert_assertion(marker, branch=branch)
+        retained[identifier] = marker.to_dict()
+    for row in list(retained.values()):
+        if (row.get("user_id") != source.user_id or row.get("scope") != snapshot["scope"]
+                or row.get("status") not in {"active", "contested"}
+                or row.get("calibration", {}).get("projection_kind") != "project_observation"
+                or row.get("trust_tier", 5) < source.trust_tier
+                or not row.get("predicate", "").startswith("configuration.")
+                or row["predicate"] in snapshot["keys"] or parse_dt(row["valid_from"]) > source.created_at):
+            continue
+        retired = {**row, "status": "superseded", "valid_to": source.created_at.isoformat(), "superseded_by": identifier}
+        engine.upsert_assertion(Assertion.from_dict(retired), branch=branch)
+        retained[row["id"]] = retired
+        relation_id = str(uuid5(NAMESPACE_URL, "project-observation-relation:" + row["id"]))
+        engine.add_relation(Relation(source.tenant_id, row["subject"], row["predicate"], row["object"], branch=branch,
+            valid_from=parse_dt(row["valid_from"]), valid_to=source.created_at, source_evidence_cids=row["source_evidence_cids"],
+            access_policy=row["access_policy"], id=relation_id), branch=branch)
+        report.setdefault("withdrawn_assertion_ids", []).append(row["id"])
+
+
+def project_observed_memory(engine, tenant_id, source_cid, branch="main", *, event=None, workspace=None, proposer=None, reviewer=None, provider_cursor=None):
     """Project an actual tool observation with scoped, exact-span custody."""
     source = engine.get_evidence(tenant_id, source_cid, branch=branch)
     report = {"source_cid": source_cid, "assertion_ids": [], "relation_ids": [], "created_count": 0,
@@ -443,29 +550,42 @@ def project_observed_memory(engine, tenant_id, source_cid, branch="main", *, eve
         return report
     event = _event(source, event)
     claims = extract_observed_claims(source, event=event, workspace=workspace)
+    snapshot = _complete_config_snapshot(source, event, workspace)
     can_propose = proposer is not None and _independent_content(event) and len(_output(source, event).strip()) >= 40
-    if not claims and not can_propose:
+    if not claims and not can_propose and snapshot is None:
         report["reason"] = "no_supported_project_observation"
         return report
     retained = _retained_assertions(engine, tenant_id, branch)
+    if snapshot is not None:
+        _reconcile_snapshot(engine, source, branch, snapshot, retained, report)
     # Structured parsers are already complete for small configuration reads.
     # Richer source text gets one bounded proposal call, never operational logs.
-    already_reviewed = any(source.cid in row.get("source_evidence_cids", [])
-        and row.get("calibration", {}).get("projection_kind") == "project_observation"
-        and row.get("calibration", {}).get("entailment_review", {}).get("entailed") is True
-        for row in retained.values())
-    if can_propose and not already_reviewed and not any(claim.kind == "configuration" for claim in claims):
+    if can_propose and not any(claim.kind == "configuration" for claim in claims):
         report["provider_attempted"] = True
-        proposals, rejected = _provider_claims(source, event, workspace, proposer, reviewer)
+        proposals, rejected, coverage = _provider_claims(source, event, workspace, proposer, reviewer, cursor=provider_cursor)
         identities = {_identity(claim) for claim in claims}
         claims.extend(claim for claim in proposals if _identity(claim) not in identities)
         report["rejected"] = rejected
+        report.update(coverage)
     return _persist_claims(engine, source, branch, claims, report, retained, event)
 
 
 def _persist_claims(engine, source, branch, claims, report, retained, event=None):
     tenant_id = source.tenant_id
-    for claim in claims[:48]:
+    # A complete snapshot at least as recent and as trusted as this source
+    # decides which configuration keys still exist; a late replay of an older
+    # read must not revive a key that snapshot proved absent.
+    snapshots = [row for row in retained.values()
+                 if row.get("calibration", {}).get("projection_kind") == "project_config_snapshot"
+                 and row.get("user_id") == source.user_id
+                 and row.get("trust_tier", 5) <= source.trust_tier
+                 and parse_dt(row["valid_from"]) >= source.created_at]
+    for claim in claims:
+        if claim.predicate.startswith("configuration.") and any(
+                row.get("scope") == claim.scope
+                and claim.predicate not in row["calibration"].get("configuration_keys", [])
+                for row in snapshots):
+            continue
         policy = merge_access_policies([source.access_policy, {"tenant": tenant_id, "allow_principals": [source.user_id]}], tenant_id=tenant_id)
         expiry = evidence_expiry_deadline(source.access_policy, source.metadata)
         # These are dated observations, not a promise of current runtime state.
@@ -478,7 +598,8 @@ def _persist_claims(engine, source, branch, claims, report, retained, event=None
         identifier = str(uuid5(NAMESPACE_URL, json.dumps([DERIVATION_VERSION, tenant_id, source.user_id, branch,
             source.cid, claim.subject, claim.predicate, claim.object, claim.scope], sort_keys=True)))
         contract = claim.verification or {"kind": "structured_observation", "subject": claim.subject,
-            "predicate": claim.predicate, "object": claim.object, "workspace": claim.scope.get("workspace"), "source_cid": source.cid}
+            "predicate": claim.predicate, "object": claim.object, "workspace": claim.scope.get("workspace"),
+            "file": claim.scope.get("file"), "source_cid": source.cid}
         assertion = Assertion(tenant_id, claim.subject, claim.predicate, claim.object, user_id=source.user_id,
             branch=branch, scope=claim.scope, source_evidence_cids=[source.cid], status="active",
             confidence=1.0 if claim.kind == "command_outcome" else 0.85, valid_from=source.created_at,
@@ -606,7 +727,7 @@ def project_grounded_synthesis(engine, tenant_id, assistant_cid, supporting_cids
         for evidence in list(candidates.values())[:2]:
             if evidence.cid in reviewed or evidence.cid in projected_sources:
                 continue
-            claims, rejected = _provider_claims(evidence, _event(evidence, None), workspace, proposer, reviewer,
+            claims, rejected, _ = _provider_claims(evidence, _event(evidence, None), workspace, proposer, reviewer,
                                                 synthesis=source.content)
             report["rejected"].extend(rejected)
             if not claims:

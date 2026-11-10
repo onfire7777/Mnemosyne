@@ -28,14 +28,14 @@ def test_verified_retry_replaces_only_the_same_check():
     ]
     assert reward(tool_signals(events)) == 1
     events.append({"check_id": "integration", "passed": 0, "failed": 10})
-    assert reward(tool_signals(events)) == 0
+    assert reward(tool_signals(events)) == -1
 
 
 def test_a_shared_tool_name_does_not_establish_the_same_check():
     assert reward(tool_signals([
         {"name": "verifier", "verdict": False},
         {"name": "verifier", "verdict": True},
-    ])) == 0
+    ])) == -1
 
 
 def test_final_task_verifier_supersedes_attempts_but_not_user_correction():
@@ -131,13 +131,16 @@ def test_legacy_reward_repair_is_audited_idempotent_and_preserves_observations()
     events.append({"name": "shell", "command": "pytest", "passed": 20, "failed": 0})
     key = runtime.observe_turn("t", "u", "legacy", "Check project tests", "Finished",
         tool_events=events, receipt_ids=[context["receipt_id"]])["episode_id"]
-    # Model the persisted pre-v2 row before its original resolution.
+    # Model the persisted pre-v2 row as its original runtime resolved it. A
+    # row that is still open is repaired when it resolves instead.
     def legacy(state):
         row = state["episodes"][key]
         row.pop("outcome_version")
         row["signals"] = [signal("exit_code", -1)] * 15 + [signal("tests", 1)]
+        value = reward(row["signals"])
+        row.update(status="resolved", reward=value, rpe=value - (2 * row["prediction"] - 1))
     runtime.writer.apply("t", "capture", legacy)
-    before = deepcopy(runtime.resolve("t", key))
+    before = deepcopy(runtime.episode("t", key))
     receipts = deepcopy(runtime.writer.read("t")["receipts"])
     assert before["reward"] < 0
     assert runtime.reprocess_outcomes("t")["reprocessed"] == 1

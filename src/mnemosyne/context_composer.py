@@ -63,6 +63,40 @@ def _relevance(query_words, text, metadata):
     return lexical
 
 
+def _request_only(text):
+    """Identify conversational requests, not asserted facts containing a question."""
+    value = str(text).strip()
+    return bool(re.match(r"^(?:please\b|(?:can|could|would|will) you\b|"
+                         r"(?:what|which|who|where|when|how|why)\b|"
+                         r"(?:continue|resume|skip|verify|check|run|fix)\b)",
+                         value, re.I)) and not re.search(r"[.!]\s+[A-Z]", value)
+
+
+def _history_request(query):
+    return bool(re.search(r"\b(?:what (?:did|have) (?:i|we)|"
+                          r"(?:previous|earlier|past|last) (?:question|request|prompt)|"
+                          r"(?:asked|requested|said) (?:before|earlier))\b", query, re.I))
+
+
+def _salience(row, section, text):
+    """Prioritize usable knowledge; only native grounded utility alters benefit."""
+    if section in {"lessons", "procedures", "skills"}:
+        base = 4.0
+    elif section == "knowledge_pages":
+        base = 3.1
+    elif section == "hits":
+        kind = row.get("kind", row.get("metadata", {}).get("memory_type"))
+        base = 2.7 if kind in {"assertion", "preference", "working", "intention"} else 2.2
+        if kind == "evidence":
+            base = 0.2 if _request_only(text) else 1.6
+    else:
+        base = 2.0
+    utility = row.get("learning_utility", 1.0)
+    if not isinstance(utility, (int, float)) or not math.isfinite(utility):
+        utility = 1.0
+    return base + 3 * (max(0.8, min(1.2, utility)) - 1)
+
+
 def _compact(row, section):
     fields = {
         "hits": ("id", "kind", "text", "provenance", "trust_tier"),
@@ -98,18 +132,26 @@ def compose_context(query, packet, budget, *, envelope=None):
     candidates = []
     irrelevant = 0
     query_words = _words(query)
+    historical = _history_request(query)
     for section in ("hits", "lessons", "procedures", "skills", "knowledge_pages", "verification_requests"):
         for index, row in enumerate(packet.get(section, [])):
             compact = _compact(row, section)
             text = compact.get("text", compact.get("statement", compact.get("content", compact.get("title", ""))))
             relevance = _relevance(query_words, text, row.get("metadata", {}))
             required = bool(row.get("required") or row.get("metadata", {}).get("required"))
+            # A transcript repeating the current question contributes no answer.
+            # Keep historical requests available when the user asks about them.
+            if (section == "hits" and row.get("kind") == "evidence"
+                    and not required and not historical and _request_only(text)
+                    and query_words and len(query_words & _words(text)) / len(query_words) >= 0.8):
+                irrelevant += 1
+                continue
             # Learned artifacts and verification requests have already passed
             # applicability checks upstream. Raw recall needs positive relevance.
             if section == "hits" and not required and not relevance:
                 irrelevant += 1
                 continue
-            priority = 4 if section in {"lessons", "procedures", "skills"} else 2
+            priority = _salience(row, section, text)
             candidates.append((required, priority + relevance, -index, section, compact, row))
     model = packet.get("user_model", {})
     for index, row in enumerate(model.get("authoritative", []) + model.get("inferred", []) + model.get("support_strategies", [])):
@@ -117,7 +159,8 @@ def compose_context(query, packet, budget, *, envelope=None):
         required = row.get("kind") == "hard_instruction"
         if not relevance and not required:
             continue
-        candidates.append((required, 1 + relevance, -index, "user_model", _compact(row, "user_model"), row))
+        priority = 3.2 if row in model.get("authoritative", []) else 2.5
+        candidates.append((required, priority + relevance, -index, "user_model", _compact(row, "user_model"), row))
     candidates.sort(key=lambda row: (row[0], row[1], row[2]), reverse=True)
     # Reserve room for honest overflow accounting before admitting any claim.
     total_candidates = len(candidates) + irrelevant
@@ -127,10 +170,15 @@ def compose_context(query, packet, budget, *, envelope=None):
         delivery = prefix + encode(result) if token_bound(result) <= budget else ("{}" if total_budget >= 2 else "")
         return {"packet": {}, "text": delivery, "used_tokens_upper_bound": token_bound(delivery), "omitted": total_candidates, "required_overflow": sum(r[0] for r in candidates)}
     seen = set()
+    seen_requests = []
     omitted, required_overflow = irrelevant, 0
     for required, _, _, section, row, original in candidates:
         claim = str(row.get("text", row.get("statement", row.get("content", row.get("suggestion", encode(row)))))).casefold().strip()
         if claim in seen:
+            continue
+        request_words = _words(claim) if section == "hits" and row.get("kind") == "evidence" and _request_only(claim) else set()
+        if request_words and any(len(request_words & prior) / max(1, len(request_words | prior)) >= 0.75 for prior in seen_requests):
+            omitted += 1
             continue
         trial = {**result, section: result.get(section, []) + [row],
                  "omitted": total_candidates, "required_overflow": len(candidates)}
@@ -155,6 +203,8 @@ def compose_context(query, packet, budget, *, envelope=None):
         if token_bound(trial) <= budget:
             result = trial
             seen.add(claim)
+            if request_words:
+                seen_requests.append(request_words)
         else:
             omitted += 1
             required_overflow += int(required)

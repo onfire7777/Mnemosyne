@@ -10,6 +10,7 @@ from collections import Counter
 from .receipts import digest
 
 VERIFIED_KINDS = frozenset({"verifier", "tests", "critic", "rating"})
+OUTCOME_VERSION = 3
 
 WEIGHTS = {
     "verifier": 1.0,
@@ -73,7 +74,23 @@ def tool_signals(events: list[dict]) -> list[dict]:
         }:
             continue
         before = len(result)
-        if "verdict" in event or (
+        counts = None
+        if "passed" in event and "failed" in event:
+            passed, failed = event["passed"], event["failed"]
+            if type(passed) is not int or type(failed) is not int or min(passed, failed) < 0:
+                raise ValueError("test counts must be nonnegative integers")
+            counts = (passed, failed)
+        # A partially passing suite is a failed check. Keep progress as a
+        # metric, never as a positive correctness label. Counts also prevent
+        # an inconsistent positive envelope from masking an observed failure.
+        if counts and sum(counts) and (counts[1] or "verdict" not in event):
+            passed, failed = counts
+            item = signal("tests", -1 if failed else 1, event.get("evidence", ""))
+            item.update(passed=passed, failed=failed,
+                        pass_fraction=passed / (passed + failed),
+                        progress=(passed - failed) / (passed + failed))
+            result.append(item)
+        elif "verdict" in event or (
             event.get("name") == "benchmark_verifier"
             and isinstance(event.get("success"), bool)
         ):
@@ -82,22 +99,6 @@ def tool_signals(events: list[dict]) -> list[dict]:
                 result.append(signal("verifier", 1, event.get("evidence", "")))
             elif verdict in (False, "fail", "failed", "failure"):
                 result.append(signal("verifier", -1, event.get("evidence", "")))
-        elif "passed" in event and "failed" in event:
-            passed, failed = event["passed"], event["failed"]
-            if (
-                type(passed) is not int
-                or type(failed) is not int
-                or min(passed, failed) < 0
-            ):
-                raise ValueError("test counts must be nonnegative integers")
-            if passed + failed:
-                result.append(
-                    signal(
-                        "tests",
-                        (passed - failed) / (passed + failed),
-                        event.get("evidence", ""),
-                    )
-                )
         elif (type(event.get("exit_code")) is int and event["exit_code"] != 0
               and event.get("outcome_scope") == "task" and event.get("final") is True):
             result.append(signal("exit_code", -1, event.get("evidence", "")))
@@ -182,6 +183,12 @@ def reward(signals: list[dict], *, include_diagnostics: bool = False) -> float |
         # Later human feedback still contributes independently.
         signals = [final[-1], *[item for item in signals if item is not final[-1]
                               and item["kind"] in {"correction", "acceptance", "reask", "rating"}]]
+    failures = [item["value"] for item in signals
+                if item["kind"] in {"tests", "verifier", "critic"} and item["value"] < 0]
+    if failures:
+        # Independent unresolved failures cannot be outvoted by unrelated
+        # passing checks. A retry of the same check was already reconciled.
+        return min(failures)
     total = math.fsum(item["weight"] for item in signals)
     return (
         math.fsum(item["value"] * item["weight"] for item in signals) / total
@@ -284,7 +291,7 @@ def reprocessed_episode(episode: dict, artifacts: dict, receipts: dict) -> dict:
     from mnemosyne.hosts.codex import reparse_retained_events
     original_events = episode.get("tool_events", [])
     events = reparse_retained_events(original_events)
-    if episode.get("outcome_version", 1) >= 2 and (
+    if episode.get("outcome_version", 1) >= OUTCOME_VERSION and (
         episode.get("event_parser_version", 0) >= 2 or events == original_events
     ):
         return deepcopy(episode)
@@ -297,6 +304,18 @@ def reprocessed_episode(episode: dict, artifacts: dict, receipts: dict) -> dict:
             legacy.update(outcome_scope="task", final=True)
         for item in tool_signals([legacy]):
             automatic[core(item)] += 1
+            if (episode.get("outcome_version", 1) < 3 and item["kind"] == "tests"
+                    and "passed" in legacy and "failed" in legacy
+                    and legacy["passed"] + legacy["failed"]):
+                verdict = legacy.get("verdict", legacy.get("success") if legacy.get("name") == "benchmark_verifier" else None)
+                if verdict in (True, "pass", "passed", "success", False, "fail", "failed", "failure"):
+                    old = signal("verifier", 1 if verdict in (True, "pass", "passed", "success") else -1,
+                                 legacy.get("evidence", ""))
+                else:
+                    old = {**item, "value": (legacy["passed"] - legacy["failed"]) /
+                           (legacy["passed"] + legacy["failed"])}
+                if core(old) != core(item):
+                    automatic[core(old)] += 1
     manual = []
     for item in episode.get("signals", []):
         key = core(item)
@@ -306,7 +325,7 @@ def reprocessed_episode(episode: dict, artifacts: dict, receipts: dict) -> dict:
             manual.append(deepcopy(item))
     updated = deepcopy(episode)
     updated["signals"] = [*tool_signals(events), *manual]
-    updated["outcome_version"] = 2
+    updated["outcome_version"] = OUTCOME_VERSION
     updated["event_parser_version"] = 2
     value = reward(updated["signals"])
     updated.update(reward=value, rpe=None if value is None else value - (2 * episode["prediction"] - 1),

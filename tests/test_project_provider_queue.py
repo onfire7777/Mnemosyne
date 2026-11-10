@@ -109,7 +109,7 @@ def test_legacy_checkpoint_revisits_finished_episodes_once_and_preserves_backoff
     path = tmp_path / 'checkpoint.json'
     path.write_text(json.dumps({'version': 1, 'completed': {'episode': fingerprint}, 'retries': {}}))
     assert project_memory.advance_project_memory(runtime, 'tenant', 'owner', path)['processed'] == 1
-    assert json.loads(path.read_text())['version'] == 2
+    assert json.loads(path.read_text())['version'] == 3
     assert project_memory.advance_project_memory(runtime, 'tenant', 'owner', path)['processed'] == 0
     assert calls == [set(), {'source-000'}]
     path.write_text(json.dumps({'version': 1, 'completed': {}, 'retries': {
@@ -126,3 +126,37 @@ def test_unsupported_provider_result_is_finished_without_claiming_success(tmp_pa
     runtime, _ = runtime_for(project, count=1)
     result = project_memory.advance_project_memory(runtime, 'tenant', 'owner', tmp_path / 'checkpoint.json')
     assert result['provider_pending'] == 0 and result['created'] == 0
+
+
+def test_provider_source_stays_queued_until_all_chunks_complete(tmp_path):
+    calls = []
+    def project(tenant, row, *, provider_cids, provider_cursors=None):
+        if not provider_cids:
+            return [{'source_cid': 'source-000', 'provider_pending': True}]
+        calls.append(provider_cursors)
+        cursor = (provider_cursors or {}).get('source-000', {})
+        if not cursor:
+            return [{'source_cid': 'source-000', 'provider_pending': True,
+                     'provider_cursor': {'offset': 12000, 'already_proposed': []}}]
+        assert cursor['offset'] == 12000
+        return [{'source_cid': 'source-000', 'provider_pending': False, 'coverage_complete': True}]
+    runtime, _ = runtime_for(project, count=1)
+    path = tmp_path / 'checkpoint.json'
+    first = project_memory.advance_project_memory(runtime, 'tenant', 'owner', path)
+    assert first['provider_pending'] == 1
+    assert not json.loads(path.read_text())['provider_completed']
+    second = project_memory.advance_project_memory(runtime, 'tenant', 'owner', path)
+    assert second['provider_pending'] == 0
+    assert len(calls) == 2
+
+
+def test_previous_version_completed_sources_are_reopened_for_coverage(tmp_path):
+    runtime, row = runtime_for(lambda *a, **k: [{'source_cid': 'source-000', 'provider_pending': True}], count=1)
+    fingerprint = project_memory.digest([row['source_cids'], []])
+    path = tmp_path / 'checkpoint.json'
+    path.write_text(json.dumps({'version': 2, 'scope': {'tenant_id': 'tenant', 'user_id': 'owner'},
+        'completed': {'episode': fingerprint}, 'provider_completed': {'old': {
+            'episode_id': 'episode', 'source_cid': 'source-000', 'fingerprint': fingerprint}}}))
+    result = project_memory.advance_project_memory(runtime, 'tenant', 'owner', path, provider_limit=0)
+    assert result['processed'] == result['provider_pending'] == 1
+    assert json.loads(path.read_text())['provider_completed'] == {}

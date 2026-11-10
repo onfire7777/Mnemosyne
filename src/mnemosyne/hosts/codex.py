@@ -73,7 +73,7 @@ def _command_text(command):
     return command if isinstance(command, str) else ""
 
 
-def _pytest_invocation(command):
+def _pytest_invocation(command, *, runner="pytest"):
     """Identify one real pytest invocation, not a command that prints its log.
 
     Only output-free shell setup and known exec-style wrappers are accepted.
@@ -92,7 +92,7 @@ def _pytest_invocation(command):
         return None
     if (len(tokens) == 3 and tokens[1] in {"-c", "-lc"}
             and Path(tokens[0]).name in {"sh", "bash", "zsh", "dash", "ksh"}):
-        return _pytest_invocation(tokens[2])
+        return _pytest_invocation(tokens[2], runner=runner)
     assignment = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
     # A setup command cannot print a forged summary. Requiring && also means
     # the final exit status belongs to pytest only after successful setup.
@@ -129,10 +129,10 @@ def _pytest_invocation(command):
     if not tokens:
         return None
     executable = Path(tokens[0]).name
-    if executable in {"pytest", "pytest.exe"}:
+    if runner == "pytest" and executable in {"pytest", "pytest.exe"}:
         return tokens
     if re.fullmatch(r"python(?:\d+(?:\.\d+)?)?(?:\.exe)?", executable):
-        return tokens if tokens[1:3] == ["-m", "pytest"] else None
+        return tokens if tokens[1:3] == ["-m", runner] else None
     return None
 
 
@@ -141,9 +141,26 @@ def _runs_pytest(command):
 
 
 def _test_counts(command, output, exit_code):
-    if not _runs_pytest(command) or type(exit_code) is not int:
+    if type(exit_code) is not int:
         return {}
     clean = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", output)
+    if _pytest_invocation(command, runner="unittest"):
+        totals = re.findall(r"(?m)^Ran (\d+) tests? in [0-9.]+s\s*$", clean)
+        summaries = re.findall(r"(?m)^(OK|FAILED)(?: \(([^\n]*)\))?\s*$", clean)
+        if not totals or not summaries:
+            return {}
+        verdict, details = summaries[-1]
+        counts = {key: int(value) for key, value in re.findall(r"(\w+)=(\d+)", details)}
+        failed = counts.get("failures", 0) + counts.get("errors", 0) + counts.get("unexpected successes", 0)
+        skipped = counts.get("skipped", 0) + counts.get("expected failures", 0)
+        passed = int(totals[-1]) - failed - skipped
+        if exit_code not in {0, 1} or (exit_code == 1) != (verdict == "FAILED") or passed < 0:
+            return {}
+        if verdict == "FAILED" and not failed:
+            return {}
+        return {"passed": passed, "failed": failed}
+    if not _runs_pytest(command):
+        return {}
     summaries = re.findall(
         r"(?m)^[= ]*((?:\d+ (?:passed|failed|errors?|skipped|xfailed|xpassed|deselected|warnings?)(?:, )?)+) in \d+(?:\.\d+)?s(?: \(\d+:\d{2}:\d{2}\))?[= ]*$",
         clean,
@@ -213,6 +230,10 @@ def _tool_event(name, response, *, tool_id=None, command=None, status=None,
         "source": "tool",
         "output": output[:16000] + output[-16000:] if len(output) > 32000 else output,
     }
+    if len(output) > 32000:
+        # The retained head and tail are not the whole result: a later reader
+        # must not treat missing content as evidence of absence.
+        event["output_truncated"] = True
     if isinstance(structured.get("source"), str) and structured["source"] in {"assistant", "self_generated", "provider_self_grade"}:
         event["source"] = structured["source"]
     if tool_id:
@@ -292,9 +313,9 @@ def _tool_event(name, response, *, tool_id=None, command=None, status=None,
     if "passed" not in event or "failed" not in event:
         event.update(_test_counts(command, output, event.get("exit_code")))
     if command and "passed" in event and "failed" in event:
-        event["runner"] = "pytest"
+        event["runner"] = "unittest" if _pytest_invocation(command, runner="unittest") else "pytest"
         event["outcome_scope"] = "check"
-        event["evidence"] = json.dumps({"runner": "pytest", "call_id": tool_id,
+        event["evidence"] = json.dumps({"runner": event["runner"], "call_id": tool_id,
                                         "exit_code": event["exit_code"],
                                         "passed": event["passed"], "failed": event["failed"]},
                                        sort_keys=True)
@@ -355,7 +376,7 @@ def _bound_verifications(events, reports, receipt_id, used_lessons, lesson_ids, 
 
 
 def reparse_retained_events(events):
-    """Preview recoverable pytest counts without changing identities or storage.
+    """Preview recoverable test counts without changing identities or storage.
 
     This is deliberately not a transcript backfill: only a retained tool event
     with its original command, output and terminal exit code is reparsed. Missing
@@ -369,7 +390,7 @@ def reparse_retained_events(events):
                 and event.get("status") in {None, "completed", "complete", "succeeded", "failed", "success", "failure"}):
             counts = _test_counts(event["command"], event["output"], event.get("exit_code"))
             if counts:
-                event.update(counts, runner="pytest")
+                event.update(counts, runner="unittest" if _pytest_invocation(event["command"], runner="unittest") else "pytest")
         result.append(event)
     return result
 

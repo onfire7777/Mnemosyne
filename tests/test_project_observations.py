@@ -110,6 +110,143 @@ def test_current_observations_refresh_then_correct_without_reviving_old_values(e
     assert "postgres" in page["text"] and "sqlite" not in page["text"]
 
 
+def test_complete_configuration_retracts_removed_keys_and_closes_relations(engine):
+    first = capture(engine, '{"engine":"sqlite","obsolete_feature":true}', command="cat settings.json")
+    project_observed_memory(engine, "t", first)
+    newer = capture(engine, '{"engine":"postgres"}', command="cat settings.json", minute=1)
+    report = project_observed_memory(engine, "t", newer)
+    old = next(row for row in rows(engine) if row["predicate"] == "configuration.obsolete_feature")
+    assert old["status"] == "superseded" and old["valid_to"]
+    assert old["id"] in report["withdrawn_assertion_ids"]
+    relations = engine.export_tenant("t")["relations"]
+    assert all(row["valid_to"] for row in relations if row["predicate"] == "configuration.obsolete_feature")
+    project_observed_memory(engine, "t", first)
+    assert [row["object"] for row in rows(engine) if row["status"] == "active"] == ["postgres"]
+
+
+def test_empty_new_snapshot_prevents_late_old_source_resurrection(engine):
+    first = capture(engine, '{"obsolete_feature":true}', command="cat settings.json")
+    empty = capture(engine, '{}', command="cat settings.json", minute=1)
+    project_observed_memory(engine, "t", empty)
+    assert project_observed_memory(engine, "t", first)["created_count"] == 0
+    assert not any(row["status"] == "active" for row in rows(engine))
+
+
+@pytest.mark.parametrize("partial", ["head", "flag", "bounded_read", "malformed", "host_marker", "two_files"])
+def test_partial_configuration_cannot_remove_unseen_keys(engine, partial):
+    first = capture(engine, '{"engine":"sqlite","obsolete_feature":true}', command="cat settings.json")
+    project_observed_memory(engine, "t", first)
+    event = {"name": "exec_command", "source": "tool", "command": "cat settings.json",
+             "cwd": "/work/Atlas", "exit_code": 0, "output": '{"engine":"postgres"}'}
+    if partial == "head":
+        event["command"] = "head settings.json"
+    elif partial == "flag":
+        event["output_truncated"] = True
+    elif partial == "bounded_read":
+        event = {"name": "read_file", "path": "settings.json", "cwd": "/work/Atlas",
+                 "arguments": {"limit": 10}, "output": '{"engine":"postgres"}'}
+    elif partial == "malformed":
+        event["output"] = '{"engine":"postgres"'
+    elif partial == "host_marker":
+        event.update(command="cat settings.yaml", output="engine: postgres\n…120 tokens truncated…\nmode: fast")
+    else:
+        event["command"] = "cat settings.json other.json"
+    newer = capture(engine, event["output"], event=event, minute=1)
+    project_observed_memory(engine, "t", newer)
+    assert next(row for row in rows(engine) if row["predicate"] == "configuration.obsolete_feature")["status"] == "active"
+
+
+def test_shortened_capture_is_marked_and_cannot_remove_unseen_keys(engine):
+    from mnemosyne.hosts.codex import _tool_event
+    first = capture(engine, "engine: sqlite\nobsolete_feature: true", command="cat settings.yaml")
+    project_observed_memory(engine, "t", first)
+    lines = [f"key_{i}: {i}" for i in range(4000)]
+    event = _tool_event("exec_command", {"exit_code": 0, "output": "\n".join(lines)},
+                        command="cat settings.yaml", cwd="/work/Atlas", tool_id="long")
+    assert event["output_truncated"] is True and len(event["output"]) == 32000
+    project_observed_memory(engine, "t", capture(engine, event["output"], event=event, minute=1))
+    assert next(row for row in rows(engine) if row["predicate"] == "configuration.obsolete_feature")["status"] == "active"
+    short = _tool_event("exec_command", {"exit_code": 0, "output": "engine: sqlite"},
+                        command="cat settings.yaml", cwd="/work/Atlas", tool_id="short")
+    assert "output_truncated" not in short
+
+
+def test_reread_of_the_same_file_checks_an_applied_configuration_memory(engine):
+    from mnemosyne.hosts.codex import _tool_event
+    from mnemosyne.hosts.memory_checks import _check
+    project_observed_memory(engine, "t", capture(engine, '{"engine":"sqlite"}', command="cat settings.json"))
+    [row] = [row for row in rows(engine) if row["status"] == "active"]
+    contract = row["calibration"]["verification_contract"]
+    assert contract["file"] == "/work/Atlas/settings.json"
+    KnowledgeMaintenanceWorker(engine, context()).run_once()
+    [page] = read_knowledge_context(engine, context(), "Atlas configuration")
+    assert "sqlite" in page["text"] and "snapshot" not in page["text"]  # the watermark stays internal
+    def reread(output, command="cat settings.json", cwd="/work/Atlas"):
+        return _check(contract, _tool_event("exec_command", {"exit_code": 0, "output": output},
+                                            command=command, cwd=cwd, tool_id="reread"))
+    assert reread('{"engine":"sqlite"}') is True
+    assert reread('{"engine":"postgres"}') is False
+    assert reread('{"mode":"fast"}') is False  # a complete read proves the key is gone
+    assert reread('{"mode":"fast"}', command="head settings.json") is None
+    assert reread('{"engine":"sqlite"}', command="cat other.json") is None
+    assert reread('{"engine":"sqlite"}', cwd="/work/Other") is None
+
+
+def test_configuration_reconciliation_respects_owner_and_file_scope(engine):
+    for user, cwd in (("alice", "/work/Atlas"), ("bob", "/work/Atlas"), ("alice", "/other/Atlas")):
+        cid = capture(engine, json.dumps({"feature": True, "owner": user + cwd}),
+                      command="cat settings.json", user=user, cwd=cwd)
+        project_observed_memory(engine, "t", cid)
+    new = capture(engine, '{}', command="cat settings.json", minute=1)
+    project_observed_memory(engine, "t", new)
+    active = [row for row in rows(engine) if row["status"] == "active"]
+    assert {(row["user_id"], row["scope"]["workspace"]) for row in active} == {
+        ("bob", "/work/Atlas"), ("alice", "/other/Atlas")}
+
+
+def test_large_configuration_projects_every_supported_leaf(engine):
+    content = json.dumps({f"feature_{i}": i for i in range(160)})
+    cid = capture(engine, content, command="cat settings.json")
+    assert project_observed_memory(engine, "t", cid)["created_count"] == 160
+    assert len([row for row in rows(engine) if row["status"] == "active"]) == 160
+    assert project_observed_memory(engine, "t", cid)["created_count"] == 0
+
+
+def test_rich_source_coverage_reaches_beyond_first_provider_window(engine):
+    text = "\n\n".join(f"Component{i}:\n  storage: SQLite\n  rationale: " + "durable ".strip() * 70 for i in range(40))
+    cid = capture(engine, text)
+    windows = []
+    def inspect(payload):
+        windows.extend(payload["clauses"])
+        return {"claims": [], "coverage_complete": True}
+    cursor = None
+    for _ in range(10):
+        result = project_observed_memory(engine, "t", cid, proposer=inspect, reviewer=review, provider_cursor=cursor)
+        cursor = result.get("provider_cursor")
+        if not result.get("provider_pending"):
+            break
+    assert result["coverage_complete"]
+    assert windows[-1]["end"] == len(text)
+    assert len(windows) == 40
+    assert len({(span["start"], span["end"]) for span in windows}) == 40
+
+
+def test_saturated_provider_window_requests_remaining_distinct_claims(engine):
+    text = "Worker:\n  storage: SQLite\n  rationale: transactional durable records"
+    cid = capture(engine, text)
+    def saturated(payload):
+        assert not payload["coverage"]["already_proposed"]
+        return {"claims": [proposal(payload)["claims"][0]] * 4}
+    first = project_observed_memory(engine, "t", cid, proposer=saturated, reviewer=review)
+    assert first["provider_pending"] and first["provider_cursor"]["offset"] == 0
+    def finish(payload):
+        assert payload["coverage"]["already_proposed"][0]["object"] == "SQLite"
+        return {"claims": [], "coverage_complete": True}
+    last = project_observed_memory(engine, "t", cid, proposer=finish, reviewer=review,
+                                   provider_cursor=first["provider_cursor"])
+    assert not last["provider_pending"] and last["coverage_complete"]
+
+
 def test_workspace_scope_and_source_expiry(engine):
     a = capture(engine, '{"engine":"sqlite"}', command="cat settings.json")
     b = capture(engine, '{"engine":"postgres"}', command="cat settings.json", cwd="/other/Atlas")
