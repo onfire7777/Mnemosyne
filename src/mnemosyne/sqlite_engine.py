@@ -3067,18 +3067,21 @@ class SqliteEngine:
         *,
         actor: str = "consolidation",
         source: str = "embedder",
+        only_if_missing: bool = False,
     ) -> bool:
-        with self._lock:
+        # The missing check and policy snapshot must share the write lock
+        # across independently opened engines, not only this instance's RLock.
+        with self.source_transaction(tenant_id, branch), self._source_operation(tenant_id, branch):
             conn = self._connect(tenant_id)
             ev = self._fetch_evidence(tenant_id, cid, branch)
-            if ev is None or ev.erased:
+            if ev is None or ev.erased or (only_if_missing and ev.embedding):
                 return False
             if not may_embed_item(
                 sensitivity=int(ev.sensitivity),
                 access_policy=ev.access_policy,
                 erased=ev.erased,
             ):
-                with conn:
+                with self._source_write(conn):
                     self._audit_row(
                         conn,
                         tenant_id,
@@ -3101,7 +3104,7 @@ class SqliteEngine:
                 sensitivity=int(ev.sensitivity),
                 access_policy=ev.access_policy,
             )
-            with conn:
+            with self._source_write(conn):
                 self._write_evidence_mutable(conn, ev)
                 # A1: mirror the just-set embedding into the subject-scoped cache
                 # when admissible (same txn; invisible to export parity). The
@@ -3676,7 +3679,7 @@ class SqliteEngine:
         partition = str(
             hit.metadata.get("embedding_partition") or VECTOR_PARTITION_PUBLIC
         )
-        if partition == "none":
+        if partition == "none" or not self.adapters.embed_missing_on_read:
             return None
         hit.metadata["stored_embedding_used"] = False
         return array.array("d", self._embed_text(hit.text)).tobytes()
@@ -3770,6 +3773,9 @@ class SqliteEngine:
                 if score > 0:
                     self._apply_dense_channel(hit, score)
                     hits.append(hit)
+        if not self.adapters.embed_missing_on_read:
+            from .dense_projection import expand_source_vectors
+            hits = expand_source_vectors(self, query, hits, candidates, k, filt)
         return LocalMemoryEngine._mark_retrieved_text_as_data(
             sorted(hits, key=lambda item: item.score, reverse=True)[:k]
         )
@@ -6095,16 +6101,26 @@ class SqliteEngine:
                 # Assertions (branch-scoped): trim surviving sources or retract.
                 self._invalidate_mental_models(conn, tenant_id, branch)
                 self._scrub_document_records(conn, tenant_id, branch, affected_cids)
+                dependent_relations = set()
                 for row in conn.execute(
-                    "SELECT id, source_evidence_cids FROM assertions "
+                    "SELECT id, source_evidence_cids, calibration, subject, predicate, object FROM assertions "
                     "WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
                     (tenant_id, branch),
                 ).fetchall():
                     sources = json.loads(row["source_evidence_cids"] or "[]")
                     if not affected_cids.intersection(sources):
                         continue
+                    calibration = json.loads(row["calibration"] or "{}")
+                    conjunctive = calibration.get("source_dependency_mode") == "all" or bool(calibration.get("coreference"))
+                    if conjunctive:
+                        dependent_relations.add((row["subject"], row["predicate"], row["object"], frozenset(sources)))
+                        conn.execute(
+                            "UPDATE assertions SET subject = '[erased]', predicate = 'erased', object = '[erased]', "
+                            "scope = '{}', calibration = ? WHERE tenant_id = ? AND branch = ? AND id = ?",
+                            (json_text({"dependency_erased": True}), tenant_id, branch, row["id"]),
+                        )
                     surviving = [item for item in sources if item not in affected_cids]
-                    if surviving:
+                    if surviving and not conjunctive:
                         conn.execute(
                             "UPDATE assertions SET source_evidence_cids = ? "
                             "WHERE tenant_id = ? AND branch = ? AND id = ?",
@@ -6148,15 +6164,22 @@ class SqliteEngine:
                     )
                 # Relations (branch-scoped).
                 for row in conn.execute(
-                    "SELECT id, source_evidence_cids FROM relations "
+                    "SELECT id, source_evidence_cids, source, predicate, target FROM relations "
                     "WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
                     (tenant_id, branch),
                 ).fetchall():
                     sources = json.loads(row["source_evidence_cids"] or "[]")
                     if not affected_cids.intersection(sources):
                         continue
+                    conjunctive = (row["source"], row["predicate"], row["target"], frozenset(sources)) in dependent_relations
+                    if conjunctive:
+                        conn.execute(
+                            "UPDATE relations SET source = '[erased]', predicate = 'erased', target = '[erased]' "
+                            "WHERE tenant_id = ? AND branch = ? AND id = ?",
+                            (tenant_id, branch, row["id"]),
+                        )
                     surviving = [item for item in sources if item not in affected_cids]
-                    if surviving:
+                    if surviving and not conjunctive:
                         conn.execute(
                             "UPDATE relations SET source_evidence_cids = ? "
                             "WHERE tenant_id = ? AND branch = ? AND id = ?",

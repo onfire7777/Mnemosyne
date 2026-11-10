@@ -160,6 +160,40 @@ def _test_counts(command, output, exit_code):
     return {"passed": passed, "failed": failed}
 
 
+def _claim_references(value):
+    """Keep typed evidence references; prose printed by a runner is not a claim."""
+    if not isinstance(value, list):
+        return []
+    claims = []
+    for claim in value:
+        if not isinstance(claim, dict):
+            continue
+        cids = claim.get("evidence_cids")
+        if (not isinstance(cids, list) or not cids
+                or any(not isinstance(cid, str) or not cid.strip() for cid in cids)):
+            continue
+        claims.append({"evidence_cids": list(dict.fromkeys(cids))})
+    return claims
+
+
+def _tool_manifest(payload):
+    """Normalize a current host manifest, never infer availability from history."""
+    manifest = payload.get("available_tools", payload.get("tools"))
+    if not isinstance(manifest, list):
+        return None
+    names = []
+    for item in manifest:
+        name = item if isinstance(item, str) else None
+        if isinstance(item, dict):
+            name = item.get("name")
+            if name is None and isinstance(item.get("function"), dict):
+                name = item["function"].get("name")
+        if not isinstance(name, str) or not name.strip():
+            return None
+        names.append(name)
+    return sorted(set(names))
+
+
 def _tool_event(name, response, *, tool_id=None, command=None, status=None,
                 arguments=None, cwd=None):
     structured = response if isinstance(response, dict) else {}
@@ -220,6 +254,8 @@ def _tool_event(name, response, *, tool_id=None, command=None, status=None,
     targets = structured.get("target_ids")
     if external_checker and isinstance(targets, list) and all(isinstance(key, str) and key.strip() for key in targets):
         event["target_ids"] = targets
+    if external_checker and (claims := _claim_references(structured.get("claims"))):
+        event["claims"] = claims
     for key in ("checked_call_ids", "tested_steps"):
         values = structured.get(key)
         if external_checker and isinstance(values, list) and values and all(isinstance(value, str) and value.strip() for value in values):
@@ -255,19 +291,33 @@ def _tool_event(name, response, *, tool_id=None, command=None, status=None,
     return event
 
 
-def _bound_verifications(events, reports, receipt_id, used_lessons, lesson_ids, served_ids=()):
+def _bound_verifications(events, reports, receipt_id, used_lessons, lesson_ids, served_ids=(), used_items=()):
     """A host declaration may identify evidence, but may never supply a grade."""
     bound = []
     used = set(used_lessons) & set(lesson_ids)
     for original in events:
         event = dict(original)
+        # A citation belongs to this delivered receipt, not merely to a CID
+        # mentioned in an arbitrary external result or another user's recall.
+        claims = _claim_references(event.pop("claims", None))
+        if (receipt_id and event.get("receipt_id") == receipt_id
+                and event.get("source") not in {"assistant", "self_generated", "provider_self_grade"}):
+            claims = [{"evidence_cids": [cid for cid in claim["evidence_cids"]
+                                          if cid in served_ids and cid not in lesson_ids]}
+                      for claim in claims]
+            if any(claim["evidence_cids"] for claim in claims):
+                event["claims"] = [claim for claim in claims if claim["evidence_cids"]]
         targets = event.pop("target_ids", [])
         accepted = []
         for target in targets:
             if not receipt_id or event.get("receipt_id") != receipt_id:
                 continue
             if target not in lesson_ids and target in served_ids:
-                accepted.append(target)
+                references = [report for report in reports if report.get("item_id") == target]
+                if not references or any(report.get("call_id") == event.get("call_id")
+                                         and report.get("check_id") == event.get("check_id")
+                                         for report in references):
+                    accepted.append(target)
                 continue
             if target not in used:
                 continue
@@ -285,6 +335,12 @@ def _bound_verifications(events, reports, receipt_id, used_lessons, lesson_ids, 
             for key in ("verdict", "passed", "failed", "outcome_scope", "final"):
                 event.pop(key, None)
         bound.append(event)
+    declared = sorted(set(used_items) & (set(served_ids) - set(lesson_ids)))
+    if receipt_id and declared:
+        # This establishes application only. No grade or target outcome is
+        # attached; an independent checker must still evaluate each target.
+        bound.append({"name": "memory_use", "source": "host", "receipt_id": receipt_id,
+                      "claims": [{"evidence_cids": declared}]})
     return bound
 
 
@@ -485,8 +541,12 @@ class CodexAdapter:
         self._save(path, state)  # completion capture survives provider timeout
         reporting = {"memory_use_reporting": {
             "command": self.report_command,
+            "capabilities_command": (self.report_command[:-1] + ["--report-capabilities"]
+                                     if self.report_command else None),
             "session_id": session, "turn_id": state["turn_id"],
-            "usage": "Report only actually used lessons and real external check references via MemoryUse.",
+            "usage": "Report actually used memory IDs in used_items and lessons in used_lessons via MemoryUse. "
+                     "Verification references identify real external checks; never report a success grade. "
+                     "If the current tool manifest is known, report it with receipt_id and turn_id before using memory.",
         }, "correlation_id": state["correlation_id"],
            "capabilities_status": state.get("capabilities_status", "unknown")}
         context = self.invoke(
@@ -503,43 +563,93 @@ class CodexAdapter:
         self._save(path, state)
         return context
 
-    def _report_use(self, facade, state, path, session, payload):
-        """Retain explicit usage independently of any externally observed verdict."""
+    def _current_receipt(self, facade, state, session, payload):
         receipt_id = payload.get("receipt_id")
         if (not receipt_id or receipt_id != state.get("receipt_id")
                 or payload.get("turn_id", state.get("turn_id")) != state.get("turn_id")
                 or state.get("turn_id") in state.get("observed_turns", {})):
-            raise ValueError("memory use must identify the current prepared receipt")
+            raise ValueError("memory reporting must identify the current prepared receipt")
         learning = build_learning_runtime(facade.engine).writer.read(self.tenant_id)
         receipt = learning["receipts"].get(receipt_id, {})
         if (receipt.get("user_id") != self.user_id or receipt.get("session_id") != session
                 or receipt.get("query") != state.get("prompt")):
-            raise ValueError("memory use receipt scope does not match the current turn")
+            raise ValueError("memory reporting receipt scope does not match the current turn")
+        return receipt
+
+    def _report_capabilities(self, facade, state, path, session, payload):
+        """Refresh unconsumed context from a current, explicitly supplied manifest."""
+        manifest = _tool_manifest(payload)
+        if manifest is None:
+            raise ValueError("capabilities must supply a complete current tool manifest")
+        pending = state.get("capabilities_refresh", {})
+        recovering = (pending.get("receipt_id") == payload.get("receipt_id")
+                      and pending.get("turn_id") == state.get("turn_id")
+                      and pending.get("available_tools") == manifest)
+        # A provider child can die after persisting the manifest but before
+        # preparing its replacement receipt. Retain the original request's
+        # identity so the bounded local retry can complete the same operation.
+        current = {**state, "receipt_id": pending["receipt_id"]} if recovering else state
+        self._current_receipt(facade, current, session, payload)
+        if state.get("turn_id") in state.get("memory_uses", {}):
+            raise ValueError("report capabilities before acknowledging or applying memory")
+        if (not recovering and state.get("receipt_id")
+                and state.get("capabilities_status") == "current_client_manifest"
+                and manifest == state.get("available_tools")):
+            return {"receipt_id": state["receipt_id"], "available_tools": manifest,
+                    "capabilities_status": "current_client_manifest", "refreshed": False}
+        state.update(available_tools=manifest, capabilities_status="current_client_manifest")
+        state["capabilities_refresh"] = {"receipt_id": payload["receipt_id"],
+                                         "turn_id": state["turn_id"], "available_tools": manifest}
+        state.pop("receipt_id", None)
+        context = self._prepare(facade, state, path, session)
+        return {"receipt_id": context["receipt_id"], "available_tools": manifest,
+                "capabilities_status": "current_client_manifest", "refreshed": True,
+                "context": context.get("_context_text", json.dumps(context, ensure_ascii=False, default=str)),
+                "_mnemosyne_delivery": {"correlation_id": state["correlation_id"],
+                    "session_id": session, "turn_id": state["turn_id"], "receipt_id": context["receipt_id"],
+                    "status": "prepared", "degraded": os.environ.get("MNEMOSYNE_LOCAL_RECALL") == "1"}}
+
+    def _report_use(self, facade, state, path, session, payload):
+        """Retain explicit usage independently of any externally observed verdict."""
+        receipt = self._current_receipt(facade, state, session, payload)
+        receipt_id = receipt["id"]
         lesson_ids = {item["item_id"] for item in receipt.get("items", [])
                       if item.get("kind") == "lesson"}
         lessons = payload.get("used_lessons", [])
         if (not isinstance(lessons, list) or any(not isinstance(key, str) for key in lessons)
                 or not set(lessons).issubset(lesson_ids)):
             raise ValueError("used_lessons must contain only lessons served by this receipt")
+        item_ids = {item["item_id"] for item in receipt.get("items", [])
+                    if item.get("kind") == "item"}
+        items = payload.get("used_items", [])
+        if (not isinstance(items, list) or any(not isinstance(key, str) for key in items)
+                or not set(items).issubset(item_ids)):
+            raise ValueError("used_items must contain only memory items served by this receipt")
         reports = payload.get("verifications", [])
         if not isinstance(reports, list):
             raise ValueError("verifications must be a list of evidence references")
         for report in reports:
-            if (not isinstance(report, dict) or set(report) != {"lesson_id", "call_id", "check_id"}
+            if not isinstance(report, dict):
+                raise ValueError("verification must be an evidence reference")
+            target_key = "lesson_id" if "lesson_id" in report else "item_id"
+            if (set(report) != {target_key, "call_id", "check_id"}
                     or any(not isinstance(value, str) or not value for value in report.values())
-                    or report["lesson_id"] not in lessons):
-                raise ValueError("verification must reference a used lesson, call_id and check_id; grades are not accepted")
+                    or report[target_key] not in (lessons if target_key == "lesson_id" else items)):
+                raise ValueError("verification must reference a used memory, call_id and check_id; grades are not accepted")
         state["delivery_status"] = "acknowledged"
         state["acknowledged_at"] = datetime.now(UTC).isoformat()
         state["used_lessons"] = list(dict.fromkeys(state.get("used_lessons", []) + lessons))
+        state["used_items"] = list(dict.fromkeys(state.get("used_items", []) + items))
         references = state.setdefault("verification_reports", [])
         references.extend(report for report in reports if report not in references)
         state.setdefault("memory_uses", {})[state["turn_id"]] = {
             "receipt_id": receipt_id, "used_lessons": state["used_lessons"],
+            "used_items": state["used_items"],
             "verification_reports": list(references),
         }
         self._save(path, state)
         return {"receipt_id": receipt_id, "used_lessons": state["used_lessons"],
+                **({"used_items": state["used_items"]} if items or state["used_items"] else {}),
                 "verification_references_recorded": len(reports), "verified": False}
 
     def _delivery_confirmed(self, state, session, turn_id, receipt_id):
@@ -591,6 +701,7 @@ class CodexAdapter:
         usage = state.get("memory_uses", {}).get(turn_id, {})
         if receipt_id and usage.get("receipt_id") == receipt_id:
             record.update(used_lessons=usage.get("used_lessons", []),
+                          used_items=usage.get("used_items", []),
                           verification_reports=usage.get("verification_reports", []))
         if prior is not None:
             if prior.get("status") != "erased":
@@ -604,7 +715,8 @@ class CodexAdapter:
             tool_events = _bound_verifications(record.get("tool_events", []),
                                                record.get("verification_reports", []),
                                                receipt_id, used_lessons, lessons,
-                                               {item["item_id"] for item in receipt.get("items", [])})
+                                               {item["item_id"] for item in receipt.get("items", [])},
+                                               record.get("used_items", []))
             result = self.invoke(facade, "observe_turn", {
                 "session_id": session,
                 "user_text": record["prompt"],
@@ -682,6 +794,7 @@ class CodexAdapter:
                     "tool_events": state.get("tool_events", []),
                     "used_skills": state.get("used_skills", []),
                     "used_lessons": state.get("used_lessons", []),
+                    "used_items": state.get("used_items", []),
                     "verification_reports": state.get("verification_reports", []),
                     "receipt_id": state.get("receipt_id"),
                 })
@@ -718,12 +831,12 @@ class CodexAdapter:
                 )
                 if state.get("turn_id") != turn_id or state.get("prompt") != prompt:
                     state.update(turn_id=turn_id, prompt=prompt, tool_events=[], used_skills=[],
-                                 used_lessons=[], verification_reports=[])
-                    for key in ("receipt_id", "assistant_text", "complete", "ended_at", "correlation_id"):
+                                 used_lessons=[], used_items=[], verification_reports=[])
+                    for key in ("receipt_id", "assistant_text", "complete", "ended_at", "correlation_id", "capabilities_refresh"):
                         state.pop(key, None)
-                manifest = payload.get("available_tools", payload.get("tools"))
-                if isinstance(manifest, list) and all(isinstance(item, str) for item in manifest):
-                    state["available_tools"] = sorted(set(manifest))
+                manifest = _tool_manifest(payload)
+                if manifest is not None:
+                    state["available_tools"] = manifest
                     state["capabilities_status"] = "current_host_manifest"
                 else:
                     # Prior tool calls and another session's manifest are not current capabilities.
@@ -744,6 +857,8 @@ class CodexAdapter:
                 }
             if event == "MemoryUse":
                 return self._report_use(facade, state, path, session, payload)
+            if event == "HostCapabilities":
+                return self._report_capabilities(facade, state, path, session, payload)
             if event == "PostToolUse":
                 if payload.get("turn_id") and payload["turn_id"] != state.get(
                     "turn_id"
@@ -810,6 +925,7 @@ class CodexAdapter:
                     "tool_events": state.get("tool_events", []),
                     "used_skills": state.get("used_skills", []),
                     "used_lessons": state.get("used_lessons", []),
+                    "used_items": state.get("used_items", []),
                     "verification_reports": state.get("verification_reports", []),
                 })
             queued = dict(state.get("pending_observations", {}))

@@ -17,6 +17,9 @@ EXCLUDED_SOURCES = {"assistant", "self_generated", "provider_self_grade"}
 
 
 def applies_to(artifact: dict, task: str, query: str) -> bool:
+    if artifact.get("strategy_contract"):
+        from .strategies import strategy_applies
+        return strategy_applies(artifact, query)
     if artifact.get("task_class") != task and task not in artifact.get(
         "task_classes", []
     ):
@@ -47,7 +50,7 @@ def correction_texts(episode: dict) -> list[str]:
 def _source_case(artifact: dict, quote: dict) -> RegressionCase:
     return RegressionCase(
         "source-" + digest(quote)[:20],
-        artifact["task_class"],
+        quote.get("task_class", artifact["task_class"]),
         quote["quote"],
         quote["quote"],
         protected=True,
@@ -329,8 +332,8 @@ def ground_quotes(
         sources.sort(key=lambda pair: pair[1] is None or pair[1].actor != "user")
     quotes = []
     quoted_steps = [(step, None) for step in artifact["steps"]]
-    if has_workspace_template(artifact["steps"]):
-        if not validate_action_template(artifact, episodes):
+    if has_workspace_template(artifact["steps"]) or artifact.get("strategy_contract"):
+        if has_workspace_template(artifact["steps"]) and not validate_action_template(artifact, episodes):
             return []
         quoted_steps = [
             (observed_steps(episode)[index], episode["id"])
@@ -354,6 +357,8 @@ def ground_quotes(
                 and step in source.content
             ):
                 found = {"episode_id": episode["id"], "cid": source.cid, "quote": step}
+                if artifact.get("strategy_contract"):
+                    found["task_class"] = episode["task_class"]
                 break
         if not found:
             return []
@@ -428,6 +433,12 @@ def evaluate_candidate(
     if not safe:
         artifact.update(state="rejected", pending_reason="unsafe_candidate")
         return False
+    if artifact.get("strategy_contract"):
+        from .strategies import validated_strategy
+        state = runtime.writer.read(tenant)
+        if not validated_strategy(artifact, state["episodes"], state["receipts"]):
+            artifact["pending_reason"] = "invalid_strategy_evidence"
+            return False
     if not artifact["source_quotes"] or not runtime._sources_live(
         tenant, artifact["source_cids"], artifact.get("user_id")
     ):
@@ -916,12 +927,22 @@ def verification_request_id(artifact: dict) -> str:
 
 
 def verification_requests(
-    runtime, tenant: str, user: str, task: str, query: str, *, state: dict | None = None
+    runtime, tenant: str, user: str, task: str, query: str, *, state: dict | None = None,
+    tools=None, risk=None, workspace=None,
 ) -> list[dict]:
     """Expose data-only test requests to the host's real tool execution loop."""
     state = state if state is not None else runtime.writer.read(tenant)
     timestamp = datetime.now(UTC)
     requests = []
+    def applicable(item):
+        if not applies_to(item, task, query):
+            return False
+        if item.get("strategy_contract"):
+            from .strategies import strategy_applies, validated_strategy
+            return (validated_strategy(item, state["episodes"], state["receipts"])
+                    and strategy_applies(item, query, tools=tools or [], risk=risk or "normal",
+                                         workspace=workspace, require_workspace=True))
+        return True
     for item in state["artifacts"].values():
         if (
             item["state"] not in {"active", "labile", "probation", "demoted"}
@@ -929,7 +950,7 @@ def verification_requests(
             or item.get("locked")
         ):
             continue
-        if item.get("user_id") != user or not applies_to(item, task, query):
+        if item.get("user_id") != user or not applicable(item):
             continue
         if timestamp < datetime.fromisoformat(item["next_revalidation_at"]):
             continue
@@ -955,7 +976,7 @@ def verification_requests(
             or item.get("user_id") != user
         ):
             continue
-        if not applies_to(item, task, query) or not runtime._sources_live(
+        if not applicable(item) or not runtime._sources_live(
             tenant, item["source_cids"], user
         ):
             continue
@@ -971,6 +992,13 @@ def verification_requests(
                 "contract_hash": item.get("contract_hash"),
                 "source_versions": item.get("source_versions"),
                 "review_status": item.get("status"),
+                "experiment_result": ({
+                    "scope": item.get("experiment_scope"),
+                    "stage": item.get("review_stage"),
+                    "partitions": item.get("partitions"),
+                    "candidate_id": item.get("prediction_candidate_id"),
+                    "next_action": "When these steps are applicable to the current authorized task, report the actual checker result with hypothesis_id, contract_hash, and tested_steps. Historical replay is not a live success.",
+                } if item.get("review_complete") else None),
                 "reward_weight": 0.0,
                 "instruction_authority": "none",
                 "capability_tags": ["data-only", "no-write-authority"],
@@ -982,7 +1010,7 @@ def verification_requests(
             item.get("user_id") == user
             and item.get("task_class") == task
             and parent
-            and applies_to(parent, task, query)
+            and applicable(parent)
             and runtime._sources_live(tenant, item.get("source_cids", []), user)
         ):
             requests.append(

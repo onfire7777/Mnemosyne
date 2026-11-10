@@ -440,6 +440,13 @@ class LearningRuntime:
 
             if not applies_to(item, task, task_scope_query):
                 continue
+            if item.get("strategy_contract"):
+                from .strategies import strategy_applies, validated_strategy
+                if not (validated_strategy(item, state["episodes"], state["receipts"])
+                        and strategy_applies(item, query, tools=tools,
+                                             risk="high" if high_risk else risk_level or "normal",
+                                             workspace=workspace, require_workspace=True)):
+                    continue
             stats = self._target_posterior(
                 state, item["kind"], item["id"], item["revision"], task
             )
@@ -652,7 +659,9 @@ class LearningRuntime:
         knowledge = learning_knowledge_context(
             self, tenant_id, user_id, task, task_scope_query, state=state,
             selected_artifact_ids=[item["id"] for item in artifacts])
-        requests = verification_requests(self, tenant_id, user_id, task, task_scope_query, state=state)
+        requests = verification_requests(self, tenant_id, user_id, task, task_scope_query, state=state,
+                                         tools=tools, risk="high" if high_risk else risk_level or "normal",
+                                         workspace=workspace)
         policy_request = {"variant": self._policy_variants(task)[1].to_dict(),
             "policy_fingerprint": digest(self._policy_variants(task)[1].to_dict()),
             "event_name": "policy_variant_verifier"}
@@ -801,6 +810,7 @@ class LearningRuntime:
                     for item in artifacts
                 ],
                 available_tools=tools,
+                workspace=workspace,
                 source_cids=sorted(
                     {cid for item in chosen for cid in item["source_cids"]}
                     | set((task_match or {}).get("source_cids", []))
@@ -840,7 +850,25 @@ class LearningRuntime:
             rendered = composed["packet"]
             delivered = {row["id"] for section in ("hits", "lessons", "procedures", "skills")
                          for row in rendered.get(section, []) if row.get("id")}
+            delivered_pages = {row.get("page_id", row.get("id")): row
+                               for row in rendered.get("knowledge_pages", [])
+                               if row.get("page_id") or row.get("id")}
             receipt["items"] = [item for item in receipt["items"] if item["item_id"] in delivered]
+            for identifier, page in delivered_pages.items():
+                if identifier in delivered:
+                    continue
+                receipt["items"].append({"kind": "item", "item_id": identifier,
+                    "routes": (), "rank": len(receipt["items"]) + 1, "revision": page.get("version", 1)})
+                receipt["eligible_targets"].append({"kind": "item", "item_id": identifier,
+                                                     "revision": page.get("version", 1)})
+            receipt["item_sources"] = {
+                row["id"]: sorted(set(row.get("source_evidence_cids", row.get("source_cids", row.get("provenance", []))))
+                                  | ({row["id"]} if row.get("kind") == "evidence" else set()))
+                for row in current_hits if row["id"] in delivered
+            }
+            for identifier, page in delivered_pages.items():
+                receipt["item_sources"][identifier] = sorted(set(receipt["item_sources"].get(identifier, [])) |
+                    set(page.get("source_evidence_cids", page.get("source_cids", []))))
             # Budget exclusions are not randomized controls. Their propensity
             # is unknown and cannot count toward a causal comparison.
             probabilities = dict(selection_probabilities)
@@ -850,6 +878,10 @@ class LearningRuntime:
             receipt["selection_exposures"] = exposure_record(eligible_hits, delivered, probabilities=probabilities)
             receipt["selection_exposures"] += artifact_exposure_record(artifacts, delivered,
                 probation_trial=trial_record, revision_trial=revision_trial)
+            receipt["selection_exposures"] += [{"item_id": identifier, "kind": "item",
+                "revision": page.get("version", 1), "served": True, "propensity": None,
+                "selection_score": 0.0, "utility": 1.0} for identifier, page in delivered_pages.items()
+                if identifier not in delivered]
             receipt["selection_version"] = 3
             receipt["context_delivery"] = {
                 "status": "prepared", "acknowledged": None, "applied": None,
@@ -859,7 +891,8 @@ class LearningRuntime:
                 "content_hash": digest(composed["text"]),
             }
             receipt["source_cids"] = sorted(set((task_match or {}).get("source_cids", [])) |
-                {cid for item in chosen if item["id"] in delivered for cid in item["source_cids"]})
+                {cid for item in chosen if item["id"] in delivered for cid in item["source_cids"]} |
+                {cid for cids in receipt["item_sources"].values() for cid in cids})
             current["receipts"][receipt["id"]] = receipt
             result = {key: rendered.get(key, []) for key in
                       ("hits", "lessons", "procedures", "skills", "knowledge_pages", "verification_requests")}
@@ -1103,6 +1136,9 @@ class LearningRuntime:
             if len(matches) == 1 and matches[0] not in normalized_skills:
                 normalized_skills.append(matches[0])
         normalized_lessons = [item for item in used_lessons or [] if item in served_ids]
+        from .utility import cited_memory_ids
+        cited_cids = cited_memory_ids(tool_events or [], receipts,
+                                      lambda cids: self._sources_live(tenant_id, cids, user_id))
         episode_id = observation_key or new_id()
         timestamp = now()
         episode = Trajectory.from_record({
@@ -1125,14 +1161,7 @@ class LearningRuntime:
             "user_text": user_text,
             "task_scope_query": receipts[-1].get("task_scope_query", user_text)
             if receipts else user_text,
-            "cited_cids": sorted(
-                {
-                    cid
-                    for event in tool_events or []
-                    for claim in event.get("claims", [])
-                    for cid in claim.get("evidence_cids", [])
-                }
-            ),
+            "cited_cids": cited_cids,
             "status": "open",
             "created_at": timestamp.isoformat(),
             "expires_at": (
@@ -1623,15 +1652,26 @@ class LearningRuntime:
                 posterior.update(target_probability)
                 row.update(posterior.to_dict())
             comparison_prefix = "randomized_"
+            minimum = max(8, getattr(self.engine.policy, "learning_contingency_min_samples", 8))
             lower = contingency_lower_bound(
                 row.get(comparison_prefix + "served_successes", 0),
                 row.get(comparison_prefix + "served_n", 0),
                 row.get(comparison_prefix + "control_successes", 0),
                 row.get(comparison_prefix + "control_n", 0),
-                minimum=getattr(
-                    self.engine.policy, "learning_contingency_min_samples", 8
-                ),
+                minimum=minimum,
             )
+            direction = "beneficial"
+            if lower is not None and lower <= 0 and verified_outcome is not None and verified_outcome < 0 and target_error < 0:
+                # The same confidence and sample gates can establish harm.
+                # Requiring prior benefit before reducing utility otherwise
+                # leaves a consistently harmful memory permanently neutral.
+                harmful = contingency_lower_bound(
+                    row.get(comparison_prefix + "control_successes", 0),
+                    row.get(comparison_prefix + "control_n", 0),
+                    row.get(comparison_prefix + "served_successes", 0),
+                    row.get(comparison_prefix + "served_n", 0), minimum=minimum)
+                if harmful is not None and harmful > 0:
+                    lower, direction = harmful, "harmful"
             if rebuild or not applied or not comparable or lower is None or lower <= 0:
                 continue
             cited = set(episode.get("cited_cids", []))
@@ -1744,9 +1784,12 @@ class LearningRuntime:
                 "rate": rate,
                 "step": row["utility"] - old_utility,
                 "contingency_lb": lower,
+                "contingency_direction": direction,
                 "served_n": row.get(comparison_prefix + "served_n", 0),
                 "control_n": row.get(comparison_prefix + "control_n", 0),
-                "evidence_version": 3,
+                "served_successes": row.get(comparison_prefix + "served_successes", 0),
+                "control_successes": row.get(comparison_prefix + "control_successes", 0),
+                "evidence_version": 4,
                 "propensity": opportunity["propensity"] if opportunity else None,
             }
             artifact = state["artifacts"].get(target)
@@ -2250,18 +2293,22 @@ class LearningRuntime:
                     for item in row.get("eligible_targets", row["items"])
                 ):
                     erasure_terms.append(row["id"])
+                    erased_items = {cid} | {identifier for identifier, sources in row.get("item_sources", {}).items()
+                                            if cid in sources}
                     row["query"] = ""
                     row["task_scope_query"] = ""
                     row["task_match"] = None
                     row["items"] = [
-                        item for item in row["items"] if item["item_id"] != cid
+                        item for item in row["items"] if item["item_id"] not in erased_items
                     ]
                     row["selection_exposures"] = [item for item in row.get("selection_exposures", [])
-                        if item.get("item_id") != cid]
+                        if item.get("item_id") not in erased_items]
+                    row["item_sources"] = {key: values for key, values in row.get("item_sources", {}).items()
+                                           if key != cid and cid not in values}
                     row["eligible_targets"] = [
                         item
                         for item in row.get("eligible_targets", [])
-                        if item["item_id"] != cid
+                        if item["item_id"] not in erased_items
                     ]
                     row["source_cids"] = [
                         item for item in row.get("source_cids", []) if item != cid

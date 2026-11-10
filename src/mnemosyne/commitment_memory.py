@@ -8,6 +8,7 @@ require a later, matching user statement.
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, time, timedelta
+import calendar
 import hashlib
 import json
 import re
@@ -18,8 +19,15 @@ from mnemosyne.models import Assertion, parse_dt
 from mnemosyne.semantic_memory import semantic_metadata, source_spans
 
 _WEEKDAYS = "monday tuesday wednesday thursday friday saturday sunday".split()
-_DAY_WORD = r"(?:the day after tomorrow|tomorrow|today|in \d+ days?|(?:next|this|on|coming) (?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|\d{4}-\d{2}-\d{2})"
-_TEMPORAL = re.compile(r"(?:\b(?:by|until|to|on)\s+)?\b" + _DAY_WORD + r"\b(?:\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?)?", re.I)
+_NUMBER_WORDS = {word: index for index, word in enumerate("zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen".split())}
+_NUMBER_WORDS.update({"a": 1, "an": 1, "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90})
+_NUMBER = r"(?:\d+|(?:" + "|".join(_NUMBER_WORDS) + r")(?:[- ](?:one|two|three|four|five|six|seven|eight|nine))?)"
+_MONTH = r"(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)"
+_DAY_WORD = (r"(?:the day after tomorrow|tomorrow|today|yesterday|in " + _NUMBER + r" (?:minutes?|hours?|days?|weeks?|months?|years?)|"
+             r"(?:next|this|on|coming) (?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)|"
+             r"Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|\d{4}-\d{2}-\d{2}|"
+             + _MONTH + r"\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{4})?|\d{1,2}(?:st|nd|rd|th)?\s+" + _MONTH + r"(?:\s+\d{4})?)")
+_TEMPORAL = re.compile(r"(?:\b(?:by|until|to|on)\s+)?\b" + _DAY_WORD + r"\b(?:\s+at\s+(?:noon|midnight|\d{1,2}(?::\d{2})?\s*(?:am|pm)?))?", re.I)
 _UNCERTAIN = re.compile(r"\b(?:if|maybe|perhaps|might|could|would|may|probably|think|guess|suppose|imagine)\b", re.I)
 
 
@@ -37,10 +45,23 @@ def resolve_commitment_time(text: str, observed_at: datetime, timezone: str | No
         return result
     wording = match[0].lower()
     explicit = re.search(r"\d{4}-\d{2}-\d{2}", wording)
+    named = re.search(r"(" + _MONTH + r")\s+(\d{1,2})(?:st|nd|rd|th)?\b(?:,?\s+(\d{4}))?", wording, re.I)
+    reverse_named = re.search(r"(\d{1,2})(?:st|nd|rd|th)?\s+(" + _MONTH + r")(?:\s+(\d{4}))?", wording, re.I)
     day = None
     if explicit:
         try:
             day = date.fromisoformat(explicit[0])
+        except ValueError:
+            result.update(status="ambiguous", reason="invalid_date")
+            return result
+    elif named or reverse_named:
+        month_text, day_text, year_text = named.groups() if named else (reverse_named[2], reverse_named[1], reverse_named[3])
+        if year_text is None:
+            result.update(status="ambiguous", reason="year_required")
+            return result
+        month = next(i for i in range(1, 13) if calendar.month_name[i].lower().startswith(month_text[:3].lower()))
+        try:
+            day = date(int(year_text), month, int(day_text))
         except ValueError:
             result.update(status="ambiguous", reason="invalid_date")
             return result
@@ -55,11 +76,31 @@ def resolve_commitment_time(text: str, observed_at: datetime, timezone: str | No
             day = today + timedelta(days=1)
         elif "today" in wording:
             day = today
-        elif offset := re.search(r"in (\d+) days?", wording):
-            if int(offset[1]) > 36525:
+        elif "yesterday" in wording:
+            day = today - timedelta(days=1)
+        elif offset := re.search(r"in (" + _NUMBER + r") (minute|hour|day|week|month|year)s?", wording):
+            amount = int(offset[1]) if offset[1].isdigit() else sum(_NUMBER_WORDS[word] for word in re.split(r"[- ]", offset[1]))
+            if amount > 36525:
                 result.update(status="ambiguous", reason="date_out_of_range")
                 return result
-            day = today + timedelta(days=int(offset[1]))
+            unit = offset[2]
+            if unit in {"minute", "hour"}:
+                start = observed_at.astimezone(UTC) + timedelta(seconds=amount * (60 if unit == "minute" else 3600))
+                result.update(status="resolved", precision="instant", date=start.astimezone(zone).date().isoformat(),
+                              start=start.isoformat(), end=start.isoformat())
+                return result
+            try:
+                if unit in {"month", "year"}:
+                    months = today.year * 12 + today.month - 1 + amount * (12 if unit == "year" else 1)
+                    year, month0 = divmod(months, 12)
+                    # Month/year arithmetic preserves calendar meaning. An
+                    # impossible date is surfaced rather than silently moved.
+                    day = date(year, month0 + 1, today.day)
+                else:
+                    day = today + timedelta(days=amount * (7 if unit == "week" else 1))
+            except (ValueError, OverflowError):
+                result.update(status="ambiguous", reason="invalid_relative_date")
+                return result
         else:
             weekday = next((i for i, name in enumerate(_WEEKDAYS) if name in wording), None)
             if weekday is not None:
@@ -82,6 +123,9 @@ def resolve_commitment_time(text: str, observed_at: datetime, timezone: str | No
         return result
     start = datetime.combine(day, time.min, zone)
     end = datetime.combine(day + timedelta(days=1), time.min, zone)
+    clock_word = re.search(r"\bat\s+(noon|midnight)\b", wording)
+    if clock_word:
+        wording = wording[:clock_word.start()] + ("at 12:00pm" if clock_word[1] == "noon" else "at 12:00am")
     clock = re.search(r"\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b", wording)
     if clock:
         hour, minute = int(clock[1]), int(clock[2] or 0)
@@ -103,27 +147,65 @@ def resolve_commitment_time(text: str, observed_at: datetime, timezone: str | No
     return result
 
 
+_PAST_VERBS = {
+    "met": "meet", "paid": "pay", "sent": "send", "wrote": "write", "written": "write",
+    "bought": "buy", "brought": "bring", "made": "make", "done": "do", "did": "do",
+    "read": "read", "ran": "run", "built": "build", "took": "take", "taken": "take",
+    "went": "go", "gone": "go", "gave": "give", "given": "give", "spoke": "speak",
+    "spoken": "speak", "chose": "choose", "chosen": "choose", "found": "find",
+    "flew": "fly", "flown": "fly", "drove": "drive", "driven": "drive", "held": "hold",
+    "left": "leave", "kept": "keep", "set": "set", "put": "put", "got": "get",
+    "gotten": "get", "sold": "sell", "taught": "teach", "told": "tell",
+}
+
+
+def _action_verb(word: str) -> str:
+    """Inflection-normalize a verb, leaving the action's objects untouched."""
+    word = _PAST_VERBS.get(word, word)
+    if word.endswith("ied"):
+        return word[:-3] + "y"
+    if word.endswith("ing") and len(word) > 5:
+        word = word[:-3]
+        if len(word) > 2 and word[-1] == word[-2] and word[-1] not in "lsz":
+            word = word[:-1]
+    elif word.endswith("ed") and len(word) > 4:
+        word = word[:-2]
+        if len(word) > 2 and word[-1] == word[-2] and word[-1] not in "lsz":
+            word = word[:-1]
+    # The base and its -ed/-ing variants share a stem even for silent-e verbs.
+    return word[:-1] if word.endswith("e") and not word.endswith("ee") else word
+
+
 def _action_key(action: str) -> str:
     text = action.casefold()
     text = re.sub(r"\b(?:my|our|the|a|an|with|to)\b", " ", text)
-    for word, normalized in {"meeting": "meet", "met": "meet", "calling": "call", "called": "call", "launching": "launch", "launched": "launch"}.items():
-        text = re.sub(r"\b" + word + r"\b", normalized, text)
-    return " ".join(re.findall(r"[\w-]+", text))
+    words = re.findall(r"[\w-]+", text)
+    if words:
+        words[0] = _action_verb(words[0])
+    return " ".join(words)
 
 
 def commitment_changes(source, clauses: list[str], timezone: str | None = None) -> list[dict]:
     changes = []
     for span in source_spans(source, clauses):
         text = span.quote.strip().rstrip(".! ")
+        text = re.sub(r"\b(I|We)['’]ve\b", r"\1 have", text, flags=re.I)
         if _UNCERTAIN.search(text):
             continue
         kind, action = "pending", None
         if m := re.fullmatch(r"(?:I|We)\s+(?:cancel(?:led|ed)?|called off|no longer plan to)\s+(.+)", text, re.I):
             kind, action = "cancelled", m[1]
-        elif m := re.fullmatch(r"(?:I|We)\s+(?:completed|finished)\s+(.+)", text, re.I):
+        elif m := re.fullmatch(r"(?:I|We)\s+(?:(?:have|had)\s+)?(?:already\s+|just\s+)?(?:completed|finished)\s+(.+)", text, re.I):
             kind, action = "completed", m[1]
-        elif m := re.fullmatch(r"(?:I|We)\s+(met|called|launched)\s+(.+)", text, re.I):
-            kind, action = "completed", m[1] + " " + m[2]
+        elif m := re.fullmatch(r"(?:I|We)\s+(?:(?:have|had)\s+)?(?:already\s+|just\s+)?(" + "|".join(_PAST_VERBS) + r"|[a-z]+ed)\s+(.+)", text, re.I):
+            # Rescheduling/cancellation is handled as a transition below.
+            if (m[1].lower() in {"rescheduled", "postponed", "moved", "cancelled", "canceled", "decided", "promised", "committed"}
+                    or m[1].lower() in {"read", "set", "put"} and not re.search(r"\b(?:have|had|already|just|yesterday)\b", text, re.I)):
+                m = None
+            else:
+                kind, action = "completed", m[1] + " " + m[2]
+        if action is not None:
+            pass
         elif m := re.fullmatch(r"(?:I|We)\s+(?:(?:decided to|will)\s+)?(?:reschedul(?:e|ed)|postpon(?:e|ed)|mov(?:e|ed))\s+(.+)", text, re.I):
             kind, action = "rescheduled", m[1]
         elif m := re.fullmatch(r"(?:I|We)\s+(?:(?:plan|intend|committed|commit|promised|promise|decided)\s+to|will|am going to|are going to)\s+(.+)", text, re.I):
@@ -174,6 +256,15 @@ def commitment_display_status(intention, *, now: datetime) -> str:
     return "overdue" if now >= end else "pending"
 
 
+def _commitment_readable(engine, source, row) -> bool:
+    from mnemosyne.retrieval import projection_sources_readable
+    return bool(row.get("source_evidence_cids")) and projection_sources_readable(
+        engine, row["source_evidence_cids"], tenant_id=source.tenant_id, branch=source.branch,
+        filt={"tenant_id": source.tenant_id, "user_id": source.user_id, "principal": source.user_id},
+        policy=engine.policy,
+    )
+
+
 def project_commitment_memory(engine, source, policy: dict, clauses: list[str], *, timezone=None, agent_id="codex", session_id=None) -> dict:
     """Project state through ordinary assertion/intention writers, idempotently.
 
@@ -219,7 +310,9 @@ def project_commitment_memory(engine, source, policy: dict, clauses: list[str], 
                       and row.get("branch", "main") == "main" and row["status"] == "active"
                       and row["predicate"] == "commitment_state"
                       and row.get("calibration", {}).get("commitment_state") == "pending"
-                      and row.get("calibration", {}).get("action_key") == change["action_key"]]
+                      and _action_key(row.get("calibration", {}).get("action", "")) == change["action_key"]
+                      and (parse_dt(row.get("valid_from")) or source.created_at) <= source.created_at
+                      and _commitment_readable(engine, source, row)]
         is_change = change["state"] != "pending"
         selector = change["previous_event_time"] if change["state"] == "rescheduled" else change["event_time"]
         if is_change and len(candidates) > 1 and selector and selector.get("date"):

@@ -9,6 +9,16 @@ from __future__ import annotations
 import re
 
 _INTENTS = {
+    "optimize": {"optimize", "optimise", "optimizing", "optimising", "speed up", "improve the performance of"},
+    "diagnose": {"diagnose", "diagnosing", "debug", "debugging", "investigate", "investigating", "troubleshoot", "troubleshooting"},
+    "implement": {"implement", "implementing", "build", "building", "develop", "developing"},
+    "refactor": {"refactor", "refactoring", "restructure", "restructuring"},
+    "verify": {"verify", "verifying", "validate", "validating", "check", "checking"},
+    "explain": {"explain", "explaining", "describe", "describing"},
+    "compare": {"compare", "comparing", "contrast", "contrasting"},
+    "configure": {"configure", "configuring", "set up", "setting up"},
+    "migrate": {"migrate", "migrating", "upgrade", "upgrading"},
+    "document": {"document", "documenting", "write documentation for"},
     "fix": {"fix", "fixing", "repair", "repairing", "resolve", "resolving", "sort out"},
     "find": {"find", "finding", "locate", "locating", "search for"},
     "show": {"show", "showing", "display", "displaying"},

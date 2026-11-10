@@ -3776,6 +3776,7 @@ class PostgresEngine:
         *,
         actor: str = "consolidation",
         source: str = "embedder",
+        only_if_missing: bool = False,
     ) -> bool:
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self.connect() as conn:
@@ -3784,14 +3785,15 @@ class PostgresEngine:
                 self._ensure_evidence_vector_schema(cur)
                 cur.execute(
                     """
-                    SELECT source_type, trust_tier, capability_tags, sensitivity, access_policy
+                    SELECT source_type, trust_tier, capability_tags, sensitivity, access_policy, embedding
                     FROM evidence
                     WHERE tenant_id = %s AND branch = %s AND cid = %s AND erased = false
+                    FOR UPDATE
                     """,
                     (db_tenant_id, branch, _cid_to_bytes(cid)),
                 )
                 row = cur.fetchone()
-                if row is None:
+                if row is None or (only_if_missing and row["embedding"] is not None):
                     return False
                 embedding_partition = vector_partition_for_item(
                     sensitivity=int(row["sensitivity"]),
@@ -7465,21 +7467,32 @@ class PostgresEngine:
                         """,
                         (self._jsonb(metadata), db_tenant_id, branch, retained_bytes),
                     )
+                dependent_relations = set()
                 cur.execute(
                     """
-                    SELECT id, source_evidence_cids
+                    SELECT id, source_evidence_cids, calibration, subject, predicate, object
                     FROM assertions
                     WHERE tenant_id = %s AND branch = %s AND source_evidence_cids && %s
                     """,
                     (db_tenant_id, branch, affected_cid_bytes),
                 )
                 for row in cur.fetchall():
+                    original_sources = _bytes_list_to_cids(row["source_evidence_cids"])
+                    calibration = row["calibration"] or {}
+                    conjunctive = calibration.get("source_dependency_mode") == "all" or bool(calibration.get("coreference"))
+                    if conjunctive:
+                        dependent_relations.add((row["subject"], row["predicate"], row["object"], frozenset(original_sources)))
+                        cur.execute(
+                            "UPDATE assertions SET subject = '[erased]', predicate = 'erased', object = '[erased]', "
+                            "scope = '{}'::jsonb, calibration = %s WHERE id = %s",
+                            (self._jsonb({"dependency_erased": True}), row["id"]),
+                        )
                     sources = [
                         item
-                        for item in _bytes_list_to_cids(row["source_evidence_cids"])
+                        for item in original_sources
                         if item not in affected_cids
                     ]
-                    if sources:
+                    if sources and not conjunctive:
                         cur.execute(
                             "UPDATE assertions SET source_evidence_cids = %s WHERE id = %s",
                             (_cid_list_to_bytes(sources), row["id"]),
@@ -7519,19 +7532,26 @@ class PostgresEngine:
                         propagated["retracted_preferences"].append(str(row["id"]))
                 cur.execute(
                     """
-                    SELECT id, source_evidence_cids
+                    SELECT id, source_evidence_cids, source, predicate, target
                     FROM relations
                     WHERE tenant_id = %s AND branch = %s AND source_evidence_cids && %s
                     """,
                     (db_tenant_id, branch, affected_cid_bytes),
                 )
                 for row in cur.fetchall():
+                    original_sources = _bytes_list_to_cids(row["source_evidence_cids"])
+                    conjunctive = (row["source"], row["predicate"], row["target"], frozenset(original_sources)) in dependent_relations
+                    if conjunctive:
+                        cur.execute(
+                            "UPDATE relations SET source = '[erased]', predicate = 'erased', target = '[erased]' WHERE id = %s",
+                            (row["id"],),
+                        )
                     sources = [
                         item
-                        for item in _bytes_list_to_cids(row["source_evidence_cids"])
+                        for item in original_sources
                         if item not in affected_cids
                     ]
-                    if sources:
+                    if sources and not conjunctive:
                         cur.execute(
                             "UPDATE relations SET source_evidence_cids = %s WHERE id = %s",
                             (_cid_list_to_bytes(sources), row["id"]),

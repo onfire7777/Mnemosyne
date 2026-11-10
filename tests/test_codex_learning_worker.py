@@ -127,3 +127,21 @@ def test_shadow_evaluation_retries_when_memory_changes_without_new_episode(tmp_p
     clock[0] += 301
     advance(facade, 't', path)
     assert len(calls) == 2
+
+
+def test_pending_hypothesis_review_retries_without_new_outcomes(tmp_path, monkeypatch):
+    from datetime import UTC, datetime
+    from mnemosyne.hosts import codex_learning
+
+    facade, _, state, _, calls = host()
+    clock = [1000.0]
+    monkeypatch.setattr(codex_learning.time, "time", lambda: clock[0])
+    state["policy"]["hypotheses"] = {"pending": {
+        "status": "inconclusive", "next_review_at": datetime.fromtimestamp(1120, UTC).isoformat()}}
+    path = tmp_path / "worker.json"
+    assert advance(facade, "t", path)["retry_after"] == 1120
+    advance(facade, "t", path)
+    assert len(calls) == 1
+    clock[0] = 1121
+    advance(facade, "t", path)
+    assert len(calls) == 2

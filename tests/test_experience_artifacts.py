@@ -990,6 +990,7 @@ def test_hypothesis_enters_probation_only_after_tagged_external_execution():
                 "output": "inspect\nverify",
                 "tested_steps": ["inspect", "verify"],
                 "hypothesis_id": "h",
+                "contract_hash": runtime.writer.read("t")["policy"]["hypotheses"]["h"]["contract_hash"],
             }
         ],
     )

@@ -12,26 +12,77 @@ import os
 from pathlib import Path
 import hashlib
 import json
+import math
 import re
 import threading
 import unicodedata
 from collections import defaultdict
 from dataclasses import asdict
+from datetime import timedelta
 from time import monotonic
 from typing import Any
 
 from mnemosyne._file_lock import exclusive_file_lock
-from mnemosyne.access_policy import may_read_item
+from mnemosyne.access_policy import may_read_item, merge_access_policies, vector_partition_for_item
 from mnemosyne.answering import AnswerReadContext
 from mnemosyne.knowledge_pages import KnowledgePage, KnowledgePageConflict, scrub_automatic_pages
 from mnemosyne.models import parse_dt, utc_now
-from mnemosyne.retrieval import projection_sources_readable
+from mnemosyne.retrieval import HashingEmbeddingProvider, projection_sources_readable
 from mnemosyne.security import SecurityPolicy
 
 SCHEMA = "mnemosyne.automatic-knowledge/v1"
 _TAG = "automatic-knowledge"
 _PRONOUNS = {"i", "me", "my", "we", "our", "you", "your", "it", "this", "that", "they", "he", "she"}
-_SECTIONS = ("Established facts", "Decisions", "Pending commitments", "Uncertainty")
+_SECTIONS = ("Established facts", "Decisions", "Pending commitments", "Resolved commitments", "Uncertainty")
+_STOP_WORDS = set("a an the what which who where when how is are was were do does did my our your we i it this that about know tell me more of for to in on with and or".split())
+_TERM_EQUIVALENTS = {"runs": "run", "running": "run", "operates": "run", "operating": "run",
+                     "hosts": "host", "hosting": "host", "hosted": "host", "deployed": "deploy",
+                     "deployment": "deploy", "deploys": "deploy", "repository": "repo", "repositories": "repo",
+                     "depends": "dependency", "dependencies": "dependency", "uses": "use", "using": "use"}
+
+
+def _terms(text: str) -> set[str]:
+    return {_TERM_EQUIVALENTS.get(term, term) for term in re.findall(r"\w+", _normal(text).replace("_", " "))
+            if term not in _STOP_WORDS and len(term) > 1}
+
+
+def _embedding_identity(engine) -> str:
+    provider = getattr(getattr(engine, "adapters", None), "embedding", None)
+    return _digest([getattr(provider, name, None) for name in ("name", "dims", "model", "model_revision", "url")])
+
+
+def _embedding(engine, text: str, *, query=False) -> list[float]:
+    provider = getattr(getattr(engine, "adapters", None), "embedding", None)
+    if provider is None:
+        return []
+    try:
+        # Topic pages and queries belong to an owner. Do not place their text
+        # or derived vectors in a provider's shared/durable cache.
+        if query and callable(getattr(provider, "embed_query_sensitive", None)):
+            vector = list(provider.embed_query_sensitive(text))
+        elif type(provider) is HashingEmbeddingProvider:
+            from mnemosyne.text import _hashing_embedding_pure
+            vector = list(_hashing_embedding_pure(text, provider.dims))
+        elif callable(getattr(provider, "embed_sensitive", None)):
+            if query and getattr(provider, "query_prefix", None):
+                text = provider.query_prefix + text
+            vector = list(provider.embed_sensitive(text))
+        else:
+            return []  # Unknown providers must expose a cache-bypassing path.
+        if not vector or len(vector) > 16384 or not all(isinstance(value, (int, float)) and math.isfinite(value) for value in vector):
+            return []
+        return vector
+    except Exception:
+        return []  # Lexical recall continues through a provider outage.
+
+
+def _cosine(a, b) -> float:
+    if not a or not isinstance(b, list) or len(a) != len(b):
+        return 0.0
+    if not all(isinstance(value, (int, float)) and math.isfinite(value) for value in b):
+        return 0.0
+    denominator = math.sqrt(sum(x*x for x in a) * sum(x*x for x in b))
+    return sum(x*y for x, y in zip(a, b)) / denominator if denominator else 0.0
 
 
 def _digest(value: Any) -> str:
@@ -134,6 +185,8 @@ def _claim(engine: Any, context: AnswerReadContext, row: dict[str, Any]) -> dict
     predicate = _normal(str(row.get("predicate", "")))
     if epistemic == "reported_belief" or row["status"] == "contested":
         section = "Uncertainty"
+    elif meta.get("commitment_state") in {"completed", "cancelled"}:
+        section = "Resolved commitments"
     elif any(word in predicate for word in ("plan", "goal", "commit", "intend", "deadline", "remind")):
         section = "Pending commitments"
     elif any(word in predicate for word in ("decid", "chose", "chosen", "decision")):
@@ -144,12 +197,19 @@ def _claim(engine: Any, context: AnswerReadContext, row: dict[str, Any]) -> dict
     source_state = [{"cid": cid, "content": _digest(source.content), "metadata": source.metadata,
                      "access_policy": source.access_policy, "trust_tier": source.trust_tier,
                      "sensitivity": source.sensitivity} for cid, source in sources.items()]
+    access = merge_access_policies([row.get("access_policy") or {}, *[s.access_policy for s in sources.values()]],
+                                  tenant_id=context.tenant_id)
+    sensitivity = max([int(row.get("sensitivity", 0))] + [s.sensitivity for s in sources.values()])
     return {"assertion_id": row["id"], "version": row.get("version", 1), "text": statement,
+            "subject": row["subject"], "predicate": row["predicate"], "object": row["object"],
+            "scope": row.get("scope") or {}, "commitment_state": meta.get("commitment_state"),
+            "access_policy": access, "embedding_allowed": vector_partition_for_item(
+                sensitivity=sensitivity, access_policy=access) != "none",
             "epistemic_class": epistemic, "section": section, "spans": spans,
             "source_evidence_cids": cids, "observed_at": meta.get("observed_at", row.get("transaction_time")),
             "event_time": meta.get("event_time"), "fingerprint": _digest([stable, source_state]),
             "trust_tier": max([int(row.get("trust_tier", 0))] + [s.trust_tier for s in sources.values()]),
-            "sensitivity": max([int(row.get("sensitivity", 0))] + [s.sensitivity for s in sources.values()])}
+            "sensitivity": sensitivity}
 
 
 def automatic_page_current(engine: Any, page: KnowledgePage, context: AnswerReadContext | None = None) -> bool:
@@ -196,6 +256,25 @@ def automatic_page_current(engine: Any, page: KnowledgePage, context: AnswerRead
 
 def _render(title: str, claims: list[dict[str, Any]], links: list[dict[str, Any]]) -> str:
     lines = [f"# {title}"]
+    # Synthesize an entity view from independently grounded propositions.
+    # This resolves pronouns and combines complementary facts without adding
+    # an uncited model-generated conclusion or erasing uncertainty/negation.
+    grouped = defaultdict(list)
+    for claim in claims:
+        if claim["section"] != "Uncertainty" and claim.get("subject"):
+            grouped[claim["subject"]].append(claim)
+    if grouped:
+        lines += ["", "## Overview"]
+        for subject, facts in sorted(grouped.items()):
+            properties = []
+            for claim in facts:
+                relation = claim["predicate"].replace("_", " ")
+                value = claim["object"]
+                scope = ", ".join(f"{key}: {value}" for key, value in sorted(claim.get("scope", {}).items())
+                                  if key not in {"commitment_id", "epistemic_class"})
+                citations = " ".join(f"[source:{span['cid']}:{span['start']}-{span['end']}]" for span in claim["spans"])
+                properties.append(f"{relation}: {value}" + (f" ({scope})" if scope else "") + " " + citations)
+            lines.append(f"- {subject} — " + "; ".join(properties))
     for section in _SECTIONS:
         items = [claim for claim in claims if claim["section"] == section]
         if not items:
@@ -215,15 +294,24 @@ def read_knowledge_context(engine: Any, context: AnswerReadContext, query: str, 
     """Return bounded useful topic views with fresh exact-span provenance."""
     if not hasattr(engine, "knowledge_page_list") or not context.user_id or max_tokens <= 0 or max_pages <= 0:
         return []
-    terms = set(re.findall(r"\w+", _normal(query)))
+    terms = _terms(query)
+    if not terms:
+        return []
     pages = engine.knowledge_page_list(context.tenant_id, context.branch, tags=[_TAG], status="all", limit=1000)
+    identity = _embedding_identity(engine)
+    vector = _embedding(engine, query, query=True) if any(p.maintenance.get("embedding_identity") == identity
+             and p.maintenance.get("embedding") and p.user_id == context.user_id for p in pages) else []
     scored = []
     for page in pages:
         if page.user_id != context.user_id or page.status != "active":
             continue
-        overlap = len(terms & set(re.findall(r"\w+", _normal(page.title))))
-        if overlap:
-            scored.append((-overlap, page.path, page))
+        content = " ".join(str(c.get(key, "")) for c in page.maintenance.get("claims", [])
+                           for key in ("subject", "predicate", "object", "text"))
+        overlap = len(terms & _terms(content + " " + page.title)) / len(terms)
+        title_overlap = len(terms & _terms(page.title)) / len(terms)
+        semantic = _cosine(vector, page.maintenance.get("embedding")) if page.maintenance.get("embedding_identity") == identity else 0.0
+        if overlap or semantic >= 0.35:
+            scored.append((-(overlap + 0.5 * title_overlap + max(0.0, semantic)), page.path, page))
     output = []
     remaining = max_tokens * 4
     for _, _, page in sorted(scored)[:max_pages * 3]:
@@ -233,13 +321,14 @@ def read_knowledge_context(engine: Any, context: AnswerReadContext, query: str, 
             if current is None or current.version != page.version or not automatic_page_current(engine, current, context):
                 continue
         claims = []
-        for claim in page.maintenance.get("claims", []):
-            cost = len(claim["text"]) + sum(len(span["cid"]) + 35 for span in claim["spans"]) + 12
-            if cost <= remaining:
-                remaining -= cost
-                claims.append(copy.deepcopy(claim))
+        for claim in sorted(page.maintenance.get("claims", []),
+                            key=lambda c: -len(terms & _terms(" ".join(str(c.get(k, "")) for k in ("text", "subject", "predicate", "object"))))):
+            candidate = claims + [copy.deepcopy(claim)]
+            if len(_render(page.title, candidate, []).encode("utf-8")) <= remaining:
+                claims = candidate
         if not claims:
             continue
+        remaining -= len(_render(page.title, claims, []).encode("utf-8"))
         output.append({"page_id": page.page_id, "version": page.version, "title": page.title,
                        "path": page.path, "text": _render(page.title, claims, []), "claims": claims,
                        "source_evidence_cids": sorted({cid for claim in claims for cid in claim["source_evidence_cids"]})})
@@ -253,6 +342,8 @@ class KnowledgeMaintenanceWorker:
 
     Retain the worker between ticks: keyset discovery advances over large stores.
     Only IDs and topic names are cached, and all claims are reread before use.
+    The time budget stops admission of work; an in-flight, provider-timeout-
+    bounded embedding may finish its guarded publication before the tick exits.
     """
     def __init__(self, engine: Any, context: AnswerReadContext, *, max_batch: int = 6,
                  max_seconds: float = 2.0, max_claims: int = 24, max_tokens: int = 2400,
@@ -465,12 +556,12 @@ class KnowledgeMaintenanceWorker:
                     text_key = _normal(claim["text"])
                     if text_key in seen:
                         continue
-                    cost = (len(claim["text"]) + len(json.dumps(claim["spans"])) + 3) // 4
-                    if len(claims) >= self.max_claims or page_tokens + cost > self.max_tokens:
+                    combined_tokens = (len(_render(titles[key], claims + [claim], []).encode("utf-8")) + 3) // 4
+                    if len(claims) >= self.max_claims or combined_tokens > self.max_tokens:
                         break
                     seen.add(text_key)
                     claims.append(claim)
-                    page_tokens += cost
+                    page_tokens = combined_tokens
                 processed += 1
                 if report["tokens"] + page_tokens > self.max_tokens:
                     break
@@ -492,10 +583,16 @@ class KnowledgeMaintenanceWorker:
                              self.engine, existing[n].source_evidence_cids, tenant_id=self.context.tenant_id,
                              branch=self.context.branch, filt=self.context.to_filter(), policy=self.engine.policy)][:12]
                 cids = sorted(set(cids).union(*(link["source_evidence_cids"] for link in links)))
-                fingerprint = _digest([[c["fingerprint"] for c in claims], links])
+                identity = _embedding_identity(self.engine)
+                fingerprint = _digest([[c["fingerprint"] for c in claims], links, identity, 2])
+                embedding_allowed = bool(claims) and all(c["embedding_allowed"] for c in claims)
                 if previous and previous.status == "active" and previous.maintenance.get("fingerprint") == fingerprint:
-                    report["unchanged"] += 1
-                    continue
+                    retry_at = parse_dt(previous.maintenance.get("embedding_retry_at"))
+                    if previous.maintenance.get("embedding") or not embedding_allowed or retry_at and retry_at > utc_now():
+                        report["unchanged"] += 1
+                        continue
+                embedding = _embedding(self.engine, titles[key] + "\n" + "\n".join(
+                    f"{c['subject']} {c['predicate'].replace('_', ' ')} {c['object']}" for c in claims)) if embedding_allowed else []
                 page = KnowledgePage(tenant_id=self.context.tenant_id, user_id=self.context.user_id or "",
                     branch=self.context.branch, path=_path(self.context.user_id or "", canonical_key), title=titles[key],
                     page_id=previous.page_id if previous else "kp-auto-" + _digest([self.context.tenant_id,
@@ -504,11 +601,13 @@ class KnowledgeMaintenanceWorker:
                     source_evidence_cids=cids, source_assertion_ids=[], tags=[_TAG],
                     trust_tier=max((c["trust_tier"] for c in claims), default=1),
                     sensitivity=max((c["sensitivity"] for c in claims), default=0),
-                    access_policy={"allow_principals": [self.context.user_id]},
+                    access_policy=merge_access_policies([{"allow_principals": [self.context.user_id]},
+                        *[c["access_policy"] for c in claims]], tenant_id=self.context.tenant_id),
                     status="active" if claims else "stale",
                     maintenance={"schema": SCHEMA, "topic_key": canonical_key, "context": asdict(self.context),
                                  "claims": claims, "fingerprint": fingerprint, "related_topics": links,
-                                 "derivation_version": 1})
+                                 "derivation_version": 2, "embedding": embedding, "embedding_identity": identity,
+                                 "embedding_retry_at": (utc_now() + timedelta(seconds=60)).isoformat() if embedding_allowed and not embedding else None})
                 if not claims:
                     if previous is None or (previous.status == "stale" and not previous.content_markdown):
                         report["unchanged"] += 1
@@ -517,7 +616,7 @@ class KnowledgeMaintenanceWorker:
                 try:
                     with self.engine.mental_model_guard(self.context.tenant_id):
                         # A source change, newer writer, or revocation wins over this build.
-                        if revision != self._revision() or monotonic() >= deadline:
+                        if revision != self._revision():
                             report["conflicts"] += 1
                             continue
                         current = self.engine.knowledge_page_get(self.context.tenant_id, page.page_id,

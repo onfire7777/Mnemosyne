@@ -18,7 +18,7 @@ from mnemosyne.episodic_facts import (
 )
 from mnemosyne.models import Assertion, Relation
 
-DERIVATION_VERSION = "semantic-memory-v1"
+DERIVATION_VERSION = "semantic-memory-v2"
 _NAME = r"[A-Z][\w.-]*(?:\s+[A-Z][\w.-]*){0,3}"
 _ASSET = r"(?:[\w-]+\s+){0,2}(?:server|project|repository|repo|service|application|app|database|website|team|company|workspace|API)"
 _STATE_VERBS = {"runs", "run", "uses", "use", "depends_on", "hosts", "host", "belongs_to", "connects_to", "deploys_to", "is", "are", "stores", "serves", "supports", "requires", "maintains", "owns"}
@@ -74,6 +74,7 @@ def _fact(source, policy, span, subject, predicate, obj, *, scope=None, **metada
         subject=subject, predicate=predicate, object=obj, scope=scope or {},
         status="active", confidence=0.9, valid_from=source.created_at,
         source_evidence_cids=[source.cid], trust_tier=source.trust_tier,
+        sensitivity=source.sensitivity,
         access_policy=dict(policy), calibration=semantic_metadata(source, span, **metadata),
     )
 
@@ -114,12 +115,13 @@ def _literal_proposal(row: dict, quote: str) -> tuple[str, str, str] | None:
     return normalized
 
 
-def build_semantic_projection(source, policy: dict, clauses: list[str], *, proposer=None, supported_clauses=()) -> SemanticProjection:
+def build_semantic_projection(source, policy: dict, clauses: list[str], *, proposer=None, supported_clauses=(), context=None) -> SemanticProjection:
     """Build owned, source-backed project/entity memory without writing it."""
     result = SemanticProjection()
     spans = source_spans(source, clauses)
-    known: dict[str, SourceSpan] = {}
-    antecedents: list[str] = []
+    context = context or {}
+    known: dict[str, SourceSpan] = dict(context.get("entities", {}))
+    antecedents: list[str] = list(known)
     unsupported: list[SourceSpan] = []
 
     def add(fact, graph=True):
@@ -131,6 +133,10 @@ def build_semantic_projection(source, policy: dict, clauses: list[str], *, propo
 
     for span in spans:
         text = span.quote.strip().rstrip(".! ")
+        # Quoted names are ordinary nominal values, not quoted instructions.
+        # The clause filter already excluded speech and full quoted sentences.
+        text = re.sub(r'["“”‘’]', "", text)
+        text = re.sub(r"(?<!\w)'([^']+)'(?!\w)", r"\1", text)
         # Report the belief itself, not the embedded world claim. This also
         # keeps separate speakers' contradictory beliefs from replacing facts.
         report = re.fullmatch(r"((?:My|Our)\s+[\w -]{1,50})\s+(thinks|believes)\s+(.+)", text, re.I)
@@ -200,9 +206,25 @@ def build_semantic_projection(source, policy: dict, clauses: list[str], *, propo
                     continue
                 extra: dict[str, Any] = {"entity_mentions": [mentioned] if mentioned else [fact.subject]}
                 if antecedent:
-                    extra["antecedent_spans"] = [known[antecedent].to_dict()]
+                    dependencies = ([known[antecedent]] if known[antecedent].cid == source.cid else
+                                    context.get("dependencies", {}).get(antecedent, [known[antecedent]]))
+                    extra["antecedent_spans"] = [item.to_dict() for item in dependencies]
                     extra["coreference"] = {"surface": text.split()[0], "entity": antecedent}
+                    extra["source_dependency_mode"] = "all"
                 fact.calibration.update(semantic_metadata(source, span, **extra))
+                if antecedent:
+                    from mnemosyne.access_policy import merge_access_policies
+                    for dependency in dependencies:
+                        if dependency.cid not in fact.source_evidence_cids:
+                            fact.source_evidence_cids.append(dependency.cid)
+                        if dependency.to_dict() not in fact.calibration["source_spans"]:
+                            fact.calibration["source_spans"].append(dependency.to_dict())
+                    fact.access_policy = merge_access_policies(
+                        [fact.access_policy, *context.get("policies", {}).get(antecedent, [])],
+                        tenant_id=source.tenant_id,
+                    )
+                    fact.trust_tier = max(fact.trust_tier, context.get("trust_tiers", {}).get(antecedent, source.trust_tier))
+                    fact.sensitivity = max(source.sensitivity, context.get("sensitivities", {}).get(antecedent, 0))
                 add(fact, graph=fact.status == "active")
                 accepted = True
             if accepted:

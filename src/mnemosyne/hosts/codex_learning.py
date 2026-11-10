@@ -13,7 +13,7 @@ def _fingerprint(facade, runtime, tenant):
     state = runtime.writer.read(tenant)
     status = runtime.status(tenant)
     payload = {
-        "pipeline_version": 2,
+        "pipeline_version": 3,
         "trainer": type(getattr(facade.tools.parametric, "trainer", None)).__qualname__,
         "trainer_configuration": getattr(getattr(facade.tools.parametric, "trainer", None),
                                          "configuration_fingerprint", lambda: None)(),
@@ -25,6 +25,11 @@ def _fingerprint(facade, runtime, tenant):
         "modes": status["modes"],
         "enabled": status["enabled"],
         "frozen": status["frozen"],
+        "pending_reviews": [
+            [key, row.get("status"), row.get("next_review_at"), row.get("lease_until")]
+            for key, row in sorted(state["policy"].get("hypotheses", {}).items())
+            if row.get("status") not in {"verified", "rejected"}
+        ],
         "protected_cases": [
             case.to_dict() for case in sorted(
                 facade.runtime_state.load_gate_cases(), key=lambda case: case.id
@@ -90,6 +95,26 @@ def advance(facade, tenant, state_path):
             retryable = True
     else:
         report["training"] = {"status": "waiting_for_validated_sources"}
+    from datetime import datetime
+    # The worker must wake queued/leased reviews even if no new task finishes.
+    # Previously a matching episode fingerprint could strand them indefinitely.
+    pending = runtime.writer.read(tenant)["policy"].get("hypotheses", {}).values()
+    review_times = []
+    for row in pending:
+        if row.get("status") in {"verified", "rejected"}:
+            continue
+        if row.get("review_complete") and row.get("prediction_candidate_status"):
+            continue
+        if row.get("review_complete"):
+            review_times.append(time.time() + 60)
+            continue
+        due = row.get("lease_until") if row.get("status") == "running" else row.get("next_review_at")
+        try:
+            review_times.append(datetime.fromisoformat(due).timestamp() if due else time.time() + 60)
+        except (TypeError, ValueError):
+            review_times.append(time.time() + 60)
+    if review_times:
+        report["retry_after"] = min(report.get("retry_after", float("inf")), max(time.time() + 60, min(review_times)))
     # Trainer validation errors may also describe a temporary provider failure.
     # Preserve the diagnostic but let the next worker tick retry the inputs.
     report["fingerprint"] = None if retryable else _fingerprint(facade, runtime, tenant)

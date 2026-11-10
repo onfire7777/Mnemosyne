@@ -2,7 +2,6 @@
 
 import json
 import os
-import subprocess
 import sys
 import traceback
 from datetime import UTC, datetime
@@ -31,21 +30,22 @@ def supervise(payload):
     command = [sys.executable, str(Path(__file__).resolve()), "--child"]
     event = payload.get("hook_event_name")
     deadline = 1.8 if event == "SessionEnd" else 8.0
-    environment = dict(os.environ)
+    from mnemosyne.hosts.deadlines import run_bounded
+    response, execution = run_bounded(command, payload, primary_timeout=deadline,
+        allow_local=event in {"UserPromptSubmit", "HostCapabilities"})
+    if response is not None:
+        if response.get('_mnemosyne_delivery'):
+            response['_mnemosyne_delivery']['retrieval_execution'] = execution
+        return response
+    STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
+    descriptor = os.open(STATE / 'host-attempts.jsonl', os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
     try:
-        result = subprocess.run(command, input=json.dumps(payload), text=True,
-            capture_output=True, timeout=deadline, env=environment, check=True)
-        return json.loads(result.stdout)
-    except (subprocess.TimeoutExpired, subprocess.CalledProcessError, json.JSONDecodeError):
-        if event == "UserPromptSubmit":
-            environment['MNEMOSYNE_LOCAL_RECALL'] = '1'
-            try:
-                result = subprocess.run(command, input=json.dumps(payload), text=True,
-                    capture_output=True, timeout=2.8, env=environment, check=True)
-                return json.loads(result.stdout)
-            except (subprocess.TimeoutExpired, subprocess.CalledProcessError, json.JSONDecodeError):
-                return {"systemMessage": "Memory recall reached its deadline; this turn has no injected memory."}
-        return {"systemMessage": "Memory capture is pending recovery from the retained transcript."}
+        os.write(descriptor, (json.dumps({'event': event, **execution}) + '\n').encode())
+    finally:
+        os.close(descriptor)
+    if event in {"UserPromptSubmit", "HostCapabilities"}:
+        return {"systemMessage": "Memory recall could not complete; this turn has no injected memory."}
+    return {"systemMessage": "Memory capture is pending recovery from the retained transcript."}
 
 
 def _log_delivery(delivery):
@@ -75,6 +75,8 @@ if __name__ == "__main__":
         arguments = sys.argv[1:]
         if arguments == ["--report-use"]:
             payload["hook_event_name"] = "MemoryUse"
+        elif arguments == ["--report-capabilities"]:
+            payload["hook_event_name"] = "HostCapabilities"
         elif arguments not in ([], ["--child"]):
             raise ValueError("unsupported lifecycle hook arguments")
         output = handle(payload) if arguments == ["--child"] else supervise(payload)

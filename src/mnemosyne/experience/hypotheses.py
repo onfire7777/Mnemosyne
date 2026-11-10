@@ -17,6 +17,12 @@ KINDS = {"factual", "contradiction", "procedural", "knowledge_maintenance"}
 STATES = {"proposed", "queued", "running", "verified", "rejected", "inconclusive"}
 
 
+def _projection_options(runtime):
+    config = getattr(runtime.engine, "_learning_configuration", {})
+    return {"semantic_proposer": config.get("semantic_proposer"),
+            "timezone": config.get("source_timezone")}
+
+
 def fingerprint_source(source):
     return digest([source.content, source.created_at.isoformat(), source.metadata,
                    source.access_policy, source.actor, source.source_type, source.trust_tier])
@@ -61,7 +67,7 @@ def factual_proposals(runtime, tenant, episodes, *, limit=8):
             if cid in seen or not runtime._sources_live(tenant, [cid], episode.get("user_id")):
                 continue
             seen.add(cid)
-            preview = preview_direct_user_memory(runtime.engine, tenant, cid)
+            preview = preview_direct_user_memory(runtime.engine, tenant, cid, **_projection_options(runtime))
             for assertion in preview.get("assertions", []):
                 claim = _claim(assertion)
                 row = {"id": "review:" + digest([tenant, episode["user_id"], cid, claim]),
@@ -77,12 +83,16 @@ def factual_proposals(runtime, tenant, episodes, *, limit=8):
 
 
 def experiment_proposals(runtime, tenant, episodes, *, limit=4):
-    """Discover explicitly supplied pure-expression fixtures in live evidence.
+    """Plan observed-trace experiments and discover explicitly supplied fixtures.
 
-    No command is inferred from prose. A typed check and its expected outputs
-    must already occur together in an owned, non-assistant source record.
+    Trace checks predict real external outcomes without executing the commands.
+    Explicit expression fixtures remain available for user-supplied algorithms.
     """
-    proposals, seen = [], set()
+    from .experiment_planner import propose_observed_experiments
+    proposals = propose_observed_experiments(runtime, tenant, episodes, limit=limit)
+    if len(proposals) >= limit:
+        return proposals
+    seen = set()
     decoder = json.JSONDecoder()
     for episode in episodes:
         for cid in episode.get("source_cids", []):
@@ -125,6 +135,29 @@ def _review(runtime, tenant, row, state):
         check = contract.get("sandbox_check")
         if check:
             from .hypothesis_sandbox import run_experiment
+            if check.get("kind") == "observed_trace_replay":
+                from .experiment_planner import validate_observed_check
+                if not validate_observed_check(runtime, tenant, row, state):
+                    return {"status": "inconclusive", "reason": "observed_cases_no_longer_grounded",
+                            "verifier": "observed-trace-review:v1", "support": []}
+                outcome = run_experiment(check)
+                partitions = {}
+                for name in ("training", "heldout"):
+                    results = [result for case, result in zip(check["cases"], outcome.get("results", []), strict=False)
+                               if case["partition"] == name]
+                    partitions[name] = {"passed": sum(result["passed"] for result in results),
+                                        "total": len(results)}
+                return {"status": "rejected" if outcome["status"] == "failed" else "inconclusive",
+                        "reason": "heldout_replay_passed_awaiting_real_outcomes" if outcome["status"] == "passed"
+                                  else outcome.get("reason", "heldout_prediction_failed"),
+                        "verifier": "observed-trace-review:v1", "support": [], "partitions": partitions,
+                        "review_complete": outcome["status"] in {"passed", "failed"},
+                        "review_stage": "awaiting_live_outcomes" if outcome["status"] == "passed" else "replay_failed",
+                        "sandbox_event": {"name": "hypothesis_sandbox", "source": "tool",
+                                          "check_id": "sandbox:" + digest([row["id"], row["contract_hash"], row["source_versions"]]),
+                                          "hypothesis_id": row["id"], "contract_hash": row["contract_hash"],
+                                          "output": json.dumps(outcome, sort_keys=True), "scope": "observed_trace_prediction",
+                                          "passed": outcome.get("passed", 0), "failed": outcome.get("failed", 0)}}
             cid, quote = check.get("source_cid"), check.get("source_quote")
             source = runtime.engine.get_evidence(tenant, cid) if cid in row["source_cids"] else None
             try:
@@ -151,7 +184,7 @@ def _review(runtime, tenant, row, state):
                 "verifier": "source-review:v1", "support": []}
     proposals = []
     for cid in row["source_cids"]:
-        preview = preview_direct_user_memory(runtime.engine, tenant, cid)
+        preview = preview_direct_user_memory(runtime.engine, tenant, cid, **_projection_options(runtime))
         proposals.extend((cid, assertion) for assertion in preview.get("assertions", []))
     expected = contract.get("claim")
     if expected is None:
@@ -232,6 +265,8 @@ def process_reviews(runtime, tenant, *, limit=8, now=None):
                 continue
         if old.get("status") in {"verified", "rejected"} and not changed:
             continue
+        if old.get("review_complete") and not changed:
+            continue
         next_review = old.get("next_review_at")
         if next_review and not changed and datetime.fromisoformat(next_review) > timestamp:
             continue
@@ -260,7 +295,8 @@ def process_reviews(runtime, tenant, *, limit=8, now=None):
                 # expiry, negation, uncertainty and temporal correction rules.
                 cids = sorted({support["source_cid"] for support in result["support"]},
                               key=lambda cid: runtime.engine.get_evidence(tenant, cid).created_at)
-                result["projection_results"] = [project_direct_user_memory(runtime.engine, tenant, cid) for cid in cids]
+                result["projection_results"] = [project_direct_user_memory(runtime.engine, tenant, cid,
+                    **_projection_options(runtime)) for cid in cids]
                 if source_versions(runtime, tenant, row) != versions:
                     result.update(status="inconclusive", reason="source_changed_during_projection")
         except Exception as exc:

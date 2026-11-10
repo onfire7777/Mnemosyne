@@ -197,7 +197,9 @@ def test_exact_repetition_does_not_inherit_old_sources_and_aliases_do_not_chain(
     exact = runtime.prepare_context("t", "u", "exact", query)
     receipt = runtime.writer.read("t")["receipts"][exact["receipt_id"]]
     assert receipt["task_match"] is None
-    assert receipt["source_cids"] == []
+    # Exact repetition inherits no alias sources. Any custody here belongs to
+    # memories independently retrieved and actually delivered in this turn.
+    assert set(receipt["source_cids"]) == {cid for cids in receipt["item_sources"].values() for cid in cids}
     alias_query = "Give me a summary of the build report"
     alias = runtime.prepare_context("t", "u", "alias", alias_query)
     runtime.observe_turn("t", "u", "alias", alias_query, "",

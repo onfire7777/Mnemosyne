@@ -9,10 +9,10 @@ from uuid import NAMESPACE_URL, uuid5
 from mnemosyne.access_policy import evidence_expiry_deadline, merge_access_policies
 from mnemosyne.episodic_facts import extract_episodic_facts, _strip_temporal_affixes
 from mnemosyne.assertion_semantics import assertion_predicate_key
-from mnemosyne.models import utc_now
+from mnemosyne.models import parse_dt, utc_now
 from mnemosyne.retrieval import projection_sources_readable
 from mnemosyne.security import is_write_tainted
-from mnemosyne.semantic_memory import build_semantic_projection, semantic_metadata, source_spans
+from mnemosyne.semantic_memory import SourceSpan, build_semantic_projection, semantic_metadata, source_spans
 from mnemosyne.commitment_memory import commitment_changes, project_commitment_memory
 
 
@@ -69,8 +69,17 @@ def memory_source_clauses(source_or_text) -> list[str]:
     if re.search(r"<(?:instructions?|system|developer|environment_context)\b|^\s*#\s*AGENTS\.md\b", text, re.I | re.M):
         return []
     quoted_lines = set()
-    for match in re.finditer(r'''"[^"]*"|“[^”]*”|(?<!\w)'(?:[^']|'(?=\w))*'(?!\w)|‘[^’]*’''', text, re.S):
-        quoted_lines.update(range(text.count("\n", 0, match.start()), text.count("\n", 0, match.end()) + 1))
+    quote_pattern = r'''"[^"]*"|“[^”]*”|(?<!\w)'(?:[^']|'(?=\w))*'(?!\w)|‘[^’]*’'''
+    for match in re.finditer(quote_pattern, text, re.S):
+        # Preserve short, inline quoted names/labels. Complete quoted claims,
+        # multiline quotations and reported speech are never user facts.
+        inner = match[0][1:-1]
+        prefix = text[text.rfind("\n", 0, match.start()) + 1:match.start()]
+        is_label = (bool(prefix.strip()) and "\n" not in inner and len(inner) <= 80
+                    and not re.search(r"[.!?;:]|\b(?:I|we|you|he|she|they|it|is|are|am|was|were|will|must|should|please|ignore)\b", inner, re.I)
+                    and not re.search(r"\b(?:said|says|wrote|reads?|quote|example|prompt|instructions?|according)\b", prefix, re.I))
+        if not is_label:
+            quoted_lines.update(range(text.count("\n", 0, match.start()), text.count("\n", 0, match.end()) + 1))
     clauses = []
     fenced = False
     quoted_block = False
@@ -90,7 +99,7 @@ def memory_source_clauses(source_or_text) -> list[str]:
         stripped = re.sub(r"^(?:[-*]\s+|\d+[.)]\s+)", "", stripped)
         for clause in re.split(r"(?<=[.!?])\s+|;\s*|\s+and\s+(?=(?:I|We|My|Our)\b)", stripped):
             clause = clause.strip()
-            if clause and not clause.endswith("?") and not re.search(r'["“”`]|(?:^|\s)[\'‘].+?[\'’](?:\s|$)', clause):
+            if clause and not clause.endswith("?") and "`" not in clause:
                 clauses.append(clause)
     return list(dict.fromkeys(clauses))
 
@@ -125,6 +134,65 @@ def _durable_direct_fact(fact) -> bool:
     uses; automatic durable user memory has a narrower evidence contract.
     """
     return assertion_predicate_key(fact.predicate)[0] in _DURABLE_PREDICATES
+
+
+def _semantic_context(engine, source, snapshot) -> dict:
+    """Resolve only the immediately preceding user turn in the same conversation.
+
+    Context is reconstructed from live, owned source spans, never a stale name
+    cache. An unrelated user turn breaks reference continuity. Missing session
+    IDs stay in their own legacy scope; they cannot cross an identified session.
+    """
+    previous = [row for row in snapshot["evidence"]
+                if row.get("cid") != source.cid and row.get("user_id") == source.user_id
+                and row.get("branch", "main") == source.branch and row.get("actor") == "user"
+                and row.get("session_id") == source.session_id
+                and parse_dt(row.get("created_at")) is not None
+                and parse_dt(row["created_at"]) < source.created_at]
+    if not previous:
+        return {}
+    latest = max(previous, key=lambda row: (parse_dt(row["created_at"]), row["cid"]))
+    if (source.created_at - parse_dt(latest["created_at"])).total_seconds() > 43200:
+        return {}
+    evidence = engine.get_evidence(source.tenant_id, latest["cid"], source.branch)
+    if evidence is None or not _eligible_user_source(evidence):
+        return {}
+    result = {"entities": {}, "dependencies": {}, "policies": {}, "trust_tiers": {}, "sensitivities": {}}
+    for row in snapshot["assertions"]:
+        meta = row.get("calibration", {})
+        if (latest["cid"] not in row.get("source_evidence_cids", [])
+                or row.get("user_id") != source.user_id or row.get("branch", "main") != source.branch
+                or row.get("status") != "active" or row.get("superseded_by")
+                or meta.get("epistemic_class") != "direct_user"
+                or (parse_dt(row.get("valid_to")) is not None and parse_dt(row["valid_to"]) <= utc_now())):
+            continue
+        cids = row.get("source_evidence_cids", [])
+        if len(cids) > 32:
+            continue  # Ask for a fresh named reference rather than grow chains without bound.
+        if not projection_sources_readable(engine, cids, tenant_id=source.tenant_id, branch=source.branch,
+                filt={"tenant_id": source.tenant_id, "user_id": source.user_id, "principal": source.user_id}, policy=engine.policy):
+            continue
+        spans, policies = [], [row.get("access_policy", {})]
+        for item in meta.get("source_spans", []):
+            dependency = engine.get_evidence(source.tenant_id, item.get("cid"), source.branch)
+            if (dependency is None or dependency.user_id != source.user_id or not _eligible_user_source(dependency)
+                    or type(item.get("start")) is not int or type(item.get("end")) is not int
+                    or not 0 <= item["start"] < item["end"] <= len(dependency.content)
+                    or dependency.content[item["start"]:item["end"]] != item.get("quote")):
+                spans = []
+                break
+            spans.append(SourceSpan(item["cid"], item["start"], item["end"], item["quote"]))
+            policies.append(dependency.access_policy)
+        if not spans or set(cids) - {span.cid for span in spans}:
+            continue
+        for name in meta.get("entity_mentions", [])[:32]:
+            if isinstance(name, str) and name and name not in {"user", "I", "We"}:
+                result["entities"][name] = next((span for span in spans if span.cid == latest["cid"]), spans[0])
+                result["dependencies"][name] = spans
+                result["policies"][name] = policies
+                result["trust_tiers"][name] = row.get("trust_tier", 1)
+                result["sensitivities"][name] = row.get("sensitivity", 0)
+    return result
 
 
 
@@ -192,7 +260,8 @@ def project_direct_user_memory(
             facts.relations = []
         batches.append((clause, facts))
     semantic = build_semantic_projection(source, policy, all_clauses, proposer=semantic_proposer,
-        supported_clauses={clause for clause, facts in batches if facts.assertions})
+        supported_clauses={clause for clause, facts in batches if facts.assertions},
+        context=_semantic_context(engine, source, snapshot))
     result["rejected_proposals"] = semantic.rejected
     # Each proposal already carries its exact original span.
     for fact in semantic.assertions:
@@ -292,6 +361,16 @@ def preview_direct_user_memory(
         scratch.branches[branch] = {"from": "main", "kind": "repair_preview"}
     scratch.evidence[scratch._evidence_key(tenant_id, branch, cid)] = deepcopy(source)
     retained = engine.export_tenant(tenant_id)
+    context = _semantic_context(engine, source, retained)
+    context_cids = {span.cid for spans in context.get("dependencies", {}).values() for span in spans}
+    for dependency in context_cids:
+        evidence = engine.get_evidence(tenant_id, dependency, branch=branch)
+        if evidence is not None:
+            scratch.evidence[scratch._evidence_key(tenant_id, branch, dependency)] = deepcopy(evidence)
+    for row in retained["assertions"]:
+        if (row.get("user_id") == source.user_id and row.get("branch", "main") == branch
+                and row.get("source_evidence_cids") and set(row["source_evidence_cids"]) <= context_cids):
+            scratch.assertions[scratch._branch_key(tenant_id, branch, row["id"])] = Assertion.from_dict(deepcopy(row))
     previous_ids = {row.get("calibration", {}).get("previous_assertion_id") for row in retained["assertions"]
                     if row.get("source_evidence_cids") == [cid] and row.get("user_id") == source.user_id}
     copied_intentions = set()
@@ -344,10 +423,12 @@ def preview_direct_user_memory(
     expected_ids = {row["id"] for row in expected["assertions"] + expected["relations"]}
     for kind in ("assertions", "relations"):
         for row in retained[kind]:
-            if row.get("branch", "main") != branch or row.get("source_evidence_cids") != [cid]:
+            if row.get("branch", "main") != branch or cid not in row.get("source_evidence_cids", []):
                 continue
             if kind == "assertions":
                 if row.get("user_id") != source.user_id or not row.get("calibration", {}).get("source_quote"):
+                    continue
+                if row.get("source_evidence_cids") != [cid] and not row.get("calibration", {}).get("coreference"):
                     continue
                 identity = ["direct-user-assertion", tenant_id, source.user_id, branch, cid,
                             row["subject"], row["predicate"], row["object"], row.get("scope", {})]
@@ -397,7 +478,9 @@ def reproject_direct_user_memory(engine, tenant_id: str, cid: str, branch: str =
     changed = set(preview["obsolete_assertion_ids"])
     retired = []
     for row in retained["assertions"]:
-        if row.get("source_evidence_cids") != [cid] or row.get("branch", "main") != branch:
+        if cid not in row.get("source_evidence_cids", []) or row.get("branch", "main") != branch:
+            continue
+        if row.get("source_evidence_cids") != [cid] and not row.get("calibration", {}).get("coreference"):
             continue
         replacement = expected.get(row["id"])
         # The UUID contract makes this distinction independent of mutable
@@ -412,6 +495,8 @@ def reproject_direct_user_memory(engine, tenant_id: str, cid: str, branch: str =
         pending = row.get("calibration", {}).get("reprojection_pending") == 3
         if replacement and (row["status"] in {"active", "contested"} or pending) and (
             row.get("calibration", {}).get("projection_version", 0) < 3 or row["status"] != replacement["status"] or pending
+            or row.get("calibration", {}).get("derivation_version") != replacement.get("calibration", {}).get("derivation_version")
+            or row.get("source_evidence_cids") != replacement.get("source_evidence_cids")
         ):
             changed.add(row["id"])
         if row["id"] not in changed:
@@ -427,7 +512,7 @@ def reproject_direct_user_memory(engine, tenant_id: str, cid: str, branch: str =
     expected_relations = {row["id"]: row for row in preview["relations"]}
     changed_pairs = {(row["subject"], row["object"]) for row in retained["assertions"] if row["id"] in changed}
     for row in retained["relations"]:
-        if row.get("source_evidence_cids") != [cid] or row.get("branch", "main") != branch:
+        if cid not in row.get("source_evidence_cids", []) or row.get("branch", "main") != branch:
             continue
         if row["id"] not in preview["obsolete_relation_ids"] and (row["source"], row["target"]) not in changed_pairs:
             continue

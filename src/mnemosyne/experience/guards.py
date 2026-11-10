@@ -126,8 +126,15 @@ def _validate_receipts(before: dict, after: dict, operation: str) -> None:
                 "X10",
                 "served revision mismatch",
             )
+            from .strategies import strategy_applies, validated_strategy
+            strategy_matches = bool(artifact.get("strategy_contract")
+                and validated_strategy(artifact, after["episodes"], after["receipts"])
+                and strategy_applies(artifact, receipt.get("query", ""),
+                    tools=receipt.get("available_tools", []), risk=receipt.get("risk_level", "normal"),
+                    workspace=receipt.get("workspace"), require_workspace=True))
             require(
-                artifact.get("task_class") == receipt.get("task_class"),
+                strategy_matches or (not artifact.get("strategy_contract")
+                                     and artifact.get("task_class") == receipt.get("task_class")),
                 "X9",
                 "artifact served outside its class",
             )
@@ -277,8 +284,30 @@ def _validate_credit(
             and row["contingency_lb"] > 0
             and min(row.get("served_n", 0), row.get("control_n", 0)) >= 8,
             "X3",
-            "credit requires positive matched contingency",
+            "credit requires a supported matched contingency with at least eight observations per arm",
         )
+        if row.get("evidence_version", 0) >= 4:
+            from .stats import contingency_lower_bound
+            direction = row.get("contingency_direction")
+            require(direction in {"beneficial", "harmful"}, "X3", "invalid contingency direction")
+            for arm in ("served", "control"):
+                require(_finite(row.get(arm + "_successes"), 0, row[arm + "_n"]),
+                        "X3", "invalid matched outcome counts")
+            arms = ("control", "served") if direction == "harmful" else ("served", "control")
+            supported = contingency_lower_bound(row[arms[0] + "_successes"], row[arms[0] + "_n"],
+                                                row[arms[1] + "_successes"], row[arms[1] + "_n"])
+            require(supported is not None and math.isclose(supported, row["contingency_lb"], abs_tol=1e-12),
+                    "X3", "contingency does not match recorded outcomes")
+            if direction == "harmful":
+                target_result = episode.get("target_outcomes", {}).get(row["target_id"], {})
+                require(target_result.get("value", 0) < 0 and row.get("delta", 0) < 0
+                        and row.get("step", 0) <= 0,
+                        "X3", "harmful contingency can only reduce utility after verified target failure")
+            if credit_id not in before["credit"]:
+                stats = after["stats"].get(_target_key(row), {})
+                require(all(row[arm + field] == stats.get("randomized_" + arm + field, 0)
+                            for arm in ("served", "control") for field in ("_n", "_successes")),
+                        "X3", "credit counts do not match the randomized outcome ledger")
         require(
             row.get("delta") == episode.get("target_outcomes", {}).get(row.get("target_id"), {}).get("rpe", episode.get("rpe")),
             "X13",
@@ -508,6 +537,10 @@ def _validate_artifacts(
             require(state == "probation" or dormant_rollback, "X21", "imports must start in probation")
         source_ids = artifact.get("source_episode_ids", [])
         episodes = [after["episodes"].get(key) for key in source_ids]
+        if artifact.get("strategy_contract") and state in SERVABLE_STATES | {"candidate"}:
+            from .strategies import validated_strategy
+            require(validated_strategy(artifact, after["episodes"], after["receipts"]),
+                    "X9", "strategy roles and operations require independently verified source tasks")
         require(
             legacy or all(episode is not None for episode in episodes),
             "X15",

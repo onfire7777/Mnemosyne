@@ -15,7 +15,16 @@ import subprocess
 import sys
 from tempfile import TemporaryDirectory
 
-_CALLS = {"sorted": sorted, "len": len, "sum": sum, "min": min, "max": max,
+def _contains_sequence(sequence, steps):
+    if not isinstance(sequence, list) or not isinstance(steps, list) or not steps:
+        return False
+    if len(sequence) > 256 or len(steps) > 64:
+        raise ValueError("sequence exceeds limit")
+    iterator = iter(sequence)
+    return all(any(value == step for value in iterator) for step in steps)
+
+
+_CALLS = {"contains_sequence": _contains_sequence, "sorted": sorted, "len": len, "sum": sum, "min": min, "max": max,
           "abs": abs, "round": round, "str": str, "int": int, "float": float,
           "bool": bool, "list": list, "tuple": tuple, "all": all, "any": any}
 _BINARY = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
@@ -74,7 +83,8 @@ def _evaluate(expression, value):
 
 
 def run_experiment(check):
-    if not isinstance(check, dict) or check.get("kind") != "python_expression" or check.get("version") != 1:
+    if (not isinstance(check, dict) or check.get("kind") not in {"python_expression", "observed_trace_replay"}
+            or check.get("version") != 1):
         return {"status": "inconclusive", "reason": "unsupported_sandbox_check"}
     cases = check.get("cases")
     if not isinstance(cases, list) or not 1 <= len(cases) <= 32:

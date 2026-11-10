@@ -43,6 +43,9 @@ def main():
             report["queue"] = facade.queue.snapshot()
             report["stage"] = "automatic_learning"
             report["automatic_learning"] = advance(facade, TENANT, STATE / "automatic-learning.json")
+            report["stage"] = "retrieval_index"
+            from mnemosyne.retrieval_maintenance import maintain_retrieval_index
+            report["retrieval_index"] = maintain_retrieval_index(facade.engine, TENANT, USER)
         # Model generation runs outside the hook lock. Its own lease protects
         # concurrent refreshes while completion capture can continue.
         report["stage"] = "maintained_answers"

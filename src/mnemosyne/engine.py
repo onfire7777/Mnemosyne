@@ -6150,10 +6150,11 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         *,
         actor: str = "consolidation",
         source: str = "embedder",
+        only_if_missing: bool = False,
     ) -> bool:
-        with self._lock:
+        with self._source_operation(tenant_id, branch):
             ev = self.evidence.get(self._evidence_key(tenant_id, branch, cid))
-            if ev is None or ev.erased:
+            if ev is None or ev.erased or (only_if_missing and ev.embedding):
                 return False
             if not may_embed_item(
                 sensitivity=int(ev.sensitivity),
@@ -6964,7 +6965,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                             template.metadata.get("embedding_partition")
                             or VECTOR_PARTITION_PUBLIC
                         )
-                        if partition == "none":
+                        if partition == "none" or not self.adapters.embed_missing_on_read:
                             continue
                         score = sparse.hashing(template.text, dims)
                     if score > 0:
@@ -6983,6 +6984,9 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                             kind=hit.kind, base_channel=base
                         )
                         hits.append(hit)
+                if not self.adapters.embed_missing_on_read:
+                    from .dense_projection import expand_source_vectors
+                    hits = expand_source_vectors(self, query, hits, self._candidate_hits(filt), k, filt)
                 return self._mark_retrieved_text_as_data(
                     sorted(hits, key=lambda item: item.score, reverse=True)[:k]
                 )
@@ -7003,6 +7007,9 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                         kind=hit.kind, base_channel=base
                     )
                     hits.append(hit)
+        if not self.adapters.embed_missing_on_read:
+            from .dense_projection import expand_source_vectors
+            hits = expand_source_vectors(self, query, hits, self._candidate_hits(filt), k, filt)
         return self._mark_retrieved_text_as_data(
             sorted(hits, key=lambda item: item.score, reverse=True)[:k]
         )
@@ -9006,20 +9013,30 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 retained_metadata_by_cid=retained_cascade_metadata,
                 metadata_by_cid=cascade_metadata,
             )
+            dependent_relations = set()
             for assertion in self.assertions.in_branch(tenant_id, branch).values():
                 if assertion.tenant_id != tenant_id or assertion.branch != branch:
                     continue
                 if not affected_cids.intersection(assertion.source_evidence_cids):
                     continue
+                conjunctive = assertion.calibration.get("source_dependency_mode") == "all" or bool(assertion.calibration.get("coreference"))
+                if conjunctive:
+                    dependent_relations.add((assertion.subject, assertion.predicate, assertion.object,
+                                             frozenset(assertion.source_evidence_cids)))
                 surviving_sources = [
                     item
                     for item in assertion.source_evidence_cids
                     if item not in affected_cids
                 ]
-                if not surviving_sources:
+                if not surviving_sources or conjunctive:
                     assertion.status = "retracted"
                     assertion.expired_at = utc_now()
                     assertion.source_evidence_cids = []
+                    if conjunctive:
+                        assertion.subject = assertion.object = "[erased]"
+                        assertion.predicate = "erased"
+                        assertion.scope = {}
+                        assertion.calibration = {"dependency_erased": True}
                     propagated["retracted_assertions"].append(assertion.id)
                 else:
                     assertion.source_evidence_cids = surviving_sources
@@ -9047,14 +9064,19 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     continue
                 if not affected_cids.intersection(relation.source_evidence_cids):
                     continue
+                conjunctive = (relation.source, relation.predicate, relation.target,
+                               frozenset(relation.source_evidence_cids)) in dependent_relations
                 surviving_sources = [
                     item
                     for item in relation.source_evidence_cids
                     if item not in affected_cids
                 ]
-                if not surviving_sources:
+                if not surviving_sources or conjunctive:
                     relation.valid_to = utc_now()
                     relation.source_evidence_cids = []
+                    if conjunctive:
+                        relation.source = relation.target = "[erased]"
+                        relation.predicate = "erased"
                     propagated["expired_relations"].append(relation.id)
                 else:
                     relation.source_evidence_cids = surviving_sources
@@ -9965,7 +9987,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         stored = self._stored_embedding_for_hit(hit, filt)
         if stored is not None:
             return stored
-        if not allow_fallback:
+        if not allow_fallback or not self.adapters.embed_missing_on_read:
             return None
         partition = str(
             hit.metadata.get("embedding_partition") or VECTOR_PARTITION_PUBLIC

@@ -5,10 +5,20 @@ import re
 
 from .receipts import digest
 
-METHOD = "explicit-or-full-request-with-bounded-equivalence-v5"
+METHOD = "explicit-or-full-request-with-grounded-strategy-transfer-v6"
 CONTRACT_VERSION = 1
 
 _ACTION_FORMS = (
+    ("optimize", r"(?:optimi[sz]e|improve the performance of|speed up)"),
+    ("diagnose", r"(?:diagnose|debug|investigate|troubleshoot)"),
+    ("implement", r"(?:implement|build|develop)"),
+    ("refactor", r"(?:refactor|restructure)"),
+    ("verify", r"(?:verify|validate|check)"),
+    ("explain", r"(?:explain|describe)"),
+    ("compare", r"(?:compare|contrast)"),
+    ("configure", r"(?:configure|set up)"),
+    ("migrate", r"(?:migrate|upgrade)"),
+    ("document", r"(?:document|write documentation for)"),
     ("list", r"(?:list|enumerate|(?:give|show)(?: me)? a list of)"),
     ("summarize", r"(?:summari[sz]e|(?:give|provide)(?: me)? a summary of)"),
     ("show", r"(?:show(?: me)?|display)"),
@@ -67,7 +77,7 @@ def semantic_contract(query: str, tools=(), risk_level=None) -> dict | None:
         entity = entity.rstrip(".!?")
         # These substitutions are confined to a repair intent, not arbitrary
         # names or descriptions. 'cache invalidation' remains a distinct entity.
-        if action == "fix":
+        if action in {"fix", "diagnose"}:
             entity = re.sub(r"\bcaching\b", "cache", entity)
             entity = re.sub(r"\b(?:issue|problem|bug)\b$", "defect", entity)
     return {"version": CONTRACT_VERSION, "intent": action, "entity": entity,

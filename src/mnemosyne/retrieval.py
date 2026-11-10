@@ -3712,6 +3712,7 @@ class HttpReranker:
     timeout_seconds: float = 30.0
     name: str = "http-reranker"
     query_prefix: str = "query: "
+    score_kind: str = "similarity"
 
     def rerank(self, query: str, hits: Sequence[Hit], k: int) -> list[Hit]:
         if k <= 0 or not hits:
@@ -3747,7 +3748,8 @@ class HttpReranker:
                     provenance=shared_or_copy(hit.provenance),
                     trust_tier=hit.trust_tier,
                     sensitivity=hit.sensitivity,
-                    metadata={**hit.metadata, "reranker": self.name},
+                    metadata={**hit.metadata, "reranker": self.name, "rerank_score": float(score),
+                              "rerank_score_kind": self.score_kind},
                 )
             )
         return sorted(ranked, key=lambda item: item.score, reverse=True)[:k]
@@ -3765,6 +3767,9 @@ class RetrievalAdapters:
     graph_retriever: GraphRetriever | None = None
     #: mnemosyne.passages.PassageGraphIndex - HippoRAG 2 ranking for query_mode=passages.
     passage_graph: Any = None
+    # Interactive hosts may only score already-indexed documents. Missing
+    # vectors are repaired by maintenance, never by N remote calls per read.
+    embed_missing_on_read: bool = True
 
 
 def retrieval_adapters_from_env(prefix: str = "MNEMOSYNE") -> RetrievalAdapters:

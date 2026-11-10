@@ -173,7 +173,7 @@ def _candidate(
 
 def _reuse_existing_identity(candidate: dict, state: dict) -> None:
     """Keep pre-scope identities stable, including withdrawn revisions."""
-    if candidate.get("revision_evidence"):
+    if candidate.get("revision_evidence") or candidate.get("strategy_contract"):
         return
     previous_id = digest([
         candidate.get("content_kind", candidate["kind"]), candidate["task_class"],
@@ -522,6 +522,8 @@ def consolidate(runtime, tenant: str) -> dict:
             candidates.append(candidate)
     if runtime._enabled(snapshot, "insight"):
         candidates.extend(_abstract_rules(snapshot))
+        from .strategies import propose_strategies
+        candidates.extend(propose_strategies(induction_snapshot))
     candidates.extend(_corrected_revisions(induction_snapshot))
     distill_mode = getattr(
         getattr(getattr(runtime, "engine", None), "policy", None),
@@ -605,7 +607,7 @@ def consolidate(runtime, tenant: str) -> dict:
             for row in snapshot["episodes"].values()
             if row["status"] == "resolved"
             and row["user_id"] == candidate.get("user_id")
-            and row["task_class"] == candidate["task_class"]
+            and (candidate.get("strategy_contract") or row["task_class"] == candidate["task_class"])
             and applies_to(candidate, row["task_class"], scope_query(row))
             and (
                 not candidate.get("revision_evidence")
@@ -757,40 +759,11 @@ def _dream_hypotheses(
                     "capability_tags": ["data-only", "no-write-authority"],
                 }, kind="contradiction" if item.candidate_kind == "contradiction" else "factual"
             ))
-    if state:
-        for artifact in state["artifacts"].values():
-            if (
-                artifact["state"] not in {"active", "labile"}
-                or len(artifact["steps"]) < 2
-            ):
-                continue
-            if (artifact.get("user_id"), artifact["task_class"]) not in groups:
-                continue
-            steps = artifact["steps"][:]
-            steps[0], steps[1] = steps[1], steps[0]
-            hypotheses.append(typed_hypothesis(runtime, tenant,
-                {
-                    "id": digest(
-                        ["hypothesis", artifact["id"], artifact["revision"], steps]
-                    ),
-                    "content": "\n".join(steps),
-                    "steps": steps,
-                    "parent_revision": artifact["id"],
-                    "task_class": artifact["task_class"],
-                    "user_id": artifact.get("user_id"),
-                    "scope_match": artifact.get("scope_match"),
-                    "conditions": artifact.get("conditions", []),
-                    "source_cids": artifact["source_cids"],
-                    "source_episode_ids": artifact["source_episode_ids"],
-                    "reality_class": "self_generated",
-                    "reward_weight": 0.0,
-                    "shadow_only": True,
-                    "status": "awaiting_external_verifier",
-                    "instruction_authority": "none",
-                    "capability_tags": ["data-only", "no-write-authority"],
-                }
-            ))
-    return [*hypotheses, *factual_proposals(runtime, tenant, episodes), *experiment_proposals(runtime, tenant, episodes)]
+    # Contrastive planning needs successful and failed histories, not only the
+    # newest replay batch. Source liveness is independently rechecked by planner.
+    experiment_episodes = list(state["episodes"].values()) if state else episodes
+    return [*hypotheses, *factual_proposals(runtime, tenant, episodes),
+            *experiment_proposals(runtime, tenant, experiment_episodes)]
 
 
 def _reflection_batch(state: dict) -> tuple[list[dict], dict]:
@@ -826,6 +799,29 @@ def _tested_hypotheses(state: dict) -> tuple[list[dict], dict]:
             "steps"
         ):
             continue
+        if (hypothesis.get("review_complete")
+                and hypothesis.get("reason") == "heldout_replay_passed_awaiting_real_outcomes"
+                and not hypothesis.get("prediction_candidate_status")):
+            updates[key] = {"prediction_candidate_status": "awaiting_fresh_targeted_evidence"}
+            check = hypothesis.get("review_contract", {}).get("sandbox_check", {})
+            positive_ids = {case["episode_id"] for case in check.get("cases", []) if case.get("expected") is True}
+            positives = [state["episodes"][eid] for eid in sorted(positive_ids)
+                         if eid in state["episodes"]]
+            if positives and all(row.get("status") == "resolved" and row.get("reward", 0) > 0
+                                 and row.get("user_id") == hypothesis.get("user_id") for row in positives):
+                candidate = _candidate(hypothesis["task_class"], hypothesis["steps"], positives)
+                if all(candidate_score(candidate, row) == 1 for row in positives):
+                    # These already observed successful operations may become a
+                    # normal gated candidate. The predictive experiment itself
+                    # remains uncredited and awaits prospective verification.
+                    fresh = any(state["policy"].get("replayed", {}).get(row["id"]) != digest(row["signals"])
+                                for row in positives)
+                    if candidate["id"] in state["artifacts"] or fresh:
+                        candidate["prediction_hypothesis_id"] = key
+                        candidates.append(candidate)
+                        updates[key] = {"prediction_candidate_id": candidate["id"],
+                                        "prediction_candidate_status": "proposed_from_observed_successes",
+                                        "review_stage": "awaiting_live_outcomes"}
         tested = []
         for episode in state["episodes"].values():
             if episode["status"] != "resolved" or episode.get(

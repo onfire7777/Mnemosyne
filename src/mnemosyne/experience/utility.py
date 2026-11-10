@@ -9,6 +9,35 @@ from __future__ import annotations
 from .receipts import digest
 
 
+def cited_memory_ids(events, receipts, source_is_live):
+    """Admit actual-use references only to this turn's live, served memory.
+
+    Hosts may report application without grading it. External checks still
+    determine target outcomes independently in ``verified_target_outcome``.
+    A raw citation to another tenant, turn, or expired source proves nothing.
+    """
+    by_receipt = {receipt["id"]: {item["item_id"] for item in receipt.get("items", [])
+                                 if item.get("kind") == "item"}
+                  for receipt in receipts}
+    served = set().union(*by_receipt.values()) if by_receipt else set()
+    sources = {item: receipt.get("item_sources", {}).get(item, [item])
+               for receipt in receipts for item in by_receipt[receipt["id"]]}
+    cited = set()
+    for event in events:
+        if event.get("source") in {"assistant", "self_generated", "provider_self_grade"}:
+            continue
+        allowed = by_receipt.get(event["receipt_id"], set()) if "receipt_id" in event else served
+        claims = event.get("claims")
+        if not isinstance(claims, list):
+            continue
+        for claim in claims:
+            cids = claim.get("evidence_cids") if isinstance(claim, dict) else None
+            if not isinstance(cids, list):
+                continue
+            cited.update(cid for cid in cids if isinstance(cid, str) and cid in allowed)
+    return sorted(cid for cid in cited if sources[cid] and source_is_live(sources[cid]))
+
+
 def applied_target(episode, kind, target):
     """Require both application evidence and that target's external outcome."""
     if target not in episode.get("target_outcomes", {}):

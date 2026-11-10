@@ -3968,7 +3968,7 @@ class MemoryTools:
                 role="reader", source_trust_tier=source_trust_tier), query)
         return runtime.prepare_context(tenant_id, user_id, session_id,
             _require_text(query, field="query"), available_tools, task_type, risk_level,
-            read_scope=read_scope, supplemental_context=supplemental,
+            workspace=workspace, read_scope=read_scope, supplemental_context=supplemental,
             delivery_envelope=delivery_envelope)
 
     @staticmethod
