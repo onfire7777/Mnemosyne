@@ -10,6 +10,8 @@ from collections import defaultdict
 import json
 import re
 
+from mnemosyne.local_paths import normalize_workspace
+
 from .receipts import digest
 from .task_class import semantic_contract, scope_query
 
@@ -48,7 +50,10 @@ def _proof(steps, episodes, receipts):
         if None in roots or len(roots) < 2:
             return None
     workspaces = [_action_data(step).get("cwd") for step in steps if _action_data(step).get("cwd")]
-    if workspaces and any(value != workspaces[0] for value in workspaces):
+    normalized_workspaces = [value if value == {"variable": "workspace"} else normalize_workspace(value)
+                            for value in workspaces]
+    if (None in normalized_workspaces or normalized_workspaces
+            and any(value != normalized_workspaces[0] for value in normalized_workspaces)):
         return None
     roles = []
     needs = set()
@@ -96,7 +101,13 @@ def validated_strategy(artifact, episodes, receipts):
     if any((row.get("tenant_id"), row.get("user_id")) !=
            (artifact.get("tenant_id"), artifact.get("user_id")) for row in rows):
         return False
-    expected = _proof(artifact.get("steps", []), rows, receipts)
+    if contract.get("kind") == "observed_conditional_roles":
+        from .strategy_roles import abstract_proof, canonical_steps
+        expected = abstract_proof(rows, receipts)
+        if not expected or artifact.get("steps") != canonical_steps(expected["roles"]):
+            return False
+    else:
+        expected = _proof(artifact.get("steps", []), rows, receipts)
     return bool(expected and contract == expected and
                 artifact.get("conditions", []) == expected["shape"]["constraints"])
 
@@ -104,19 +115,23 @@ def validated_strategy(artifact, episodes, receipts):
 def strategy_applies(artifact, query, *, tools=None, risk=None, workspace=None, require_workspace=False):
     proof = artifact.get("strategy_contract") or {}
     shape = proof.get("shape")
-    if proof.get("version") != 1 or not isinstance(shape, dict):
+    if proof.get("version") not in {1, 2} or not isinstance(shape, dict):
         return False
     contract = semantic_contract(query, (), risk or shape.get("risk"))
-    if not contract or _shape(contract) != shape or not _independent_entity(contract["entity"], artifact.get("steps", [])):
+    abstract = proof.get("kind") == "observed_conditional_roles"
+    if not contract or _shape(contract) != shape or (not abstract and not _independent_entity(contract["entity"], artifact.get("steps", []))):
         return False
     if proof.get("steps_hash") != digest(artifact.get("steps", [])):
         return False
+    if abstract:
+        from .strategy_roles import role_tools_available
+        return tools is None or role_tools_available(proof.get("roles", []), tools)
     if require_workspace and proof.get("workspace") is not None:
         from .candidates import WORKSPACE_VARIABLE, _workspace
         if proof["workspace"] == WORKSPACE_VARIABLE:
             if not _workspace(workspace):
                 return False
-        elif workspace != proof["workspace"]:
+        elif not normalize_workspace(workspace) or normalize_workspace(workspace) != normalize_workspace(proof["workspace"]):
             return False
     return tools is None or set(proof.get("required_tools", [])) <= set(tools)
 
@@ -127,7 +142,7 @@ def propose_strategies(state, *, limit=8):
     A new entity never inherits a successful task label. The proposal enters the
     same protected regression and local probation gates as every procedure.
     """
-    from .candidates import observed_steps, portable_observed_steps
+    from .candidates import observed_steps, portable_observed_steps, _canonical_workspace_step
     from .sleep import _candidate
     groups = defaultdict(dict)
     for episode in state["episodes"].values():
@@ -136,7 +151,8 @@ def propose_strategies(state, *, limit=8):
             continue
         for steps in (observed_steps(episode), portable_observed_steps(episode)[0]):
             if steps:
-                key = digest([episode.get("tenant_id"), episode.get("user_id"), _shape(contract), steps])
+                key = digest([episode.get("tenant_id"), episode.get("user_id"), _shape(contract),
+                              [_canonical_workspace_step(step) for step in steps]])
                 groups[key][episode["id"]] = (steps, episode)
     proposals = []
     for key in sorted(groups):
@@ -157,4 +173,5 @@ def propose_strategies(state, *, limit=8):
         proposals.append(artifact)
         if len(proposals) >= limit:
             break
-    return proposals
+    from .strategy_roles import propose_abstract_strategies
+    return [*proposals, *propose_abstract_strategies(state, max(0, limit - len(proposals)))]

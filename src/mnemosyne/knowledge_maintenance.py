@@ -14,6 +14,7 @@ import hashlib
 import json
 import math
 import re
+import shlex
 import threading
 import unicodedata
 from collections import defaultdict
@@ -33,7 +34,8 @@ from mnemosyne.security import SecurityPolicy
 SCHEMA = "mnemosyne.automatic-knowledge/v1"
 _TAG = "automatic-knowledge"
 _PRONOUNS = {"i", "me", "my", "we", "our", "you", "your", "it", "this", "that", "they", "he", "she"}
-_SECTIONS = ("Established facts", "Decisions", "Pending commitments", "Resolved commitments", "Uncertainty")
+_SECTIONS = ("Established facts", "Observed configuration", "Observed facts", "Decisions",
+             "Pending commitments", "Resolved commitments", "Observed command outcomes", "Uncertainty")
 _STOP_WORDS = set("a an the what which who where when how is are was were do does did my our your we i it this that about know tell me more of for to in on with and or".split())
 _TERM_EQUIVALENTS = {"runs": "run", "running": "run", "operates": "run", "operating": "run",
                      "hosts": "host", "hosting": "host", "hosted": "host", "deployed": "deploy",
@@ -151,7 +153,7 @@ def _claim(engine: Any, context: AnswerReadContext, row: dict[str, Any]) -> dict
         return None
     meta = row.get("calibration") or {}
     epistemic = meta.get("epistemic_class", "direct_user" if meta.get("projection_kind") == "direct_user" else "")
-    if epistemic not in {"direct_user", "reported_belief"}:
+    if epistemic not in {"direct_user", "reported_belief", "observed_tool", "consolidated_evidence"}:
         return None
     cids = list(dict.fromkeys(row.get("source_evidence_cids") or []))
     if not cids or not projection_sources_readable(engine, cids, tenant_id=context.tenant_id,
@@ -182,9 +184,21 @@ def _claim(engine: Any, context: AnswerReadContext, row: dict[str, Any]) -> dict
         return None
     # Exact source spans are shown, so inferred wording never becomes asserted fact.
     statement = " ".join(dict.fromkeys(span["quote"].strip() for span in spans))
+    contract = meta.get("verification_contract") or {}
+    if (meta.get("projection_kind") == "project_observation" and meta.get("observation_kind") == "command_outcome"
+            and contract.get("kind") == "command_observation"):
+        if (not isinstance(contract.get("argv"), list) or not contract["argv"]
+                or not all(isinstance(part, str) for part in contract["argv"])
+                or type(contract.get("expected_exit_code")) is not int):
+            return None
+        statement = f"{shlex.join(contract['argv'])} returned exit code {contract['expected_exit_code']}"
+    elif meta.get("entailment_review", {}).get("entailed") is True:
+        statement = f"{row['subject']} {row['predicate'].replace('_', ' ')} {row['object']}"
     predicate = _normal(str(row.get("predicate", "")))
     if epistemic == "reported_belief" or row["status"] == "contested":
         section = "Uncertainty"
+    elif epistemic in {"observed_tool", "consolidated_evidence"}:
+        section = {"configuration": "Observed configuration", "command_outcome": "Observed command outcomes"}.get(meta.get("observation_kind"), "Observed facts")
     elif meta.get("commitment_state") in {"completed", "cancelled"}:
         section = "Resolved commitments"
     elif any(word in predicate for word in ("plan", "goal", "commit", "intend", "deadline", "remind")):
@@ -203,6 +217,7 @@ def _claim(engine: Any, context: AnswerReadContext, row: dict[str, Any]) -> dict
     return {"assertion_id": row["id"], "version": row.get("version", 1), "text": statement,
             "subject": row["subject"], "predicate": row["predicate"], "object": row["object"],
             "scope": row.get("scope") or {}, "commitment_state": meta.get("commitment_state"),
+            "verification_contract": meta.get("verification_contract"),
             "access_policy": access, "embedding_allowed": vector_partition_for_item(
                 sensitivity=sensitivity, access_policy=access) != "none",
             "epistemic_class": epistemic, "section": section, "spans": spans,
@@ -261,11 +276,11 @@ def _render(title: str, claims: list[dict[str, Any]], links: list[dict[str, Any]
     # an uncited model-generated conclusion or erasing uncertainty/negation.
     grouped = defaultdict(list)
     for claim in claims:
-        if claim["section"] != "Uncertainty" and claim.get("subject"):
-            grouped[claim["subject"]].append(claim)
+        if claim["section"] not in {"Uncertainty", "Observed command outcomes"} and claim.get("subject"):
+            grouped[(claim["subject"], claim.get("epistemic_class"))].append(claim)
     if grouped:
         lines += ["", "## Overview"]
-        for subject, facts in sorted(grouped.items()):
+        for (subject, epistemic), facts in sorted(grouped.items()):
             properties = []
             for claim in facts:
                 relation = claim["predicate"].replace("_", " ")
@@ -274,7 +289,8 @@ def _render(title: str, claims: list[dict[str, Any]], links: list[dict[str, Any]
                                   if key not in {"commitment_id", "epistemic_class"})
                 citations = " ".join(f"[source:{span['cid']}:{span['start']}-{span['end']}]" for span in claim["spans"])
                 properties.append(f"{relation}: {value}" + (f" ({scope})" if scope else "") + " " + citations)
-            lines.append(f"- {subject} — " + "; ".join(properties))
+            label = "Observed " if epistemic in {"observed_tool", "consolidated_evidence"} else ""
+            lines.append(f"- {label}{subject} — " + "; ".join(properties))
     for section in _SECTIONS:
         items = [claim for claim in claims if claim["section"] == section]
         if not items:
@@ -282,7 +298,8 @@ def _render(title: str, claims: list[dict[str, Any]], links: list[dict[str, Any]
         lines += ["", f"## {section}"]
         for claim in items:
             citations = " ".join(f"[source:{span['cid']}:{span['start']}-{span['end']}]" for span in claim["spans"])
-            lines.append(f"- {claim['text']} {citations}")
+            observed = f" (observed {claim['observed_at']})" if claim.get("epistemic_class") in {"observed_tool", "consolidated_evidence"} and claim.get("observed_at") else ""
+            lines.append(f"- {claim['text']}{observed} {citations}")
     if links:
         lines += ["", "## Related topics"]
         lines += [f"- [{link['title']}]({link['path']})" for link in links]
@@ -571,7 +588,7 @@ class KnowledgeMaintenanceWorker:
                 cids = sorted({cid for claim in claims for cid in claim["source_evidence_cids"]})
                 # Two independently captured facts justify a topic; an explicit goal
                 # or decision can justify immediate creation from one source.
-                useful = len(cids) >= 2 or len(set(self._requests.get(key, []))) >= 2 or any(c["section"] in {"Pending commitments", "Decisions"} for c in claims)
+                useful = len(cids) >= 2 or len(set(self._requests.get(key, []))) >= 2 or any(c["section"] in {"Pending commitments", "Decisions", "Observed configuration"} for c in claims)
                 if not previous and not useful:
                     continue
                 if not claims and not previous:

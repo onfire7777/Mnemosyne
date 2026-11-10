@@ -637,6 +637,9 @@ def _validate_artifacts(
                     ]
                 )
                 row = after["stats"].get(key, {})
+                if artifact.get("strategy_contract"):
+                    from .strategy_trials import strategy_trial_stats
+                    row = strategy_trial_stats(after, artifact)
                 tested = Posterior.from_dict(row)
                 control = Posterior(
                     1 + row.get("control_successes", 0),
@@ -710,9 +713,12 @@ def _validate_artifacts(
                     "quote does not occur in live evidence",
                 )
             from .candidates import grounded_action_template
+            from .strategy_roles import grounded_abstract_steps
 
             require(
-                (grounded_action_template(artifact, [after["episodes"][eid] for eid in source_ids], quotes)
+                (grounded_abstract_steps(artifact, [after["episodes"][eid] for eid in source_ids], quotes)
+                 if artifact.get("strategy_contract", {}).get("kind") == "observed_conditional_roles" else
+                 grounded_action_template(artifact, [after["episodes"][eid] for eid in source_ids], quotes)
                  if artifact.get("action_template") else all(
                     any(step in quote["quote"] for quote in quotes)
                     for step in artifact.get("steps", [])

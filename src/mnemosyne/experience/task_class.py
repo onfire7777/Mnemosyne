@@ -5,7 +5,7 @@ import re
 
 from .receipts import digest
 
-METHOD = "explicit-or-full-request-with-grounded-strategy-transfer-v6"
+METHOD = "explicit-or-full-request-with-grounded-abstract-transfer-v7"
 CONTRACT_VERSION = 1
 
 _ACTION_FORMS = (

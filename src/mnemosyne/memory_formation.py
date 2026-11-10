@@ -9,10 +9,10 @@ from uuid import NAMESPACE_URL, uuid5
 from mnemosyne.access_policy import evidence_expiry_deadline, merge_access_policies
 from mnemosyne.episodic_facts import extract_episodic_facts, _strip_temporal_affixes
 from mnemosyne.assertion_semantics import assertion_predicate_key
-from mnemosyne.models import parse_dt, utc_now
+from mnemosyne.models import utc_now
 from mnemosyne.retrieval import projection_sources_readable
 from mnemosyne.security import is_write_tainted
-from mnemosyne.semantic_memory import SourceSpan, build_semantic_projection, semantic_metadata, source_spans
+from mnemosyne.semantic_memory import build_semantic_projection, semantic_metadata, source_spans, is_owned_entity_clause
 from mnemosyne.commitment_memory import commitment_changes, project_commitment_memory
 
 
@@ -137,74 +137,20 @@ def _durable_direct_fact(fact) -> bool:
 
 
 def _semantic_context(engine, source, snapshot) -> dict:
-    """Resolve only the immediately preceding user turn in the same conversation.
-
-    Context is reconstructed from live, owned source spans, never a stale name
-    cache. An unrelated user turn breaks reference continuity. Missing session
-    IDs stay in their own legacy scope; they cannot cross an identified session.
-    """
-    previous = [row for row in snapshot["evidence"]
-                if row.get("cid") != source.cid and row.get("user_id") == source.user_id
-                and row.get("branch", "main") == source.branch and row.get("actor") == "user"
-                and row.get("session_id") == source.session_id
-                and parse_dt(row.get("created_at")) is not None
-                and parse_dt(row["created_at"]) < source.created_at]
-    if not previous:
-        return {}
-    latest = max(previous, key=lambda row: (parse_dt(row["created_at"]), row["cid"]))
-    if (source.created_at - parse_dt(latest["created_at"])).total_seconds() > 43200:
-        return {}
-    evidence = engine.get_evidence(source.tenant_id, latest["cid"], source.branch)
-    if evidence is None or not _eligible_user_source(evidence):
-        return {}
-    result = {"entities": {}, "dependencies": {}, "policies": {}, "trust_tiers": {}, "sensitivities": {}}
-    for row in snapshot["assertions"]:
-        meta = row.get("calibration", {})
-        if (latest["cid"] not in row.get("source_evidence_cids", [])
-                or row.get("user_id") != source.user_id or row.get("branch", "main") != source.branch
-                or row.get("status") != "active" or row.get("superseded_by")
-                or meta.get("epistemic_class") != "direct_user"
-                or (parse_dt(row.get("valid_to")) is not None and parse_dt(row["valid_to"]) <= utc_now())):
-            continue
-        cids = row.get("source_evidence_cids", [])
-        if len(cids) > 32:
-            continue  # Ask for a fresh named reference rather than grow chains without bound.
-        if not projection_sources_readable(engine, cids, tenant_id=source.tenant_id, branch=source.branch,
-                filt={"tenant_id": source.tenant_id, "user_id": source.user_id, "principal": source.user_id}, policy=engine.policy):
-            continue
-        spans, policies = [], [row.get("access_policy", {})]
-        for item in meta.get("source_spans", []):
-            dependency = engine.get_evidence(source.tenant_id, item.get("cid"), source.branch)
-            if (dependency is None or dependency.user_id != source.user_id or not _eligible_user_source(dependency)
-                    or type(item.get("start")) is not int or type(item.get("end")) is not int
-                    or not 0 <= item["start"] < item["end"] <= len(dependency.content)
-                    or dependency.content[item["start"]:item["end"]] != item.get("quote")):
-                spans = []
-                break
-            spans.append(SourceSpan(item["cid"], item["start"], item["end"], item["quote"]))
-            policies.append(dependency.access_policy)
-        if not spans or set(cids) - {span.cid for span in spans}:
-            continue
-        for name in meta.get("entity_mentions", [])[:32]:
-            if isinstance(name, str) and name and name not in {"user", "I", "We"}:
-                result["entities"][name] = next((span for span in spans if span.cid == latest["cid"]), spans[0])
-                result["dependencies"][name] = spans
-                result["policies"][name] = policies
-                result["trust_tiers"][name] = row.get("trust_tier", 1)
-                result["sensitivities"][name] = row.get("sensitivity", 0)
-    return result
+    from mnemosyne.entity_context import build_entity_context
+    return build_entity_context(engine, source, snapshot, eligible=_eligible_user_source)
 
 
 
 def project_direct_user_memory(
     engine, tenant_id: str, cid: str, branch: str = "main", *,
-    semantic_proposer=None, timezone: str | None = None, agent_id: str = "codex",
+    semantic_proposer=None, semantic_reviewer=None, timezone: str | None = None, agent_id: str = "codex",
     session_id: str | None = None,
 ) -> dict:
     """Project trusted user evidence through the existing episodic extractor."""
     result = {"source_cid": cid, "assertion_ids": [], "relation_ids": [], "count": 0,
               "created_count": 0, "reason": "ineligible_source", "intention_ids": [],
-              "unresolved": [], "rejected_proposals": []}
+              "unresolved": [], "rejected_proposals": [], "pending_reviews": []}
     source = engine.get_evidence(tenant_id, cid, branch=branch)
     if (
         source is None or not _eligible_user_source(source)
@@ -234,6 +180,8 @@ def project_direct_user_memory(
     commitments = commitment_changes(source, all_clauses, timezone)
     commitment_quotes = {item["span"].quote for item in commitments}
     for clause in clauses:
+        if is_owned_entity_clause(clause):
+            continue  # The entity projector owns canonical identity and project scope.
         parser_text = _CONTRACTION_PATTERN.sub(
             lambda match: _CONTRACTIONS[match.group().lower()], clause.replace("’", "'"),
         )
@@ -259,10 +207,19 @@ def project_direct_user_memory(
                     })
             facts.relations = []
         batches.append((clause, facts))
-    semantic = build_semantic_projection(source, policy, all_clauses, proposer=semantic_proposer,
+    semantic = build_semantic_projection(source, policy, all_clauses, proposer=semantic_proposer, reviewer=semantic_reviewer,
         supported_clauses={clause for clause, facts in batches if facts.assertions},
         context=_semantic_context(engine, source, snapshot))
     result["rejected_proposals"] = semantic.rejected
+    # Recovery needs the review outcome even when the proposal itself was
+    # retained in quarantine. Otherwise a transient provider failure would
+    # look like a completed projection and never be retried.
+    result["pending_reviews"] = [
+        {key: verdict[key] for key in ("reason", "method", "error_type") if key in verdict}
+        for fact in semantic.assertions
+        if (verdict := fact.calibration.get("entailment_review"))
+        and not verdict.get("entailed")
+    ]
     # Each proposal already carries its exact original span.
     for fact in semantic.assertions:
         from mnemosyne.episodic_facts import ExtractedFacts
@@ -332,7 +289,7 @@ def project_direct_user_memory(
 
 def preview_direct_user_memory(
     engine, tenant_id: str, cid: str, branch: str = "main", *,
-    semantic_proposer=None, timezone: str | None = None, agent_id: str = "codex", session_id: str | None = None,
+    semantic_proposer=None, semantic_reviewer=None, timezone: str | None = None, agent_id: str = "codex", session_id: str | None = None,
 ) -> dict:
     """Plan a source-preserving repair without writing to the supplied engine.
 
@@ -362,6 +319,16 @@ def preview_direct_user_memory(
     scratch.evidence[scratch._evidence_key(tenant_id, branch, cid)] = deepcopy(source)
     retained = engine.export_tenant(tenant_id)
     context = _semantic_context(engine, source, retained)
+    # Discourse boundaries are evidence too: dropping an intervening unrelated
+    # turn from a preview would incorrectly resurrect a stale pronoun focus.
+    for row in retained["evidence"]:
+        if (row.get("user_id") == source.user_id and row.get("branch", "main") == branch
+                and row.get("actor") == "user" and row.get("cid") != cid
+                and parse_dt(row.get("created_at")) is not None
+                and parse_dt(row["created_at"]) < source.created_at):
+            prior_source = engine.get_evidence(tenant_id, row["cid"], branch=branch)
+            if prior_source is not None:
+                scratch.evidence[scratch._evidence_key(tenant_id, branch, row["cid"])] = deepcopy(prior_source)
     context_cids = {span.cid for spans in context.get("dependencies", {}).values() for span in spans}
     for dependency in context_cids:
         evidence = engine.get_evidence(tenant_id, dependency, branch=branch)
@@ -408,7 +375,7 @@ def preview_direct_user_memory(
                     intention.update(status="scheduled", cancellation_state=None)
                 scratch.intentions[(tenant_id, item.intention_id)] = Intention.from_dict(intention)
                 copied_intentions.add(item.intention_id)
-    projected = project_direct_user_memory(scratch, tenant_id, cid, branch, semantic_proposer=semantic_proposer,
+    projected = project_direct_user_memory(scratch, tenant_id, cid, branch, semantic_proposer=semantic_proposer, semantic_reviewer=semantic_reviewer,
         timezone=timezone, agent_id=agent_id, session_id=session_id)
     expected = scratch.export_tenant(tenant_id)
     expected["assertions"] = [row for row in expected["assertions"] if row["id"] in projected["assertion_ids"]]
@@ -454,22 +421,24 @@ def reproject_direct_user_memory(engine, tenant_id: str, cid: str, branch: str =
     from copy import deepcopy
     from mnemosyne.models import Assertion, Relation
 
-    provider = options.get("semantic_proposer")
-    if provider is not None:
-        proposals = {}
-        failures = {}
-        def cached(payload):
+    for option, method in (("semantic_proposer", "propose_memory"), ("semantic_reviewer", "review_memory_entailment")):
+        provider = options.get(option)
+        if provider is None:
+            continue
+        def cached(payload, _provider=provider, _method=method, _responses=None, _failures=None):
             key = json.dumps(payload, sort_keys=True)
-            if key in failures:
-                raise failures[key]
-            if key not in proposals:
+            if key in _failures:
+                raise _failures[key]
+            if key not in _responses:
                 try:
-                    proposals[key] = provider.propose_memory(payload) if hasattr(provider, "propose_memory") else provider(payload)
+                    call = getattr(_provider, _method, _provider)
+                    _responses[key] = call(payload)
                 except Exception as error:
-                    failures[key] = error
+                    _failures[key] = error
                     raise
-            return deepcopy(proposals[key])
-        options["semantic_proposer"] = cached
+            return deepcopy(_responses[key])
+        from functools import partial
+        options[option] = partial(cached, _responses={}, _failures={})
     preview = preview_direct_user_memory(engine, tenant_id, cid, branch, **options)
     if preview["reason"] == "ineligible_source":
         return {"preview": preview, "applied": False, "retired_assertion_ids": [], "retired_relation_ids": []}

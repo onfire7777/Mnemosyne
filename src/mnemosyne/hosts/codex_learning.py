@@ -13,7 +13,7 @@ def _fingerprint(facade, runtime, tenant):
     state = runtime.writer.read(tenant)
     status = runtime.status(tenant)
     payload = {
-        "pipeline_version": 3,
+        "pipeline_version": 4,
         "trainer": type(getattr(facade.tools.parametric, "trainer", None)).__qualname__,
         "trainer_configuration": getattr(getattr(facade.tools.parametric, "trainer", None),
                                          "configuration_fingerprint", lambda: None)(),

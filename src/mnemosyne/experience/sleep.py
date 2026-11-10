@@ -762,8 +762,10 @@ def _dream_hypotheses(
     # Contrastive planning needs successful and failed histories, not only the
     # newest replay batch. Source liveness is independently rechecked by planner.
     experiment_episodes = list(state["episodes"].values()) if state else episodes
+    from .environment_experiments import environment_proposals
     return [*hypotheses, *factual_proposals(runtime, tenant, episodes),
-            *experiment_proposals(runtime, tenant, experiment_episodes)]
+            *experiment_proposals(runtime, tenant, experiment_episodes),
+            *environment_proposals(runtime, tenant, experiment_episodes)]
 
 
 def _reflection_batch(state: dict) -> tuple[list[dict], dict]:
@@ -1160,6 +1162,9 @@ def _activation_trial(runtime, state: dict, artifact: dict):
         stat_key(artifact["kind"], artifact["id"], artifact["revision"], artifact["task_class"]),
         {},
     )
+    if artifact.get("strategy_contract"):
+        from .strategy_trials import strategy_trial_stats
+        row = strategy_trial_stats(state, artifact)
     probation = getattr(
         getattr(getattr(runtime, "engine", None), "policy", None),
         "learning_probation_outcomes", {},
@@ -1203,7 +1208,7 @@ def activation_supported(
 def repair_reprocessed_lifecycle(runtime, state: dict, tasks: set[str]) -> None:
     """Withdraw behavior whose repaired observations no longer support it."""
     affected = {key for key, item in state["artifacts"].items()
-                if item["task_class"] in tasks}
+                if item["task_class"] in tasks or item.get("strategy_contract")}
     invalid = set()
     quarantine = state["policy"].setdefault("outcome_quarantine", {})
     for key in affected:

@@ -329,6 +329,9 @@ class _PreparedFact:
 
     def apply(self, engine: LocalMemoryEngine, branch: str) -> None:
         job = self.job
+        from mnemosyne.project_observations import consolidated_fact_metadata
+        ownership = consolidated_fact_metadata(engine, job.tenant_id, job.source_evidence_cids,
+            branch, job.candidate_subject, job.candidate_predicate, job.candidate_object)
         engine.upsert_assertion(
             Assertion(
                 tenant_id=job.tenant_id,
@@ -341,6 +344,7 @@ class _PreparedFact:
                 trust_tier=job.trust_tier,
                 sensitivity=job.sensitivity,
                 access_policy=self.access_policy,
+                **ownership,
             ),
             branch=branch,
         )

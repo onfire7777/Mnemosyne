@@ -32,7 +32,8 @@ def run_backfill(facade, tenant_id, user_id, *, cursor=None, limit=20, apply=Fal
         after = tuple(decoded)
     engine = facade.engine
     config = getattr(engine, "_learning_configuration", {})
-    options = {"semantic_proposer": config.get("semantic_proposer"), "timezone": config.get("source_timezone"),
+    options = {"semantic_proposer": config.get("semantic_proposer"), "semantic_reviewer": config.get("semantic_reviewer"),
+               "timezone": config.get("source_timezone"),
                "agent_id": "codex", "session_id": "semantic-backfill"}
     eligible = []
     for row in engine.export_tenant(tenant_id).get("evidence", []):

@@ -50,6 +50,20 @@ def now() -> datetime:
     return datetime.now(UTC)
 
 
+def _tool_source_content(event: dict) -> str:
+    """One canonical representation for capture and source-bound recovery."""
+    from .candidates import observed_action
+    content = str(event.get("output") or event.get("evidence") or "")
+    action = observed_action(event)
+    if action and action != event.get("name"):
+        content = action + ("\n" + content if content else "")
+    for field in ("expected_steps", "corrective_steps", "tested_steps"):
+        steps = event.get(field)
+        if isinstance(steps, list) and all(isinstance(step, str) for step in steps):
+            content += "\n" + "\n".join(steps)
+    return content
+
+
 def calibrate_prediction(prediction: float, state: dict) -> float:
     """Apply the same observed calibration to live and evaluated predictions."""
     policy = state.get("policy", {})
@@ -869,6 +883,10 @@ class LearningRuntime:
             for identifier, page in delivered_pages.items():
                 receipt["item_sources"][identifier] = sorted(set(receipt["item_sources"].get(identifier, [])) |
                     set(page.get("source_evidence_cids", page.get("source_cids", []))))
+            from mnemosyne.hosts.memory_checks import freeze_contracts
+            receipt["item_verification_contracts"] = freeze_contracts(
+                self.engine, tenant_id, current_hits, packet.get("knowledge_pages", []),
+                delivered_pages, receipt["item_sources"])
             # Budget exclusions are not randomized controls. Their propensity
             # is unknown and cannot count toward a causal comparison.
             probabilities = dict(selection_probabilities)
@@ -1050,7 +1068,11 @@ class LearningRuntime:
                         metadata={
                             "reality_class": "grounded"
                             if actor == "user"
-                            else "self_generated"
+                            else "self_generated",
+                            **({"workspace": receipts[-1]["workspace"]}
+                               if receipts and receipts[-1].get("workspace") else {}),
+                            **({"source_timezone": self.engine._learning_configuration["source_timezone"]}
+                               if getattr(self.engine, "_learning_configuration", {}).get("source_timezone") else {}),
                         },
                         access_policy={
                             "tenant": tenant_id,
@@ -1067,17 +1089,7 @@ class LearningRuntime:
                 "provider_self_grade",
             }:
                 continue
-            content = str(event.get("output") or event.get("evidence") or "")
-            from .candidates import observed_action
-            action = observed_action(event)
-            if action and action != event.get("name"):
-                content = action + ("\n" + content if content else "")
-            for field in ("expected_steps", "corrective_steps", "tested_steps"):
-                steps = event.get(field)
-                if isinstance(steps, list) and all(
-                    isinstance(step, str) for step in steps
-                ):
-                    content += "\n" + "\n".join(steps)
+            content = _tool_source_content(event)
             if content:
                 cids.append(
                     self.engine.append_evidence(
@@ -1090,7 +1102,9 @@ class LearningRuntime:
                             document_segment_id=source_segment_id(tenant_id, user_id, session_id, "tool"),
                             session_id=session_id,
                             trust_tier=1,
-                            metadata={"memory_role": "operational"},
+                            metadata={"memory_role": "operational", "tool_observation": copy.deepcopy(event),
+                                **({"experiment_environment": copy.deepcopy(event["experiment_environment"])}
+                                   if isinstance(event.get("experiment_environment"), dict) else {})},
                             access_policy={
                                 "tenant": tenant_id,
                                 "allow_principals": [user_id],
@@ -1234,28 +1248,69 @@ class LearningRuntime:
         if feedback_id is not None:
             self.resolve(tenant_id, feedback_id)
         stored = self.episode(tenant_id, episode_id)
-        formation = self._project_episode_memory(tenant_id, stored)
+        defer_review = getattr(self.engine, "_learning_configuration", {}).get("defer_semantic_review", False)
+        formation = self._project_episode_memory(tenant_id, stored,
+                                                provider_cids=set() if defer_review else None)
         if already_observed:
             return {"episode_id": episode_id, "already_observed": True,
                     "erased": stored["status"] == "erased", "memory_formation": formation}
         return {"episode_id": episode_id, "memory_formation": formation}
 
-    def _project_episode_memory(self, tenant_id: str, episode: dict) -> list[dict]:
+    def _project_episode_memory(self, tenant_id: str, episode: dict, *, provider_cids: set[str] | None = None) -> list[dict]:
         """Retry idempotent projections after durable capture, outside its transaction."""
         from mnemosyne.memory_formation import project_direct_user_memory
+        from mnemosyne.project_observations import project_observed_memory, project_grounded_synthesis, _independent_content
+        from .candidates import observed_action
 
         if episode["status"] == "erased":
             return []
-        return [
-            project_direct_user_memory(self.engine, tenant_id, cid,
-                semantic_proposer=getattr(self.engine, "_learning_configuration", {}).get("semantic_proposer"),
-                timezone=getattr(self.engine, "_learning_configuration", {}).get("source_timezone"),
-                session_id=episode.get("session_id"))
-            for cid in episode.get("source_cids", [])
-            if (source := self.engine.get_evidence(tenant_id, cid)) is not None
-            and source.actor == "user" and source.user_id == episode["user_id"]
-            and source.content == episode.get("user_text")
-        ]
+        config = getattr(self.engine, "_learning_configuration", {})
+        sources = [source for cid in episode.get("source_cids", [])
+                   if (source := self.engine.get_evidence(tenant_id, cid)) is not None
+                   and source.user_id == episode["user_id"] and not source.erased]
+        legacy_events = {}
+        for event in episode.get("tool_events", []):
+            if event.get("source") != "tool" or not observed_action(event):
+                continue
+            variants = {_tool_source_content(event)}
+            if isinstance(event.get("output"), str):
+                variants.add(event["output"])
+            for content in variants - {""}:
+                legacy_events.setdefault(content, []).append(event)
+        projections = []
+        for source in sources:
+            if provider_cids and source.cid not in provider_cids:
+                continue
+            use_provider = provider_cids is None or source.cid in provider_cids
+            if source.actor == "user" and source.content == episode.get("user_text"):
+                projections.append(project_direct_user_memory(self.engine, tenant_id, source.cid,
+                    semantic_proposer=config.get("semantic_proposer") if use_provider else None,
+                    semantic_reviewer=config.get("semantic_reviewer") if use_provider else None,
+                    timezone=source.metadata.get("source_timezone", config.get("source_timezone")),
+                    session_id=episode.get("session_id")))
+                if not use_provider and config.get("semantic_proposer") is not None:
+                    projections[-1]["provider_pending"] = True
+            elif source.actor == "tool":
+                event = source.metadata.get("tool_observation")
+                if not isinstance(event, dict):
+                    # Older sources predate event metadata. Recover only an
+                    # unambiguous retained action/output pair from this episode.
+                    matches = legacy_events.get(source.content, [])
+                    event = matches[0] if len(matches) == 1 else None
+                projections.append(project_observed_memory(self.engine, tenant_id, source.cid,
+                    event=event, proposer=config.get("project_observation_proposer") if use_provider else None,
+                    reviewer=config.get("semantic_reviewer") if use_provider else None))
+                if (not use_provider and config.get("project_observation_proposer") is not None
+                        and _independent_content(event or {}) and len(source.content) >= 40):
+                    projections[-1]["provider_pending"] = True
+        tool_cids = [source.cid for source in sources if source.actor == "tool"]
+        for source in sources:
+            if source.actor == "assistant" and tool_cids:
+                projections.append(project_grounded_synthesis(self.engine, tenant_id, source.cid, tool_cids,
+                    proposer=config.get("project_observation_proposer") if provider_cids is None else None,
+                    reviewer=config.get("semantic_reviewer") if provider_cids is None else None,
+                    projected_sources=[row["source_cid"] for row in projections if row.get("source_cid") in tool_cids]))
+        return projections
 
     def episode(self, tenant_id: str, episode_id: str) -> dict:
         return self.writer.read(tenant_id)["episodes"][episode_id]
@@ -1369,6 +1424,19 @@ class LearningRuntime:
             if episode["status"] != "open":
                 return episode
             outcome = reward(episode["signals"])
+            # A factual/command check can validate a memory while the task is
+            # still ungraded. Retain that evidence without manufacturing a
+            # task outcome or running the credit machinery.
+            if episode.get("outcome_version", 1) >= 2:
+                episode["target_outcomes"] = {}
+                for receipt_id in episode["receipt_ids"]:
+                    for item in state["receipts"][receipt_id]["items"]:
+                        artifact = receipt_target(item, state["artifacts"])
+                        value = verified_target_outcome(artifact, episode) if artifact else None
+                        if value is not None:
+                            episode["target_outcomes"][artifact["id"]] = {
+                                "value": value, "rpe": value - (2 * episode["prediction"] - 1),
+                            }
             if outcome is None and not expired:
                 return episode
             episode["status"] = "unknown" if outcome is None else "resolved"
@@ -1382,16 +1450,6 @@ class LearningRuntime:
             if outcome is None:
                 return episode
             episode["rpe"] = outcome - (2 * episode["prediction"] - 1)
-            if episode.get("outcome_version", 1) >= 2:
-                episode["target_outcomes"] = {}
-                for receipt_id in episode["receipt_ids"]:
-                    for item in state["receipts"][receipt_id]["items"]:
-                        artifact = receipt_target(item, state["artifacts"])
-                        value = verified_target_outcome(artifact, episode) if artifact else None
-                        if value is not None:
-                            episode["target_outcomes"][artifact["id"]] = {
-                                "value": value, "rpe": value - (2 * episode["prediction"] - 1),
-                            }
             for receipt_id in episode["receipt_ids"]:
                 receipt = state["receipts"][receipt_id]
                 require(
@@ -2305,6 +2363,9 @@ class LearningRuntime:
                         if item.get("item_id") not in erased_items]
                     row["item_sources"] = {key: values for key, values in row.get("item_sources", {}).items()
                                            if key != cid and cid not in values}
+                    row["item_verification_contracts"] = {
+                        key: values for key, values in row.get("item_verification_contracts", {}).items()
+                        if key not in erased_items}
                     row["eligible_targets"] = [
                         item
                         for item in row.get("eligible_targets", [])

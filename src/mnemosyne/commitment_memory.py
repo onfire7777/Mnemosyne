@@ -207,6 +207,12 @@ def commitment_changes(source, clauses: list[str], timezone: str | None = None) 
         if action is not None:
             pass
         elif m := re.fullmatch(r"(?:I|We)\s+(?:(?:decided to|will)\s+)?(?:reschedul(?:e|ed)|postpon(?:e|ed)|mov(?:e|ed))\s+(.+)", text, re.I):
+            # Moving an asset to a host is a relocation, not a calendar edit.
+            # "move" denotes rescheduling only for an explicit scheduled event.
+            if re.search(r"\bmov(?:e|ed)\b", m[0], re.I) and not re.search(
+                r"\b(?:meeting|appointment|call|deadline|booking|session|interview|visit|presentation|reservation|schedule)\b", m[1], re.I,
+            ):
+                continue
             kind, action = "rescheduled", m[1]
         elif m := re.fullmatch(r"(?:I|We)\s+(?:(?:plan|intend|committed|commit|promised|promise|decided)\s+to|will|am going to|are going to)\s+(.+)", text, re.I):
             action = m[1]
@@ -317,6 +323,8 @@ def project_commitment_memory(engine, source, policy: dict, clauses: list[str], 
         selector = change["previous_event_time"] if change["state"] == "rescheduled" else change["event_time"]
         if is_change and len(candidates) > 1 and selector and selector.get("date"):
             candidates = [row for row in candidates if row["calibration"].get("event_time", {}).get("date") == selector["date"]]
+        if is_change and not candidates and change["state"] == "completed":
+            continue  # An ordinary past-tense fact does not invent a prior commitment.
         if is_change and len(candidates) != 1:
             report["unresolved"].append({"source_span": span.to_dict(), "reason": "ambiguous_commitment_target" if candidates else "missing_commitment_target", "action": change["action"]})
             continue

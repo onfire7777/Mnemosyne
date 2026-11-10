@@ -20,6 +20,7 @@ STATES = {"proposed", "queued", "running", "verified", "rejected", "inconclusive
 def _projection_options(runtime):
     config = getattr(runtime.engine, "_learning_configuration", {})
     return {"semantic_proposer": config.get("semantic_proposer"),
+            "semantic_reviewer": config.get("semantic_reviewer"),
             "timezone": config.get("source_timezone")}
 
 
@@ -135,6 +136,27 @@ def _review(runtime, tenant, row, state):
         check = contract.get("sandbox_check")
         if check:
             from .hypothesis_sandbox import run_experiment
+            if check.get("kind") == "isolated_environment":
+                from .environment_experiments import run_environment_experiment
+                cid = check.get("source_cid")
+                source = runtime.engine.get_evidence(tenant, cid) if cid in row["source_cids"] else None
+                if (not source or source.actor != "tool"
+                        or source.metadata.get("experiment_environment") != check.get("environment")):
+                    return {"status": "inconclusive", "reason": "environment_source_unavailable",
+                            "verifier": "isolated-environment:v1", "support": []}
+                outcome = run_environment_experiment(check["environment"], check["alternative"])
+                completed = outcome["status"] in {"improved", "not_improved"}
+                return {"status": "rejected" if outcome["status"] == "not_improved" else "inconclusive",
+                        "reason": "environment_improved_awaiting_live_outcome" if outcome["status"] == "improved"
+                                  else outcome.get("reason", "environment_did_not_improve"),
+                        "verifier": "isolated-environment:v1", "support": [],
+                        "review_complete": completed, "review_stage": "awaiting_live_outcomes" if completed else "environment_pending",
+                        "prediction_candidate_status": "awaiting_live_environment_verification" if completed else None,
+                        "environment_result": outcome,
+                        "sandbox_event": {"name": "environment_experiment", "source": "tool",
+                            "check_id": "environment:" + digest([row["id"], row["contract_hash"], row["source_versions"]]),
+                            "hypothesis_id": row["id"], "contract_hash": row["contract_hash"],
+                            "scope": "isolated_environment", "output": json.dumps(outcome, sort_keys=True)}}
             if check.get("kind") == "observed_trace_replay":
                 from .experiment_planner import validate_observed_check
                 if not validate_observed_check(runtime, tenant, row, state):

@@ -14,6 +14,7 @@ from uuid import uuid4
 from mnemosyne.experience.integration import _after_outcomes, build_learning_runtime
 from mnemosyne.experience.receipts import digest
 from mnemosyne.hosts.locking import bounded_lock
+from mnemosyne.local_paths import normalize_workspace
 
 
 def redact(value):
@@ -220,8 +221,8 @@ def _tool_event(name, response, *, tool_id=None, command=None, status=None,
         event["source_call_id"] = str(tool_id)
     if command:
         event["command"] = redact(_command_text(command))
-    if cwd:
-        event["cwd"] = redact(str(cwd))
+    if (workspace := normalize_workspace(cwd)) is not None:
+        event["cwd"] = redact(workspace)
     if isinstance(arguments, (dict, list)):
         event["arguments"] = json.loads(redact(arguments))
     if command:
@@ -256,13 +257,22 @@ def _tool_event(name, response, *, tool_id=None, command=None, status=None,
         event["target_ids"] = targets
     if external_checker and (claims := _claim_references(structured.get("claims"))):
         event["claims"] = claims
+    observations = structured.get("observations")
+    if external_checker and isinstance(observations, list):
+        event["observations"] = [json.loads(redact(row)) for row in observations
+                                  if isinstance(row, dict)]
     for key in ("checked_call_ids", "tested_steps"):
         values = structured.get(key)
         if external_checker and isinstance(values, list) and values and all(isinstance(value, str) and value.strip() for value in values):
             event[key] = values
-    for key in ("evidence", "receipt_id", "revalidation_request_id", "hypothesis_id"):
+    for key in ("evidence", "receipt_id", "revalidation_request_id", "hypothesis_id", "contract_hash"):
         if external_checker and isinstance(structured.get(key), str):
             event[key] = redact(structured[key])
+    # Keep verifier contracts typed. Text printed by shell/Python is never a
+    # trusted result envelope, even when it happens to contain matching JSON.
+    for key in ("hypothesis_review", "source_versions", "experiment_environment"):
+        if external_checker and isinstance(structured.get(key), dict):
+            event[key] = json.loads(redact(structured[key]))
     for key in (("exit_code", "passed", "failed") if external_checker else ("exit_code",)):
         value = structured.get(key)
         if type(value) is int and (key == "exit_code" or value >= 0):
@@ -385,6 +395,16 @@ def _merge_events(previous, incoming):
         if match is None:
             result.append(event)
         else:
+            previous = result[match]
+            if (tool_id and previous.get("tool_use_id") == tool_id
+                    and previous.get("command") == event.get("command")
+                    and previous.get("exit_code") == event.get("exit_code")):
+                # The transcript describes the same completed call but does
+                # not contain a workspace snapshot taken by its live hook.
+                # Preserve that observed snapshot, never recreate it later.
+                for key in ("cwd", "experiment_environment"):
+                    if key not in event and key in previous:
+                        event = {**event, key: previous[key]}
             result[match] = event
     return result
 
@@ -712,7 +732,14 @@ class CodexAdapter:
             lessons = {item["item_id"] for item in receipt.get("items", [])
                        if item.get("kind") == "lesson"} if receipt_id else set()
             used_lessons = [key for key in record.get("used_lessons", []) if key in lessons]
-            tool_events = _bound_verifications(record.get("tool_events", []),
+            events = list(record.get("tool_events", []))
+            if receipt_id:
+                from mnemosyne.hosts.memory_checks import observed_memory_checks, contracts_current
+                events += observed_memory_checks(receipt, record.get("used_items", []), events,
+                    lambda cids: runtime._sources_live(self.tenant_id, cids, self.user_id),
+                    target_is_current=lambda key, contracts: contracts_current(
+                        facade.engine, self.tenant_id, self.user_id, key, contracts))
+            tool_events = _bound_verifications(events,
                                                record.get("verification_reports", []),
                                                receipt_id, used_lessons, lessons,
                                                {item["item_id"] for item in receipt.get("items", [])},
@@ -842,7 +869,7 @@ class CodexAdapter:
                     # Prior tool calls and another session's manifest are not current capabilities.
                     state["available_tools"] = []
                     state["capabilities_status"] = "unknown"
-                state["workspace"] = payload.get("cwd", payload.get("workspace"))
+                state["workspace"] = normalize_workspace(payload.get("cwd", payload.get("workspace")))
                 context = self._prepare(facade, state, path, session)
                 if context is None:
                     return {}
@@ -886,6 +913,17 @@ class CodexAdapter:
                         cwd=arguments.get("cwd", arguments.get("workdir")) if isinstance(arguments, dict) else None,
                         arguments=arguments,
                     )
+                    if tool_event.get("runner") == "pytest" and tool_event.get("failed", 0) > 0:
+                        # Capture only while handling the current completion.
+                        # Retrospective transcript replay cannot reconstruct
+                        # the workspace that existed when a failure occurred.
+                        from mnemosyne.experience.environment_capture import capture_failed_python_environment
+                        environment = capture_failed_python_environment(
+                            tool_event, workspace=state.get("workspace"))
+                        if environment is not None:
+                            encoded = json.dumps(environment, ensure_ascii=False)
+                            if redact(encoded) == encoded:
+                                tool_event["experiment_environment"] = environment
                     state["tool_events"] = _merge_events(
                         state.get("tool_events", []), [tool_event]
                     )

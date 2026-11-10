@@ -6,6 +6,9 @@ from datetime import UTC, datetime, timedelta
 from copy import deepcopy
 import json
 from pathlib import PurePosixPath
+from urllib.parse import unquote
+
+from mnemosyne.local_paths import normalize_workspace
 
 from mnemosyne.gate import Candidate, PromotionGate, RegressionCase
 from mnemosyne.learning import LocalCritic, Procedure, Trajectory
@@ -186,24 +189,27 @@ def _action_data(step: str) -> dict:
 
 
 def _workspace(value) -> bool:
-    return (isinstance(value, str) and value.startswith("/") and value != "/"
-            and str(PurePosixPath(value)) == value and ".." not in PurePosixPath(value).parts)
+    normalized = normalize_workspace(value)
+    return bool(normalized and normalized != "/"
+                and ".." not in PurePosixPath(normalized).parts)
 
 
 def template_workspace(step: str, workspace: str) -> str:
     """Abstract only cwd; executable, entities, flags and all arguments stay literal."""
     value = _action_data(step)
-    if value.get("cwd") != workspace or not _workspace(workspace):
+    original_workspace = value.get("cwd")
+    workspace = normalize_workspace(workspace)
+    if normalize_workspace(original_workspace) != workspace or not _workspace(workspace):
         return step
     remaining = {key: deepcopy(item) for key, item in value.items() if key != "cwd"}
     # Host adapters retain the original arguments as well as normalized cwd.
     # Bind only those explicit cwd fields when they agree with the observation.
     if isinstance(remaining.get("arguments"), dict):
         for key in ("cwd", "workdir"):
-            if remaining["arguments"].get(key) == workspace:
+            if normalize_workspace(remaining["arguments"].get(key)) == workspace:
                 remaining["arguments"][key] = WORKSPACE_VARIABLE
     # A command tied to the old root cannot safely become a portable operation.
-    if workspace in json.dumps(remaining, ensure_ascii=False):
+    if workspace in unquote(json.dumps(remaining, ensure_ascii=False)):
         return step
     return json.dumps({**remaining, "cwd": WORKSPACE_VARIABLE}, sort_keys=True,
                       ensure_ascii=False, allow_nan=False)
@@ -215,22 +221,38 @@ def has_workspace_template(steps: list[str]) -> bool:
 
 def portable_observed_steps(episode: dict) -> tuple[list[str], str | None]:
     steps = observed_steps(episode)
-    roots = {value for step in steps if _workspace(value := _action_data(step).get("cwd"))}
+    roots = {normalize_workspace(value) for step in steps if _workspace(value := _action_data(step).get("cwd"))}
     if len(roots) != 1:
         return steps, None
     root = next(iter(roots))
     return [template_workspace(step, root) for step in steps], root
 
 
+def _canonical_workspace_step(step):
+    """Compare local path spellings without rewriting retained action evidence."""
+    value = _action_data(step)
+    if not value:
+        return step
+    if (cwd := normalize_workspace(value.get("cwd"))) is not None:
+        value["cwd"] = cwd
+    if isinstance(value.get("arguments"), dict):
+        for key in ("cwd", "workdir"):
+            if (cwd := normalize_workspace(value["arguments"].get(key))) is not None:
+                value["arguments"][key] = cwd
+    return json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False)
+
+
 def sequence_occurrence(steps: list[str], sequence: list[str], *, contiguous=False) -> list[int] | None:
     """Find an ordered occurrence with one consistent, explicit workspace binding."""
     if not steps:
         return None
+    steps = [_canonical_workspace_step(step) for step in steps]
     roots = {None}
     if has_workspace_template(steps):
-        roots = {value for step in sequence if _workspace(value := _action_data(step).get("cwd"))}
+        roots = {normalize_workspace(value) for step in sequence if _workspace(value := _action_data(step).get("cwd"))}
     for root in sorted(roots, key=lambda value: value or ""):
-        comparable = [template_workspace(step, root) if root else step for step in sequence]
+        comparable = [_canonical_workspace_step(template_workspace(step, root) if root else step)
+                      for step in sequence]
         if contiguous:
             for start in range(len(sequence) - len(steps) + 1):
                 if comparable[start:start + len(steps)] == steps:
@@ -246,6 +268,9 @@ def sequence_occurrence(steps: list[str], sequence: list[str], *, contiguous=Fal
 
 
 def action_occurrence(artifact: dict, episode: dict) -> list[int] | None:
+    if artifact.get("strategy_contract", {}).get("kind") == "observed_conditional_roles":
+        from .strategy_roles import abstract_occurrence
+        return abstract_occurrence(artifact, episode)
     return sequence_occurrence(artifact.get("steps", []),
                                compatible_observed_steps(artifact.get("steps", []), episode),
                                contiguous=artifact.get("kind") == "chunk")
@@ -264,7 +289,8 @@ def validate_action_template(artifact: dict, episodes: list[dict]) -> bool:
         if not root or action_occurrence(artifact, episode) is None:
             return False
         bindings.append({"episode_id": episode["id"], "value": root})
-    return len({row["value"] for row in bindings}) >= 2 and bindings == proof.get("bindings")
+    retained = [{**row, "value": normalize_workspace(row.get("value"))} for row in proof.get("bindings", [])]
+    return len({row["value"] for row in bindings}) >= 2 and bindings == retained
 
 
 def grounded_action_template(artifact: dict, episodes: list[dict], quotes: list[dict]) -> bool:
@@ -294,6 +320,9 @@ def ordered_subset(steps: list[str], expected: list[str]) -> bool:
 
 def candidate_score(artifact: dict, episode: dict) -> float | None:
     """Score only against an external order oracle, never model self-judgment."""
+    if artifact.get("strategy_contract", {}).get("kind") == "observed_conditional_roles":
+        from .strategy_roles import abstract_score
+        return abstract_score(artifact, episode)
     if artifact.get("content_kind", artifact.get("kind")) == "lesson":
         corrections = correction_texts(episode)
         return float(artifact["content"] in corrections) if corrections else None
@@ -332,7 +361,10 @@ def ground_quotes(
         sources.sort(key=lambda pair: pair[1] is None or pair[1].actor != "user")
     quotes = []
     quoted_steps = [(step, None) for step in artifact["steps"]]
-    if has_workspace_template(artifact["steps"]) or artifact.get("strategy_contract"):
+    if artifact.get("strategy_contract", {}).get("kind") == "observed_conditional_roles":
+        quoted_steps = [(observed_action(episode["tool_events"][index]), episode["id"])
+                        for episode in episodes for index in action_occurrence(artifact, episode) or []]
+    elif has_workspace_template(artifact["steps"]) or artifact.get("strategy_contract"):
         if has_workspace_template(artifact["steps"]) and not validate_action_template(artifact, episodes):
             return []
         quoted_steps = [
@@ -996,6 +1028,7 @@ def verification_requests(
                     "scope": item.get("experiment_scope"),
                     "stage": item.get("review_stage"),
                     "partitions": item.get("partitions"),
+                    "environment_result": item.get("environment_result"),
                     "candidate_id": item.get("prediction_candidate_id"),
                     "next_action": "When these steps are applicable to the current authorized task, report the actual checker result with hypothesis_id, contract_hash, and tested_steps. Historical replay is not a live success.",
                 } if item.get("review_complete") else None),

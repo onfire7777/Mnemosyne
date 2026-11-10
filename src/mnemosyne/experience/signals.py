@@ -129,6 +129,8 @@ def tool_signals(events: list[dict]) -> list[dict]:
                 item["target_ids"] = sorted(set(targets))
         if event.get("outcome_scope") == "task" and event.get("final") is True:
             item.update(outcome_scope="task", final=True)
+        elif event.get("outcome_scope") == "diagnostic":
+            item["outcome_scope"] = "diagnostic"
         call_id = event.get("call_id", event.get("source_call_id"))
         if isinstance(call_id, str):
             item["call_id"] = call_id
@@ -170,8 +172,10 @@ def user_signals(text: str, previous_text: str = "") -> list[dict]:
     return []
 
 
-def reward(signals: list[dict]) -> float | None:
+def reward(signals: list[dict], *, include_diagnostics: bool = False) -> float | None:
     signals = _current_checks(signals)
+    if not include_diagnostics:
+        signals = [item for item in signals if item.get("outcome_scope") != "diagnostic"]
     final = [item for item in signals if item.get("outcome_scope") == "task" and item.get("final")]
     if final:
         # Only an explicit external final verdict can supersede attempted checks.
@@ -199,7 +203,11 @@ def verified_target_outcome(artifact: dict, episode: dict) -> float | None:
     verified = [item for item in episode.get("signals", []) if item["kind"] in VERIFIED_KINDS]
     targeted = [item for item in verified if artifact["id"] in item.get("target_ids", [])]
     if targeted:
-        return reward(targeted)
+        return reward(targeted, include_diagnostics=True)
+    if artifact.get("strategy_contract", {}).get("kind") == "observed_conditional_roles":
+        from .strategy_roles import abstract_score
+        score = abstract_score(artifact, episode)
+        return None if score is None else 2 * score - 1
     if artifact.get("content_kind", artifact.get("kind")) in {"lesson", "item"}:
         return None
     general = [item for item in verified if not item.get("target_ids")]

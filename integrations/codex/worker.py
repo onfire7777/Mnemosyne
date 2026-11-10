@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 from runtime import ROOT, STATE, TENANT, USER, open_facade
 from hook import adapter
 from automatic_learning import advance
-from mnemosyne.answering import AnswerReadContext
 from mnemosyne.jobs import RuntimeJobHandlers
 from mnemosyne.media import CommandMediaTextExtractor
 from mnemosyne.mental_model_refresh import MentalModelRefreshWorker
@@ -41,6 +40,10 @@ def main():
                 if job.kind in {"consolidate_evidence", "consolidate_sleep"}:
                     break
             report["queue"] = facade.queue.snapshot()
+            report["stage"] = "project_memory"
+            from mnemosyne.hosts.project_memory import advance_project_memory
+            report["project_memory"] = advance_project_memory(
+                facade.tools._learning_runtime(), TENANT, USER, STATE / "project-memory.json")
             report["stage"] = "automatic_learning"
             report["automatic_learning"] = advance(facade, TENANT, STATE / "automatic-learning.json")
             report["stage"] = "retrieval_index"
@@ -51,13 +54,12 @@ def main():
         report["stage"] = "maintained_answers"
         with open_facade() as facade:
             from mnemosyne.knowledge_maintenance import KnowledgeMaintenanceWorker
-            knowledge_context = AnswerReadContext(tenant_id=TENANT, user_id=USER,
-                role="operator", source_trust_tier=0)
+            from mnemosyne.hosts.project_memory import maintenance_context
+            knowledge_context = maintenance_context(facade.engine, TENANT, USER)
             report["knowledge"] = KnowledgeMaintenanceWorker(facade.engine, knowledge_context,
                 checkpoint_path=STATE / "knowledge-maintenance.json").run_once()
             service = MentalModelService(facade.engine, provider_factory=facade.tools._grounded_provider_factory)
-            context = AnswerReadContext(tenant_id=TENANT, user_id=USER,
-                                        role="operator", source_trust_tier=0)
+            context = maintenance_context(facade.engine, TENANT, USER)
             report["maintained_answers"] = MentalModelRefreshWorker(
                 service, context, max_batch=1, check_changes=True,
             ).run_once()
