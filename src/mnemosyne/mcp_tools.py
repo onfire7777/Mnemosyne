@@ -1396,7 +1396,10 @@ class MemoryTools:
         if (stored and same_cid and
                 self.engine.get_evidence(tenant_id, cid, branch).user_id == user_id):
             from mnemosyne.memory_formation import project_direct_user_memory
-            formation = project_direct_user_memory(self.engine, tenant_id, cid, branch)
+            formation = project_direct_user_memory(self.engine, tenant_id, cid, branch,
+                semantic_proposer=getattr(self.engine, "_learning_configuration", {}).get("semantic_proposer"),
+                timezone=getattr(self.engine, "_learning_configuration", {}).get("source_timezone"),
+                agent_id=session_identity.agent_id if session_identity else "codex", session_id=session_id)
 
         working_item_id: str | None = None
         if mirror_turn:
@@ -3940,6 +3943,7 @@ class MemoryTools:
     def prepare_context(self, tenant_id: str, user_id: str, session_id: str, query: str,
                         available_tools: list[str] | None = None, task_type: str | None = None,
                         risk_level: str | None = None,
+                        workspace: str | None = None, delivery_envelope: dict | None = None,
                         role: WriteRole = "agent", source_trust_tier: int = 1,
                         session_identity: SessionIdentity | None = None) -> dict[str, Any]:
         self._learning_session(tenant_id, user_id, session_id, session_identity)
@@ -3947,10 +3951,25 @@ class MemoryTools:
         runtime = self._learning_runtime()
         from mnemosyne.runtime_state import migrate_legacy_learning
         migrate_legacy_learning(runtime, self.learning, tenant_id)
-        context = runtime.prepare_context(tenant_id, user_id, session_id,
-            _require_text(query, field="query"), available_tools, task_type, risk_level)
-        context["user_model"] = self.profile_context(tenant_id, user_id, {"session_id": session_id})
-        return context
+        read_scope = {}
+        if session_identity is not None:
+            self._session_read_scope(read_scope, tenant_id=tenant_id, user_id=user_id,
+                                     session_id=session_id, session_identity=session_identity)
+            read_scope["agent_id"] = session_identity.agent_id
+            read_scope["prospective_owner"] = {"user_id": user_id, "agent_id": session_identity.agent_id}
+        scope = {"session_id": session_id}
+        if workspace:
+            scope["workspace"] = workspace
+        supplemental = {"user_model": self.profile_context(tenant_id, user_id, scope)}
+        from mnemosyne.answering import AnswerReadContext
+        from mnemosyne.knowledge_maintenance import read_knowledge_context
+        supplemental["knowledge_pages"] = read_knowledge_context(
+            self.engine, AnswerReadContext(tenant_id=tenant_id, user_id=user_id,
+                role="reader", source_trust_tier=source_trust_tier), query)
+        return runtime.prepare_context(tenant_id, user_id, session_id,
+            _require_text(query, field="query"), available_tools, task_type, risk_level,
+            read_scope=read_scope, supplemental_context=supplemental,
+            delivery_envelope=delivery_envelope)
 
     @staticmethod
     def _erase_profile_model(user_model, runtime_state, tenant_id: str, cid: str,
@@ -4081,7 +4100,7 @@ class MemoryTools:
             raise PermissionError("tool outcomes require an authenticated trusted host")
         runtime = self._learning_runtime()
         from mnemosyne.experience.integration import observe_completed_turn
-        return observe_completed_turn(
+        result = observe_completed_turn(
             runtime, tenant_id, user_id, session_id, user_text, assistant_text,
             tool_events=tool_events, receipt_ids=receipt_ids, used_skills=used_skills,
             used_lessons=used_lessons,
@@ -4089,6 +4108,37 @@ class MemoryTools:
             feedback=lambda episode_id: self._capture_learning_user_feedback(
                 runtime, tenant_id, user_id, session_id, user_text, episode_id,
                 role, source_trust_tier))
+
+        # Completed direct-user turns also feed the session plane. Reuse the
+        # durable source rather than recapturing text or extending an old TTL.
+        if session_identity is not None:
+            from mnemosyne.experience.receipts import digest
+            episode = runtime.episode(tenant_id, result["episode_id"])
+            clock = datetime.now(UTC)
+            mirrored = []
+            if episode.get("status") != "erased":
+                existing = self.engine.list_working(tenant_id, session_id, as_of=clock)
+                for cid in episode.get("source_cids", []):
+                    source = self.engine.get_evidence(tenant_id, cid)
+                    if (source is None or source.actor != "user" or source.user_id != user_id
+                            or source.erased or source.created_at + timedelta(hours=1) <= clock
+                            or not runtime._sources_live(tenant_id, [cid], user_id)):
+                        continue
+                    identifier = digest(["completed-working-v1", tenant_id, user_id,
+                                         session_identity.agent_id, session_id, cid])
+                    if not any(row.item_id == identifier for row in existing):
+                        self.engine.put_working(WorkingMemoryItem(
+                            item_id=identifier, tenant_id=tenant_id, user_id=user_id,
+                            agent_id=session_identity.agent_id or "codex", session_id=session_id,
+                            task_id=episode["id"], kind="conversation_turn", content=source.content,
+                            created_at=source.created_at, expires_at=source.created_at + timedelta(hours=1),
+                            evidence_ids=[cid], trust_tier=source.trust_tier,
+                            access_policy=source.access_policy,
+                            metadata={"branch": "main", "actor": "user", "source_type": source.source_type},
+                            salience=0.5))
+                    mirrored.append(identifier)
+            result["working_item_ids"] = mirrored
+        return result
 
     def record_signal(self, tenant_id: str, user_id: str, session_id: str,
                       kind: str, value: float, episode_id: str | None = None,

@@ -623,6 +623,7 @@ def _knowledge_page_from_row(row: sqlite3.Row) -> KnowledgePage:
             "trust_tier": row["trust_tier"],
             "sensitivity": row["sensitivity"],
             "access_policy": json.loads(row["access_policy"]),
+            "maintenance": json.loads(row["maintenance"]),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         }
@@ -1118,6 +1119,9 @@ class SqliteEngine:
             SqliteEngine._validate_tenant_file_owner(conn, tenant_id)
             for statement in ENSURE_STATEMENTS:
                 conn.execute(statement)
+            page_columns = {row[1] for row in conn.execute("PRAGMA table_info(knowledge_pages)")}
+            if "maintenance" not in page_columns:
+                conn.execute("ALTER TABLE knowledge_pages ADD COLUMN maintenance TEXT NOT NULL DEFAULT '{}'")
             evidence_columns = {
                 row[1] for row in conn.execute("PRAGMA table_info(evidence)")
             }
@@ -2567,6 +2571,7 @@ class SqliteEngine:
                 ev.embedding = None
             with conn:
                 self._write_evidence_mutable(conn, ev)
+                self._scrub_automatic_knowledge(conn, tenant_id, branch, {cid})
                 # Privacy tightening (raised sensitivity / added restriction /
                 # nulled embedding) always invalidates any cached vector for this
                 # cid — purge unconditionally (restriction/hold purge rail, R4).
@@ -2894,6 +2899,7 @@ class SqliteEngine:
                     saved["model_id"],
                 ),
             )
+        SqliteEngine._scrub_automatic_knowledge(conn, tenant_id, branch)
 
     def get_evidence_for_read(
         self,
@@ -3021,6 +3027,7 @@ class SqliteEngine:
             ev.metadata = {**ev.metadata, **metadata_patch}
             with self._source_write(conn):
                 self._write_evidence_mutable(conn, ev)
+                self._scrub_automatic_knowledge(conn, tenant_id, branch, {cid})
                 # A metadata patch that signals a restriction/hold/quarantine
                 # change (or drops the embedding partition to "none") invalidates
                 # the cached vector for this cid — purge on those paths (R4).
@@ -7218,6 +7225,42 @@ class SqliteEngine:
             saved = self.observation_get(tenant_id, observation_id, branch=branch)
             return saved.to_dict() if saved is not None else record
 
+    @staticmethod
+    def _scrub_automatic_knowledge(conn: sqlite3.Connection, tenant_id: str, branch: str,
+                                   affected_cids: set[str] | None = None) -> None:
+        from mnemosyne.knowledge_pages import scrub_automatic_pages
+        records = [_knowledge_page_from_row(r).to_dict() for r in conn.execute(
+            "SELECT * FROM knowledge_pages WHERE tenant_id = ? AND branch = ?", (tenant_id, branch))]
+        for row in scrub_automatic_pages(records, affected_cids):
+            conn.execute("UPDATE knowledge_pages SET title = ?, path = ?, content_markdown = '', "
+                         "source_evidence_cids = '[]', source_assertion_ids = '[]', source_observation_ids = '[]', "
+                         "maintenance = ?, version = ?, status = ?, updated_at = ? "
+                         "WHERE tenant_id = ? AND branch = ? AND page_id = ?",
+                         (row["title"], row["path"], json_text(row["maintenance"]), row["version"],
+                          row["status"], row["updated_at"], tenant_id, branch, row["page_id"]))
+
+    def knowledge_source_batch(self, tenant_id: str, branch: str = "main", *,
+                               collection: str = "assertions", after: str = "",
+                               limit: int = 256, ids: list[str] | None = None) -> list[dict[str, Any]]:
+        """Bounded keyset scan; no whole-tenant export on a maintenance tick."""
+        if collection not in {"assertions", "evidence"} or not 1 <= limit <= 4096:
+            raise ValueError("invalid knowledge source scan")
+        key = "id" if collection == "assertions" else "cid"
+        where = ""
+        args: list[Any] = [tenant_id, branch, after]
+        if ids is not None:
+            if not ids:
+                return []
+            where = f" AND {key} IN ({','.join('?' for _ in ids)})"
+            args.extend(ids)
+        args.append(limit)
+        with self._lock:
+            rows = self._connect(tenant_id).execute(
+                f"SELECT * FROM {collection} WHERE tenant_id = ? AND branch = ? AND {key} > ?"
+                f"{where} ORDER BY {key} LIMIT ?", args).fetchall()
+        parser = _assertion_from_row if collection == "assertions" else _evidence_from_row
+        return [parser(row).to_dict() for row in rows]
+
     def knowledge_page_create(
         self,
         page_or_tenant: KnowledgePage | dict[str, Any] | str,
@@ -7277,9 +7320,9 @@ class SqliteEngine:
                 INSERT INTO knowledge_pages (
                     tenant_id, branch, page_id, user_id, path, title, content_markdown,
                     source_observation_ids, source_assertion_ids, source_evidence_cids,
-                    tags, version, status, trust_tier, sensitivity, access_policy,
+                    tags, version, status, trust_tier, sensitivity, access_policy, maintenance,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     tenant_id,
@@ -7298,6 +7341,7 @@ class SqliteEngine:
                     kp.trust_tier,
                     kp.sensitivity,
                     json_text(kp.access_policy),
+                    json_text(kp.maintenance),
                     created_at,
                     updated_at,
                 ),
@@ -7312,7 +7356,8 @@ class SqliteEngine:
                 source=kp.user_id or "system",
                 trust_tier=kp.trust_tier,
             )
-            conn.commit()
+            if self._mental_model_guard_state is None:
+                conn.commit()
             return kp.page_id
 
     def knowledge_page_update(
@@ -7374,14 +7419,14 @@ class SqliteEngine:
                     )
             new_version = current.version + 1
             updated_at = dt_to_json(utc_now())
-            conn.execute(
+            changed = conn.execute(
                 """
                 UPDATE knowledge_pages SET
                     user_id = ?, path = ?, title = ?, content_markdown = ?,
                     source_observation_ids = ?, source_assertion_ids = ?, source_evidence_cids = ?,
                     tags = ?, version = ?, status = ?, trust_tier = ?, sensitivity = ?,
-                    access_policy = ?, updated_at = ?
-                WHERE tenant_id = ? AND branch = ? AND page_id = ?
+                    access_policy = ?, maintenance = ?, updated_at = ?
+                WHERE tenant_id = ? AND branch = ? AND page_id = ? AND version = ?
                 """,
                 (
                     kp.user_id,
@@ -7397,12 +7442,18 @@ class SqliteEngine:
                     kp.trust_tier,
                     kp.sensitivity,
                     json_text(kp.access_policy),
+                    json_text(kp.maintenance),
                     updated_at,
                     tenant_id,
                     branch,
                     kp.page_id,
+                    current.version,
                 ),
             )
+            if changed.rowcount != 1:
+                if self._mental_model_guard_state is None:
+                    conn.rollback()
+                raise KnowledgePageConflict("knowledge page changed during update")
             self._audit_row(
                 conn,
                 tenant_id,
@@ -7413,10 +7464,11 @@ class SqliteEngine:
                 source=kp.user_id or "system",
                 trust_tier=kp.trust_tier,
             )
-            conn.commit()
+            if self._mental_model_guard_state is None:
+                conn.commit()
             saved = copy.deepcopy(kp)
             saved.version = new_version
-            saved.updated_at = updated_at
+            saved.updated_at = parse_dt(updated_at)
             saved.created_at = current.created_at
             return saved
 
@@ -7461,6 +7513,11 @@ class SqliteEngine:
             if row is None:
                 return None
             page = _knowledge_page_from_row(row)
+            if validate_custody and page.maintenance.get("schema") == "mnemosyne.automatic-knowledge/v1":
+                from mnemosyne.knowledge_maintenance import automatic_page_current
+                from mnemosyne.knowledge_pages import scrub_automatic_pages
+                if not automatic_page_current(self, page):
+                    return KnowledgePage.from_dict(scrub_automatic_pages([page.to_dict()])[0])
             if validate_custody:
                 try:
                     verify_knowledge_page_acyclic_custody(
@@ -7516,6 +7573,9 @@ class SqliteEngine:
             if tags:
                 tag_set = set(tags)
                 pages = [p for p in pages if tag_set.issubset(set(p.tags))]
+            if status == "active":
+                from mnemosyne.knowledge_maintenance import automatic_page_current
+                pages = [p for p in pages if automatic_page_current(self, p)]
             return pages
 
     def knowledge_page_render_markdown(

@@ -5,7 +5,7 @@ import os
 import sys
 from datetime import datetime, timezone
 
-from runtime import ROOT, STATE, TENANT, USER, locked, open_facade
+from runtime import ROOT, STATE, TENANT, USER, open_facade
 from hook import adapter
 from automatic_learning import advance
 from mnemosyne.answering import AnswerReadContext
@@ -21,7 +21,7 @@ def main():
     try:
         report["stage"] = "completed_turns"
         report["completions"] = adapter().recover_completed(max_sessions=8)
-        with locked(), open_facade() as facade:
+        with open_facade() as facade:
             report["stage"] = "queued_work"
             handlers = RuntimeJobHandlers(
                 facade.engine, facade.queue, metrics=facade.tools.metrics,
@@ -47,6 +47,11 @@ def main():
         # concurrent refreshes while completion capture can continue.
         report["stage"] = "maintained_answers"
         with open_facade() as facade:
+            from mnemosyne.knowledge_maintenance import KnowledgeMaintenanceWorker
+            knowledge_context = AnswerReadContext(tenant_id=TENANT, user_id=USER,
+                role="operator", source_trust_tier=0)
+            report["knowledge"] = KnowledgeMaintenanceWorker(facade.engine, knowledge_context,
+                checkpoint_path=STATE / "knowledge-maintenance.json").run_once()
             service = MentalModelService(facade.engine, provider_factory=facade.tools._grounded_provider_factory)
             context = AnswerReadContext(tenant_id=TENANT, user_id=USER,
                                         role="operator", source_trust_tier=0)
@@ -70,4 +75,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    from mnemosyne.hosts.locking import bounded_lock
+    try:
+        with bounded_lock(STATE / "worker.lock", timeout=0):
+            main()
+    except TimeoutError:
+        pass  # another worker owns this bounded batch; hooks remain independent

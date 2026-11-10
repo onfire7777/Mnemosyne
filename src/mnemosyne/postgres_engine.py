@@ -3636,6 +3636,7 @@ class PostgresEngine:
                     saved["model_id"],
                 ),
             )
+        self._scrub_automatic_knowledge(cur, db_tenant_id, branch)
 
     def get_evidence_for_read(
         self,
@@ -3926,6 +3927,7 @@ class PostgresEngine:
                     """,
                     (self._jsonb(metadata), db_tenant_id, branch, _cid_to_bytes(cid)),
                 )
+                self._scrub_automatic_knowledge(cur, db_tenant_id, branch, {cid})
                 self._audit(
                     cur,
                     db_tenant_id,
@@ -4025,6 +4027,7 @@ class PostgresEngine:
                         _cid_to_bytes(cid),
                     ),
                 )
+                self._scrub_automatic_knowledge(cur, db_tenant_id, branch, {cid})
                 self._audit(
                     cur,
                     db_tenant_id,
@@ -9742,6 +9745,7 @@ class PostgresEngine:
               trust_tier SMALLINT NOT NULL DEFAULT 0,
               sensitivity SMALLINT NOT NULL DEFAULT 0,
               access_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
+              maintenance JSONB NOT NULL DEFAULT '{}'::jsonb,
               created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
               updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
               FOREIGN KEY (tenant_id, branch) REFERENCES branches(tenant_id, name)
@@ -9760,6 +9764,8 @@ class PostgresEngine:
               ON knowledge_pages (tenant_id, branch, page_id)
             """
         )
+
+        cur.execute("ALTER TABLE knowledge_pages ADD COLUMN IF NOT EXISTS maintenance JSONB NOT NULL DEFAULT '{}'::jsonb")
 
     def observation_upsert(
         self,
@@ -10184,6 +10190,46 @@ class PostgresEngine:
         saved = self.observation_get(tenant_id, observation_id, branch=branch)
         return saved.to_dict() if saved is not None else record
 
+    def _scrub_automatic_knowledge(self, cur: Any, db_tenant_id: Any, branch: str,
+                                   affected_cids: set[str] | None = None) -> None:
+        from mnemosyne.knowledge_pages import scrub_automatic_pages
+        self._ensure_knowledge_pages_schema(cur)
+        cur.execute("SELECT * FROM knowledge_pages WHERE tenant_id = %s AND branch = %s FOR UPDATE",
+                    (db_tenant_id, branch))
+        records = [_row_to_knowledge_page(row).to_dict() for row in cur.fetchall()]
+        for row in scrub_automatic_pages(records, affected_cids):
+            cur.execute("UPDATE knowledge_pages SET title = %s, path = %s, content_markdown = '', "
+                        "source_evidence_cids = '{}', source_assertion_ids = '{}', source_observation_ids = '{}', "
+                        "maintenance = %s, version = %s, status = %s, updated_at = now() "
+                        "WHERE tenant_id = %s AND branch = %s AND page_id = %s",
+                        (row["title"], row["path"], self._jsonb(row["maintenance"]), row["version"],
+                         row["status"], db_tenant_id, branch, row["page_id"]))
+
+    def knowledge_source_batch(self, tenant_id: str, branch: str = "main", *,
+                               collection: str = "assertions", after: str = "",
+                               limit: int = 256, ids: list[str] | None = None) -> list[dict[str, Any]]:
+        """Bounded keyset scan with the same source representation as export."""
+        if collection not in {"assertions", "evidence"} or not 1 <= limit <= 4096:
+            raise ValueError("invalid knowledge source scan")
+        key = "s.id::text" if collection == "assertions" else "encode(s.cid, 'hex')"
+        args: list[Any] = [_stable_uuid("tenant", tenant_id), branch, after]
+        where = ""
+        if ids is not None:
+            if not ids:
+                return []
+            where = f" AND {key} = ANY(%s)"
+            args.append(ids)
+        args.append(limit)
+        with self._mental_model_connection(tenant_id) as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, _stable_uuid("tenant", tenant_id))
+                cur.execute(f"SELECT s.*, t.name AS tenant_name FROM {collection} s "
+                            f"JOIN tenants t ON t.id = s.tenant_id WHERE s.tenant_id = %s "
+                            f"AND s.branch = %s AND {key} > %s{where} ORDER BY {key} LIMIT %s", args)
+                rows = cur.fetchall()
+        return [(_row_to_assertion(row) if collection == "assertions" else
+                 _row_to_evidence(row, bytes(row["cid"]).hex())).to_dict() for row in rows]
+
     def knowledge_page_create(
         self,
         page_or_tenant: KnowledgePage | dict[str, Any] | str,
@@ -10214,7 +10260,7 @@ class PostgresEngine:
             ),
             get_evidence=lambda cid: self.get_evidence(tenant_id, cid, branch=branch),
         )
-        with self.connect() as conn:
+        with self._mental_model_connection(tenant_id) as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
                 self._ensure_tenant_and_branch_cursor(
@@ -10243,8 +10289,8 @@ class PostgresEngine:
                     INSERT INTO knowledge_pages (
                         tenant_id, branch, page_id, user_id, path, title, content_markdown,
                         source_observation_ids, source_assertion_ids, source_evidence_cids,
-                        tags, version, status, trust_tier, sensitivity, access_policy
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        tags, version, status, trust_tier, sensitivity, access_policy, maintenance
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         db_tenant_id,
@@ -10263,6 +10309,7 @@ class PostgresEngine:
                         kp.trust_tier,
                         kp.sensitivity,
                         self._jsonb(kp.access_policy),
+                        self._jsonb(kp.maintenance),
                     ),
                 )
                 self._audit(
@@ -10309,7 +10356,7 @@ class PostgresEngine:
             ),
             get_evidence=lambda cid: self.get_evidence(tenant_id, cid, branch=branch),
         )
-        with self.connect() as conn:
+        with self._mental_model_connection(tenant_id) as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
                 self._ensure_tenant_and_branch_cursor(
@@ -10347,7 +10394,7 @@ class PostgresEngine:
                         user_id = %s, path = %s, title = %s, content_markdown = %s,
                         source_observation_ids = %s, source_assertion_ids = %s, source_evidence_cids = %s,
                         tags = %s, version = %s, status = %s, trust_tier = %s, sensitivity = %s,
-                        access_policy = %s, updated_at = now()
+                        access_policy = %s, maintenance = %s, updated_at = now()
                     WHERE tenant_id = %s AND branch = %s AND page_id = %s
                     RETURNING *
                     """,
@@ -10365,6 +10412,7 @@ class PostgresEngine:
                         kp.trust_tier,
                         kp.sensitivity,
                         self._jsonb(kp.access_policy),
+                        self._jsonb(kp.maintenance),
                         db_tenant_id,
                         branch,
                         kp.page_id,
@@ -10407,7 +10455,7 @@ class PostgresEngine:
                     actual_page_id = page_id_or_path_or_branch
 
         db_tenant_id = _stable_uuid("tenant", tenant_id)
-        with self.connect() as conn:
+        with self._mental_model_connection(tenant_id) as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
                 self._ensure_knowledge_pages_schema(cur)
@@ -10429,6 +10477,11 @@ class PostgresEngine:
                 if row is None:
                     return None
                 page = _row_to_knowledge_page(row, tenant_id)
+                if validate_custody and page.maintenance.get("schema") == "mnemosyne.automatic-knowledge/v1":
+                    from mnemosyne.knowledge_maintenance import automatic_page_current
+                    from mnemosyne.knowledge_pages import scrub_automatic_pages
+                    if not automatic_page_current(self, page):
+                        return KnowledgePage.from_dict(scrub_automatic_pages([page.to_dict()])[0])
                 if validate_custody:
                     try:
                         verify_knowledge_page_acyclic_custody(
@@ -10463,7 +10516,7 @@ class PostgresEngine:
         limit: int = 100,
     ) -> list[KnowledgePage]:
         db_tenant_id = _stable_uuid("tenant", tenant_id)
-        with self.connect() as conn:
+        with self._mental_model_connection(tenant_id) as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
                 self._ensure_knowledge_pages_schema(cur)
@@ -10490,6 +10543,9 @@ class PostgresEngine:
                 if tags:
                     tag_set = set(tags)
                     pages = [p for p in pages if tag_set.issubset(set(p.tags))]
+                if status == "active":
+                    from mnemosyne.knowledge_maintenance import automatic_page_current
+                    pages = [p for p in pages if automatic_page_current(self, p)]
                 return pages
 
     def knowledge_page_render_markdown(
@@ -11050,6 +11106,7 @@ def _row_to_knowledge_page(
         trust_tier=int(row["trust_tier"]),
         sensitivity=int(row["sensitivity"]),
         access_policy=dict(policy),
+        maintenance=dict(row.get("maintenance") or {}),
         created_at=parse_dt(row.get("created_at")) or utc_now(),
         updated_at=parse_dt(row.get("updated_at")) or utc_now(),
     )

@@ -4955,6 +4955,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 self.evidence[
                     self._evidence_key(tenant_id, branch, cid)
                 ].retired_at = parse_dt(saved["updated_at"])
+            self._scrub_automatic_knowledge(tenant_id, branch, set(removed))
             self.document_records[key] = saved
             for model_id, model in list(self.mental_models.items()):
                 if model_id[:2] == (tenant_id, branch):
@@ -5380,6 +5381,25 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             self._persist()
             return copy.deepcopy(rec)
 
+    def _scrub_automatic_knowledge(self, tenant_id: str, branch: str, affected_cids: set[str] | None = None) -> None:
+        from mnemosyne.knowledge_pages import scrub_automatic_pages
+        records = [r for (t, _, b), r in self.knowledge_pages.items() if t == tenant_id and b == branch]
+        for row in scrub_automatic_pages(records, affected_cids):
+            self.knowledge_pages[(tenant_id, row["page_id"], branch)] = row
+
+    def knowledge_source_batch(self, tenant_id: str, branch: str = "main", *,
+                               collection: str = "assertions", after: str = "",
+                               limit: int = 256, ids: list[str] | None = None) -> list[dict[str, Any]]:
+        """Bounded ordered source rows for automatic knowledge maintenance."""
+        if collection not in {"assertions", "evidence"} or not 1 <= limit <= 4096:
+            raise ValueError("invalid knowledge source scan")
+        with self._lock:
+            rows = getattr(self, collection).in_branch(tenant_id, branch).values()
+            key = "id" if collection == "assertions" else "cid"
+            selected = [r for r in rows if (getattr(r, key) or "") > after
+                        and (ids is None or getattr(r, key) in ids)]
+            return [r.to_dict() for r in sorted(selected, key=lambda r: getattr(r, key))[:limit]]
+
     def knowledge_page_create(
         self,
         page_or_tenant: KnowledgePage | dict[str, Any] | str,
@@ -5562,6 +5582,11 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             if row is None:
                 return None
             kp = KnowledgePage.from_dict(row)
+            if validate_custody and kp.maintenance.get("schema") == "mnemosyne.automatic-knowledge/v1":
+                from mnemosyne.knowledge_maintenance import automatic_page_current
+                from mnemosyne.knowledge_pages import scrub_automatic_pages
+                if not automatic_page_current(self, kp):
+                    return KnowledgePage.from_dict(scrub_automatic_pages([kp.to_dict()])[0])
             if validate_custody:
                 try:
                     verify_knowledge_page_acyclic_custody(
@@ -5617,6 +5642,9 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                         continue
                 items.append(KnowledgePage.from_dict(row))
             items.sort(key=lambda p: p.path)
+            if status == "active":
+                from mnemosyne.knowledge_maintenance import automatic_page_current
+                items = [p for p in items if automatic_page_current(self, p)]
             return items[:limit]
 
     def knowledge_page_render_markdown(
@@ -5793,11 +5821,15 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         """
         previous = self.evidence.get(key)
         previous_metadata = previous.metadata if previous is not None else None
+        # Scrubbing replaces records rather than mutating them. Retain references
+        # for rollback without copying every topic's prose on each source append.
+        previous_pages = self.knowledge_pages.copy()
         audit_length = len(self.audit_log)
         store_version = self._store_version
         try:
             yield
         except BaseException:
+            self.knowledge_pages = previous_pages
             if previous is None:
                 self.evidence.pop(key, None)
             else:
@@ -6226,6 +6258,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     trust_tier=ev.trust_tier,
                     capability_tags=ev.capability_tags,
                 )
+                self._scrub_automatic_knowledge(tenant_id, branch, {cid})
                 self._persist_source_change((tenant_id, "evidence", branch, cid))
             return True
 
@@ -6292,6 +6325,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 trust_tier=ev.trust_tier,
                 capability_tags=ev.capability_tags,
             )
+            self._scrub_automatic_knowledge(tenant_id, branch, {cid})
             self._persist_source_change((tenant_id, "evidence", branch, cid))
             from mnemosyne.mental_model_sources import purge_source_snapshot_caches
             self._after_source_commit(lambda: purge_source_snapshot_caches(self, tenant_id))
@@ -8688,6 +8722,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 copy.deepcopy(self.entities),
                 copy.deepcopy(self.intentions),
                 copy.deepcopy(self.mental_models),
+                copy.deepcopy(self.knowledge_pages),
                 copy.deepcopy(self.document_records),
                 copy.deepcopy(self.working_memory),
                 copy.deepcopy(self.audit_log),
@@ -8715,6 +8750,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     self.entities,
                     self.intentions,
                     self.mental_models,
+                    self.knowledge_pages,
                     self.document_records,
                     self.working_memory,
                     self.audit_log,
@@ -8901,6 +8937,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             for model_key_value, model in list(self.mental_models.items()):
                 if model_key_value[:2] == (tenant_id, branch):
                     self.mental_models[model_key_value] = invalidate_model_record(model)
+            self._scrub_automatic_knowledge(tenant_id, branch, affected_cids)
             retained_cascade_metadata = {
                 retained_cid: {
                     **dict(metadata),

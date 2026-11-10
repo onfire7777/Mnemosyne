@@ -11,8 +11,9 @@ from pathlib import Path
 
 
 @contextmanager
-def exclusive_file_lock(path: Path) -> Iterator[None]:
+def exclusive_file_lock(path: Path, timeout: float | None = None) -> Iterator[None]:
     """Hold an exclusive lock on a persistent path until this context exits."""
+    deadline = time.monotonic() + timeout if timeout is not None else None
     with path.open("a+b") as lock_file:
         if sys.platform == "win32":
             import msvcrt
@@ -25,7 +26,9 @@ def exclusive_file_lock(path: Path) -> Iterator[None]:
                 except OSError as exc:
                     if exc.errno != errno.EACCES:
                         raise
-                    time.sleep(0.1)
+                    if deadline is not None and time.monotonic() >= deadline:
+                        raise TimeoutError("file lock deadline exceeded") from None
+                    time.sleep(0.025)
             try:
                 yield
             finally:
@@ -34,7 +37,17 @@ def exclusive_file_lock(path: Path) -> Iterator[None]:
         else:
             import fcntl
 
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            if deadline is None:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            else:
+                while True:
+                    try:
+                        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        break
+                    except BlockingIOError:
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError("file lock deadline exceeded") from None
+                        time.sleep(0.025)
             try:
                 yield
             finally:

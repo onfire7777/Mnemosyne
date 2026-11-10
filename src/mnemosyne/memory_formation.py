@@ -12,6 +12,8 @@ from mnemosyne.assertion_semantics import assertion_predicate_key
 from mnemosyne.models import utc_now
 from mnemosyne.retrieval import projection_sources_readable
 from mnemosyne.security import is_write_tainted
+from mnemosyne.semantic_memory import build_semantic_projection, semantic_metadata, source_spans
+from mnemosyne.commitment_memory import commitment_changes, project_commitment_memory
 
 
 _USER_SOURCE_TYPES = {"chat", "learning_turn", "correction", "conversation", "message", "note", "user"}
@@ -51,13 +53,13 @@ def _eligible_user_source(source) -> bool:
         and metadata.get("origin") not in {"imported", "external", "synthetic"}
         and provenance.get("origin") not in {"imported", "external", "synthetic"}
         and not metadata.get("quarantine_reason")
-        and metadata.get("reality_class") not in {"self_generated", "simulated", "externally_suggested"}
+        and metadata.get("reality_class") not in {"self_generated", "simulated", "externally_suggested", "external"}
         and (deadline is None or deadline > utc_now())
     )
 
 
-def direct_user_clauses(source_or_text, *, include_directives: bool = False) -> list[str]:
-    """Return original declarative clauses, omitting quoted or uncertain prose."""
+def memory_source_clauses(source_or_text) -> list[str]:
+    """Return original unquoted clauses; interpretation applies its own gates."""
     if isinstance(source_or_text, str):
         text = source_or_text
     else:
@@ -88,16 +90,20 @@ def direct_user_clauses(source_or_text, *, include_directives: bool = False) -> 
         stripped = re.sub(r"^(?:[-*]\s+|\d+[.)]\s+)", "", stripped)
         for clause in re.split(r"(?<=[.!?])\s+|;\s*|\s+and\s+(?=(?:I|We|My|Our)\b)", stripped):
             clause = clause.strip()
-            if (
-                (_FIRST_PERSON.match(_strip_temporal_affixes(clause)) or include_directives and _DIRECTIVE.match(clause))
-                and not clause.endswith("?")
-                and not _HYPOTHETICAL.search(clause)
-                and not re.search(r"\b(?:says|said|told|claims|believes|according to)\b", clause, re.I)
-                and not re.match(r"I\s+(?:said|wrote|quoted|read|asked|ran|clicked|opened|mean|meant|want\s+you|need\s+you)\b", clause, re.I)
-                and not re.search(r'["“”`]|(?:^|\s)[\'‘].+?[\'’](?:\s|$)', clause)
-            ):
+            if clause and not clause.endswith("?") and not re.search(r'["“”`]|(?:^|\s)[\'‘].+?[\'’](?:\s|$)', clause):
                 clauses.append(clause)
     return list(dict.fromkeys(clauses))
+
+
+
+def direct_user_clauses(source_or_text, *, include_directives: bool = False) -> list[str]:
+    """Return original declarative clauses, omitting quoted or uncertain prose."""
+    return [clause for clause in memory_source_clauses(source_or_text) if (
+        (_FIRST_PERSON.match(_strip_temporal_affixes(clause)) or include_directives and _DIRECTIVE.match(clause))
+        and not _HYPOTHETICAL.search(clause)
+        and not re.search(r"\b(?:says|said|told|claims|believes|according to)\b", clause, re.I)
+        and not re.match(r"I\s+(?:said|wrote|quoted|read|asked|ran|clicked|opened|mean|meant|want\s+you|need\s+you)\b", clause, re.I)
+    )]
 
 
 _DURABLE_PREDICATES = frozenset({
@@ -122,10 +128,15 @@ def _durable_direct_fact(fact) -> bool:
 
 
 
-def project_direct_user_memory(engine, tenant_id: str, cid: str, branch: str = "main") -> dict:
+def project_direct_user_memory(
+    engine, tenant_id: str, cid: str, branch: str = "main", *,
+    semantic_proposer=None, timezone: str | None = None, agent_id: str = "codex",
+    session_id: str | None = None,
+) -> dict:
     """Project trusted user evidence through the existing episodic extractor."""
     result = {"source_cid": cid, "assertion_ids": [], "relation_ids": [], "count": 0,
-              "created_count": 0, "reason": "ineligible_source"}
+              "created_count": 0, "reason": "ineligible_source", "intention_ids": [],
+              "unresolved": [], "rejected_proposals": []}
     source = engine.get_evidence(tenant_id, cid, branch=branch)
     if (
         source is None or not _eligible_user_source(source)
@@ -143,12 +154,17 @@ def project_direct_user_memory(engine, tenant_id: str, cid: str, branch: str = "
     if deadline is not None:
         policy["expires_at"] = deadline.isoformat()
     clauses = direct_user_clauses(source)
-    if not clauses:
+    all_clauses = memory_source_clauses(source)
+    if not all_clauses:
         result["reason"] = "no_supported_direct_claim"
         return result
     snapshot = engine.export_tenant(tenant_id)
     retained_assertions = [row for row in snapshot["assertions"] if row.get("branch", "main") == branch]
     retained_relations = {row["id"] for row in snapshot["relations"] if row.get("branch", "main") == branch}
+    batches = []
+    timezone = timezone or source.metadata.get("timezone") or source.metadata.get("time_zone")
+    commitments = commitment_changes(source, all_clauses, timezone)
+    commitment_quotes = {item["span"].quote for item in commitments}
     for clause in clauses:
         parser_text = _CONTRACTION_PATTERN.sub(
             lambda match: _CONTRACTIONS[match.group().lower()], clause.replace("’", "'"),
@@ -164,19 +180,49 @@ def project_direct_user_memory(engine, tenant_id: str, cid: str, branch: str = "
                            if (relation.source, relation.target) in supported_entities
                            or any(fact.predicate == "has_pet" and relation.source == fact.object
                                   for fact in facts.assertions)]
+        if clause in commitment_quotes:
+            for fact in facts.assertions:
+                if assertion_predicate_key(fact.predicate)[0] in {"plan_to", "intend_to", "committed_to", "promised_to", "decided_to"}:
+                    # Preserve the historical decision independently from the
+                    # mutable current commitment. No invented completion time.
+                    fact.status = "superseded"
+                    fact.calibration.setdefault("qualifiers", {}).update({
+                        "current_state": "represented_by_commitment", "end_known": False,
+                    })
+            facts.relations = []
+        batches.append((clause, facts))
+    semantic = build_semantic_projection(source, policy, all_clauses, proposer=semantic_proposer,
+        supported_clauses={clause for clause, facts in batches if facts.assertions})
+    result["rejected_proposals"] = semantic.rejected
+    # Each proposal already carries its exact original span.
+    for fact in semantic.assertions:
+        from mnemosyne.episodic_facts import ExtractedFacts
+        relations = [rel for rel in semantic.relations if rel.source == fact.subject
+                     and rel.predicate == fact.predicate and rel.target == fact.object]
+        batches.append((fact.calibration["source_quote"], ExtractedFacts([fact], relations)))
+    for clause, facts in batches:
         for fact in facts.assertions:
             identity = ["direct-user-assertion", tenant_id, source.user_id, branch, cid,
                         fact.subject, fact.predicate, fact.object, fact.scope]
             fact.id = str(uuid5(NAMESPACE_URL, json.dumps(identity, sort_keys=True)))
-            fact.calibration["source_quote"] = clause
-            fact.calibration["projection_kind"] = "direct_user"
-            fact.calibration["projection_version"] = 2
+            span = source_spans(source, [clause])[0]
+            metadata = semantic_metadata(source, span)
+            metadata.update(fact.calibration)
+            qualifiers = metadata.get("qualifiers", {})
+            if qualifiers.get("occurrence_start"):
+                metadata["event_time"] = {
+                    "status": "resolved", "precision": qualifiers.get("temporal_precision", "unknown"),
+                    "start": str(qualifiers["occurrence_start"]),
+                    "end": str(qualifiers.get("occurrence_end") or ""), "wording": clause,
+                }
+            fact.calibration = metadata
+            fact.calibration["projection_version"] = 3
             retained = next((row for row in retained_assertions if row["id"] == fact.id or (
                 cid in row.get("source_evidence_cids", []) and row.get("user_id") == source.user_id
                 and row["subject"] == fact.subject and row["predicate"] == fact.predicate
                 and row["object"] == fact.object and row.get("scope", {}) == fact.scope
             )), None)
-            if retained is None:
+            if retained is None or retained.get("calibration", {}).get("reprojection_pending") == 3:
                 identifier = engine.upsert_assertion(fact, branch=branch)
                 result["created_count"] += int(identifier == fact.id)
             else:
@@ -204,12 +250,21 @@ def project_direct_user_memory(engine, tenant_id: str, cid: str, branch: str = "
                 retained_relations.add(identifier)
             if identifier not in result["relation_ids"]:
                 result["relation_ids"].append(identifier)
-    result["count"] = len(result["assertion_ids"]) + len(result["relation_ids"])
+    prospective = project_commitment_memory(engine, source, policy, all_clauses,
+        timezone=timezone, agent_id=agent_id, session_id=session_id)
+    result["assertion_ids"].extend(identifier for identifier in prospective["assertion_ids"] if identifier not in result["assertion_ids"])
+    result["intention_ids"] = prospective["intention_ids"]
+    result["created_count"] += prospective["created_count"]
+    result["unresolved"] = prospective["unresolved"]
+    result["count"] = len(result["assertion_ids"]) + len(result["relation_ids"]) + len(result["intention_ids"])
     result["reason"] = "projected" if result["count"] else "no_supported_direct_claim"
     return result
 
 
-def preview_direct_user_memory(engine, tenant_id: str, cid: str, branch: str = "main") -> dict:
+def preview_direct_user_memory(
+    engine, tenant_id: str, cid: str, branch: str = "main", *,
+    semantic_proposer=None, timezone: str | None = None, agent_id: str = "codex", session_id: str | None = None,
+) -> dict:
     """Plan a source-preserving repair without writing to the supplied engine.
 
     Only single-source, deterministically identified direct-user projections
@@ -217,10 +272,12 @@ def preview_direct_user_memory(engine, tenant_id: str, cid: str, branch: str = "
     review and are never silently relabeled as automatic projections.
     """
     from copy import deepcopy
-    from mnemosyne.engine import LocalMemoryEngine
+    from mnemosyne.engine import LocalMemoryEngine, Intention
+    from mnemosyne.models import Assertion, parse_dt
 
     report = {"source_cid": cid, "reason": "ineligible_source", "assertions": [],
-              "relations": [], "obsolete_assertion_ids": [], "obsolete_relation_ids": []}
+              "relations": [], "intentions": [], "cancelled_intention_ids": [], "unresolved": [],
+              "obsolete_assertion_ids": [], "obsolete_relation_ids": []}
     source = engine.get_evidence(tenant_id, cid, branch=branch)
     if source is None or not _eligible_user_source(source):
         return report
@@ -234,12 +291,56 @@ def preview_direct_user_memory(engine, tenant_id: str, cid: str, branch: str = "
     if branch != "main":
         scratch.branches[branch] = {"from": "main", "kind": "repair_preview"}
     scratch.evidence[scratch._evidence_key(tenant_id, branch, cid)] = deepcopy(source)
-    projected = project_direct_user_memory(scratch, tenant_id, cid, branch)
+    retained = engine.export_tenant(tenant_id)
+    previous_ids = {row.get("calibration", {}).get("previous_assertion_id") for row in retained["assertions"]
+                    if row.get("source_evidence_cids") == [cid] and row.get("user_id") == source.user_id}
+    copied_intentions = set()
+    if branch == "main":
+        # Replay a lifecycle transition against its pre-transition state, in
+        # the sandbox only. This makes cancellation/reschedule previews useful
+        # both before their first application and after an interrupted replay.
+        for row in retained["assertions"]:
+            if row.get("user_id") != source.user_id or row.get("branch", "main") != branch or row["predicate"] != "commitment_state":
+                continue
+            if row.get("source_evidence_cids") == [cid] or row.get("calibration", {}).get("commitment_state") != "pending":
+                continue
+            if row["status"] != "active" and row["id"] not in previous_ids:
+                continue
+            if parse_dt(row.get("valid_from")) > source.created_at:
+                continue
+            dependencies = row.get("source_evidence_cids", [])
+            if not projection_sources_readable(engine, dependencies, tenant_id=tenant_id, branch=branch,
+                    filt={"tenant_id": tenant_id, "user_id": source.user_id, "principal": source.user_id}, policy=engine.policy):
+                continue
+            for dependency in dependencies:
+                evidence = engine.get_evidence(tenant_id, dependency, branch=branch)
+                if evidence is not None:
+                    scratch.evidence[scratch._evidence_key(tenant_id, branch, dependency)] = deepcopy(evidence)
+            copied = deepcopy(row)
+            if row["id"] in previous_ids:
+                copied.update(status="active", valid_to=None, superseded_by=None)
+            scratch.assertions[scratch._branch_key(tenant_id, branch, row["id"])] = Assertion.from_dict(copied)
+            intention_id = row.get("calibration", {}).get("intention_id")
+            for item in engine.list_intentions(tenant_id):
+                if item.intention_id != intention_id:
+                    continue
+                intention = item.to_dict()
+                if row["id"] in previous_ids and item.status == "cancelled":
+                    intention.update(status="scheduled", cancellation_state=None)
+                scratch.intentions[(tenant_id, item.intention_id)] = Intention.from_dict(intention)
+                copied_intentions.add(item.intention_id)
+    projected = project_direct_user_memory(scratch, tenant_id, cid, branch, semantic_proposer=semantic_proposer,
+        timezone=timezone, agent_id=agent_id, session_id=session_id)
     expected = scratch.export_tenant(tenant_id)
+    expected["assertions"] = [row for row in expected["assertions"] if row["id"] in projected["assertion_ids"]]
+    expected["relations"] = [row for row in expected["relations"] if row["id"] in projected["relation_ids"]]
     for row in expected["assertions"]:
         row.pop("transaction_time", None)  # assigned by the eventual writer, not part of the plan
-    report.update(reason=projected["reason"], assertions=expected["assertions"], relations=expected["relations"])
-    retained = engine.export_tenant(tenant_id)
+    report.update(reason=projected["reason"], assertions=expected["assertions"], relations=expected["relations"],
+                  intentions=[item.to_dict() for item in scratch.list_intentions(tenant_id) if item.intention_id in projected["intention_ids"]],
+                  cancelled_intention_ids=[item.intention_id for item in scratch.list_intentions(tenant_id)
+                                           if item.intention_id in copied_intentions and item.status == "cancelled"],
+                  unresolved=projected["unresolved"])
     expected_ids = {row["id"] for row in expected["assertions"] + expected["relations"]}
     for kind in ("assertions", "relations"):
         for row in retained[kind]:
@@ -260,3 +361,91 @@ def preview_direct_user_memory(engine, tenant_id: str, cid: str, branch: str = "
     for key in ("obsolete_assertion_ids", "obsolete_relation_ids"):
         report[key].sort()
     return report
+
+
+def reproject_direct_user_memory(engine, tenant_id: str, cid: str, branch: str = "main", **options) -> dict:
+    """Apply a versioned preview, retiring only this source's automatic outputs.
+
+    Manual/shared assertions and already superseded user corrections are never
+    revived. A durable pending marker permits retries after interruption between
+    invalidation and regeneration. Raw evidence is not modified.
+    """
+    from copy import deepcopy
+    from mnemosyne.models import Assertion, Relation
+
+    provider = options.get("semantic_proposer")
+    if provider is not None:
+        proposals = {}
+        failures = {}
+        def cached(payload):
+            key = json.dumps(payload, sort_keys=True)
+            if key in failures:
+                raise failures[key]
+            if key not in proposals:
+                try:
+                    proposals[key] = provider.propose_memory(payload) if hasattr(provider, "propose_memory") else provider(payload)
+                except Exception as error:
+                    failures[key] = error
+                    raise
+            return deepcopy(proposals[key])
+        options["semantic_proposer"] = cached
+    preview = preview_direct_user_memory(engine, tenant_id, cid, branch, **options)
+    if preview["reason"] == "ineligible_source":
+        return {"preview": preview, "applied": False, "retired_assertion_ids": [], "retired_relation_ids": []}
+    retained = engine.export_tenant(tenant_id)
+    expected = {row["id"]: row for row in preview["assertions"]}
+    changed = set(preview["obsolete_assertion_ids"])
+    retired = []
+    for row in retained["assertions"]:
+        if row.get("source_evidence_cids") != [cid] or row.get("branch", "main") != branch:
+            continue
+        replacement = expected.get(row["id"])
+        # The UUID contract makes this distinction independent of mutable
+        # labels. A manual assertion with the same text remains manual.
+        identity = ["direct-user-assertion", tenant_id, row.get("user_id"), branch, cid,
+                    row["subject"], row["predicate"], row["object"], row.get("scope", {})]
+        if row["id"] != str(uuid5(NAMESPACE_URL, json.dumps(identity, sort_keys=True))):
+            continue
+        automatic = row.get("calibration", {}).get("projection_kind") in {None, "direct_user"} and row.get("calibration", {}).get("source_quote")
+        if not automatic:
+            continue
+        pending = row.get("calibration", {}).get("reprojection_pending") == 3
+        if replacement and (row["status"] in {"active", "contested"} or pending) and (
+            row.get("calibration", {}).get("projection_version", 0) < 3 or row["status"] != replacement["status"] or pending
+        ):
+            changed.add(row["id"])
+        if row["id"] not in changed:
+            continue
+        tombstone = deepcopy(row)
+        tombstone["status"] = "retracted"
+        tombstone["expired_at"] = utc_now().isoformat()
+        tombstone.setdefault("calibration", {})["reprojection_pending"] = 3 if replacement else None
+        tombstone["calibration"]["reprojection_reason"] = "source_projection_v3"
+        engine.upsert_assertion(Assertion.from_dict(tombstone), branch=branch)
+        retired.append(row["id"])
+    retired_relations = []
+    expected_relations = {row["id"]: row for row in preview["relations"]}
+    changed_pairs = {(row["subject"], row["object"]) for row in retained["assertions"] if row["id"] in changed}
+    for row in retained["relations"]:
+        if row.get("source_evidence_cids") != [cid] or row.get("branch", "main") != branch:
+            continue
+        if row["id"] not in preview["obsolete_relation_ids"] and (row["source"], row["target"]) not in changed_pairs:
+            continue
+        identity = ["direct-user-relation", tenant_id, engine.get_evidence(tenant_id, cid, branch=branch).user_id,
+                    branch, cid, row["source"], row["predicate"], row["target"]]
+        if row["id"] != str(uuid5(NAMESPACE_URL, json.dumps(identity))):
+            continue
+        tombstone = deepcopy(row)
+        # Serving expiry is a repair timestamp, not an invented world-time end.
+        tombstone.setdefault("access_policy", {})["expires_at"] = utc_now().isoformat()
+        engine.add_relation(Relation.from_dict(tombstone), branch=branch)
+        retired_relations.append(row["id"])
+    applied = project_direct_user_memory(engine, tenant_id, cid, branch, **options)
+    current = engine.export_tenant(tenant_id)["assertions"]
+    for identifier in retired_relations:
+        replacement = expected_relations.get(identifier)
+        if replacement and any(row["status"] in {"active", "contested"} and row["subject"] == replacement["source"]
+                               and row["object"] == replacement["target"] and cid in row.get("source_evidence_cids", []) for row in current):
+            engine.add_relation(Relation.from_dict(replacement), branch=branch)
+    return {"preview": preview, "applied": True, "projection": applied,
+            "retired_assertion_ids": retired, "retired_relation_ids": retired_relations}

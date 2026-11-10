@@ -262,6 +262,16 @@ def _validate_credit(
             "X1",
             "credit needs a resolved outcome",
         )
+        if row.get("evidence_version", 0) >= 3:
+            from .utility import applied_target, randomized_opportunity
+            require(applied_target(episode, row.get("target_kind"), row.get("target_id")),
+                    "X7", "utility credit requires actual application and a target-specific outcome")
+            opportunity = randomized_opportunity(
+                episode, [after["receipts"][key] for key in episode.get("receipt_ids", [])],
+                row["target_kind"], row["target_id"], row["revision"])
+            require(opportunity is not None and opportunity["served"]
+                    and row.get("propensity") == opportunity["propensity"],
+                    "X3", "utility credit requires recorded randomized exposure")
         require(
             _finite(row.get("contingency_lb"), 0, 1)
             and row["contingency_lb"] > 0
@@ -733,6 +743,38 @@ def _validate_replay(before: dict, after: dict) -> None:
         )
 
 
+def _validate_hypotheses(before, after, operation, source_lookup):
+    from .hypotheses import KINDS, STATES, fingerprint_source
+    old_rows = before["policy"].get("hypotheses", {})
+    for key, row in after["policy"].get("hypotheses", {}).items():
+        contract = row.get("review_contract")
+        if not contract:  # Retained historical review requests migrate on use.
+            continue
+        require(contract.get("version") == 1 and contract.get("kind") in KINDS
+                and row.get("contract_hash") == digest(contract),
+                "X7", "hypothesis review must retain its typed contract")
+        require(row.get("status") in STATES | {"externally_tested"}
+                and row.get("reward_weight") == 0 and row.get("shadow_only") is True,
+                "X7", "hypothesis reviews cannot manufacture task rewards")
+        old = old_rows.get(key, {})
+        if old.get("review_contract") and operation not in {"erasure", "rollback"}:
+            require(old["review_contract"] == contract, "X12", "hypothesis revision is immutable")
+        if row.get("status") != "verified" or row == old:
+            continue
+        if contract["kind"] == "procedural":
+            candidate = after["artifacts"].get(row.get("candidate_id"), {})
+            require(candidate.get("gate_passed") is True, "X21", "a procedural theory needs the existing promotion gate")
+            continue
+        require(bool(row.get("support")), "X7", "verified factual review needs retained source support")
+        for item in row["support"]:
+            cid = item.get("source_cid")
+            source = source_lookup(cid) if source_lookup and cid else None
+            require(source is not None and cid in row.get("source_cids", [])
+                    and bool(item.get("quote")) and item["quote"] in source.content
+                    and row.get("source_versions", {}).get(cid) == fingerprint_source(source),
+                    "X7", "review support must quote the exact current source version")
+
+
 def validate(before: dict, after: dict, operation: str, *, source_lookup=None) -> None:
     """Reject invalid state before persistence, allowing writer containment to commit."""
     require(
@@ -761,6 +803,7 @@ def validate(before: dict, after: dict, operation: str, *, source_lookup=None) -
     _validate_stats(before, after, operation, new_credit)
     _validate_artifacts(before, after, operation, source_lookup)
     _validate_replay(before, after)
+    _validate_hypotheses(before, after, operation, source_lookup)
     policy = after["policy"]
     require(
         _finite(policy.get("exploration_floor", 0.02), 0.02, 1),

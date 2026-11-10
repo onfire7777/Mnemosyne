@@ -945,12 +945,15 @@ class UserModel:
         return None
 
     def context_packet(self, tenant_id: str, user_id: str, scope: dict[str, Any]) -> dict[str, Any]:
+        current_time = datetime.now(UTC)
         active = [
             entry
             for entry in self.entries.values()
             if entry.tenant_id == tenant_id
             and entry.user_id == user_id
             and entry.status == "active"
+            and (entry.valid_from is None or entry.valid_from <= current_time)
+            and (entry.valid_to is None or entry.valid_to > current_time)
             and self._scope_matches(entry.scope, scope)
             and not self._excepted(entry, scope)
         ]

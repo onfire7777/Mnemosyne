@@ -461,6 +461,7 @@ ENSURE_STATEMENTS: list[str] = [
         trust_tier INTEGER NOT NULL DEFAULT 0,
         sensitivity INTEGER NOT NULL DEFAULT 0,
         access_policy TEXT NOT NULL DEFAULT '{}',
+        maintenance TEXT NOT NULL DEFAULT '{}',
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         PRIMARY KEY (tenant_id, branch, page_id),

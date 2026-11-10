@@ -383,6 +383,8 @@ def _scoped_splits(state: dict, tenant: str) -> list[dict]:
 
 
 def consolidate(runtime, tenant: str) -> dict:
+    from .hypotheses import process_reviews
+    review_result = process_reviews(runtime, tenant)
     snapshot = runtime.writer.read(tenant)
     if not runtime._enabled(snapshot, "lessons"):
         return {
@@ -706,18 +708,22 @@ def consolidate(runtime, tenant: str) -> dict:
             )
         return result
 
-    return runtime.writer.apply(
+    result = runtime.writer.apply(
         tenant,
         "consolidate",
         apply,
         expected_revision=snapshot["policy"].get("revision", 0),
     )
+    reviewed = process_reviews(runtime, tenant)
+    result["hypotheses_reviewed"] = review_result["reviewed"] + reviewed["reviewed"]
+    return result
 
 
 def _dream_hypotheses(
     runtime, tenant: str, episodes: list[dict], state: dict | None = None
 ) -> list[dict]:
     from mnemosyne.dreamer import SandboxedDreamer
+    from .hypotheses import experiment_proposals, factual_proposals, typed_hypothesis
 
     groups = defaultdict(list)
     for episode in episodes:
@@ -733,11 +739,12 @@ def _dream_hypotheses(
                         sources[cid] = source
         report = SandboxedDreamer().dream(list(sources.values()), tenant_id=tenant)
         for item in report.candidates:
-            hypotheses.append(
+            hypotheses.append(typed_hypothesis(runtime, tenant,
                 {
                     "id": item.id,
                     "content": item.content,
-                    "source_cids": list(item.source_evidence_cids),
+                    "source_cids": sorted(set(item.source_evidence_cids)
+                                          | ({item.metadata["bridge_cid"]} if item.metadata.get("bridge_cid") in sources else set())),
                     "task_class": task,
                     "user_id": user,
                     "source_episode_ids": [row["id"] for row in rows],
@@ -748,8 +755,8 @@ def _dream_hypotheses(
                     "status": "awaiting_external_verifier",
                     "instruction_authority": "none",
                     "capability_tags": ["data-only", "no-write-authority"],
-                }
-            )
+                }, kind="contradiction" if item.candidate_kind == "contradiction" else "factual"
+            ))
     if state:
         for artifact in state["artifacts"].values():
             if (
@@ -761,7 +768,7 @@ def _dream_hypotheses(
                 continue
             steps = artifact["steps"][:]
             steps[0], steps[1] = steps[1], steps[0]
-            hypotheses.append(
+            hypotheses.append(typed_hypothesis(runtime, tenant,
                 {
                     "id": digest(
                         ["hypothesis", artifact["id"], artifact["revision"], steps]
@@ -782,8 +789,8 @@ def _dream_hypotheses(
                     "instruction_authority": "none",
                     "capability_tags": ["data-only", "no-write-authority"],
                 }
-            )
-    return hypotheses
+            ))
+    return [*hypotheses, *factual_proposals(runtime, tenant, episodes), *experiment_proposals(runtime, tenant, episodes)]
 
 
 def _reflection_batch(state: dict) -> tuple[list[dict], dict]:
@@ -812,6 +819,7 @@ def _reflection_batch(state: dict) -> tuple[list[dict], dict]:
 
 
 def _tested_hypotheses(state: dict) -> tuple[list[dict], dict]:
+    from .signals import tool_signals, reward
     candidates, updates = [], {}
     for key, hypothesis in state["policy"].get("hypotheses", {}).items():
         if hypothesis.get("status") in {"verified", "rejected"} or not hypothesis.get(
@@ -840,16 +848,29 @@ def _tested_hypotheses(state: dict) -> tuple[list[dict], dict]:
                     continue
                 if hypothesis.get("steps") and steps != hypothesis["steps"]:
                     continue
-                if episode["reward"] <= 0:
+                legacy_event = (hypothesis.get("legacy_contract_adopted_at")
+                                and episode.get("created_at", "~") <= hypothesis["legacy_contract_adopted_at"])
+                if (hypothesis.get("contract_hash") and event.get("contract_hash") != hypothesis["contract_hash"]
+                        and not legacy_event):
+                    continue
+                # A different passing check elsewhere in the task does not
+                # verify this experiment. Require the matched event's result.
+                checked_event = event
+                if (legacy_event and event.get("name") == "verifier" and type(event.get("success")) is bool
+                        and event.get("output")):
+                    checked_event = {**event, "verdict": event["success"]}
+                checks = [signal for signal in tool_signals([checked_event]) if signal["kind"] in {"tests", "verifier"}]
+                result = reward(checks)
+                if result is None or not (event.get("output") or event.get("evidence")):
+                    continue
+                if result <= 0:
                     updates[key] = {
                         "status": "rejected",
+                        "reason": "external_procedure_check_failed",
                         "test_episode_ids": [episode["id"]],
                     }
                     break
-                if any(
-                    signal["kind"] in {"tests", "verifier"}
-                    for signal in episode["signals"]
-                ):
+                if episode["reward"] > 0:
                     tested.append((episode, steps))
         if tested and key not in updates:
             rows = [row for row, _ in tested]

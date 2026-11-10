@@ -3,6 +3,15 @@
 from __future__ import annotations
 
 import json
+import copy
+import os
+import tempfile
+import logging
+import weakref
+import threading
+from contextlib import nullcontext
+from collections import defaultdict, deque
+from math import ceil
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +20,37 @@ from mnemosyne.learning import LearningSystem
 from mnemosyne.observability import MetricsRegistry
 from mnemosyne.queue import InProcessQueue
 from mnemosyne.user_model import LatentUserProfile, SupportStrategy, UserMistakeEvent, UserModel, UserModelEntry
+
+
+_LOG = logging.getLogger(__name__)
+
+
+class _PersistentMetricsRegistry(MetricsRegistry):
+    """Track new observations even when an equal-valued sample rolls off a window."""
+
+    def __init__(self, snapshot=None):
+        super().__init__(snapshot)
+        self.persistence_lock = threading.RLock()
+        self.pending_samples = defaultdict(lambda: deque(maxlen=200))
+        self.changed_gauges = set()
+
+    def increment(self, name, amount=1):
+        with self.persistence_lock:
+            super().increment(name, amount)
+
+    def observe(self, name, value):
+        with self.persistence_lock:
+            super().observe(name, value)
+            self.pending_samples[name].append(float(value))
+
+    def gauge(self, name, value):
+        with self.persistence_lock:
+            super().gauge(name, value)
+            self.changed_gauges.add(name)
+
+    def snapshot(self):
+        with self.persistence_lock:
+            return super().snapshot()
 
 
 def _support_strategy_threshold(value: Any) -> int:
@@ -61,6 +101,10 @@ class RuntimeState:
         if self.path.exists():
             self.data.update(json.loads(self.path.read_text(encoding="utf-8")))
 
+        self._baseline = copy.deepcopy(self.data)
+        self._metrics_baselines = weakref.WeakKeyDictionary()
+        self._metrics_save_lock = threading.RLock()
+
     @classmethod
     def from_store_path(cls, store_path: str | Path | None) -> "RuntimeState | None":
         if not store_path:
@@ -69,10 +113,29 @@ class RuntimeState:
         return cls(path.with_suffix(path.suffix + ".runtime.json"))
 
     def save(self) -> None:
+        # Merge independent writers under a short file lock; provider work has
+        # already finished. Never resurrect a concurrently erased profile row.
+        from mnemosyne._file_lock import exclusive_file_lock
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-        tmp.write_text(json.dumps(self.data, indent=2, sort_keys=True), encoding="utf-8", newline="\n")
-        tmp.replace(self.path)
+        with exclusive_file_lock(self.path.with_suffix(self.path.suffix + ".lock"), timeout=1.0):
+            current = json.loads(self.path.read_text()) if self.path.exists() else self._baseline
+            merged = _merge_state(self._baseline, self.data, current)
+            self._publish(merged)
+            self.data = merged
+            self._baseline = copy.deepcopy(merged)
+
+    def _publish(self, data) -> None:
+        """Publish under the caller's file lock, leaving an intact prior file on failure."""
+        descriptor, temporary = tempfile.mkstemp(prefix=self.path.name, dir=self.path.parent)
+        try:
+            with os.fdopen(descriptor, "w") as stream:
+                json.dump(data, stream, indent=2, sort_keys=True)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, self.path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
 
     def load_user_model(self) -> UserModel:
         user_data = self.data.get("user_model", {})
@@ -159,11 +222,45 @@ class RuntimeState:
         self.save()
 
     def load_metrics(self) -> MetricsRegistry:
-        return MetricsRegistry(self.data.get("metrics"))
+        metrics = _PersistentMetricsRegistry(self.data.get("metrics"))
+        self._metrics_baselines[metrics] = metrics.snapshot().to_dict()
+        return metrics
 
     def save_metrics(self, metrics: MetricsRegistry) -> None:
-        self.data["metrics"] = metrics.snapshot().to_dict()
-        self.save()
+        """Merge advisory telemetry independently from strict profile state.
+
+        Counters contribute each registry's unsaved delta. Observations append
+        in commit order and retain the latest 200 samples. Explicit gauge writes
+        use last-committing-writer semantics; derived p95 gauges use the merged
+        sample window. Failed telemetry persistence cannot fail a memory write.
+        """
+        registry_lock = metrics.persistence_lock if isinstance(metrics, _PersistentMetricsRegistry) else nullcontext()
+        with self._metrics_save_lock, registry_lock:
+            self._save_metrics(metrics)
+
+    def _save_metrics(self, metrics: MetricsRegistry) -> None:
+        from mnemosyne._file_lock import exclusive_file_lock
+
+        desired = metrics.snapshot().to_dict()
+        base = self._metrics_baselines.get(metrics, {})
+        pending = ({name: list(values) for name, values in metrics.pending_samples.items()}
+                   if isinstance(metrics, _PersistentMetricsRegistry) else None)
+        changed = metrics.changed_gauges if isinstance(metrics, _PersistentMetricsRegistry) else None
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with exclusive_file_lock(self.path.with_suffix(self.path.suffix + ".lock"), timeout=1.0):
+                current = json.loads(self.path.read_text()) if self.path.exists() else copy.deepcopy(self._baseline)
+                merged = _merge_metrics(base, desired, current.get("metrics", {}), pending, changed)
+                self._publish({**current, "metrics": merged})
+            self.data["metrics"] = copy.deepcopy(merged)
+            self._baseline["metrics"] = copy.deepcopy(merged)
+            self._metrics_baselines[metrics] = desired
+            if isinstance(metrics, _PersistentMetricsRegistry):
+                metrics.pending_samples.clear()
+                metrics.changed_gauges.clear()
+        except (OSError, ValueError, TypeError):
+            # Retain deltas/journal for a subsequent save; never log source data.
+            _LOG.warning("Advisory metrics persistence deferred", exc_info=False)
 
     def load_gate_cases(self) -> list[RegressionCase]:
         return [RegressionCase.from_dict(row) for row in self.data.get("gate_cases", [])]
@@ -171,3 +268,77 @@ class RuntimeState:
     def save_gate_cases(self, cases: list[RegressionCase]) -> None:
         self.data["gate_cases"] = [case.to_dict() for case in cases]
         self.save()
+
+
+def _merge_metrics(base, desired, current, observations=None, changed_gauges=None):
+    """Merge telemetry deltas, keeping strict conflict rules out of the data path."""
+    result = copy.deepcopy(current)
+    counters = result.setdefault("counters", {})
+    for name, value in desired.get("counters", {}).items():
+        delta = value - base.get("counters", {}).get(name, 0)
+        counters[name] = counters.get(name, 0) + delta
+
+    gauges = result.setdefault("gauges", {})
+    for name, value in desired.get("gauges", {}).items():
+        if (changed_gauges is not None and name in changed_gauges) or (
+                changed_gauges is None and value != base.get("gauges", {}).get(name)):
+            gauges[name] = value
+
+    samples = result.setdefault("samples", {})
+    if observations is None:
+        observations = {}
+        for name, values in desired.get("samples", {}).items():
+            previous = base.get("samples", {}).get(name, [])
+            # Plain externally supplied registries lack an observation journal.
+            # Match the retained window's overlap rather than appending its past.
+            overlap = next((size for size in range(min(len(previous), len(values)), 0, -1)
+                            if previous[-size:] == values[:size]), 0)
+            observations[name] = values[overlap:]
+    for name, appended in observations.items():
+        if not appended:
+            continue
+        samples[name] = (samples.get(name, []) + list(appended))[-200:]
+        ordered = sorted(samples[name])
+        gauges[name + ".p95"] = ordered[max(0, ceil(len(ordered) * 0.95) - 1)]
+    return result
+
+
+def _merge_state(base, desired, current):
+    """Three-way merge, rejecting simultaneous changes to the same value."""
+    if desired == base:
+        return copy.deepcopy(current)
+    if current == base or current == desired:
+        return copy.deepcopy(desired)
+    if all(isinstance(value, dict) for value in (base, desired, current)):
+        result = {}
+        missing = object()
+        for key in base.keys() | desired.keys() | current.keys():
+            old, new, live = base.get(key, missing), desired.get(key, missing), current.get(key, missing)
+            if new is missing:
+                if old is missing:
+                    if live is not missing:
+                        result[key] = copy.deepcopy(live)
+                    continue
+                if live != old and live is not missing:
+                    raise ValueError("concurrent runtime state conflict")
+                continue
+            if old is missing:
+                if live is not missing and live != new:
+                    raise ValueError("concurrent runtime state conflict")
+                result[key] = copy.deepcopy(new)
+            elif live is missing:
+                if new != old:
+                    raise ValueError("concurrent runtime state conflict")
+            else:
+                result[key] = _merge_state(old, new, live)
+        return result
+    if all(isinstance(value, list) for value in (base, desired, current)):
+        def key(row):
+            if not isinstance(row, dict):
+                return None
+            return row.get("id") or (str(row.get("tenant_id")) + ":" + str(row["user_id"]) if row.get("user_id") else None)
+        if all(key(row) is not None for rows in (base, desired, current) for row in rows):
+            mappings = [{key(row): row for row in rows} for rows in (base, desired, current)]
+            if all(len(mapping) == len(rows) for mapping, rows in zip(mappings, (base, desired, current))):
+                return list(_merge_state(*mappings).values())
+    raise ValueError("concurrent runtime state conflict")

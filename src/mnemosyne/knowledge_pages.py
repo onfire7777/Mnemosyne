@@ -8,6 +8,7 @@ rendering, inline citations, dynamic Sources & Grounding Ledgers, and strict
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import copy
 from datetime import datetime
 import re
 from typing import Any, Literal
@@ -49,6 +50,49 @@ class CustodyNotFoundError(ValueError):
 
 class KnowledgePageConflict(ValueError):
     """Raised on version/revision conflict updating a knowledge page."""
+
+
+def scrub_automatic_pages(records: list[dict[str, Any]], affected_cids: set[str] | None = None) -> list[dict[str, Any]]:
+    """Remove derived plaintext and linked titles on source revocation/erasure.
+
+    Preserve only opaque topic identity and assertion IDs for safe regeneration
+    from surviving sources. Archived pages remain regeneration tombstones.
+    """
+    import hashlib
+    import json
+
+    automatic = [r for r in records if (r.get("maintenance") or {}).get("schema") == "mnemosyne.automatic-knowledge/v1"]
+    affected = {r["page_id"] for r in automatic if affected_cids is None or
+                set(r.get("source_evidence_cids") or []).intersection(affected_cids)}
+    while True:
+        paths = {r["path"] for r in automatic if r["page_id"] in affected}
+        expanded = affected | {r["page_id"] for r in automatic if any(
+            link.get("path") in paths for link in r["maintenance"].get("related_topics", []))}
+        if expanded == affected:
+            break
+        affected = expanded
+    result = []
+    for original in automatic:
+        if original["page_id"] not in affected:
+            continue
+        row = copy.deepcopy(original)
+        meta = row["maintenance"]
+        key = meta.get("topic_key")
+        topic_hash = meta.get("topic_hash") or hashlib.sha256(json.dumps(
+            key, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+        row.update(title="Unavailable topic", content_markdown="", source_evidence_cids=[],
+                   source_assertion_ids=[], source_observation_ids=[],
+                   path="/".join(row["path"].split("/")[:2]) + "/unavailable-" + topic_hash[:12]
+                        + "-" + hashlib.sha256(row["page_id"].encode()).hexdigest()[:8],
+                   version=int(row.get("version", 1)) + 1, updated_at=dt_to_json(utc_now()))
+        if row.get("status") not in {"archived", "retired"}:
+            row["status"] = "stale"
+        row["maintenance"] = {"schema": meta["schema"], "topic_hash": topic_hash,
+                              "context": meta.get("context", {}), "claims": [], "related_topics": [],
+                              "assertion_ids": meta.get("assertion_ids") or
+                                  [c["assertion_id"] for c in meta.get("claims", [])]}
+        result.append(row)
+    return result
 
 
 def validate_knowledge_page_path(path: str) -> str:
@@ -104,6 +148,8 @@ class KnowledgePage:
     trust_tier: int = 0
     sensitivity: int = 0
     access_policy: dict[str, Any] = field(default_factory=dict)
+    # Versioned derivation metadata belongs to this projection, never its ACL.
+    maintenance: dict[str, Any] = field(default_factory=dict)
     created_at: datetime = field(default_factory=utc_now)
     updated_at: datetime = field(default_factory=utc_now)
 
@@ -130,6 +176,7 @@ class KnowledgePage:
             "trust_tier": self.trust_tier,
             "sensitivity": self.sensitivity,
             "access_policy": dict(self.access_policy),
+            "maintenance": copy.deepcopy(self.maintenance),
             "created_at": dt_to_json(self.created_at),
             "updated_at": dt_to_json(self.updated_at),
         }
@@ -141,6 +188,7 @@ class KnowledgePage:
         copy_data["source_assertion_ids"] = list(copy_data.get("source_assertion_ids") or [])
         copy_data["source_evidence_cids"] = list(copy_data.get("source_evidence_cids") or [])
         copy_data["tags"] = list(copy_data.get("tags") or [])
+        copy_data["maintenance"] = copy.deepcopy(copy_data.get("maintenance") or {})
         copy_data["created_at"] = parse_dt(copy_data.get("created_at")) or utc_now()
         copy_data["updated_at"] = parse_dt(copy_data.get("updated_at")) or utc_now()
         return cls(**copy_data)

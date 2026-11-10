@@ -139,8 +139,13 @@ def prospective_memory_hits(
         action = _plane_value(intention, "action", {})
         text = json.dumps(action, sort_keys=True, separators=(",", ":"), default=str)
         provenance = [str(cid) for cid in _plane_value(intention, "evidence_ids", [])]
-        if not provenance:
+        if not provenance or not projection_sources_readable(
+            ops, provenance, tenant_id=tenant_id, branch=branch, filt=filt, policy=ops.policy
+        ):
             continue
+        if isinstance(action, dict) and action.get("type") == "memory_commitment":
+            from mnemosyne.commitment_memory import commitment_display_status
+            text = str(action.get("text", text)) + " [" + commitment_display_status(intention, now=as_of) + "]"
         trust_tiers: list[int] = []
         sensitivities: list[int] = []
         capability_tags: set[str] = set()

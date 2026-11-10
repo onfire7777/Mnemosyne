@@ -18,6 +18,7 @@ from .stats import Posterior, contingency_lower_bound, wilson_interval
 from .task_class import METHOD as TASK_CLASS_METHOD, classify, resolve_task
 from .traces import plastic_rate, stiff_step, trace
 from .writer import LearningWriter
+from .utility import selection_utility, exposure_record, artifact_exposure_record
 
 COMPONENTS = (
     "routes",
@@ -294,6 +295,11 @@ class LearningRuntime:
         available_tools: list[str] | None = None,
         task_type: str | None = None,
         risk_level: str | None = None,
+        *,
+        workspace: str | None = None,
+        read_scope: dict | None = None,
+        supplemental_context: dict | None = None,
+        delivery_envelope: dict | None = None,
     ) -> dict:
         tools = available_tools or []
         task = classify(query, tools, task_type)
@@ -312,6 +318,7 @@ class LearningRuntime:
             query, tools, task_type, tenant_id=tenant_id, user_id=user_id,
             risk_level=risk_level, state=state,
             source_is_live=lambda cids: self._sources_live(tenant_id, cids, user_id),
+            proposer=getattr(self.engine, "_learning_configuration", {}).get("semantic_contract_proposer"),
         )
         if self.skill_store is not None and self._collects(state, "selective_import"):
             from .candidates import register_import
@@ -325,7 +332,10 @@ class LearningRuntime:
             ):
                 register_import(self, tenant_id, candidate)
             state = self.writer.read(tenant_id)
-        retrieval_filter = {"role": "reader", "user_id": user_id, "principal": user_id}
+        retrieval_filter = {"tenant_id": tenant_id, "tenant": tenant_id, "branch": "main",
+                            "role": "reader", "user_id": user_id, "principal": user_id}
+        # Only the authenticated facade supplies these session selectors.
+        retrieval_filter.update(read_scope or {})
         effective_policy = self.engine.policy.to_dict()
         effective_policy["learning_enabled"] = state["policy"].get(
             "enabled", effective_policy["learning_enabled"]
@@ -439,6 +449,7 @@ class LearningRuntime:
                     "confidence": stats.mean,
                     "lower_bound": stats.lower_bound,
                     "low_confidence": stats.lower_bound < 0.8,
+                    "learning_utility": selection_utility(state, item["kind"], item["id"], item["revision"], task, user_id=user_id),
                 }
             )
         seed = int(
@@ -456,7 +467,7 @@ class LearningRuntime:
         )
         known_active = sorted(
             (item for item in artifacts if item["state"] == "active"),
-            key=lambda item: (-item["lower_bound"], item["id"]),
+            key=lambda item: (-item["lower_bound"] * item.get("learning_utility", 1.0), item["id"]),
         )
         best_known = known_active[0] if known_active else None
         pending_trial = any(
@@ -486,9 +497,7 @@ class LearningRuntime:
             if self._enabled(state, "items"):
                 for hit in hits:
                     key = stat_key("item", hit["id"], 1, task)
-                    hit["learning_utility"] = (
-                        state["stats"].get(key, {}).get("utility", 1.0)
-                    )
+                    hit["learning_utility"] = selection_utility(state, "item", hit["id"], 1, task, user_id=user_id)
                 hits.sort(
                     key=lambda hit: (
                         float(hit.get("score", 0)) * hit["learning_utility"]
@@ -497,6 +506,7 @@ class LearningRuntime:
                 )
         else:
             hits, eligible_hits = [], []
+        selection_probabilities = {hit["id"]: 1.0 for hit in hits}
         if not high_risk and self._enabled(state, "exploration"):
             protected_cids = {
                 cid
@@ -511,9 +521,6 @@ class LearningRuntime:
                 getattr(self.engine.policy, "learning_exploration_rate", 0.1),
             )
             for hit in hits:
-                if rng.random() >= withholding_rate:
-                    retained.append(hit)
-                    continue
                 source_ids = list(hit.get("provenance", []))
                 if hit.get("kind") == "evidence":
                     source_ids.append(hit["id"])
@@ -529,7 +536,8 @@ class LearningRuntime:
                             or isinstance(lifecycle, dict) and lifecycle.get("must_keep")
                         )
                     protected = protected or source_protection[key]
-                if protected:
+                selection_probabilities[hit["id"]] = 1.0 if protected else 1.0 - withholding_rate
+                if protected or rng.random() >= withholding_rate:
                     retained.append(hit)
             hits = retained
         # Retrieval may outlive source expiry or a custody update. Refresh the
@@ -546,7 +554,7 @@ class LearningRuntime:
         candidates = [
             item for item in artifacts if item["state"] in {"probation", "demoted"}
         ]
-        active.sort(key=lambda item: (-item["lower_bound"], item["id"]))
+        active.sort(key=lambda item: (-item["lower_bound"] * item.get("learning_utility", 1.0), item["id"]))
         probation = [
             item
             for item in candidates
@@ -638,6 +646,19 @@ class LearningRuntime:
         model_contribution = tier.predict(tenant_id, user_id, query, 0.0, state=state) if (
             tier and self._enabled(state, "metacognition")
         ) else None
+
+        from .candidates import learning_knowledge_context, materialize_framework, verification_requests
+        from mnemosyne.context_composer import compose_context
+        knowledge = learning_knowledge_context(
+            self, tenant_id, user_id, task, task_scope_query, state=state,
+            selected_artifact_ids=[item["id"] for item in artifacts])
+        requests = verification_requests(self, tenant_id, user_id, task, task_scope_query, state=state)
+        policy_request = {"variant": self._policy_variants(task)[1].to_dict(),
+            "policy_fingerprint": digest(self._policy_variants(task)[1].to_dict()),
+            "event_name": "policy_variant_verifier"}
+        requests.append({"kind": "policy_variant", **policy_request})
+        for item in artifacts:
+            item["framework"] = materialize_framework(self, tenant_id, user_id, item, state)
 
         def capture(current):
             chosen = selected
@@ -785,64 +806,83 @@ class LearningRuntime:
                     | set((task_match or {}).get("source_cids", []))
                 ),
             )
+            from mnemosyne.retrieval import projection_sources_readable
+            def current_sources(row):
+                cids = row.get("source_evidence_cids", row.get("source_cids", row.get("provenance", [])))
+                if row.get("kind") == "evidence":
+                    cids = list(set(cids) | {row["id"]})
+                return projection_sources_readable(self.engine, cids, tenant_id=tenant_id,
+                    branch=row.get("branch", "main"), filt=retrieval_filter, policy=self.engine.policy)
+            current_hits = [row for row in hits if current_sources(row)]
+            chosen = [row for row in chosen if self._sources_live(tenant_id, row.get("source_cids", []), user_id)]
+            extra = supplemental_context or {}
+            profiles = {key: [row for row in extra.get("user_model", {}).get(key, []) if current_sources(row)]
+                        for key in ("authoritative", "inferred", "support_strategies")}
+            packet = {
+                "hits": current_hits,
+                "lessons": [a for a in chosen if a["kind"] == "lesson"],
+                "procedures": [a for a in chosen if a["kind"] == "procedure"],
+                "skills": [a for a in chosen if a["kind"] in {"skill", "chunk"}],
+                "knowledge_pages": [row for row in knowledge if self._sources_live(tenant_id, row.get("source_cids", []), user_id)]
+                    + [row for row in extra.get("knowledge_pages", []) if current_sources(row)],
+                "user_model": profiles,
+                "verification_requests": requests,
+                "receipt_id": receipt["id"], "task_class": task,
+                "prediction": prediction, "mode": mode,
+                "goal_checked": mode == "fast", "exploration": chosen_exploration,
+            }
+            if comparison_sample:
+                packet["verification_requests"] = requests + [{"kind": "goal_comparison",
+                    "receipt_id": receipt["id"], "query": query,
+                    "artifact_ids": [item["id"] for item in chosen]}]
+            composed = compose_context(query, packet, self.engine.policy.token_budget,
+                                       envelope=delivery_envelope)
+            rendered = composed["packet"]
+            delivered = {row["id"] for section in ("hits", "lessons", "procedures", "skills")
+                         for row in rendered.get(section, []) if row.get("id")}
+            receipt["items"] = [item for item in receipt["items"] if item["item_id"] in delivered]
+            # Budget exclusions are not randomized controls. Their propensity
+            # is unknown and cannot count toward a causal comparison.
+            probabilities = dict(selection_probabilities)
+            for hit in hits:
+                if hit["id"] not in delivered:
+                    probabilities[hit["id"]] = None
+            receipt["selection_exposures"] = exposure_record(eligible_hits, delivered, probabilities=probabilities)
+            receipt["selection_exposures"] += artifact_exposure_record(artifacts, delivered,
+                probation_trial=trial_record, revision_trial=revision_trial)
+            receipt["selection_version"] = 3
+            receipt["context_delivery"] = {
+                "status": "prepared", "acknowledged": None, "applied": None,
+                "token_budget": self.engine.policy.token_budget,
+                "used_tokens_upper_bound": composed["used_tokens_upper_bound"],
+                "omitted": composed["omitted"], "required_overflow": composed["required_overflow"],
+                "content_hash": digest(composed["text"]),
+            }
+            receipt["source_cids"] = sorted(set((task_match or {}).get("source_cids", [])) |
+                {cid for item in chosen if item["id"] in delivered for cid in item["source_cids"]})
             current["receipts"][receipt["id"]] = receipt
-            return receipt, chosen
+            result = {key: rendered.get(key, []) for key in
+                      ("hits", "lessons", "procedures", "skills", "knowledge_pages", "verification_requests")}
+            # Explicit API consumers retain diagnostic details for admitted
+            # items; lifecycle injection uses only the bounded _context_text.
+            for section in ("hits", "lessons", "procedures", "skills"):
+                identifiers = {row["id"] for row in result[section]}
+                result[section] = [row for row in packet[section] if row["id"] in identifiers]
+            result["policy_verification_request"] = policy_request
+            result.update({key: packet[key] for key in
+                          ("receipt_id", "task_class", "prediction", "mode", "goal_checked", "exploration")})
+            result["chunks"] = [a for a in result["skills"] if a.get("kind") == "chunk"]
+            profiles = rendered.get("user_model", [])
+            result["user_model"] = {
+                "authoritative": [row for row in profiles if row.get("kind") not in {"inferred_preference", "support_strategy"}],
+                "inferred": [row for row in profiles if row.get("kind") == "inferred_preference"],
+                "support_strategies": [row for row in profiles if row.get("kind") == "support_strategy"],
+            }
+            result["_context_text"] = composed["text"]
+            result["context_delivery"] = receipt["context_delivery"]
+            return result
 
-        receipt, selected = self.writer.apply(tenant_id, "capture", capture)
-        prediction = receipt["prediction"]
-        exploration = receipt["exploration"]
-        from .candidates import (
-            learning_knowledge_context,
-            materialize_framework,
-            verification_requests,
-        )
-
-        selected_ids = [item["id"] for item in selected]
-        knowledge = learning_knowledge_context(
-            self,
-            tenant_id,
-            user_id,
-            task,
-            task_scope_query,
-            state=state,
-            selected_artifact_ids=selected_ids,
-        )
-        for item in selected:
-            item["framework"] = materialize_framework(
-                self, tenant_id, user_id, item, state
-            )
-        requests = verification_requests(
-            self, tenant_id, user_id, task, task_scope_query, state=state
-        )
-        if comparison_sample:
-            requests.append(
-                {
-                    "kind": "goal_comparison",
-                    "receipt_id": receipt["id"],
-                    "query": query,
-                    "artifact_ids": selected_ids,
-                }
-            )
-        return {
-            "hits": hits,
-            "lessons": [a for a in selected if a["kind"] == "lesson"],
-            "procedures": [a for a in selected if a["kind"] == "procedure"],
-            "skills": [a for a in selected if a["kind"] in {"skill", "chunk"}],
-            "chunks": [a for a in selected if a["kind"] == "chunk"],
-            "knowledge_pages": knowledge,
-            "verification_requests": requests,
-            "policy_verification_request": {
-                "variant": self._policy_variants(task)[1].to_dict(),
-                "policy_fingerprint": digest(self._policy_variants(task)[1].to_dict()),
-                "event_name": "policy_variant_verifier",
-            },
-            "receipt_id": receipt["id"],
-            "task_class": task,
-            "prediction": prediction,
-            "mode": mode,
-            "goal_checked": mode == "fast",
-            "exploration": exploration,
-        }
+        return self.writer.apply(tenant_id, "capture", capture)
 
     def observe_turn(
         self,
@@ -1178,7 +1218,10 @@ class LearningRuntime:
         if episode["status"] == "erased":
             return []
         return [
-            project_direct_user_memory(self.engine, tenant_id, cid)
+            project_direct_user_memory(self.engine, tenant_id, cid,
+                semantic_proposer=getattr(self.engine, "_learning_configuration", {}).get("semantic_proposer"),
+                timezone=getattr(self.engine, "_learning_configuration", {}).get("source_timezone"),
+                session_id=episode.get("session_id"))
             for cid in episode.get("source_cids", [])
             if (source := self.engine.get_evidence(tenant_id, cid)) is not None
             and source.actor == "user" and source.user_id == episode["user_id"]
@@ -1499,6 +1542,7 @@ class LearningRuntime:
             )
 
     def _credit(self, state: dict, episode: dict, *, rebuild: bool = False) -> None:
+        from .utility import applied_target, randomized_opportunity
         task, outcome = episode["task_class"], episode["reward"]
         probability = (outcome + 1) / 2
         receipts = [state["receipts"][key] for key in episode["receipt_ids"]]
@@ -1544,9 +1588,23 @@ class LearningRuntime:
                     "importance": 0.0,
                 },
             )
+            row["opportunity_n"] = row.get("opportunity_n", 0) + 1
+            row["exposed_n"] = row.get("exposed_n", 0) + int(bool(served))
+            applied = bool(served) and applied_target(episode, kind, target)
+            row["applied_n"] = row.get("applied_n", 0) + int(applied)
+            opportunity = randomized_opportunity(episode, receipts, kind, target, revision)
+            # Missing or composition-trimmed items are not randomized controls.
+            # Keep exposure diagnostics separate from comparable trial counts.
+            comparable = opportunity is not None
             prefix = "served" if served else "control"
             row[prefix + "_n"] += 1
             row[prefix + "_successes"] += target_probability
+            if comparable:
+                if opportunity:
+                    row["randomized_" + prefix + "_n"] = row.get("randomized_" + prefix + "_n", 0) + 1
+                    row["randomized_" + prefix + "_successes"] = row.get("randomized_" + prefix + "_successes", 0.0) + target_probability
+                    row[prefix + "_ipw_n"] = row.get(prefix + "_ipw_n", 0.0) + opportunity["inverse_propensity"]
+                    row[prefix + "_ipw_successes"] = row.get(prefix + "_ipw_successes", 0.0) + opportunity["inverse_propensity"] * target_probability
             if served:
                 if verified_outcome is not None:
                     row["verified_n"] = row.get("verified_n", 0) + 1
@@ -1564,16 +1622,17 @@ class LearningRuntime:
                 posterior = _posterior(row)
                 posterior.update(target_probability)
                 row.update(posterior.to_dict())
+            comparison_prefix = "randomized_"
             lower = contingency_lower_bound(
-                row["served_successes"],
-                row["served_n"],
-                row["control_successes"],
-                row["control_n"],
+                row.get(comparison_prefix + "served_successes", 0),
+                row.get(comparison_prefix + "served_n", 0),
+                row.get(comparison_prefix + "control_successes", 0),
+                row.get(comparison_prefix + "control_n", 0),
                 minimum=getattr(
                     self.engine.policy, "learning_contingency_min_samples", 8
                 ),
             )
-            if rebuild or not served or lower is None or lower <= 0:
+            if rebuild or not applied or not comparable or lower is None or lower <= 0:
                 continue
             cited = set(episode.get("cited_cids", []))
             if kind == "item":
@@ -1685,8 +1744,10 @@ class LearningRuntime:
                 "rate": rate,
                 "step": row["utility"] - old_utility,
                 "contingency_lb": lower,
-                "served_n": row["served_n"],
-                "control_n": row["control_n"],
+                "served_n": row.get(comparison_prefix + "served_n", 0),
+                "control_n": row.get(comparison_prefix + "control_n", 0),
+                "evidence_version": 3,
+                "propensity": opportunity["propensity"] if opportunity else None,
             }
             artifact = state["artifacts"].get(target)
             if (
@@ -2195,6 +2256,8 @@ class LearningRuntime:
                     row["items"] = [
                         item for item in row["items"] if item["item_id"] != cid
                     ]
+                    row["selection_exposures"] = [item for item in row.get("selection_exposures", [])
+                        if item.get("item_id") != cid]
                     row["eligible_targets"] = [
                         item
                         for item in row.get("eligible_targets", [])

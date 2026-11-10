@@ -13,6 +13,10 @@ ADDITIVE_PREDICATES = frozenset({
     "has_hobby", "has_interest", "speaks", "speaks_language", "knows",
     "allergic_to", "has_allergy", "like", "dislike", "prefer", "own",
     "speak", "know", "use", "uses",
+    "has_project", "has_server", "has_repository", "has_service", "has_app",
+    "has_application", "depends_on", "hosts", "supports", "requires",
+    "plan_to", "intend_to", "committed_to", "promised_to", "decided_to",
+    "believes",
 })
 
 

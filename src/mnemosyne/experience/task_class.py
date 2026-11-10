@@ -6,6 +6,7 @@ import re
 from .receipts import digest
 
 METHOD = "explicit-or-full-request-with-bounded-equivalence-v5"
+CONTRACT_VERSION = 1
 
 _ACTION_FORMS = (
     ("list", r"(?:list|enumerate|(?:give|show)(?: me)? a list of)"),
@@ -40,6 +41,45 @@ def _request_contract(query: str) -> tuple[str, str] | None:
     return None
 
 
+def semantic_contract(query: str, tools=(), risk_level=None) -> dict | None:
+    """A bounded, inspectable applicability contract, separate from task IDs.
+
+    Only grammatical wrappers and a small domain vocabulary are normalized.
+    Paths, quoted literals, flags, entities, numbers and constraints remain
+    exact; unknown language declines transfer rather than guessing similarity.
+    Available tools are recorded separately from demonstrated required tools.
+    """
+    text = unicodedata.normalize("NFC", query).strip()
+    text = re.sub(r"^(?:(?:please|(?:can|could|would) you)\s+){1,2}", "", text, flags=re.I)
+    text = re.sub(r"^help me\s+(?:to\s+)?", "", text, flags=re.I)
+    text = re.sub(r"^resolve\s+", "fix ", text, flags=re.I)
+    parsed = _request_contract(text)
+    if parsed is None:
+        return None
+    action, subject = parsed
+    # Split constraints before normalizing the domain vocabulary. A negated
+    # condition, changed tool or changed side effect can never disappear.
+    pieces = re.split(r"\s+(?=(?:without|with|using|only|unless|except|before|after|while|but|do not|never)\b)", subject, maxsplit=1)
+    entity = pieces[0]
+    constraints = pieces[1:]  # retained verbatim, including case and punctuation
+    entity = re.sub(r"^the\s+", "", entity)
+    if re.fullmatch(r"[a-z][a-z ]*[.!?]?", entity):
+        entity = entity.rstrip(".!?")
+        # These substitutions are confined to a repair intent, not arbitrary
+        # names or descriptions. 'cache invalidation' remains a distinct entity.
+        if action == "fix":
+            entity = re.sub(r"\bcaching\b", "cache", entity)
+            entity = re.sub(r"\b(?:issue|problem|bug)\b$", "defect", entity)
+    return {"version": CONTRACT_VERSION, "intent": action, "entity": entity,
+            "inputs": [entity], "outputs": [action], "constraints": constraints,
+            "risk": risk_level or "normal", "available_tools": sorted(set(tools))}
+
+
+def _semantic_equal(left, right):
+    return bool(left and right and {k: v for k, v in left.items() if k != "available_tools"}
+                == {k: v for k, v in right.items() if k != "available_tools"})
+
+
 def _required_tools(episode: dict, receipt: dict) -> set[str]:
     from .candidates import EXCLUDED_SOURCES, observed_action
 
@@ -60,7 +100,7 @@ def scope_query(episode: dict) -> str:
 
 
 def resolve_task(query, tools, task_type, *, tenant_id, user_id, risk_level,
-                 state, source_is_live):
+                 state, source_is_live, proposer=None):
     """Reuse a proven owner-scoped task identity for a bounded paraphrase.
 
     Stored identities and outcomes stay intact. Each alias retains the prior
@@ -68,19 +108,27 @@ def resolve_task(query, tools, task_type, *, tenant_id, user_id, risk_level,
     """
     task = classify(query, tools, task_type)
     contract = _request_contract(query)
-    if task_type or contract is None:
+    semantic = semantic_contract(query, tools, risk_level)
+    if task_type:
         return task, query, None
     candidates = []
+    proposal_candidates = []
     for episode in state["episodes"].values():
         if (
             episode.get("tenant_id") != tenant_id or episode.get("user_id") != user_id
             or episode.get("status") not in {"open", "resolved"}
             or episode.get("feedback_for_episode_id")
             or not episode.get("task_class", "").startswith("lexical:v3:")
-            or _request_contract(episode.get("user_text", "")) != contract
-            or _request_contract(scope_query(episode)) != contract
         ):
             continue
+        literal_match = bool(contract and _request_contract(episode.get("user_text", "")) == contract
+                             and _request_contract(scope_query(episode)) == contract)
+        semantic_match = bool(
+            episode.get("status") == "resolved"
+            and any(s.get("kind") in {"tests", "verifier"} for s in episode.get("signals", []))
+            and _semantic_equal(semantic, semantic_contract(episode.get("user_text", ""), tools, risk_level))
+            and _semantic_equal(semantic, semantic_contract(scope_query(episode), tools, risk_level))
+        )
         receipts = [state["receipts"][key] for key in episode.get("receipt_ids", [])
                     if key in state["receipts"]]
         if not any(
@@ -89,18 +137,33 @@ def resolve_task(query, tools, task_type, *, tenant_id, user_id, risk_level,
             for receipt in receipts
         ) or not source_is_live(episode.get("source_cids", [])):
             continue
-        candidates.append(episode)
+        if episode.get("status") == "resolved" and any(s.get("kind") in {"tests", "verifier"} for s in episode.get("signals", [])):
+            proposal_candidates.append(episode)
+        if not literal_match and not semantic_match:
+            continue
+        candidates.append((episode, literal_match))
     if not candidates:
+        from .task_contracts import proposed_match
+        proposed = proposed_match(query, tools, risk_level, proposal_candidates, proposer)
+        if proposed:
+            prior, proof = proposed
+            return prior["task_class"], scope_query(prior), proof
         return task, query, None
-    prior = min(candidates, key=lambda row: (
-        row["user_text"] != scope_query(row), row["user_text"] != query,
+    prior, literal_match = min(candidates, key=lambda pair: (
+        not pair[1],
+        (row := pair[0])["user_text"] != scope_query(row), row["user_text"] != query,
         row["created_at"], row["id"],
     ))
     if prior["user_text"] == query and scope_query(prior) == query and prior["task_class"] == task:
         return prior["task_class"], query, None
     return prior["task_class"], scope_query(prior), {
-        "method": "bounded_request_equivalence:v2", "matched_episode_id": prior["id"],
+        "method": "bounded_request_equivalence:v2" if literal_match else "semantic_applicability:v1",
+        "matched_episode_id": prior["id"],
         "source_cids": list(prior["source_cids"]),
+        **({"contract": semantic, "required_tools": sorted(_required_tools(
+            prior, next(state["receipts"][key] for key in prior["receipt_ids"]
+                        if key in state["receipts"]))) }
+           if not literal_match else {}),
     }
 
 
@@ -113,22 +176,37 @@ def validated_scope_query(receipt: dict, state: dict) -> str | None:
         return query if canonical == query else None
     prior = state["episodes"].get(proof.get("matched_episode_id"), {})
     contract = _request_contract(query)
+    grounded_match = proof.get("method") == "grounded_semantic_applicability:v1"
+    semantic_match = proof.get("method") == "semantic_applicability:v1" or grounded_match
     if (
-        proof.get("method") not in {"bounded_request_equivalence:v1", "bounded_request_equivalence:v2"}
+        proof.get("method") not in {"bounded_request_equivalence:v1", "bounded_request_equivalence:v2", "semantic_applicability:v1", "grounded_semantic_applicability:v1"}
         or prior.get("status") not in {"open", "resolved"}
         or prior.get("tenant_id") != receipt.get("tenant_id")
         or prior.get("user_id") != receipt.get("user_id")
         or prior.get("task_class") != receipt.get("task_class")
         or canonical != scope_query(prior)
-        or contract is None or _request_contract(canonical) != contract
+        or (not semantic_match and (contract is None or _request_contract(canonical) != contract))
         or not set(prior.get("source_cids", [])) <= set(receipt.get("source_cids", []))
     ):
         return None
+    if semantic_match:
+        if grounded_match:
+            from .task_contracts import grounded_contract
+            expected = grounded_contract(query, proof.get("query_roles"), receipt.get("available_tools", []), receipt.get("risk_level"))
+            reference = grounded_contract(canonical, proof.get("reference_roles"), receipt.get("available_tools", []), receipt.get("risk_level"))
+        else:
+            expected = semantic_contract(query, receipt.get("available_tools", []), receipt.get("risk_level"))
+            reference = semantic_contract(canonical, (), receipt.get("risk_level"))
+        if (proof.get("contract") != expected
+                or prior.get("status") != "resolved"
+                or not any(s.get("kind") in {"tests", "verifier"} for s in prior.get("signals", []))
+                or not _semantic_equal(expected, reference)):
+            return None
     old_receipts = [state["receipts"][key] for key in prior.get("receipt_ids", [])
                     if key in state["receipts"]]
     if not any(
         (_compatible_tools(prior, old, receipt.get("available_tools", []))
-         if proof.get("method") == "bounded_request_equivalence:v2"
+         if proof.get("method") in {"bounded_request_equivalence:v2", "semantic_applicability:v1", "grounded_semantic_applicability:v1"}
          else set(old.get("available_tools", [])) == set(receipt.get("available_tools", [])))
         and old.get("risk_level", "normal") == receipt.get("risk_level", "normal")
         for old in old_receipts
