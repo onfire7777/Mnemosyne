@@ -131,16 +131,13 @@ def test_legacy_reward_repair_is_audited_idempotent_and_preserves_observations()
     events.append({"name": "shell", "command": "pytest", "passed": 20, "failed": 0})
     key = runtime.observe_turn("t", "u", "legacy", "Check project tests", "Finished",
         tool_events=events, receipt_ids=[context["receipt_id"]])["episode_id"]
-    # Model the persisted pre-v2 row as its original runtime resolved it. A
-    # row that is still open is repaired when it resolves instead.
+    # Model the persisted pre-v2 row before its original resolution.
     def legacy(state):
         row = state["episodes"][key]
         row.pop("outcome_version")
         row["signals"] = [signal("exit_code", -1)] * 15 + [signal("tests", 1)]
-        value = reward(row["signals"])
-        row.update(status="resolved", reward=value, rpe=value - (2 * row["prediction"] - 1))
     runtime.writer.apply("t", "capture", legacy)
-    before = deepcopy(runtime.episode("t", key))
+    before = deepcopy(runtime.resolve("t", key))
     receipts = deepcopy(runtime.writer.read("t")["receipts"])
     assert before["reward"] < 0
     assert runtime.reprocess_outcomes("t")["reprocessed"] == 1

@@ -279,26 +279,12 @@ def verified_target_outcome(artifact: dict, episode: dict) -> float | None:
     return reward(_current_checks(outcomes)) if outcomes else None
 
 
-def reprocessed_episode(episode: dict, artifacts: dict, receipts: dict) -> dict:
-    """Recompute derived outcome fields from retained observations, never from prose.
-
-    This explicit maintenance path preserves manual feedback and all original
-    source/receipt identities. LearningWriter retains the original row in its
-    encrypted audit. Erased and imported histories are never reconstructed.
-    """
-    if episode.get("status") not in {"resolved", "unknown"}:
-        return deepcopy(episode)
-    from mnemosyne.hosts.codex import reparse_retained_events
-    original_events = episode.get("tool_events", [])
-    events = reparse_retained_events(original_events)
-    if episode.get("outcome_version", 1) >= OUTCOME_VERSION and (
-        episode.get("event_parser_version", 0) >= 2 or events == original_events
-    ):
-        return deepcopy(episode)
+def _repaired_signals(episode: dict, events: list[dict]) -> list[dict]:
+    """Recompute automatic signals from retained events; keep manual feedback."""
     automatic = Counter()
     def core(item):
         return item["kind"], item["value"], item["weight"], item.get("evidence", "")
-    for event in original_events:
+    for event in episode.get("tool_events", []):
         legacy = dict(event)
         if episode.get("outcome_version", 1) < 2 and type(legacy.get("exit_code")) is int and legacy["exit_code"] != 0:
             legacy.update(outcome_scope="task", final=True)
@@ -323,8 +309,33 @@ def reprocessed_episode(episode: dict, artifacts: dict, receipts: dict) -> dict:
             automatic[key] -= 1
         else:
             manual.append(deepcopy(item))
+    return [*tool_signals(events), *manual]
+
+
+def current_signals(episode: dict) -> list[dict]:
+    """Signals for an unresolved episode whose stored values predate a scoring fix."""
+    from mnemosyne.hosts.codex import reparse_retained_events
+    return _repaired_signals(episode, reparse_retained_events(episode.get("tool_events", [])))
+
+
+def reprocessed_episode(episode: dict, artifacts: dict, receipts: dict) -> dict:
+    """Recompute derived outcome fields from retained observations, never from prose.
+
+    This explicit maintenance path preserves manual feedback and all original
+    source/receipt identities. LearningWriter retains the original row in its
+    encrypted audit. Erased and imported histories are never reconstructed.
+    """
+    if episode.get("status") not in {"resolved", "unknown"}:
+        return deepcopy(episode)
+    from mnemosyne.hosts.codex import reparse_retained_events
+    original_events = episode.get("tool_events", [])
+    events = reparse_retained_events(original_events)
+    if episode.get("outcome_version", 1) >= OUTCOME_VERSION and (
+        episode.get("event_parser_version", 0) >= 2 or events == original_events
+    ):
+        return deepcopy(episode)
     updated = deepcopy(episode)
-    updated["signals"] = [*tool_signals(events), *manual]
+    updated["signals"] = _repaired_signals(episode, events)
     updated["outcome_version"] = OUTCOME_VERSION
     updated["event_parser_version"] = 2
     value = reward(updated["signals"])

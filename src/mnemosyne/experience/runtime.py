@@ -13,7 +13,10 @@ from mnemosyne.models import Evidence
 from mnemosyne.learning import Trajectory
 from .guards import require
 from .receipts import ContextReceipt, ROUTE_OF_CHANNEL, ServedItem, digest, source_segment_id
-from .signals import reward, signal, tool_signals, user_signals, verified_target_outcome, receipt_target
+from .signals import (
+    OUTCOME_VERSION, current_signals, reward, signal, tool_signals, user_signals,
+    verified_target_outcome, receipt_target,
+)
 from .stats import Posterior, contingency_lower_bound, wilson_interval
 from .task_class import METHOD as TASK_CLASS_METHOD, classify, resolve_task
 from .traces import plastic_rate, stiff_step, trace
@@ -1187,7 +1190,7 @@ class LearningRuntime:
                 )
             ).isoformat(),
             "prediction": receipts[-1]["prediction"] if receipts else 0.5,
-            "outcome_version": 3,
+            "outcome_version": OUTCOME_VERSION,
             "reward": None,
             "rpe": None,
             "turn_index": len(
@@ -1426,14 +1429,13 @@ class LearningRuntime:
             episode = state["episodes"][episode_id]
             if episode["status"] != "open":
                 return episode
-            from .signals import OUTCOME_VERSION, reprocessed_episode
-            if episode.get("outcome_version", 1) < OUTCOME_VERSION:
-                # Open episodes may span a runtime upgrade. Repair their
-                # derived signals before they can produce new credit.
-                migrated = reprocessed_episode({**episode, "status": "unknown"},
-                                               state["artifacts"], state["receipts"])
-                for field in ("signals", "outcome_version", "event_parser_version"):
-                    episode[field] = migrated[field]
+            if 2 <= episode.get("outcome_version", 1) < OUTCOME_VERSION:
+                # An open episode may span a runtime upgrade. Correct its
+                # derived signals before they can earn credit. Histories from
+                # before the targeted-credit contract (version 1) keep their
+                # original resolution and the audited reprocess path.
+                episode.update(signals=current_signals(episode),
+                               outcome_version=OUTCOME_VERSION, event_parser_version=2)
             outcome = reward(episode["signals"])
             # A factual/command check can validate a memory while the task is
             # still ungraded. Retain that evidence without manufacturing a
