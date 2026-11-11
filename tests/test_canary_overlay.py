@@ -10,6 +10,12 @@ only the bookkeeping the golden harness documents (merged canaries, per-merge re
 The mix deliberately produces unstable groups - a retracted, more trusted fact next to the
 active one, whose replays supersede and restore it at every merge - which is where replaying a
 live row instead of the canary's copy goes wrong.
+
+A second mix spells one attribute several ways ("lives_in" and "residence", "likes" and
+"does_not_like"), adds additive predicates and gives facts different owners. Revision compares
+semantic predicates, so a canary must copy every spelling of the attribute it revises: a canary
+that copied only the exact predicate would show the gate no supersession and still supersede
+at merge.
 """
 
 from __future__ import annotations
@@ -32,21 +38,30 @@ from mnemosyne.canary_overlay import THIN_CANARIES_ENV
 TENANT = "overlay-prop"
 SUBJECTS = ["S0", "S1", "S2", "S3"]
 OBJECTS = ["red", "blue", "green", "amber"]
+# Spellings of two attributes (one of them additive, with its negation) and a plain one.
+PREDICATES = ["lives_in", "residence", "resides_in", "likes", "like", "does_not_like", "is"]
+OWNERS = [None, None, "u1", "u2"]
 
 
-def _ops(seed: int) -> list[tuple[Any, ...]]:
+def _ops(seed: int, *, semantic: bool = False) -> list[tuple[Any, ...]]:
     rng = random.Random(seed)
     ops: list[tuple[Any, ...]] = []
 
+    def spelling() -> tuple[Any, ...]:
+        # Drawn only for the semantic mix, so the plain mix keeps its seeded sequences.
+        return (rng.choice(PREDICATES), rng.choice(OWNERS)) if semantic else ()
+
     def main_write(statuses: list[str]) -> tuple[Any, ...]:
-        return ("main", rng.choice(SUBJECTS), rng.choice(OBJECTS), rng.randint(0, 2), rng.choice(statuses), rng.random() < 0.7)
+        return ("main", rng.choice(SUBJECTS), rng.choice(OBJECTS), rng.randint(0, 2), rng.choice(statuses),
+                rng.random() < 0.7, *spelling())
 
     for _ in range(rng.randint(2, 7)):
         ops.append(main_write(["candidate", "candidate", "retracted", "superseded"]))
     for cycle in range(rng.randint(8, 22)):
-        writes = [(rng.choice(SUBJECTS), rng.choice(OBJECTS), rng.randint(0, 2), rng.random() < 0.7)
+        writes = [(rng.choice(SUBJECTS), rng.choice(OBJECTS), rng.randint(0, 2), rng.random() < 0.7, *spelling())
                   for _ in range(rng.randint(1, 3))]
-        relations = [(rng.choice(SUBJECTS), rng.choice(["links", "owns"]), rng.choice(SUBJECTS))
+        relations = [(rng.choice(SUBJECTS), rng.choice(PREDICATES if semantic else ["links", "owns"]),
+                      rng.choice(OBJECTS if semantic else SUBJECTS))
                      for _ in range(rng.randint(0, 2))]
         # What the gate does on a canary before deciding: retrieve, recording access.
         read = (rng.choice(SUBJECTS), rng.random() < 0.5) if rng.random() < 0.85 else None
@@ -64,25 +79,26 @@ def _run(ops: list[tuple[Any, ...]], thin: bool, monkeypatch: pytest.MonkeyPatch
 
         engine = LocalMemoryEngine()
 
-        def fact(subject: str, obj: str, tier: int, status: str = "candidate") -> Any:
-            return Assertion(tenant_id=TENANT, subject=subject, predicate="is", object=obj, trust_tier=tier,
-                             status=status)
+        def fact(subject: str, obj: str, tier: int, status: str = "candidate",
+                 predicate: str = "is", owner: str | None = None) -> Any:
+            return Assertion(tenant_id=TENANT, user_id=owner, subject=subject, predicate=predicate, object=obj,
+                             trust_tier=tier, status=status)
 
         reads: list[Any] = []
         for op in ops:
             if op[0] == "main":
-                _, subject, obj, tier, status, tick = op
+                _, subject, obj, tier, status, tick, *spelled = op
                 if tick:
                     clock.tick()
-                engine.upsert_assertion(fact(subject, obj, tier, status))
+                engine.upsert_assertion(fact(subject, obj, tier, status, *spelled))
                 continue
             _, name, writes, relations, merge, read = op
             clock.tick()
             engine.branch(name, frm="main", kind="canary", tenant_id=TENANT)
-            for subject, obj, tier, tick in writes:
+            for subject, obj, tier, tick, *spelled in writes:
                 if tick:
                     clock.tick()
-                engine.upsert_assertion(fact(subject, obj, tier), branch=name)
+                engine.upsert_assertion(fact(subject, obj, tier, "candidate", *spelled), branch=name)
             for source, predicate, target in relations:
                 engine.add_relation(Relation(tenant_id=TENANT, source=source, predicate=predicate, target=target),
                                     branch=name)
@@ -122,6 +138,85 @@ def test_thin_canaries_leave_main_exactly_as_full_branches(seed: int, monkeypatc
     assert stats["merged"] == sum(1 for op in gates if op[4])
     problems = diff(full, thin)
     assert not problems, f"seed {seed}: thin canaries drifted from full branches:\n" + "\n".join(problems)
+
+
+@pytest.mark.parametrize("seed", range(40))
+def test_thin_canaries_match_full_branches_across_predicate_spellings(seed: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    ops = _ops(seed, semantic=True)
+    thin, stats = _run(ops, True, monkeypatch)
+    full, legacy_stats = _run(ops, False, monkeypatch)
+    assert legacy_stats["created"] == 0 and stats["created"] == sum(1 for op in ops if op[0] == "gate")
+    problems = diff(full, thin)
+    assert not problems, f"seed {seed}: thin canaries drifted from full branches:\n" + "\n".join(problems)
+
+
+@pytest.mark.parametrize("old, new, old_object, new_object", [
+    ("lives_in", "residence", "Paris", "Berlin"),
+    ("likes", "does_not_like", "coffee", "coffee"),
+    ("residence", "residence", "Paris", "Berlin"),
+])
+@pytest.mark.parametrize("thin", [True, False])
+def test_a_canary_shows_the_gate_a_revision_under_another_spelling(
+    old: str, new: str, old_object: str, new_object: str, thin: bool, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The supersession rail reads the canary: it must see what the merge will do."""
+    from datetime import UTC, datetime, timedelta
+
+    from mnemosyne.engine import LocalMemoryEngine
+    from mnemosyne.models import Assertion
+
+    monkeypatch.setenv(THIN_CANARIES_ENV, "1" if thin else "0")
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    engine = LocalMemoryEngine()
+    current = engine.upsert_assertion(Assertion(
+        tenant_id=TENANT, user_id="u", subject="user", predicate=old, object=old_object, status="active",
+        valid_from=start))
+    engine.branch("canary-spelling", frm="main", kind="canary", tenant_id=TENANT)
+    engine.upsert_assertion(Assertion(
+        tenant_id=TENANT, user_id="u", subject="user", predicate=new, object=new_object, status="active",
+        valid_from=start + timedelta(days=1)), branch="canary-spelling")
+    assert engine.superseded_fact_ids_on_branch(TENANT, "canary-spelling", {current}) == {current}
+    engine.merge("canary-spelling", "main", tenant_id=TENANT)
+    assert engine.superseded_fact_ids_on_branch(TENANT, "main", {current}) == {current}
+
+
+@pytest.mark.parametrize("owner", [None, "u"])
+@pytest.mark.parametrize("thin", [True, False])
+def test_a_merged_revision_closes_the_old_facts_relation_on_main(
+    thin: bool, owner: str | None, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A fact superseded on a canary must not keep its edge open in main's graph.
+
+    The canary closes its copy of the relation. The merge replays the superseded copy, which
+    takes no part in revision, and then unions relation windows, where an open window wins: the
+    replay itself has to end the relation on main.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from mnemosyne.engine import LocalMemoryEngine
+    from mnemosyne.models import Assertion, Evidence, Relation
+
+    monkeypatch.setenv(THIN_CANARIES_ENV, "1" if thin else "0")
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    engine = LocalMemoryEngine()
+    for step, city in enumerate(["Dakar", "Hanoi", "Dakar", "Hanoi", "Tbilisi"]):
+        moment = start + timedelta(minutes=step)
+        cid = engine.append_evidence(Evidence(
+            tenant_id=TENANT, user_id="u", actor="user", source_type="doc", created_at=moment,
+            content=f"Statement {step}: Entity lives in {city}.", access_policy={"tenant": TENANT}))
+        name = f"canary-city-{step}"
+        engine.branch(name, frm="main", kind="canary", tenant_id=TENANT)
+        engine.upsert_assertion(Assertion(
+            tenant_id=TENANT, user_id=owner, subject="Entity", predicate="lives in", object=city, status="active",
+            valid_from=moment, source_evidence_cids=[cid], access_policy={"tenant": TENANT}), branch=name)
+        engine.add_relation(Relation(
+            tenant_id=TENANT, source="Entity", predicate="lives in", target=city, valid_from=moment,
+            source_evidence_cids=[cid], access_policy={"tenant": TENANT}), branch=name)
+        engine.merge(name, "main", tenant_id=TENANT)
+    facts = sorted((item.object, item.status) for item in engine.assertions.values() if item.branch == "main")
+    assert facts == [("Dakar", "superseded")] * 2 + [("Hanoi", "superseded")] * 2 + [("Tbilisi", "active")]
+    edges = {(item.target, item.valid_to is None) for item in engine.relations.values() if item.branch == "main"}
+    assert edges == {("Dakar", False), ("Hanoi", False), ("Tbilisi", True)}
 
 
 def test_retracted_trusted_fact_is_replayed_from_the_canary_copy(monkeypatch: pytest.MonkeyPatch) -> None:

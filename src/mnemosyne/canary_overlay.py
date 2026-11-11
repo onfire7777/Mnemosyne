@@ -7,9 +7,11 @@ consolidation was quadratic.
 
 A canary created by the gate (kind ``canary`` from ``main`` for one tenant, while persistence
 is deferred or in memory) is an *overlay* here: the branch exists, but nothing is copied. An
-overlay reads through to main. A whole assertion group (tenant, subject, predicate) is copied
-into the overlay the moment an upsert on the overlay touches it, so the upsert runs the
-unchanged engine code against exactly the copies a full branch would hold.
+overlay reads through to main. A whole assertion group is copied into the overlay the moment an
+upsert on the overlay touches it, so the upsert runs the unchanged engine code against exactly
+the copies a full branch would hold. A group is everything one upsert can read or rewrite: a
+tenant's assertions about one subject under one semantic predicate (``assertion_group_key``),
+whatever its spelling or polarity - "lives_in" and "residence", "likes" and "does_not_like".
 
 MERGE replays what the legacy merge replays, in the same order within each group:
 
@@ -44,6 +46,7 @@ from datetime import datetime
 from typing import Any
 
 from mnemosyne.access_policy import evidence_expiry_deadline
+from mnemosyne.branch_index import assertion_group_key
 from mnemosyne.cid_lists import evidence_epoch
 
 THIN_CANARIES_ENV = "MNEMOSYNE_THIN_CANARIES"
@@ -58,6 +61,11 @@ def _relation_group_keys(subject: str, predicate: str) -> set[tuple[str, str]]:
         if predicates & aliases:
             predicates.update(aliases)
     return {(subject.strip().lower(), pred) for pred in predicates}
+
+
+def _group_of(item: Any) -> tuple[str, str]:
+    """The assertion group ``item`` belongs to: (subject, semantic predicate)."""
+    return (item.subject, assertion_group_key(item.predicate))
 
 
 def thin_canaries_enabled() -> bool:
@@ -168,7 +176,7 @@ class CanaryOverlayMixin:
             for key in keys:
                 assertion_cache.pop(key, None)
 
-    def _overlay_group_snapshot(self, tenant_id: str, branch: str, subject: str, predicate: str) -> dict[str, Any]:
+    def _overlay_group_snapshot(self, tenant_id: str, branch: str, group: tuple[str, str]) -> dict[str, Any]:
         """Private copies of a group's members, taken before any of them is replayed.
 
         Legacy replays the canary's copies, taken when the canary was created. Replaying one
@@ -176,7 +184,7 @@ class CanaryOverlayMixin:
         own copy then restores it), so a later member must never be replayed from the live row.
         A group of one cannot rewrite itself before its replay: it needs no snapshot.
         """
-        members = self._assertion_items.peers(tenant_id, branch, subject, predicate)
+        members = self._assertion_items.peers(tenant_id, branch, *group)
         if len(members) < 2:
             return {}
         return {key: copy.deepcopy(item) for key, item in members.items()}
@@ -186,32 +194,32 @@ class CanaryOverlayMixin:
         born = set(state.born_last)
         snapshots: dict[tuple[str, str], dict[str, Any]] = {}
         for key, item in list(self._assertion_items.in_branch(tenant_id, "main").items()):
-            group = (item.subject, item.predicate)
+            group = _group_of(item)
             if key in born or group in state.replayed_groups:
                 continue
             snapshot = snapshots.get(group)
             if snapshot is None:
-                snapshot = snapshots[group] = self._overlay_group_snapshot(tenant_id, "main", *group)
+                snapshot = snapshots[group] = self._overlay_group_snapshot(tenant_id, "main", group)
             own = snapshot.pop(key, None)
             self._overlay_replay(item if own is None else own, "main", now=state.time, audit=False,
                                  persist=False, owned=own is not None)
         state.pending = False
         state.replayed_groups = set()
 
-    def _overlay_flush_group(self, tenant_id: str, subject: str, predicate: str) -> None:
+    def _overlay_flush_group(self, tenant_id: str, group: tuple[str, str]) -> None:
         state = (self._overlay_states or {}).get(tenant_id)
-        if state is None or not state.pending or (subject, predicate) in state.replayed_groups:
+        if state is None or not state.pending or group in state.replayed_groups:
             return
         born = set(state.born_last)
-        members = list(self._assertion_items.peers(tenant_id, "main", subject, predicate).items())
-        snapshot = self._overlay_group_snapshot(tenant_id, "main", subject, predicate)
+        members = list(self._assertion_items.peers(tenant_id, "main", *group).items())
+        snapshot = self._overlay_group_snapshot(tenant_id, "main", group)
         for key, item in members:
             if key not in born:
                 own = snapshot.get(key)
                 self._overlay_replay(item if own is None else own, "main", now=state.time, audit=False,
                                      persist=False, owned=own is not None)
         self._overlay_forget_projections(key for key, _ in members)
-        state.replayed_groups.add((subject, predicate))
+        state.replayed_groups.add(group)
         self.overlay_stats["group_flushes"] += 1
 
     def _overlay_replay(self, source: Any, into: str, *, now: datetime | None, audit: bool = True,
@@ -297,16 +305,20 @@ class CanaryOverlayMixin:
     def _overlay_materialize_group(self, name: str, overlay: CanaryOverlay, subject: str, predicate: str) -> None:
         """Copy one assertion group and its relation peers as a full branch holds them."""
         tenant_id = overlay.tenant_id
-        self._overlay_flush_group(tenant_id, subject, predicate)
-        for item in list(self._assertion_items.peers(tenant_id, overlay.parent, subject, predicate).values()):
+        group = (subject, assertion_group_key(predicate))
+        self._overlay_flush_group(tenant_id, group)
+        members = list(self._assertion_items.peers(tenant_id, overlay.parent, *group).values())
+        for item in members:
             key = self._branch_key(tenant_id, name, item.id)
             if dict.get(self._assertion_items, key) is None:
                 clone = copy.deepcopy(item)
                 clone.branch = name
                 self._assertion_items[key] = clone
         # Superseding a canary assertion also closes its relations. Detach only
-        # those peers so that this write cannot alter the parent's graph.
-        groups = _relation_group_keys(subject, predicate)
+        # those peers so that this write cannot alter the parent's graph. The
+        # superseded member names its relations by its own spelling.
+        groups = _relation_group_keys(subject, predicate).union(
+            *(_relation_group_keys(item.subject, item.predicate) for item in members))
         for item in list(self._relation_items.in_branch(tenant_id, overlay.parent).values()):
             if (item.source.strip().lower(), item.predicate.strip().lower()) not in groups:
                 continue
@@ -365,10 +377,11 @@ class CanaryOverlayMixin:
         replay only re-stamps a group, so owner, scope and status are already exact.
         """
         overlay = (self._overlays or {}).get(branch)
+        group = (subject, assertion_group_key(predicate))
         with self._overlay_context():
-            members = self._assertion_items.peers(tenant_id, branch, subject, predicate)
+            members = self._assertion_items.peers(tenant_id, branch, *group)
             if not members and overlay is not None and overlay.tenant_id == tenant_id:
-                members = self._assertion_items.peers(tenant_id, overlay.parent, subject, predicate)
+                members = self._assertion_items.peers(tenant_id, overlay.parent, *group)
             return any(
                 item.user_id is None and not item.scope and item.status in _ACTIVE
                 for item in members.values()
@@ -442,11 +455,11 @@ class CanaryOverlayMixin:
                       if dict.get(assertions, self._branch_key(tenant, into, item.id)) is not None}
             new_items = [item for item in canary_items if item.id not in copies]
             sources_total += len(new_items)
-            touched = [(item.subject, item.predicate) for item in canary_items]
+            touched = [_group_of(item) for item in canary_items]
             if state.first:
-                eager = [(item.subject, item.predicate) for item in main_view.values()] + touched
+                eager = [_group_of(item) for item in main_view.values()] + touched
             else:
-                dirty = [(item.subject, item.predicate) for key in state.born_last
+                dirty = [_group_of(item) for key in state.born_last
                          if (item := dict.get(assertions, key)) is not None]
                 eager = touched + dirty + sorted(state.unstable)
             eager_groups = list(dict.fromkeys(eager))
@@ -454,9 +467,15 @@ class CanaryOverlayMixin:
             # later assertion restores the active fact. A full branch retains
             # independent relation inputs for its subsequent relation replay;
             # preserve those same inputs before mutating main here.
-            relation_groups = set().union(*(
-                _relation_group_keys(*group) for group in eager_groups
-            ))
+            # A relation is named by its assertion's own spelling of the predicate.
+            canary_members: dict[tuple[str, str], list[Any]] = {}
+            for item in canary_items:
+                canary_members.setdefault(_group_of(item), []).append(item)
+            relation_groups: set[tuple[str, str]] = set()
+            for group in eager_groups:
+                relation_groups |= _relation_group_keys(*group)
+                for item in (*assertions.peers(tenant, into, *group).values(), *canary_members.get(group, ())):
+                    relation_groups |= _relation_group_keys(item.subject, item.predicate)
             relation_snapshots = {
                 item.id: copy.deepcopy(item)
                 for item in relations.in_branch(tenant, into).values()
@@ -475,12 +494,12 @@ class CanaryOverlayMixin:
 
             touched_keys_main: list[str] = []
             for group in eager_groups:
-                self._overlay_flush_group(tenant, *group)
+                self._overlay_flush_group(tenant, group)
                 members = list(assertions.peers(tenant, into, *group).items())
                 # The canary's copies of untouched members are main's rows as they stand now;
                 # snapshot them before the first replay can rewrite one (see _overlay_group_snapshot).
                 snapshot = ({} if all(member.id in copies for _, member in members)
-                            else self._overlay_group_snapshot(tenant, into, *group))
+                            else self._overlay_group_snapshot(tenant, into, group))
                 for key, member in members:
                     touched_keys_main.append(key)
                     canary_copy = copies.get(member.id)
@@ -559,7 +578,7 @@ class CanaryOverlayMixin:
             self._persist()
 
             # What the next merge needs to know.
-            new_groups = [(item.subject, item.predicate) for key in added_keys
+            new_groups = [_group_of(item) for key in added_keys
                           if (item := dict.get(assertions, key)) is not None]
             for group in dict.fromkeys(eager_groups + new_groups):
                 if self._overlay_group_unstable(tenant, group):
@@ -728,7 +747,7 @@ class CanaryOverlayMixin:
             state is not None
             and state.pending
             and item.status in _ACTIVE
-            and (item.subject, item.predicate) not in state.replayed_groups
+            and _group_of(item) not in state.replayed_groups
             and key not in state.born_last
         ):
             last = state.time  # the deferred replay of the last merge re-stamps it
@@ -754,7 +773,7 @@ class CanaryOverlayMixin:
         """
         if item.status not in _ACTIVE:
             return True
-        return self._overlay_group_unstable(tenant_id, (item.subject, item.predicate))
+        return self._overlay_group_unstable(tenant_id, _group_of(item))
 
     def _overlay_record_access(self, hits: list[Any]) -> dict[str, int]:
         """``_record_retrieval_access`` for hits on a canary overlay.

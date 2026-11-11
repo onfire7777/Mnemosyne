@@ -19630,6 +19630,8 @@ def cmd_prepare_context(args: argparse.Namespace) -> None:
         available_tools=args.available_tools,
         task_type=args.task_type,
         risk_level=args.risk_level,
+        workspace=args.workspace,
+        delivery_envelope=args.delivery_envelope,
         role=args.role,
         source_trust_tier=args.source_trust_tier,
     ))

@@ -6377,6 +6377,11 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 continue
             rel_vt = _to_utc_opt(rel.valid_to)
             tgt_vt = _to_utc_opt(valid_to)
+            # A relation that begins when the fact has already ended belongs
+            # to a later statement of the same triple, not to this fact.
+            rel_vf = _to_utc_opt(rel.valid_from)
+            if rel_vf is not None and tgt_vt is not None and rel_vf >= tgt_vt:
+                continue
             if rel.valid_to is None or (
                 rel_vt is not None and tgt_vt is not None and rel_vt > tgt_vt
             ):
@@ -6416,18 +6421,19 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             self._apply_schema_fast_path_projection_status(
                 incoming, requested_status=requested_status
             )
-            peers = [
+            # The peer index groups a subject's assertions by semantic predicate
+            # key, so this reads the group and never the whole branch.
+            holders = [
                 item
-                for item in self.assertions.in_branch(incoming.tenant_id, branch).values()
-                if item.tenant_id == incoming.tenant_id
-                and item.branch == branch
-                and item.user_id == incoming.user_id
-                and item.subject == incoming.subject
-                and assertion_predicate_key(item.predicate)[0] == assertion_predicate_key(incoming.predicate)[0]
+                for item in self.assertions.peers(
+                    incoming.tenant_id, branch, incoming.subject,
+                    assertion_predicate_key(incoming.predicate)[0],
+                ).values()
+                if item.user_id == incoming.user_id
                 and item.scope == incoming.scope
-                and incoming.status in {"active", "contested"}
                 and item.status in {"active", "contested"}
             ]
+            peers = holders if incoming.status in {"active", "contested"} else []
             replacement_id = assertion_replacement_id(
                 incoming.calibration, {item.id for item in peers},
                 replayed_calibration=next(
@@ -6523,6 +6529,24 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                         source="assertion",
                         trust_tier=incoming.trust_tier,
                     )
+
+            if requested_status == "superseded" and incoming.valid_to is not None and not any(
+                item.id != incoming.id and assertions_same_value(item, incoming) for item in holders
+            ):
+                # A fact that arrives already superseded (a merge replaying the
+                # copy a canary superseded) takes no part in revision, but its
+                # relations end with it. Without this the branch the copy lands
+                # on keeps the old fact's edge open in the graph. A current fact
+                # holding the same value over that time still supports the edge.
+                self._sync_relation_supersession(
+                    tenant_id=incoming.tenant_id,
+                    branch=branch,
+                    subject=incoming.subject,
+                    predicate=incoming.predicate,
+                    obj=incoming.object,
+                    valid_to=incoming.valid_to,
+                    source_evidence_cids=incoming.source_evidence_cids if incoming.user_id is not None else None,
+                )
 
             if same and (replacement_id is None or incoming.status != "superseded"):
                 winner = max(same, key=lambda item: item.confidence)
@@ -9113,16 +9137,28 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 working.access_policy = access_policy
             for working_key, _ in working_removals:
                 self.working_memory.pop(working_key, None)
-            from mnemosyne.erasure_ids import redact_source_audit_payload
+            from mnemosyne.erasure_ids import (
+                audit_custody_names, redact_source_audit_payload, rekey_audit_custody,
+            )
             audit_targets = {identifier for name in (
                 "retracted_assertions", "trimmed_assertions", "expired_relations", "trimmed_relations",
                 "retracted_preferences", "trimmed_preferences",
             ) for identifier in propagated[name]}
+            # Rows whose working-memory custody names an erased source. Erasing
+            # the payload below removes that list, so note them first: a legal
+            # hard delete still has to re-key them.
+            custody_rows = [
+                index for index, record in enumerate(self.audit_log)
+                if record.get("tenant_id") == tenant_id and audit_custody_names(record, affected_cids)
+            ]
             # Replace, never mutate: exports hand out these record dicts, so an
             # in-place edit would rewrite snapshots taken before this erasure
             # (and survive a source_transaction rollback inside them).
             for index, record in enumerate(self.audit_log):
-                if record.get("tenant_id") == tenant_id:
+                # An erasure's own record is its custody report (ids, never
+                # source text). A forget that spans several branches must not
+                # wipe the report it wrote for the previous one.
+                if record.get("tenant_id") == tenant_id and record.get("op") != "forget":
                     self.audit_log[index] = {**record, "diff": redact_source_audit_payload(
                         record.get("diff", {}), affected_cids,
                         target_affected=record.get("target_id") in audit_targets, branch=branch,
@@ -9151,6 +9187,8 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     self._redact_working_digests(record, placeholder_map)
                     for record in self.audit_log
                 ]
+                for index in custody_rows:
+                    self.audit_log[index] = rekey_audit_custody(self.audit_log[index], new_id())
                 self.deletion_log[:] = [
                     self._redact_working_digests(record, placeholder_map)
                     for record in self.deletion_log

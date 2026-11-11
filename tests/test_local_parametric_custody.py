@@ -92,8 +92,8 @@ def test_training_labels_follow_external_checks_despite_opposite_user_feedback(t
             f"{'green' if success else 'red'} mixed operation {i}", f"response {i}",
             tool_events=[{"name": "external_checker", "verdict": success, "output": f"measured result {i}"}])
         eid = observed["episode_id"]
-        # Four real user ratings outweigh the external check in global reward;
-        # they must not reverse the label used to train the outcome predictor.
+        # Four real user ratings outweigh a passing external check in global
+        # reward; they must not reverse the label used to train the predictor.
         for rating in range(4):
             runtime.record_signal("t", episode_id=eid, kind="acceptance", value=-1 if success else 1,
                                   evidence=f"explicit feedback {i}/{rating}", final=rating == 3)
@@ -101,7 +101,10 @@ def test_training_labels_follow_external_checks_despite_opposite_user_feedback(t
             training_ids.append(eid)
             expected[eid] = int(success)
     state = runtime.writer.read("t")
-    assert all(int(state["episodes"][eid]["reward"] > 0) != value for eid, value in expected.items())
+    # Every reward is negative: the ratings outvote a passing check, and a failed
+    # check stands whatever the ratings say. The labels still follow the checks.
+    assert all(state["episodes"][eid]["reward"] < 0 for eid in expected)
+    assert sorted(expected.values()) == [0, 0, 1, 1]
     labels_seen = []
     original = local_parametric.train_logistic_adapter
 

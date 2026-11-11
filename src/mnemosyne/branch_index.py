@@ -11,8 +11,10 @@ that also maintains ordered sub-views:
 * ``in_branch(tenant, branch)``  items of one tenant on one branch;
 * ``in_any_branch(branch)``      items of every tenant on one branch;
 * ``of_tenant(tenant)``          items of one tenant on every branch;
-* ``peers(*key)``                assertions sharing tenant/branch/subject/predicate, or
-                                 relations sharing tenant/branch/source/predicate/target.
+* ``peers(*key)``                assertions sharing tenant/branch/subject/predicate key
+                                 (``assertion_group_key``: every spelling and polarity of one
+                                 attribute, the set one upsert can revise), or relations
+                                 sharing tenant/branch/source/predicate/target.
 
 Every view lists its items in the SAME relative order as iterating the full dict and
 filtering, so replacing a filtered scan with a view is byte-for-byte equivalent. Index keys
@@ -29,14 +31,24 @@ import copy
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from mnemosyne.assertion_semantics import assertion_predicate_key
 from mnemosyne.cid_lists import bump_evidence_epoch, track_evidence, untrack_evidence
 
 _MISSING = object()
 _EMPTY: dict[str, Any] = {}
 
 
+def assertion_group_key(predicate: Any) -> Any:
+    """The predicate slot of an assertion's peer key: its semantic attribute.
+
+    Revision compares attributes, not spellings ("lives_in" revises "residence",
+    "does_not_like" retracts "likes"), so the peers of an upsert are indexed the same way.
+    """
+    return assertion_predicate_key(predicate)[0] if isinstance(predicate, str) else predicate
+
+
 def _assertion_peer(item: Any) -> tuple[Any, ...]:
-    return (item.tenant_id, item.branch, item.subject, item.predicate)
+    return (item.tenant_id, item.branch, item.subject, assertion_group_key(item.predicate))
 
 
 def _relation_peer(item: Any) -> tuple[Any, ...]:

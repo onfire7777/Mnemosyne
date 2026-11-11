@@ -135,6 +135,25 @@ ENSURE_STATEMENTS: list[str] = [
         FOREIGN KEY (tenant_id, branch) REFERENCES branches(tenant_id, name)
     )
     """,
+    # branch() gives its assertion and relation copies fresh ids. This records
+    # which row each copy came from, so a merge back replays a copy onto its
+    # original instead of inserting it beside it. Ids only, no content.
+    """
+    CREATE TABLE IF NOT EXISTS branch_copies (
+        tenant_id TEXT NOT NULL,
+        branch TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('assertion', 'relation')),
+        id TEXT NOT NULL,
+        origin_id TEXT NOT NULL,
+        PRIMARY KEY (tenant_id, branch, kind, id)
+    )
+    """,
+    # An upsert reads one attribute of one subject, never the whole branch;
+    # the predicate column lets it list a subject's spellings from the index.
+    """
+    CREATE INDEX IF NOT EXISTS assertions_tenant_branch_subject_predicate_idx
+        ON assertions (tenant_id, branch, subject, predicate)
+    """,
     # relations — UNIQUE(tenant_id, branch, id); mirrors the Relation model.
     """
     CREATE TABLE IF NOT EXISTS relations (

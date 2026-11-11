@@ -190,6 +190,54 @@ def test_merge_same_object_reinforces_as_merged(tmp_path: Path) -> None:
         assert isinstance(dest_id, str) and dest_id
 
 
+def test_repeated_merges_leave_the_history_local_leaves(tmp_path: Path) -> None:
+    # branch() gives its copies fresh ids. A merge has to replay a copy onto the
+    # row it came from: a superseded copy takes no part in revision, so under its
+    # fresh id every merge added one more row per superseded fact - the history
+    # doubled with each merge of anything at all. Local keeps ids and is the oracle.
+    from datetime import UTC, datetime, timedelta
+
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+
+    def scenario(engine, tenant):
+        for step, city in enumerate(["Dakar", "Hanoi", "Dakar", "Hanoi", "Tbilisi"]):
+            moment = start + timedelta(minutes=step)
+            cid = engine.append_evidence(_evidence(tenant, f"Statement {step}: Entity lives in {city}."))
+            name = f"canary-{step}"
+            engine.branch(name, frm="main", kind="canary", tenant_id=tenant)
+            engine.upsert_assertion(Assertion(
+                tenant_id=tenant, user_id=USER, subject="Entity", predicate="lives in", object=city,
+                status="active", valid_from=moment, source_evidence_cids=[cid],
+                access_policy={"tenant": tenant}), branch=name)
+            engine.add_relation(Relation(
+                tenant_id=tenant, source="Entity", predicate="lives in", target=city, valid_from=moment,
+                source_evidence_cids=[cid], access_policy={"tenant": tenant}), branch=name)
+            engine.merge(name, into="main", tenant_id=tenant)
+        for step in range(6):  # merges that touch nothing of the chain
+            name = f"unrelated-{step}"
+            engine.branch(name, frm="main", kind="canary", tenant_id=tenant)
+            engine.upsert_assertion(Assertion(
+                tenant_id=tenant, user_id=USER, subject=f"Other {step}", predicate="status", object="fine",
+                status="active", valid_from=start, access_policy={"tenant": tenant}), branch=name)
+            engine.merge(name, into="main", tenant_id=tenant)
+        exported = engine.export_tenant(tenant)
+        facts = sorted((row["subject"], row["object"], row["status"], row["valid_to"], row["version"])
+                       for row in exported["assertions"] if row["branch"] == "main")
+        edges = sorted((row["target"], row["valid_from"], row["valid_to"])
+                       for row in exported["relations"] if row["branch"] == "main")
+        chains = {row["id"]: row["superseded_by"] for row in exported["assertions"] if row["branch"] == "main"}
+        return facts, edges, chains
+
+    sqlite_engine, local = _engines(tmp_path)
+    facts, edges, chains = scenario(sqlite_engine, TENANT)
+    oracle_facts, oracle_edges, _ = scenario(local, TENANT)
+    assert facts == oracle_facts
+    assert edges == oracle_edges
+    assert sum(1 for row in facts if row[2] == "superseded") == 4
+    # every supersession link names a row that is on main, not a branch copy
+    assert all(target is None or target in chains for target in chains.values())
+
+
 # --- branch isolation --------------------------------------------------------
 
 

@@ -74,3 +74,25 @@ def test_audit_scrub_handles_nested_reinforcement_and_preserves_unrelated_branch
     assert redact_source_audit_payload({**snapshot, "branch": "other"}, {"deleted"}) == {**snapshot, "branch": "other"}
     assert redact_source_audit_payload({"statement": "legacy"}, {"deleted"}, target_affected=True) == {
         "source_payload_erased": True}
+
+
+def test_an_erasure_on_a_second_branch_keeps_the_first_branchs_report(engine):
+    """A forget's own audit row is its custody report; the next branch must not wipe it."""
+    from mnemosyne.models import Assertion, Evidence
+
+    tenant = "audit-erasure-" + uuid4().hex
+    cid = engine.append_evidence(Evidence(
+        tenant_id=tenant, user_id="owner", actor="user", source_type="note",
+        content="The archive opens on Mondays.", access_policy={"tenant": tenant}))
+    engine.upsert_assertion(Assertion(
+        tenant_id=tenant, subject="archive", predicate="opens", object="Mondays", status="active",
+        source_evidence_cids=[cid], access_policy={"tenant": tenant}))
+    engine.branch("review", frm="main", tenant_id=tenant)
+    assert engine.forget(tenant, cid, requested_by="owner", branch="main")["erased"]
+    first = next(row for row in engine.export_tenant(tenant)["audit_log"] if row["op"] == "forget")
+    assert first["diff"]["retracted_assertions"]
+    assert engine.forget(tenant, cid, requested_by="owner", branch="review")["erased"]
+    reports = [row for row in engine.export_tenant(tenant)["audit_log"] if row["op"] == "forget"]
+    assert len(reports) == 2
+    assert reports[0]["diff"] == first["diff"]
+    assert all(row["diff"]["retracted_assertions"] for row in reports)

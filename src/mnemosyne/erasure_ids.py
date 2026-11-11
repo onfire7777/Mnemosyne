@@ -166,6 +166,28 @@ def redact_erased_cids(value: Any, placeholder_map: Mapping[str, str]) -> Any:
     return value
 
 
+def audit_custody_names(record: Mapping[str, Any], cids: set[str]) -> bool:
+    """Whether an audit row's working-memory custody lists one of ``cids``.
+
+    Such a row's id and digests are derived from the item it records, so a legal
+    hard delete must re-key it. Ask before the payload is erased: erasing the
+    payload removes the list this reads.
+    """
+    diff = record.get("diff")
+    return any(
+        isinstance(listed, (list, tuple)) and any(isinstance(cid, str) and cid in cids for cid in listed)
+        for listed in (record.get("evidence_ids"), diff.get("evidence_ids") if isinstance(diff, Mapping) else None)
+    )
+
+
+def rekey_audit_custody(record: dict[str, Any], new_id: str) -> dict[str, Any]:
+    """A copy of an audit row without its item-derived digests and under a fresh id."""
+    rekeyed = {key: value for key, value in record.items() if key not in {"working_digest", "working_item_digest"}}
+    if "id" in rekeyed:
+        rekeyed["id"] = new_id
+    return rekeyed
+
+
 def redact_source_audit_payload(
     diff: Mapping[str, Any], affected_cids: set[str], *,
     target_affected: bool = False, branch: str = "main",

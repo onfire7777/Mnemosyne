@@ -586,7 +586,8 @@ def test_postgres_engine_relation_supersession_signature() -> None:
 
 def test_hypothetical_assertions_excluded_from_trajectories() -> None:
     """Hypothetical assertions are excluded from build_attribute_trajectories and build_attribute_trajectory."""
-    text = "user: In 2020, I lived in Boston. Suppose I moved to Chicago in 2024."
+    # Present tense: "I lived in Boston" attests a past interval, not a current home.
+    text = "user: Since 2020, I live in Boston. Suppose I moved to Chicago in 2024."
     facts = extract_episodic_facts(text, speaker_role="user")
 
     # Group trajectories should exclude hypothetical Chicago move

@@ -70,6 +70,7 @@ from typing import Any, Mapping, Sequence
 
 
 from mnemosyne import text as text_kernels
+from mnemosyne.assertion_semantics import assertion_predicate_key
 from mnemosyne.access_policy import (
     VECTOR_PARTITION_NONE,
     VECTOR_PARTITION_PUBLIC,
@@ -386,6 +387,10 @@ INSERT INTO relations (
     valid_from, valid_to, source_evidence_cids, access_policy
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
+
+_BRANCH_COPY_INSERT = (
+    "INSERT OR REPLACE INTO branch_copies(tenant_id, branch, kind, id, origin_id) VALUES (?, ?, ?, ?, ?)"
+)
 
 _RELATION_UPSERT = (
     _RELATION_INSERT
@@ -4599,13 +4604,24 @@ class SqliteEngine:
     # ``correct``) mirror Local's short body directly over SQL.
 
     def _assertion_oracle(
-        self, conn: sqlite3.Connection, tenant_id: str, branch: str
+        self, conn: sqlite3.Connection, tenant_id: str, branch: str,
+        incoming: Assertion | None = None,
     ) -> LocalMemoryEngine:
         """Hydrate an upsert-scope oracle: the tenant's branch registry (so
-        Local's own ``_require_branch`` passes), the (tenant, branch) evidence
-        (read by projection-reality-monitoring + independent-corroboration), and
-        the (tenant, branch) assertions (the supersede/contest peer set). Keys
-        match Local's internal keying exactly (``_evidence_key`` / ``_branch_key``)."""
+        Local's own ``_require_branch`` passes), the evidence read by
+        projection-reality-monitoring + independent-corroboration, the
+        assertions that form the supersede/contest peer set, and the relations a
+        supersession closes. Keys match Local's internal keying exactly
+        (``_evidence_key`` / ``_branch_key``).
+
+        With ``incoming`` the oracle holds only what that one upsert can read or
+        write, which is what Local itself reads: the current members of the
+        incoming fact's group (same subject and semantic predicate) and any row
+        already stored under its id; the evidence those facts cite, looked up by
+        cid; and, only when there is a member to supersede, the relations whose
+        source is that subject. Without it the whole (tenant, branch) is loaded,
+        which costs every write the size of the store; that form is kept as the
+        reference the scoped one is tested against."""
         oracle = LocalMemoryEngine(policy=self.policy, adapters=self.adapters)
         with self._lock:
             branch_rows = conn.execute(
@@ -4613,18 +4629,74 @@ class SqliteEngine:
                 "WHERE tenant_id = ? ORDER BY rowid",
                 (tenant_id,),
             ).fetchall()
-            ev_rows = conn.execute(
-                "SELECT * FROM evidence WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
-                (tenant_id, branch),
-            ).fetchall()
-            a_rows = conn.execute(
-                "SELECT * FROM assertions WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
-                (tenant_id, branch),
-            ).fetchall()
-            rel_rows = conn.execute(
-                "SELECT * FROM relations WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
-                (tenant_id, branch),
-            ).fetchall()
+            if incoming is None:
+                ev_rows = conn.execute(
+                    "SELECT * FROM evidence WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
+                    (tenant_id, branch),
+                ).fetchall()
+                a_rows = conn.execute(
+                    "SELECT * FROM assertions WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
+                    (tenant_id, branch),
+                ).fetchall()
+                rel_rows = conn.execute(
+                    "SELECT * FROM relations WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
+                    (tenant_id, branch),
+                ).fetchall()
+            else:
+                # A subject can carry thousands of attributes (a project's
+                # configuration). Read its predicate spellings from the index,
+                # keep those of the incoming attribute, and load only their rows.
+                group = assertion_predicate_key(incoming.predicate)[0]
+                spellings = [
+                    row["predicate"] for row in conn.execute(
+                        "SELECT DISTINCT predicate FROM assertions "
+                        "WHERE tenant_id = ? AND branch = ? AND subject = ?",
+                        (tenant_id, branch, incoming.subject),
+                    )
+                    if assertion_predicate_key(row["predicate"])[0] == group
+                ]
+                found = {
+                    row["id"]: row for row in self._rows_by_key(
+                        conn, "assertions", "id", tenant_id, branch, [incoming.id]
+                    )
+                }
+                for start in range(0, len(spellings), 500):
+                    chunk = spellings[start:start + 500]
+                    for row in conn.execute(
+                        "SELECT rowid AS _rowid, * FROM assertions "
+                        "WHERE tenant_id = ? AND branch = ? AND subject = ? "
+                        f"AND predicate IN ({','.join('?' * len(chunk))}) "
+                        "AND status IN ('active', 'contested')",
+                        (tenant_id, branch, incoming.subject, *chunk),
+                    ):
+                        found[row["id"]] = row
+                a_rows = sorted(found.values(), key=lambda row: row["_rowid"])
+                cids = {str(cid) for cid in incoming.source_evidence_cids if cid}
+                for row in a_rows:
+                    cids.update(str(cid) for cid in json.loads(row["source_evidence_cids"]) if cid)
+                ev_rows = self._rows_by_key(
+                    conn, "evidence", "cid", tenant_id, branch, sorted(cids)
+                )
+                rel_rows = []
+                if any(row["id"] != incoming.id for row in a_rows) or (
+                    incoming.status == "superseded" and incoming.valid_to is not None
+                ):
+                    # A supersession closes the relations named after the fact,
+                    # and so does a fact that arrives already superseded.
+                    # Local matches them by normalized source, so match the same
+                    # way over the two columns it takes, then load the matches.
+                    source = incoming.subject.strip().lower()
+                    rel_rows = self._rows_by_key(
+                        conn, "relations", "id", tenant_id, branch,
+                        [
+                            row["id"] for row in conn.execute(
+                                "SELECT id, source FROM relations "
+                                "WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
+                                (tenant_id, branch),
+                            )
+                            if row["source"].strip().lower() == source
+                        ],
+                    )
         for row in branch_rows:
             oracle.branches[row["name"]] = {
                 "from": row["from_branch"],
@@ -4647,6 +4719,23 @@ class SqliteEngine:
                 rel
             )
         return oracle
+
+    @staticmethod
+    def _rows_by_key(
+        conn: sqlite3.Connection, table: str, column: str, tenant_id: str, branch: str,
+        keys: list[str],
+    ) -> list[sqlite3.Row]:
+        """Rows of one (tenant, branch) whose primary-key column is in ``keys``, in rowid order."""
+        rows: list[sqlite3.Row] = []
+        for start in range(0, len(keys), 500):
+            chunk = keys[start:start + 500]
+            rows.extend(conn.execute(
+                f"SELECT rowid AS _rowid, * FROM {table} WHERE tenant_id = ? AND branch = ? "
+                f"AND {column} IN ({','.join('?' * len(chunk))})",
+                (tenant_id, branch, *chunk),
+            ).fetchall())
+        rows.sort(key=lambda row: row["_rowid"])
+        return rows
 
     def _preference_oracle(
         self, conn: sqlite3.Connection, tenant_id: str
@@ -4725,7 +4814,7 @@ class SqliteEngine:
                 if not conn.in_transaction:
                     conn.execute("BEGIN IMMEDIATE")
                 self._require_branch(conn, assertion.tenant_id, branch)
-                oracle = self._assertion_oracle(conn, assertion.tenant_id, branch)
+                oracle = self._assertion_oracle(conn, assertion.tenant_id, branch, assertion)
                 before = {item.id: item.to_dict() for item in oracle.assertions.values()}
                 before_relations = {
                     item.id: item.to_dict() for item in oracle.relations.values()
@@ -4947,7 +5036,7 @@ class SqliteEngine:
         from the Local oracle (a byte-parity divergence). Tenant-optional like Local:
         with a tenant the one file is queried; without one every tenant file is
         scanned. Rows return as deep-copied ``Assertion`` objects sorted by
-        ``valid_from``."""
+        ``valid_from`` then ``id``, as Local sorts them."""
         moment = t.astimezone(UTC) if t.tzinfo else t.replace(tzinfo=UTC)
 
         def _valid_at(
@@ -4997,7 +5086,12 @@ class SqliteEngine:
                     finally:
                         if owned:
                             conn.close()
-        return sorted(matches, key=lambda item: item.valid_from)
+        # Local's order: valid_from, then id. Rows that start at the same instant
+        # must not come back in whatever order the query plan read them.
+        return sorted(matches, key=lambda item: (
+            item.valid_from.astimezone(UTC) if item.valid_from.tzinfo else item.valid_from.replace(tzinfo=UTC),
+            str(item.id),
+        ))
 
     def set_calibration(self, calibration: CalibrationSet) -> None:
         """Store the conformal calibration set at PK(tenant_id, memory_type),
@@ -5267,6 +5361,7 @@ class SqliteEngine:
                     assertion.branch = name
                     assertion.id = new_id()
                     self._insert_assertion_row(conn, assertion)
+                    conn.execute(_BRANCH_COPY_INSERT, (tenant_id, name, "assertion", assertion.id, row["id"]))
                 for row in conn.execute(
                     "SELECT * FROM relations WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
                     (tenant_id, frm),
@@ -5275,6 +5370,7 @@ class SqliteEngine:
                     rel.branch = name
                     rel.id = new_id()
                     conn.execute(_RELATION_INSERT, _relation_insert_values(rel))
+                    conn.execute(_BRANCH_COPY_INSERT, (tenant_id, name, "relation", rel.id, row["id"]))
                 self._audit_row(
                     conn,
                     tenant_id,
@@ -5294,7 +5390,12 @@ class SqliteEngine:
         matching Local not PG). Assertions: each ``frm`` assertion is cloned onto
         ``into`` and pushed through this engine's OWN :meth:`upsert_assertion`
         (supersede/contest runs) — ``assertions_added`` when the (tenant, into)
-        row count grows, else ``assertions_merged`` (the reinforce path).
+        row count grows, else ``assertions_merged`` (the reinforce path). A row
+        that ``branch()`` copied from ``into`` is replayed under the id of the
+        row it came from, as Local replays a copy under its own id: a copy the
+        branch left alone, or superseded, lands on its original instead of
+        beside it. (A superseded copy takes no part in revision, so under a
+        fresh id every merge used to add one more row per superseded fact.)
         Relations: overlapping semantic peers reinforce provenance, confidence,
         validity, and restrictive access policy; disjoint windows stay distinct.
         Returns ``MergeReport(frm, into, evidence_added, assertions_added,
@@ -5414,6 +5515,18 @@ class SqliteEngine:
                 "SELECT * FROM assertions WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
                 (tenant_id, frm),
             ).fetchall()
+            # Copies of ``into`` rows made when ``frm`` was branched from it.
+            origins: dict[str, dict[str, str]] = {"assertion": {}, "relation": {}}
+            parent = conn.execute(
+                "SELECT from_branch FROM branches WHERE tenant_id = ? AND name = ?",
+                (tenant_id, frm),
+            ).fetchone()
+            if parent is not None and parent["from_branch"] == into:
+                for copied in conn.execute(
+                    "SELECT kind, id, origin_id FROM branch_copies WHERE tenant_id = ? AND branch = ?",
+                    (tenant_id, frm),
+                ):
+                    origins[copied["kind"]][copied["id"]] = copied["origin_id"]
             # Phase 1: replay each source assertion, recording its real
             # destination id (identity when preserved, the existing peer's id
             # under semantic absorption). One complete entry per source.
@@ -5422,6 +5535,12 @@ class SqliteEngine:
                 cloned = copy.deepcopy(_assertion_from_row(row))
                 source_id = cloned.id
                 cloned.branch = into
+                cloned.id = origins["assertion"].get(source_id, source_id)
+                replaced = cloned.calibration.get("replaces_assertion_id")
+                if isinstance(replaced, str) and replaced in origins["assertion"]:
+                    cloned.calibration = {
+                        **cloned.calibration, "replaces_assertion_id": origins["assertion"][replaced],
+                    }
                 before = self._count_assertions(conn, tenant_id, into)
                 assertion_id_map[source_id] = self.upsert_assertion(cloned, branch=into)
                 after = self._count_assertions(conn, tenant_id, into)
@@ -5460,6 +5579,7 @@ class SqliteEngine:
             with conn:
                 for row in rel_rows:
                     rel = _relation_from_row(row)
+                    rel.id = origins["relation"].get(rel.id, rel.id)
                     peers = [
                         _relation_from_row(item)
                         for item in conn.execute(
@@ -5526,6 +5646,10 @@ class SqliteEngine:
                 }
                 conn.execute(
                     "DELETE FROM relations WHERE tenant_id = ? AND branch = ?",
+                    (tenant_id, branch),
+                )
+                conn.execute(
+                    "DELETE FROM branch_copies WHERE tenant_id = ? AND branch = ?",
                     (tenant_id, branch),
                 )
                 conn.execute(
@@ -6268,15 +6392,28 @@ class SqliteEngine:
                             descriptor["item_id"],
                         ),
                     )
-                from mnemosyne.erasure_ids import redact_source_audit_payload
+                from mnemosyne.erasure_ids import (
+                    audit_custody_names, redact_source_audit_payload, rekey_audit_custody,
+                )
                 audit_targets = {identifier for name in (
                     "retracted_assertions", "trimmed_assertions", "expired_relations", "trimmed_relations",
                     "retracted_preferences", "trimmed_preferences",
                 ) for identifier in propagated[name]}
+                # Rows whose working-memory custody names an erased source:
+                # erasing the payload removes that list, and a legal hard
+                # delete still has to re-key them.
+                custody_rows: set[int] = set()
                 for row in conn.execute(
                     "SELECT seq, record FROM audit_log WHERE tenant_id = ?", (tenant_id,),
                 ).fetchall():
                     record = json.loads(row["record"])
+                    if audit_custody_names(record, affected_cids):
+                        custody_rows.add(row["seq"])
+                    if record.get("op") == "forget":
+                        # An erasure's own record is its custody report (ids,
+                        # never source text): a forget spanning several branches
+                        # must not wipe the report of the previous one.
+                        continue
                     diff = redact_source_audit_payload(
                         record.get("diff", {}), affected_cids,
                         target_affected=record.get("target_id") in audit_targets, branch=branch,
@@ -6304,6 +6441,8 @@ class SqliteEngine:
                             redacted = self._redact_working_digests(
                                 json.loads(row["record"]), placeholder_map
                             )
+                            if table == "audit_log" and row["seq"] in custody_rows:
+                                redacted = rekey_audit_custody(redacted, new_id())
                             conn.execute(
                                 f"UPDATE {table} SET record = ? WHERE seq = ?",
                                 (json_text(redacted), row["seq"]),

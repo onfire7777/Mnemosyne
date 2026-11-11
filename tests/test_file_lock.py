@@ -53,7 +53,8 @@ def test_windows_empty_file_locks_byte_zero_and_retries_only_eacces(
     assert lock_path.read_bytes() == b""
     assert [call[1:] for call in calls[:-1]] == [(1, 1)] * 127
     assert calls[-1][1:] == (2, 1)
-    assert sleeps == [0.1] * 126
+    # the contended lock is polled every 25 ms so a caller's deadline is honoured promptly
+    assert sleeps == [0.025] * 126
 
 
 @pytest.mark.parametrize("failure", [OSError(errno.EPERM, "denied"), KeyboardInterrupt()])

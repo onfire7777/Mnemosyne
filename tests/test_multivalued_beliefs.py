@@ -244,3 +244,19 @@ def test_historical_graph_keeps_both_additive_members(engine):
         "t", "user", "has_pet", (START + timedelta(days=2)).isoformat(), user_id="alice",
     )
     assert {row["object"] for row in result["assertions"]} == {"Buster", "Fido"}
+
+
+@pytest.mark.parametrize("past_city, edge_stays_open", [("Paris", True), ("Rome", False)])
+def test_a_past_interval_ends_only_its_own_edge(engine, past_city, edge_stays_open):
+    """A fact stored as already superseded ends its relation, unless a current fact still holds that value."""
+    engine.upsert_assertion(Assertion(
+        tenant_id="t", subject="user", predicate="residence", object="Paris", status="active", valid_from=START))
+    for city in ("Paris", "Rome"):
+        engine.add_relation(Relation(tenant_id="t", source="user", predicate="lives_in", target=city, valid_from=START))
+    engine.upsert_assertion(Assertion(
+        tenant_id="t", subject="user", predicate="residence", object=past_city, status="superseded",
+        valid_from=START + timedelta(days=1), valid_to=START + timedelta(days=30)))
+    edges = {row["target"]: row["valid_to"] for row in engine.export_tenant("t")["relations"]}
+    assert (edges[past_city] is None) is edge_stays_open
+    other = "Rome" if past_city == "Paris" else "Paris"
+    assert edges[other] is None
