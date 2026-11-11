@@ -113,7 +113,10 @@ def observed_action(event: dict) -> str | None:
     name = event.get("name")
     if not isinstance(name, str) or not name.strip():
         return None
-    if event.get("status") not in {None, "completed", "complete", "succeeded", "failed", "success", "failure"}:
+    # Finished actions only; an unfinished one (e.g. "inProgress") is not an
+    # observed step. "ok" is the finished-success spelling the trajectory
+    # fixtures and the learning evals emit.
+    if event.get("status") not in {None, "ok", "completed", "complete", "succeeded", "failed", "success", "failure"}:
         return None
     fields = {key: event[key] for key in ("command", "arguments", "cwd", "conditions")
               if key in event and event[key] is not None}

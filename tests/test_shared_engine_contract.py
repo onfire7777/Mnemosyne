@@ -2184,6 +2184,8 @@ def test_shared_engine_contract_higher_trust_assertion_overrides_newer_machine_c
 ) -> None:
     engine, tenant, user = engine_bundle
     subject = f"shared source truth subject {uuid4()}"
+    # A single-valued attribute: additive predicates such as "prefers" keep
+    # every value, so they have no conflict for trust to resolve.
     machine_cid = _append_evidence(
         engine,
         tenant,
@@ -2196,7 +2198,7 @@ def test_shared_engine_contract_higher_trust_assertion_overrides_newer_machine_c
             tenant_id=tenant,
             user_id=user,
             subject=subject,
-            predicate="prefers",
+            predicate="stored_in",
             object="machine guess",
             confidence=0.72,
             valid_from=datetime(2026, 6, 21, tzinfo=UTC),
@@ -2218,7 +2220,7 @@ def test_shared_engine_contract_higher_trust_assertion_overrides_newer_machine_c
             tenant_id=tenant,
             user_id=user,
             subject=subject,
-            predicate="prefers",
+            predicate="stored_in",
             object="human-authored markdown",
             confidence=0.99,
             valid_from=datetime(2026, 6, 20, tzinfo=UTC),
@@ -2233,7 +2235,7 @@ def test_shared_engine_contract_higher_trust_assertion_overrides_newer_machine_c
             tenant_id=tenant,
             user_id=user,
             subject=subject,
-            predicate="prefers",
+            predicate="stored_in",
             object="newer machine guess",
             confidence=0.99,
             valid_from=datetime(2026, 6, 22, tzinfo=UTC),
@@ -4092,8 +4094,11 @@ def test_shared_engine_contract_memory_tools_parametric_facades(
     assert set(artifact["source_ids"]) == {curated_lesson.id, curated_procedure.id}
     assert artifact["artifact_uri"].startswith("local-parametric://")
     assert artifact["security"]["allowed"] is True
-    assert evaluated["promoted"] is True
-    assert evaluated["artifact"]["status"] == "promoted"
+    # The local shadow tier has no evaluator: a resolved protected suite is
+    # not evidence that its cases ran, so the adapter is not promoted.
+    assert evaluated["promoted"] is False
+    assert evaluated["reason"] == "measured adapter evaluator required"
+    assert evaluated["artifact"]["status"] == "shadow"
     assert evaluated["protected_suite"]["source"] == "runtime_state"
     assert evaluated["protected_suite"]["protected_case_ids"] == [protected_case_id]
     assert evaluated["protected_suite"]["tier_counts"] == {"core": 1}
@@ -4359,12 +4364,14 @@ def test_shared_engine_contract_bitemporal_assertion_as_of(engine_bundle: tuple[
         )
     )
     subject = f"shared-user-{uuid4()}"
+    # "status" is single-valued, so the later value supersedes the earlier one;
+    # an additive predicate such as "prefers" would keep both current.
     engine.upsert_assertion(
         Assertion(
             tenant_id=tenant,
             user_id=user,
             subject=subject,
-            predicate="prefers",
+            predicate="status",
             object="alpha",
             confidence=0.9,
             valid_from=now,
@@ -4379,7 +4386,7 @@ def test_shared_engine_contract_bitemporal_assertion_as_of(engine_bundle: tuple[
             tenant_id=tenant,
             user_id=user,
             subject=subject,
-            predicate="prefers",
+            predicate="status",
             object="beta",
             confidence=0.92,
             valid_from=now + timedelta(minutes=5),
@@ -4390,8 +4397,8 @@ def test_shared_engine_contract_bitemporal_assertion_as_of(engine_bundle: tuple[
         )
     )
 
-    past = engine.as_of(subject, "prefers", now + timedelta(minutes=1), tenant_id=tenant)
-    current = engine.as_of(subject, "prefers", now + timedelta(minutes=10), tenant_id=tenant)
+    past = engine.as_of(subject, "status", now + timedelta(minutes=1), tenant_id=tenant)
+    current = engine.as_of(subject, "status", now + timedelta(minutes=10), tenant_id=tenant)
 
     assert [item.object for item in past] == ["alpha"]
     assert [item.object for item in current] == ["beta"]

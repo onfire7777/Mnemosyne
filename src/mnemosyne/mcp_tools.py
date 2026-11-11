@@ -4078,7 +4078,7 @@ class MemoryTools:
         if not runtime._enabled(state, "lessons"):
             return
         episode = state["episodes"][episode_id]
-        from mnemosyne.memory_formation import direct_user_clauses
+        from mnemosyne.memory_formation import direct_user_clauses, directive_body
         sources = [source for cid in episode.get("source_cids", [])
                    if (source := self.engine.get_evidence(tenant_id, cid)) is not None
                    and source.actor == "user" and source.user_id == user_id
@@ -4088,11 +4088,14 @@ class MemoryTools:
             return
         source_cids = [source.cid for source in sources]
         for clause in direct_user_clauses(sources[0], include_directives=True):
-            scope = {} if re.match(r"(?:i (?:would )?prefer|from now on|always)\b", clause, re.IGNORECASE) else {"session_id": session_id}
+            # "No, use bullets instead." is matched past its opener; the profile
+            # keeps the user's exact clause.
+            body = directive_body(clause)
+            scope = {} if re.match(r"(?:i (?:would )?prefer|from now on|always)\b", body, re.IGNORECASE) else {"session_id": session_id}
             scope["_learning_source_cids"] = source_cids
             preference = re.match(
                 r"(?:i (?:would )?prefer|from now on|please (?:use|keep|respond)|(?:use|write|respond)\b.{0,100}\binstead)\b",
-                clause, re.IGNORECASE,
+                body, re.IGNORECASE,
             )
             if preference and not any(entry.tenant_id == tenant_id and entry.user_id == user_id
                                       and entry.statement == clause and entry.scope == scope
@@ -4100,7 +4103,7 @@ class MemoryTools:
                 self.profile_record_explicit(tenant_id, user_id, clause, scope=scope,
                                              source_evidence_cids=source_cids)
             if re.match(r"(?:i (?:made (?:a|the) mistake|forgot|keep forgetting|missed|misread)|my mistake)\b",
-                        clause, re.IGNORECASE) and not any(
+                        body, re.IGNORECASE) and not any(
                     event.tenant_id == tenant_id and event.user_id == user_id
                     and event.pattern == clause and event.scope == scope
                     for event in self.user_model.mistake_events):

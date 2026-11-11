@@ -9118,12 +9118,15 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 "retracted_assertions", "trimmed_assertions", "expired_relations", "trimmed_relations",
                 "retracted_preferences", "trimmed_preferences",
             ) for identifier in propagated[name]}
-            for record in self.audit_log:
+            # Replace, never mutate: exports hand out these record dicts, so an
+            # in-place edit would rewrite snapshots taken before this erasure
+            # (and survive a source_transaction rollback inside them).
+            for index, record in enumerate(self.audit_log):
                 if record.get("tenant_id") == tenant_id:
-                    record["diff"] = redact_source_audit_payload(
+                    self.audit_log[index] = {**record, "diff": redact_source_audit_payload(
                         record.get("diff", {}), affected_cids,
                         target_affected=record.get("target_id") in audit_targets, branch=branch,
-                    )
+                    )}
             # Spec §7 privacy invariant 13: a hard delete is unrecoverable, so NO
             # retained record may carry the erased cid — not the deletion_log
             # evidence_cid, not the provenance arrays / standing-cascade refs inside

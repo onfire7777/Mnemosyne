@@ -122,6 +122,22 @@ def test_directives_require_explicit_profile_mode(text):
 
 
 @pytest.mark.parametrize("text", [
+    "No, use bullet points instead.", "Actually, please use JSON.", "No, I prefer short answers.",
+])
+def test_profile_mode_matches_past_a_correction_opener(text):
+    assert direct_user_clauses(text) == []
+    assert direct_user_clauses(text, include_directives=True) == [text]
+
+
+@pytest.mark.parametrize("text", [
+    "No, that is correct.", "No, I meant the current month.", "Actually this worked perfectly.",
+    '"No, use bullet points instead."',
+])
+def test_correction_opener_alone_is_not_a_directive(text):
+    assert direct_user_clauses(text, include_directives=True) == []
+
+
+@pytest.mark.parametrize("text", [
     '"Please use JSON."', '> Please use JSON.',
     'Example:\nPlease use JSON.', '```\nPlease use JSON.\n```',
     'Please use JSON if I ask for machine output.',

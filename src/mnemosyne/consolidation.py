@@ -327,11 +327,33 @@ class _PreparedFact:
     candidate: Candidate
     access_policy: dict[str, Any]
 
+    def _revises_tenant_fact(self, engine: LocalMemoryEngine, branch: str) -> bool:
+        """Whether a current unowned, unscoped fact already holds this subject and predicate.
+
+        Revision is scoped to one owner, so an owned candidate would sit beside
+        such a fact instead of revising it: the stale value would stay current
+        and the supersession rail would never see the change.
+        """
+        job = self.job
+        keyed = getattr(engine, "tenant_fact_is_current", None)
+        if callable(keyed):
+            # The in-memory engine answers by group key without settling a thin canary.
+            return keyed(job.tenant_id, branch, job.candidate_subject, job.candidate_predicate)
+        return any(
+            item.user_id is None and not item.scope and item.status in {"active", "contested"}
+            for item in engine.as_of(job.candidate_subject, job.candidate_predicate, utc_now(),
+                                     tenant_id=job.tenant_id, branch=branch)
+        )
+
     def apply(self, engine: LocalMemoryEngine, branch: str) -> None:
         job = self.job
         from mnemosyne.project_observations import consolidated_fact_metadata
         ownership = consolidated_fact_metadata(engine, job.tenant_id, job.source_evidence_cids,
             branch, job.candidate_subject, job.candidate_predicate, job.candidate_object)
+        if ownership and self._revises_tenant_fact(engine, branch):
+            # Continue the tenant-level fact's own lineage, as consolidation
+            # did before facts carried an owner.
+            ownership = {}
         engine.upsert_assertion(
             Assertion(
                 tenant_id=job.tenant_id,

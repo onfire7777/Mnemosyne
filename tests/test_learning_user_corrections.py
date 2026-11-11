@@ -11,6 +11,10 @@ from mnemosyne.gate import Candidate, PromotionGate, RegressionCase
 
 QUERY = "Format the build summary"
 CORRECTION = "Use a JSON object for build summaries."
+# A request sharing no words with the correction. User turns are stored as
+# grounded, so an overlapping request is retrieved beside the correction and
+# lifts the ungrounded-only abstention the factual-confidence tests rely on.
+UNRELATED_QUERY = "Report the nightly status"
 
 
 def record_correction(runtime, correction=CORRECTION, query=QUERY):
@@ -24,7 +28,7 @@ def record_correction(runtime, correction=CORRECTION, query=QUERY):
 
 def test_authoritative_user_quote_enters_probation_without_factual_confidence():
     runtime = LearningRuntime(LocalMemoryEngine())
-    record_correction(runtime)
+    record_correction(runtime, query=UNRELATED_QUERY)
     quoted = runtime.engine.retrieve(
         CORRECTION, "t", record_access=False,
         filt={"principal": "u", "user_id": "u", "role": "reader"},
@@ -37,12 +41,12 @@ def test_authoritative_user_quote_enters_probation_without_factual_confidence():
     assert lesson["state"] == "probation"
     assert lesson["gate_evidence"]["protected_passed"]
     assert lesson["source_quotes"][0]["quote"] == CORRECTION
-    assert lesson["scope_match"] == {"kind": "exact_query", "query": QUERY}
+    assert lesson["scope_match"] == {"kind": "exact_query", "query": UNRELATED_QUERY}
 
 
 def test_default_factual_gate_still_requires_nonabstaining_retrieval():
     runtime = LearningRuntime(LocalMemoryEngine())
-    record_correction(runtime)
+    record_correction(runtime, query=UNRELATED_QUERY)
     case = RegressionCase("fact", "build-summary", CORRECTION, CORRECTION,
                           protected=True)
     proposal = Candidate("fact-candidate", "fact", "build-summary", CORRECTION,
@@ -71,7 +75,10 @@ def test_runtime_case_with_same_id_retains_its_factual_contract():
 
 def test_imported_candidate_cannot_claim_user_quote_proof():
     runtime = LearningRuntime(LocalMemoryEngine())
-    episode = runtime.episode("t", record_correction(runtime))
+    episode = runtime.episode("t", record_correction(runtime, query=UNRELATED_QUERY))
+    # The same candidate passes as a learned lesson, by quote proof alone.
+    learned = _candidate("build-summary", [CORRECTION], [episode], kind="lesson")
+    assert evaluate_candidate(runtime, "t", learned, [episode])
     proposed = _candidate("build-summary", [CORRECTION], [episode], kind="lesson")
     proposed.update(origin="imported", source_quote_proof=True,
                     source_origin={"tenant_id": "t", "user_id": "u", "source_sha": "import"})

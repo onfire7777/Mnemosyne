@@ -21,6 +21,10 @@ _FIRST_PERSON = re.compile(r"^(?:I\b|I['’](?:m|ve|ll|d)\b|We\b|We['’](?:re|v
 _DIRECTIVE = re.compile(
     r"^(?:please\s+(?:use|keep|respond)\b|from\s+now\s+on\b|(?:use|write|respond)\b.+\binstead\b)", re.I,
 )
+# A correction often opens with an interjection ("No, use bullets instead.").
+# It is still the user's own directive: profile mode matches past the opener
+# while the stored clause keeps the user's exact words.
+_CORRECTION_OPENER = re.compile(r"^(?:no|nope|actually)[,!]\s+", re.I)
 _HYPOTHETICAL = re.compile(
     r"\b(?:if|suppose|imagine|hypothetically|assuming|maybe|perhaps|might|possibly|probably)\b"
     r"|\b(?:I|we|he|she|they|it)\s+may\b|\bmay\s+(?:not\s+)?(?:be|have|live|move|work|prefer|like|need)\b"
@@ -105,14 +109,22 @@ def memory_source_clauses(source_or_text) -> list[str]:
 
 
 
+def directive_body(clause: str) -> str:
+    """The clause without a leading correction interjection ("No, ...")."""
+    return _CORRECTION_OPENER.sub("", clause, count=1)
+
+
 def direct_user_clauses(source_or_text, *, include_directives: bool = False) -> list[str]:
     """Return original declarative clauses, omitting quoted or uncertain prose."""
-    return [clause for clause in memory_source_clauses(source_or_text) if (
-        (_FIRST_PERSON.match(_strip_temporal_affixes(clause)) or include_directives and _DIRECTIVE.match(clause))
-        and not _HYPOTHETICAL.search(clause)
-        and not re.search(r"\b(?:says|said|told|claims|believes|according to)\b", clause, re.I)
-        and not re.match(r"I\s+(?:said|wrote|quoted|read|asked|ran|clicked|opened|mean|meant|want\s+you|need\s+you)\b", clause, re.I)
-    )]
+    def owned(clause: str) -> bool:
+        body = directive_body(clause) if include_directives else clause
+        return bool(
+            (_FIRST_PERSON.match(_strip_temporal_affixes(body)) or include_directives and _DIRECTIVE.match(body))
+            and not _HYPOTHETICAL.search(clause)
+            and not re.search(r"\b(?:says|said|told|claims|believes|according to)\b", clause, re.I)
+            and not re.match(r"I\s+(?:said|wrote|quoted|read|asked|ran|clicked|opened|mean|meant|want\s+you|need\s+you)\b", body, re.I)
+        )
+    return [clause for clause in memory_source_clauses(source_or_text) if owned(clause)]
 
 
 _DURABLE_PREDICATES = frozenset({

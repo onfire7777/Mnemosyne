@@ -357,6 +357,23 @@ class CanaryOverlayMixin:
                     found.add(fact_id)
         return found
 
+    def tenant_fact_is_current(self, tenant_id: str, branch: str, subject: str, predicate: str) -> bool:
+        """Whether ``branch`` holds a current fact of this group with no owner and no scope.
+
+        A keyed read that settles nothing. An overlay that has not copied the group
+        answers with its parent's rows, which are the rows a copy would hold; a deferred
+        replay only re-stamps a group, so owner, scope and status are already exact.
+        """
+        overlay = (self._overlays or {}).get(branch)
+        with self._overlay_context():
+            members = self._assertion_items.peers(tenant_id, branch, subject, predicate)
+            if not members and overlay is not None and overlay.tenant_id == tenant_id:
+                members = self._assertion_items.peers(tenant_id, overlay.parent, subject, predicate)
+            return any(
+                item.user_id is None and not item.scope and item.status in _ACTIVE
+                for item in members.values()
+            )
+
     # ------------------------------------------------------------------ stability
 
     def _overlay_group_unstable(self, tenant_id: str, group: tuple[str, str]) -> bool:

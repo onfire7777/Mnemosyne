@@ -4044,7 +4044,9 @@ def test_mcp_server_persists_parametric_artifacts_and_rolls_back(tmp_path: Path)
     assert proposal_record["payload"]["phase"] == "proposal"
     assert evaluated["artifact"]["id"] == artifact["id"]
     assert evaluated["promoted"] is False
-    assert evaluated["reason"] == "no validated source lessons or procedures"
+    # Evaluation stops at the first missing requirement: the default local
+    # tier has no measured evaluator, which is checked before the sources.
+    assert evaluated["reason"] == "measured adapter evaluator required"
     assert rolled_back["status"] == "rolled_back"
     assert rolled_back["rollback_ref"].startswith("rollback-")
     assert rollback_record["payload"]["phase"] == "rolled_back"

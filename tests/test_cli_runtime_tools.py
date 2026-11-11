@@ -13813,6 +13813,8 @@ def test_cli_assert_write_rejects_untrusted_source(tmp_path: Path) -> None:
 
 
 def test_cli_source_sync_applies_committed_markdown_git_assertion_as_source_truth(tmp_path: Path) -> None:
+    # "stored_in" is single-valued. An additive predicate such as "prefers"
+    # keeps every value, leaving no conflict for the human source to win.
     store = tmp_path / "mnemosyne.json"
     source_repo = tmp_path / "source-repo"
     source_repo.mkdir()
@@ -13836,7 +13838,7 @@ def test_cli_source_sync_applies_committed_markdown_git_assertion_as_source_trut
 ```mnemosyne-assertion
 id = "cli-source-truth"
 subject = "Mnemosyne source truth"
-predicate = "prefers"
+predicate = "stored_in"
 object = "Markdown git"
 confidence = 0.99
 valid_from = "2026-06-20T00:00:00Z"
@@ -13863,7 +13865,7 @@ reviewed_by = "human"
         "--source-type",
         "model",
         "--content",
-        "Machine assertion says the source truth prefers generated memory.",
+        "Machine assertion says the source truth is stored in generated memory.",
         "--trust-tier",
         "3",
     )
@@ -13877,7 +13879,7 @@ reviewed_by = "human"
         "--subject",
         "Mnemosyne source truth",
         "--predicate",
-        "prefers",
+        "stored_in",
         "--object",
         "generated memory",
         "--evidence-cid",
@@ -13909,7 +13911,7 @@ reviewed_by = "human"
     active = [
         item
         for item in exported["assertions"]
-        if item["subject"] == "Mnemosyne source truth" and item["predicate"] == "prefers" and item["status"] == "active"
+        if item["subject"] == "Mnemosyne source truth" and item["predicate"] == "stored_in" and item["status"] == "active"
     ]
     machine_assertion = next(item for item in raw_exported["assertions"] if item["object"] == "generated memory")
     evidence_audit = next(
@@ -14484,14 +14486,21 @@ def test_cli_parametric_tier_can_use_command_provider(tmp_path: Path) -> None:
     assert proposal_record["payload"]["provider"]["metadata"] == {"lesson_count": 1, "procedure_count": 1}
     assert evaluated["protected_suite"]["source"] == "runtime_state"
     assert evaluated["protected_suite"]["protected_case_ids"] == ["parametric-runtime-protected"]
-    assert evaluated["artifact"]["rail_report"]["protected_suite"]["tier_counts"] == {"core": 1}
+    assert evaluated["protected_suite"]["tier_counts"] == {"core": 1}
+    # This command provider trains and rolls back but has no evaluator. The
+    # resolved suite is not evidence that its cases ran, so nothing is promoted.
+    assert evaluated["promoted"] is False
+    assert evaluated["reason"] == "measured adapter evaluator required"
+    assert evaluated["artifact"]["status"] == "shadow"
     assert rolled_back["rollback_ref"] == f"provider-rollback-{artifact['id']}"
     assert rolled_back["metrics"]["provider_rolled_back"] == 1.0
     assert rolled_back["metrics"]["rollback_protected_cases"] == 1.0
     assert rolled_back["protected_suite"]["source"] == "runtime_state"
     assert rollback_record["payload"]["provider"]["rollback_ref"] == f"provider-rollback-{artifact['id']}"
     assert rollback_record["payload"]["protected_suite"]["protected_case_ids"] == ["parametric-runtime-protected"]
-    assert [call["action"] for call in calls] == ["propose", "rollback"]
+    # The unmeasured evaluation deactivates through the provider before the
+    # operator's own rollback.
+    assert [call["action"] for call in calls] == ["propose", "rollback", "rollback"]
     assert calls[-1]["protected_cases"] == ["parametric-runtime-protected"]
     assert calls[-1]["protected_suite"]["protected_case_count"] == 1
 
@@ -15316,12 +15325,15 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
     assert promoted["promoted"] is False
     assert set(artifact["source_ids"]) == {curated_lesson, curated_procedure}
     assert evaluated_artifact["artifact"]["id"] == artifact["id"]
-    assert evaluated_artifact["promoted"] is True
+    # The default local tier has no evaluator; persisted protected cases are
+    # not evidence that they ran, so the adapter stays in shadow.
+    assert evaluated_artifact["promoted"] is False
+    assert evaluated_artifact["reason"] == "measured adapter evaluator required"
     assert artifact["artifact_uri"].startswith("local-parametric://")
     assert proposal_record["payload"]["phase"] == "proposal"
     assert proposal_record["artifact"]["status"] == "shadow"
-    assert evaluated_record["payload"]["phase"] == "promoted"
-    assert evaluated_record["artifact"]["status"] == "promoted"
+    assert evaluated_record["payload"]["phase"] == "shadow"
+    assert evaluated_record["artifact"]["status"] == "shadow"
     assert rolled_back_artifact["status"] == "rolled_back"
     assert rolled_back_artifact["rollback_ref"].startswith("rollback-")
     assert rollback_record["payload"]["phase"] == "rolled_back"
@@ -15329,7 +15341,9 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
     assert promoted_procedure["gate"]["promoted"] is False
     assert rolled_back["status"] == "retired"
     assert rolled_back_search["procedures"][0]["id"] == procedure["id"]
-    assert ops["tripwires"]["gate_promotions"] >= 1
+    # Nothing in this flow is promoted: the lesson and procedure lack
+    # outcome-grounded sources and the adapter was never measured.
+    assert ops["tripwires"]["gate_promotions"] == 0
     assert ops["tripwires"]["gate_rollbacks"] >= 2
 
 
