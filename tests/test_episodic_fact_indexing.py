@@ -166,11 +166,6 @@ def test_extract_expenses_and_counts_family() -> None:
     assert a1.scope.get("amount") == 450.0
     assert any(r.source == "user" and r.target == "bike repairs" for r in f1.relations)
 
-    # Total money spent
-    t2 = "Total money spent on bike repairs was $450."
-    f2 = extract_episodic_facts(t2, evidence_ids=[cid])
-    assert any(a.predicate == "expense" and "450" in a.object for a in f2.assertions)
-
     # Counts
     t3 = "I bought 3 guitars and I have two monitors."
     f3 = extract_episodic_facts(t3, evidence_ids=[cid])

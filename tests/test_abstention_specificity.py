@@ -85,17 +85,17 @@ def test_proper_noun_present_allows_full_support() -> None:
 
 def test_compound_noun_cross_document_isolation() -> None:
     hit_table = _make_hit("h1", "I bought an antique table lamp for the dining room.")
-    hit_tennis = _make_hit("h2", "I watched the exciting tennis championship match yesterday.")
-    query = "Did I buy a table tennis racket?"
+    hit_coffee = _make_hit("h2", "I drink fresh coffee every morning before work.")
+    query = "Did I buy a coffee table?"
 
-    # Table and tennis appear in separate documents, NOT within <= 2 tokens in the same document
-    supp_split = query_support(query, [hit_table, hit_tennis])
+    # Coffee and table appear in separate documents, NOT within <= 2 tokens in the same document
+    supp_split = query_support(query, [hit_table, hit_coffee])
     assert supp_split["anchor_grounding"]["satisfied"] is False
-    assert "table tennis" in supp_split["anchor_grounding"]["missing_compounds"]
+    assert "coffee table" in supp_split["anchor_grounding"]["missing_compounds"]
     assert supp_split["score"] <= 0.35
 
-    # Grounded hit with table tennis in the same hit
-    hit_together = _make_hit("h3", "I bought a professional table tennis racket and balls.")
+    # Grounded hit with coffee table in the same hit
+    hit_together = _make_hit("h3", "I bought a walnut coffee table and two chairs.")
     supp_together = query_support(query, [hit_together])
     assert supp_together["anchor_grounding"]["satisfied"] is True
     assert supp_together["anchor_grounding"]["missing_compounds"] == []
