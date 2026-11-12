@@ -137,7 +137,7 @@ def test_query_intent_adaptive_currency_promotion():
 def test_taxonomic_expansion_and_dynamic_concept_bridge():
     """Verify taxonomic hypernym expansion and dynamic corpus-learned concept bridging."""
     # Static taxonomy
-    assert "truck" in expand_taxonomic_concepts(["vehicle"])
+    assert "van" in expand_taxonomic_concepts(["vehicle"])
     assert "motorcycle" in expand_taxonomic_concepts(["vehicles"])
     assert "mother" in expand_taxonomic_concepts(["parents"])
     assert "grandfather" in expand_taxonomic_concepts(["grandpa"])
@@ -152,7 +152,7 @@ def test_taxonomic_expansion_and_dynamic_concept_bridge():
     assert "scooter" in bridged
 
     # similar_query_terms integration
-    assert similar_query_terms("vehicle", "truck")
+    assert similar_query_terms("vehicle", "van")
     assert similar_query_terms("vehicle", "motorcycle")
     assert similar_query_terms("parent", "mother")
     assert similar_query_terms("grandpa", "grandfather")
@@ -178,10 +178,10 @@ def test_conjunctive_nominal_abstention_grounding():
         channel="c",
     )
 
-    # 1. Query asks for both desk lamp AND bookcase: one conjunct missing
-    res = query_support("What is the total cost of my recently purchased desk lamp and the bookcase?", [hit])
+    # 1. Query asks for both desk lamp AND ottoman: one conjunct missing
+    res = query_support("How much did I pay for the desk lamp and the ottoman?", [hit])
     assert res["anchor_grounding"]["satisfied"] is False
-    assert any("bookcase" in err for err in res["anchor_grounding"]["missing_conjunctions"])
+    assert any("ottoman" in err for err in res["anchor_grounding"]["missing_conjunctions"])
     assert res["score"] <= 0.35
 
     # 2. Both conjuncts missing: must fail grounding

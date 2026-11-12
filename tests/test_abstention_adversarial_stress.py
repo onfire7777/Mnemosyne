@@ -116,21 +116,21 @@ def test_answerable_2hop_linked_facts_does_not_falsely_abstain() -> None:
 # Adversarial Stress Failures
 # ---------------------------------------------------------------------------
 
-def test_adversarial_dr_johnson_with_randy_johnson_distractor() -> None:
-    """False premise Dr. Johnson must abstain when memory only has Dr. Smith + Randy Johnson."""
+def test_adversarial_dr_okafor_with_randy_okafor_distractor() -> None:
+    """False premise Dr. Okafor must abstain when memory only has Dr. Lindqvist + Randy Okafor."""
     engine = LocalMemoryEngine()
     try:
         engine.append_evidence(Evidence(
             tenant_id="t1", branch="main", user_id="u", actor="user", source_type="conversation",
-            content="Dr. Smith prescribed me cyclobenzaprine for my acute back pain.", metadata={}
+            content="Dr. Lindqvist prescribed me cyclobenzaprine for my acute back pain.", metadata={}
         ))
         engine.append_evidence(Evidence(
             tenant_id="t1", branch="main", user_id="u", actor="user", source_type="conversation",
-            content="Former pitcher Randy Johnson won 300 games in Major League Baseball.", metadata={}
+            content="Former pitcher Randy Okafor won 300 games in Major League Baseball.", metadata={}
         ))
-        query = "What medication did Dr. Johnson prescribe for my back pain?"
+        query = "What medication did Dr. Okafor prescribe for my back pain?"
         res = engine.retrieve(query, tenant_id="t1", record_access=False)
-        # MUST abstain because Dr. Johnson is ungrounded (Frankenstein split)
+        # MUST abstain because Dr. Okafor is ungrounded (Frankenstein split)
         assert res.abstained is True, f"Expected abstention but got confident answer with hits: {[h.text for h in res.hits]}"
         qs = res.explain["confidence"]["query_support"]
         assert qs["score"] <= 0.35
@@ -138,19 +138,19 @@ def test_adversarial_dr_johnson_with_randy_johnson_distractor() -> None:
         engine.close()
 
 
-def test_adversarial_randy_smith_frankenstein_proper_noun() -> None:
-    """False premise Randy Smith must abstain when Randy and Smith are in separate documents."""
+def test_adversarial_randy_lindqvist_frankenstein_proper_noun() -> None:
+    """False premise Randy Lindqvist must abstain when Randy and Lindqvist are in separate documents."""
     engine = LocalMemoryEngine()
     try:
         engine.append_evidence(Evidence(
             tenant_id="t1", branch="main", user_id="u", actor="user", source_type="conversation",
-            content="Dr. Smith prescribed me cyclobenzaprine for my back pain.", metadata={}
+            content="Dr. Lindqvist prescribed me cyclobenzaprine for my back pain.", metadata={}
         ))
         engine.append_evidence(Evidence(
             tenant_id="t1", branch="main", user_id="u", actor="user", source_type="conversation",
-            content="Randy Johnson won the Cy Young Award.", metadata={}
+            content="Randy Okafor won the Cy Young Award.", metadata={}
         ))
-        query = "Did Randy Smith prescribe medication for my back pain?"
+        query = "Did Randy Lindqvist prescribe medication for my back pain?"
         res = engine.retrieve(query, tenant_id="t1", record_access=False)
         assert res.abstained is True, f"Expected abstention but got confident answer with hits: {[h.text for h in res.hits]}"
     finally:
@@ -176,21 +176,21 @@ def test_adversarial_possessive_entity_split_emmas_dog() -> None:
         engine.close()
 
 
-def test_adversarial_possessive_dr_johnsons_clinic() -> None:
-    """False premise Dr. Johnson's clinic must abstain when split across documents."""
+def test_adversarial_possessive_dr_okafors_clinic() -> None:
+    """False premise Dr. Okafor's clinic must abstain when split across documents."""
     engine = LocalMemoryEngine()
     try:
         engine.append_evidence(Evidence(
             tenant_id="t1", branch="main", user_id="u", actor="user", source_type="conversation",
-            content="Dr. Smith opened a new clinic in downtown Seattle.", metadata={}
+            content="Dr. Lindqvist opened a new clinic in downtown Seattle.", metadata={}
         ))
         engine.append_evidence(Evidence(
             tenant_id="t1", branch="main", user_id="u", actor="user", source_type="conversation",
-            content="Former pitcher Randy Johnson won 300 games in Major League Baseball.", metadata={}
+            content="Former pitcher Randy Okafor won 300 games in Major League Baseball.", metadata={}
         ))
-        query = "Where is Dr. Johnson's clinic located?"
+        query = "Where is Dr. Okafor's clinic located?"
         res = engine.retrieve(query, tenant_id="t1", record_access=False)
-        assert res.abstained is True, "Expected abstention on ungrounded 'Dr. Johnson's clinic'"
+        assert res.abstained is True, "Expected abstention on ungrounded 'Dr. Okafor's clinic'"
     finally:
         engine.close()
 

@@ -82,15 +82,15 @@ def test_knowledge_updates_currency_prioritization_cases():
 
 def test_taxonomic_concept_expansion_cases():
     """Verify that hypernym queries match concrete hyponym sessions."""
-    # 1. Vehicles -> truck / motorcycle
+    # 1. Vehicles -> van / motorcycle
     texts = (
-        "I drive a red truck to the lumber yard every week.",
+        "I drive a white van to the lumber yard on Saturdays.",
         "My motorcycle is parked in the garage for the winter.",
         "My close friend David works in finance.",
     )
     idx = PassageIndex(texts)
     scores = idx.scores("How many vehicles do I own?")
-    assert 0 in scores, "Session mentioning 'truck' must receive positive BM25 score for 'vehicles'"
+    assert 0 in scores, "Session mentioning 'van' must receive positive BM25 score for 'vehicles'"
     assert 1 in scores, "Session mentioning 'motorcycle' must receive positive BM25 score for 'vehicles'"
 
     # 2. Grandpa -> grandfather
@@ -100,7 +100,7 @@ def test_taxonomic_concept_expansion_cases():
 
     # 3. Vehicle hypernym -> concrete hyponyms
     assert similar_query_terms("vehicle", "motorcycle")
-    assert similar_query_terms("vehicles", "truck")
+    assert similar_query_terms("vehicles", "van")
 
 
 def test_conjunctive_and_temporal_abstention_grounding_cases():
@@ -129,22 +129,22 @@ def test_conjunctive_and_temporal_abstention_grounding_cases():
     hit_created = hit_march.metadata["created_at"]
     assert not (win_dec.start <= hit_created < win_dec.end)
 
-    # 2. Conjunctive premise: "basil and lavender"
-    hit_tomatoes = Hit(
-        id="h_tom",
+    # 2. Conjunctive premise: "kale and spinach"
+    hit_planters = Hit(
+        id="h_planters",
         kind="evidence",
-        text="In my balcony planters, I initially planted 6 basil seedlings and 4 mint cuttings.",
+        text="On the balcony I started 6 kale seedlings next to a row of radishes.",
         score=1.0,
         tenant_id="t",
         branch="main",
         channel="c",
     )
     rep_conj = query_support(
-        "How many seedlings did I start for basil and lavender?",
-        [hit_tomatoes],
+        "How many seedlings did I start for kale and spinach?",
+        [hit_planters],
     )
     assert rep_conj["anchor_grounding"]["satisfied"] is False
-    assert any("lavender" in c for c in rep_conj["anchor_grounding"]["missing_conjunctions"])
+    assert any("spinach" in c for c in rep_conj["anchor_grounding"]["missing_conjunctions"])
     assert rep_conj["score"] <= 0.35
 
     # 3. Locative duration: "How long did I stay in Chile?"
