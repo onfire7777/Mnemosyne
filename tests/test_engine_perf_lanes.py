@@ -8,7 +8,7 @@ Covers four pure-speed changes:
   the dense/lexical channels of one retrieve; same kill-switch);
 * the ``rrf_fuse`` local-branch reconstruction that replaced
   ``copy.deepcopy`` (proven against a deepcopy reference kept here);
-* the graph-PPR node->relation pair index (first-match semantics pinned);
+* the graph-PPR node->relation pair index (edge to a seed preferred);
 * the capability-default ``MNEMOSYNE_PARALLEL_CHANNELS`` channel overlap;
 * the default-OFF ``MNEMOSYNE_RETRIEVAL_RESULT_CACHE_SIZE`` LRU, which stores
   only post-sanitization results and invalidates on engine mutation tokens.
@@ -298,10 +298,10 @@ def test_sqlite_scan_memo_invalidates_on_write(tmp_path: Path, monkeypatch: pyte
 
 
 # --------------------------------------------------------------------------- #
-# Task 2 — graph PPR node->relation pair index (first-match semantics)
+# Task 2 — graph PPR node->relation pair index (seed edge first)
 # --------------------------------------------------------------------------- #
 
-def test_graph_ppr_pair_index_preserves_first_match_semantics() -> None:
+def test_graph_ppr_pair_index_prefers_edge_to_seed() -> None:
     engine = LocalMemoryEngine()
     cid = engine.append_evidence(
         Evidence(
@@ -334,13 +334,11 @@ def test_graph_ppr_pair_index_preserves_first_match_semantics() -> None:
     hits = engine.graph_ppr(["alpha"], k=10, tenant_id=TENANT, branch="main")
     hit_ids = [hit.id for hit in hits]
 
-    # Linear-scan first-match order over relation_by_pair insertion:
-    # node "beta"  -> earliest pair mentioning it is (alpha, beta)  -> r1;
-    # node "gamma" -> earliest pair mentioning it is (beta, gamma)  -> r2;
-    # r3 (alpha, gamma) is never first for any ranked node. A last-wins or
-    # rebuilt-order index would surface r3 for "gamma" and fail here.
-    assert set(hit_ids) == {r1, r2}
-    assert r3 not in hit_ids
+    # Each ranked neighbour yields its edge to the seed, not its oldest edge:
+    # node "beta" -> (alpha, beta) -> r1; node "gamma" -> (alpha, gamma) -> r3.
+    # r2 (beta, gamma) does not touch the seed and both nodes have a seed edge.
+    assert set(hit_ids) == {r1, r3}
+    assert r2 not in hit_ids
     assert all(hit.channel == "graph_ppr" for hit in hits)
 
 
@@ -639,7 +637,9 @@ def test_retrieval_result_cache_skips_store_when_read_mark_mutates_token(
     engine.retrieve("cacheable helios probe with read mark mutation", TENANT)
     engine.retrieve("cacheable helios probe with read mark mutation", TENANT)
 
-    assert engine.channel_calls == 6
+    # Per run: dense, lexical, graph, and one lexical retry with the full question ("with"),
+    # because the probe's lexical channel finds nothing for the content words.
+    assert engine.channel_calls == 8
 
 
 def test_sqlite_retrieval_result_cache_token_changes_on_write(tmp_path: Path) -> None:

@@ -124,6 +124,7 @@ def test_graph_baseline_cli_retains_artifacts_and_refuses_overwrite(tmp_path: Pa
                 "metrics.json",
                 "queries.jsonl",
                 "store.json",
+                "store.json.lock",
                 "traces.jsonl",
             )
         },

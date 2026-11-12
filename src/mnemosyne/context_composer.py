@@ -10,6 +10,8 @@ import json
 import math
 import re
 
+from mnemosyne.retrieval import normalise_query_term
+
 
 def encode(value):
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str)
@@ -19,14 +21,21 @@ def token_bound(value):
     return len((value if isinstance(value, str) else encode(value)).encode("utf-8"))
 
 
-def _words(text):
-    return set(re.findall(r"[\w-]{3,}", str(text).casefold())) - {
+_STOP = {
         "the", "and", "for", "with", "that", "this", "have", "please", "from", "what", "you", "your",
         "are", "was", "were", "has", "had", "will", "would", "could", "should", "can", "our", "all",
         "how", "does", "about", "into", "then", "than", "also", "more", "most", "now", "those", "these",
         "fully", "completely", "cleanly", "continue", "remaining", "biggest", "issues", "issue", "fix",
         "improve", "improving", "make", "want", "need", "use", "using", "help", "get", "got", "each",
         "actually", "actual", "better", "still", "them", "they", "some", "which", "there", "their"}
+
+
+def _words(text):
+    # shortcut: English-suffix stemmer only, so other languages, irregular forms ("chose") and
+    # meaning-only hits still need an exact shared word; upgrade when delivery gets embeddings.
+    words = set(re.findall(r"[\w-]{3,}", str(text).casefold())) - _STOP
+    # Stop words go first ("issues" must not become "issu") and again after ("wants" -> "want").
+    return {normalise_query_term(w) for w in words} - _STOP
 
 
 def _relevance(query_words, text, metadata):

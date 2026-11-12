@@ -26,6 +26,12 @@ def test_prompt_wrappers_do_not_make_another_project_relevant():
     assert result["omitted"] == 1
 
 
+def test_word_forms_do_not_drop_a_retrieved_memory():
+    packet = {"hits": [{"id": "a", "kind": "assertion", "text": "User has a dog named Rex"}]}
+    result = compose_context("What are my dogs called?", packet, 4000)
+    assert [row["id"] for row in result["packet"]["hits"]] == ["a"]
+
+
 def test_semantic_reranking_survives_without_literal_overlap_and_rejects_noise():
     packet = {"hits": [
         {"id": "semantic", "text": "The host runs Debian.", "metadata": {"reranker": "http-reranker", "rerank_score": 3, "rerank_score_kind": "logit"}},

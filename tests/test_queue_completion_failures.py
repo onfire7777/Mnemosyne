@@ -7,7 +7,7 @@ import pytest
 from mnemosyne.queue import PostgresQueue, QueueJob, QueueWorker, SqliteQueue
 
 
-@pytest.mark.parametrize("failure_source", ["result", "handler"])
+@pytest.mark.parametrize("failure_source", ["handler"])
 def test_worker_records_type_errors_and_exhausts_attempts(tmp_path, failure_source):
     queue = SqliteQueue(tmp_path, "tenant")
     try:
@@ -61,25 +61,37 @@ def test_postgres_failed_status_write_preserves_running_job(monkeypatch, operati
     monkeypatch.setattr(queue, "_update_status", lambda job_id, **fields: persisted.append((job_id, fields)))
     queue.complete(job.id)
     assert job.status == "complete"
-    assert persisted == [(job.id, {"status": "complete", "result": {"answer": 42}})]
+    assert persisted == [(job.id, {"status": "complete"})]
 
 
-def test_failed_completion_preserves_lease_result_for_retry(tmp_path):
+def test_completed_job_leaves_the_queue_with_its_result(tmp_path):
     queue = SqliteQueue(tmp_path, "tenant")
     try:
+        legacy = queue.enqueue("result", {})
+        queue._conn.execute(  # a row finished by an older version, result kept
+            "UPDATE runtime_jobs SET status = 'complete', result = '\"forgotten text\"' WHERE id = ?", (legacy.id,))
         queued = queue.enqueue("result", {})
         leased = queue.lease()
-        leased.result = object()
-        with pytest.raises(TypeError):
-            queue.complete(queued.id)
-
-        assert leased.status == "running"
-        assert queue.jobs[queued.id].status == "running"
         leased.result = {"answer": 42}
         queue.complete(queued.id)
-        assert leased.status == "complete"
-        assert queue.jobs[queued.id].status == "complete"
-        assert queue.jobs[queued.id].result == {"answer": 42}
+        assert leased.status == "complete" and leased.result == {"answer": 42}
+        assert queue.list_jobs() == []
+    finally:
+        queue.close()
+
+
+def test_expired_lease_is_handed_out_again_or_ends_dead(tmp_path):
+    queue = SqliteQueue(tmp_path, "tenant")
+    try:
+        retried = queue.enqueue("result", {})
+        exhausted = queue.enqueue("result", {}, max_attempts=1)
+        assert queue.lease() and queue.lease()  # both workers die mid-job
+        assert queue.lease() is None  # a fresh lease is not reclaimed
+        queue._conn.execute("UPDATE runtime_jobs SET updated_at = '2000-01-01T00:00:00Z'")
+        again = queue.lease()
+        assert (again.id, again.attempts) == (retried.id, 2)
+        assert queue.lease() is None
+        assert queue.jobs[exhausted.id].status == "dead"
     finally:
         queue.close()
 
@@ -103,7 +115,7 @@ def test_sqlite_failed_failure_write_preserves_lease(tmp_path):
         queue._conn.execute("DROP TRIGGER fail_status_write")
         queue.complete(queued.id)
         assert leased.status == "complete"
-        assert queue.jobs[queued.id].result == {"answer": 42}
+        assert queued.id not in queue.jobs
     finally:
         queue.close()
 
@@ -122,8 +134,7 @@ def test_worker_does_not_retry_after_ambiguous_completion_acknowledgment(tmp_pat
         worker = QueueWorker(queue, {"result": lambda payload: {"answer": 42}})
         with pytest.raises(ConnectionError, match="acknowledgment lost"):
             worker.run_once()
-        assert queue.jobs[queued.id].status == "complete"
-        assert queue.jobs[queued.id].result == {"answer": 42}
+        assert queued.id not in queue.jobs
         assert queue.lease() is None
     finally:
         queue.close()

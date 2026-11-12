@@ -27,6 +27,7 @@ from mnemosyne.media import MEDIA_EXTRACT_JOB, MediaTextExtractor, MetadataMedia
 from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES, enforce_byte_limit, validate_byte_limit
 from mnemosyne.models import Evidence, Relation
 from mnemosyne.observability import MetricsRegistry
+from mnemosyne.privacy import detect_pii_tags
 from mnemosyne.queue import InProcessQueue
 from mnemosyne.security import TrustTier
 from mnemosyne.storage import LocalObjectStore
@@ -86,6 +87,8 @@ class RuntimeJobHandlers:
             lesson_distiller=lesson_distiller,
             procedure_inducer=procedure_inducer,
             user_model=user_model,
+            # A queue job names the evidence to consolidate once; a cadence refusal burns its retries and kills it.
+            consolidation_min_steps=0,
         )
 
     def handlers(self) -> dict[str, Any]:
@@ -214,6 +217,13 @@ class RuntimeJobHandlers:
                 {"source_evidence_cid": source_cid, "reason": "empty_extraction"},
             )
 
+        # Extracted text is classified like ingested text: the image's own sensitivity is only a floor.
+        pii_tags = [f"pii-{tag}" for tag in detect_pii_tags(text)]
+        inherited = int(payload.get("sensitivity", getattr(source, "sensitivity", 0)))
+        sensitivity = max(inherited, 3 if pii_tags else 0)
+        access_policy = dict(getattr(source, "access_policy", {}) or {"tenant": tenant_id})
+        if sensitivity > inherited:  # the image's policy ceiling would deny the raised row to every role
+            access_policy.update(max_sensitivity=sensitivity, data_class="pii")
         source_trust = int(payload.get("source_trust_tier", getattr(source, "trust_tier", int(TrustTier.NORMAL))))
         trust_tier = max(source_trust, int(TrustTier.AUTHENTICATED))
         capability_tags = sorted(
@@ -221,6 +231,7 @@ class RuntimeJobHandlers:
                 list(getattr(source, "capability_tags", []) or [])
                 + list(payload.get("capability_tags", []) or [])
                 + ["derived-from-media", "tool-authored", "source:media-extraction"]
+                + pii_tags
             )
         )
         if trust_tier >= int(TrustTier.UNTRUSTED_EXTERNAL):
@@ -246,8 +257,8 @@ class RuntimeJobHandlers:
                 },
                 trust_tier=trust_tier,
                 capability_tags=capability_tags,
-                sensitivity=int(payload.get("sensitivity", getattr(source, "sensitivity", 0))),
-                access_policy=dict(getattr(source, "access_policy", {}) or {"tenant": tenant_id}),
+                sensitivity=sensitivity,
+                access_policy=access_policy,
             ),
             branch=branch,
         )
@@ -271,9 +282,10 @@ class RuntimeJobHandlers:
                 "branch": branch,
                 "source_evidence_cids": [derived_cid],
                 "trigger": MEDIA_EXTRACT_JOB,
-                "passes": list(DEFAULT_CONSOLIDATION_PASSES),
+                # one row has nothing to cluster; its gist would be a copy
+                "passes": [name for name in DEFAULT_CONSOLIDATION_PASSES if name != "summarizer"],
                 "trust_tier": trust_tier,
-                "sensitivity": int(payload.get("sensitivity", getattr(source, "sensitivity", 0))),
+                "sensitivity": sensitivity,
                 "capability_tags": capability_tags,
                 "modality": "text",
                 "source_type": "media-extraction",

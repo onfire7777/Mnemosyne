@@ -8,10 +8,13 @@ from dataclasses import asdict, dataclass, field
 
 ROUTE_OF_CHANNEL = {
     "lexical": "lexical",
+    "lexical_bm25": "lexical",
     "postgres_fts": "lexical",
     "command_lexical": "lexical",
     "postgres_lexical_fallback": "lexical",
     "dense": "vector",
+    "dense_hash": "vector",
+    "dense_media": "vector",
     "vector": "vector",
     "postgres_pgvector": "vector",
     "postgres_dense_fallback": "vector",

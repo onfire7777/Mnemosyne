@@ -342,6 +342,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS audit_log_tenant_event_unique
 CREATE OR REPLACE FUNCTION mnemosyne_audit_log_append_only()
 RETURNS trigger AS $$
 BEGIN
+  IF TG_OP = 'UPDATE' THEN
+    -- erasure may blank a source-derived diff; every other column must stay identical
+    IF NEW.diff = '{"source_payload_erased": true}'::jsonb
+       AND to_jsonb(NEW) - 'diff' = to_jsonb(OLD) - 'diff' THEN
+      RETURN NEW;
+    END IF;
+  END IF;
   RAISE EXCEPTION 'audit_log is append-only; % is not allowed', TG_OP
     USING ERRCODE = '42501';
 END;
@@ -1037,6 +1044,7 @@ CREATE TABLE IF NOT EXISTS memory_source_changes (
   item_id TEXT NOT NULL,
   PRIMARY KEY (tenant_id, revision)
 );
+CREATE INDEX IF NOT EXISTS memory_source_changes_item_idx ON memory_source_changes (tenant_id, collection, item_id);
 ALTER TABLE memory_source_revisions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE memory_source_revisions FORCE ROW LEVEL SECURITY;
 ALTER TABLE memory_source_changes ENABLE ROW LEVEL SECURITY;
@@ -1057,11 +1065,23 @@ DECLARE
   source_tenant UUID;
   source_id TEXT;
   source_collection TEXT;
+  old_cmp JSONB;
+  new_cmp JSONB;
 BEGIN
-  IF TG_OP = 'UPDATE'
-     AND (to_jsonb(OLD) - ARRAY['embedding', 'embedding_partition', 'lexeme', 'access_count', 'last_accessed', 'last_accessed_at', 'salience'])
-       = (to_jsonb(NEW) - ARRAY['embedding', 'embedding_partition', 'lexeme', 'access_count', 'last_accessed', 'last_accessed_at', 'salience']) THEN
-    RETURN NULL;
+  IF TG_OP = 'UPDATE' THEN
+    old_cmp := to_jsonb(OLD) - ARRAY['embedding', 'embedding_partition', 'lexeme', 'access_count', 'last_accessed', 'last_accessed_at', 'salience'];
+    new_cmp := to_jsonb(NEW) - ARRAY['embedding', 'embedding_partition', 'lexeme', 'access_count', 'last_accessed', 'last_accessed_at', 'salience'];
+    -- evidence access counters live in metadata.lifecycle; a recall is not a source change.
+    -- object guard: #- with a text key raises on an array lifecycle
+    IF jsonb_typeof(old_cmp #> '{metadata,lifecycle}') = 'object' THEN
+      old_cmp := old_cmp #- '{metadata,lifecycle,access_count}' #- '{metadata,lifecycle,last_accessed}';
+    END IF;
+    IF jsonb_typeof(new_cmp #> '{metadata,lifecycle}') = 'object' THEN
+      new_cmp := new_cmp #- '{metadata,lifecycle,access_count}' #- '{metadata,lifecycle,last_accessed}';
+    END IF;
+    IF old_cmp = new_cmp THEN
+      RETURN NULL;
+    END IF;
   END IF;
   IF TG_OP = 'UPDATE' THEN
     source_rows := ARRAY[to_jsonb(OLD), to_jsonb(NEW)];

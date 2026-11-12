@@ -379,10 +379,8 @@ services:
       OLLAMA_TIMEOUT: "280"
       MNEMOSYNE_ROLE_LADDER_TIMEOUT: "300"
       MNEMOSYNE_ROLE_LADDER_LOCAL_TIMEOUT: "280"   # local rung defaults to min(20s, total) — far below measured latency
-      # §31 cadence steps are counted per worker-run PROCESS invocation; with the
-      # default max_cycles=1 the process exits after each job, the counter resets,
-      # and the 5-step consolidation cadence bound can never be satisfied. Keep the
-      # worker long-lived; the entrypoint supervise loop remains for crash recovery.
+      # Keep the worker-run process long-lived (queue jobs are not subject to the §31
+      # 5-step cadence bound); the entrypoint supervise loop remains for crash recovery.
       MNEMOSYNE_WORKER_MAX_CYCLES: "1000"
       MNEMOSYNE_WORKER_IDLE_EXIT_AFTER: "600"
       # Runtime command-provider subprocess timeouts (default 30s) must cover the

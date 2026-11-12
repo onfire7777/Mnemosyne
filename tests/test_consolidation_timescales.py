@@ -1128,3 +1128,15 @@ def test_sleep_keeps_cid_when_another_assertion_still_supports_it() -> None:
     result = worker.run_sleep_payload(_sleep_payload([cid], now=NOW))
     assert _sleep_receipt(result)["input_cids"] == [cid]
     assert cid not in _sleep_receipt(result).get("excluded_cids", [])
+
+
+def test_runtime_handlers_complete_every_queued_consolidation_job_for_one_tenant() -> None:
+    engine = _engine()
+    queue = InProcessQueue()
+    for index in range(3):
+        cid = _append(engine, f"Queued consolidation fact number {index}.")
+        queue.enqueue("consolidate_evidence", {"tenant_id": TENANT, "user_id": USER, "source_evidence_cids": [cid]})
+
+    QueueWorker(queue, RuntimeJobHandlers(engine, queue, gate_cases=[]).handlers()).drain()
+
+    assert [job.status for job in queue.jobs.values()] == ["complete"] * 3

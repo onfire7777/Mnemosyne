@@ -95,3 +95,53 @@ def test_persist_is_private_atomic_and_cleans_failed_temporary(tmp_path, monkeyp
     assert path.read_bytes() == original
     json.loads(path.read_text())
     assert sorted(p.name for p in tmp_path.iterdir()) == ['state.json', 'state.json.lock']
+
+
+def test_long_lived_process_keeps_jobs_and_profile_rows_written_by_others(tmp_path):
+    from mnemosyne.user_model import UserMemoryKind, UserModelEntry
+
+    path = tmp_path / 'state.json'
+    path.write_text('{}')  # a file without the default sections still saves
+    server = RuntimeState(path)
+    queue, model = server.load_queue(), server.load_user_model()
+    server.save_queue(queue)
+    other = RuntimeState(path)
+    other_queue, other_model = other.load_queue(), other.load_user_model()
+    theirs = other_queue.enqueue('work', {})
+    other.save_queue(other_queue)
+    other_model.add_entry(UserModelEntry('t', 'u', UserMemoryKind.EXPLICIT_PREFERENCE, 'theirs'))
+    other.save_user_model(other_model)
+    queue.enqueue('work', {})  # both sides enqueued: this save used to raise a conflict
+    for _ in range(2):  # the second save used to delete what the other process wrote
+        server.save_queue(queue)
+        server.save_user_model(model)
+    assert queue.lease().id == theirs.id  # and the long-lived queue can run the other side's job
+    queue.complete(theirs.id)
+    server.save_queue(queue)
+    saved = RuntimeState(path)
+    assert [job.status for job in saved.load_queue().jobs.values()] == ['queued']  # finished jobs are not kept
+    assert [entry.statement for entry in saved.load_user_model().entries.values()] == ['theirs']
+    other.data['learning'] = {'engine_tenants': ['a']}
+    other.save()
+    server.data['learning'] = {'engine_tenants': ['b']}  # first learning save on both sides used to conflict
+    server.save()
+    assert RuntimeState(path).data['learning'] == {'engine_tenants': ['a', 'b']}
+
+
+def test_profile_correction_from_another_process_is_served_and_survives_a_write(tmp_path):
+    from mnemosyne.engine import LocalMemoryEngine
+    from mnemosyne.mcp_tools import MemoryTools
+
+    def process():
+        return MemoryTools(LocalMemoryEngine(), runtime_state=RuntimeState(tmp_path / 'state.json'))
+
+    def statements(tools):
+        return sorted(row['statement'] for row in tools.profile_context('t', 'u')['authoritative'])
+
+    old = process().profile_add('t', 'u', 'explicit_preference', 'Region is eu-west-1')['id']
+    server = process()
+    assert statements(server) == ['Region is eu-west-1']
+    process().profile_correct('t', 'u', old, 'Region is us-east-2')
+    assert statements(server) == ['Region is us-east-2']
+    server.profile_add('t', 'u', 'explicit_preference', 'Prefers Celsius')
+    assert statements(process()) == ['Prefers Celsius', 'Region is us-east-2']

@@ -112,17 +112,22 @@ class RuntimeState:
         path = Path(store_path).expanduser()
         return cls(path.with_suffix(path.suffix + ".runtime.json"))
 
-    def save(self) -> None:
+    def save(self) -> dict[str, Any]:
         # Merge independent writers under a short file lock; provider work has
         # already finished. Never resurrect a concurrently erased profile row.
         from mnemosyne._file_lock import exclusive_file_lock
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with exclusive_file_lock(self.path.with_suffix(self.path.suffix + ".lock"), timeout=1.0):
-            current = json.loads(self.path.read_text()) if self.path.exists() else self._baseline
+            # A file that lacks a section (hand-written, very old) did not delete it: read it as unchanged.
+            current = {**self._baseline, **json.loads(self.path.read_text())} if self.path.exists() else self._baseline
             merged = _merge_state(self._baseline, self.data, current)
             self._publish(merged)
-            self.data = merged
-            self._baseline = copy.deepcopy(merged)
+            if "gate_cases" in merged:  # read lazily from self.data, no live owner: keep seeing other writers' cases
+                self.data["gate_cases"] = merged["gate_cases"]
+            # Baseline = what THIS process wrote. The other sections are rebuilt from live objects that never
+            # saw other writers' rows; adopting the merged file here would turn "never saw" into "deleted".
+            self._baseline = copy.deepcopy(self.data)
+        return merged
 
     def _publish(self, data) -> None:
         """Publish under the caller's file lock, leaving an intact prior file on failure."""
@@ -156,6 +161,18 @@ class RuntimeState:
             )
         }
         return model
+
+    def refresh_user_model(self, model: UserModel) -> None:
+        """Fold the profile another process saved into a live model, in place: its holders keep the object."""
+        # shortcut: parses the whole file on every profile call, add an mtime check if that shows up in profiles
+        saved = json.loads(self.path.read_text(encoding="utf-8")).get("user_model") if self.path.exists() else None
+        if saved is None or saved == self._baseline["user_model"]:
+            return
+        self.data["user_model"] = saved
+        self._baseline["user_model"] = copy.deepcopy(saved)
+        fresh = vars(self.load_user_model())
+        fresh.pop("_source_custody")
+        vars(model).update(fresh)
 
     def save_user_model(self, model: UserModel) -> None:
         self.data["user_model"] = {
@@ -219,7 +236,14 @@ class RuntimeState:
 
     def save_queue(self, queue: InProcessQueue) -> None:
         self.data["queue"] = queue.to_dict()
-        self.save()
+        merged = self.save()["queue"]
+        # Adopt other processes' jobs in place (workers and pipelines hold this object), and the baseline
+        # with them. This run's finished jobs stay in memory only, for its own report.
+        fresh = InProcessQueue.from_dict(merged)
+        done = {job.id: job for job in queue.jobs.values() if job.status == "complete"}
+        queue.jobs, queue._order = {**done, **fresh.jobs}, fresh._order
+        self.data["queue"] = merged
+        self._baseline["queue"] = copy.deepcopy(merged)
 
     def load_metrics(self) -> MetricsRegistry:
         metrics = _PersistentMetricsRegistry(self.data.get("metrics"))
@@ -322,6 +346,9 @@ def _merge_state(base, desired, current):
                 if live != old and live is not missing:
                     raise ValueError("concurrent runtime state conflict")
                 continue
+            if (old is missing and live is not missing and live != new
+                    and isinstance(new, (dict, list)) and type(live) is type(new)):
+                old = type(new)()  # both writers added this key (first learning save): merge them as additions
             if old is missing:
                 if live is not missing and live != new:
                     raise ValueError("concurrent runtime state conflict")
@@ -333,6 +360,10 @@ def _merge_state(base, desired, current):
                 result[key] = _merge_state(old, new, live)
         return result
     if all(isinstance(value, list) for value in (base, desired, current)):
+        if all(isinstance(row, str) for rows in (base, desired, current) for row in rows):
+            # Id lists (queue order, learning tenants): keep the live order, drop what this writer removed, add what it added.
+            removed, known = set(base) - set(desired), set(base) | set(current)
+            return [row for row in current if row not in removed] + [row for row in desired if row not in known]
         def key(row):
             if not isinstance(row, dict):
                 return None

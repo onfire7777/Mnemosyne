@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Callable, Sequence
 from uuid import uuid4
 
 from mnemosyne.answering import AnswerReadContext
+from mnemosyne.models import utc_now
 from mnemosyne.security import SecurityPolicy
 
 if TYPE_CHECKING:
@@ -29,10 +30,6 @@ _CHANGE_SCAN_INTERVAL_SECONDS = 5.0
 
 class MentalModelLeaseLost(ValueError):
     """This worker no longer owns permission to publish its computation."""
-
-
-def utc_now() -> datetime:
-    return datetime.now(UTC)
 
 
 def bounded_int(value: Any, name: str, minimum: int, maximum: int) -> int:

@@ -224,6 +224,9 @@ def test_capture_batch_rolls_back_a_later_capture_failure(
         def defer_persistence(self):
             return nullcontext()
 
+        def close(self) -> None:
+            pass
+
         def capture(self, **kwargs: object) -> dict[str, object]:
             self.calls += 1
             self.staged.write_text(json.dumps({"captured": self.calls}), newline="\n")
@@ -244,6 +247,24 @@ def test_capture_batch_rolls_back_a_later_capture_failure(
     with pytest.raises(RuntimeError, match="injected"):
         cli_module.cmd_capture_batch(args)
     assert store.read_text() == '{"original":true}\n'
+    assert not list(tmp_path.glob(".store.json-batch-*"))
+
+
+def test_concurrent_cli_processes_on_one_local_store_keep_every_capture(tmp_path: Path) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    store = tmp_path / "store.json"
+    cli = MnemoCLI(store=str(store))
+    rows = tmp_path / "rows.jsonl"
+    rows.write_text(
+        json.dumps({"tenant": "t", "user": "u", "source_type": "chat", "content": "Batch row."}) + "\n"
+    )
+    with ThreadPoolExecutor(7) as pool:
+        batch = pool.submit(cli.capture_batch, rows)
+        singles = [pool.submit(cli.capture, "t", "u", f"Widget {i} weighs {i} kg.") for i in range(6)]
+        for job in (batch, *singles):
+            job.result()
+    assert len(json.loads(store.read_text())["evidence"]) == 7
     assert not list(tmp_path.glob(".store.json-batch-*"))
 
 

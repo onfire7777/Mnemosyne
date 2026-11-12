@@ -658,7 +658,7 @@ class LearningRuntime:
                     {
                         ROUTE_OF_CHANNEL.get(channel, channel)
                         for channel in channels
-                        if channel
+                        if channel and channel != "rerank"  # a reranker suffix is not a retrieval route
                     }
                 )
             )
@@ -1057,9 +1057,7 @@ class LearningRuntime:
             if existing is not None:
                 cids.append(existing.cid)
                 continue
-            cids.append(
-                self.engine.append_evidence(
-                    Evidence(
+            evidence = Evidence(
                         tenant_id=tenant_id,
                         user_id=user_id,
                         actor=actor,
@@ -1082,8 +1080,11 @@ class LearningRuntime:
                             "allow_principals": [user_id],
                         },
                     )
-                )
-            )
+            from mnemosyne.memory_formation import direct_user_clauses, restated_segment_id
+            # Clause guard keeps chatter such as "continue" from paying for a tenant export.
+            if actor == "user" and direct_user_clauses(text, include_directives=True):
+                evidence.document_segment_id = restated_segment_id(self.engine, evidence)
+            cids.append(self.engine.append_evidence(evidence))
         correction_source_cid = cids[0] if user_text else None
         for event in tool_events or []:
             if event.get("source") in {
@@ -2366,9 +2367,13 @@ class LearningRuntime:
                     erasure_terms.append(row["id"])
                     erased_items = {cid} | {identifier for identifier, sources in row.get("item_sources", {}).items()
                                             if cid in sources}
-                    row["query"] = ""
-                    row["task_scope_query"] = ""
-                    row["task_match"] = None
+                    # A hit that was only a retrieval candidate did not shape the turn's outcome.
+                    used = cid in row.get("source_cids", []) or any(
+                        item["item_id"] in erased_items for item in row["items"])
+                    if used:
+                        row["query"] = ""
+                        row["task_scope_query"] = ""
+                        row["task_match"] = None
                     row["items"] = [
                         item for item in row["items"] if item["item_id"] not in erased_items
                     ]
@@ -2387,11 +2392,12 @@ class LearningRuntime:
                     row["source_cids"] = [
                         item for item in row.get("source_cids", []) if item != cid
                     ]
-                    affected.update(
-                        e["id"]
-                        for e in state["episodes"].values()
-                        if row["id"] in e["receipt_ids"]
-                    )
+                    if used:
+                        affected.update(
+                            e["id"]
+                            for e in state["episodes"].values()
+                            if row["id"] in e["receipt_ids"]
+                        )
             # A source turn also owns the query stored in its decision receipts.
             for episode_id in affected:
                 for receipt_id in state["episodes"][episode_id]["receipt_ids"]:
@@ -2471,8 +2477,10 @@ class LearningRuntime:
                         for name, row in values.items()
                         if row.get("episode_id") not in affected
                     }
-            for key in ("last_good", "active_policy_variants", "policy_gate_evidence"):
-                state["policy"].pop(key, None)
+            # These hold weights, counts and artifact states only; keep them when no turn was retracted.
+            if affected:
+                for key in ("last_good", "active_policy_variants", "policy_gate_evidence"):
+                    state["policy"].pop(key, None)
             for tracking in state["policy"].get("host_consolidation", {}).values():
                 removed = {"failure:" + key for key in affected}
                 tracking["completed"] = [key for key in tracking.get("completed", []) if key not in removed]
@@ -2496,24 +2504,17 @@ class LearningRuntime:
                     credit["task_class"],
                 )
                 row = state["stats"].get(key)
+                # Same randomized counts and direction as _credit; the row keeps its issue-time fields.
+                arms = ("control", "served") if credit.get("contingency_direction") == "harmful" else ("served", "control")
                 bound = (
-                    contingency_lower_bound(
-                        row["served_successes"],
-                        row["served_n"],
-                        row["control_successes"],
-                        row["control_n"],
-                    )
+                    contingency_lower_bound(*(row.get("randomized_" + arm + field, 0)
+                                              for arm in arms for field in ("_successes", "_n")))
                     if row
                     else None
                 )
                 if bound is None or bound <= 0:
                     del state["credit"][credit_id]
                     continue
-                credit.update(
-                    contingency_lb=bound,
-                    served_n=row["served_n"],
-                    control_n=row["control_n"],
-                )
                 row["utility"] = max(
                     0.8, min(1.2, row.get("utility", 1) + credit.get("step", 0))
                 )
@@ -2533,9 +2534,10 @@ class LearningRuntime:
                 if artifact["id"] in erasure_targets and artifact["state"] in {"active", "labile"} and not activation_supported(self, state, artifact):
                     artifact["state"] = "probation"
             _homeostasis(state)
-            state["policy"].pop("routes", None)
-            state["policy"].pop("route_daily", None)
-            state["policy"].pop("calibration_bins", None)
+            if affected:
+                state["policy"].pop("routes", None)
+                state["policy"].pop("route_daily", None)
+                state["policy"].pop("calibration_bins", None)
             for defect in state["defects"].values():
                 if any(term in str(defect) for term in erasure_terms):
                     defect.pop("before", None)

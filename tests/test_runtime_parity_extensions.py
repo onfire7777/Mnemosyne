@@ -580,8 +580,9 @@ def test_signed_provenance_verifier_quarantines_digest_mismatch() -> None:
     invalid = verifier.verify(payload, {"sha256": sha256(b"other").hexdigest(), "issuer": "camera", "signature": "sig"})
 
     assert valid.valid is True
-    assert valid.trusted is True
-    assert valid.trust_delta == -1
+    # a self-made manifest (caller hashes its own bytes, nothing is signature-checked) must not raise trust
+    assert valid.trusted is False
+    assert valid.trust_delta == 0
     assert invalid.quarantine is True
     assert invalid.trust_delta > 0
 
@@ -1639,9 +1640,9 @@ def test_forget_transitively_erases_media_derived_evidence_and_assertions(tmp_pa
     assert preference.source_evidence_cids == []
     assert relation.valid_to is not None
     assert relation.source_evidence_cids == []
-    assert derived_relation.source == result.cid
-    assert derived_relation.predicate == "media-derived-text"
-    assert derived_relation.target == derived_cid
+    assert derived_relation.source == "[erased]"
+    assert derived_relation.predicate == "erased"
+    assert derived_relation.target == "[erased]"
     assert derived_relation.valid_to is not None
     assert derived_relation.source_evidence_cids == []
     assert forgotten["propagated"]["retracted_preferences"] == [preference_id]
@@ -2035,6 +2036,7 @@ def test_consolidation_worker_distills_lessons_procedures_and_summary(tmp_path) 
                 engine,
                 gate_cases=[],
                 learning=learning,
+                consolidation_min_steps=0,
             ).run_queue_payload
         },
     )
@@ -2044,6 +2046,14 @@ def test_consolidation_worker_distills_lessons_procedures_and_summary(tmp_path) 
     assert job is not None
     assert job.status == "complete"
     pass_results = {item["name"]: item for item in job.result["pass_results"]}
+    # An ingest job covers one row, so it no longer asks for a gist of it; a summary is requested explicitly.
+    assert "summarizer" not in pass_results
+    queue.enqueue(
+        CONSOLIDATE_EVIDENCE_JOB,
+        {"tenant_id": TENANT, "user_id": USER, "source_evidence_cids": [result.cid], "passes": ["summarizer"]},
+    )
+    summary_job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
+    pass_results["summarizer"] = next(item for item in summary_job.result["pass_results"] if item["name"] == "summarizer")
     assert pass_results["resolver"]["details"]["strategy"] == "deterministic_entity_key"
     assert pass_results["resolver"]["details"]["resolved_entities"][0]["key"] == "deployment-target"
     assert pass_results["summarizer"]["status"] == "complete"
@@ -3360,3 +3370,62 @@ def test_parametric_invariant_rails_reject_low_gate_margin(tmp_path) -> None:
 
     assert decision.promoted is False
     assert "gate margin below noise rail" in decision.reason
+
+
+def test_postgres_user_model_save_merges_writers_instead_of_overwriting() -> None:
+    # Two servers on one tenant each hold a stale copy of the user model; no live database needed.
+    import copy
+
+    from mnemosyne.postgres_runtime_state import PostgresRuntimeState
+
+    db: dict = {"blob": None, "prefs": {}}
+
+    class Cursor:
+        def __init__(self, work): self.work, self.row = work, None
+        def __enter__(self): return self
+        def __exit__(self, *exc): return False
+        def fetchall(self): return []
+        def fetchone(self): return self.row
+        def execute(self, sql, params=()):
+            sql = " ".join(sql.split())
+            if sql.startswith("SELECT payload FROM runtime_state"):
+                self.row = None if self.work["blob"] is None else (copy.deepcopy(self.work["blob"]),)
+            elif sql.startswith("INSERT INTO runtime_state"):
+                self.work["blob"] = json.loads(json.dumps(params[-1]))
+            elif sql.startswith("DELETE FROM preferences"):
+                self.work["prefs"].clear()
+            elif sql.startswith("INSERT INTO preferences"):
+                self.work["prefs"][params[0]] = params[4]
+
+    class Connection:
+        def __enter__(self):
+            self.work = copy.deepcopy(db)
+            return self
+        def __exit__(self, exc_type, *exc):
+            if exc_type is None:
+                db.update(self.work)
+            return False
+        def cursor(self, **_kwargs): return Cursor(self.work)
+
+    def server() -> PostgresRuntimeState:
+        state = object.__new__(PostgresRuntimeState)
+        state.tenant_id, state.db_tenant_id, state._jsonb, state.connect = "acme", "tenant-uuid", (lambda value: value), Connection
+        return state
+
+    a, b = server(), server()
+    db["blob"] = {"entries": [], "latent_profiles": [], "mistake_events": [], "support_strategies": []}
+    model_a, model_b = a.load_user_model(), b.load_user_model()
+    tabs = UserModelEntry("acme", "alice", UserMemoryKind.EXPLICIT_PREFERENCE, "always use tabs")
+    model_a.add_entry(tabs)
+    a.save_user_model(model_a)
+    model_b.add_entry(UserModelEntry("acme", "bob", UserMemoryKind.EXPLICIT_PREFERENCE, "reply in German"))
+    b.save_user_model(model_b)
+    b.save_user_model(model_b)  # B's model never held A's entry; a repeat save must not delete it
+    assert sorted(db["prefs"].values()) == ["always use tabs", "reply in German"]
+
+    del model_a.entries[tabs.id]  # A erases its entry; B's later stale save must not bring it back
+    a.save_user_model(model_a)
+    model_b.add_entry(UserModelEntry("acme", "bob", UserMemoryKind.EXPLICIT_PREFERENCE, "use metric units"))
+    b.save_user_model(model_b)
+    assert sorted(db["prefs"].values()) == ["reply in German", "use metric units"]
+    assert sorted(row["statement"] for row in db["blob"]["entries"]) == ["reply in German", "use metric units"]

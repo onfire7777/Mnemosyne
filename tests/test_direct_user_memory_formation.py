@@ -165,3 +165,31 @@ def test_distinct_negative_preferences_coexist(engine):
     rows = engine.export_tenant("t")["assertions"]
     assert {row["object"] for row in rows if row["status"] == "active"} == {"coffee", "tea"}
     assert {row["predicate"] for row in rows} == {"do_not_like"}
+
+
+def test_dated_correction_inside_its_open_window_supersedes(engine):
+    from datetime import UTC, datetime
+
+    for text, when in (("I live in Sacramento.", datetime(2026, 2, 10, tzinfo=UTC)),
+                       ("I moved to San Diego in 2026.", datetime(2026, 6, 11, tzinfo=UTC))):
+        project_direct_user_memory(engine, "t", source(engine, text, created_at=when))
+    rows = engine.export_tenant("t")["assertions"]
+    assert {row["object"]: row["status"] for row in rows} == {"Sacramento": "superseded", "San Diego": "active"}
+
+
+def test_discourse_lead_is_stripped_only_before_first_person():
+    from mnemosyne.memory_formation import memory_source_clauses
+
+    assert direct_user_clauses("Actually, I live in Lisbon.") == ["I live in Lisbon."]
+    for text in ("No dogs are allowed.", "No I/O errors were found.", "Update my address to 5 Main St."):
+        assert memory_source_clauses(text) == [text]
+
+
+def test_restating_a_replaced_fact_makes_it_current_again(engine):
+    from mnemosyne.mcp_tools import MemoryTools
+
+    tools = MemoryTools(engine)
+    for city in ("Paris", "Berlin", "Paris", "Paris"):
+        result = tools.capture(tenant_id="t", user_id="alice", actor="user", source_type="chat", content=f"I live in {city}.")
+    assert result["idempotent"]
+    assert [row["object"] for row in engine.export_tenant("t")["assertions"] if row["status"] == "active"] == ["Paris"]

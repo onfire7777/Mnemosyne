@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import copy
+import json
 from typing import Any
 from contextlib import nullcontext
 
@@ -18,6 +20,7 @@ from mnemosyne.postgres_engine import (
 from mnemosyne.postgres_security import assert_postgres_safe_role, postgres_safe_role_required
 from mnemosyne.queue import InProcessQueue
 from mnemosyne.retrieval import HashingEmbeddingProvider
+from mnemosyne.runtime_state import _merge_state
 from mnemosyne.user_model import (
     LatentUserProfile,
     SupportStrategy,
@@ -141,6 +144,10 @@ class PostgresRuntimeState:
 
     def load_user_model(self) -> UserModel:
         payload = self._load_payload("user_model", None)
+        # deepcopy: from_dict shares nested scope dicts with the payload
+        self._user_model_base = copy.deepcopy(
+            _DEFAULT_RUNTIME_PAYLOAD["user_model"] if payload is None else payload
+        )
         if payload is None:
             return self._load_user_model_from_tables()
         model = UserModel(
@@ -202,17 +209,52 @@ class PostgresRuntimeState:
                 if event_scopes.get(event_id) == (strategy.user_id, strategy.pattern, strategy.scope)
             ]
             serialized_support_strategies.append(row)
-        self._save_payload(
-            "user_model",
+        # JSON round trip: compare in the shape the database hands back
+        payload = json.loads(json.dumps(
             {
                 "entries": [entry.to_dict() for entry in entries],
                 "latent_profiles": [profile.to_dict() for profile in latent_profiles],
                 "mistake_events": [event.to_dict() for event in mistake_events],
                 "support_strategies": serialized_support_strategies,
                 "support_strategy_threshold": model.support_strategy_threshold,
-            },
-        )
-        self._mirror_user_model(entries, latent_profiles)
+            }
+        ))
+        # Other servers save their own stale copy of this tenant's model: merge
+        # under a lock, as RuntimeState.save does, so nobody's entries (or
+        # erasures) are undone. Blob and mirror commit or roll back together.
+        with self.connect() as conn:
+            with conn.cursor() as cur:
+                self._set_tenant(cur)
+                cur.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                    (f"{self.db_tenant_id}:user_model",),
+                )
+                cur.execute(
+                    "SELECT payload FROM runtime_state WHERE tenant_id = %s AND key = 'user_model'",
+                    (self.db_tenant_id,),
+                )
+                row = cur.fetchone()
+                current = row[0] if row else _DEFAULT_RUNTIME_PAYLOAD["user_model"]
+                base = getattr(self, "_user_model_base", None)
+                # an instance that never loaded has no baseline: plain overwrite
+                merged = _merge_state(current if base is None else base, payload, current)
+                cur.execute(
+                    """
+                    INSERT INTO runtime_state(tenant_id, key, payload, updated_at)
+                    VALUES (%s, 'user_model', %s, now())
+                    ON CONFLICT (tenant_id, key)
+                    DO UPDATE SET payload = EXCLUDED.payload, updated_at = now()
+                    """,
+                    (self.db_tenant_id, self._jsonb(merged)),
+                )
+                self._mirror_user_model(
+                    [UserModelEntry.from_dict(row) for row in merged.get("entries", [])],
+                    [LatentUserProfile.from_dict(row) for row in merged.get("latent_profiles", [])],
+                    connection=conn,
+                )
+        # the baseline is what the caller's model holds, not the merged row: entries
+        # merged in from other writers are not in that model and must not read as deleted
+        self._user_model_base = payload
 
     def _bind_learning(self, learning: LearningSystem) -> None:
         # The supplied facade may have been constructed before the backend was
@@ -431,8 +473,8 @@ class PostgresRuntimeState:
                     for expected in [dict(row["expected"] or {})]
                 ]
 
-    def _mirror_user_model(self, entries: list[UserModelEntry], latent_profiles: list[LatentUserProfile]) -> None:
-        with self.connect() as conn:
+    def _mirror_user_model(self, entries: list[UserModelEntry], latent_profiles: list[LatentUserProfile], *, connection: Any) -> None:
+        with nullcontext(connection) as conn:
             with conn.cursor() as cur:
                 self._set_tenant(cur)
                 cur.execute(

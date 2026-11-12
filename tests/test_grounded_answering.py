@@ -866,3 +866,15 @@ def test_graph_relation_id_is_never_cited_and_authorized_source_is_hydrated() ->
     assert result.abstained is False
     assert relation_id not in {row.cid for row in result.evidence}
     assert source_cid in {row.cid for row in result.evidence}
+
+
+def test_answer_returns_the_validated_quote_verbatim() -> None:
+    engine = _engine()
+    orchestrator = GroundedAnswerOrchestrator(engine, RecordingDecomposer({"queries": []}))
+    request = AnswerRequest(question="Ada", context=_context())
+    cid = orchestrator.assemble(request).evidence[0].cid
+    reader = RecordingReader(
+        {"claims": [{"spans": [{"cid": cid, "quote": "owns project Zephyr"}]}], "unresolved": False}
+    )
+    result = orchestrator.answer(request, reader)
+    assert result.answer == result.claims[0].text == "owns project Zephyr"

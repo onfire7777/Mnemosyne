@@ -180,6 +180,8 @@ def _action_key(action: str) -> str:
     text = action.casefold()
     text = re.sub(r"\b(?:my|our|the|a|an|with|to)\b", " ", text)
     words = re.findall(r"[\w-]+", text)
+    if len(words) > 1 and words[0] in {"finish", "complete"}:
+        del words[0]  # "I finished X" is parsed as bare "X"
     if words:
         words[0] = _action_verb(words[0])
     return " ".join(words)
@@ -190,7 +192,7 @@ def commitment_changes(source, clauses: list[str], timezone: str | None = None) 
     for span in source_spans(source, clauses):
         text = span.quote.strip().rstrip(".! ")
         text = re.sub(r"\b(I|We)['’]ve\b", r"\1 have", text, flags=re.I)
-        if _UNCERTAIN.search(text):
+        if _UNCERTAIN.search(_TEMPORAL.sub("", text)):  # the month "May" is not the modal "may"
             continue
         kind, action = "pending", None
         if m := re.fullmatch(r"(?:I|We)\s+(?:cancel(?:led|ed)?|called off|no longer plan to)\s+(.+)", text, re.I):

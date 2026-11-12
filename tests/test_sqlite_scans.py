@@ -248,6 +248,23 @@ def test_lexical_search_parity_tokenizer_stressors():
     sqlite.close()
 
 
+def test_lexical_search_parity_non_ascii_rows():
+    """unicode61 and the app tokenizer disagree on non-ASCII rows, so the FTS
+    prefilter must never drop them: SQLite finds what the oracle finds."""
+    local, sqlite = _fresh_engines()
+    wanted = {
+        "vim": _append_evidence_both(local, sqlite, "我用vim编辑器写代码", with_embedding=False),
+        "viet": _append_evidence_both(local, sqlite, "Tôi sống ở Việt Nam", with_embedding=False),
+        "Барсик": _append_evidence_both(local, sqlite, "Моя собака Барсик любит морковь.", with_embedding=False),
+    }
+    filt = {"tenant_id": TENANT, "branch": "main"}
+    for query, cid in wanted.items():
+        found = sqlite.lexical_search(query, 10, filt)
+        assert [hit.id for hit in found] == [cid], query
+        assert _sig(local.lexical_search(query, 10, filt)) == _sig(found), query
+    sqlite.close()
+
+
 # --- graph_ppr --------------------------------------------------------------
 
 

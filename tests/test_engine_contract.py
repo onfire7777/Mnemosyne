@@ -575,7 +575,7 @@ def test_hard_delete_erasure_removes_evidence_row_and_logs_mode() -> None:
     assert exported["deletion_log"][-1]["erasure_mode"] == "hard_delete_legal"
 
 
-def test_explicit_preferences_outrank_inferred_preferences() -> None:
+def test_preferences_in_one_category_coexist() -> None:
     engine = LocalMemoryEngine()
     inferred = Preference(
         tenant_id=TENANT,
@@ -599,8 +599,12 @@ def test_explicit_preferences_outrank_inferred_preferences() -> None:
     exported = engine.export_tenant(TENANT)
     by_id = {item["id"]: item for item in exported["preferences"]}
 
-    assert by_id[inferred.id]["status"] == "superseded"
+    assert by_id[inferred.id]["status"] == "active"
     assert by_id[explicit_id]["status"] == "active"
+    # an exact repeat reuses the stored row
+    repeat = Preference.from_dict({**explicit.to_dict(), "id": "repeat"})
+    assert engine.add_preference(repeat) == explicit_id
+    assert len(engine.export_tenant(TENANT)["preferences"]) == 2
 
 
 def test_deep_search_uses_graph_channel_when_relations_exist() -> None:

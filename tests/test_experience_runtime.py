@@ -257,3 +257,20 @@ def test_learning_and_audit_continue_after_erasure_key_rotation():
         "t", episode_id=second["episode_id"], kind="verifier", value=1, final=True
     )
     assert runtime.writer.store.history("t")
+
+
+def test_policy_audit_records_only_changed_entries_and_rolls_them_back():
+    runtime = LearningRuntime(LocalMemoryEngine())
+    runtime.mode("t", "lessons", "active")
+    runtime.mode("t", "dreamer", "off")
+    event = runtime.writer.store.history("t")[-1]
+    change = next(row for row in event["changes"] if row["key"] == "modes")
+    assert change["partial"] and change["before"] == {} and change["after"] == {"dreamer": "off"}
+    runtime.mode("t", "routes", "off")  # a later change to another entry is not a conflict
+    runtime.rollback("t", event["id"])
+    assert runtime.writer.read("t")["policy"]["modes"] == {"lessons": "active", "routes": "off"}
+    runtime.mode("t", "dreamer", "off")
+    event = runtime.writer.store.history("t")[-1]
+    runtime.mode("t", "dreamer", "shadow")
+    with pytest.raises(ValueError, match="conflicts"):
+        runtime.rollback("t", event["id"])

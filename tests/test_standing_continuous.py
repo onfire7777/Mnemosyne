@@ -139,3 +139,12 @@ def test_g0_standing_calibration_fixture_reports_p2_contracts() -> None:
     assert report["standing_independent_corroboration_contract"] == 1.0
     assert report["standing_evidence_dominance_gap"] >= EVIDENCE_DOMINANCE_GAP
     assert report["passed"] is True
+
+
+def test_non_finite_signals_are_invalid_not_maximal() -> None:
+    inf = float("inf")
+    assert standing({"reality_class": "grounded", "lifecycle_salience": inf}).salience == 0.0
+    assert (
+        standing({"reality_class": "self_generated", "birth_groundedness": inf}).groundedness
+        == standing({"reality_class": "self_generated"}).groundedness
+    )

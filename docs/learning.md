@@ -6,7 +6,7 @@ A host first calls `prepare_context` with tenant, user, session and query. The r
 
 Retrieval and repetition earn no outcome credit. Assistant prose earns no reward. Evidence and authority remain separate from learned utility. The runtime's mandatory guards validate changes through its single learning writer.
 
-Completed tool results can resolve an episode immediately. Failures and every ten resolved outcomes per user trigger consolidation through shared host orchestration. Atomic claims prevent duplicate feedback from scheduling the same automatic pass twice; failed passes remain retryable. Session closure resolves remaining episodes under the runtime's expiration rules and runs maintenance even without new outcomes. The `learning_consolidate` queue job and `learning_reflect` slow-cadence pass use the same guarded runtime and configured providers.
+Completed tool results can resolve an episode immediately. Failures and every ten resolved outcomes per user trigger consolidation through shared host orchestration. Hosts that set `defer_semantic_review` (the Codex integration) skip this in-turn pass; their background worker consolidates instead, outside the hook deadline. Atomic claims prevent duplicate feedback from scheduling the same automatic pass twice; failed passes remain retryable. Session closure resolves remaining episodes under the runtime's expiration rules and runs maintenance even without new outcomes. The `learning_consolidate` queue job and `learning_reflect` slow-cadence pass use the same guarded runtime and configured providers.
 
 ## Learning mechanisms
 

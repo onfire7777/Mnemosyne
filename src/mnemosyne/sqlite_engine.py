@@ -37,7 +37,7 @@ instance from SQL and reusing its exact candidate/graph bodies (see the
 
 Phase-2 Task 5 adds the assertion / bitemporal / remaining-write surface —
 ``upsert_assertion`` (replay/supersede/contest), ``add_relation``,
-``add_preference`` (supersession), ``register_entity``, ``set_calibration`` /
+``add_preference`` (replay dedup), ``register_entity``, ``set_calibration`` /
 ``_calibration_for``, ``as_of`` (half-open [valid_from, valid_to) window over
 ``dt_to_json`` TEXT), ``correct``, and the ``deep_search`` / ``explain``
 delegators. The stateful writes run Local's actual body over a scoped oracle
@@ -85,6 +85,7 @@ from mnemosyne.access_policy import (
 from mnemosyne.calibration import CalibrationSet
 from mnemosyne.engine import (
     _CANDIDATE_MEMO_SIZE,
+    _to_utc_opt,
     _evaluate_trigger,
     Intention,
     LocalMemoryEngine,
@@ -195,14 +196,6 @@ from mnemosyne.standing import (
 )
 from mnemosyne.text import cosine, lexical_score, tokenize
 from mnemosyne.workspace import self_generation_budget_report, source_backed_summary
-
-
-def _to_utc_opt(dt: datetime | None) -> datetime | None:
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=UTC)
-    return dt.astimezone(UTC)
 
 
 LEXICAL_BACKEND = "sqlite-fts5"
@@ -991,11 +984,8 @@ class SqliteEngine:
         self._source_operation_depth = 0
         self._integrity_checked: set[str] = set()
         self._retrieval_result_cache_nonce = secrets.token_hex(16)
-        # Task 8: tenant-granular embedding-cache hit/miss telemetry (never
-        # per-cid — a per-key counter would itself be a presence oracle), and
-        # the per-tenant projection registries (cached-ppr / evidence-fts /
-        # optional vec0), built lazily on first use.
-        self._cache_telemetry: dict[str, dict[str, int]] = {}
+        # Task 8: the per-tenant projection registries (cached-ppr /
+        # evidence-fts / optional vec0), built lazily on first use.
         self._registries: dict[str, ProjectionRegistry] = {}
         # Scan-oracle memo (see _scan_oracle): one SQL hydration serves the
         # dense + lexical channels of a retrieve (and repeats until a write).
@@ -1119,6 +1109,13 @@ class SqliteEngine:
             SqliteEngine._validate_tenant_file_owner(conn, tenant_id)
             for statement in ENSURE_STATEMENTS:
                 conn.execute(statement)
+            # FTS5 only marks deleted terms; secure-delete removes them, so a forgotten token leaves the index.
+            # shortcut: needs SQLite 3.42, older builds keep erased terms until segments merge; a store that
+            # has this option set can no longer be opened by SQLite older than 3.42.
+            if sqlite3.sqlite_version_info >= (3, 42) and conn.execute(
+                "SELECT 1 FROM evidence_fts_config WHERE k = 'secure-delete'"
+            ).fetchone() is None:
+                conn.execute("INSERT INTO evidence_fts(evidence_fts, rank) VALUES('secure-delete', 1)")
             page_columns = {row[1] for row in conn.execute("PRAGMA table_info(knowledge_pages)")}
             if "maintenance" not in page_columns:
                 conn.execute("ALTER TABLE knowledge_pages ADD COLUMN maintenance TEXT NOT NULL DEFAULT '{}'")
@@ -1151,6 +1148,11 @@ class SqliteEngine:
                 )
             if "superseded_by" not in working_columns:
                 conn.execute("ALTER TABLE working_memory ADD COLUMN superseded_by TEXT")
+            # Needs salience, which stores older than the column only get from the ALTER above.
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS working_memory_eviction_idx "
+                "ON working_memory(tenant_id, session_id, status, salience, created_at)"
+            )
             # Lease C residual #3 (Plan CR-C1 admit): migration-safe relation columns.
             relation_columns = {
                 row[1] for row in conn.execute("PRAGMA table_info(relations)")
@@ -1209,20 +1211,18 @@ class SqliteEngine:
 
     @staticmethod
     def _write_evidence_mutable(conn: sqlite3.Connection, ev: Evidence) -> None:
-        """Rewrite the mutable evidence columns from ``ev`` (content/erased kept
-        for forget reuse; Task-3 metadata/embedding/sensitivity/access_policy
-        paths pass current values for the untouched columns)."""
+        """Rewrite the mutable evidence columns from ``ev``. Content and the
+        erased flag are never written and an erased row is never touched, so a
+        stale ``ev`` snapshot cannot undo a forget."""
         conn.execute(
-            "UPDATE evidence SET content = ?, metadata = ?, embedding = ?, "
-            "sensitivity = ?, access_policy = ?, erased = ? "
-            "WHERE tenant_id = ? AND branch = ? AND cid = ?",
+            "UPDATE evidence SET metadata = ?, embedding = ?, "
+            "sensitivity = ?, access_policy = ? "
+            "WHERE tenant_id = ? AND branch = ? AND cid = ? AND erased = 0",
             (
-                ev.content,
                 json_text(ev.metadata),
                 pack_embedding(ev.embedding),
                 int(ev.sensitivity),
                 json_text(ev.access_policy),
-                int(bool(ev.erased)),
                 ev.tenant_id,
                 ev.branch,
                 ev.cid,
@@ -1330,12 +1330,12 @@ class SqliteEngine:
         event_time = occurred_at or utc_now()
         if event_time.tzinfo is None:
             raise ValueError("audit event time must be timezone-aware")
-        if event_id is not None:
-            if any(
-                json.loads(row["record"]).get("id") == event_id
-                for row in conn.execute("SELECT record FROM audit_log")
-            ):
-                return
+        if event_id is not None and conn.execute(
+            "SELECT 1 FROM audit_log WHERE json_valid(record) "
+            "AND json_extract(record, '$.id') = ? LIMIT 1",
+            (event_id,),
+        ).fetchone():
+            return
         record = {
             "id": event_id or new_id(),
             "tenant_id": tenant_id,
@@ -2069,16 +2069,22 @@ class SqliteEngine:
         """Non-erased self-generated/simulated event + byte counts (Local parity)."""
         events = 0
         byte_count = 0
-        rows = conn.execute(
-            "SELECT * FROM evidence WHERE tenant_id = ? AND branch = ? AND erased = 0",
+        ticks = 0
+        # NOT INDEXED: newest-first rowid scan that stops early; the PK index would sort every row.
+        for row in conn.execute(
+            "SELECT * FROM evidence NOT INDEXED WHERE tenant_id = ? AND branch = ? "
+            "AND erased = 0 ORDER BY rowid DESC",
             (tenant_id, branch),
-        ).fetchall()
-        for row in rows:
+        ):
             item = _evidence_from_row(row)
             if LocalMemoryEngine._classify_evidence_reality(item) not in {
                 "self_generated",
                 "simulated",
             }:
+                # A window tick is one non-self-generated row; older rows are outside the window.
+                ticks += 1
+                if ticks >= self.policy.self_generation_budget_window_ticks:
+                    break
                 continue
             if source_backed_summary(
                 item,
@@ -2972,6 +2978,26 @@ class SqliteEngine:
                         found[str(row["cid"])] = created
         return found
 
+    def assertions_citing(
+        self, tenant_id: str, cids: Sequence[str], branch: str = "main"
+    ) -> list[Assertion]:
+        """Live and superseded assertions that cite any of ``cids`` (one result page of them)."""
+
+        wanted = [cid for cid in dict.fromkeys(cids) if cid]
+        if not wanted:
+            return []
+        conn = self._connect(tenant_id)
+        placeholders = ",".join("?" for _ in wanted)
+        # shortcut: scans the branch's assertions on every search; index the cited cids if that shows up in latency
+        with self._lock:
+            rows = conn.execute(
+                "SELECT * FROM assertions AS a WHERE tenant_id = ? AND branch = ? "
+                "AND status IN ('active', 'contested', 'superseded') AND EXISTS ("
+                f"SELECT 1 FROM json_each(a.source_evidence_cids) WHERE value IN ({placeholders}))",
+                (tenant_id, branch, *wanted),
+            ).fetchall()
+        return [_assertion_from_row(row) for row in rows]
+
     def evidence_is_erased(
         self, tenant_id: str, cid: str, branch: str = "main"
     ) -> bool:
@@ -3106,22 +3132,6 @@ class SqliteEngine:
             )
             with self._source_write(conn):
                 self._write_evidence_mutable(conn, ev)
-                # A1: mirror the just-set embedding into the subject-scoped cache
-                # when admissible (same txn; invisible to export parity). The
-                # cache_key is the STORED cid (already subject-salted for S2+/PII).
-                if self._embedding_cache_admits(
-                    sensitivity=int(ev.sensitivity),
-                    access_policy=ev.access_policy,
-                    erased=ev.erased,
-                ):
-                    self._embedding_cache_store_row(
-                        conn,
-                        tenant_id,
-                        cid,
-                        self._model_id(),
-                        list(embedding),
-                        int(ev.sensitivity),
-                    )
                 self._audit_row(
                     conn,
                     tenant_id,
@@ -3160,8 +3170,38 @@ class SqliteEngine:
             ]
         return [row for row in rows if is_raptor_summary_item(row)]
 
-    def export_tenant(self, tenant_id: str) -> dict[str, Any]:
+    def export_tenant(self, tenant_id: str, ids: set[str] | None = None) -> dict[str, Any]:
         conn = self._connect(tenant_id)
+        if ids is not None:
+            # Keyed read for get/supersede: the named rows plus the evidence they cite.
+            by_id = f"WHERE tenant_id = ? AND id IN ({','.join('?' * len(ids))}) ORDER BY rowid"
+            with self._lock:
+                rows = {
+                    "assertions": [
+                        _assertion_from_row(row).to_dict()
+                        for row in conn.execute(f"SELECT * FROM assertions {by_id}", (tenant_id, *ids))
+                    ],
+                    "relations": [
+                        _relation_from_row(row).to_dict()
+                        for row in conn.execute(f"SELECT * FROM relations {by_id}", (tenant_id, *ids))
+                    ],
+                    "preferences": [
+                        json.loads(row["record"])
+                        for row in conn.execute(f"SELECT record FROM preferences {by_id}", (tenant_id, *ids))
+                    ],
+                }
+                wanted = set(ids).union(
+                    *(row.get("source_evidence_cids") or [] for group in rows.values() for row in group)
+                )
+                evidence = [
+                    _evidence_from_row(row).to_dict()
+                    for row in conn.execute(
+                        "SELECT * FROM evidence WHERE tenant_id = ? AND erased = 0 "
+                        f"AND cid IN ({','.join('?' * len(wanted))}) ORDER BY rowid",
+                        (tenant_id, *wanted),
+                    )
+                ]
+            return {"tenant_id": tenant_id, "evidence": evidence, **rows}
         with self._lock:
             evidence = [
                 _evidence_from_row(row).to_dict()
@@ -3263,10 +3303,10 @@ class SqliteEngine:
         return exported
 
     def export_tenant_filtered(
-        self, tenant_id: str, access_context: dict[str, Any]
+        self, tenant_id: str, access_context: dict[str, Any], ids: set[str] | None = None
     ) -> dict[str, Any]:
         return filter_export_for_context(
-            self.export_tenant(tenant_id),
+            self.export_tenant(tenant_id) if ids is None else self.export_tenant(tenant_id, ids),
             {**dict(access_context or {}), "tenant_id": tenant_id},
             policy_max_sensitivity=self.policy.max_sensitivity,
             evidence_gate=lambda row: derived_evidence_readable(
@@ -3628,7 +3668,11 @@ class SqliteEngine:
             params = (target,)
         with self._lock:
             rel_rows = conn.execute(rel_sql, params).fetchall()
-            ev_rows = conn.execute(ev_sql, params).fetchall()
+            # Local graph_ppr builds hits only from relations: without any, evidence is never read.
+            ev_rows = (
+                conn.execute(ev_sql, params).fetchall()
+                if rel_rows or self.adapters.graph_retriever is not None else []
+            )
         for row in rel_rows:
             rel = _relation_from_row(row)
             oracle.relations[rel.id] = rel
@@ -3864,11 +3908,13 @@ class SqliteEngine:
                 allowed_evidence_cids is not None
                 and hit.kind == "evidence"
                 and hit.id not in allowed_evidence_cids
+                # unicode61 and the app tokenizer only agree on ASCII rows
+                and hit.text.isascii()
             )
         ]
         hits = []
         if text_kernels.NATIVE is not None:
-            scores = text_kernels.NATIVE.lexical_scan(
+            scores = text_kernels.lexical_scan(
                 query, [hit.text for hit in scored]
             )
             for hit, score in zip(scored, scores, strict=True):
@@ -3952,22 +3998,9 @@ class SqliteEngine:
 
     # --- Task 8: embedding cache (A1) ----------------------------------------
     #
-    # A subject-scoped embedding cache keyed by (cache_key, model_id), where
-    # cache_key is the STORED evidence cid. ``ids.evidence_cid`` already mixes
-    # user_id into the content address for sensitivity >= 2 / detected PII, so
-    # two subjects with identical S2+/PII plaintext produce different cids —
-    # that reused salt is precisely what closes the dedup-oracle rail (no new
-    # salting is invented here). The cache is invisible to ``export_tenant`` /
-    # parity: it is a pure recompute-avoidance + privacy surface.
-
-    def _model_id(self) -> str:
-        """Stable identity of the active embedding model (cache key component)."""
-        provider = self.adapters.embedding
-        for attr in ("model_id", "model", "name"):
-            value = getattr(provider, attr, None)
-            if value:
-                return str(value)
-        return type(provider).__name__
+    # The ``embedding_cache`` table is no longer written: nothing read it back,
+    # so it was a second copy of every evidence embedding. The purge paths stay
+    # so rows already in existing stores are still erased on forget/restrict.
 
     def _embedding_cache_admits(
         self,
@@ -3995,40 +4028,6 @@ class SqliteEngine:
         return True
 
     @staticmethod
-    def _embedding_cache_store_row(
-        conn: sqlite3.Connection,
-        tenant_id: str,
-        cache_key: str,
-        model_id: str,
-        vector: list[float],
-        sensitivity: int,
-    ) -> None:
-        conn.execute(
-            "INSERT OR REPLACE INTO embedding_cache "
-            "(tenant_id, cache_key, model_id, embedding, dims, sensitivity, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (
-                tenant_id,
-                str(cache_key),
-                model_id,
-                pack_embedding(list(vector)),
-                len(vector),
-                int(sensitivity),
-                dt_to_json(utc_now()),
-            ),
-        )
-
-    def _embedding_cache_fetch(
-        self, conn: sqlite3.Connection, tenant_id: str, cache_key: str, model_id: str
-    ) -> list[float] | None:
-        with self._lock:
-            row = conn.execute(
-                "SELECT embedding FROM embedding_cache WHERE tenant_id = ? AND cache_key = ? AND model_id = ?",
-                (tenant_id, str(cache_key), model_id),
-            ).fetchone()
-        return None if row is None else unpack_embedding(row["embedding"])
-
-    @staticmethod
     def _purge_embedding_cache_row(
         conn: sqlite3.Connection, tenant_id: str, cache_key: str
     ) -> int:
@@ -4048,77 +4047,6 @@ class SqliteEngine:
             with conn:
                 removed = self._purge_embedding_cache_row(conn, tenant_id, cid)
         return removed
-
-    def _cache_record(self, tenant_id: str, hit: bool) -> None:
-        """Tenant-granular hit/miss telemetry ONLY — a per-cid counter would
-        itself be a presence oracle."""
-        stats = self._cache_telemetry.setdefault(
-            str(tenant_id), {"hits": 0, "misses": 0}
-        )
-        stats["hits" if hit else "misses"] += 1
-
-    def cache_stats(self, tenant_id: str) -> dict[str, int]:
-        """Tenant-granular embedding-cache hit/miss counters."""
-        return dict(self._cache_telemetry.get(str(tenant_id), {"hits": 0, "misses": 0}))
-
-    def cached_embedding(
-        self,
-        tenant_id: str,
-        cid: str,
-        text: str,
-        *,
-        sensitivity: int,
-        access_policy: Any,
-        erased: bool = False,
-        embedding_partition: str | None = None,
-        context: dict[str, Any] | None = None,
-        model_id: str | None = None,
-        store: bool = True,
-    ) -> list[float]:
-        """A1 read-through embedding cache with ``may_use_stored_embedding``
-        read gating. A DENIED context (or a cross-subject cid that isn't present)
-        goes through the IDENTICAL miss branch as any genuine miss — the provider
-        is always called and the fresh vector returned; it is stored only when
-        the read gate permits AND the item is admissible. This makes a
-        cross-subject S2+ probe indistinguishable from a miss (class 10)."""
-        model = model_id or self._model_id()
-        decision = may_read_item(
-            item_tenant_id=tenant_id,
-            sensitivity=int(sensitivity),
-            access_policy=access_policy,
-            context=context,
-            policy_max_sensitivity=self.policy.max_sensitivity,
-            status="active",
-            erased=erased,
-        )
-        gate = may_use_stored_embedding(
-            decision=decision,
-            sensitivity=int(sensitivity),
-            access_policy=access_policy,
-            embedding_partition=embedding_partition,
-        )
-        if gate:
-            conn = self._connect(tenant_id)
-            cached = self._embedding_cache_fetch(conn, tenant_id, str(cid), model)
-            if cached is not None:
-                self._cache_record(tenant_id, True)
-                return cached
-        self._cache_record(tenant_id, False)
-        vector = self._embed_text(text)
-        if (
-            gate
-            and store
-            and self._embedding_cache_admits(
-                sensitivity=int(sensitivity), access_policy=access_policy, erased=erased
-            )
-        ):
-            with self._lock:
-                conn = self._connect(tenant_id)
-                with conn:
-                    self._embedding_cache_store_row(
-                        conn, tenant_id, str(cid), model, vector, int(sensitivity)
-                    )
-        return vector
 
     # --- Task 8: cached-PPR projection + projection registry -----------------
 
@@ -4589,7 +4517,7 @@ class SqliteEngine:
     # pattern for read paths. The stateful WRITE paths whose cross-row semantics
     # are non-trivial — ``upsert_assertion`` (replay/supersede/contest +
     # projection-reality-monitoring + schema-fast-path calibration mutation),
-    # ``add_preference`` (supersession), ``register_entity`` (merge upsert) —
+    # ``add_preference`` (replay dedup), ``register_entity`` (merge upsert) —
     # run Local's ACTUAL method over an oracle hydrated from SQL, then persist
     # only the genuinely new/changed rows back (rowid preserved for unchanged
     # rows → ``export_tenant`` ORDER BY rowid parity holds) and replay Local's
@@ -4652,7 +4580,7 @@ class SqliteEngine:
         self, conn: sqlite3.Connection, tenant_id: str
     ) -> LocalMemoryEngine:
         """Hydrate a preference-scope oracle: all of the tenant's preferences
-        (supersession is tenant/user/category/scope-scoped, never branch-scoped)."""
+        (replay dedup is tenant/user/category/scope-scoped, never branch-scoped)."""
         oracle = LocalMemoryEngine(policy=self.policy, adapters=self.adapters)
         with self._lock:
             rows = conn.execute(
@@ -4894,12 +4822,11 @@ class SqliteEngine:
         return json.dumps(self.export_all(), indent=2, sort_keys=True)
 
     def add_preference(self, preference: Preference) -> str:
-        """Tenant-scoped preference supersession, byte-parity with Local.
+        """Tenant-scoped preference write, byte-parity with Local.
 
-        Runs ``LocalMemoryEngine.add_preference`` (same
-        tenant/user/category/scope/active supersession + explicit/retracted
-        logic) over an oracle hydrated from every tenant preference, then
-        persists the new row and any superseded/retracted rows (record JSON,
+        Runs ``LocalMemoryEngine.add_preference`` (preferences coexist; an
+        exact replay reuses the stored row) over an oracle hydrated from every
+        tenant preference, then persists the new or changed row (record JSON,
         rowid preserved) plus Local's audit rows in one transaction."""
         with self._lock:
             conn = self._connect(preference.tenant_id)
@@ -5709,19 +5636,6 @@ class SqliteEngine:
                 assertion_refs.setdefault(hit.tenant_id, set()).add(
                     (hit.branch, hit.id)
                 )
-        for tenant_id, refs in assertion_refs.items():
-            conn = self._connect(tenant_id)
-            with self._lock:
-                for branch, aid in refs:
-                    row = conn.execute(
-                        "SELECT * FROM assertions WHERE tenant_id = ? AND branch = ? AND id = ?",
-                        (tenant_id, branch, aid),
-                    ).fetchone()
-                    if row is not None:
-                        a = _assertion_from_row(row)
-                        oracle.assertions[
-                            oracle._branch_key(a.tenant_id, a.branch, a.id)
-                        ] = a
         # 2. evidence refs from hits + hydrated assertions' source cids.
         ev_refs: dict[str, set[tuple[str, str]]] = {}
 
@@ -5736,12 +5650,31 @@ class SqliteEngine:
                 _want(hit.tenant_id, hit.branch, hit.id)
             for cid in hit.provenance:
                 _want(hit.tenant_id, hit.branch, cid)
-        for a in oracle.assertions.values():
-            for cid in a.source_evidence_cids:
-                _want(a.tenant_id, a.branch, cid)
-        for tenant_id, refs in ev_refs.items():
-            conn = self._connect(tenant_id)
-            with self._lock:
+        # Take each tenant's write lock BEFORE the first read: a forget or correction
+        # committed between the read and the write-back would be overwritten by it.
+        with self._lock, ExitStack() as txns:
+            for tenant_id in sorted({*assertion_refs, *ev_refs}):
+                conn = self._connect(tenant_id)
+                txns.enter_context(conn)
+                if not conn.in_transaction:
+                    conn.execute("BEGIN IMMEDIATE")
+            for tenant_id, refs in assertion_refs.items():
+                conn = self._connect(tenant_id)
+                for branch, aid in refs:
+                    row = conn.execute(
+                        "SELECT * FROM assertions WHERE tenant_id = ? AND branch = ? AND id = ?",
+                        (tenant_id, branch, aid),
+                    ).fetchone()
+                    if row is not None:
+                        a = _assertion_from_row(row)
+                        oracle.assertions[
+                            oracle._branch_key(a.tenant_id, a.branch, a.id)
+                        ] = a
+            for a in oracle.assertions.values():
+                for cid in a.source_evidence_cids:
+                    _want(a.tenant_id, a.branch, cid)
+            for tenant_id, refs in ev_refs.items():
+                conn = self._connect(tenant_id)
                 for branch, cid in refs:
                     row = conn.execute(
                         "SELECT * FROM evidence WHERE tenant_id = ? AND branch = ? AND cid = ?",
@@ -5752,15 +5685,14 @@ class SqliteEngine:
                         oracle.evidence[
                             oracle._evidence_key(ev.tenant_id, ev.branch, ev.cid or "")
                         ] = ev
-        # 3. Local's exact body mutates the oracle dicts in place (its _persist is
-        #    a no-op with no store_path); snapshot for the write-back delta.
-        a_before = {key: item.to_dict() for key, item in oracle.assertions.items()}
-        ev_before = {key: item.to_dict() for key, item in oracle.evidence.items()}
-        result = LocalMemoryEngine._record_retrieval_access(oracle, hits)
-        # 4. persist only the genuinely-changed rows, per tenant, in one txn each.
-        for tenant_id in {*assertion_refs, *ev_refs}:
-            conn = self._connect(tenant_id)
-            with self._lock, conn:
+            # 3. Local's exact body mutates the oracle dicts in place (its _persist is
+            #    a no-op with no store_path); snapshot for the write-back delta.
+            a_before = {key: item.to_dict() for key, item in oracle.assertions.items()}
+            ev_before = {key: item.to_dict() for key, item in oracle.evidence.items()}
+            result = LocalMemoryEngine._record_retrieval_access(oracle, hits)
+            # 4. persist only the genuinely-changed rows; the open transactions commit on exit.
+            for tenant_id in {*assertion_refs, *ev_refs}:
+                conn = self._connect(tenant_id)
                 for key, item in oracle.assertions.items():
                     if item.tenant_id == tenant_id and item.to_dict() != a_before.get(
                         key
@@ -5860,6 +5792,16 @@ class SqliteEngine:
             if result.get("erased"):
                 from mnemosyne.mental_model_sources import purge_source_snapshot_caches
                 self._after_source_commit(lambda: purge_source_snapshot_caches(self, tenant_id))
+
+                def truncate_wal() -> None:
+                    # The WAL still holds the pre-forget pages. Best effort: a reader that keeps a
+                    # snapshot open makes this wait busy_timeout and leaves them to the next checkpoint.
+                    try:
+                        self._connect(tenant_id).execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()
+                    except sqlite3.OperationalError:
+                        pass  # forget is already committed; it must not fail on housekeeping
+
+                self._after_source_commit(truncate_wal)
             return result
 
     def _forget_impl(
@@ -6114,11 +6056,6 @@ class SqliteEngine:
                     conjunctive = calibration.get("source_dependency_mode") == "all" or bool(calibration.get("coreference"))
                     if conjunctive:
                         dependent_relations.add((row["subject"], row["predicate"], row["object"], frozenset(sources)))
-                        conn.execute(
-                            "UPDATE assertions SET subject = '[erased]', predicate = 'erased', object = '[erased]', "
-                            "scope = '{}', calibration = ? WHERE tenant_id = ? AND branch = ? AND id = ?",
-                            (json_text({"dependency_erased": True}), tenant_id, branch, row["id"]),
-                        )
                     surviving = [item for item in sources if item not in affected_cids]
                     if surviving and not conjunctive:
                         conn.execute(
@@ -6128,12 +6065,15 @@ class SqliteEngine:
                         )
                         propagated["trimmed_assertions"].append(row["id"])
                     else:
+                        # A belief with no source left must not keep the erased text (object, quote).
                         conn.execute(
-                            "UPDATE assertions SET status = 'retracted', expired_at = ?, source_evidence_cids = ? "
+                            "UPDATE assertions SET status = 'retracted', expired_at = ?, source_evidence_cids = ?, "
+                            "subject = '[erased]', predicate = 'erased', object = '[erased]', scope = '{}', calibration = ? "
                             "WHERE tenant_id = ? AND branch = ? AND id = ?",
                             (
                                 dt_to_json(utc_now()),
                                 json_text([]),
+                                json_text({"dependency_erased": True}),
                                 tenant_id,
                                 branch,
                                 row["id"],
@@ -6157,6 +6097,9 @@ class SqliteEngine:
                         pref.status = "retracted"
                         pref.valid_to = utc_now()
                         pref.source_evidence_cids = []
+                        pref.statement = "[erased]"
+                        pref.scope = {}
+                        pref.exceptions = {}
                         propagated["retracted_preferences"].append(pref.id)
                     conn.execute(
                         "UPDATE preferences SET record = ? WHERE id = ?",
@@ -6172,12 +6115,6 @@ class SqliteEngine:
                     if not affected_cids.intersection(sources):
                         continue
                     conjunctive = (row["source"], row["predicate"], row["target"], frozenset(sources)) in dependent_relations
-                    if conjunctive:
-                        conn.execute(
-                            "UPDATE relations SET source = '[erased]', predicate = 'erased', target = '[erased]' "
-                            "WHERE tenant_id = ? AND branch = ? AND id = ?",
-                            (tenant_id, branch, row["id"]),
-                        )
                     surviving = [item for item in sources if item not in affected_cids]
                     if surviving and not conjunctive:
                         conn.execute(
@@ -6188,7 +6125,8 @@ class SqliteEngine:
                         propagated["trimmed_relations"].append(row["id"])
                     else:
                         conn.execute(
-                            "UPDATE relations SET valid_to = ?, source_evidence_cids = ? "
+                            "UPDATE relations SET valid_to = ?, source_evidence_cids = ?, "
+                            "source = '[erased]', predicate = 'erased', target = '[erased]' "
                             "WHERE tenant_id = ? AND branch = ? AND id = ?",
                             (
                                 dt_to_json(utc_now()),

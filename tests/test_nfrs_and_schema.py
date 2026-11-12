@@ -434,3 +434,19 @@ def test_how_provenance_semiring_combines_alternatives_and_prunes_erased() -> No
     assert how_provenance_for_sources(["cidA", "cidB"]).tag() == "cidA*cidB"
     assert how_provenance_for_sources(["cidA", "cidB"], joint=False).tag() == "cidA + cidB"
     assert HowProvenance.from_dict(alternative.to_dict()) == alternative
+
+
+def test_audit_log_trigger_and_roles_allow_only_the_erasure_redaction() -> None:
+    # forget() blanks source-derived audit diffs; an unconditional trigger made every such forget fail.
+    from mnemosyne.erasure_ids import redact_source_audit_payload
+
+    schema = Path("sql/schema.sql").read_text(encoding="utf-8")
+    roles = Path("infra/postgres/roles.sql").read_text(encoding="utf-8")
+    redacted = redact_source_audit_payload({"source_evidence_cids": ["c"]}, {"c"})
+
+    assert redacted == {"source_payload_erased": True}
+    assert "IF NEW.diff = '{\"source_payload_erased\": true}'::jsonb" in schema
+    assert "AND to_jsonb(NEW) - 'diff' = to_jsonb(OLD) - 'diff' THEN" in schema
+    grant = "GRANT UPDATE (diff) ON audit_log TO mnemosyne_app, mnemosyne_consolidator;"
+    # a table-level REVOKE also drops column grants, so the grant must come after it
+    assert roles.index("REVOKE UPDATE, DELETE, TRUNCATE ON audit_log") < roles.index(grant)

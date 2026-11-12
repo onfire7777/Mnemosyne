@@ -461,3 +461,28 @@ def test_r5_autonomous_prefetch_dreamer_structural_holes_and_user_model_graduati
     drifts = detect_preference_drift([entry], "I switched to neovim for editing", new_evidence_cid="cid-s4")
     assert len(drifts) >= 1
     assert entry.confidence < pre_drift_conf
+
+
+def test_hierarchy_evidence_is_denied_when_caller_can_read_nothing() -> None:
+    from mnemosyne.knowledge_pages import KnowledgePage
+
+    engine = LocalMemoryEngine()
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id="t",
+            user_id="alice",
+            actor="user",
+            source_type="chat",
+            content="Alice's salary at Acme is 250000 dollars.",
+            sensitivity=1,
+            access_policy={"tenant": "t", "allow_principals": ["alice"]},
+        )
+    )
+    engine.knowledge_page_create(
+        KnowledgePage(tenant_id="t", path="people/alice", title="Alice salary",
+                      content_markdown="salary notes", source_evidence_cids=[cid])
+    )
+    alice = AnswerReadContext(tenant_id="t", user_id="alice", role="operator", max_sensitivity=3)
+    bob = AnswerReadContext(tenant_id="t", user_id="bob", role="reader", max_sensitivity=0)
+    assert resolve_hierarchical_evidence(engine, "What is the salary?", alice)["claims"]
+    assert not resolve_hierarchical_evidence(engine, "What is the salary?", bob)["claims"]

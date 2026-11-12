@@ -376,7 +376,7 @@ class _StubEmbedEngine:
     """Just enough engine surface for ConsolidationWorker._embed_evidence."""
 
     def __init__(self, dims: int):
-        self.adapters = SimpleNamespace(embedding=SimpleNamespace(dims=dims))
+        self.adapters = SimpleNamespace(embedding=HashingEmbeddingProvider(dims=dims))
         self.calls: list[tuple[str, list[float]]] = []
 
     def set_evidence_embedding(

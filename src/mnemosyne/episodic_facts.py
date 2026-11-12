@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Sequence
 
-from mnemosyne.models import Assertion, Relation, utc_now
+from mnemosyne.models import Assertion, Relation, parse_dt, utc_now
 from mnemosyne.security import TrustTier
 
 
@@ -1582,6 +1582,10 @@ def extract_episodic_facts(
         scope_copy = dict(scope or {})
         if q.get("is_hypothetical"):
             scope_copy["is_hypothetical"] = True
+        # shortcut: only a date window still open at statement time falls back to the statement time; a closed
+        # window that contains the older statement still loses, upgrade in the engine upsert if that shows up.
+        if vf is not None and occ_start is not None and occ_end is not None and occ_start <= vf <= parse_dt(ref_time) <= occ_end:
+            vf = None
         a = Assertion(
             tenant_id=tenant_id,
             user_id=user_id,
@@ -1612,6 +1616,8 @@ def extract_episodic_facts(
         if key in seen_relations:
             return
         seen_relations.add(key)
+        if vf is not None and occ_start is not None and occ_end is not None and occ_start <= vf <= parse_dt(ref_time) <= occ_end:
+            vf = None  # same open-window rule as add_assertion
         r = Relation(
             tenant_id=tenant_id,
             source=source,

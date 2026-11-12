@@ -211,6 +211,11 @@ def test_answer_grounding_floor_abstains_on_low_grounded_self_dominance() -> Non
     assert "low_grounded_self_support_exceeds_fraction_cap" in active["reasons"]
     assert inactive["active"] is False
     assert inactive["grounded_support_fraction"] == 1.0
+    # A grounded best hit is not "dominated" by lower-ranked self-generated padding.
+    padded = [low_self_hits[1], grounded_hits[0], low_self_hits[1]]
+    assert answer_grounding_floor_report(padded, policy)["active"] is False
+    grounded_hits[0].text = "When is it?"  # the user's earlier question answers nothing
+    assert answer_grounding_floor_report(padded, policy)["active"] is True
 
 
 def test_workspace_broadcast_strips_control_shaped_payloads_and_redacts_content() -> None:
@@ -240,3 +245,24 @@ def test_workspace_broadcast_strips_control_shaped_payloads_and_redacts_content(
         set(item["stripped_control_keys"])
     )
     assert raw_marker not in str(report)
+
+
+def test_self_generation_budget_is_a_window_not_a_lifetime_cap(tmp_path) -> None:
+    from mnemosyne.sqlite_engine import SqliteEngine
+
+    tenant = "tenant-heartbeat"
+
+    def turn(actor: str, text: str) -> Evidence:
+        return Evidence(
+            tenant_id=tenant, user_id="u", actor=actor, source_type="chat",
+            content=text, access_policy={"tenant": tenant},
+        )
+
+    for engine in (LocalMemoryEngine(), SqliteEngine(tmp_path)):
+        assistant = []
+        for i in range(20):  # more assistant turns than self_generation_budget_max_events
+            engine.append_evidence(turn("user", f"user question {i}"))
+            assistant.append(engine.append_evidence(turn("assistant", f"assistant answer {i}")))
+        assert all(engine.get_evidence(tenant, cid) is not None for cid in assistant)
+        runaway = [engine.append_evidence(turn("assistant", f"unprompted {i}")) for i in range(20)]
+        assert engine.get_evidence(tenant, runaway[-1]) is None  # the flood cap still holds

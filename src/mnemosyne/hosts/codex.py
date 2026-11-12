@@ -17,14 +17,31 @@ from mnemosyne.hosts.locking import bounded_lock
 from mnemosyne.local_paths import normalize_workspace
 
 
+_SECRET_KEY = re.compile(r"(?i)(?:password|secret|api[_-]?key|access[_-]?token)$")
+
+
+def _redact_tree(value, key=""):
+    # Redact leaves: re-parsing redacted JSON text breaks on a secret before an escaped quote.
+    if isinstance(value, dict):
+        return {redact(k) if isinstance(k, str) else k: _redact_tree(v, str(k))
+                for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact_tree(v, key) for v in value]
+    if isinstance(value, str):
+        return "[REDACTED]" if _SECRET_KEY.search(key) and len(value) >= 8 else redact(value)
+    return value
+
+
 def redact(value):
-    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+    if not isinstance(value, str):
+        return json.dumps(_redact_tree(value), ensure_ascii=False)
+    text = value
     text = re.sub(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{12,}", "Bearer [REDACTED]", text)
     text = re.sub(
         r"\b(?:sk-|ghp_|github_pat_|gbrain_at_)[A-Za-z0-9_-]{12,}", "[REDACTED]", text
     )
     return re.sub(
-        r"""(?i)((?:password|secret|api[_-]?key|access[_-]?token)\s*[=:]\s*["']?)[^\s"',}]{8,}""",
+        r"""(?i)((?:password|secret|api[_-]?key|access[_-]?token)["']?\s*[=:]\s*["']?)[^\s"',}]{8,}""",
         r"\1[REDACTED]",
         text,
     )
@@ -245,7 +262,7 @@ def _tool_event(name, response, *, tool_id=None, command=None, status=None,
     if (workspace := normalize_workspace(cwd)) is not None:
         event["cwd"] = redact(workspace)
     if isinstance(arguments, (dict, list)):
-        event["arguments"] = json.loads(redact(arguments))
+        event["arguments"] = _redact_tree(arguments)
     if command:
         event["check_id"] = "command:" + digest([_command_text(command), cwd])
     elif isinstance(arguments, (dict, list)):
@@ -280,7 +297,7 @@ def _tool_event(name, response, *, tool_id=None, command=None, status=None,
         event["claims"] = claims
     observations = structured.get("observations")
     if external_checker and isinstance(observations, list):
-        event["observations"] = [json.loads(redact(row)) for row in observations
+        event["observations"] = [_redact_tree(row) for row in observations
                                   if isinstance(row, dict)]
     for key in ("checked_call_ids", "tested_steps"):
         values = structured.get(key)
@@ -293,7 +310,7 @@ def _tool_event(name, response, *, tool_id=None, command=None, status=None,
     # trusted result envelope, even when it happens to contain matching JSON.
     for key in ("hypothesis_review", "source_versions", "experiment_environment"):
         if external_checker and isinstance(structured.get(key), dict):
-            event[key] = json.loads(redact(structured[key]))
+            event[key] = _redact_tree(structured[key])
     for key in (("exit_code", "passed", "failed") if external_checker else ("exit_code",)):
         value = structured.get(key)
         if type(value) is int and (key == "exit_code" or value >= 0):
@@ -712,9 +729,9 @@ class CodexAdapter:
         if turn_id in observed:
             return
         runtime = build_learning_runtime(facade.engine)
-        episodes = runtime.writer.read(self.tenant_id)["episodes"]
-        receipt_id = state.setdefault("prepared_turns", {}).get(turn_id)
         learning = runtime.writer.read(self.tenant_id)
+        episodes = learning["episodes"]
+        receipt_id = state.setdefault("prepared_turns", {}).get(turn_id)
         receipt = learning["receipts"].get(receipt_id, {})
         if (receipt.get("user_id") != self.user_id or receipt.get("session_id") != session
                 or receipt.get("query") != turn["prompt"]):

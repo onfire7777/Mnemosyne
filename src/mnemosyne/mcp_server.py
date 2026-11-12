@@ -109,7 +109,10 @@ class MnemosyneMcpServer:
             "MNEMOSYNE_PARAMETRIC_ADAPTER_KIND", "command-parametric-adapter"
         )
         self.parametric_timeout = parametric_timeout or float(os.environ.get("MNEMOSYNE_PARAMETRIC_TIMEOUT", "300"))
-        self.object_store = object_store or os.environ.get("MNEMOSYNE_OBJECT_STORE") or ".mnemosyne/objects"
+        # payloads follow the store so every process sharing it finds them, whatever its cwd
+        self.object_store = object_store or os.environ.get("MNEMOSYNE_OBJECT_STORE") or (
+            str(Path(store_path).expanduser().parent / "objects") if store_path else ".mnemosyne/objects"
+        )
         self.object_store_encryption = object_store_encryption or os.environ.get("MNEMOSYNE_OBJECT_STORE_ENCRYPTION", "none")
         self.object_key_store = object_key_store or os.environ.get("MNEMOSYNE_OBJECT_KEY_STORE")
         self.object_key_provider = object_key_provider or _default_object_key_provider()
@@ -317,10 +320,32 @@ class MnemosyneMcpServer:
             else:
                 engine = LocalMemoryEngine(store_path=self.store_path)
                 runtime_state = RuntimeState.from_store_path(self.store_path)
-            if self.passage_graph is not None and getattr(engine, "adapters", None) is not None:
+            if getattr(engine, "adapters", None) is not None:
                 from dataclasses import replace as _replace
 
-                engine.adapters = _replace(engine.adapters, passage_graph=self.passage_graph)
+                from mnemosyne.retrieval import retrieval_adapters_from_env
+
+                # The retrieval providers the CLI uses; each engine keeps its own backend labels.
+                # shortcut: with none of these set the engine keeps its own default embedder (256-dim
+                # hashing on local/SQLite, the CLI uses 1024); unify when stored vectors can be re-embedded.
+                env = retrieval_adapters_from_env()
+                chosen = {
+                    name: getattr(env, name)
+                    for name, keys in (
+                        ("embedding", ("EMBEDDING_PROVIDER", "EMBEDDING_DIMS")),
+                        ("reranker", ("EMBEDDING_PROVIDER", "EMBEDDING_DIMS", "RERANKER_PROVIDER")),
+                    )
+                    if any(os.environ.get(f"MNEMOSYNE_{key}") for key in keys)
+                }
+                engine.adapters = _replace(
+                    engine.adapters,
+                    **chosen,
+                    lexical_retriever=env.lexical_retriever,
+                    graph_retriever=env.graph_retriever,
+                    passage_graph=self.passage_graph
+                    if self.passage_graph is not None
+                    else engine.adapters.passage_graph,
+                )
             if self.queue_backend == "postgres":
                 dsn = self.postgres_dsn or os.environ.get("MNEMOSYNE_POSTGRES_DSN")
                 if not dsn:
@@ -994,7 +1019,8 @@ def build_sdk_server(**kwargs: Any) -> Any:
         def skills() -> Any:
             if not facade._authorized({}):
                 raise ValueError("unauthorized: valid MCP auth token required")
-            return facade.tools._skills()
+            facade.prepare_tool_arguments("skill_search", {}, {})  # the session gate a skill tool call passes
+            return (facade._stateless_tools_for(None, {})[3] if facade.stateless else facade.tools)._skills()
 
         async def list_prompts(_ctx: Any, _params: Any) -> Any:
             return types.ListPromptsResult(prompts=[types.Prompt(name=s["name"], description=s["applicability"] or None)
@@ -1067,6 +1093,7 @@ def build_sdk_streamable_http_app(
     health_path: str = "/healthz",
     stateless: bool = True,
     transport_stateless: bool | None = None,
+    security_settings: Any = None,
     **kwargs: Any,
 ) -> Any:
     """Build an official MCP SDK StreamableHTTP ASGI app."""
@@ -1089,7 +1116,7 @@ def build_sdk_streamable_http_app(
             event_store=None,
             json_response=True,
             stateless=manager_stateless,
-            security_settings=None,
+            security_settings=security_settings,
         )
         streamable_app = StreamableHTTPASGIApp(session_manager)
 
@@ -1146,11 +1173,23 @@ def serve_sdk_streamable_http(
         import uvicorn
     except ImportError as exc:  # pragma: no cover - exercised when optional extra is absent.
         raise RuntimeError("Official MCP SDK streamable HTTP mode requires `uvicorn`.") from exc
+    from mnemosyne.network_safety import is_loopback_host
+
+    security_settings = None
+    if is_loopback_host(host):
+        # A rebound DNS name reaches a loopback bind with a foreign Host; the SDK checks it only when asked.
+        from mcp.server.transport_security import TransportSecuritySettings
+
+        loopback = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
+        security_settings = TransportSecuritySettings(
+            allowed_hosts=loopback, allowed_origins=[f"http://{item}" for item in loopback]
+        )
     app = build_sdk_streamable_http_app(
         streamable_http_path=streamable_http_path,
         health_path=health_path,
         stateless=stateless,
         transport_stateless=transport_stateless,
+        security_settings=security_settings,
         **kwargs,
     )
     try:
@@ -1243,6 +1282,7 @@ def build_http_server(
 ) -> ThreadingHTTPServer:
     """Build a hosted HTTP JSON-RPC transport around the MCP facade."""
 
+    from mnemosyne.network_safety import is_loopback_host
     from mnemosyne.oidc_jwks import load_oidc_authorization_policy, load_oidc_jwks, oidc_jwks_loader
     from mnemosyne.security import OidcJwtVerifier
 
@@ -1353,6 +1393,17 @@ def build_http_server(
             )
 
         def do_POST(self) -> None:  # noqa: N802 - stdlib callback name.
+            # A web page can POST text/plain cross-site without preflight, and a
+            # rebound DNS name reaches a loopback bind with a foreign Host.
+            try:
+                host_ok = not is_loopback_host(host) or is_loopback_host(
+                    urlsplit("//" + self.headers.get("Host", "")).hostname
+                )
+            except ValueError:
+                host_ok = False
+            if not host_ok or self.headers.get_content_type() != "application/json":
+                self._send_json(403, {"ok": False, "error": "forbidden"})
+                return
             path = urlsplit(self.path).path
             if path == session_exchange_path:
                 self._handle_session_exchange()
@@ -1851,7 +1902,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--store", default=str(default_store()), help="Path to local JSON store")
     parser.add_argument("--backend", choices=["local", "postgres", "sqlite"], default=default_backend(), help="Storage backend for MCP tools")
     parser.add_argument("--postgres-dsn", default=default_postgres_dsn(), help="Postgres DSN for --backend postgres")
-    parser.add_argument("--object-store", default=os.environ.get("MNEMOSYNE_OBJECT_STORE", ".mnemosyne/objects"))
+    parser.add_argument("--object-store", default=os.environ.get("MNEMOSYNE_OBJECT_STORE"))
     parser.add_argument(
         "--object-store-encryption",
         choices=["none", "aesgcm"],
@@ -1878,7 +1929,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--allowed-residency",
         action="append",
-        default=list(_default_allowed_residencies()),
+        default=None,  # None, not the env list: append would add to it instead of replacing it
         help="Allowed data residency label for MCP ingestion; repeat or use MNEMOSYNE_ALLOWED_RESIDENCIES",
     )
     parser.add_argument(
@@ -2003,7 +2054,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--idp-role-claim", default=os.environ.get("MNEMOSYNE_MCP_IDP_ROLE_CLAIM", "mnemosyne_role"))
     parser.add_argument("--idp-trust-claim", default=os.environ.get("MNEMOSYNE_MCP_IDP_TRUST_CLAIM", "mnemosyne_source_trust_tier"))
     parser.add_argument("--idp-session-id-claim", default=os.environ.get("MNEMOSYNE_MCP_IDP_SESSION_ID_CLAIM", "jti"))
-    parser.add_argument("--idp-algorithm", action="append", default=os.environ.get("MNEMOSYNE_MCP_IDP_ALGORITHMS", "RS256,ES256").split(","))
+    parser.add_argument("--idp-algorithm", action="append", default=None)
     parser.add_argument("--idp-leeway-seconds", type=int, default=int(os.environ.get("MNEMOSYNE_MCP_IDP_LEEWAY_SECONDS", "60")))
     parser.add_argument("--idp-timeout", type=float, default=float(os.environ.get("MNEMOSYNE_MCP_IDP_TIMEOUT", "10")))
     parser.add_argument("--idp-jwks-max-bytes", type=int, default=int(os.environ.get("MNEMOSYNE_MCP_IDP_JWKS_MAX_BYTES", str(1024 * 1024))))
@@ -2088,7 +2139,7 @@ def main(argv: list[str] | None = None) -> None:
         "object_key_provider": args.object_key_provider,
         "object_key_command": args.object_key_command,
         "object_key_timeout": args.object_key_timeout,
-        "allowed_residencies": tuple(args.allowed_residency),
+        "allowed_residencies": tuple(args.allowed_residency or ()),
         "runtime_residency": args.runtime_residency,
         "allowed_residency_transfers": tuple(args.allowed_residency_transfer),
         "require_runtime_residency": args.require_runtime_residency,
@@ -2139,7 +2190,7 @@ def main(argv: list[str] | None = None) -> None:
             idp_role_claim=args.idp_role_claim,
             idp_trust_claim=args.idp_trust_claim,
             idp_session_id_claim=args.idp_session_id_claim,
-            idp_algorithms=tuple(args.idp_algorithm),
+            idp_algorithms=tuple(args.idp_algorithm or os.environ.get("MNEMOSYNE_MCP_IDP_ALGORITHMS", "RS256,ES256").split(",")),
             idp_leeway_seconds=args.idp_leeway_seconds,
             idp_timeout=args.idp_timeout,
             idp_jwks_max_bytes=args.idp_jwks_max_bytes,

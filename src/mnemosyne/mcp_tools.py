@@ -292,7 +292,7 @@ TOOL_SPEC: list[dict[str, Any]] = [
     },
     {
         "name": "preference",
-        "description": "Record an explicit or inferred preference with precedence rules.",
+        "description": "Record an explicit or inferred preference. Preferences in one category coexist; an exact repeat returns the stored id.",
         "arguments": ["tenant_id", "user_id", "category", "statement"],
     },
     {
@@ -1154,7 +1154,7 @@ class MemoryTools:
                     access_policy=dict(item.access_policy),
                     valid_from=clock,
                 )
-                self.engine.add_preference(pref)
+                pref.id = self.engine.add_preference(pref)
                 preferences.append(pref)
                 consolidated_ids.append(item.item_id)
             elif item.kind == "intermediate_conclusion":
@@ -1265,7 +1265,7 @@ class MemoryTools:
                         access_policy=dict(item.access_policy),
                         valid_from=clock,
                     )
-                    self.engine.add_preference(pref)
+                    pref.id = self.engine.add_preference(pref)
                     preferences.append(pref)
                 elif item.kind == "intermediate_conclusion":
                     assertion = Assertion(
@@ -1337,6 +1337,7 @@ class MemoryTools:
         mirror_turn: bool = False,
         session_identity: SessionIdentity | None = None,
     ) -> dict[str, Any]:
+        self._deny_reader("capture", session_identity)
         _require_text(tenant_id, field="tenant_id")
         enforce_byte_limit(
             content.encode("utf-8"),
@@ -1369,7 +1370,7 @@ class MemoryTools:
             modality=evidence.modality,
             sensitivity=int(evidence.sensitivity),
         )
-        from mnemosyne.memory_formation import direct_user_clauses
+        from mnemosyne.memory_formation import direct_user_clauses, restated_segment_id
         if actor == "user" and direct_user_clauses(content, include_directives=True):
             # Preserve a compatible legacy capture, but never deduplicate one
             # person's first-person statement into another person's source.
@@ -1377,6 +1378,7 @@ class MemoryTools:
             if previous is None or previous.user_id != user_id or previous.actor != actor:
                 from mnemosyne.experience.receipts import digest
                 evidence.document_segment_id = "capture:" + digest([tenant_id, user_id, source_type])
+                evidence.document_segment_id = restated_segment_id(self.engine, evidence, branch)
                 expected_cid = evidence_cid(
                     evidence.content, tenant_id=tenant_id, user_id=user_id,
                     source_type=source_type, content_pointer=evidence.content_pointer,
@@ -1469,7 +1471,9 @@ class MemoryTools:
         signed_provenance: dict[str, Any] | None = None,
         capability_tags: list[str] | None = None,
         sensitivity: int = 0,
+        session_identity: SessionIdentity | None = None,
     ) -> dict[str, Any]:
+        self._deny_reader("ingest", session_identity)
         if isinstance(data, str):
             max_bytes = getattr(self.ingestion, "max_ingest_bytes", DEFAULT_MAX_INGEST_BYTES)
             try:
@@ -2890,7 +2894,7 @@ class MemoryTools:
         which version was meant and returns the record valid at that moment.
         """
 
-        exported = self.export(
+        context = self._read_context(
             tenant_id,
             role=role,
             user_id=user_id,
@@ -2902,6 +2906,8 @@ class MemoryTools:
             break_glass=break_glass,
             lawful_basis=lawful_basis,
         )
+        # Keyed: the full export loads and access-checks every row of the tenant to find one.
+        exported = self.engine.export_tenant_filtered(tenant_id, context, {id})
         for collection in ("evidence", "assertions", "relations", "preferences", "justifications", "contradictions"):
             for item in exported.get(collection, []):
                 item_id = item.get("cid") or item.get("id")
@@ -3045,7 +3051,7 @@ class MemoryTools:
         # The authorized projection omits internal owner and scope fields.
         # Copy those from the same source row after the public read succeeds.
         record = next(
-            row for row in self.engine.export_tenant(tenant_id)["assertions"]
+            row for row in self.engine.export_tenant(tenant_id, {id})["assertions"]
             if row["id"] == id and row.get("branch", "main") == branch
         )
         if record.get("user_id") not in {None, user_id}:
@@ -3453,6 +3459,7 @@ class MemoryTools:
                 role=role,
                 source_trust_tier=source_trust_tier if source_trust_tier is not None else int(TrustTier.NORMAL),
             )
+        self._refresh_user_model()
         entry_id = self.user_model.add_entry(
             UserModelEntry(
                 tenant_id=tenant_id,
@@ -3469,6 +3476,7 @@ class MemoryTools:
         return {"id": entry_id, "security": decision}
 
     def profile_context(self, tenant_id: str, user_id: str, scope: dict[str, Any] | None = None) -> dict[str, Any]:
+        self._refresh_user_model()
         return self.user_model.context_packet(tenant_id, user_id, scope or {})
 
     @staticmethod
@@ -3500,6 +3508,7 @@ class MemoryTools:
         scope: dict[str, Any] | None = None,
         confidence: float = 0.9,
         source_evidence_cids: list[str] | None = None,
+        session_identity: SessionIdentity | None = None,
     ) -> dict[str, Any]:
         return self.profile_add(
             tenant_id=tenant_id,
@@ -3509,8 +3518,8 @@ class MemoryTools:
             scope=scope,
             confidence=confidence,
             source_evidence_cids=source_evidence_cids,
-            role="agent",
-            source_trust_tier=int(TrustTier.USER_AUTHORED),
+            role=session_identity.role if session_identity else "agent",
+            source_trust_tier=session_identity.source_trust_tier if session_identity else int(TrustTier.USER_AUTHORED),
         )
 
     def profile_propose_inference(
@@ -3521,6 +3530,7 @@ class MemoryTools:
         context: dict[str, Any] | None = None,
         confidence: float = 0.55,
         source_evidence_cids: list[str] | None = None,
+        session_identity: SessionIdentity | None = None,
     ) -> dict[str, Any]:
         return self.profile_add(
             tenant_id=tenant_id,
@@ -3530,8 +3540,8 @@ class MemoryTools:
             scope=context,
             confidence=confidence,
             source_evidence_cids=source_evidence_cids,
-            role="agent",
-            source_trust_tier=int(TrustTier.USER_AUTHORED),
+            role=session_identity.role if session_identity else "agent",
+            source_trust_tier=session_identity.source_trust_tier if session_identity else int(TrustTier.USER_AUTHORED),
         )
 
     def profile_correct(
@@ -3563,6 +3573,7 @@ class MemoryTools:
         not give.
         """
 
+        self._refresh_user_model()
         prior = self.user_model.entry_in_scope(id, tenant_id=tenant_id, user_id=user_id)
         if prior.status != "active":
             raise ValueError("profile entry is not active")
@@ -3596,7 +3607,7 @@ class MemoryTools:
         result["corrects"] = id
         # True however it was closed: an inference already yields to the
         # statement that replaces it the moment that statement is added.
-        result["superseded"] = prior.status == "superseded"
+        result["superseded"] = self.user_model.entries[id].status == "superseded"
         return result
 
     def profile_retire(
@@ -3616,6 +3627,7 @@ class MemoryTools:
         that belongs to another tenant or user, is an error.
         """
 
+        self._refresh_user_model()
         entry = self.user_model.entry_in_scope(id, tenant_id=tenant_id, user_id=user_id)
         decision = self._authorize(
             "profile_retire",
@@ -3669,6 +3681,7 @@ class MemoryTools:
             if parsed is None:
                 raise ValueError("occurred_at must be an ISO-8601 datetime")
             event_kwargs["occurred_at"] = parsed
+        self._refresh_user_model()
         result = self.user_model.record_user_mistake(
             UserMistakeEvent(**event_kwargs),
             suggestion=suggestion,
@@ -3698,6 +3711,7 @@ class MemoryTools:
             destructive=True,
             target_sink="preference",
         )
+        self._refresh_user_model()
         strategy = self.user_model.support_strategies.get(strategy_id)
         if strategy is not None and (strategy.tenant_id != tenant_id or strategy.user_id != user_id):
             raise PermissionError("support strategy is outside the requested tenant/user scope")
@@ -3962,7 +3976,7 @@ class MemoryTools:
     def prepare_context(self, tenant_id: str, user_id: str, session_id: str, query: str,
                         available_tools: list[str] | None = None, task_type: str | None = None,
                         risk_level: str | None = None,
-                        workspace: str | None = None, delivery_envelope: dict | None = None,
+                        workspace: str | None = None, delivery_envelope: dict[str, Any] | None = None,
                         role: WriteRole = "agent", source_trust_tier: int = 1,
                         session_identity: SessionIdentity | None = None) -> dict[str, Any]:
         self._learning_session(tenant_id, user_id, session_id, session_identity)
@@ -4007,6 +4021,9 @@ class MemoryTools:
             # source operation inside the active main-branch transaction.
             return {"profile_entries": 0, "mistake_events": 0, "support_strategies": 0,
                     "retracted_profile_entries": []}
+        refresh = getattr(runtime_state, "refresh_user_model", None)
+        if refresh:  # entries another process built on this evidence are retracted too
+            refresh(user_model)
         import copy
         before = copy.deepcopy((user_model.entries, user_model.latent_profiles,
                                 user_model.mistake_events, user_model.support_strategies))
@@ -4277,7 +4294,9 @@ class MemoryTools:
         outcome: TrajectoryOutcome,
         reward: float,
         memory_version: str,
+        session_identity: SessionIdentity | None = None,
     ) -> dict[str, Any]:
+        self._deny_reader("trajectory_log", session_identity)
         validated_outcome = _require_trajectory_outcome(outcome)
         trajectory_id = self.learning.log_trajectory(
             Trajectory(
@@ -4304,8 +4323,11 @@ class MemoryTools:
         outcome: TrajectoryOutcome,
         reward: float,
         memory_version: str,
+        session_identity: SessionIdentity | None = None,
     ) -> dict[str, Any]:
-        return self.trajectory_log(tenant_id, user_id, session_id, task, steps, outcome, reward, memory_version)
+        return self.trajectory_log(
+            tenant_id, user_id, session_id, task, steps, outcome, reward, memory_version, session_identity
+        )
 
     def trajectory_attribute(self, trajectory_id: str) -> dict[str, Any]:
         attribution = self.learning.attribute_failure(trajectory_id)
@@ -4465,9 +4487,11 @@ class MemoryTools:
     def framework_import(
         self, path: str, model: str = "", name: str | None = None,
         tenant_id: str | None = None, user_id: str | None = None,
+        session_identity: SessionIdentity | None = None,
     ) -> dict[str, Any]:
         from mnemosyne.frameworks import DEFAULT_MODEL
 
+        self._skill_admin("framework_import", session_identity)
         skills = self._skills()
         result = skills.import_skill(path, model or DEFAULT_MODEL, name, memory=self._skill_memory(tenant_id, user_id))
         self._remember_skills(skills)  # a book's passages are in memory before this call returns
@@ -4475,9 +4499,11 @@ class MemoryTools:
 
     def skill_make_burnskill(
         self, skill_id: str, model: str = "", tenant_id: str | None = None, user_id: str | None = None,
+        session_identity: SessionIdentity | None = None,
     ) -> dict[str, Any]:
         from mnemosyne.frameworks import DEFAULT_MODEL
 
+        self._skill_admin("skill_make_burnskill", session_identity)
         return self._skills().make_burnskill(skill_id, model or DEFAULT_MODEL, self._skill_memory(tenant_id, user_id))
 
     def skill_ask(self, skill_id: str, question: str, revision: int | None = None) -> dict[str, Any]:
@@ -4523,13 +4549,16 @@ class MemoryTools:
             skills.approve_effects(skill_id, row["revision"])
         return skills.set_state(skill_id, state, revision)
 
-    def skill_forget(self, skill_id: str) -> dict[str, Any]:
+    def skill_forget(self, skill_id: str, session_identity: SessionIdentity | None = None) -> dict[str, Any]:
+        self._skill_admin("skill_forget", session_identity)
         result = self._skills().forget(skill_id)
         for where in result["memory"]:
             self._forget_skill_memory(where)
         return result
 
-    def skill_export(self, skill_id: str, path: str, revision: int | None = None) -> dict[str, Any]:
+    def skill_export(self, skill_id: str, path: str, revision: int | None = None,
+                     session_identity: SessionIdentity | None = None) -> dict[str, Any]:
+        self._skill_admin("skill_export", session_identity)
         return self._skills().export_skill(skill_id, path, revision)
 
     def skill_validate(self, path: str) -> dict[str, Any]:
@@ -4808,6 +4837,13 @@ class MemoryTools:
         if self.runtime_state:
             self.runtime_state.save_user_model(self.user_model)
 
+    def _refresh_user_model(self) -> None:
+        # Another process may have changed the profile since this one loaded it.
+        # shortcut: PostgresRuntimeState has no refresh, a long-lived PostgreSQL process serves its start-up copy
+        refresh = getattr(self.runtime_state, "refresh_user_model", None)
+        if refresh:
+            refresh(self.user_model)
+
     def _save_learning(self) -> None:
         if self.runtime_state:
             self.runtime_state.save_learning(self.learning)
@@ -4864,6 +4900,35 @@ class MemoryTools:
             raise PermissionError(f"{operation} denied: {decision.reason}")
         return decision.to_dict()
 
+    def _skill_admin(self, operation: str, session_identity: SessionIdentity | None) -> None:
+        # These tools read and write server paths and erase skills: operator only on a signed session.
+        if session_identity is not None:
+            self._learning_access(
+                operation, session_identity.role, session_identity.source_trust_tier, administrative=True
+            )
+
+    @staticmethod
+    def _deny_reader(operation: str, session_identity: SessionIdentity | None) -> None:
+        # A plain check, not _authorize: the capture hot path gains no audit write.
+        if session_identity is not None and session_identity.role == "reader":
+            raise PermissionError(f"{operation} denied: reader role holds no write authority")
+
+    @staticmethod
+    def _owned(row: Any, user_id: str) -> Any:
+        """Another user's row reads as missing; a row with no owner is tenant-shared."""
+        owner = row.get("user_id") if isinstance(row, dict) else getattr(row, "user_id", None)
+        return row if row is not None and owner in (None, "", user_id) else None
+
+    def _require_owned_page(
+        self, tenant_id: str, user_id: str, page_id: str | None, path: str | None, branch: str
+    ) -> None:
+        page = self.engine.knowledge_page_get(
+            tenant_id, page_id=page_id, path=path, branch=branch, validate_custody=False
+        )
+        if page is not None and self._owned(page, user_id) is None:
+            # Same message as the engine's missing-page error.
+            raise ValueError(f"KnowledgePage '{page_id or path}' not found")
+
     def observation_upsert(
         self,
         tenant_id: str,
@@ -4877,6 +4942,7 @@ class MemoryTools:
         observation_id: str | None = None,
         session_identity: SessionIdentity | None = None,
     ) -> dict[str, Any]:
+        self._deny_reader("observation_upsert", session_identity)
         _require_text(tenant_id, field="tenant_id")
         _require_text(user_id, field="user_id")
         _require_text(subject, field="subject")
@@ -4895,6 +4961,9 @@ class MemoryTools:
             source_evidence_cids=list(source_evidence_cids or []),
         )
         if observation_id:
+            existing = self.engine.observation_get(tenant_id, observation_id, branch=branch, validate_custody=False)
+            if existing is not None and self._owned(existing, user_id) is None:
+                raise PermissionError("observation belongs to another user")
             obs.observation_id = observation_id
         obs_id = self.engine.observation_upsert(obs, branch=branch)
         stored = self.engine.observation_get(tenant_id, obs_id, branch=branch)
@@ -4911,7 +4980,7 @@ class MemoryTools:
         _require_text(tenant_id, field="tenant_id")
         _require_text(user_id, field="user_id")
         _require_text(observation_id, field="observation_id")
-        stored = self.engine.observation_get(tenant_id, observation_id, branch=branch)
+        stored = self._owned(self.engine.observation_get(tenant_id, observation_id, branch=branch), user_id)
         if stored is None:
             return None
         return stored.to_dict() if hasattr(stored, "to_dict") else stored
@@ -4952,6 +5021,7 @@ class MemoryTools:
         branch: str = "main",
         session_identity: SessionIdentity | None = None,
     ) -> dict[str, Any]:
+        self._deny_reader("observation_reconcile", session_identity)
         _require_text(tenant_id, field="tenant_id")
         _require_text(user_id, field="user_id")
         _require_text(subject, field="subject")
@@ -4988,6 +5058,7 @@ class MemoryTools:
         page_id: str | None = None,
         session_identity: SessionIdentity | None = None,
     ) -> dict[str, Any]:
+        self._deny_reader("knowledge_page_create", session_identity)
         _require_text(tenant_id, field="tenant_id")
         _require_text(user_id, field="user_id")
         _require_text(path, field="path")
@@ -5025,12 +5096,15 @@ class MemoryTools:
         branch: str = "main",
         session_identity: SessionIdentity | None = None,
     ) -> dict[str, Any]:
+        self._deny_reader("knowledge_page_update", session_identity)
         _require_text(tenant_id, field="tenant_id")
         _require_text(user_id, field="user_id")
         if not page_id and not path:
             raise ValueError("Either page_id or path must be provided")
         from mnemosyne.knowledge_pages import KnowledgePage
-        existing = self.engine.knowledge_page_get(tenant_id, page_id=page_id, path=path, branch=branch)
+        existing = self._owned(
+            self.engine.knowledge_page_get(tenant_id, page_id=page_id, path=path, branch=branch), user_id
+        )
         if existing is None:
             raise ValueError(f"KnowledgePage not found for {page_id or path}")
         if isinstance(existing, dict):
@@ -5063,7 +5137,9 @@ class MemoryTools:
         _require_text(user_id, field="user_id")
         if not page_id and not path:
             raise ValueError("Either page_id or path must be provided")
-        stored = self.engine.knowledge_page_get(tenant_id, page_id=page_id, path=path, branch=branch)
+        stored = self._owned(
+            self.engine.knowledge_page_get(tenant_id, page_id=page_id, path=path, branch=branch), user_id
+        )
         if stored is None:
             return None
         return stored.to_dict() if hasattr(stored, "to_dict") else stored
@@ -5082,6 +5158,8 @@ class MemoryTools:
     ) -> list[dict[str, Any]]:
         _require_text(tenant_id, field="tenant_id")
         _require_text(user_id, field="user_id")
+        # shortcut: loads all tenant pages, move the owner filter into the engines' knowledge_page_list
+        # (as observation_list already does) if a tenant gets many thousands of pages.
         items = self.engine.knowledge_page_list(
             tenant_id,
             branch=branch,
@@ -5089,8 +5167,9 @@ class MemoryTools:
             folder=folder,
             tags=tags,
             status=status,
-            limit=limit,
+            limit=10**9,
         )
+        items = [item for item in items if self._owned(item, user_id) is not None][:limit]
         return [item.to_dict() if hasattr(item, "to_dict") else item for item in items]
 
     def knowledge_page_refresh(
@@ -5106,6 +5185,7 @@ class MemoryTools:
         _require_text(user_id, field="user_id")
         if not page_id and not path:
             raise ValueError("Either page_id or path must be provided")
+        self._require_owned_page(tenant_id, user_id, page_id, path, branch)
         refreshed = self.engine.knowledge_page_refresh(tenant_id, page_id=page_id, path=path, branch=branch)
         return refreshed.to_dict() if hasattr(refreshed, "to_dict") else refreshed
 
@@ -5124,6 +5204,7 @@ class MemoryTools:
         _require_text(user_id, field="user_id")
         if not page_id and not path:
             raise ValueError("Either page_id or path must be provided")
+        self._require_owned_page(tenant_id, user_id, page_id, path, branch)
         rendered = self.engine.knowledge_page_render_markdown(
             tenant_id,
             page_id=page_id,

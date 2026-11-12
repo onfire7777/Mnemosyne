@@ -502,7 +502,8 @@ def test_verified_import_uses_defensive_copy_and_can_activate(store, tmp_path):
     assert checked["nodes"] == before["nodes"] and checked["edges"] == before["edges"]
     imported = store.import_skill(str(burnskill(tmp_path / "valid.burnskill", units, framework)), "unused")
     assert imported["status"] == "ready"
-    assert store.status(imported["skill_id"])["state"] == "active"
+    assert store.status(imported["skill_id"])["state"] == "probation"
+    assert store.set_state(imported["skill_id"], "active")["state"] == "active"
 
 
 def test_mechanical_repair_on_validation_copy_cannot_approve_unchanged_cyclic_graph(store, tmp_path):

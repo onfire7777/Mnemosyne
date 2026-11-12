@@ -321,7 +321,7 @@ def test_postgres_queue_lifecycle_and_tenant_isolation_live() -> None:
 
     jobs = queue.jobs
     assert jobs[leased.id].status == "complete"
-    assert jobs[leased.id].result == {"ok": True}
+    assert jobs[leased.id].result is None  # the result stays on the returned job only
     assert queue.snapshot()["complete"] == 1
     assert other_queue.snapshot() == {}
 
@@ -537,7 +537,7 @@ def test_postgres_queue_worker_drains_maintenance_handlers_live() -> None:
     )
 
     drained = worker.drain(limit=5)
-    persisted = {job.kind: job for job in queue.list_jobs()}
+    persisted = {job.kind: job for job in drained}  # results are not stored on the queue row
 
     assert [job.status for job in drained] == ["complete", "complete", "complete", "complete", "complete"]
     assert queue.snapshot()["complete"] == 5

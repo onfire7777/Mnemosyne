@@ -8,6 +8,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 from mnemosyne.access_policy import evidence_expiry_deadline, merge_access_policies
 from mnemosyne.episodic_facts import extract_episodic_facts, _strip_temporal_affixes
+from mnemosyne.ids import evidence_cid
 from mnemosyne.assertion_semantics import assertion_predicate_key
 from mnemosyne.models import utc_now
 from mnemosyne.retrieval import projection_sources_readable
@@ -18,6 +19,12 @@ from mnemosyne.commitment_memory import commitment_changes, project_commitment_m
 
 _USER_SOURCE_TYPES = {"chat", "learning_turn", "correction", "conversation", "message", "note", "user"}
 _FIRST_PERSON = re.compile(r"^(?:I\b|I['’](?:m|ve|ll|d)\b|We\b|We['’](?:re|ve|ll|d)\b|My\b|Our\b)", re.I)
+# Stripped only before a first-person word, so "No dogs are allowed" and "No I/O errors" keep their meaning;
+# "update"/"correction" need punctuation because "Update my address" is an instruction, not a lead.
+_DISCOURSE_LEAD = re.compile(
+    r"^(?:(?:actually|no|sorry|well|so|also|oh|yes|fyi|btw|by the way)\b[,:!\s]*|(?:correction|update)\s*[,:!]\s*)+"
+    r"(?=(?:I|We|My|Our)(?:\s|['’]))", re.I,
+)
 _DIRECTIVE = re.compile(
     r"^(?:please\s+(?:use|keep|respond)\b|from\s+now\s+on\b|(?:use|write|respond)\b.+\binstead\b)", re.I,
 )
@@ -98,7 +105,7 @@ def memory_source_clauses(source_or_text) -> list[str]:
             continue
         stripped = re.sub(r"^(?:[-*]\s+|\d+[.)]\s+)", "", stripped)
         for clause in re.split(r"(?<=[.!?])\s+|;\s*|\s+and\s+(?=(?:I|We|My|Our)\b)", stripped):
-            clause = clause.strip()
+            clause = _DISCOURSE_LEAD.sub("", clause.strip())
             if clause and not clause.endswith("?") and "`" not in clause:
                 clauses.append(clause)
     return list(dict.fromkeys(clauses))
@@ -113,6 +120,35 @@ def direct_user_clauses(source_or_text, *, include_directives: bool = False) -> 
         and not re.search(r"\b(?:says|said|told|claims|believes|according to)\b", clause, re.I)
         and not re.match(r"I\s+(?:said|wrote|quoted|read|asked|ran|clicked|opened|mean|meant|want\s+you|need\s+you)\b", clause, re.I)
     )]
+
+
+def restated_segment_id(engine, evidence, branch: str = "main") -> str | None:
+    """Segment for a user statement, fresh when it repeats words whose belief was replaced since.
+
+    Evidence is content-addressed, so "Paris", "Berlin", "Paris" would otherwise
+    deduplicate the third statement onto the first row and leave Berlin current.
+    """
+    base = segment = evidence.document_segment_id
+    seen, rows = set(), None
+    while base is not None:
+        cid = evidence_cid(
+            evidence.content, tenant_id=evidence.tenant_id, user_id=evidence.user_id,
+            source_type=evidence.source_type, content_pointer=evidence.content_pointer,
+            modality=evidence.modality, sensitivity=int(evidence.sensitivity), document_segment_id=segment,
+        )
+        if cid in seen or engine.get_evidence(evidence.tenant_id, cid, branch) is None:
+            break
+        seen.add(cid)
+        if rows is None:
+            rows = engine.export_tenant(evidence.tenant_id)["assertions"]
+        # superseded_by with valid_to means a newer value replaced it; trust-rejected and commitment rows lack one.
+        replaced = sorted(row["superseded_by"] for row in rows if row.get("branch", "main") == branch
+                          and cid in row.get("source_evidence_cids", []) and row["status"] == "superseded"
+                          and row.get("superseded_by") and row.get("valid_to"))
+        if not replaced:
+            break
+        segment = f"{base}:{uuid5(NAMESPACE_URL, json.dumps(replaced))}"
+    return segment
 
 
 _DURABLE_PREDICATES = frozenset({

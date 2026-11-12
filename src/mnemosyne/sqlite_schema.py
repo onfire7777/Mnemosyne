@@ -55,6 +55,8 @@ PRAGMA_STATEMENTS: tuple[str, ...] = (
     "PRAGMA synchronous=FULL",
     "PRAGMA foreign_keys=ON",
     "PRAGMA busy_timeout=5000",
+    # Zero freed cells so forgotten text does not stay readable in free pages.
+    "PRAGMA secure_delete=ON",
 )
 
 ENSURE_STATEMENTS: list[str] = [
@@ -101,6 +103,7 @@ ENSURE_STATEMENTS: list[str] = [
         FOREIGN KEY (tenant_id, branch) REFERENCES branches(tenant_id, name)
     )
     """,
+    "CREATE INDEX IF NOT EXISTS evidence_erased_idx ON evidence(tenant_id, branch) WHERE erased = 1",
     # assertions — UNIQUE(tenant_id, branch, id); columns mirror the Assertion
     # model (datetimes as dt_to_json TEXT for lexicographic as-of windows).
     """
@@ -267,6 +270,8 @@ ENSURE_STATEMENTS: list[str] = [
         record TEXT NOT NULL
     )
     """,
+    # json_valid: one malformed row must not make the index build, and so the open, fail.
+    "CREATE INDEX IF NOT EXISTS audit_log_record_id_idx ON audit_log(json_extract(record, '$.id')) WHERE json_valid(record)",
     """
     CREATE TABLE IF NOT EXISTS deletion_log (
         seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -314,6 +319,7 @@ ENSURE_STATEMENTS: list[str] = [
         value TEXT NOT NULL
     )
     """,
+    # No longer written (nothing read it); kept so old rows are still purged on forget.
     # embedding_cache (Task 8, A1) — subject-scoped embedding cache. The
     # PRIMARY KEY is (cache_key, model_id); ``cache_key`` is the STORED evidence
     # row cid, which ``ids.evidence_cid`` already subject-salts (mixes user_id
@@ -392,10 +398,6 @@ ENSURE_STATEMENTS: list[str] = [
     """
     CREATE INDEX IF NOT EXISTS working_memory_scope_expiry_idx
         ON working_memory(tenant_id, session_id, status, expires_at, item_id)
-    """,
-    """
-    CREATE INDEX IF NOT EXISTS working_memory_eviction_idx
-        ON working_memory(tenant_id, session_id, status, salience, created_at)
     """,
     # observations — First-class evolving observations with proof quotes
     """
@@ -557,6 +559,7 @@ ENSURE_STATEMENTS.extend(
 ENSURE_STATEMENTS.extend([
     "CREATE TABLE IF NOT EXISTS memory_source_revisions (tenant_id TEXT PRIMARY KEY, revision INTEGER NOT NULL)",
     "CREATE TABLE IF NOT EXISTS memory_source_changes (tenant_id TEXT NOT NULL, revision INTEGER NOT NULL, collection TEXT NOT NULL, branch TEXT NOT NULL, item_id TEXT NOT NULL, PRIMARY KEY (tenant_id, revision))",
+    "CREATE INDEX IF NOT EXISTS memory_source_changes_item_idx ON memory_source_changes(tenant_id, collection, item_id)",
 ])
 for _source_table in ("evidence", "assertions", "relations", "preferences"):
     for _operation in ("INSERT", "UPDATE", "DELETE"):

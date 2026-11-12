@@ -82,6 +82,9 @@ GRANT DELETE ON entity_aliases TO mnemosyne_app;
 -- installs the BEFORE UPDATE/DELETE trigger that enforces this at execution.
 REVOKE UPDATE, DELETE, TRUNCATE ON audit_log FROM mnemosyne_app, mnemosyne_consolidator;
 GRANT SELECT, INSERT ON audit_log TO mnemosyne_app, mnemosyne_consolidator;
+-- forget() blanks source-derived diffs; the trigger allows only that exact
+-- redaction. Must follow the REVOKE above, which also drops column grants.
+GRANT UPDATE (diff) ON audit_log TO mnemosyne_app, mnemosyne_consolidator;
 
 -- Zero-DELETE enforcement on observations and knowledge_pages:
 -- Neither mnemosyne_app nor mnemosyne_consolidator has DELETE privileges.

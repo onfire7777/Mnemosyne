@@ -1,4 +1,5 @@
-//! Bit-identical port of `mnemosyne.text.tokenize` (parity note 3).
+//! Bit-identical port of `mnemosyne.text.tokenize` for ASCII text (parity
+//! note 3); `mnemosyne.text` routes non-ASCII text to its pure path.
 //!
 //! The pure pattern's character classes are ASCII-only, so Python's
 //! `str.lower()` on a matched span equals `to_ascii_lowercase()`, and the

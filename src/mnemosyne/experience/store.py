@@ -174,7 +174,7 @@ class LearningStore:
 
     def read(self, tenant: str) -> dict:
         with self.transaction(tenant) as (state, _):
-            return copy.deepcopy(state)
+            return state  # transaction() already hands out a private copy on every backend
 
     def history(self, tenant: str) -> list[dict]:
         with self.lock:

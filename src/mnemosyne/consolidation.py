@@ -2482,6 +2482,17 @@ class ConsolidationWorker:
         set_embedding = getattr(self.engine, "set_evidence_embedding", None)
         if not callable(set_embedding):
             return {"backend_supported": False, "evaluated": len(evidence), "embedded": 0, "already_embedded": 0}
+        if type(getattr(getattr(self.engine, "adapters", None), "embedding", None)) is not HashingEmbeddingProvider:
+            # A hash vector stored beside a real model's query vectors is noise; leave these rows to the configured provider.
+            return {
+                "backend_supported": True,
+                "provider": "configured-provider",
+                "evaluated": len(evidence),
+                "embedded": 0,
+                "already_embedded": 0,
+                "embedded_cids": [],
+                "failed_cids": [],
+            }
         embedded_cids: list[str] = []
         failed_cids: list[str] = []
         already_embedded = 0
@@ -2633,6 +2644,9 @@ class ConsolidationWorker:
     @staticmethod
     def _lifecycle_state(item: Evidence, lifecycle: Any) -> LifecycleState:
         data = lifecycle if isinstance(lifecycle, dict) else {}
+        # Rows the pre-fix forgetter wrote have no last_outcome_at; their tier/salience/importance came from 0.1 defaults.
+        if data.get("updated_by") == "consolidation.forgetter" and not data.get("last_outcome_at"):
+            data = {k: v for k, v in data.items() if k not in {"tier", "salience", "importance", "confabulation_risk"}}
         tier_raw = str(data.get("tier") or FidelityTier.VERBATIM.value)
         try:
             tier = FidelityTier(tier_raw)
@@ -2650,15 +2664,15 @@ class ConsolidationWorker:
         return LifecycleState(
             item_id=item.cid or "",
             tier=tier,
-            salience=ConsolidationWorker._safe_float(data.get("salience"), 0.1),
+            salience=ConsolidationWorker._safe_float(data.get("salience"), 0.5),
             importance=ConsolidationWorker._safe_float(
                 data.get("importance", item.metadata.get("importance") if isinstance(item.metadata, dict) else None),
-                0.1,
+                0.5,
             ),
             access_count=int(ConsolidationWorker._safe_float(data.get("access_count"), 0.0)),
             last_accessed=ConsolidationWorker._parse_datetime(data.get("last_accessed")),
             outcome_utility=ConsolidationWorker._safe_float(data.get("outcome_utility"), 0.0),
-            last_outcome_at=ConsolidationWorker._parse_datetime(data.get("last_outcome_at")),
+            last_outcome_at=ConsolidationWorker._parse_datetime(data.get("last_outcome_at")) or item.created_at,
             must_keep=must_keep,
             successful_rehearsals=int(ConsolidationWorker._safe_float(data.get("successful_rehearsals"), 0.0)),
             next_rehearsal_at=ConsolidationWorker._parse_datetime(data.get("next_rehearsal_at")),

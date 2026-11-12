@@ -7,16 +7,18 @@ import sqlite3
 import threading
 from collections import Counter, deque
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
-from uuid import NAMESPACE_URL, uuid5
 
 from mnemosyne.ids import new_id
 from mnemosyne.journal import safe_tenant_filename
 from mnemosyne.models import dt_to_json
 from mnemosyne.postgres_security import assert_postgres_safe_role, postgres_safe_role_required
 from mnemosyne.sqlite_schema import ENSURE_STATEMENTS, PRAGMA_STATEMENTS
+
+# shortcut: no heartbeat, a job that really runs >1h is handed out twice; add a heartbeat if jobs get that long
+_LEASE_TIMEOUT = timedelta(hours=1)
 
 
 @dataclass(slots=True)
@@ -106,7 +108,8 @@ class InProcessQueue:
     def to_dict(self) -> dict[str, Any]:
         return {
             "order": list(self._order),
-            "jobs": [job.to_dict() for job in self.jobs.values()],
+            # A finished job leaves the durable queue: its result quotes evidence that may later be forgotten.
+            "jobs": [job.to_dict() for job in self.jobs.values() if job.status != "complete"],
         }
 
     @classmethod
@@ -224,6 +227,18 @@ class PostgresQueue:
         with self.connect() as conn:
             with conn.cursor(row_factory=self._dict_row) as cur:
                 self._ensure_tenant(cur, db_tenant_id)
+                # A worker that died mid-job never completes or fails it: hand it out again
+                # (the interval is _LEASE_TIMEOUT).
+                cur.execute(
+                    """
+                    UPDATE runtime_jobs
+                    SET status = CASE WHEN attempts >= max_attempts THEN 'dead' ELSE 'retry' END,
+                        last_error = 'lease expired: worker died mid-job',
+                        updated_at = now()
+                    WHERE tenant_id = %s AND status = 'running' AND updated_at < now() - interval '1 hour'
+                    """,
+                    (db_tenant_id,),
+                )
                 # JSON null is deliberately retained: an explicitly invalid
                 # effective_score must not fall back to score (_job_priority).
                 # PG16 input validation keeps malformed values from aborting
@@ -284,7 +299,8 @@ class PostgresQueue:
 
     def complete(self, job_id: str) -> None:
         job = self._leased.get(job_id)
-        self._update_status(job_id, status="complete", result=job.result if job else None)
+        # The result stays on the returned job only: it quotes evidence that may later be forgotten.
+        self._update_status(job_id, status="complete")
         self._leased.pop(job_id, None)
         if job:
             job.status = "complete"
@@ -369,7 +385,10 @@ class PostgresQueue:
                 return _job_from_row(row) if row else None
 
     def _tenant_db_id(self) -> str:
-        return str(uuid5(NAMESPACE_URL, f"mnemosyne:tenant:{self.tenant_id}"))
+        # lazy import: local queues must not load the PostgreSQL engine module
+        from mnemosyne.postgres_engine import _stable_uuid
+
+        return _stable_uuid("tenant", self.tenant_id)
 
     def _ensure_tenant(self, cur: Any, db_tenant_id: str) -> None:
         cur.execute(
@@ -392,9 +411,9 @@ class SqliteQueue:
 
     ``lease`` is a single ``BEGIN IMMEDIATE`` claim — the SQLite analogue of
     PostgresQueue's ``FOR UPDATE SKIP LOCKED``: the reserved write lock
-    serialises concurrent leasers so one job is never handed out twice. There is
-    NO lease timeout / visibility reclaim, matching BOTH shipped queues (the
-    grounding is explicit: do not invent one). The connection runs in autocommit
+    serialises concurrent leasers so one job is never handed out twice. A job
+    left 'running' for longer than ``_LEASE_TIMEOUT`` (its worker died) goes back
+    to 'retry', or to 'dead' once out of attempts. The connection runs in autocommit
     mode (``isolation_level=None``) so the explicit ``BEGIN IMMEDIATE`` claim is
     the sole transaction and single-statement writes commit immediately.
     """
@@ -461,6 +480,14 @@ class SqliteQueue:
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
+                now = datetime.now(UTC)
+                # A worker that died mid-job never completes or fails it: hand it out again.
+                self._conn.execute(
+                    "UPDATE runtime_jobs SET status = CASE WHEN attempts >= max_attempts THEN 'dead' "
+                    "ELSE 'retry' END, last_error = 'lease expired: worker died mid-job', updated_at = ? "
+                    "WHERE tenant_id = ? AND status = 'running' AND updated_at < ?",
+                    (dt_to_json(now), self.tenant_id, dt_to_json(now - _LEASE_TIMEOUT)),
+                )
                 if kind:
                     rows = self._conn.execute(
                         "SELECT * FROM runtime_jobs WHERE tenant_id = ? "
@@ -486,9 +513,8 @@ class SqliteQueue:
                         best_job = job
                         best_key = key
                 if best_job is None:
-                    self._conn.execute("ROLLBACK")
+                    self._conn.execute("COMMIT")  # keeps a lease just expired to 'dead'
                     return None
-                now = datetime.now(UTC)
                 self._conn.execute(
                     "UPDATE runtime_jobs SET status = 'running', attempts = attempts + 1, "
                     "updated_at = ? WHERE id = ? AND tenant_id = ?",
@@ -507,17 +533,12 @@ class SqliteQueue:
     def complete(self, job_id: str) -> None:
         with self._lock:
             job = self._leased.get(job_id)
-            result = job.result if job else None
             now = datetime.now(UTC)
+            # A finished job leaves the queue: its result quotes evidence that may later be forgotten.
+            # The status clause also sweeps rows completed by older versions.
             self._conn.execute(
-                "UPDATE runtime_jobs SET status = 'complete', result = COALESCE(?, result), "
-                "updated_at = ? WHERE id = ? AND tenant_id = ?",
-                (
-                    None if result is None else json.dumps(result, sort_keys=True),
-                    dt_to_json(now),
-                    job_id,
-                    self.tenant_id,
-                ),
+                "DELETE FROM runtime_jobs WHERE tenant_id = ? AND (id = ? OR status = 'complete')",
+                (self.tenant_id, job_id),
             )
             self._leased.pop(job_id, None)
             if job:

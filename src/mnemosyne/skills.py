@@ -35,6 +35,7 @@ from urllib.parse import unquote, urlsplit
 from uuid import uuid4
 
 from mnemosyne import frameworks
+from mnemosyne._file_lock import exclusive_file_lock
 
 WORKERS = 3
 MAX_UNITS = 60
@@ -114,7 +115,11 @@ def _sha_of(files: list[tuple[str, bytes]]) -> str:
 
 def _safe(rel: str) -> bool:
     p = PurePosixPath(rel)
-    return not (p.is_absolute() or ".." in p.parts or ":" in rel)
+    return (
+        bool(rel)
+        and "\\" not in rel
+        and not (p.is_absolute() or ".." in p.parts or ":" in rel)
+    )
 
 
 def runnable(paths: list[str]) -> list[str]:
@@ -1555,6 +1560,8 @@ class SkillStore:
                         "AND memory IS NULL",
                         (json.dumps(memory), row["skill_id"], busy[0]["revision"]),
                     )
+            # Resumes a build whose owner died; a no-op while a live worker holds its lock.
+            self._jobs.put((row["skill_id"], busy[0]["revision"]))
             return {**head, "revision": busy[0]["revision"], "status": "converting"}
         units = json.loads(row["units"])
         revision = (
@@ -1684,17 +1691,25 @@ class SkillStore:
         while True:
             skill_id, revision = self._jobs.get()
             try:
-                self._convert(skill_id, revision)
-            except Exception as exc:  # noqa: BLE001 - recorded on the revision
-                with self._sql() as conn:
-                    conn.execute(
-                        "UPDATE skill_revisions SET conversion = 'failed', error = ? "
-                        "WHERE skill_id = ? AND revision = ?",
-                        (str(exc)[:1000], skill_id, revision),
-                    )
+                with exclusive_file_lock(
+                    self.path.parent / f".convert-{skill_id}-{revision}.lock", timeout=0
+                ):
+                    try:
+                        self._convert(skill_id, revision)
+                    except Exception as exc:  # noqa: BLE001 - recorded on the revision
+                        with self._sql() as conn:
+                            conn.execute(
+                                "UPDATE skill_revisions SET conversion = 'failed', error = ? "
+                                "WHERE skill_id = ? AND revision = ?",
+                                (str(exc)[:1000], skill_id, revision),
+                            )
+            except TimeoutError:
+                continue  # a live process is building this revision; the OS frees the lock if it dies
 
     def _convert(self, skill_id: str, revision: int) -> None:
         row = self._skill(skill_id, revision)
+        if row["conversion"] != "converting":
+            return  # queued at start-up, finished by its owner since
         usage: dict[str, float] = {}
         with frameworks.framework_context(
             model=row["model"],
@@ -1889,10 +1904,12 @@ class SkillStore:
         """A plain skill as its SKILL.md folder; a BurnSkill as one .burnskill file - a SKILL.md view
         (front matter, document), then framework, units and original files packed below."""
         row = self._skill(skill_id, revision)
+        # The name is the skill author's text: it names a folder or file here, never a path.
+        safe = re.sub(r"[\\/:\x00]", "_", row["name"]).strip(". ") or row["skill_id"]
         out = Path(path).expanduser()
         kept = Path(row["source_dir"])
         if row["conversion"] == "native":
-            target = out / row["name"]
+            target = out / safe
             shutil.copytree(kept, target, dirs_exist_ok=True)
             return {
                 "skill_id": row["skill_id"],
@@ -1905,7 +1922,7 @@ class SkillStore:
                 f"{row['name']} is not a BurnSkill yet ({row['conversion']})"
             )
         if out.suffix.lower() not in SKILL_FILES:
-            out = out / f"{row['name']}{BS_SUFFIX}"
+            out = out / f"{safe}{BS_SUFFIX}"
         fw = json.loads(row["framework"])
         about = " ".join(
             str(
@@ -1971,6 +1988,26 @@ class SkillStore:
         if isinstance(nxt, dict):
             return nxt
         load = lambda v: json.loads(v) if isinstance(v, str) else v  # noqa: E731
+        # A file made by someone else does not get to say what it carries or does: attachments are
+        # the packed files themselves, and its declared effects can add to the keyword scan, not hide it.
+        attachments = [
+            rel
+            for rel, _ in files
+            if PurePosixPath(rel).suffix.lower() not in TEXT_SUFFIXES
+            or PurePosixPath(rel).stem.lower() in LEGAL
+        ]
+        declared = (fw.get("meta") or {}).get("effects")
+        fw["meta"] = {
+            **(fw.get("meta") or {}),
+            "effects": list(
+                dict.fromkeys(
+                    [
+                        *(declared if isinstance(declared, list) else []),
+                        *effects_of(fw["nodes"], []),
+                    ]
+                )
+            ),
+        }
         self._insert(
             *nxt,
             skill["name"],
@@ -1980,12 +2017,9 @@ class SkillStore:
             skill.get("model", ""),
             self._manual_metadata(load(skill.get("meta") or {})),
             load(skill.get("needs") or []),
-            load(skill.get("attachments") or []),
+            attachments,
             fw,
-            state=("draft" if problems else "probation" if effects_of(
-                fw["nodes"], load(skill.get("attachments") or []),
-                (fw.get("meta") or {}).get("effects"),
-            ) else "active"),
+            state="draft" if problems else "probation",
             conversion="incomplete" if problems else "completed",
             applicability=skill.get("applicability", ""),
             memory=memory,
@@ -2011,7 +2045,7 @@ class SkillStore:
         rows = self._rows(
             "SELECT * FROM skill_revisions WHERE (skill_id = ? OR lower(name) = lower(?)) "
             + ("AND revision = ? " if revision else "")
-            + "ORDER BY state = 'active' DESC, state IN ('probation', 'labile') DESC, revision DESC LIMIT 1",
+            + "ORDER BY state IN ('active', 'probation', 'labile') DESC, revision DESC LIMIT 1",
             (skill_id, skill_id, revision) if revision else (skill_id, skill_id),
         )
         if not rows:
@@ -2368,7 +2402,9 @@ class SkillStore:
         latest: dict[str, dict[str, Any]] = {}
         for r in self._rows("SELECT * FROM skill_revisions ORDER BY revision DESC"):
             if r["state"] in states and (
-                r["skill_id"] not in latest or r["state"] == "active"
+                r["skill_id"] not in latest
+                # with drafts listed, the newest usable revision still comes first, as in _skill
+                or r["state"] in states[:3] and latest[r["skill_id"]]["state"] not in states[:3]
             ):
                 latest[r["skill_id"]] = r
         have = {a.strip().lower() for a in (available or [])}

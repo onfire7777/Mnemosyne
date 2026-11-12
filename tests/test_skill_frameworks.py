@@ -767,3 +767,16 @@ def test_skills_are_offered_as_mcp_prompts_and_resources(tmp_path, monkeypatch):
         assert read.contents[0].text.startswith("raise")
     finally:
         server.mnemosyne_mcp_facade.close()
+
+
+def test_a_build_running_in_another_process_is_left_alone(store, tmp_path, monkeypatch):
+    from mnemosyne._file_lock import exclusive_file_lock
+
+    skill_id = store.import_skill(str(_skill_dir(tmp_path)), "m")["skill_id"]
+    monkeypatch.setattr(store._jobs, "put", lambda job: None)  # its builder is another process
+    revision = store.make_burnskill(skill_id, "test/model")["revision"]
+    with exclusive_file_lock(tmp_path / f".convert-{skill_id}-{revision}.lock"):  # that builder is alive
+        other = sk.SkillStore(str(tmp_path / "skills.sqlite"))
+        time.sleep(0.3)
+        assert other.status(skill_id, revision)["conversion"] == "converting"
+    assert _burnskill(other, skill_id)["conversion"] == "completed"  # builder gone: asking again resumes it

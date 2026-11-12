@@ -32,9 +32,10 @@ class SignedProvenanceVerifier:
     """Deterministic verifier for C2PA-like manifest metadata.
 
     Real C2PA verification is delegated to a production verifier. This local
-    verifier enforces the essential contract: a manifest must bind to the exact
-    bytes being ingested before it can raise trust, and digest mismatch
-    quarantines the item.
+    verifier only checks that a manifest binds to the exact bytes being
+    ingested: digest mismatch quarantines the item, and a digest match alone
+    never raises trust (no signature is checked here, and the caller can hash
+    its own content). Raising trust needs C2paToolVerifier with a trust policy.
     """
 
     def verify(self, payload: bytes, manifest: dict[str, Any] | None) -> ProvenanceDecision:
@@ -58,15 +59,12 @@ class SignedProvenanceVerifier:
                 manifest=dict(manifest),
                 diagnostics={"expected": expected, "actual": actual},
             )
-        signer = manifest.get("issuer") or manifest.get("signer") or manifest.get("claim_generator")
-        signature = manifest.get("signature") or manifest.get("signature_ref")
-        trusted = bool(signer and signature)
         return ProvenanceDecision(
             valid=True,
-            trusted=trusted,
+            trusted=False,
             quarantine=False,
-            trust_delta=-1 if trusted else 0,
-            reason="signed provenance digest verified" if trusted else "digest verified without trusted signature",
+            trust_delta=0,
+            reason="digest verified without trusted signature",
             manifest=dict(manifest),
             diagnostics={"actual": actual},
         )

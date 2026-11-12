@@ -472,7 +472,7 @@ def test_consolidation_worker_smoke_completes(tmp_path: Any) -> None:
     assert job is not None
     # The job leased, ran the consolidation pass against the SqliteEngine
     # duck-type, and COMPLETED (not failed, not skipped-for-missing-method).
-    assert queue.snapshot().get("complete", 0) == 1
+    assert job.status == "complete" and queue.snapshot() == {}
     summarizer = next(item for item in (job.result or {})["pass_results"] if item["name"] == "summarizer")
     assert summarizer["status"] == "complete"
     # The summary pass wrote back through the engine duck-type (append_evidence +

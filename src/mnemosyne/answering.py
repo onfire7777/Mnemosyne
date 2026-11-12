@@ -817,23 +817,13 @@ class GroundedAnswerOrchestrator:
         assembled = self.assemble(request)
         if assembled.abstained:
             verifier = PremiseConsistencyVerifier()
-            evidence_pool = assembled.evidence
-            if not evidence_pool and hasattr(self.engine, "export_all"):
-                try:
-                    all_records = self.engine.export_all()
-                    evidence_pool = tuple(
-                        AnswerEvidence(
-                            cid=str(rec.get("cid") or ""),
-                            content=str(rec.get("content") or ""),
-                            source_identity=rec.get("source_identity"),
-                            session_id=rec.get("session_id"),
-                            turn_index=rec.get("turn_index"),
-                            hop=0,
-                        )
-                        for rec in all_records.get("evidence", [])
-                    )
-                except Exception:
-                    evidence_pool = ()
+            try:
+                # shortcut: re-checks every row the caller may read, O(tenant evidence) per abstention; pass retrieval candidates instead if abstentions get slow
+                evidence_pool = list(
+                    self._authorized_rows(request.context, None).values()
+                )
+            except Exception:
+                evidence_pool = []
             if evidence_pool:
                 premise_check = verifier.verify(
                     request.question, evidence_rows=evidence_pool
@@ -845,27 +835,13 @@ class GroundedAnswerOrchestrator:
                     return GroundedAnswer(
                         answer=premise_check.clean_abstention_text,
                         claims=(),
-                        evidence=evidence_pool,
-                        episodes=_episodes(evidence_pool),
+                        evidence=(),
+                        episodes=(),
                         trace=assembled.trace,
                         abstained=True,
                         public_reason="premise_mismatch",
                     )
             return assembled
-        verifier = PremiseConsistencyVerifier()
-        premise_check = verifier.verify(
-            request.question, evidence_rows=assembled.evidence
-        )
-        if premise_check.abstention_recommended and premise_check.clean_abstention_text:
-            return GroundedAnswer(
-                answer=premise_check.clean_abstention_text,
-                claims=(),
-                evidence=assembled.evidence,
-                episodes=assembled.episodes,
-                trace=assembled.trace,
-                abstained=True,
-                public_reason="premise_mismatch",
-            )
         try:
             proposal = reader.read(
                 {
@@ -901,20 +877,23 @@ class GroundedAnswerOrchestrator:
             if disp is not None and claims:
                 claims = _apply_disposition_to_claims(claims, disp, replayed.evidence)
             if not claims:
-                return self._reader_abstain(replayed)
-            cleaned_claims = tuple(
-                AnswerClaim(
-                    text=_clean_hedging_headers(claim.text),
-                    evidence_cids=claim.evidence_cids,
-                    spans=claim.spans,
-                    synthesis_operation=claim.synthesis_operation,
+                # The premise check only words an abstention the reader already made.
+                premise_check = PremiseConsistencyVerifier().verify(
+                    request.question, evidence_rows=replayed.evidence
                 )
-                for claim in claims
-            )
-            raw_answer = "\n".join(claim.text for claim in cleaned_claims)
+                if (
+                    premise_check.abstention_recommended
+                    and premise_check.clean_abstention_text
+                ):
+                    return replace(
+                        self._reader_abstain(replayed),
+                        answer=premise_check.clean_abstention_text,
+                        public_reason="premise_mismatch",
+                    )
+                return self._reader_abstain(replayed)
             return GroundedAnswer(
-                answer=_clean_hedging_headers(raw_answer),
-                claims=cleaned_claims,
+                answer="\n".join(claim.text for claim in claims),
+                claims=claims,
                 evidence=replayed.evidence,
                 episodes=replayed.episodes,
                 trace=replayed.trace,
@@ -1048,9 +1027,9 @@ class GroundedAnswerOrchestrator:
         )
 
     def _authorized_rows(
-        self, context: AnswerReadContext, referenced: set[str]
+        self, context: AnswerReadContext, referenced: set[str] | None
     ) -> dict[str, dict[str, Any]]:
-        if not referenced:
+        if referenced is not None and not referenced:
             return {}
         exported = self.engine.export_tenant_filtered(
             context.tenant_id, context.to_filter()
@@ -1065,7 +1044,7 @@ class GroundedAnswerOrchestrator:
             cid = row.get("cid")
             if (
                 isinstance(cid, str)
-                and cid in referenced
+                and (referenced is None or cid in referenced)
                 and row.get("branch", "main") == context.branch
                 and not bool(row.get("erased"))
                 and not _quarantined(row)
@@ -1084,6 +1063,8 @@ class GroundedAnswerOrchestrator:
                     or raw.erased
                     or (context.as_of is not None and raw.created_at > context.as_of)
                 ):
+                    if referenced is None:
+                        continue  # whole-scope scan: a row outside as_of is skipped, not drift
                     raise LookupError("authorized evidence is no longer active")
                 authorized = dict(row)
                 authorized["_access_policy_sha256"] = hashlib.sha256(
@@ -1583,7 +1564,7 @@ def _verify_live_authorized_evidence(
                 if isinstance(row, Mapping) and isinstance(row.get("cid"), str):
                     exported_map[row["cid"]] = row
         except Exception:
-            exported_map = {}
+            return {}
 
     verified: dict[str, dict[str, Any]] = {}
     for cid in unique_cids:
@@ -1608,10 +1589,10 @@ def _verify_live_authorized_evidence(
             and created_at > context.as_of
         ):
             continue
-        if exported_map and cid not in exported_map:
+        exp_row = exported_map.get(cid)
+        if exp_row is None:
             continue
-        exp_row = exported_map.get(cid, {})
-        if exp_row and (bool(exp_row.get("erased")) or _quarantined(exp_row)):
+        if bool(exp_row.get("erased")) or _quarantined(exp_row):
             continue
         trust_tier = getattr(raw, "trust_tier", exp_row.get("trust_tier", 0))
         if (
@@ -1621,28 +1602,11 @@ def _verify_live_authorized_evidence(
             and trust_tier >= 4
         ):
             continue
-        content = getattr(raw, "content", None) or (
-            exp_row.get("content") if isinstance(exp_row, Mapping) else None
-        )
+        # The filtered export row carries the caller's redactions; never the raw text.
+        content = exp_row.get("content")
         if not isinstance(content, str) or not content:
             continue
-        row_dict = (
-            dict(exp_row)
-            if isinstance(exp_row, Mapping) and exp_row
-            else {
-                "cid": cid,
-                "content": content,
-                "tenant_id": context.tenant_id,
-                "branch": context.branch,
-                "erased": False,
-                "sensitivity": getattr(raw, "sensitivity", 0),
-                "trust_tier": trust_tier,
-                "source_identity": getattr(raw, "source_identity", None),
-                "session_id": getattr(raw, "session_id", None),
-                "metadata": getattr(raw, "metadata", {}) or {},
-            }
-        )
-        row_dict["content"] = content
+        row_dict = dict(exp_row)
         row_dict["_access_policy_sha256"] = hashlib.sha256(
             json.dumps(
                 getattr(raw, "access_policy", {}) or {},

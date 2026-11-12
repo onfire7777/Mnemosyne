@@ -652,7 +652,8 @@ class IngestionPipeline:
                 "branch": branch,
                 "source_evidence_cids": [cid],
                 "trigger": "ingest",
-                "passes": list(DEFAULT_CONSOLIDATION_PASSES),
+                # one row has nothing to cluster; its gist would be a copy
+                "passes": [name for name in DEFAULT_CONSOLIDATION_PASSES if name != "summarizer"],
                 "trust_tier": trust_tier,
                 "sensitivity": sensitivity,
                 "capability_tags": list(capability_tags),
@@ -813,7 +814,12 @@ class IngestionPipeline:
 
 
 def classify_request(request: IngestRequest, payload: bytes) -> dict[str, Any]:
-    text = (request.content or payload.decode("utf-8", errors="ignore"))[:32_768]
+    text = request.content or payload.decode("utf-8", errors="ignore")
+    if not request.content and request.modality != "text":
+        text = text[:32_768]  # raw media bytes: bounded sniff only, a full scan of random bytes false-positives
+    derived = extract_derived_text(request.metadata)[0]
+    if derived:
+        text = f"{text}\n{derived}"
     trust_tier = _classify_trust_tier(request.actor, request.source_type)
     capability_tags = [_actor_tag(request.actor), f"source:{request.source_type}"]
     if trust_tier >= int(TrustTier.UNTRUSTED_EXTERNAL):

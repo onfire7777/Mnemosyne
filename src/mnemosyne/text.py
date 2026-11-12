@@ -4,8 +4,9 @@ Dispatch layer (Phase-1 Task 6): each primitive routes through the native
 kernels in ``mnemosyne_native`` when the extension is importable, falling back
 to the pure-Python bodies (kept as ``_*_pure``) otherwise. ``MNEMOSYNE_PURE=1``
 forces the pure path at import time. The two paths are byte-parity-proven
-(tests/test_native_parity.py), so dispatch is a pure speed decision — never a
-behavior decision.
+(tests/test_native_parity.py) on ASCII text, so dispatch is a pure speed
+decision — never a behavior decision. The native tokenizer is ASCII-only, so
+non-ASCII text always takes the pure path.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ import logging
 import math
 import os
 import re
+import unicodedata
 from collections import Counter
 from collections.abc import Sequence
 from functools import lru_cache
@@ -34,6 +36,12 @@ logging.getLogger("mnemosyne.native").info(
 )
 
 TOKEN_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_:+./-]*")
+# shortcut: kana/han/hangul are one token per character, and Thai/Indic/vocalised-Arabic words
+# split at combining signs; upgrade to bigrams or a segmenter if precision matters.
+_CJK = "\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff"
+# (?=\w) keeps punctuation inside the kana block ("\u30fb") from becoming a token
+_UNICODE_TOKEN_RE = re.compile(rf"(?=\w)[{_CJK}]|[^\W{_CJK}](?:[^\W{_CJK}]|[:+./-])*")
+_ACCENT_RE = re.compile("(?<=[a-z])[\u0300-\u036f]+")  # Latin only: Cyrillic й is not и
 
 
 def _tokenize_pure(text: str) -> list[str]:
@@ -41,7 +49,14 @@ def _tokenize_pure(text: str) -> list[str]:
     # the query "instructions", while keeping internal dots/hyphens/slashes that
     # carry meaning (URLs, versions, hyphenated capability tags like "data-only").
     tokens: list[str] = []
-    for match in TOKEN_RE.finditer(text):
+    token_re = TOKEN_RE
+    if not text.isascii():
+        # Fold case and Latin accents so "naive" finds "naïve"; NFC recomposes everything else.
+        text = unicodedata.normalize(
+            "NFC", _ACCENT_RE.sub("", unicodedata.normalize("NFD", text.casefold()))
+        )
+        token_re = _UNICODE_TOKEN_RE
+    for match in token_re.finditer(text):
         token = match.group(0).lower().strip("./:+-")
         if token:
             tokens.append(token)
@@ -54,7 +69,7 @@ def _tokenize_pure(text: str) -> list[str]:
 
 
 def tokenize(text: str) -> list[str]:
-    if NATIVE is not None:
+    if NATIVE is not None and text.isascii():
         raw = NATIVE.tokenize(text)
         tokens: list[str] = []
         for t in raw:
@@ -91,7 +106,7 @@ def _lexical_score_pure(query: str, text: str) -> float:
 def lexical_score(query: str, text: str) -> float:
     return (
         NATIVE.lexical_score(query, text)
-        if NATIVE is not None
+        if NATIVE is not None and query.isascii() and text.isascii()
         else _lexical_score_pure(query, text)
     )
 
@@ -128,6 +143,15 @@ def lexical_scorer(query: str) -> Callable[[str], float]:
     return score
 
 
+def lexical_scan(query: str, texts: list[str]) -> list[float]:
+    """``NATIVE.lexical_scan``, with every non-ASCII query or text scored by the pure path."""
+    score = lexical_scorer(query)
+    if not query.isascii():
+        return [score(text) for text in texts]
+    scores = NATIVE.lexical_scan(query, texts)
+    return [s if t.isascii() else score(t) for s, t in zip(scores, texts, strict=True)]
+
+
 def _hashing_embedding_pure(text: str, dims: int) -> tuple[float, ...]:
     vec = [0.0] * dims
     for token in _tokenize_pure(text):
@@ -146,7 +170,7 @@ def _hashing_embedding_cached(text: str, dims: int) -> tuple[float, ...]:
     # The lru_cache wraps the DISPATCHING compute: it caches whichever backend
     # produced the value, and byte-parity makes the backends interchangeable,
     # so cache behavior (keys, hits, stored tuples) is identical in both modes.
-    if NATIVE is not None:
+    if NATIVE is not None and text.isascii():
         return tuple(NATIVE.hashing_embedding(text, dims))
     return _hashing_embedding_pure(text, dims)
 

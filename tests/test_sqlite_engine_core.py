@@ -260,3 +260,34 @@ def test_all_engine_surfaces_are_implemented(tmp_path: Path):
         "cid": "a" * 64,
         "erasure_mode": "tombstone_recompute",
     }
+
+
+def test_store_without_working_memory_salience_opens(tmp_path: Path):
+    """v1.7.0 stores predate working_memory.salience; the eviction index must wait for its ALTER."""
+    from mnemosyne.queue import SqliteQueue
+
+    engine = SqliteEngine(tmp_path)
+    conn = engine._connect("t1")
+    conn.execute("DROP INDEX working_memory_eviction_idx")
+    conn.execute("ALTER TABLE working_memory DROP COLUMN salience")
+    conn.commit()
+    engine.close()
+
+    SqliteQueue(tmp_path, "t1")
+    reopened = SqliteEngine(tmp_path)._connect("t1")
+    assert reopened.execute(
+        "SELECT 1 FROM sqlite_master WHERE name = 'working_memory_eviction_idx'"
+    ).fetchone()
+
+
+def test_write_path_lookups_use_their_indexes(tmp_path: Path):
+    """Each of these ran as a full scan under the write lock: erased-replay probe, audit id
+    de-duplication, and the source-change cleanup done per deleted row."""
+    conn = SqliteEngine(tmp_path)._connect("t1")
+    for index, sql in (
+        ("evidence_erased_idx", "SELECT * FROM evidence WHERE tenant_id = 't' AND branch = 'main' AND erased = 1 ORDER BY rowid"),
+        ("audit_log_record_id_idx", "SELECT 1 FROM audit_log WHERE json_valid(record) AND json_extract(record, '$.id') = 'x' LIMIT 1"),
+        ("memory_source_changes_item_idx", "DELETE FROM memory_source_changes WHERE tenant_id = 't' AND collection = 'evidence' AND item_id = 'x'"),
+    ):
+        plan = " ".join(row[3] for row in conn.execute("EXPLAIN QUERY PLAN " + sql))
+        assert index in plan, plan

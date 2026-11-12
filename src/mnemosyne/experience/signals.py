@@ -77,9 +77,9 @@ def tool_signals(events: list[dict]) -> list[dict]:
         counts = None
         if "passed" in event and "failed" in event:
             passed, failed = event["passed"], event["failed"]
-            if type(passed) is not int or type(failed) is not int or min(passed, failed) < 0:
-                raise ValueError("test counts must be nonnegative integers")
-            counts = (passed, failed)
+            # Third-party payloads reuse these keys for flags or lists; only real counts grade.
+            if type(passed) is int and type(failed) is int and min(passed, failed) >= 0:
+                counts = (passed, failed)
         # A partially passing suite is a failed check. Keep progress as a
         # metric, never as a positive correctness label. Counts also prevent
         # an inconsistent positive envelope from masking an observed failure.

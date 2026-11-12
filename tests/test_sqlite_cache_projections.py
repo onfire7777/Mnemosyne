@@ -1,8 +1,8 @@
 """SqliteEngine embedding cache (A1) + cached-PPR projection + projection
 registry (Phase-2 Task 8).
 
-Covers the subject-scoped embedding cache (admission matrix, read-side gating,
-purge rails, tenant-granular telemetry, privacy classes 10 & 13), the cached-PPR
+Covers the retired embedding cache (never written any more; admission matrix and
+purge rails for rows left in existing stores, privacy class 13), the cached-PPR
 projection served by ``graph_ppr(use_cache=True)`` (signature parity with the
 live traversal, ``graph_signal_cached`` metadata, fingerprint-mismatch recompute,
 and the TOCTOU capture-before-rebuild handoff), the FTS5 rebuildable projection,
@@ -18,37 +18,27 @@ from uuid import uuid4
 import pytest
 
 from mnemosyne.models import Evidence, Relation
-from mnemosyne.retrieval import HashingEmbeddingProvider, LocalSimilarityReranker, RetrievalAdapters
+from mnemosyne.retrieval import HashingEmbeddingProvider
 from mnemosyne.sqlite_engine import SqliteEngine, sqlite_vec_available
 
 # --- helpers ----------------------------------------------------------------
 
 
-class CountingEmbeddingProvider:
-    """HashingEmbeddingProvider wrapper that counts ``embed`` calls so a test can
-    prove the provider was invoked on a cache miss (privacy class 10)."""
-
-    name = "local-hashing"
-    dims = HashingEmbeddingProvider.dims
-
-    def __init__(self) -> None:
-        self._inner = HashingEmbeddingProvider()
-        self.calls = 0
-
-    def embed(self, text: str) -> list[float]:
-        self.calls += 1
-        return self._inner.embed(text)
+def _seed_cache(engine: SqliteEngine, tenant: str, cid: str) -> None:
+    """A row as an older build's mirror left it (nothing writes the table now)."""
+    conn = engine._connect(tenant)
+    with conn:
+        conn.execute(
+            "INSERT INTO embedding_cache (tenant_id, cache_key, model_id, embedding, dims, created_at) "
+            "VALUES (?, ?, 'legacy-model', x'00', 1, '')",
+            (tenant, cid),
+        )
 
 
-def _counting_engine(tmp_path: Path) -> tuple[SqliteEngine, CountingEmbeddingProvider]:
-    provider = CountingEmbeddingProvider()
-    adapters = RetrievalAdapters(
-        embedding=provider,
-        reranker=LocalSimilarityReranker(embedding_provider=provider),
-        lexical_backend="sqlite-fts5",
-        graph_backend="sqlite-cached-ppr",
-    )
-    return SqliteEngine(tmp_path / "root", adapters=adapters), provider
+def _cache_rows(engine: SqliteEngine, tenant: str, cid: str) -> int:
+    return engine._connect(tenant).execute(
+        "SELECT COUNT(*) FROM embedding_cache WHERE tenant_id = ? AND cache_key = ?", (tenant, cid)
+    ).fetchone()[0]
 
 
 def _append(
@@ -138,87 +128,16 @@ def test_embedding_cache_admission_matrix(tmp_path: Path) -> None:
     assert admits(sensitivity=0, access_policy={}, erased=True) is False
 
 
-def test_set_embedding_populates_cache_only_when_admissible(tmp_path: Path) -> None:
+def test_set_embedding_does_not_write_a_second_copy(tmp_path: Path) -> None:
     engine = SqliteEngine(tmp_path / "root")
     tenant = "t"
-    conn = engine._connect(tenant)
-    model = engine._model_id()
-
-    admissible = _append(engine, tenant, "u", "public admissible content", sensitivity=1)
-    assert engine.set_evidence_embedding(tenant, admissible, [0.1, 0.2, 0.3, 0.4]) is True
-    assert engine._embedding_cache_fetch(conn, tenant, admissible, model) == [0.1, 0.2, 0.3, 0.4]
-
-    # S3 row: the embedding is stored on the row (may_embed allows a private
-    # partition) but is NEVER admitted to the cache (fail closed).
-    s3 = _append(engine, tenant, "u", "sensitive s3 content", sensitivity=3)
-    assert engine.set_evidence_embedding(tenant, s3, [0.5, 0.6]) is True
-    assert engine._embedding_cache_fetch(conn, tenant, s3, model) is None
+    cid = _append(engine, tenant, "u", "public admissible content", sensitivity=1)
+    assert engine.set_evidence_embedding(tenant, cid, [0.1, 0.2, 0.3, 0.4]) is True
+    assert engine.get_evidence(tenant, cid).embedding == [0.1, 0.2, 0.3, 0.4]
+    assert _cache_rows(engine, tenant, cid) == 0
 
 
-# --- embedding cache: get-or-compute + telemetry ----------------------------
-
-
-def test_cached_embedding_records_hit_and_miss_at_tenant_granularity(tmp_path: Path) -> None:
-    engine, provider = _counting_engine(tmp_path)
-    tenant = "t"
-    cid = _append(engine, tenant, "u", "cache me", sensitivity=0)
-
-    first = engine.cached_embedding(
-        tenant, cid, "cache me", sensitivity=0, access_policy={"tenant": tenant}, context={"tenant_id": tenant}
-    )
-    assert provider.calls == 1  # miss → provider called + stored
-    second = engine.cached_embedding(
-        tenant, cid, "cache me", sensitivity=0, access_policy={"tenant": tenant}, context={"tenant_id": tenant}
-    )
-    assert provider.calls == 1  # hit → provider NOT called again
-    assert first == second
-    assert engine.cache_stats(tenant) == {"hits": 1, "misses": 1}
-
-
-def test_denied_context_is_a_miss_never_the_cached_vector(tmp_path: Path) -> None:
-    engine, provider = _counting_engine(tmp_path)
-    tenant = "t"
-    cid = _append(engine, tenant, "u", "cache me too", sensitivity=0)
-    # populate under an allowed context
-    engine.cached_embedding(
-        tenant, cid, "cache me too", sensitivity=0, access_policy={"tenant": tenant}, context={"tenant_id": tenant}
-    )
-    assert engine.cache_stats(tenant) == {"hits": 0, "misses": 1}
-    calls_before = provider.calls
-    # a cross-tenant (denied) context must never serve the cached vector — miss.
-    engine.cached_embedding(
-        tenant, cid, "cache me too", sensitivity=0, access_policy={"tenant": tenant}, context={"tenant_id": "intruder"}
-    )
-    assert provider.calls == calls_before + 1  # provider invoked on the denied miss
-    assert engine.cache_stats(tenant) == {"hits": 0, "misses": 2}  # a miss, never a hit
-
-
-# --- embedding cache: privacy classes 10 & 13 -------------------------------
-
-
-def test_class10_cross_subject_s2_probe_is_indistinguishable_from_miss(tmp_path: Path) -> None:
-    engine, provider = _counting_engine(tmp_path)
-    tenant = "t"
-    content = "secret ssn 123-45-6789 and a shared phrase"
-    # two subjects, identical S2 plaintext → subject-salted cids DIFFER.
-    cid_alice = _append(engine, tenant, "alice", content, sensitivity=2)
-    cid_bob = _append(engine, tenant, "bob", content, sensitivity=2)
-    assert cid_alice != cid_bob
-
-    engine.set_evidence_embedding(tenant, cid_alice, [0.9, 0.8, 0.7])  # cached under cid_alice
-    conn = engine._connect(tenant)
-    model = engine._model_id()
-    assert engine._embedding_cache_fetch(conn, tenant, cid_alice, model) is not None
-    # bob (the guessing subject) has no cache row — identical to a never-seen cid.
-    assert engine._embedding_cache_fetch(conn, tenant, cid_bob, model) is None
-
-    calls_before = provider.calls
-    engine.cached_embedding(
-        tenant, cid_bob, content, sensitivity=2, access_policy={"tenant": tenant}, context={"tenant_id": tenant}
-    )
-    # cross-subject probe took the same miss branch → provider called, a miss.
-    assert provider.calls == calls_before + 1
-    assert engine.cache_stats(tenant)["hits"] == 0
+# --- embedding cache: privacy class 13 --------------------------------------
 
 
 def test_class13_purge_leaves_no_cid_recoverable_trace(tmp_path: Path) -> None:
@@ -226,13 +145,10 @@ def test_class13_purge_leaves_no_cid_recoverable_trace(tmp_path: Path) -> None:
     tenant = "t"
     content = "erase me: ssn 987-65-4321 confidential"
     cid = _append(engine, tenant, "alice", content, sensitivity=2)
-    engine.set_evidence_embedding(tenant, cid, [0.3, 0.3, 0.3])
+    _seed_cache(engine, tenant, cid)
     conn = engine._connect(tenant)
-    model = engine._model_id()
-    assert engine._embedding_cache_fetch(conn, tenant, cid, model) is not None
 
     assert engine.purge_embedding_cache(tenant, cid) == 1
-    assert engine._embedding_cache_fetch(conn, tenant, cid, model) is None
 
     # sha256(guess) finds no confirmation: keys are subject-salted cids, never a
     # plain content hash, and the purged row is gone entirely.
@@ -253,30 +169,25 @@ def test_backfill_privacy_purges_cached_embedding(tmp_path: Path) -> None:
     engine = SqliteEngine(tmp_path / "root")
     tenant = "t"
     cid = _append(engine, tenant, "u", "email me at user@example.com please", sensitivity=1)
-    engine.set_evidence_embedding(tenant, cid, [0.2, 0.4])
-    conn = engine._connect(tenant)
-    model = engine._model_id()
-    assert engine._embedding_cache_fetch(conn, tenant, cid, model) is not None
+    _seed_cache(engine, tenant, cid)
     # privacy backfill raises sensitivity + restricts → cache must be purged.
     assert engine.backfill_evidence_privacy(tenant, cid, ["email"], pii_sensitivity=3) is True
-    assert engine._embedding_cache_fetch(conn, tenant, cid, model) is None
+    assert _cache_rows(engine, tenant, cid) == 0
 
 
 def test_update_metadata_purges_cache_on_hold_but_not_on_benign_patch(tmp_path: Path) -> None:
     engine = SqliteEngine(tmp_path / "root")
     tenant = "t"
-    model = engine._model_id()
-    conn = engine._connect(tenant)
 
     benign = _append(engine, tenant, "u", "benign patch target", sensitivity=1)
-    engine.set_evidence_embedding(tenant, benign, [0.1, 0.1])
+    _seed_cache(engine, tenant, benign)
     engine.update_evidence_metadata(tenant, benign, {"topic": "weather"})
-    assert engine._embedding_cache_fetch(conn, tenant, benign, model) is not None  # kept
+    assert _cache_rows(engine, tenant, benign) == 1  # kept
 
     held = _append(engine, tenant, "u", "hold patch target", sensitivity=1)
-    engine.set_evidence_embedding(tenant, held, [0.2, 0.2])
+    _seed_cache(engine, tenant, held)
     engine.update_evidence_metadata(tenant, held, {"hold": True})
-    assert engine._embedding_cache_fetch(conn, tenant, held, model) is None  # purged
+    assert _cache_rows(engine, tenant, held) == 0  # purged
 
 
 # --- cached-PPR projection --------------------------------------------------

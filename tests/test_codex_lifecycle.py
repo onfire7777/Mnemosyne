@@ -675,3 +675,14 @@ def test_worker_ignores_unprepared_history_before_capture_started(tmp_path):
     transcript.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
     host.event("Stop", transcript_path=str(transcript))
     assert [row["user_text"] for row in host.episodes()] == ["new request"]
+
+
+def test_tool_event_redacts_structured_secrets_without_breaking_quoted_commands():
+    from mnemosyne.hosts.codex import _tool_event
+
+    command = 'echo "API_KEY=abcdefgh12345678"'
+    event = _tool_event("shell", {"exit_code": 0, "output": "ok"}, command=command,
+                        arguments={"command": command, "password": "hunter2hunter2hunter2",
+                                   "sk-abcdefghijklmnop": 1})
+    assert event["arguments"] == {"command": 'echo "API_KEY=[REDACTED]"', "password": "[REDACTED]",
+                                  "[REDACTED]": 1}

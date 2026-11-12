@@ -16,7 +16,7 @@ import pytest
 
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.journal import CIDJournal, journal_filename
-from mnemosyne.models import Assertion, Evidence, Preference, Relation
+from mnemosyne.models import Assertion, Evidence, Hit, Preference, Relation
 from mnemosyne.privacy import ErasureMode
 from mnemosyne.sqlite_engine import SqliteEngine
 
@@ -306,8 +306,13 @@ def test_hard_delete_referential_consistency_and_caller_return_truth(tmp_path: P
 def test_embedding_cache_purged_both_modes(tmp_path: Path, mode: ErasureMode):
     engine = _make(tmp_path / "root")
     cid = engine.append_evidence(_ev("t", "Cached-vector target evidence."))
-    engine.cached_embedding("t", cid, "Cached-vector target evidence.",
-                            sensitivity=0, access_policy={"tenant": "t"}, store=True)
+    conn = engine._connect("t")
+    with conn:  # a row as an older build's mirror left it; nothing writes the table now
+        conn.execute(
+            "INSERT INTO embedding_cache (tenant_id, cache_key, model_id, embedding, dims, created_at) "
+            "VALUES ('t', ?, 'legacy-model', x'00', 1, '')",
+            (cid,),
+        )
     assert _embedding_cache_count(engine, "t", cid) == 1
     engine.forget("t", cid, requested_by="legal", erasure_mode=mode)
     assert _embedding_cache_count(engine, "t", cid) == 0  # privacy class 13
@@ -422,3 +427,61 @@ def test_forget_is_branch_scoped_leaves_other_branch(tmp_path: Path):
     assert engine.get_evidence("t", cid, branch="main") is None  # erased on main
     survived = engine.get_evidence("t", cid, branch="feature")
     assert survived is not None and survived.erased is False  # feature branch intact
+
+
+@pytest.mark.parametrize("backend", ["local", "sqlite"])
+@pytest.mark.parametrize("mode,requested_by", [(TOMBSTONE, "user"), (HARD, "legal")])
+def test_forget_leaves_no_source_text_in_store_files(tmp_path: Path, backend, mode, requested_by):
+    """Derived rows that lose their last source are scrubbed, and on SQLite the old
+    pages leave the db file and the WAL while the engine is still open."""
+    secret = "zanzibar-plutonium-7731"
+    engine = LocalMemoryEngine(store_path=tmp_path / "store.json") if backend == "local" else _make(tmp_path)
+    cid = engine.append_evidence(_ev("t", f"I live in {secret}."))
+    engine.upsert_assertion(
+        Assertion(tenant_id="t", user_id="user-1", subject="user", predicate="residence", object=secret,
+                  status="active", source_evidence_cids=[cid], calibration={"source_quote": f"I live in {secret}."})
+    )
+    engine.add_relation(
+        Relation(tenant_id="t", source="user", predicate="lives_in", target=secret, source_evidence_cids=[cid])
+    )
+    engine.add_preference(
+        Preference(tenant_id="t", user_id="user-1", category="tone", statement=f"mention {secret}",
+                   source_evidence_cids=[cid])
+    )
+    assert engine.forget("t", cid, requested_by=requested_by, erasure_mode=mode)["erased"] is True
+    leaking = [path.name for path in tmp_path.rglob("*") if path.is_file() and secret.encode() in path.read_bytes()]
+    assert leaking == []
+    engine.close()
+
+
+def test_stale_write_back_cannot_undo_a_forget(tmp_path: Path, monkeypatch):
+    """A recall reads its rows under the write lock, and a writer that still holds a
+    pre-forget snapshot cannot put the erased content back."""
+    reader, other = _make(tmp_path), _make(tmp_path)  # two processes on one store
+    cid = reader.append_evidence(_ev("t", "my SSN is 123-45-6789"))
+    hit = Hit(id=cid, kind="evidence", tenant_id="t", branch="main", text="x", score=1.0, channel="lexical")
+    local_body = LocalMemoryEngine._record_retrieval_access
+    locked = []
+
+    def body(oracle, hits):
+        locked.append(reader._connect("t").in_transaction)
+        return local_body(oracle, hits)
+
+    monkeypatch.setattr(LocalMemoryEngine, "_record_retrieval_access", body)
+    assert reader._record_retrieval_access([hit]) == {"assertions": 0, "evidence": 1}
+    assert locked == [True]
+
+    fetch = reader._fetch_evidence
+
+    def fetch_then_forget(*args, **kwargs):
+        snapshot = fetch(*args, **kwargs)
+        monkeypatch.setattr(reader, "_fetch_evidence", fetch)
+        assert other.forget("t", cid)["erased"] is True
+        return snapshot
+
+    monkeypatch.setattr(reader, "_fetch_evidence", fetch_then_forget)
+    reader.update_evidence_metadata("t", cid, {"topic": "x"})
+    row = reader._connect("t").execute("SELECT erased, content FROM evidence WHERE cid = ?", (cid,)).fetchone()
+    assert tuple(row) == (1, "")
+    reader.close()
+    other.close()

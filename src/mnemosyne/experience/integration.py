@@ -102,6 +102,8 @@ def build_learning_runtime(engine, *, skill_store=None, lesson_distiller=None,
 
 def _after_outcomes(runtime, tenant_id, user_id):
     """Claim automatic triggers atomically; never hold a DB lock over providers."""
+    if getattr(runtime.engine, "_learning_configuration", {}).get("defer_semantic_review"):
+        return None  # this host's worker consolidates, outside the hook deadline
     token = uuid4().hex
     timestamp = now()
 

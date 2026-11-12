@@ -377,7 +377,9 @@ def test_sqlite_queue_visibility_and_lifecycle_parity(tmp_path: Path) -> None:
     s_retry, s_final = run(sqlite_queue)
     i_retry, i_final = run(inproc)
     assert s_retry == i_retry == {"retry": 1}
-    assert s_final == i_final == {"dead": 1, "complete": 1}
+    # A finished job leaves the durable queue; the in-process queue keeps it for this run's report.
+    assert s_final == {"dead": 1}
+    assert i_final == {"dead": 1, "complete": 1}
 
 
 def test_sqlite_queue_worker_drains_with_result(tmp_path: Path) -> None:
@@ -388,10 +390,9 @@ def test_sqlite_queue_worker_drains_with_result(tmp_path: Path) -> None:
     assert [job.kind for job in drained] == ["echo"]
     assert drained[0].status == "complete"
     assert drained[0].result == {"echoed": 7}
-    assert queue.snapshot() == {"complete": 1}
-    # jobs property + list_jobs surface the durable row.
-    assert set(queue.jobs) == {drained[0].id}
-    assert queue.list_jobs()[0].result == {"echoed": 7}
+    # The result lives on the returned job only: the finished row leaves the queue.
+    assert queue.snapshot() == {}
+    assert queue.list_jobs() == []
 
 
 def test_sqlite_queue_no_handler_fails_job(tmp_path: Path) -> None:

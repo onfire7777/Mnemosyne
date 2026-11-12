@@ -42,6 +42,8 @@ def rrf_fuse(
     scores: dict[tuple[str, str], float] = defaultdict(float)
     channels: dict[tuple[str, str], list[str]] = defaultdict(list)
     channel_scores: dict[tuple[str, str], dict[str, float]] = defaultdict(dict)
+    # Learned tables sum to 1; a route they never saw gets their mean, not a raw 1.0.
+    neutral = sum(channel_weights.values()) / len(channel_weights) if channel_weights else 1.0
     for ranked in ranked_lists:
         for rank, hit in enumerate(ranked, start=1):
             key = (hit.kind, hit.id)
@@ -50,7 +52,7 @@ def rrf_fuse(
             if channel_weights is not None:
                 from mnemosyne.experience.receipts import ROUTE_OF_CHANNEL
                 route = ROUTE_OF_CHANNEL.get(hit.channel, hit.channel)
-                weight = float(channel_weights.get(route, 1.0))
+                weight = float(channel_weights.get(route, neutral))
                 if not math.isfinite(weight) or weight < 0:
                     raise ValueError("channel weights must be finite and nonnegative")
             scores[key] += weight / (rrf_k + rank)

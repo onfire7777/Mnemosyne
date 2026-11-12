@@ -59,6 +59,7 @@ from mnemosyne.retrieval import (
     answer_grounding_floor_report,
     apply_activation_scores,
     apply_workspace_retrieval_advisory,
+    filter_derived_adapter_hits,
     gist_support_report,
     global_sensemaking_projection,
     normalise_query_term,
@@ -909,15 +910,20 @@ def _time_window_route(
         explain["order"] = "latest_first"
     allow_soft_fallback = (window.axis == "event") or (effective_filter.get("query_mode") == "passages")
     is_relative_ago = "ago" in window.label.lower()
-    if (not inside and not date_only and not bare_happen and allow_soft_fallback) or (
-        is_relative_ago and not date_only and not bare_happen
-    ):
+    # An unrelated passage made in the span must not hide a memory whose subject carries the date.
+    answered = query_support(
+        window_support_query(window), [hit for _m, hit in inside[:k]]
+    )["score"] >= QUERY_SUPPORT_THRESHOLD
+    if not date_only and not bare_happen and (is_relative_ago or not answered):
         # Soft Temporal Fallback / Relative-Ago Proximity Ranking: when 0 hits match the hard window,
         # or when a conversational "X days/weeks ago" query includes a topic, score all candidates
         # by lexical/semantic relevance weighted by temporal proximity (giving exact-window matches
         # a 1.35x multiplier while retaining strong topical matches from adjacent days).
-        if not inside:
+        if not inside or not is_relative_ago:
             explain["fallback"] = "soft_temporal_proximity"
+            # Beyond the old empty-span fallback, a hit from another day must name the span to count.
+            if not is_relative_ago and (inside or not allow_soft_fallback):
+                explain["span_unanswered"] = True
         else:
             explain["relative_backfill"] = True
         inside_ids = {hit.id for _m, hit in inside}
@@ -1130,6 +1136,13 @@ def _relevant_memory_hits(hits: list[Hit], include_operational: bool) -> list[Hi
     return [hit for hit in hits if not (
         hit.kind == "evidence" and hit.metadata.get("source_type") == "learning_tool_result"
     )]
+
+
+# Function words only: content words (drink, travel, use...) must stay in the channel query.
+_FUNCTION_WORDS = frozenset(
+    "a am an and are as at be been being by did do does for from had has have how i in into is it its me my of on or our "
+    "that the these this those to was we were what when where which who whom whose why with you your".split()
+)
 
 
 def _source_only_local_routes(adapters: RetrievalAdapters, routes: list[list[Hit]]) -> bool:
@@ -1431,6 +1444,15 @@ class RetrievalPipelineOps(Protocol):
         """
         ...
 
+    def assertions_citing(
+        self, tenant_id: str, cids: Sequence[str], branch: str = "main"
+    ) -> Sequence[Any]:
+        """Active, contested and superseded assertions citing any of these evidence rows.
+
+        May also include successors on their ``superseded_by`` chains.
+        """
+        ...
+
     def list_working(self, tenant_id: str, session_id: str, *, as_of: Any) -> list[Any]: ...
 
     # -- fusion / ordering / budget helpers ------------------------------------
@@ -1688,6 +1710,70 @@ def _run_global_sensemaking(
     )
 
 
+def _lift_current_over_superseded(
+    ops: RetrievalPipelineOps, ordered: list[Hit], filt: dict[str, Any], limit: int
+) -> list[Hit]:
+    """Rank the statement that replaced a superseded one directly above it and label both.
+
+    A source counts as superseded only when no live assertion still cites it and the
+    ``superseded_by`` chain of one that did ends at a live assertion.
+    """
+
+    lookup = getattr(ops, "assertions_citing", None)
+    wanted = {hit.id for hit in ordered if hit.kind == "evidence"}
+    if lookup is None or not wanted:
+        return ordered
+    tenant_id, branch = filt["tenant_id"], filt["branch"]
+    citing = lookup(tenant_id, sorted(wanted), branch)
+    by_id = {item.id: item for item in citing}
+    live = {"active", "contested"}
+    current = {cid for item in citing if item.status in live for cid in item.source_evidence_cids}
+    stale: dict[str, list[str]] = {}
+    for old in citing:
+        if old.status != "superseded":
+            continue
+        item, seen = old, {old.id}
+        # shortcut: one read per hop of the chain; resolve it inside the store if chains get long
+        while item is not None and item.status == "superseded" and item.superseded_by and item.superseded_by not in seen:
+            seen.add(item.superseded_by)
+            item = by_id.get(item.superseded_by) or ops._get_projection_for_adapter(
+                tenant_id, branch, "assertion", item.superseded_by
+            )
+        if item is None or item.status not in live:
+            continue
+        for cid in wanted.intersection(old.source_evidence_cids).difference(current):
+            successors = stale.setdefault(cid, [])
+            successors.extend(c for c in item.source_evidence_cids if c not in successors)
+    if not stale:
+        return ordered
+    ranked = {hit.id: hit for hit in ordered if hit.kind == "evidence"}
+    above: set[str] = set()
+    moved: set[str] = set()
+    lifted: list[Hit] = []
+    for hit in ordered:
+        if hit.kind == "evidence" and hit.id in moved:
+            continue
+        if hit.kind == "evidence" and hit.id in stale:
+            for cid in stale[hit.id]:
+                if cid in above:
+                    continue
+                # A successor the ranking did not return is read by id through the authorised reader.
+                found = [ranked[cid]] if cid in ranked else filter_derived_adapter_hits(ops, [replace(hit, id=cid)], filt)
+                for successor in found:
+                    above.add(cid)
+                    moved.add(cid)
+                    lifted.append(replace(
+                        successor, score=hit.score, metadata={**successor.metadata, "supersedes": hit.id}
+                    ))
+            # Name only successors the caller was shown: an unreadable one stays unnamed.
+            shown = [cid for cid in stale[hit.id] if cid in above]
+            if shown:
+                hit = replace(hit, metadata={**hit.metadata, "superseded_by": shown})
+        above.add(hit.id)
+        lifted.append(hit)
+    return lifted[: max(limit, len(ordered))]
+
+
 def run_retrieval_pipeline(
     ops: RetrievalPipelineOps,
     *,
@@ -1840,11 +1926,27 @@ def run_retrieval_pipeline(
             )
         return source_scopes[key]
 
-    def search_relevance(search, count, filt):
+    # The local channels score term overlap without IDF: function words would outvote the one
+    # rare word. A real embedding model or cross-encoder still gets the full question.
+    # "What's" / "Where's" count as their function word.
+    content_query = " ".join(
+        w for w in query.split()
+        if re.split("['’]", w.strip("?!.,;:\"'()").lower())[0] not in _FUNCTION_WORDS
+    ) or query
+    hash_query = content_query if type(ops.adapters.embedding) is HashingEmbeddingProvider else query
+    rerank_query = (
+        content_query
+        if type(getattr(ops.adapters.reranker, "embedding_provider", None)) is HashingEmbeddingProvider else query
+    )
+
+    def search_relevance(search, count, filt, channel_query=query):
         if diversify_learning:
-            return _diverse_learning_search(search, query, count, filt, source_scope,
-                                             include_operational=bool(effective_filter.get("include_operational")))
-        return search(query, count, filt)
+            hits = _diverse_learning_search(search, channel_query, count, filt, source_scope,
+                                            include_operational=bool(effective_filter.get("include_operational")))
+        else:
+            hits = search(channel_query, count, filt)
+        # No content word matched: ask the old way, so the BM25 source route can still match synonyms.
+        return hits if hits or channel_query == query else search_relevance(search, count, filt)
 
     if window is not None:
         window_hits, window_explain = _time_window_route(
@@ -1919,11 +2021,11 @@ def run_retrieval_pipeline(
         graph, prospective, working, working_explain = [], [], [], {}
     elif parallel_channels_enabled():
         with ThreadPoolExecutor(max_workers=5) as pool:
-            dense_future = pool.submit(search_relevance, ops.vector_search, policy.rerank_width, effective_filter)
-            lexical_future = pool.submit(search_relevance, ops.lexical_search, policy.rerank_width, effective_filter)
+            dense_future = pool.submit(search_relevance, ops.vector_search, policy.rerank_width, effective_filter, hash_query)
+            lexical_future = pool.submit(search_relevance, ops.lexical_search, policy.rerank_width, effective_filter, content_query)
             graph_future = pool.submit(
                 ops.graph_ppr,
-                tokenize(query),
+                tokenize(content_query),
                 graph_k,
                 as_of=effective_filter.get("as_of"),
                 tenant_id=tenant_id,
@@ -1956,11 +2058,11 @@ def run_retrieval_pipeline(
             prospective = prospective_future.result()
             working, working_explain = working_future.result() if working_future is not None else ([], {})
     else:
-        dense = search_relevance(ops.vector_search, policy.rerank_width, effective_filter)
-        lexical = search_relevance(ops.lexical_search, policy.rerank_width, effective_filter)
+        dense = search_relevance(ops.vector_search, policy.rerank_width, effective_filter, hash_query)
+        lexical = search_relevance(ops.lexical_search, policy.rerank_width, effective_filter, content_query)
         graph = _fast_graph_hits(
             ops.graph_ppr(
-                tokenize(query),
+                tokenize(content_query),
                 graph_k,
                 as_of=effective_filter.get("as_of"),
                 tenant_id=tenant_id,
@@ -2157,7 +2259,7 @@ def run_retrieval_pipeline(
     chronological_window = bool(chronological_order)
     reranked = (
         fused if chronological_window or (relevance_order and ops.adapters.reranker.name == "local-similarity")
-        else ops.adapters.reranker.rerank(query, fused, k=max(k * 2, k))
+        else ops.adapters.reranker.rerank(rerank_query, fused, k=max(k * 2, k))
     )
     reranked = _diversify_facets(query, reranked, k=max(k, 5))
     if chronological_window:
@@ -2183,7 +2285,7 @@ def run_retrieval_pipeline(
     elif window is not None or passage_mode or source_ranked is not None:
         diversified = reranked[:k]
     else:
-        diversified = ops._mmr(query, reranked, k=max(k, 1))
+        diversified = ops._mmr(hash_query, reranked, k=max(k, 1))
     activated = (
         diversified if relevance_order else ops._apply_standing_scores(
             apply_activation_scores(diversified, policy, now=retrieval_instant)
@@ -2242,6 +2344,9 @@ def run_retrieval_pipeline(
         if workspace_retrieval_advisory.get("status") == "applied":
             workspace_retrieval_advisory["used_for_ranking"] = False
             workspace_retrieval_advisory["ranking_preserved"] = "explicit_temporal_order"
+    # Questions about a past time or an explicit first/last order want the old statement.
+    if window is None and not chronological_order and historical_time is None:
+        ordered = _lift_current_over_superseded(ops, ordered, effective_filter, k)
     priority_sub_budget = 0
     priority_tokens_used = 0
     priority_items_retained = 0
@@ -2306,6 +2411,11 @@ def run_retrieval_pipeline(
     support_report = query_support(
         window_support_query(window) if use_stripped_window_query else query, budgeted, linked_facts
     )
+    if (window_explain or {}).get("span_unanswered"):
+        # Said on another day: returned, but asserted only when the memory itself names the span.
+        support_report = min(support_report, query_support(
+            window.label, [hit for hit in budgeted if hit.metadata.get("temporal_fallback")]
+        ), key=lambda report: report["score"])
     support_score = support_report["score"]
     if cosine_ranked:
         # Found by meaning: a best cosine at or above the index's floor supports the answer

@@ -2242,8 +2242,7 @@ class AutoMemorySession:
         self._session_evidence_cids: list[str] = []
         self._active_goals: list[str] = []
         self._active_constraints: list[str] = []
-        self._last_user_turn_text: str = ""
-        self._last_user_evidence_cid: str = ""
+        self._directive_source: dict[str, tuple[str, str]] = {}  # directive -> (cid, text) of its own turn
         self._closed: bool = False
         from mnemosyne.experience.integration import build_learning_runtime
         # The learning runtime currently serves the main branch only.
@@ -2321,7 +2320,7 @@ class AutoMemorySession:
         obs_snippets: list[str] = []
         if hasattr(self.engine, "observation_list"):
             try:
-                obs_list = self.engine.observation_list(self.tenant_id, branch=self.branch, status="active", limit=3)
+                obs_list = self.engine.observation_list(self.tenant_id, branch=self.branch, user_id=self.user_id, status="active", limit=3)
                 for o in obs_list:
                     obs_snippets.append(f"({o.subject} / {o.topic}): {o.content}")
             except Exception as exc:
@@ -2402,6 +2401,7 @@ class AutoMemorySession:
         from mnemosyne.experience.receipts import source_segment_id
         from mnemosyne.ids import evidence_cid
         from mnemosyne.models import Evidence, utc_now
+        from mnemosyne.privacy import detect_pii_tags
 
         self._turn_count += 1
         now = utc_now()
@@ -2428,6 +2428,7 @@ class AutoMemorySession:
             source_type="chat",
             document_segment_id=user_segment,
             content=user_text,
+            sensitivity=3 if detect_pii_tags(user_text) else 0,
             branch=self.branch,
             cid=cid_user,
             created_at=now,
@@ -2437,8 +2438,6 @@ class AutoMemorySession:
         user_stored = self.engine.get_evidence(self.tenant_id, cid_user, self.branch) is not None
         if user_stored:
             self._session_evidence_cids.append(cid_user)
-        self._last_user_turn_text = user_text
-        self._last_user_evidence_cid = cid_user
 
         # 2. Store User Turn in Working Memory
         item_user = WorkingMemoryItem(
@@ -2481,6 +2480,7 @@ class AutoMemorySession:
             source_type="chat",
             document_segment_id=assistant_segment,
             content=assistant_text,
+            sensitivity=3 if detect_pii_tags(assistant_text) else 0,
             branch=self.branch,
             cid=cid_asst,
             created_at=now,
@@ -2513,11 +2513,12 @@ class AutoMemorySession:
                 log.debug("AutoMemorySession put_working asst turn error: %s", exc)
 
         # 5. Extract Active Goals & Constraints from User Turn
-        goal_match = re.search(r"(?:my goal is|i want to|aim to|need to|objective is)\s+([^.!?\n]+)", user_text, re.IGNORECASE)
+        goal_match = re.search(r"\b(?:my goal is|(?:i|we) (?:want|aim|need) to|(?:my|our) objective is)\s+((?:[^.!?\n]|\.(?=\S))+)", user_text, re.IGNORECASE)
         if goal_match and user_stored:
             goal_text = goal_match.group(0).strip()
             if goal_text not in self._active_goals:
                 self._active_goals.append(goal_text)
+                self._directive_source[goal_text] = (cid_user, user_text)
                 self._recent_goal_changes.append(self._turn_count)
                 g_item = WorkingMemoryItem(
                     item_id=f"goal-{uuid4().hex[:8]}",
@@ -2539,11 +2540,12 @@ class AutoMemorySession:
                     except Exception as exc:
                         log.debug("AutoMemorySession put_working goal error: %s", exc)
 
-        constraint_match = re.search(r"(?:always|never|must|prefer)\s+([^.!?\n]+)", user_text, re.IGNORECASE)
+        constraint_match = re.search(r"\b(?:always|never|must|prefer)\s+((?:[^.!?\n]|\.(?=\S))+)", user_text, re.IGNORECASE)
         if constraint_match and user_stored:
             constraint_text = constraint_match.group(0).strip()
             if constraint_text not in self._active_constraints:
                 self._active_constraints.append(constraint_text)
+                self._directive_source[constraint_text] = (cid_user, user_text)
                 self._recent_goal_changes.append(self._turn_count)
                 c_item = WorkingMemoryItem(
                     item_id=f"constraint-{uuid4().hex[:8]}",
@@ -2718,20 +2720,16 @@ class AutoMemorySession:
         from mnemosyne.observations import Observation, ProofQuote
 
         consolidated_obs: list[str] = []
-        user_cid = self._last_user_evidence_cid
-        user_text = self._last_user_turn_text
 
         # Consolidate active goals
         for goal in self._active_goals:
+            user_cid, user_text = self._directive_source[goal]
             pq = None
             if user_cid and user_text and goal in user_text:
                 start = user_text.find(goal)
                 end = start + len(goal)
                 sha = hashlib.sha256(goal.encode("utf-8")).hexdigest()
                 pq = ProofQuote(cid=user_cid, quote=goal, start=start, end=end, sha256=sha)
-            elif user_cid and user_text:
-                sha = hashlib.sha256(user_text.encode("utf-8")).hexdigest()
-                pq = ProofQuote(cid=user_cid, quote=user_text, start=0, end=len(user_text), sha256=sha)
 
             obs = Observation(
                 tenant_id=self.tenant_id,
@@ -2753,15 +2751,13 @@ class AutoMemorySession:
 
         # Consolidate active constraints
         for constraint in self._active_constraints:
+            user_cid, user_text = self._directive_source[constraint]
             pq = None
             if user_cid and user_text and constraint in user_text:
                 start = user_text.find(constraint)
                 end = start + len(constraint)
                 sha = hashlib.sha256(constraint.encode("utf-8")).hexdigest()
                 pq = ProofQuote(cid=user_cid, quote=constraint, start=start, end=end, sha256=sha)
-            elif user_cid and user_text:
-                sha = hashlib.sha256(user_text.encode("utf-8")).hexdigest()
-                pq = ProofQuote(cid=user_cid, quote=user_text, start=0, end=len(user_text), sha256=sha)
 
             obs = Observation(
                 tenant_id=self.tenant_id,

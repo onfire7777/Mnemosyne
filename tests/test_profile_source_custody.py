@@ -259,7 +259,7 @@ def test_hard_delete_retry_persists_cleanup_after_storage_failure(pipeline, tmp_
             def fail(*_args, **_kwargs):
                 raise OSError("profile persistence interrupted")
             # Fail after RuntimeState has replaced its in-memory payload, or
-            # after PG has saved the payload but before its profile mirror.
+            # inside the PG transaction (payload rolls back with its profile mirror).
             with monkeypatch.context() as patch:
                 patch.setattr(runtime_state, "_mirror_user_model" if is_postgres else "save", fail)
                 return original(model)

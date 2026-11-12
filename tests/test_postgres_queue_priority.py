@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 
-from mnemosyne.queue import InProcessQueue, PostgresQueue, QueueWorker
+from mnemosyne.queue import InProcessQueue, PostgresQueue
 
 
 @pytest.fixture(scope="module")
@@ -87,26 +87,12 @@ def test_postgres_lease_skips_locked_job_and_respects_kind(queue_dsn):
     assert queue.lease().id == other.id
 
 
-def test_postgres_result_serialization_failure_preserves_lease_live(queue_dsn):
+def test_postgres_completed_job_does_not_store_its_result_live(queue_dsn):
     queue = PostgresQueue(queue_dsn, uuid4().hex, require_safe_role=False)
     queue.enqueue("work", {})
     leased = queue.lease()
-    leased.result = object()
-    with pytest.raises(TypeError):
-        queue.complete(leased.id)
-    assert leased.status == "running"
-    assert queue.jobs[leased.id].status == "running"
     leased.result = {"answer": 42}
     queue.complete(leased.id)
-    assert queue.jobs[leased.id].result == {"answer": 42}
-    assert leased.status == "complete"
-
-
-def test_postgres_worker_result_serialization_failure_reaches_dead_live(queue_dsn):
-    queue = PostgresQueue(queue_dsn, uuid4().hex, require_safe_role=False)
-    queued = queue.enqueue("work", {}, max_attempts=2)
-    worker = QueueWorker(queue, {"work": lambda payload: object()})
-    assert worker.run_once().status == "retry"
-    assert worker.run_once().status == "dead"
-    assert queue.jobs[queued.id].status == "dead"
-    assert worker.run_once() is None
+    assert queue.jobs[leased.id].status == "complete"
+    assert queue.jobs[leased.id].result is None
+    assert leased.status == "complete" and leased.result == {"answer": 42}

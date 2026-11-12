@@ -13,6 +13,7 @@ from mnemosyne.text import (
     _hashing_embedding_pure,
     _lexical_score_pure,
     lexical_scorer,
+    tokenize,
 )
 
 WORDS = ("film Film FILM directed 1970 the of in a by born died Move (1970 film) actor actress "
@@ -62,3 +63,12 @@ def test_sparse_cosine_equals_the_pure_dot_product(seed: int, dims: int) -> None
                 assert _bits(actual) == _bits(expected), (query, text)
             else:
                 assert actual == expected
+
+
+def test_tokenize_non_latin_scripts_and_accents() -> None:
+    assert tokenize("我住在上海") == ["我", "住", "在", "上", "海"]
+    assert tokenize("Pythonが好き・") == ["python", "が", "好", "き"]
+    assert tokenize("Санкт-Петербург") == ["санкт-петербург", "санкт", "петербург"]
+    assert tokenize("القاهرة") == ["القاهرة"]
+    assert tokenize("Zürich naïve wait…what") == ["zurich", "naive", "wait", "what"]
+    assert tokenize("Hello, WORLD... v1.2.3 data-only") == ["hello", "world", "v1.2.3", "data-only", "data", "only"]

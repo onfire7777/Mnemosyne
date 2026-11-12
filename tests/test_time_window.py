@@ -107,7 +107,8 @@ def test_search_answers_from_the_memories_made_in_the_span() -> None:
 def test_a_span_answer_that_misses_what_was_asked_about_abstains() -> None:
     result = _ask(_engine(), "What did I say about Leeds yesterday?")
     assert result.explain["time_window"]["label"] == "yesterday"
-    assert "Leeds" not in " ".join(hit.text for hit in result.hits)
+    # Said on another day: returned, flagged as outside the span, and still not asserted.
+    assert [hit.metadata["temporal_fallback"] for hit in result.hits if "Leeds" in hit.text] == [True]
     assert result.abstained is True
 
 
@@ -533,9 +534,8 @@ def test_default_without_graph_abstains_for_empty_window(temporal_engine):
         "What did I ask about the workshop yesterday?", tenant_id=TENANT, record_access=False,
         filt={"query_timezone": "America/New_York", "evaluated_at": "2026-11-04T12:00:00Z"},
     )
-    assert result.hits == []
+    assert [hit.metadata["temporal_fallback"] for hit in result.hits] == [True]
     assert result.abstained is True
-    assert result.explain["time_window"]["passages"] == 0
 
 
 def test_default_window_needs_no_embedding_channel_or_mmr_provider(temporal_engine, monkeypatch):

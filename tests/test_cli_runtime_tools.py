@@ -1469,6 +1469,18 @@ def _run_cli_inproc(capsys: pytest.CaptureFixture[str], store: Path, *args: str)
     return json.loads(capsys.readouterr().out)
 
 
+def test_cli_default_object_store_follows_the_store_not_the_cwd(tmp_path: Path) -> None:
+    asset = tmp_path / "blob.bin"
+    asset.write_bytes(b"payload")
+
+    run_cli(
+        tmp_path / "mem" / "store.json", "ingest", "--tenant", TENANT, "--user", USER,
+        "--source-type", "upload", "--file", str(asset), "--modality", "binary",
+    )
+
+    assert any(path.is_file() for path in (tmp_path / "mem" / "objects").rglob("*"))
+
+
 def test_cli_confirm_transparent_output_exposes_confirmed_id(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -4284,6 +4296,7 @@ def test_cli_read_context_flags_apply_without_leakage(tmp_path: Path) -> None:
         assert parsed.residency == "us"
         assert parsed.region == "us-west-2"
 
+    engine.close()  # the CLI processes below need the store's writer lock
     for command in ("search", "deep-search", "explain"):
         allowed = run_cli(store, command, "--tenant", TENANT, "--query", query, *shared)
         assert any(hit["id"] == cid for hit in allowed["hits"])
@@ -5138,7 +5151,7 @@ def test_cli_reports_residency_policy_and_provider_check(tmp_path: Path) -> None
         "provider-check",
     )
 
-    assert policy["allowed_residencies"] == ["local", "eu", "us"]
+    assert policy["allowed_residencies"] == ["eu", "us"]
     assert policy["runtime_residency"] == "us"
     assert policy["require_runtime_residency"] is True
     assert policy["allowed_residency_transfers"] == ["eu->us"]
@@ -5454,28 +5467,49 @@ def test_cli_projection_recompute_enqueue_persists_payload(tmp_path: Path) -> No
 
 def test_cli_search_surfaces_gist_only_abstention(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
-    ingested = run_cli(
-        store,
-        "ingest",
-        "--tenant",
-        TENANT,
-        "--user",
-        USER,
-        "--actor",
-        "user",
-        "--source-type",
-        "chat",
-        "--content",
-        "CLI search abstention source should only support answers through generated gist metadata.",
-        "--run-consolidation-once",
+    # An ingest job no longer gists a single row, so a gist row shaped like the summarizer's is written directly.
+    fingerprint = "47226236eb20fd6567f97ada49e426a92085bc1e6291912f819e8d8a149f5a0c"
+    engine = LocalMemoryEngine(store_path=store)
+    source_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="CLI search abstention source should only support answers through generated gist metadata.",
+            access_policy={"tenant": TENANT},
+        )
     )
-    exported = run_cli(store, "export", "--tenant", TENANT)
-    summary = next(item for item in exported["evidence"] if item["source_type"] == "consolidation-summary")
-
-    # Only the summary carries its fingerprint token (source CIDs left its text).
-    fingerprint = summary["metadata"]["summary"]["source_fingerprint"]
+    summary_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="system",
+            source_type="consolidation-summary",
+            source_identity="consolidation-summary:cli-gist-abstention",
+            content=f"CLI search abstention source should only support answers through generated gist metadata.\n\n[gist {fingerprint}]",
+            metadata={
+                "reality_class": "self_generated",
+                "source_evidence_cids": [source_cid],
+                "summary": {
+                    "confabulation_risk": True,
+                    "kind": "abstractive_gist",
+                    "raptor_level": 1,
+                    "source_count": 1,
+                    "source_evidence_cids": [source_cid],
+                    "source_fingerprint": fingerprint,
+                    "status": "active",
+                    "strategy": "deterministic_first_sentence",
+                },
+            },
+            trust_tier=2,
+            capability_tags=["derived-summary", "consolidation-gist", "source:consolidation"],
+            access_policy={"tenant": TENANT},
+        )
+    )
+    engine.close()
+    summary = {"cid": summary_cid}
     result = run_cli(store, "search", "--tenant", TENANT, "--query", fingerprint)
-    assert ingested["cid"]
 
     assert result["abstained"] is True
     assert result["uncertainty_note"] == "Only gist-tier memory support was retrieved; inspect source evidence before answering."
@@ -5522,6 +5556,7 @@ def test_cli_deep_search_and_explain_suppress_gist_derived_graph_without_source(
         )
     )
 
+    engine.close()
     deep_searched = run_cli(store, "deep-search", "--tenant", TENANT, "--query", source_key)
     explained = run_cli(store, "explain", "--tenant", TENANT, "--query", source_key)
 
@@ -5889,7 +5924,7 @@ def test_cli_persists_queue_between_ingest_and_worker_commands(tmp_path: Path) -
     assert queued["jobs"][0]["payload"]["source_evidence_cids"] == [ingested["cid"]]
     assert completed["job"]["status"] == "complete"
     assert completed["job"]["result"]["source_evidence_cids"] == [ingested["cid"]]
-    assert after["queue"]["complete"] == 1
+    assert after == {"queue": {}, "jobs": []}  # a finished job leaves the durable queue
 
 
 def test_cli_queue_enqueue_and_drain_runtime_job(tmp_path: Path) -> None:
@@ -5909,7 +5944,7 @@ def test_cli_queue_enqueue_and_drain_runtime_job(tmp_path: Path) -> None:
     assert drained["jobs"][0]["kind"] == "calibrate"
     assert drained["jobs"][0]["status"] == "complete"
     assert drained["jobs"][0]["result"]["details"]["abstain"] is True
-    assert after["queue"]["complete"] == 1
+    assert after == {"queue": {}, "jobs": []}
 
 
 def test_cli_worker_run_supervises_bounded_queue_cycles(tmp_path: Path) -> None:
@@ -5937,7 +5972,14 @@ def test_cli_worker_run_supervises_bounded_queue_cycles(tmp_path: Path) -> None:
     assert supervised["metrics"]["counters"]["queue.job.calibrate.complete"] == 1
     assert supervised["metrics"]["counters"]["queue.job.observability_snapshot.complete"] == 1
     assert supervised["metrics"]["counters"]["observability.snapshots"] == 1
-    assert after["queue"]["complete"] == 2
+    assert after == {"queue": {}, "jobs": []}
+
+
+def test_cli_worker_run_heartbeat_window_end_is_not_a_worker_failure(tmp_path: Path) -> None:
+    supervised = run_cli(tmp_path / "mnemosyne.json", "worker-run", "--max-cycles", "4", "--idle-exit-after", "0")
+
+    assert supervised["ok"] is True
+    assert supervised["workspace_heartbeat"]["failure_code"] == "workspace_heartbeat_hard_stop"
 
 
 def test_cli_worker_run_workspace_heartbeat_is_bounded_and_additive(tmp_path: Path) -> None:
@@ -14050,6 +14092,21 @@ def test_cli_session_token_rejects_tenant_mismatch(tmp_path: Path) -> None:
     assert "session tenant mismatch" in result.stderr
 
 
+def test_cli_session_token_binds_learning_tenant_and_passes_prepare_context_flags(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    session = ("--session-secret", SESSION_SECRET, "--session-token", make_session_token())
+
+    mismatch = run_raw_cli(store, *session, "learning-status", "--tenant-id", "other-tenant")
+    prepared = run_cli(
+        store, *session, "prepare-context", "--tenant-id", TENANT, "--user-id", USER, "--session-id", "s1", "--query", "hi",
+        "--workspace", "/repos/alpha", "--delivery-envelope", '{"capabilities_status": "host-marker"}',
+    )
+
+    assert mismatch.returncode != 0
+    assert "session tenant_id mismatch" in mismatch.stderr
+    assert "host-marker" in json.dumps(prepared)
+
+
 def test_cli_session_token_requires_secret(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     token = make_session_token()
@@ -14507,7 +14564,8 @@ def test_cli_parametric_synthetic_suite_is_shadow_only_and_unverified(tmp_path: 
     store = tmp_path / "mnemosyne.json"
     runtime_state = RuntimeState.from_store_path(store)
     assert runtime_state is not None
-    learning = LearningSystem(LocalMemoryEngine(store_path=store))
+    engine = LocalMemoryEngine(store_path=store)
+    learning = LearningSystem(engine)
     lesson = Lesson(
         tenant_id=TENANT,
         lesson_type="corrective",
@@ -14528,6 +14586,7 @@ def test_cli_parametric_synthetic_suite_is_shadow_only_and_unverified(tmp_path: 
     learning.lessons[lesson.id] = lesson
     learning.procedures[procedure.id] = procedure
     runtime_state.save_learning(learning)
+    engine.close()
 
     artifact = run_cli(store, "parametric-propose", "--tenant", TENANT, *PARAMETRIC_AUTH)
     evaluated = run_cli(

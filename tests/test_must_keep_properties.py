@@ -306,3 +306,38 @@ def test_forgetter_honors_top_level_must_keep_metadata() -> None:
     assert after.metadata["lifecycle"]["demoted"] is False
     assert after.metadata["lifecycle"]["tier"] == FidelityTier.VERBATIM.value
     assert after.metadata["lifecycle"]["must_keep"] is True
+
+
+def test_forgetter_keeps_fresh_evidence_verbatim_and_heals_legacy_demotion() -> None:
+    engine = LocalMemoryEngine()
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="Brand-new memory with no lifecycle metadata.",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    worker = ConsolidationWorker(engine, [], consolidation_min_steps=0)
+    payload = {"tenant_id": TENANT, "source_evidence_cids": [cid], "passes": ["forgetter"]}
+
+    def lifecycle() -> dict:
+        return engine.get_evidence(TENANT, cid).metadata["lifecycle"]  # type: ignore[union-attr]
+
+    worker.run_queue_payload(payload)
+    worker.run_queue_payload(payload)
+    assert (lifecycle()["tier"], lifecycle()["demoted"]) == (FidelityTier.VERBATIM.value, False)
+
+    # What the pre-fix forgetter persisted after two passes over a fresh row.
+    legacy = {"tier": "abstractive_gist", "salience": 0.079, "importance": 0.1, "confabulation_risk": True}
+    legacy.update(updated_by="consolidation.forgetter", last_outcome_at=None)
+    engine.update_evidence_metadata(TENANT, cid, {"lifecycle": legacy}, branch="main", actor="test", source="setup")
+    worker.run_queue_payload(payload)
+    assert (lifecycle()["tier"], lifecycle()["confabulation_risk"]) == (FidelityTier.VERBATIM.value, False)
+
+    # Age is measured from creation, so a year-old unused row still demotes.
+    worker.run_queue_payload({**payload, "now": (datetime.now(UTC) + timedelta(days=365)).isoformat()})
+    assert lifecycle()["tier"] == FidelityTier.EXTRACTIVE_SUMMARY.value

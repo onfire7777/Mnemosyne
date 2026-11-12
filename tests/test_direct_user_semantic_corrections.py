@@ -188,6 +188,22 @@ def test_preview_supported_projection_is_deterministic(engine):
     assert preview_direct_user_memory(engine, "t", cid) == preview_direct_user_memory(engine, "t", cid)
 
 
+def test_correction_outranks_and_labels_the_statement_it_replaced(engine):
+    old_cid, _ = capture(engine, "I live in Paris.")
+    new_cid, _ = capture(engine, "I moved to Berlin.", day=1)
+    hits = engine.retrieve("Where do I live?", "t", filt={"user_id": "alice", "principal": "alice"}).hits
+    ids = [hit.id for hit in hits]
+    assert ids.index(new_cid) < ids.index(old_cid)
+    assert hits[ids.index(old_cid)].metadata["superseded_by"] == [new_cid]
+
+
+def test_new_value_supersedes_every_conflicting_value(engine):
+    capture(engine, "I live in Berlin. I live in Paris.")
+    capture(engine, "I live in Rome.", day=1)
+    live = {(row["object"], row["status"]) for row in assertions(engine) if row["status"] in {"active", "contested"}}
+    assert live == {("Rome", "active")}
+
+
 def test_postgres_semantic_correction_live():
     import os
     from uuid import uuid4

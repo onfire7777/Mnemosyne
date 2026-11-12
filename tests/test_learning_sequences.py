@@ -105,3 +105,46 @@ def test_generated_learning_sequences_preserve_guards_and_erasure(backend, opera
                     )
         finally:
             engine.close()
+
+
+def test_forgetting_a_candidate_only_note_keeps_other_learning():
+    import dataclasses
+
+    engine = LocalMemoryEngine()
+    engine.policy = dataclasses.replace(engine.policy, learning_exploration_rate=0.5)
+    runtime = LearningRuntime(engine)
+
+    def note(text):
+        return engine.append_evidence(Evidence(
+            tenant_id="t", user_id="u", actor="user", source_type="note", content=text,
+            trust_tier=1, access_policy={"tenant": "t", "allow_principals": ["u"]}))
+
+    used = note("The deploy command for the billing service is make ship-billing.")
+    other = note("My favourite pizza topping is mushrooms.")
+    query = "what is the deploy command for the billing service"
+    for index in range(60):
+        context = runtime.prepare_context("t", "u", f"s{index}", query)
+        served = any(hit["id"] == used for hit in context["hits"])
+        event = {"name": "checker", "source": "tool", "verdict": "pass" if served else "fail",
+                 "output": "checked", "check_id": f"c{index}"}
+        if served:
+            event.update(receipt_id=context["receipt_id"], target_ids=[used], claims=[{"evidence_cids": [used]}])
+        observed = runtime.observe_turn("t", "u", f"s{index}", query, "answer", tool_events=[event],
+                                        receipt_ids=[context["receipt_id"]], observation_id=f"o{index}")
+        runtime.resolve("t", observed["episode_id"])
+        if len(runtime.writer.read("t")["credit"]) >= 2:
+            break
+    before = runtime.writer.read("t")
+    assert len(before["credit"]) == 2 and before["policy"]["routes"]
+    receipts = before["receipts"].values()
+    assert any(item["item_id"] == other for row in receipts for item in row["eligible_targets"])
+    assert not any(item["item_id"] == other for row in receipts for item in row["items"])
+
+    # Used to raise LearningGuardError X3, or to retract every turn that merely listed the note.
+    assert engine.forget("t", other)["erased"]
+
+    after = runtime.writer.read("t")
+    assert other not in str(after)
+    assert after["credit"] == before["credit"]
+    assert {row["status"] for row in after["episodes"].values()} == {"resolved"}
+    assert after["policy"]["routes"] == before["policy"]["routes"]

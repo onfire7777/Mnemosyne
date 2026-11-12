@@ -407,7 +407,7 @@ def test_r06_assertion_calibration_is_scrubbed() -> None:
     _delete(world)
     stored = next(iter(world.engine.assertions.values()))
     _assert_absent(stored.calibration, CANARY, world.source_ref)
-    assert stored.calibration["pair"][1] == "kept-sample"
+    assert stored.calibration == {"dependency_erased": True}
 
 
 def test_r06_sqlite_assertion_calibration_is_scrubbed(tmp_path: Path) -> None:
@@ -434,7 +434,7 @@ def test_r06_sqlite_assertion_calibration_is_scrubbed(tmp_path: Path) -> None:
     assert rows
     calibrations = [json.loads(row["calibration"]) for row in rows]
     _assert_absent(calibrations, CANARY, source_ref)
-    assert calibrations[0]["pair"][1] == "kept-sample"
+    assert calibrations[0] == {"dependency_erased": True}
 
 
 def test_r21_scrubbed_key_collision_never_drops_audit_data() -> None:

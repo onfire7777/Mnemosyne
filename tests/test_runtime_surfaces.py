@@ -4775,3 +4775,15 @@ def test_postgres_engine_exposes_memory_tools_runtime_surface() -> None:
     }
 
     assert required <= set(dir(PostgresEngine))
+
+
+def test_mcp_http_refuses_cross_site_and_rebound_posts(tmp_path: Path) -> None:
+    server, thread, url = start_mcp_http_server(store_path=tmp_path / "store.json")
+    try:
+        call = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+        assert http_json("POST", f"{url}/mcp", call)[0] == 200
+        # What a browser sends without preflight, and what a rebound DNS name sends.
+        assert http_json("POST", f"{url}/mcp", call, headers={"Content-Type": "text/plain;charset=UTF-8"})[0] == 403
+        assert http_json("POST", f"{url}/mcp", call, headers={"Host": "rebind.evil.example"})[0] == 403
+    finally:
+        stop_mcp_http_server(server, thread)

@@ -118,6 +118,7 @@ from mnemosyne.pipeline import run_retrieval_pipeline
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.privacy import ErasureMode
 from mnemosyne.retrieval import (
+    _bounded_float,
     _spans_calendar_period,
     derived_evidence_readable,
     evidence_current_for_context,
@@ -1756,16 +1757,6 @@ def validate_intention_evaluation_inputs(
     return evaluated_at.astimezone(UTC)
 
 
-def _bounded_float(value: object, *, default: float) -> float:
-    try:
-        number = float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return default
-    if not math.isfinite(number):
-        return default
-    return max(0.0, min(1.0, number))
-
-
 def _candidate_time_metadata(
     created_at: Any,
     metadata: Mapping[str, Any],
@@ -2745,7 +2736,7 @@ class MemoryEngine(Protocol):
         """
         raise NotImplementedError
 
-    def export_tenant(self, tenant_id: str) -> dict[str, Any]:
+    def export_tenant(self, tenant_id: str, ids: set[str] | None = None) -> dict[str, Any]:
         raise NotImplementedError
 
     def get_mental_model_record(
@@ -2780,7 +2771,7 @@ class MemoryEngine(Protocol):
         raise NotImplementedError
 
     def export_tenant_filtered(
-        self, tenant_id: str, access_context: dict[str, Any]
+        self, tenant_id: str, access_context: dict[str, Any], ids: set[str] | None = None
     ) -> dict[str, Any]:
         raise NotImplementedError
 
@@ -3254,6 +3245,28 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     )
                 self._writer_owners[writer_path_key] = self
                 self._writer_path_key = writer_path_key
+            # Every writer loads the whole file and rewrites it, so a writer in another
+            # process would erase this one's memories: hold a file lock until close().
+            from mnemosyne._file_lock import exclusive_file_lock
+
+            file_lock = ExitStack()
+            try:
+                self.store_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                file_lock.enter_context(
+                    exclusive_file_lock(
+                        self.store_path.with_suffix(self.store_path.suffix + ".lock"),
+                        timeout=30.0,
+                    )
+                )
+            except BaseException as exc:
+                self.close()
+                if isinstance(exc, TimeoutError):
+                    raise RuntimeError(
+                        "local memory store already has a writer in another process: "
+                        f"{writer_path_key}; use --backend sqlite for concurrent processes"
+                    ) from None
+                raise
+            self._writer_file_lock = file_lock
 
     def attach_store(self, store_path: str | os.PathLike[str]) -> None:
         """Give an ephemeral engine a new durable home without copying its state."""
@@ -3304,6 +3317,9 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             if self._writer_owners.get(writer_path_key) is self:
                 del self._writer_owners[writer_path_key]
         self._writer_path_key = None
+        file_lock = self.__dict__.pop("_writer_file_lock", None)
+        if file_lock is not None:
+            file_lock.close()
 
     def __enter__(self) -> LocalMemoryEngine:
         return self
@@ -6035,7 +6051,8 @@ class LocalMemoryEngine(CanaryOverlayMixin):
     ) -> tuple[int, int]:
         events = 0
         byte_count = 0
-        for key, item in self.evidence.items():
+        ticks = 0
+        for key, item in reversed(self.evidence.items()):
             key_tenant, key_branch, _ = key.split(":", 2)
             if key_tenant != tenant_id or key_branch != branch or item.erased:
                 continue
@@ -6043,6 +6060,10 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 "self_generated",
                 "simulated",
             }:
+                # A window tick is one non-self-generated row; older rows are outside the window.
+                ticks += 1
+                if ticks >= self.policy.self_generation_budget_window_ticks:
+                    break
                 continue
             if source_backed_summary(
                 item,
@@ -6111,6 +6132,36 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 if ev and not ev.erased and ev.created_at is not None:
                     found[cid] = ev.created_at
         return found
+
+    def assertions_citing(
+        self, tenant_id: str, cids: Sequence[str], branch: str = "main"
+    ) -> list[Assertion]:
+        """Live and superseded assertions that cite any of ``cids``, plus the successors on their
+        ``superseded_by`` chains, as detached copies."""
+
+        wanted = set(cids)
+        # shortcut: scans the branch's assertions on every search; index cid -> assertion if that shows up in latency
+        # Read through a canary overlay instead of settling it: settling turns every gate canary into a full branch.
+        with self._lock, self._overlay_context():
+            rows: dict[str, Assertion] = {}
+            overlay = (self._overlays or {}).get(branch)
+            if overlay is not None and overlay.tenant_id == tenant_id:
+                rows = {item.id: item for item in self._assertion_items.in_branch(tenant_id, overlay.parent).values()}
+            rows.update({item.id: item for item in self._assertion_items.in_branch(tenant_id, branch).values()})
+            found = {
+                item.id: item
+                for item in rows.values()
+                if item.status in {"active", "contested", "superseded"}
+                and not wanted.isdisjoint(item.source_evidence_cids)
+            }
+            chain = [item.superseded_by for item in found.values() if item.status == "superseded" and item.superseded_by]
+            while chain:
+                successor = rows.get(chain.pop())
+                if successor is not None and successor.id not in found:
+                    found[successor.id] = successor
+                    if successor.status == "superseded" and successor.superseded_by:
+                        chain.append(successor.superseded_by)
+            return [copy.deepcopy(item) for item in found.values()]
 
     def list_raptor_summaries(
         self, tenant_id: str, branch: str = "main"
@@ -6455,14 +6506,6 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     tzinfo=UTC
                 )
                 if incoming.trust_tier < current.trust_tier:
-                    if inc_vf > cur_vf:
-                        current.valid_to = incoming.valid_from
-                    else:
-                        current.valid_to = current.valid_from + timedelta(
-                            microseconds=1
-                        )
-                    current.status = "superseded"
-                    current.superseded_by = successor_id
                     incoming.version = current.version + 1
                     incoming.justification_id = new_id()
                     op = "upsert_assertion.trust_supersede"
@@ -6471,11 +6514,8 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     incoming.superseded_by = current.id
                     op = "upsert_assertion.trust_rejected"
                 elif inc_vf > cur_vf:
-                    current.valid_to = incoming.valid_from
-                    current.status = "superseded"
                     incoming.version = current.version + 1
                     incoming.justification_id = new_id()
-                    current.superseded_by = successor_id
                     op = "upsert_assertion.supersede"
                 elif inc_vf == cur_vf:
                     current.status = "contested"
@@ -6491,15 +6531,24 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     "upsert_assertion.supersede",
                     "upsert_assertion.trust_supersede",
                 }:
-                    self._sync_relation_supersession(
-                        tenant_id=incoming.tenant_id,
-                        branch=branch,
-                        subject=current.subject,
-                        predicate=current.predicate,
-                        obj=current.object,
-                        valid_to=current.valid_to,
-                        source_evidence_cids=current.source_evidence_cids if current.user_id is not None else None,
-                    )
+                    # `current` is the strongest conflict, so beating it beats every other one.
+                    for loser in conflicts:
+                        loser.valid_to = (
+                            incoming.valid_from
+                            if inc_vf > (_to_utc_opt(loser.valid_from) or cur_vf)
+                            else loser.valid_from + timedelta(microseconds=1)
+                        )
+                        loser.status = "superseded"
+                        loser.superseded_by = successor_id
+                        self._sync_relation_supersession(
+                            tenant_id=incoming.tenant_id,
+                            branch=branch,
+                            subject=loser.subject,
+                            predicate=loser.predicate,
+                            obj=loser.object,
+                            valid_to=loser.valid_to,
+                            source_evidence_cids=loser.source_evidence_cids if loser.user_id is not None else None,
+                        )
                 elif op == "upsert_assertion.historical_superseded":
                     self._sync_relation_supersession(
                         tenant_id=incoming.tenant_id,
@@ -6872,22 +6921,25 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         with self._lock:
             pref = copy.deepcopy(preference)
             pref.access_policy = access_policy
-            existing = [
-                item
-                for item in self.preferences.values()
-                if item.tenant_id == pref.tenant_id
-                and item.user_id == pref.user_id
-                and item.category == pref.category
-                and item.scope == pref.scope
-                and item.status == "active"
-            ]
-            for item in existing:
-                if item.statement != pref.statement:
-                    if pref.explicit or not item.explicit:
-                        item.status = "superseded"
-                        item.valid_to = pref.valid_from
-                    else:
-                        pref.status = "retracted"
+            # Preferences coexist: a category holds many unrelated statements. Only an exact
+            # replay (same evidence, so same custody and erasure) reuses the stored row.
+            for item in self.preferences.values():
+                if (
+                    item.id != pref.id
+                    and item.status == pref.status == "active"
+                    and item.tenant_id == pref.tenant_id
+                    and item.user_id == pref.user_id
+                    and item.category == pref.category
+                    and item.scope == pref.scope
+                    and item.statement == pref.statement
+                    and item.exceptions == pref.exceptions
+                    and item.access_policy == pref.access_policy
+                    and set(item.source_evidence_cids) == set(pref.source_evidence_cids)
+                ):
+                    pref.id = item.id
+                    pref.valid_from = item.valid_from
+                    pref.explicit = pref.explicit or item.explicit
+                    break
             self.preferences[pref.id] = pref
             self._audit(
                 pref.tenant_id,
@@ -7085,7 +7137,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             # FFI crossing scores every candidate text; byte-parity-proven
             # against the per-hit lexical_score loop (tests/test_native_parity.py).
             candidates = self._candidate_hits(filt)
-            scores = text_kernels.NATIVE.lexical_scan(
+            scores = text_kernels.lexical_scan(
                 query, [hit.text for hit in candidates]
             )
             for hit, score in zip(candidates, scores, strict=True):
@@ -7314,22 +7366,24 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             adjacency.setdefault(seed, [])
         # Every edge was added in both directions and every seed is a key: the graph is closed.
         ranks = ppr_power_iteration(adjacency, matches_seed, closed=True)
-        # node -> relation row index, built once (was an O(V*E) per-node linear
-        # scan). First-match semantics replicated exactly: for each node the
-        # winning row is the one the linear scan found FIRST in relation_by_pair
-        # insertion order — the earliest pair mentioning the node in either slot.
-        relation_by_node: dict[str, tuple[Relation, dict[str, Any], Any, Any]] = {}
+        # node -> relation rows, built once (was an O(V*E) per-node linear scan):
+        # the node's edges to a seed (the fact asked about), else its oldest edge.
+        relation_by_node: dict[
+            str, list[tuple[Relation, dict[str, Any], Any, Any]]
+        ] = {}
+        for (pair_node, other), row in relation_by_pair.items():
+            if matches_seed(other):
+                relation_by_node.setdefault(pair_node, []).append(row)
         for pair, row in relation_by_pair.items():
             for pair_node in pair:
                 if pair_node not in relation_by_node:
-                    relation_by_node[pair_node] = row
+                    relation_by_node[pair_node] = [row]
         for node, score in sorted(
             ranks.items(), key=lambda item: item[1], reverse=True
         ):
             if matches_seed(node) or score <= 0:
                 continue
-            relation_row = relation_by_node.get(node)
-            if relation_row:
+            for relation_row in relation_by_node.get(node, ()):
                 rel, _verdict, relation_decision, rel_branch = relation_row
                 if rel.id in seen_relation_ids:
                     continue
@@ -7381,6 +7435,8 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                         },
                     )
                 )
+                if len(hits) >= k:
+                    break
             if len(hits) >= k:
                 break
         return self._mark_retrieved_text_as_data(hits)
@@ -9014,7 +9070,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 metadata_by_cid=cascade_metadata,
             )
             dependent_relations = set()
-            for assertion in self.assertions.in_branch(tenant_id, branch).values():
+            for key, assertion in list(self.assertions.in_branch(tenant_id, branch).items()):
                 if assertion.tenant_id != tenant_id or assertion.branch != branch:
                     continue
                 if not affected_cids.intersection(assertion.source_evidence_cids):
@@ -9032,11 +9088,12 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     assertion.status = "retracted"
                     assertion.expired_at = utc_now()
                     assertion.source_evidence_cids = []
-                    if conjunctive:
-                        assertion.subject = assertion.object = "[erased]"
-                        assertion.predicate = "erased"
-                        assertion.scope = {}
-                        assertion.calibration = {"dependency_erased": True}
+                    # A belief with no source left must not keep the erased text (object, quote).
+                    assertion.subject = assertion.object = "[erased]"
+                    assertion.predicate = "erased"
+                    assertion.scope = {}
+                    assertion.calibration = {"dependency_erased": True}
+                    self.assertions[key] = assertion  # re-index under the scrubbed subject/predicate
                     propagated["retracted_assertions"].append(assertion.id)
                 else:
                     assertion.source_evidence_cids = surviving_sources
@@ -9055,11 +9112,14 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     preference.status = "retracted"
                     preference.valid_to = utc_now()
                     preference.source_evidence_cids = []
+                    preference.statement = "[erased]"
+                    preference.scope = {}
+                    preference.exceptions = {}
                     propagated["retracted_preferences"].append(preference.id)
                 else:
                     preference.source_evidence_cids = surviving_sources
                     propagated["trimmed_preferences"].append(preference.id)
-            for relation in self.relations.in_branch(tenant_id, branch).values():
+            for key, relation in list(self.relations.in_branch(tenant_id, branch).items()):
                 if relation.tenant_id != tenant_id or relation.branch != branch:
                     continue
                 if not affected_cids.intersection(relation.source_evidence_cids):
@@ -9074,9 +9134,9 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 if not surviving_sources or conjunctive:
                     relation.valid_to = utc_now()
                     relation.source_evidence_cids = []
-                    if conjunctive:
-                        relation.source = relation.target = "[erased]"
-                        relation.predicate = "erased"
+                    relation.source = relation.target = "[erased]"
+                    relation.predicate = "erased"
+                    self.relations[key] = relation  # re-index under the scrubbed source/target
                     propagated["expired_relations"].append(relation.id)
                 else:
                     relation.source_evidence_cids = surviving_sources
@@ -9196,7 +9256,33 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 "propagated": propagated,
             }
 
-    def export_tenant(self, tenant_id: str) -> dict[str, Any]:
+    def export_tenant(self, tenant_id: str, ids: set[str] | None = None) -> dict[str, Any]:
+        if ids is not None:
+            # Keyed read for get/supersede: the named rows plus the evidence they cite.
+            rows = {
+                name: [
+                    item.to_dict()
+                    for item in source
+                    if item.tenant_id == tenant_id and item.id in ids
+                ]
+                for name, source in (
+                    ("assertions", self.assertions.of_tenant(tenant_id).values()),
+                    ("relations", self.relations.of_tenant(tenant_id).values()),
+                    ("preferences", self.preferences.values()),
+                )
+            }
+            wanted = set(ids).union(
+                *(row.get("source_evidence_cids") or [] for group in rows.values() for row in group)
+            )
+            return {
+                "tenant_id": tenant_id,
+                "evidence": [
+                    item.to_dict()
+                    for item in self.evidence.of_tenant(tenant_id).values()
+                    if item.tenant_id == tenant_id and not item.erased and item.cid in wanted
+                ],
+                **rows,
+            }
         # Branches with a merge audit row for this tenant (or "*"), built once: the merge_log
         # selection below used to rescan the whole audit log for every merge row.
         merge_targets: set[Any] = set()
@@ -9302,10 +9388,10 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         }
 
     def export_tenant_filtered(
-        self, tenant_id: str, access_context: dict[str, Any]
+        self, tenant_id: str, access_context: dict[str, Any], ids: set[str] | None = None
     ) -> dict[str, Any]:
         return filter_export_for_context(
-            self.export_tenant(tenant_id),
+            self.export_tenant(tenant_id) if ids is None else self.export_tenant(tenant_id, ids),
             {**dict(access_context or {}), "tenant_id": tenant_id},
             policy_max_sensitivity=self.policy.max_sensitivity,
             evidence_gate=lambda row: derived_evidence_readable(

@@ -10,10 +10,13 @@ from .guards import LearningGuardError, validate
 from .receipts import digest
 from .store import LearningStore
 
+_MISSING = object()
+
 
 class LearningWriter:
     def __init__(self, engine):
         self.store = LearningStore(engine)
+        self._migrated = set()
 
     def read(self, tenant: str) -> dict:
         state = self.store.read(tenant)
@@ -22,6 +25,7 @@ class LearningWriter:
             self.apply(tenant, "legacy_migration",
                        lambda current: merge_legacy_learning(current, self.store.engine, tenant))
             state = self.store.read(tenant)
+        self._migrated.add(tenant)
         return state
 
     def apply(
@@ -33,7 +37,8 @@ class LearningWriter:
         expected_revision: int | None = None,
         erasure_terms: list[str] | None = None,
     ):
-        if operation != "legacy_migration":
+        # The pre-read only triggers legacy migration; once per writer and tenant is enough.
+        if operation != "legacy_migration" and tenant not in self._migrated:
             self.read(tenant)
         error = None
         with self.store.transaction(tenant) as (state, handle):
@@ -87,6 +92,16 @@ class LearningWriter:
                                 "after": new,
                             }
                         )
+                        if collection == "policy" and isinstance(old, dict) and isinstance(new, dict):
+                            # Policy records are whole maps; auditing only the changed entries
+                            # keeps the log from growing by the full history on every write.
+                            names = [name for name in old.keys() | new.keys()
+                                     if old.get(name, _MISSING) != new.get(name, _MISSING)]
+                            changes[-1].update(
+                                before={name: old[name] for name in names if name in old},
+                                after={name: new[name] for name in names if name in new},
+                                partial=True,
+                            )
             event = {
                 "id": new_id(),
                 "op": "learning." + operation,
@@ -122,6 +137,19 @@ class LearningWriter:
             for change in reversed(event["changes"]):
                 collection, key = change["collection"], change["key"]
                 if collection == "policy" and key == "revision":
+                    continue
+                if change.get("partial"):
+                    current = state[collection].get(key)
+                    names = change["before"].keys() | change["after"].keys()
+                    if not isinstance(current, dict) or any(
+                        current.get(name, _MISSING) != change["after"].get(name, _MISSING) for name in names
+                    ):
+                        raise ValueError("rollback conflicts with later learning")
+                    for name in names:
+                        if name in change["before"]:
+                            current[name] = copy.deepcopy(change["before"][name])
+                        else:
+                            current.pop(name, None)
                     continue
                 if state[collection].get(key) != change["after"]:
                     raise ValueError("rollback conflicts with later learning")

@@ -307,6 +307,9 @@ QUERY_SUPPORT_QUESTION_STOPWORDS = {
     "after",
     "ago",
     "also",
+    "any",
+    "anyth",
+    "anything",
     "average",
     "before",
     "between",
@@ -322,6 +325,8 @@ QUERY_SUPPORT_QUESTION_STOPWORDS = {
     "days",
     "describe",
     "earliest",
+    "everyth",
+    "everything",
     "explain",
     "film",
     "films",
@@ -340,11 +345,13 @@ QUERY_SUPPORT_QUESTION_STOPWORDS = {
     "identify",
     "instead",
     "just",
+    "know",
     "last",
     "latest",
     "list",
     "long",
     "many",
+    "mention",
     "month",
     "months",
     "movi",
@@ -363,6 +370,10 @@ QUERY_SUPPORT_QUESTION_STOPWORDS = {
     "recall",
     "recently",
     "related",
+    "remember",
+    "remind",
+    "said",
+    "say",
     "search",
     "show",
     "since",
@@ -374,6 +385,7 @@ QUERY_SUPPORT_QUESTION_STOPWORDS = {
     "three",
     "time",
     "times",
+    "told",
     "total",
     "two",
     "typical",
@@ -517,8 +529,25 @@ def answer_grounding_floor_report(
     denominator = max(1, support_count)
     low_self_fraction = round(low_self / denominator, 6)
     grounded_fraction = round(grounded / denominator, 6)
-    weak_self_dominates = low_self_fraction > max_self_fraction
-    grounded_floor_failed = low_self > 0 and grounded_fraction < min_grounded_fraction
+    # Padding hits are counted rank-blind; a grounded best hit is not "dominated".
+    # The user's own earlier bare question is grounded but answers nothing: skip it.
+    best = max(
+        (
+            i
+            for i in range(support_count)
+            if not (
+                rows[i]["grounded_support"]
+                and re.fullmatch(r"[^.!?。！？]+[?？]", hits[i].text.strip())
+            )
+        ),
+        key=lambda i: hits[i].score,
+        default=None,
+    )
+    top_grounded = best is not None and rows[best]["grounded_support"]
+    weak_self_dominates = not top_grounded and low_self_fraction > max_self_fraction
+    grounded_floor_failed = (
+        not top_grounded and low_self > 0 and grounded_fraction < min_grounded_fraction
+    )
     active = support_count > 0 and (weak_self_dominates or grounded_floor_failed)
     reasons: list[str] = []
     if weak_self_dominates:
@@ -1398,6 +1427,18 @@ _ANCHOR_SENTENCE_START = frozenset(
         "outline",
         "today",
         "yesterday",
+        "let",
+        "look",
+        "refresh",
+        "hey",
+        "hi",
+        "so",
+        "ok",
+        "okay",
+        "anyone",
+        "he",
+        "she",
+        "they",
     }
 )
 
@@ -1746,7 +1787,7 @@ def query_support(
     query: str, hits: Sequence[Hit], extra_texts: Sequence[str] = ()
 ) -> dict[str, Any]:
     """Specificity-weighted query support with proper-noun, compound-noun, and focal-object grounding."""
-    words = re.findall(r"[A-Za-z0-9]+(?:[\x27\x2D][A-Za-z0-9]+)*", query)
+    words = re.findall(r"[A-Za-z0-9]+(?:[\x27\x2D][A-Za-z0-9]+)*", query.replace("’", "'"))
     hit_texts = [hit.text for hit in hits[:5]] + list(extra_texts)
     allow_assistant = bool(
         re.search(
@@ -1766,14 +1807,15 @@ def query_support(
     current_mw: list[str] = []
 
     for i, w in enumerate(words):
-        clean_w = re.sub(r"['’]s$", "", w)
+        clean_w = re.sub(r"['’](?:s|m|d|ve|ll|re)$", "", w)
         norm = clean_w.lower()
         is_cap = (
             clean_w[0].isupper()
             or any(c.isupper() for c in clean_w[1:])
             or (any(c.isdigit() for c in clean_w) and any(c.isalpha() for c in clean_w))
         )
-        if is_cap:
+        # "Didn't"/"Isn't" are capitalised but never names.
+        if is_cap and not norm.endswith("n't"):
             if i == 0 and norm in _ANCHOR_SENTENCE_START:
                 if current_mw:
                     if len(current_mw) >= 2:
@@ -1941,7 +1983,8 @@ def query_support(
     query_terms: list[str] = []
     term_weights: dict[str, float] = {}
     n_docs = max(len(hit_texts), 1)
-    for token in tokenize(query):
+    # "Didn't"/"Don't" are framing; tokenize() would keep "didn"/"don" as required content.
+    for token in tokenize(re.sub(r"(?i)\b\w+n['’]t\b", " ", query)):
         term = normalise_query_term(token)
         if len(term) <= 2 or term in QUERY_SUPPORT_STOPWORDS or term in query_terms:
             continue

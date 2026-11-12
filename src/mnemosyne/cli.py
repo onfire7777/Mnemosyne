@@ -215,8 +215,13 @@ def default_postgres_dsn() -> str | None:
     return os.environ.get("MNEMOSYNE_POSTGRES_DSN")
 
 
-def default_object_store() -> str:
-    return os.environ.get("MNEMOSYNE_OBJECT_STORE", ".mnemosyne/objects")
+def default_object_store() -> str | None:
+    return os.environ.get("MNEMOSYNE_OBJECT_STORE")
+
+
+def _object_store_root(args: argparse.Namespace) -> Path:
+    # payloads follow the store so every process sharing it finds them, whatever its cwd
+    return Path(args.object_store or Path(args.store).expanduser().parent / "objects")
 
 
 def default_object_store_encryption() -> str:
@@ -265,6 +270,8 @@ def apply_session_identity(args: argparse.Namespace) -> None:
             raise SystemExit(f"session token denied: {exc}") from exc
         _bind_session_claim(args, "tenant", identity.tenant_id)
         _bind_session_claim(args, "user", identity.user_id)
+        _bind_session_claim(args, "tenant_id", identity.tenant_id)
+        _bind_session_claim(args, "user_id", identity.user_id)
         if hasattr(args, "cancelled_by"):
             # Mirror the MCP surface: the cancellation principal is the
             # authenticated user (default) or the authenticated agent.
@@ -634,8 +641,8 @@ def load_object_store(args: argparse.Namespace) -> LocalObjectStore:
             return EncryptedS3ObjectStore(client, load_object_key_manager(args))
         return S3ObjectStore(client)
     if args.object_store_encryption == "aesgcm":
-        return EncryptedLocalObjectStore(Path(args.object_store), load_object_key_manager(args))
-    return LocalObjectStore(Path(args.object_store))
+        return EncryptedLocalObjectStore(_object_store_root(args), load_object_key_manager(args))
+    return LocalObjectStore(_object_store_root(args))
 
 
 def load_object_key_manager(args: argparse.Namespace) -> JsonKeyManager | CommandKeyManager:
@@ -647,7 +654,7 @@ def load_object_key_manager(args: argparse.Namespace) -> JsonKeyManager | Comman
         return CommandKeyManager(args.object_key_command, timeout_seconds=float(args.object_key_timeout))
     if args.object_key_provider != "json":
         raise SystemExit(f"Unsupported object key provider: {args.object_key_provider}")
-    key_store = Path(args.object_key_store) if args.object_key_store else Path(args.object_store) / ".keys.json"
+    key_store = Path(args.object_key_store) if args.object_key_store else _object_store_root(args) / ".keys.json"
     return JsonKeyManager(key_store)
 
 
@@ -886,7 +893,7 @@ def load_tools(
         object_store=load_object_store(args),
         provenance_verifier=load_provenance_verifier(args),
         queue=ingestion_queue,
-        allowed_residencies=tuple(args.allowed_residency),
+        allowed_residencies=tuple(default_allowed_residencies() if args.allowed_residency is None else args.allowed_residency),
         runtime_residency=args.runtime_residency,
         allowed_residency_transfers=tuple(args.allowed_residency_transfer),
         require_runtime_residency=args.require_runtime_residency,
@@ -955,7 +962,7 @@ def _oidc_verifier_components(
         role_claim=args.idp_role_claim,
         trust_claim=args.idp_trust_claim,
         session_id_claim=args.idp_session_id_claim,
-        allowed_algorithms=tuple(args.idp_algorithm),
+        allowed_algorithms=tuple(args.idp_algorithm or os.environ.get("MNEMOSYNE_IDP_ALGORITHMS", "RS256,ES256").split(",")),
         leeway_seconds=args.idp_leeway_seconds,
         jwks_loader=oidc_jwks_loader(
             jwks=args.idp_jwks,
@@ -1753,6 +1760,9 @@ def cmd_working_expire(args: argparse.Namespace) -> None:
 
 def cmd_capture_batch(args: argparse.Namespace) -> None:
     """Capture a bounded, prevalidated JSONL batch through one engine process."""
+    from contextlib import ExitStack
+
+    from mnemosyne._file_lock import exclusive_file_lock
     from mnemosyne.media_limits import ensure_file_within_limit
 
     if args.backend != "local":
@@ -1836,7 +1846,13 @@ def cmd_capture_batch(args: argparse.Namespace) -> None:
     descriptor, staged_name = tempfile.mkstemp(prefix=f".{store.name}-batch-", dir=store.parent)
     os.close(descriptor)
     staged = Path(staged_name)
+    release = ExitStack()
     try:
+        # The batch works on a copy and renames it over the store: hold the store's writer
+        # lock from copy to rename, or a capture saved in between is erased.
+        release.enter_context(
+            exclusive_file_lock(store.with_suffix(store.suffix + ".lock"), timeout=30.0)
+        )
         if store.exists():
             if store.is_symlink() or not store.is_file():
                 raise ValueError("local capture-batch store must be a real file")
@@ -1848,6 +1864,7 @@ def cmd_capture_batch(args: argparse.Namespace) -> None:
         staged_args.disable_runtime_state = True
         staged_args.consolidation_gate_cases = consolidation_gate_cases
         tools = load_tools(staged_args)
+        release.callback(tools.engine.close)
         with tools.engine.defer_persistence():
             results = [
                 tools.capture(
@@ -1883,6 +1900,9 @@ def cmd_capture_batch(args: argparse.Namespace) -> None:
     except BaseException:
         staged.unlink(missing_ok=True)
         raise
+    finally:
+        release.close()
+        staged.with_suffix(staged.suffix + ".lock").unlink(missing_ok=True)
     emit(
         {
             "count": len(results),
@@ -5923,6 +5943,7 @@ def _mcp_serve_argv(args: argparse.Namespace) -> list[str]:
     """
 
     argv: list[str] = ["--backend", str(args.backend), "--store", str(args.store)]
+    argv += ["--object-store", str(args.object_store)]
     if args.backend == "postgres" and getattr(args, "postgres_dsn", None):
         argv += ["--postgres-dsn", str(args.postgres_dsn)]
     transport = args.transport
@@ -9365,6 +9386,7 @@ def cmd_profile_record_explicit(args: argparse.Namespace) -> None:
             scope=parse_json_arg(args.scope, {}),
             confidence=args.confidence,
             source_evidence_cids=args.evidence_cid,
+            session_identity=getattr(args, "session_identity", None),
         )
     )
 
@@ -9379,6 +9401,7 @@ def cmd_profile_propose_inference(args: argparse.Namespace) -> None:
             context=parse_json_arg(args.context, {}),
             confidence=args.confidence,
             source_evidence_cids=args.evidence_cid,
+            session_identity=getattr(args, "session_identity", None),
         )
     )
 
@@ -10064,6 +10087,8 @@ def _persist_worker_state(
     elif runtime_state:
         runtime_state.save_learning(tools.learning)
         runtime_state.save_user_model(tools.user_model)
+    # A long-running worker builds its next cycle on the profile other processes have saved meanwhile.
+    tools._refresh_user_model()
 
 
 def _runtime_workspace_service() -> Any:
@@ -10342,7 +10367,8 @@ def cmd_worker_run(args: argparse.Namespace) -> None:
         workspace_projection = dict(workspace_projection)
         workspace_projection["lifecycle"] = "stopped"
         workspace_projection["ok"] = True
-    ok = not (args.fail_on_dead and int(final_queue.get("dead", 0)) > 0) and not workspace_unhealthy
+    # the shadow heartbeat's normal window end must not fail the worker; only a heartbeat exception does
+    ok = not (args.fail_on_dead and int(final_queue.get("dead", 0)) > 0) and (workspace_projection or {}).get("failure_code") != "workspace_heartbeat_failure"
     report = {
         "ok": ok,
         "worker": {
@@ -19534,7 +19560,7 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
         checks["residency_policy"] = {
             "ok": True,
             **residency_policy_report(
-                allowed_residencies=tuple(args.allowed_residency),
+                allowed_residencies=tuple(default_allowed_residencies() if args.allowed_residency is None else args.allowed_residency),
                 runtime_residency=args.runtime_residency,
                 require_runtime_residency=args.require_runtime_residency,
                 allowed_residency_transfers=tuple(args.allowed_residency_transfer),
@@ -19630,6 +19656,8 @@ def cmd_prepare_context(args: argparse.Namespace) -> None:
         available_tools=args.available_tools,
         task_type=args.task_type,
         risk_level=args.risk_level,
+        workspace=args.workspace,
+        delivery_envelope=args.delivery_envelope,
         role=args.role,
         source_trust_tier=args.source_trust_tier,
     ))
@@ -19895,7 +19923,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--allowed-residency",
         action="append",
-        default=default_allowed_residencies(),
+        default=None,  # None, not the env list: append would add to it instead of replacing it
         help="Allowed data residency label for ingestion; repeat or use MNEMOSYNE_ALLOWED_RESIDENCIES",
     )
     parser.add_argument(
@@ -20252,7 +20280,7 @@ def build_parser() -> argparse.ArgumentParser:
     session_exchange.add_argument("--idp-role-claim", default=os.environ.get("MNEMOSYNE_IDP_ROLE_CLAIM", "mnemosyne_role"))
     session_exchange.add_argument("--idp-trust-claim", default=os.environ.get("MNEMOSYNE_IDP_TRUST_CLAIM", "mnemosyne_source_trust_tier"))
     session_exchange.add_argument("--idp-session-id-claim", default=os.environ.get("MNEMOSYNE_IDP_SESSION_ID_CLAIM", "jti"))
-    session_exchange.add_argument("--idp-algorithm", action="append", default=(os.environ.get("MNEMOSYNE_IDP_ALGORITHMS", "RS256,ES256").split(",")))
+    session_exchange.add_argument("--idp-algorithm", action="append", default=None)
     session_exchange.add_argument("--idp-leeway-seconds", type=int, default=int(os.environ.get("MNEMOSYNE_IDP_LEEWAY_SECONDS", "60")))
     session_exchange.add_argument("--idp-timeout", type=float, default=float(os.environ.get("MNEMOSYNE_IDP_TIMEOUT", "10")))
     session_exchange.add_argument("--idp-jwks-max-bytes", type=int, default=int(os.environ.get("MNEMOSYNE_IDP_JWKS_MAX_BYTES", str(1024 * 1024))))
@@ -20319,7 +20347,7 @@ def build_parser() -> argparse.ArgumentParser:
     idp_jwks_live_check.add_argument(
         "--idp-algorithm",
         action="append",
-        default=(os.environ.get("MNEMOSYNE_IDP_ALGORITHMS", "RS256,ES256").split(",")),
+        default=None,
     )
     idp_jwks_live_check.add_argument(
         "--idp-leeway-seconds",

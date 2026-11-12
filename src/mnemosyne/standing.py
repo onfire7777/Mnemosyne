@@ -8,6 +8,7 @@ memories surface. Salience is deliberately excluded from authority.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
@@ -403,7 +404,7 @@ def _bounded_unit(value: Any, *, default: float) -> float:
         numeric = float(value)
     except (TypeError, ValueError):
         return default
-    if numeric != numeric:
+    if not math.isfinite(numeric):
         return default
     return max(0.0, min(1.0, numeric))
 
@@ -415,7 +416,7 @@ def _optional_bounded_unit(value: Any) -> float | None:
         numeric = float(value)
     except (TypeError, ValueError):
         return None
-    if numeric != numeric:
+    if not math.isfinite(numeric):
         return None
     return max(0.0, min(1.0, numeric))
 

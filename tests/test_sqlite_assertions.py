@@ -317,23 +317,23 @@ def _preference(tenant: str, *, id: str, statement: str, explicit: bool, valid_f
     )
 
 
-def test_add_preference_supersession_export_parity_vs_local(tmp_path: Path):
+def test_add_preference_coexist_export_parity_vs_local(tmp_path: Path):
     sqlite, local = _engines(tmp_path)
     tenant = "t-pref"
 
     def seed(engine):
-        # implicit pref, then an explicit pref with a different statement in the
-        # same category/scope → the first is superseded (valid_to = new valid_from).
+        # different statements in the same category/scope coexist, whatever their explicitness.
         engine.add_preference(_preference(tenant, id="p1", statement="use bullet lists", explicit=False, valid_from=T1))
         engine.add_preference(_preference(tenant, id="p2", statement="use numbered lists", explicit=True, valid_from=T2))
-        # a weaker implicit pref against an explicit one is retracted.
         engine.add_preference(_preference(tenant, id="p3", statement="use prose", explicit=False, valid_from=T3))
+        # an exact repeat reuses the stored row (and upgrades it to explicit).
+        assert engine.add_preference(_preference(tenant, id="p4", statement="use prose", explicit=True, valid_from=T3)) == "p3"
 
     seed(sqlite)
     seed(local)
     assert _normalise(sqlite.export_tenant(tenant)) == _normalise(local.export_tenant(tenant))
     statuses = {row["id"]: row["status"] for row in sqlite.export_tenant(tenant)["preferences"]}
-    assert statuses == {"p1": "superseded", "p2": "active", "p3": "retracted"}
+    assert statuses == {"p1": "active", "p2": "active", "p3": "active"}
 
 
 def test_register_entity_export_parity_vs_local(tmp_path: Path):

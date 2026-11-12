@@ -210,6 +210,16 @@ def test_orchestrator_premise_verifier_integration() -> None:
     assert result.public_reason == "premise_mismatch"
     assert "Sacramento" in result.answer
     assert "San Diego" in result.answer
+    # Another tenant's evidence must never feed the premise wording.
+    other = orchestrator.answer(
+        AnswerRequest(
+            question=request.question,
+            context=AnswerReadContext(tenant_id="t2", user_id="u2"),
+        ),
+        SimpleReader(),
+    )
+    assert other.answer == ""
+    assert other.public_reason != "premise_mismatch"
 
 
 def test_adaptive_synthesize_premise_mismatch_abstention() -> None:

@@ -535,14 +535,17 @@ flowchart TB
   registers path-keyed ownership in a process-local `_writer_owners` `WeakValueDictionary`: a second
   *writable* engine on the same on-disk store raises
   `RuntimeError("local memory store already has a writer: …")`, and ownership is released on `close()` (or
-  garbage collection). It is **process-local only** — no timeout, heartbeat, renewal, epoch, or fencing token
-  — and read-only engines register nothing, so many readers coexist; on the Postgres/Sqlite lanes
+  garbage collection). Across processes the writer also holds an exclusive file lock on `<store>.lock` until
+  `close()`: a writer in another process waits up to 30 s, then gets the same error. There is no heartbeat,
+  renewal, epoch, or fencing token
+  — and read-only engines take neither, so many readers coexist; on the Postgres/Sqlite lanes
   single-writer discipline is delegated to the database. All local mutators funnel through the single
   `_persist()` write choke point (which bumps `_store_version`). **(2) Durable job leases** — the
   `queued → running → retry → complete → dead` lease state machine in `queue.py` (`InProcessQueue` /
   `PostgresQueue` via `FOR UPDATE SKIP LOCKED` / `SqliteQueue` via `BEGIN IMMEDIATE`, one shared
-  `enqueue`/`lease`/`complete`/`fail` surface). The leased unit is a *job*, not a writer, and there is
-  deliberately **no lease timeout / visibility reclaim** on any of the three queues.
+  `enqueue`/`lease`/`complete`/`fail` surface). The leased unit is a *job*, not a writer. On the SQLite and
+  PostgreSQL queues a job left `running` for over an hour (its worker died) goes back to `retry`, or to `dead`
+  once out of attempts; a finished job's result is returned to the caller and not stored.
 
 ---
 

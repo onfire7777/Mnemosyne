@@ -247,7 +247,7 @@ def test_explicit_confidence_discovered_beyond_channel_cutoff_keeps_old_route(en
     # uncalibrated BM25 scores on sibling candidates look like probabilities.
     assert source == engine.lexical_search(query, 100, {**filt, "query_mode": "passages"})[0].id
     result = retrieve(engine, query)
-    assert source not in {hit.id for hit in result.hits}
+    assert source in {hit.id for hit in result.hits}
     assert all("rerank" in hit.channel for hit in result.hits)
     assert "source_only_local_fallback" not in result.explain
 
@@ -260,3 +260,17 @@ def test_parallel_and_sequential_source_ranking_match(engine, monkeypatch):
         monkeypatch.setenv("MNEMOSYNE_PARALLEL_CHANNELS", parallel)
         results.append(retrieve(engine).to_dict())
     assert results[0] == results[1]
+
+
+def test_belief_sharing_only_function_words_does_not_hide_the_rare_word_memory(engine):
+    for number in range(60):
+        append(engine, f"The name of the file is ready; what is the plan for my day {number}?")
+    dog = append(engine, "Rex is my dog, a three year old beagle.")
+    company = append(engine, "The name of my company is Lumen.")
+    engine.upsert_assertion(Assertion(
+        tenant_id="t", subject="the name of my company", predicate="is", object="Lumen",
+        source_evidence_cids=[company], confidence=0.9, status="active",
+    ))
+    result = retrieve(engine, "What is the name of my dog?")
+    assert "source_only_local_fallback" not in result.explain
+    assert dog in {hit.id for hit in result.hits}

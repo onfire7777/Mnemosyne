@@ -203,7 +203,7 @@ TENANT, USER = 't', 'u'
 locked = nullcontext
 @contextmanager
 def open_facade():
-    engine = LocalMemoryEngine(store_path=ROOT / 'memory.json')
+    engine = LocalMemoryEngine(store_path=ROOT / 'memory.json', read_only=True)
     try:
         yield SimpleNamespace(engine=engine)
     finally:
