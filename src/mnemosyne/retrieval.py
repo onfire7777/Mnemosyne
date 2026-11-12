@@ -1585,33 +1585,15 @@ _LOW_WEIGHT_PREDICATES = frozenset(
 
 _FOCAL_OBJECT_TERMS = frozenset(
     {
-        "hamster",
-        "football",
-        "footballs",
-        "violin",
         "uncle",
-        "dad",
-        "father",
         "taxi",
-        "bus",
         "cows",
         "cow",
         "fence",
-        "tart",
-        "tarts",
-        "pepper",
-        "peppers",
-        "porsche",
-        "ferrari",
-        "sapiens",
         "cucumbers",
         "cucumber",
-        "guitar",
-        "airbnbs",
-        "airbnb",
         "passport",
         "salary",
-        "anniversary",
         "birthday",
         "saxophone",
         "piano",
@@ -1619,13 +1601,9 @@ _FOCAL_OBJECT_TERMS = frozenset(
         "drums",
         "trumpet",
         "clarinet",
-        "baseball",
         "basketball",
-        "tennis",
-        "soccer",
         "parrot",
         "rabbit",
-        "cat",
         "dog",
         "horse",
         "boat",
@@ -1633,10 +1611,7 @@ _FOCAL_OBJECT_TERMS = frozenset(
         "motorcycle",
         "bicycle",
         "gift",
-        "gifts",
-        "wedding",
         "plants",
-        "apartment",
     }
 )
 
@@ -1733,19 +1708,9 @@ _COMMON_ADJECTIVES = frozenset(
 )
 
 _RECOGNIZED_COMPOUND_ANCHORS = (
-    ("table", "tennis"),
-    ("egg", "tarts"),
-    ("egg", "tart"),
-    ("vintage", "films"),
-    ("vintage", "film"),
     ("software", "manager"),
     ("engineer", "manager"),
-    ("master", "degree"),
-    ("masters", "degree"),
-    ("chili", "peppers"),
-    ("chili", "pepper"),
     ("ipad", "case"),
-    ("holiday", "market"),
     ("coffee", "table"),
     ("side", "table"),
     ("dining", "table"),
@@ -1753,13 +1718,7 @@ _RECOGNIZED_COMPOUND_ANCHORS = (
     ("holiday", "parties"),
     ("birthday", "party"),
     ("birthday", "parties"),
-    ("birthday", "gift"),
-    ("birthday", "gifts"),
     ("formal", "education"),
-    ("autographed", "football"),
-    ("italian", "restaurant"),
-    ("italian", "restaurants"),
-    ("undergrad", "course"),
 )
 
 
@@ -1895,7 +1854,7 @@ def query_support(
         if not found_mw and mw_name not in missing_proper:
             missing_proper.append(mw_name)
 
-    # 2. Extract and verify possessive entity pairs (e.g., "Emma's dog", "Dr. Johnson's clinic")
+    # 2. Extract and verify possessive entity pairs (e.g., "Priya's bike", "Dr. Okafor's office")
     possessive_pairs: list[tuple[str, str]] = []
     for i in range(len(words) - 1):
         w1, w2 = words[i], words[i + 1]
@@ -2069,77 +2028,11 @@ def query_support(
     matched_weight = sum(term_weights.get(t, 1.5) for t in matched_terms)
     weighted_score = matched_weight / max(total_weight, 0.001)
 
-    # Locative prepositional phrase binding (e.g., "apartment in Shinjuku", "sale at Nordstrom")
     missing_locatives: list[str] = []
-    is_ordering_query = bool(re.search(r"\b(?:order of|chronological)\b", q_lower))
-    if not is_ordering_query:
-        locative_pairs = re.findall(
-            r"\b([A-Za-z]+)\s+(?:in|at)\s+([A-Z][A-Za-z]+)\b", query
-        )
-        for entity, loc in locative_pairs:
-            if loc.lower() in _MONTHS or loc.lower() in _WEEKDAYS:
-                continue
-            en = normalise_query_term(entity.lower())
-            ln = normalise_query_term(loc.lower())
-            if (
-                en not in QUERY_SUPPORT_STOPWORDS
-                and en not in _LOW_WEIGHT_PREDICATES
-                and ln not in QUERY_SUPPORT_STOPWORDS
-                and len(en) > 2
-                and len(ln) > 2
-            ):
-                found_loc = False
-                for text in user_hit_texts[:5]:
-                    tokens = [normalise_query_term(t) for t in tokenize(text)]
-                    p_e = [
-                        idx
-                        for idx, tok in enumerate(tokens)
-                        if similar_query_terms(en, tok)
-                    ]
-                    p_l = [
-                        idx
-                        for idx, tok in enumerate(tokens)
-                        if similar_query_terms(ln, tok)
-                    ]
-                    if any(abs(i - j) <= 25 for i in p_e for j in p_l):
-                        found_loc = True
-                        break
-                if not found_loc:
-                    missing_locatives.append(f"{entity} in {loc}")
-
-    # Duration grounding: "how long [was/have/stayed] ... in [Location]"
-    if re.search(r"\bhow\s+long\b", query, re.I):
-        loc_match = re.search(r"\b(?:in|at)\s+([A-Z][A-Za-z]+)\b", query)
-        if (
-            loc_match
-            and loc_match.group(1).lower() not in _MONTHS
-            and loc_match.group(1).lower() not in _WEEKDAYS
-        ):
-            loc_target = normalise_query_term(loc_match.group(1).lower())
-            if loc_target not in QUERY_SUPPORT_STOPWORDS and len(loc_target) > 2:
-                dur_regex = re.compile(
-                    r"\b(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|several|a\s+few|a\s+couple(?:\s+of)?|half\s+a?)\s+(?:days?|weeks?|months?|years?|hours?)(?!\s+old)\b",
-                    re.IGNORECASE,
-                )
-                has_loc_duration = False
-                for text in hit_texts[:5]:
-                    sentences = re.split(r"[.!?\n]+", text)
-                    for sent in sentences:
-                        sent_tokens = [normalise_query_term(t) for t in tokenize(sent)]
-                        has_loc_in_sent = any(
-                            similar_query_terms(loc_target, tok) for tok in sent_tokens
-                        )
-                        if has_loc_in_sent and dur_regex.search(sent):
-                            has_loc_duration = True
-                            break
-                    if has_loc_duration:
-                        break
-                if not has_loc_duration:
-                    missing_locatives.append(f"how long in {loc_match.group(1)}")
 
     # Personal episodic core argument co-occurrence:
-    # When query specifies a distinct subject/relational anchor (e.g. dad, uncle, Rachel)
-    # and a distinct focal object/event anchor (e.g. birthday gift),
+    # When query specifies a distinct subject/relational anchor (e.g. uncle, Priya)
+    # and a distinct focal object/event anchor (e.g. birthday party),
     # require that they co-occur within at least one candidate hit to avoid cross-session unigram pooling.
     missing_arguments: list[str] = []
     subjects = [
@@ -2167,37 +2060,6 @@ def query_support(
                 break
         if not has_joint_hit:
             missing_arguments.append(f"{subjects[0]} + {focal_objects[0]}")
-
-    # Age-of-person grounding: "How old is/was <ProperNoun>" requires an age indicator in a hit mentioning <ProperNoun>
-    age_person_match = re.search(
-        r"\b[Hh]ow\s+old\s+(?:is|was|will)\s+([A-Z][a-z]+)\b", query
-    )
-    if age_person_match:
-        person_norm = normalise_query_term(age_person_match.group(1).lower())
-        age_indicator_re = re.compile(
-            r"\b(?:\d+\s*(?:years?\s*old|yo|y/o|months?\s*old)|age\s+of\s+\d+|aged\s+\d+|turned\s+\d+|born\s+in\s+\d{4})\b",
-            re.I,
-        )
-        has_person_age = False
-        for text in user_hit_texts[:5]:
-            tokens = [normalise_query_term(tok) for tok in tokenize(text)]
-            if any(
-                similar_query_terms(person_norm, tok) for tok in tokens
-            ) and age_indicator_re.search(text):
-                has_person_age = True
-                break
-        if not has_person_age:
-            missing_arguments.append(f"age of {age_person_match.group(1)}")
-
-    # Remaining-quantity grounding: "How many pages do I have left..." requires 'left' or 'remaining' in user hit text
-    if re.search(r"\bhow\s+many\s+pages\s+do\s+i\s+have\s+left\b", q_lower):
-        has_remaining_pages = any(
-            re.search(r"\b(?:left|remaining)\b", text, re.I)
-            and re.search(r"\bpages?\b", text, re.I)
-            for text in user_hit_texts[:5]
-        )
-        if not has_remaining_pages:
-            missing_arguments.append("pages left")
 
     # Conjunctive Noun-Phrase Grounding: "X and Y", "both X and Y"
     missing_conjunctions: list[str] = []

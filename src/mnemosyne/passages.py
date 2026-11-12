@@ -884,15 +884,12 @@ class PassageIndex:
             query_counts = {t: float(c) for t, c in raw_query_counts.items()}
 
         expanded_counts = dict(query_counts)
-        noisy_syn_tokens = {"air", "stand", "food", "years", "old"}
         for term, query_count in list(content_counts.items()):
             for lookup_term in (term, _stem_passage_token(term)):
                 syns = TAXONOMIC_EXPANSIONS.get(lookup_term)
                 if syns:
                     for syn in syns:
                         for syn_tok in tokenize(syn):
-                            if syn_tok in noisy_syn_tokens:
-                                continue
                             if (
                                 syn_tok not in expanded_counts
                                 and syn_tok not in QUERY_SUPPORT_STOPWORDS
@@ -903,15 +900,6 @@ class PassageIndex:
         for term, qc in expanded_counts.items():
             st = _stem_passage_token(term)
             stem_expanded[st] = max(stem_expanded[st], qc)
-
-        if re.search(
-            r"\b(?:how\s+old\s+(?:was|am)\s+i|years?\s+(?:older|younger)\b.*\bthan\s+(?:me|when\s+i)|average\s+age\s+of\s+me)\b",
-            query,
-            re.IGNORECASE,
-        ):
-            for u_st, u_qc in (("age", 1.35), ("turn", 1.55), ("30-year-old", 2.5), ("32-year-old", 2.5)):
-                stem_expanded[u_st] = max(stem_expanded[u_st], u_qc)
-                expanded_counts[u_st] = max(expanded_counts.get(u_st, 0.0), u_qc)
 
         return expanded_counts, dict(stem_expanded)
 
@@ -960,33 +948,6 @@ class PassageIndex:
                     scores[index] += (
                         0.75 * query_count * u_idf * count * 2.2 / (count + u_norm)
                     )
-
-        # User-turn self-age disclosure expansion for comparative/multi-session age queries
-        if re.search(
-            r"\b(?:how\s+old\s+(?:was|am)\s+i|years?\s+(?:older|younger)\b.*\bthan\s+(?:me|when\s+i)|average\s+age\s+of\s+me)\b",
-            query,
-            re.IGNORECASE,
-        ):
-            for u_st, u_qc in (
-                ("age", 1.35),
-                ("turn", 1.55),
-                ("30", 1.15),
-                ("32", 1.25),
-            ):
-                u_postings = self.user_stem_postings.get(u_st, ())
-                if u_postings:
-                    u_idf = log(
-                        1.0
-                        + (n_texts - len(u_postings) + 0.5) / (len(u_postings) + 0.5)
-                    )
-                    for index, count in u_postings:
-                        u_norm = 1.2 * (
-                            0.25
-                            + 0.75 * self.user_lengths[index] / self.average_user_length
-                        )
-                        scores[index] += (
-                            0.75 * u_qc * u_idf * count * 2.2 / (count + u_norm)
-                        )
 
         return dict(scores)
 
