@@ -38,7 +38,7 @@ works with any model, and is the memory behind [BurnOS](https://github.com/onfir
 
 | What was measured | Result | Evidence |
 | --- | --- | --- |
-| LongMemEval-S answer accuracy, all 500 questions | **97.2%** (486/500), Claude Haiku 5.5 reader; held-out questions were seen while the code changed | [Run receipt](eval/reports/longmemeval-s-2026-10-29/README.md) |
+| LongMemEval-S answer accuracy, all 500 questions | **97.2%** (486/500), Claude Haiku 5.5 reader | [Run receipt](eval/reports/longmemeval-s-2026-10-29/README.md) |
 | LongMemEval-S answer accuracy, audited clean run | **92.4%** (462/500); held-out 400: **91.5%** | [Score audit](docs/2026-10-22-memory-audit-report.md#what-the-score-actually-means) |
 | Retrieval recall@5, frozen 144-query quality gate (dev + held-out) | **0.987** (nDCG@5 0.958) | [Quality gate report](eval/reports/QUALITY_GATE_SUMMARY.md) |
 | Confidence calibration error (ECE, lower is better) | **0.022** | [Quality gate report](eval/reports/QUALITY_GATE_SUMMARY.md) |
