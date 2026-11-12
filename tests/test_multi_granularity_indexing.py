@@ -20,10 +20,10 @@ def test_extract_session_subpassages_standard_dialogue():
     dialogue = (
         "User: Hi, can you give me some recommendations for dinner?\n"
         "Assistant: Certainly! Are you looking for Italian, Mexican, or Asian cuisines?\n"
-        "User: I adopted a golden retriever named Barnaby last week and want a pet-friendly patio.\n"
+        "User: I adopted a border collie named Juniper last week and want a pet-friendly patio.\n"
         "Assistant: A patio that welcomes dogs is a great idea. Bistro Bella has an outdoor pet-friendly terrace.\n"
         "User: Sounds wonderful, thank you!\n"
-        "Assistant: You are very welcome! Have a great dinner with Barnaby."
+        "Assistant: You are very welcome! Have a great dinner with Juniper."
     )
 
     subs = extract_session_subpassages(
@@ -49,14 +49,14 @@ def test_extract_session_subpassages_standard_dialogue():
     assert turns[0].speaker == "user"
     assert "dinner" in turns[0].text
     assert turns[1].speaker == "user"
-    assert "Barnaby" in turns[1].text
+    assert "Juniper" in turns[1].text
     assert turns[1].round_index == 1
 
     # Check rounds
     rounds = [sp for sp in subs if sp.granularity == "round"]
     assert len(rounds) == 3
     assert "dinner" in rounds[0].text and "Italian" in rounds[0].text
-    assert "Barnaby" in rounds[1].text and "Bistro Bella" in rounds[1].text
+    assert "Juniper" in rounds[1].text and "Bistro Bella" in rounds[1].text
     assert rounds[1].sub_id == f"{session_id}:round:1"
 
 
@@ -146,8 +146,8 @@ def test_needle_boosting_long_session_outranks_short_distractor():
         )
 
     # Insert needle turn in round 12
-    needle_user = "User: By the way, I adopted a rare golden retriever puppy named Barnaby last Saturday!"
-    needle_asst = "Assistant: Congratulations on adopting Barnaby! A golden retriever will bring so much joy."
+    needle_user = "User: By the way, I adopted a rare border collie puppy named Juniper last Saturday!"
+    needle_asst = "Assistant: Congratulations on adopting Juniper! A border collie will bring so much joy."
     filler_turns.insert(24, needle_user)
     filler_turns.insert(25, needle_asst)
 
@@ -181,7 +181,7 @@ def test_needle_boosting_long_session_outranks_short_distractor():
         metadata={"created_at": datetime(2023, 6, 1, 10, 0, tzinfo=UTC)},
     )
 
-    query = "What is the name of my adopted golden retriever puppy Barnaby?"
+    query = "What is the name of my adopted border collie puppy Juniper?"
 
     # Rank with score fusion enabled
     owner = object()
@@ -200,7 +200,7 @@ def test_needle_boosting_long_session_outranks_short_distractor():
     assert ranked[0].id == "session_needle_long"
     assert "multi_granularity" in ranked[0].metadata
     mg = ranked[0].metadata["multi_granularity"]
-    assert "Barnaby" in mg["best_round_text"]
+    assert "Juniper" in mg["best_round_text"]
     assert mg["max_round_score"] > 0.0
     assert mg["max_turn_score"] > 0.0
 

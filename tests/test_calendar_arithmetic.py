@@ -167,35 +167,35 @@ def test_build_event_timeline_chronological_ordering():
     assert h_feb.metadata["calendar_delta"]["delta_days"] > 100
 
 
-def test_build_event_timeline_sunday_mass_to_ash_wednesday():
-    """Verify exact days between Sunday Mass and Ash Wednesday as in benchmark questions."""
-    h_sunday = Hit(
-        id="sunday_mass",
+def test_build_event_timeline_days_between_two_events():
+    """Verify exact days between two dated events, given out of chronological order."""
+    h_race = Hit(
+        id="river_race",
         kind="evidence",
         tenant_id="t",
         branch="main",
-        text="Attended Sunday mass at St. Mary's.",
+        text="Ran the Riverside 10K race.",
         score=1.0,
         channel="evidence",
-        metadata={"event_start": "2024-02-11T10:00:00Z"},
+        metadata={"event_start": "2024-03-09T10:00:00Z"},
     )
-    h_ash = Hit(
-        id="ash_wednesday",
+    h_sale = Hit(
+        id="book_sale",
         kind="evidence",
         tenant_id="t",
         branch="main",
-        text="Attended Ash Wednesday service at the cathedral.",
+        text="Volunteered at the library book sale.",
         score=1.0,
         channel="evidence",
-        metadata={"event_start": "2024-02-14T19:00:00Z"},
+        metadata={"event_start": "2024-03-12T19:00:00Z"},
     )
 
     timeline = build_event_timeline(
-        [h_ash, h_sunday], reference_date="2024-02-20T00:00:00Z"
+        [h_sale, h_race], reference_date="2024-03-20T00:00:00Z"
     )
     assert len(timeline) == 2
-    assert timeline[0]["hit_id"] == "sunday_mass"
-    assert timeline[1]["hit_id"] == "ash_wednesday"
+    assert timeline[0]["hit_id"] == "river_race"
+    assert timeline[1]["hit_id"] == "book_sale"
     assert timeline[1]["days_since_previous"] == 3
 
 

@@ -171,17 +171,17 @@ def run_probes() -> dict[str, int]:
     verifier = PremiseConsistencyVerifier()
 
     # 3.1 Semicolon separation between two clauses
-    ev3_semi = [{"content": "Tom studied; Alex graduated from MIT in June."}]
+    ev3_semi = [{"content": "Priya studied; Marcus graduated from Rice in June."}]
     res3_semi = verifier.verify(
-        "Who graduated first, Tom or Alex?", evidence_rows=ev3_semi
+        "Who graduated first, Priya or Marcus?", evidence_rows=ev3_semi
     )
     if (
         not res3_semi.is_consistent
         and res3_semi.abstention_recommended
-        and "Tom" in (res3_semi.clean_abstention_text or "")
+        and "Priya" in (res3_semi.clean_abstention_text or "")
     ):
         print(
-            "  [PASS] 3.1 Semicolon correctly splits clauses; abstains when only Alex graduated."
+            "  [PASS] 3.1 Semicolon correctly splits clauses; abstains when only Marcus graduated."
         )
         results["passed"] += 1
     else:
@@ -191,9 +191,9 @@ def run_probes() -> dict[str, int]:
         results["failed"] += 1
 
     # 3.2 Colon delimiter in entity label (DEFECT CHECK)
-    ev3_colon = [{"content": "Tom: graduated in 2020; Alex: graduated in 2021."}]
+    ev3_colon = [{"content": "Priya: graduated in 2020; Marcus: graduated in 2021."}]
     res3_colon = verifier.verify(
-        "Who graduated first, Tom or Alex?", evidence_rows=ev3_colon
+        "Who graduated first, Priya or Marcus?", evidence_rows=ev3_colon
     )
     if res3_colon.is_consistent and not res3_colon.abstention_recommended:
         print(
@@ -212,7 +212,7 @@ def run_probes() -> dict[str, int]:
     print("\n[PROBE 4] Spending Intent Variations")
     spending_queries = [
         "How much money did I spend on bikes?",
-        "How much did the car cover cost?",
+        "How much did the wiper blades cost?",
         "What did the bicycle cost?",
         "What did it cost?",
         "Total spent on groceries",

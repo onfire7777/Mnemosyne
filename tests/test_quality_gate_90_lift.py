@@ -21,21 +21,21 @@ def test_knowledge_updates_currency_prioritization_cases():
     dt_old = datetime(2023, 3, 1, 10, 0, tzinfo=timezone.utc)
     dt_new = datetime(2023, 5, 1, 10, 0, tzinfo=timezone.utc)
 
-    # 1. Canon EOS 80D camera trips
-    hit_old_canon = Hit(
-        id="canon_1",
+    # 1. Marathons run in one pair of shoes
+    hit_old_shoes = Hit(
+        id="shoes_1",
         kind="evidence",
-        text="Photography log: I have taken my Canon EOS 80D camera on 4 trips so far. Great camera for travel.",
+        text="Running log: I have run 2 marathons in my Brooks Ghost shoes so far. Great shoes for long races.",
         score=1.0,
         tenant_id="t",
         branch="main",
         channel="test",
         metadata={"created_at": dt_old},
     )
-    hit_new_canon = Hit(
-        id="canon_2",
+    hit_new_shoes = Hit(
+        id="shoes_2",
         kind="evidence",
-        text="Travel update: I have now taken my Canon EOS 80D camera on 7 trips across Europe.",
+        text="Race update: I have now run 5 marathons in my Brooks Ghost shoes across the region.",
         score=1.0,
         tenant_id="t",
         branch="main",
@@ -44,27 +44,27 @@ def test_knowledge_updates_currency_prioritization_cases():
     )
     ranked = rank_passages(
         owner,
-        "How many trips have I taken my Canon EOS 80D camera on?",
-        [hit_old_canon, hit_new_canon],
+        "How many marathons have I run in my Brooks Ghost shoes?",
+        [hit_old_shoes, hit_new_shoes],
         k=2,
     )
-    assert ranked[0].id == "canon_2", "Newer session with 7 trips must rank above older session with 4 trips"
+    assert ranked[0].id == "shoes_2", "Newer session with 5 marathons must rank above older session with 2"
 
-    # 2. Wells Fargo mortgage pre-approval
-    hit_old_mortgage = Hit(
-        id="wf_1",
+    # 2. Credit card limit approval
+    hit_old_card = Hit(
+        id="card_1",
         kind="evidence",
-        text="Finance update: I got pre-approved for a mortgage from Wells Fargo for the amount of $400,000.",
+        text="Finance update: I got approved for a credit card from Harbor Credit Union with a limit of $5,000.",
         score=1.0,
         tenant_id="t",
         branch="main",
         channel="test",
         metadata={"created_at": dt_old},
     )
-    hit_new_mortgage = Hit(
-        id="wf_2",
+    hit_new_card = Hit(
+        id="card_2",
         kind="evidence",
-        text="Mortgage letter: Wells Fargo increased my pre-approved mortgage amount to $450,000.",
+        text="Card letter: Harbor Credit Union increased my approved credit card limit to $8,000.",
         score=1.0,
         tenant_id="t",
         branch="main",
@@ -73,34 +73,34 @@ def test_knowledge_updates_currency_prioritization_cases():
     )
     ranked_m = rank_passages(
         owner,
-        "What was the amount I was pre-approved for when I got my mortgage from Wells Fargo?",
-        [hit_old_mortgage, hit_new_mortgage],
+        "What credit limit did Harbor Credit Union approve on my card?",
+        [hit_old_card, hit_new_card],
         k=2,
     )
-    assert ranked_m[0].id == "wf_2"
+    assert ranked_m[0].id == "card_2"
 
 
 def test_taxonomic_concept_expansion_cases():
     """Verify that hypernym queries match concrete hyponym sessions."""
-    # 1. Siblings -> brother / sister
+    # 1. Vehicles -> truck / motorcycle
     texts = (
-        "My brother Michael is an architect living in Seattle.",
-        "My sister Sarah graduated from medical school last spring.",
+        "I drive a red truck to the lumber yard every week.",
+        "My motorcycle is parked in the garage for the winter.",
         "My close friend David works in finance.",
     )
     idx = PassageIndex(texts)
-    scores = idx.scores("What is the total number of siblings I have?")
-    assert 0 in scores, "Session mentioning 'brother' must receive positive BM25 score for 'siblings'"
-    assert 1 in scores, "Session mentioning 'sister' must receive positive BM25 score for 'siblings'"
+    scores = idx.scores("How many vehicles do I own?")
+    assert 0 in scores, "Session mentioning 'truck' must receive positive BM25 score for 'vehicles'"
+    assert 1 in scores, "Session mentioning 'motorcycle' must receive positive BM25 score for 'vehicles'"
 
-    # 2. Grandma -> grandmother
-    scores_g = idx.scores("How many years older is my grandma than me?")
+    # 2. Grandpa -> grandfather
+    scores_g = idx.scores("When did my grandpa retire?")
     assert isinstance(scores_g, dict)
-    assert similar_query_terms("grandma", "grandmother")
+    assert similar_query_terms("grandpa", "grandfather")
 
-    # 3. Kitchen appliances -> espresso machine, air fryer
-    assert similar_query_terms("appliance", "espresso")
-    assert similar_query_terms("appliances", "air")
+    # 3. Vehicle hypernym -> concrete hyponyms
+    assert similar_query_terms("vehicle", "motorcycle")
+    assert similar_query_terms("vehicles", "truck")
 
 
 def test_conjunctive_and_temporal_abstention_grounding_cases():
@@ -129,50 +129,50 @@ def test_conjunctive_and_temporal_abstention_grounding_cases():
     hit_created = hit_march.metadata["created_at"]
     assert not (win_dec.start <= hit_created < win_dec.end)
 
-    # 2. Conjunctive premise: "tomatoes and chili peppers"
+    # 2. Conjunctive premise: "basil and lavender"
     hit_tomatoes = Hit(
         id="h_tom",
         kind="evidence",
-        text="In my backyard garden, I initially planted 6 tomato plants and 4 cucumber vines.",
+        text="In my balcony planters, I initially planted 6 basil seedlings and 4 mint cuttings.",
         score=1.0,
         tenant_id="t",
         branch="main",
         channel="c",
     )
     rep_conj = query_support(
-        "How many plants did I initially plant for tomatoes and chili peppers?",
+        "How many seedlings did I start for basil and lavender?",
         [hit_tomatoes],
     )
     assert rep_conj["anchor_grounding"]["satisfied"] is False
-    assert any("chili" in c for c in rep_conj["anchor_grounding"]["missing_conjunctions"])
+    assert any("lavender" in c for c in rep_conj["anchor_grounding"]["missing_conjunctions"])
     assert rep_conj["score"] <= 0.35
 
-    # 3. Locative duration: "How long was I in Korea for?"
-    hit_japan = Hit(
-        id="h_japan",
+    # 3. Locative duration: "How long did I stay in Chile?"
+    hit_peru = Hit(
+        id="h_peru",
         kind="evidence",
-        text="I spent two weeks traveling in Japan. Next year I am thinking of visiting South Korea.",
+        text="I spent ten days hiking in Peru. Next year I am thinking of visiting northern Chile.",
         score=1.0,
         tenant_id="t",
         branch="main",
         channel="c",
     )
-    rep_korea = query_support("How long was I in Korea for?", [hit_japan])
-    assert rep_korea["anchor_grounding"]["satisfied"] is False
-    assert any("Korea" in loc for loc in rep_korea["anchor_grounding"]["missing_locatives"])
-    assert rep_korea["score"] <= 0.35
+    rep_chile = query_support("How long did I stay in Chile?", [hit_peru])
+    assert rep_chile["anchor_grounding"]["satisfied"] is False
+    assert any("Chile" in loc for loc in rep_chile["anchor_grounding"]["missing_locatives"])
+    assert rep_chile["score"] <= 0.35
 
-    # 4. Compound noun grounding: "birthday gift"
-    hit_birthday = Hit(
-        id="h_bday",
+    # 4. Compound noun grounding: "birthday party"
+    hit_party = Hit(
+        id="h_party",
         kind="evidence",
-        text="I organized a birthday celebration with chocolate cake and music.",
+        text="I baked a lemon cake for the office party on Friday.",
         score=1.0,
         tenant_id="t",
         branch="main",
         channel="c",
     )
-    rep_gift = query_support("What birthday gift did I buy for Sarah?", [hit_birthday])
-    assert rep_gift["anchor_grounding"]["satisfied"] is False
-    assert any("birthday gift" in comp for comp in rep_gift["anchor_grounding"]["missing_compounds"])
-    assert rep_gift["score"] <= 0.35
+    rep_party = query_support("Who came to my birthday party?", [hit_party])
+    assert rep_party["anchor_grounding"]["satisfied"] is False
+    assert any("birthday party" in comp for comp in rep_party["anchor_grounding"]["missing_compounds"])
+    assert rep_party["score"] <= 0.35

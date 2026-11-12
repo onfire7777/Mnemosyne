@@ -275,14 +275,14 @@ def run_it4_probes() -> dict[str, int]:
 
     # 3.1 Colons in speaker turns and entity labels where both graduated (Consistent)
     colon_consistent_cases = [
-        "Tom: graduated in 2020; Alex: graduated in 2021.",
-        "Speaker 1 (Tom): graduated from MIT. Speaker 2 (Alex): graduated from Harvard.",
-        "Tom: graduated in 2020\nAlex: graduated in 2021",
+        "Priya: graduated in 2020; Marcus: graduated in 2021.",
+        "Speaker 1 (Priya): graduated from MIT. Speaker 2 (Marcus): graduated from Harvard.",
+        "Priya: graduated in 2020\nMarcus: graduated in 2021",
     ]
     colon_consist_failures = []
     for text in colon_consistent_cases:
         ev = [{"content": text}]
-        res = verifier.verify("Who graduated first, Tom or Alex?", evidence_rows=ev)
+        res = verifier.verify("Who graduated first, Priya or Marcus?", evidence_rows=ev)
         if not res.is_consistent or res.abstention_recommended:
             colon_consist_failures.append((text, res))
 
@@ -297,19 +297,19 @@ def run_it4_probes() -> dict[str, int]:
         )
         results["failed"] += 1
 
-    # 3.2 Colons where only Alex graduated (Abstention required)
+    # 3.2 Colons where only Marcus graduated (Abstention required)
     colon_counterfactual = [
-        "Tom: moved to Seattle. Alex: graduated from MIT in 2021.",
-        "Tom: started a new company; Alex: graduated from Stanford.",
+        "Priya: moved to Seattle. Marcus: graduated from MIT in 2021.",
+        "Priya: started a new company; Marcus: graduated from Stanford.",
     ]
     colon_cf_failures = []
     for text in colon_counterfactual:
         ev = [{"content": text}]
-        res = verifier.verify("Who graduated first, Tom or Alex?", evidence_rows=ev)
+        res = verifier.verify("Who graduated first, Priya or Marcus?", evidence_rows=ev)
         if (
             res.is_consistent
             or not res.abstention_recommended
-            or "Tom" not in (res.clean_abstention_text or "")
+            or "Priya" not in (res.clean_abstention_text or "")
         ):
             colon_cf_failures.append((text, res))
 
@@ -326,20 +326,20 @@ def run_it4_probes() -> dict[str, int]:
 
     # 3.3 Semicolons and sentence-ending punctuation (!, ?)
     punct_cases = [
-        ("Tom moved to Seattle; Alex graduated from MIT in June.", False, True, "Tom"),
-        ("Tom graduated in 2020; Alex graduated in 2021.", True, False, None),
+        ("Priya moved to Seattle; Marcus graduated from MIT in June.", False, True, "Priya"),
+        ("Priya graduated in 2020; Marcus graduated in 2021.", True, False, None),
         (
-            "Did Tom move to Seattle? Yes. Alex graduated from MIT in 2021!",
+            "Did Priya move to Seattle? Yes. Marcus graduated from MIT in 2021!",
             False,
             True,
-            "Tom",
+            "Priya",
         ),
-        ("Tom graduated in 2020! Alex graduated in 2021!", True, False, None),
+        ("Priya graduated in 2020! Marcus graduated in 2021!", True, False, None),
     ]
     punct_failures = []
     for text, expected_consistent, expected_abstain, expected_mention in punct_cases:
         ev = [{"content": text}]
-        res = verifier.verify("Who graduated first, Tom or Alex?", evidence_rows=ev)
+        res = verifier.verify("Who graduated first, Priya or Marcus?", evidence_rows=ev)
         if (
             res.is_consistent != expected_consistent
             or res.abstention_recommended != expected_abstain
@@ -361,15 +361,15 @@ def run_it4_probes() -> dict[str, int]:
 
     # 3.4 Dashes separating clauses where both entities graduated (Consistent)
     dash_consistent_cases = [
-        "Tom graduated in 2020 - Alex graduated in 2021.",
-        "Tom graduated in 2020 -- Alex graduated in 2021.",
-        "Tom graduated in 2020 — Alex graduated in 2021.",
-        "Tom graduated in 2020 – Alex graduated in 2021.",
+        "Priya graduated in 2020 - Marcus graduated in 2021.",
+        "Priya graduated in 2020 -- Marcus graduated in 2021.",
+        "Priya graduated in 2020 — Marcus graduated in 2021.",
+        "Priya graduated in 2020 – Marcus graduated in 2021.",
     ]
     dash_failures = []
     for text in dash_consistent_cases:
         ev = [{"content": text}]
-        res = verifier.verify("Who graduated first, Tom or Alex?", evidence_rows=ev)
+        res = verifier.verify("Who graduated first, Priya or Marcus?", evidence_rows=ev)
         if not res.is_consistent or res.abstention_recommended:
             dash_failures.append((text, res))
 

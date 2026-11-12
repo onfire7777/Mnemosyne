@@ -13,18 +13,18 @@ def test_event_ledger_entry_dataclass() -> None:
         event_date="2026-05-01",
         speaker_role="user",
         action="purchase",
-        entity="car cover",
-        canonical_key="car cover_2026-05",
-        value=65.0,
+        entity="wiper blades",
+        canonical_key="wiper blades_2026-05",
+        value=30.0,
         unit="USD",
         category_tags=("car",),
         is_borderline=False,
         borderline_reason=None,
         evidence_cid="cid1",
-        quote_span="bought a car cover for $65.00",
+        quote_span="bought wiper blades for $30.00",
     )
-    assert entry.entity == "car cover"
-    assert entry.value == 65.0
+    assert entry.entity == "wiper blades"
+    assert entry.value == 30.0
     d = entry.to_dict()
     assert d["entry_id"] == "e1"
     assert d["action"] == "purchase"
@@ -59,20 +59,20 @@ def test_ledger_extraction_purchases_and_expenses() -> None:
             "cid": "c1",
             "session_id": "sess_1",
             "created_at": "2026-04-10T12:00:00Z",
-            "content": "User: I bought a car cover for $65.00 and picked up detailing spray for $20.50.",
+            "content": "User: I bought wiper blades for $30.00 and picked up engine oil for $24.50.",
         },
         {
             "cid": "c2",
             "session_id": "sess_2",
             "created_at": "2026-04-15T15:00:00Z",
-            "content": "User: I spent $500 on a mountain bike and paid $120 for bike repairs.",
+            "content": "User: I spent $600 on a mountain bike and paid $75 for bike repairs.",
         },
     ]
     entries = ledger.extract_from_evidence(evidence)
     assert len(entries) >= 4
     entities = [e.entity.lower() for e in entries]
-    assert any("car cover" in ent for ent in entities)
-    assert any("detailing spray" in ent for ent in entities)
+    assert any("wiper blades" in ent for ent in entities)
+    assert any("engine oil" in ent for ent in entities)
     assert any("mountain bike" in ent for ent in entities)
     assert any("bike repairs" in ent for ent in entities)
 
@@ -124,22 +124,22 @@ def test_ledger_activity_and_count_extraction() -> None:
         {
             "cid": "c1",
             "session_id": "sess_1",
-            "content": "User: I played tennis at the club and learned Italian cooking this weekend.",
+            "content": "User: I played badminton at the club and learned Thai cooking this weekend.",
         },
         {
             "cid": "c2",
             "session_id": "sess_2",
-            "content": "User: I have three model kits waiting to be built.",
+            "content": "User: I have three vinyl records waiting to be played.",
         },
     ]
     entries = ledger.extract_from_evidence(evidence)
     actions = [e.action for e in entries]
     assert "activity" in actions or "item" in actions
-    tennis = [e for e in entries if "tennis" in e.entity.lower()]
-    assert len(tennis) == 1
-    model_kits = [e for e in entries if "model kit" in e.entity.lower()]
-    assert len(model_kits) == 1
-    assert model_kits[0].value == 3.0
+    badminton = [e for e in entries if "badminton" in e.entity.lower()]
+    assert len(badminton) == 1
+    records = [e for e in entries if "vinyl" in e.entity.lower()]
+    assert len(records) == 1
+    assert records[0].value == 3.0
 
 
 def test_dual_set_aggregation_strict_equals_inclusive() -> None:
@@ -148,19 +148,19 @@ def test_dual_set_aggregation_strict_equals_inclusive() -> None:
         {
             "cid": "c1",
             "session_id": "sess_1",
-            "content": "User: I bought a car cover for $65.00 and detailing spray for $20.50.",
+            "content": "User: I bought wiper blades for $30.00 and engine oil for $24.50.",
         }
     ]
     ledger.extract_from_evidence(evidence)
     agg = ledger.aggregate("How much did I spend on car care?")
     assert agg.strict_count == 2
     assert agg.inclusive_count == 2
-    assert agg.strict_sum == 85.50
-    assert agg.inclusive_sum == 85.50
+    assert agg.strict_sum == 54.50
+    assert agg.inclusive_sum == 54.50
     # Single total formatting
-    assert "You spent $85.50" in agg.synthesis_text
-    assert "car cover" in agg.synthesis_text
-    assert "detailing spray" in agg.synthesis_text
+    assert "You spent $54.50" in agg.synthesis_text
+    assert "wiper blades" in agg.synthesis_text
+    assert "engine oil" in agg.synthesis_text
 
 
 def test_dual_set_aggregation_strict_less_than_inclusive() -> None:
@@ -170,24 +170,24 @@ def test_dual_set_aggregation_strict_less_than_inclusive() -> None:
             "cid": "c1",
             "session_id": "sess_1",
             "content": (
-                "User: I bought a bicycle for $500.00, paid $120.00 for bike repairs, "
-                "and bought inner tubes for $25.00. I also bought a cycling helmet for $80.00 "
-                "and a bike lock for $45.00."
+                "User: I bought a bicycle for $600.00, paid $75.00 for bike repairs, "
+                "and bought inner tubes for $18.00. I also bought a cycling helmet for $60.00 "
+                "and a bike lock for $35.00."
             ),
         }
     ]
     ledger.extract_from_evidence(evidence)
-    agg = ledger.aggregate("How much did I spend on bike expenses?")
+    agg = ledger.aggregate("How much did I spend on cycling gear?")
     assert agg.strict_count == 3  # bicycle, repairs, tubes
     assert agg.inclusive_count == 5  # helmet, lock included
-    assert agg.strict_sum == 645.00
-    assert agg.inclusive_sum == 770.00
+    assert agg.strict_sum == 693.00
+    assert agg.inclusive_sum == 788.00
     assert len(agg.borderline_entries) == 2
     assert all(e.is_borderline for e in agg.borderline_entries)
     # Dual reporting formatting
     assert "Strictly for core bike" in agg.synthesis_text
-    assert "$645.00" in agg.synthesis_text
-    assert "$770.00" in agg.synthesis_text
+    assert "$693.00" in agg.synthesis_text
+    assert "$788.00" in agg.synthesis_text
     assert "accessories and related gear" in agg.synthesis_text
 
 
@@ -196,12 +196,12 @@ def test_adaptive_synthesize_integration_with_event_ledger() -> None:
         {
             "cid": "c1",
             "session_id": "s1",
-            "content": "User: I bought a car cover for $65.00.",
+            "content": "User: I bought wiper blades for $30.00.",
         },
         {
             "cid": "c2",
             "session_id": "s2",
-            "content": "User: I bought detailing spray for $20.50.",
+            "content": "User: I bought engine oil for $24.50.",
         },
     ]
     synth = adaptive_synthesize("How many car care items did I buy?", evidence)
@@ -211,7 +211,7 @@ def test_adaptive_synthesize_integration_with_event_ledger() -> None:
     assert "claims" in synth
     assert len(synth["claims"]) == 1
     claim = synth["claims"][0]
-    assert "85.50" in claim["text"] or "2" in claim["text"]
+    assert "54.50" in claim["text"] or "2" in claim["text"]
     assert "set_aggregation" in claim["derivation"]
     agg_dict = claim["derivation"]["set_aggregation"]
     assert agg_dict["strict_count"] == 2
@@ -242,19 +242,19 @@ def test_ledger_cross_month_deduplication() -> None:
             "cid": "c1",
             "session_id": "s1",
             "created_at": "2026-03-10",
-            "content": "User: I bought a car cover for $65.00.",
+            "content": "User: I bought wiper blades for $30.00.",
         },
         {
             "cid": "c2",
             "session_id": "s2",
             "created_at": "2026-04-10",
-            "content": "User: Remember I bought a car cover for $65.00.",
+            "content": "User: Remember I bought wiper blades for $30.00.",
         },
     ]
     ledger.extract_from_evidence(evidence)
     agg = ledger.aggregate("How much did I spend on car care?")
     assert agg.strict_count == 1
-    assert agg.strict_sum == 65.0
+    assert agg.strict_sum == 30.0
 
 
 def test_ledger_monetary_unit_hygiene() -> None:

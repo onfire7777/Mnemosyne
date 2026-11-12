@@ -7,10 +7,10 @@ Adversarially probes:
    - Dual set-aggregation: strict core items vs borderline/accessory items across all taxonomy domains.
    - Unit contamination (activity count summed into monetary USD total).
 2. PremiseConsistencyVerifier:
-   - Location mismatch (Sacramento vs San Diego).
+   - Location mismatch (Missoula vs Asheville).
    - Role/title mismatch (Manager vs Senior Tech Lead, boundary capture).
-   - Missing entity (pet hamster, cat, etc. when dog Buster is recorded).
-   - Comparative counterfactual timeline (Tom vs Alex when neither participated, and passage co-occurrence).
+   - Missing entity (pet ferret, cat, etc. when dog Biscuit is recorded).
+   - Comparative counterfactual timeline (Priya vs Marcus when neither participated, and passage co-occurrence).
    - Calibrated direct abstention.
 3. Answering protocol:
    - Direct answering without hedging headers.
@@ -77,13 +77,13 @@ def run_tests() -> dict[str, Any]:
             "cid": "c1",
             "session_id": "s1",
             "created_at": "2026-03-10",
-            "content": "User: I bought a car cover for $65.00.",
+            "content": "User: I bought wiper blades for $30.00.",
         },
         {
             "cid": "c2",
             "session_id": "s2",
             "created_at": "2026-04-10",
-            "content": "User: Remember I bought a car cover for $65.00.",
+            "content": "User: Remember I bought wiper blades for $30.00.",
         },
     ]
     ledger_cross_month.extract_from_evidence(ev_cross_month)
@@ -176,11 +176,11 @@ def run_tests() -> dict[str, Any]:
     ev_dual = [
         {
             "cid": "c1",
-            "content": "User: I bought a bicycle for $500.00, paid $120.00 for bike repairs, and bought inner tubes for $25.00. I also bought a cycling helmet for $80.00 and a bike lock for $45.00.",
+            "content": "User: I bought a bicycle for $600.00, paid $75.00 for bike repairs, and bought inner tubes for $18.00. I also bought a cycling helmet for $60.00 and a bike lock for $35.00.",
         }
     ]
     ledger_dual.extract_from_evidence(ev_dual)
-    agg_dual = ledger_dual.aggregate("How much did I spend on bike expenses?")
+    agg_dual = ledger_dual.aggregate("How much did I spend on cycling gear?")
     if (
         agg_dual.strict_count == 3
         and agg_dual.inclusive_count == 5
@@ -279,16 +279,16 @@ def run_tests() -> dict[str, Any]:
     print("\n[SECTION 2] PremiseConsistencyVerifier")
     verifier = PremiseConsistencyVerifier()
 
-    # 2.1 Location mismatch (Sacramento vs San Diego)
-    ev_loc = [{"content": "User: I booked an Airbnb in San Diego for our summer trip."}]
+    # 2.1 Location mismatch (Missoula vs Asheville)
+    ev_loc = [{"content": "User: I booked a cabin in Asheville for our autumn trip."}]
     res_loc = verifier.verify(
-        "When did I book the Airbnb in Sacramento?", evidence_rows=ev_loc
+        "How many nights did I reserve the cabin in Missoula?", evidence_rows=ev_loc
     )
     if (
         not res_loc.is_consistent
         and res_loc.abstention_recommended
-        and "Sacramento" in (res_loc.clean_abstention_text or "")
-        and "San Diego" in (res_loc.clean_abstention_text or "")
+        and "Missoula" in (res_loc.clean_abstention_text or "")
+        and "Asheville" in (res_loc.clean_abstention_text or "")
     ):
         print("  [PASS] 2.1 Location mismatch detected with calibrated abstention.")
         results["passed"] += 1
@@ -313,42 +313,42 @@ def run_tests() -> dict[str, Any]:
         print(f"  [FAIL] 2.2 Role mismatch check failed: {res_role}")
         results["defects_found"] += 1
 
-    # 2.3 Missing entity (pet hamster when dog Buster recorded)
+    # 2.3 Missing entity (pet ferret when dog Biscuit recorded)
     facts_pet = [
         Assertion(
-            tenant_id="t", subject="user", predicate="family_pet", object="dog Buster"
+            tenant_id="t", subject="user", predicate="family_pet", object="dog Biscuit"
         )
     ]
-    ev_pet = [{"content": "User: I took Buster for a walk in the park."}]
+    ev_pet = [{"content": "User: I took Biscuit for a walk in the park."}]
     res_pet = verifier.verify(
-        "What is the name of my pet hamster?", facts=facts_pet, evidence_rows=ev_pet
+        "What did I name my pet ferret?", facts=facts_pet, evidence_rows=ev_pet
     )
     if (
         not res_pet.is_consistent
         and res_pet.abstention_recommended
-        and "hamster" in (res_pet.clean_abstention_text or "")
+        and "ferret" in (res_pet.clean_abstention_text or "")
     ):
         print(
-            "  [PASS] 2.3 Missing entity (pet hamster) detected with clean abstention."
+            "  [PASS] 2.3 Missing entity (pet ferret) detected with clean abstention."
         )
         results["passed"] += 1
     else:
         print(f"  [FAIL] 2.3 Missing entity check failed: {res_pet}")
         results["defects_found"] += 1
 
-    # 2.4 Comparative counterfactual timeline (Tom vs Alex when neither participated)
+    # 2.4 Comparative counterfactual timeline (Priya vs Marcus when neither participated)
     ev_neither = [
         {
-            "content": "User: Tom moved to Seattle last year. Alex started a new job in Boston."
+            "content": "User: Priya moved to Tucson last year. Marcus started a new job in Raleigh."
         }
     ]
     res_comp = verifier.verify(
-        "Who became a parent first, Tom or Alex?", evidence_rows=ev_neither
+        "Who bought a house first, Priya or Marcus?", evidence_rows=ev_neither
     )
     if (
         not res_comp.is_consistent
         and res_comp.abstention_recommended
-        and "Neither Tom nor Alex" in (res_comp.clean_abstention_text or "")
+        and "Neither Priya nor Marcus" in (res_comp.clean_abstention_text or "")
     ):
         print(
             "  [PASS] 2.4 Comparative counterfactual (neither participated) cleanly abstained."
@@ -360,10 +360,10 @@ def run_tests() -> dict[str, Any]:
 
     # 2.5 Comparative counterfactual co-occurrence false-positive -> DEFECT INVESTIGATION
     ev_cooccur = [
-        {"content": "User: Tom moved to Seattle last year. Alex graduated from MIT."}
+        {"content": "User: Priya moved to Tucson last year. Marcus graduated from Rice."}
     ]
     res_cooccur = verifier.verify(
-        "Who graduated first, Tom or Alex?", evidence_rows=ev_cooccur
+        "Who graduated first, Priya or Marcus?", evidence_rows=ev_cooccur
     )
     if res_cooccur.is_consistent:
         print(
@@ -383,15 +383,15 @@ def run_tests() -> dict[str, Any]:
 
     # 2.6 Semicolon delimiter in comparative premise verifier
     ev_semi = [
-        {"content": "User: Tom moved to Seattle; Alex graduated from MIT in June."}
+        {"content": "User: Priya moved to Tucson; Marcus graduated from Rice in June."}
     ]
     res_semi = verifier.verify(
-        "Who graduated first, Tom or Alex?", evidence_rows=ev_semi
+        "Who graduated first, Priya or Marcus?", evidence_rows=ev_semi
     )
     if (
         not res_semi.is_consistent
         and res_semi.abstention_recommended
-        and "Tom" in (res_semi.clean_abstention_text or "")
+        and "Priya" in (res_semi.clean_abstention_text or "")
     ):
         print(
             "  [PASS] 2.6 Semicolon-delimited comparative counterfactual correctly abstained."
@@ -404,9 +404,9 @@ def run_tests() -> dict[str, Any]:
         results["defects_found"] += 1
 
     # 2.7 Colon delimiter in entity label
-    ev_colon = [{"content": "Tom: graduated in 2020; Alex: graduated in 2021."}]
+    ev_colon = [{"content": "Priya: graduated in 2020; Marcus: graduated in 2021."}]
     res_colon = verifier.verify(
-        "Who graduated first, Tom or Alex?", evidence_rows=ev_colon
+        "Who graduated first, Priya or Marcus?", evidence_rows=ev_colon
     )
     if res_colon.is_consistent and not res_colon.abstention_recommended:
         print(
@@ -460,7 +460,7 @@ def run_tests() -> dict[str, Any]:
     print("\n[SECTION 4] Adaptive Synthesize Intent Routing")
 
     q_count = "How many bike items did I buy?"
-    q_spend = "How much did I spend on bike expenses?"
+    q_spend = "How much did I spend on cycling gear?"
     intent_count = detect_synthesis_intent(q_count)
     intent_spend = detect_synthesis_intent(q_spend)
 

@@ -39,7 +39,7 @@ def test_multi_step_trajectory_ordering() -> None:
             tenant_id="t1",
             subject="user",
             predicate="residence",
-            object="Sacramento",
+            object="Boise",
             valid_from=t1,
             valid_to=t2,
             status="superseded",
@@ -66,7 +66,7 @@ def test_multi_step_trajectory_ordering() -> None:
     assert len(trajectory.steps) == 3
 
     # Check order
-    assert trajectory.steps[0].value == "Sacramento"
+    assert trajectory.steps[0].value == "Boise"
     assert trajectory.steps[0].valid_from == t1
     assert trajectory.steps[0].status == "SUPERSEDED"
     assert trajectory.steps[0].evidence_cids == ("cid1",)
@@ -88,7 +88,7 @@ def test_multi_step_trajectory_ordering() -> None:
 
     # as_of point-in-time state lookup
     as_of_2021 = trajectory.as_of(datetime(2021, 1, 1, tzinfo=UTC))
-    assert as_of_2021 is not None and as_of_2021.value == "Sacramento"
+    assert as_of_2021 is not None and as_of_2021.value == "Boise"
 
     as_of_2023 = trajectory.as_of(datetime(2023, 1, 1, tzinfo=UTC))
     assert as_of_2023 is not None and as_of_2023.value == "San Diego"
@@ -100,7 +100,7 @@ def test_multi_step_trajectory_ordering() -> None:
     formatted = trajectory.format_trajectory()
     assert (
         formatted
-        == "Sacramento (2020-01-01) -> San Diego (2022-06-01) -> Portland (2024-03-15, CURRENT)"
+        == "Boise (2020-01-01) -> San Diego (2022-06-01) -> Portland (2024-03-15, CURRENT)"
     )
 
 
@@ -152,7 +152,7 @@ def test_engine_relation_supersession_synchronization() -> None:
         branch=branch,
         subject="user",
         predicate="residence",
-        object="Sacramento",
+        object="Boise",
         valid_from=t1,
         status="active",
     )
@@ -163,7 +163,7 @@ def test_engine_relation_supersession_synchronization() -> None:
         branch=branch,
         source="user",
         predicate="lives_in",
-        target="Sacramento",
+        target="Boise",
         valid_from=t1,
         valid_to=None,
     )
@@ -172,7 +172,7 @@ def test_engine_relation_supersession_synchronization() -> None:
         branch=branch,
         source="user",
         predicate="residence",
-        target="Sacramento",
+        target="Boise",
         valid_from=t1,
         valid_to=None,
     )
@@ -183,13 +183,13 @@ def test_engine_relation_supersession_synchronization() -> None:
     stored_relations = [
         r
         for r in engine.relations.values()
-        if r.tenant_id == tenant_id and r.source == "user" and r.target == "Sacramento"
+        if r.tenant_id == tenant_id and r.source == "user" and r.target == "Boise"
     ]
     assert len(stored_relations) == 2
     for r in stored_relations:
         assert r.valid_to is None
 
-    # 2. Upsert newer assertion superseding Sacramento
+    # 2. Upsert newer assertion superseding Boise
     incoming_assertion = Assertion(
         tenant_id=tenant_id,
         branch=branch,
@@ -221,7 +221,7 @@ def test_graph_ppr_prevents_diffusion_leakage_after_supersession() -> None:
             user_id="u1",
             actor="user",
             source_type="conversation",
-            content="I lived in Sacramento.",
+            content="I lived in Boise.",
         )
     )
     ev2 = engine.append_evidence(
@@ -230,7 +230,7 @@ def test_graph_ppr_prevents_diffusion_leakage_after_supersession() -> None:
             user_id="u1",
             actor="user",
             source_type="conversation",
-            content="Sacramento is in California.",
+            content="Boise is in Idaho.",
         )
     )
     ev3 = engine.append_evidence(
@@ -243,14 +243,14 @@ def test_graph_ppr_prevents_diffusion_leakage_after_supersession() -> None:
         )
     )
 
-    # Initial state: User lives in Sacramento, Sacramento in California
+    # Initial state: User lives in Boise, Boise in Idaho
     engine.upsert_assertion(
         Assertion(
             tenant_id=tenant_id,
             branch=branch,
             subject="user",
             predicate="residence",
-            object="Sacramento",
+            object="Boise",
             valid_from=t_old,
             source_evidence_cids=[ev1],
         ),
@@ -262,7 +262,7 @@ def test_graph_ppr_prevents_diffusion_leakage_after_supersession() -> None:
             branch=branch,
             source="user",
             predicate="lives_in",
-            target="Sacramento",
+            target="Boise",
             valid_from=t_old,
             source_evidence_cids=[ev1],
         ),
@@ -272,9 +272,9 @@ def test_graph_ppr_prevents_diffusion_leakage_after_supersession() -> None:
         Relation(
             tenant_id=tenant_id,
             branch=branch,
-            source="Sacramento",
+            source="Boise",
             predicate="located_in",
-            target="California",
+            target="Idaho",
             valid_from=t_old,
             source_evidence_cids=[ev2],
         ),
@@ -318,9 +318,9 @@ def test_graph_ppr_prevents_diffusion_leakage_after_supersession() -> None:
     )
     hit_texts_current = [h.text.lower() for h in hits_current]
 
-    # San Diego must be present, Sacramento must NOT be present (no PPR diffusion mass leak)
+    # San Diego must be present, Boise must NOT be present (no PPR diffusion mass leak)
     assert any("san diego" in t for t in hit_texts_current)
-    assert not any("sacramento" in t for t in hit_texts_current)
+    assert not any("boise" in t for t in hit_texts_current)
 
     # Query graph as of 2021-06-01 (historical point-in-time):
     historical_time = datetime(2021, 6, 1, tzinfo=UTC)
@@ -333,8 +333,8 @@ def test_graph_ppr_prevents_diffusion_leakage_after_supersession() -> None:
     )
     hit_texts_hist = [h.text.lower() for h in hits_hist]
 
-    # Sacramento must be present historically, San Diego must NOT be present
-    assert any("sacramento" in t for t in hit_texts_hist)
+    # Boise must be present historically, San Diego must NOT be present
+    assert any("boise" in t for t in hit_texts_hist)
     assert not any("san diego" in t for t in hit_texts_hist)
 
 
@@ -360,38 +360,38 @@ def test_historical_superseded_relation_synchronization() -> None:
         branch=branch,
     )
 
-    # 2. Also register relation for Sacramento (2020)
+    # 2. Also register relation for Boise (2020)
     engine.add_relation(
         Relation(
             tenant_id=tenant_id,
             branch=branch,
             source="user",
             predicate="lives_in",
-            target="Sacramento",
+            target="Boise",
             valid_from=t_old,
             valid_to=None,
         ),
         branch=branch,
     )
 
-    # 3. Older assertion arrives out of order: Sacramento in 2020
+    # 3. Older assertion arrives out of order: Boise in 2020
     engine.upsert_assertion(
         Assertion(
             tenant_id=tenant_id,
             branch=branch,
             subject="user",
             predicate="residence",
-            object="Sacramento",
+            object="Boise",
             valid_from=t_old,
         ),
         branch=branch,
     )
 
-    # Verify Sacramento relation valid_to is synchronized to current.valid_from (2024-01-01)
+    # Verify Boise relation valid_to is synchronized to current.valid_from (2024-01-01)
     sac_relations = [
         r
         for r in engine.relations.values()
-        if r.tenant_id == tenant_id and r.source == "user" and r.target == "Sacramento"
+        if r.tenant_id == tenant_id and r.source == "user" and r.target == "Boise"
     ]
     assert len(sac_relations) == 1
     assert sac_relations[0].valid_to == t_new
@@ -405,7 +405,7 @@ def test_expired_or_superseded_single_step_trajectory() -> None:
         tenant_id="t1",
         subject="user",
         predicate="residence",
-        object="Sacramento",
+        object="Boise",
         valid_from=t1,
         valid_to=t2,
         status="superseded",
@@ -416,7 +416,7 @@ def test_expired_or_superseded_single_step_trajectory() -> None:
     assert trajectory.current is None
     assert trajectory.current_value is None
     assert "CURRENT" not in trajectory.format_trajectory()
-    assert trajectory.format_trajectory() == "Sacramento (2020-01-01)"
+    assert trajectory.format_trajectory() == "Boise (2020-01-01)"
 
 
 def test_timezone_naive_and_aware_sorting_in_trajectory() -> None:
@@ -425,7 +425,7 @@ def test_timezone_naive_and_aware_sorting_in_trajectory() -> None:
         tenant_id="t1",
         subject="user",
         predicate="residence",
-        object="Sacramento",
+        object="Boise",
         valid_from=datetime(2020, 1, 1),  # naive
     )
     a2 = Assertion(
@@ -437,7 +437,7 @@ def test_timezone_naive_and_aware_sorting_in_trajectory() -> None:
     )
     trajectory = build_attribute_trajectory([a2, a1], "user", "residence")
     assert len(trajectory.steps) == 2
-    assert trajectory.steps[0].value == "Sacramento"
+    assert trajectory.steps[0].value == "Boise"
     assert trajectory.steps[1].value == "San Diego"
     assert trajectory.steps[1].status == "CURRENT"
 
@@ -516,14 +516,14 @@ def test_sqlite_engine_relation_supersession_parity(tmp_path: Path) -> None:
         )
     )
 
-    # Add relation for Sacramento (2020)
+    # Add relation for Boise (2020)
     engine.add_relation(
         Relation(
             tenant_id=tenant_id,
             branch=branch,
             source="user",
             predicate="lives_in",
-            target="Sacramento",
+            target="Boise",
             valid_from=t_old,
             valid_to=None,
             source_evidence_cids=[cid],
@@ -531,14 +531,14 @@ def test_sqlite_engine_relation_supersession_parity(tmp_path: Path) -> None:
         branch=branch,
     )
 
-    # Add initial assertion Sacramento (2020)
+    # Add initial assertion Boise (2020)
     engine.upsert_assertion(
         Assertion(
             tenant_id=tenant_id,
             branch=branch,
             subject="user",
             predicate="residence",
-            object="Sacramento",
+            object="Boise",
             valid_from=t_old,
             source_evidence_cids=[cid],
         ),
@@ -562,7 +562,7 @@ def test_sqlite_engine_relation_supersession_parity(tmp_path: Path) -> None:
     # Query relations from SQLite table
     exported = engine.export_tenant(tenant_id)
     sac_rel = [
-        r for r in exported.get("relations", []) if r.get("target") == "Sacramento"
+        r for r in exported.get("relations", []) if r.get("target") == "Boise"
     ]
     assert len(sac_rel) == 1
     assert sac_rel[0].get("valid_to") is not None
@@ -570,11 +570,11 @@ def test_sqlite_engine_relation_supersession_parity(tmp_path: Path) -> None:
     # Test direct _sync_relation_supersession call on SqliteEngine
     t_sync = datetime(2021, 6, 1, tzinfo=UTC)
     engine._sync_relation_supersession(
-        tenant_id, branch, "user", "lives_in", "Sacramento", t_sync
+        tenant_id, branch, "user", "lives_in", "Boise", t_sync
     )
     exported2 = engine.export_tenant(tenant_id)
     sac_rel2 = [
-        r for r in exported2.get("relations", []) if r.get("target") == "Sacramento"
+        r for r in exported2.get("relations", []) if r.get("target") == "Boise"
     ]
     assert parse_dt(sac_rel2[0].get("valid_to")) == t_sync
 
@@ -665,7 +665,7 @@ def test_multi_step_trajectory_with_retracted_final_step() -> None:
         tenant_id="t1",
         subject="user",
         predicate="residence",
-        object="Sacramento",
+        object="Boise",
         valid_from=t1,
         status="active",
     )
@@ -680,11 +680,11 @@ def test_multi_step_trajectory_with_retracted_final_step() -> None:
 
     traj = build_attribute_trajectory([a_active, a_retracted], "user", "residence")
     assert len(traj.steps) == 2
-    assert traj.steps[0].value == "Sacramento"
+    assert traj.steps[0].value == "Boise"
     assert traj.steps[0].status == "CURRENT"
     assert traj.steps[1].value == "Denver"
     assert traj.steps[1].status == "RETRACTED"
 
-    assert traj.current_value == "Sacramento"
+    assert traj.current_value == "Boise"
     assert traj.current is not None
-    assert traj.current.value == "Sacramento"
+    assert traj.current.value == "Boise"

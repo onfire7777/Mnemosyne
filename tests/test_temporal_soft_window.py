@@ -149,7 +149,7 @@ def test_sequence_chronological_ordering_without_window() -> None:
                 user_id="u",
                 actor="user",
                 source_type="conversation",
-                content="I visited the Louvre museum.",
+                content="I toured the Pemaquid lighthouse.",
                 created_at=parse_dt("2025-01-10T10:00:00Z"),
                 metadata={"event_start": "2025-01-10T10:00:00Z"},
             )
@@ -161,7 +161,7 @@ def test_sequence_chronological_ordering_without_window() -> None:
                 user_id="u",
                 actor="user",
                 source_type="conversation",
-                content="I visited the Prado museum.",
+                content="I toured the Split Rock lighthouse.",
                 created_at=parse_dt("2025-06-20T10:00:00Z"),
                 metadata={"event_start": "2025-06-20T10:00:00Z"},
             )
@@ -173,7 +173,7 @@ def test_sequence_chronological_ordering_without_window() -> None:
                 user_id="u",
                 actor="user",
                 source_type="conversation",
-                content="I visited the Uffizi museum.",
+                content="I toured the Heceta Head lighthouse.",
                 created_at=parse_dt("2024-11-05T10:00:00Z"),
                 metadata={"event_start": "2024-11-05T10:00:00Z"},
             )
@@ -181,7 +181,7 @@ def test_sequence_chronological_ordering_without_window() -> None:
 
         # Earliest to latest
         res_earliest = engine.retrieve(
-            "order of the museums I visited from earliest to latest",
+            "order of the lighthouses I toured from earliest to latest",
             tenant_id="t1",
             record_access=False,
             filt={"query_mode": "passages", "evaluated_at": NOW_STR},
@@ -190,7 +190,7 @@ def test_sequence_chronological_ordering_without_window() -> None:
 
         # Latest to earliest
         res_latest = engine.retrieve(
-            "order of the museums I visited from latest to earliest",
+            "order of the lighthouses I toured from latest to earliest",
             tenant_id="t1",
             record_access=False,
             filt={"query_mode": "passages", "evaluated_at": NOW_STR},

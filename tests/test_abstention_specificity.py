@@ -22,17 +22,17 @@ def _make_hit(id: str, text: str, score: float = 1.0, metadata: dict | None = No
 def test_proper_noun_absence_caps_support_and_abstains() -> None:
     hit_sf = _make_hit(
         "h1",
-        "I stayed at the Fairmont Hotel in San Francisco during my California vacation.",
+        "I stayed at the Harbourfront Inn in Kelowna during my Canada vacation.",
     )
-    query = "Where did I stay when visiting Sacramento?"
+    query = "Where did I stay when visiting Halifax?"
 
     supp = query_support(query, [hit_sf])
     assert supp["anchor_grounding"]["satisfied"] is False
-    assert "Sacramento" in supp["anchor_grounding"]["missing_proper"]
+    assert "Halifax" in supp["anchor_grounding"]["missing_proper"]
     assert supp["score"] <= 0.35
     assert supp["anchor_grounding"]["capped"] is True
 
-    # End-to-end engine verification: absence of proper noun Sacramento triggers abstention
+    # End-to-end engine verification: absence of proper noun Halifax triggers abstention
     engine = LocalMemoryEngine()
     try:
         engine.append_evidence(
@@ -42,7 +42,7 @@ def test_proper_noun_absence_caps_support_and_abstains() -> None:
                 user_id="u",
                 actor="user",
                 source_type="conversation",
-                content="I stayed at the Fairmont Hotel in San Francisco during my vacation.",
+                content="I stayed at the Harbourfront Inn in Kelowna during my vacation.",
                 metadata={},
             )
         )
@@ -55,9 +55,9 @@ def test_proper_noun_absence_caps_support_and_abstains() -> None:
 def test_proper_noun_present_allows_full_support() -> None:
     hit_sac = _make_hit(
         "h1",
-        "I stayed at the Citizen Hotel in Sacramento during my California vacation.",
+        "I stayed at the Lighthouse Inn in Halifax during my Canada vacation.",
     )
-    query = "Where did I stay when visiting Sacramento?"
+    query = "Where did I stay when visiting Halifax?"
 
     supp = query_support(query, [hit_sac])
     assert supp["anchor_grounding"]["satisfied"] is True
@@ -73,7 +73,7 @@ def test_proper_noun_present_allows_full_support() -> None:
                 user_id="u",
                 actor="user",
                 source_type="conversation",
-                content="I stayed at the Citizen Hotel in Sacramento during my California vacation.",
+                content="I stayed at the Lighthouse Inn in Halifax during my Canada vacation.",
                 metadata={},
             )
         )
@@ -84,18 +84,18 @@ def test_proper_noun_present_allows_full_support() -> None:
 
 
 def test_compound_noun_cross_document_isolation() -> None:
-    hit_table = _make_hit("h1", "I bought an antique table lamp for the dining room.")
-    hit_tennis = _make_hit("h2", "I watched the exciting tennis championship match yesterday.")
-    query = "Did I buy a table tennis racket?"
+    hit_coffee = _make_hit("h1", "I bought a bag of coffee beans for the kitchen.")
+    hit_table = _make_hit("h2", "I refinished an old oak table in the garage.")
+    query = "Did I buy a coffee table?"
 
-    # Table and tennis appear in separate documents, NOT within <= 2 tokens in the same document
-    supp_split = query_support(query, [hit_table, hit_tennis])
+    # Coffee and table appear in separate documents, NOT within <= 2 tokens in the same document
+    supp_split = query_support(query, [hit_coffee, hit_table])
     assert supp_split["anchor_grounding"]["satisfied"] is False
-    assert "table tennis" in supp_split["anchor_grounding"]["missing_compounds"]
+    assert "coffee table" in supp_split["anchor_grounding"]["missing_compounds"]
     assert supp_split["score"] <= 0.35
 
-    # Grounded hit with table tennis in the same hit
-    hit_together = _make_hit("h3", "I bought a professional table tennis racket and balls.")
+    # Grounded hit with coffee table in the same hit
+    hit_together = _make_hit("h3", "I bought a walnut coffee table for the living room.")
     supp_together = query_support(query, [hit_together])
     assert supp_together["anchor_grounding"]["satisfied"] is True
     assert supp_together["anchor_grounding"]["missing_compounds"] == []
@@ -140,8 +140,8 @@ def test_multihop_bridge_query_supported_via_extra_texts() -> None:
 
 def test_dense_cosine_override_blocked_when_anchor_missing() -> None:
     # When cosine_ranked evaluates top_score >= floor, but an anchor proper noun is missing
-    query = "Where did I stay when visiting Sacramento?"
-    hit = _make_hit("h1", "I stayed at a wonderful hotel in San Francisco.")
+    query = "Where did I stay when visiting Halifax?"
+    hit = _make_hit("h1", "I stayed at a wonderful hotel in Kelowna.")
     supp = query_support(query, [hit])
     assert supp["anchor_grounding"]["satisfied"] is False
 

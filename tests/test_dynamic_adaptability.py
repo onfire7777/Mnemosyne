@@ -69,7 +69,7 @@ def test_dynamic_window_trimming_adapted_to_budget():
 def test_trim_hit_window_preserves_query_focal_content():
     """Verify _trim_hit_window centers the window around paragraphs matching query tokens."""
     part1 = "Unrelated introductory filler about morning coffee and breakfast weather. " * 15
-    part2 = "CRITICAL FOCAL PARAGRAPH: The pre-approved mortgage amount from Wells Fargo was $450,000. " * 5
+    part2 = "CRITICAL FOCAL PARAGRAPH: The approved credit card limit from Harbor Credit Union was $8,000. " * 5
     part3 = "Unrelated concluding filler about evening dinner and walking the dog. " * 15
     full_text = f"{part1}\n\n{part2}\n\n{part3}"
 
@@ -83,9 +83,9 @@ def test_trim_hit_window_preserves_query_focal_content():
         channel="c",
     )
 
-    trimmed = _trim_hit_window(hit, query="Wells Fargo mortgage pre-approved amount", max_tokens=250)
-    assert "Wells Fargo" in trimmed.text
-    assert "$450,000" in trimmed.text
+    trimmed = _trim_hit_window(hit, query="Harbor Credit Union credit card approved limit", max_tokens=250)
+    assert "Harbor Credit Union" in trimmed.text
+    assert "$8,000" in trimmed.text
 
 
 def test_query_intent_adaptive_currency_promotion():
@@ -137,11 +137,10 @@ def test_query_intent_adaptive_currency_promotion():
 def test_taxonomic_expansion_and_dynamic_concept_bridge():
     """Verify taxonomic hypernym expansion and dynamic corpus-learned concept bridging."""
     # Static taxonomy
-    assert "brother" in expand_taxonomic_concepts(["siblings"])
-    assert "sister" in expand_taxonomic_concepts(["siblings"])
-    assert "espresso machine" in expand_taxonomic_concepts(["appliance"])
-    assert "air fryer" in expand_taxonomic_concepts(["appliances"])
-    assert "italian" in expand_taxonomic_concepts(["cuisines"])
+    assert "truck" in expand_taxonomic_concepts(["vehicle"])
+    assert "motorcycle" in expand_taxonomic_concepts(["vehicles"])
+    assert "mother" in expand_taxonomic_concepts(["parents"])
+    assert "grandfather" in expand_taxonomic_concepts(["grandpa"])
 
     # Dynamic concept bridge with tenant co-occurrences
     tenant_corpus_cooccurrences = {
@@ -153,11 +152,10 @@ def test_taxonomic_expansion_and_dynamic_concept_bridge():
     assert "scooter" in bridged
 
     # similar_query_terms integration
-    assert similar_query_terms("appliance", "espresso")
-    assert similar_query_terms("appliance", "blender")
-    assert similar_query_terms("cuisine", "mexican")
-    assert similar_query_terms("sibling", "sister")
-    assert similar_query_terms("grandma", "grandmother")
+    assert similar_query_terms("vehicle", "truck")
+    assert similar_query_terms("vehicle", "motorcycle")
+    assert similar_query_terms("parent", "mother")
+    assert similar_query_terms("grandpa", "grandfather")
 
     # Co-hyponyms must NEVER match each other
     assert similar_query_terms("mexican", "italian") is False
@@ -169,21 +167,21 @@ def test_taxonomic_expansion_and_dynamic_concept_bridge():
 
 def test_conjunctive_nominal_abstention_grounding():
     """Verify that query with nominal conjunction 'X and Y' requires grounding for BOTH X and Y."""
-    text_only_headphones = "I purchased new noise-canceling headphones last Friday for $199."
+    text_only_lamp = "I purchased a new brass desk lamp last Friday for $45."
     hit = Hit(
         id="h1",
         kind="evidence",
-        text=text_only_headphones,
+        text=text_only_lamp,
         score=1.0,
         tenant_id="t",
         branch="main",
         channel="c",
     )
 
-    # 1. Query asks for both headphones AND iPad: one conjunct missing
-    res = query_support("What is the total cost of my recently purchased headphones and the iPad?", [hit])
+    # 1. Query asks for both desk lamp AND bookcase: one conjunct missing
+    res = query_support("What is the total cost of my recently purchased desk lamp and the bookcase?", [hit])
     assert res["anchor_grounding"]["satisfied"] is False
-    assert any("iPad" in err or "ipad" in err for err in res["anchor_grounding"]["missing_conjunctions"])
+    assert any("bookcase" in err for err in res["anchor_grounding"]["missing_conjunctions"])
     assert res["score"] <= 0.35
 
     # 2. Both conjuncts missing: must fail grounding

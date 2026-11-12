@@ -4,7 +4,7 @@ Covers:
 1. Deterministic extraction across all 4 fact families (Residence, Family/Pet, Expenses/Counts, Milestones).
 2. Explicit date/timestamp parsing and fallback to utterance created_at.
 3. Cryptographic provenance preservation (source_evidence_cids, trust_tier).
-4. Atomic supersession across successive temporal updates (e.g. Sacramento -> San Diego).
+4. Atomic supersession across successive temporal updates (e.g. Boise -> San Diego).
 5. Cross-engine parity across LocalMemoryEngine and SqliteEngine.
 6. End-to-end integration via MemoryTools.working_consolidate and working_expire(consolidate=True).
 7. Negative cases (non-factual conversational dialogue produces 0 assertions).
@@ -108,11 +108,11 @@ def test_extract_residence_family() -> None:
     assert any(r.source == "user" and r.target == "San Diego" and r.predicate in {"lives_in", "residence"} for r in f1.relations)
 
     # Living in / residing
-    t2 = "I currently live in Sacramento."
+    t2 = "I currently live in Boise."
     now = datetime(2023, 5, 1, 12, 0, 0, tzinfo=UTC)
     f2 = extract_episodic_facts(t2, evidence_ids=[cid], created_at=now)
     a2 = next(a for a in f2.assertions if a.predicate == "residence")
-    assert a2.object == "Sacramento"
+    assert a2.object == "Boise"
     assert a2.valid_from == now
 
     # Apartment in location
@@ -142,17 +142,17 @@ def test_extract_family_and_pet_family() -> None:
     assert any(r.source == "user" and r.target == "Emily" and r.predicate == "has_family" for r in f1.relations)
 
     # Pet with breed
-    t2 = "My dog Buster is a Golden Retriever."
+    t2 = "My dog Buster is a Border Collie."
     f2 = extract_episodic_facts(t2, evidence_ids=[cid], created_at=now)
     assert any(a.predicate == "has_pet" and a.object == "Buster" for a in f2.assertions)
-    assert any(a.subject == "Buster" and a.predicate == "breed" and a.object == "Golden Retriever" for a in f2.assertions)
+    assert any(a.subject == "Buster" and a.predicate == "breed" and a.object == "Border Collie" for a in f2.assertions)
     assert any(r.source == "user" and r.target == "Buster" and r.predicate == "has_pet" for r in f2.relations)
     assert any(r.source == "Buster" and r.target == "dog" and r.predicate == "is_a" for r in f2.relations)
 
     # Pet named
-    t3 = "I have a cat named Luna."
+    t3 = "I have a cat named Mochi."
     f3 = extract_episodic_facts(t3, evidence_ids=[cid])
-    assert any(a.predicate == "has_pet" and a.object == "Luna" for a in f3.assertions)
+    assert any(a.predicate == "has_pet" and a.object == "Mochi" for a in f3.assertions)
 
 
 def test_extract_expenses_and_counts_family() -> None:
@@ -229,7 +229,7 @@ def test_provenance_and_trust_derivation() -> None:
     trust = int(TrustTier.DIRECT_USER)
     policy = {"tenant": TENANT, "classification": "confidential"}
 
-    text = "I live in Sacramento. My daughter Emily was born on May 4, 2018. I spent $450 on bike repairs. In 2021, I graduated from Stanford."
+    text = "I live in Boise. My daughter Emily was born on May 4, 2018. I spent $450 on bike repairs. In 2021, I graduated from Stanford."
     facts = extract_episodic_facts(
         text,
         tenant_id=TENANT,
@@ -264,8 +264,8 @@ def test_atomic_supersession_local_memory_engine() -> None:
     cid1 = _seed_evidence(engine, TENANT, USER, "First residence statement")
     cid2 = _seed_evidence(engine, TENANT, USER, "Second residence statement")
 
-    # Step 1: In 2022, user lived in Sacramento
-    t1 = "I live in Sacramento."
+    # Step 1: In 2022, user lived in Boise
+    t1 = "I live in Boise."
     f1 = extract_episodic_facts(
         t1, tenant_id=TENANT, user_id=USER,
         valid_from=datetime(2022, 1, 1, 0, 0, 0, tzinfo=UTC),
@@ -274,10 +274,10 @@ def test_atomic_supersession_local_memory_engine() -> None:
     for a in f1.assertions:
         engine.upsert_assertion(a)
 
-    # Verify Sacramento is active
+    # Verify Boise is active
     active = [a for a in engine.assertions.values() if a.predicate == "residence" and a.status == "active"]
     assert len(active) == 1
-    assert active[0].object == "Sacramento"
+    assert active[0].object == "Boise"
 
     # Step 2: In 2024, user moved to San Diego
     t2 = "In 2024, I moved to San Diego."
@@ -288,7 +288,7 @@ def test_atomic_supersession_local_memory_engine() -> None:
     for a in f2.assertions:
         engine.upsert_assertion(a)
 
-    # Verify San Diego is active and Sacramento is superseded
+    # Verify San Diego is active and Boise is superseded
     all_res = [a for a in engine.assertions.values() if a.predicate == "residence"]
     assert len(all_res) == 2
 
@@ -298,7 +298,7 @@ def test_atomic_supersession_local_memory_engine() -> None:
     assert active_res.object == "San Diego"
     assert active_res.valid_from == datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
 
-    assert superseded_res.object == "Sacramento"
+    assert superseded_res.object == "Boise"
     assert superseded_res.superseded_by == active_res.id
     assert superseded_res.valid_to == active_res.valid_from
 
@@ -309,8 +309,8 @@ def test_atomic_supersession_sqlite_engine() -> None:
         cid1 = _seed_evidence(engine, TENANT, USER, "First residence statement")
         cid2 = _seed_evidence(engine, TENANT, USER, "Second residence statement")
 
-        # Step 1: Sacramento in 2022
-        t1 = "I live in Sacramento."
+        # Step 1: Boise in 2022
+        t1 = "I live in Boise."
         f1 = extract_episodic_facts(
             t1, tenant_id=TENANT, user_id=USER,
             valid_from=datetime(2022, 1, 1, 0, 0, 0, tzinfo=UTC),
@@ -346,7 +346,7 @@ def test_atomic_supersession_sqlite_engine() -> None:
         superseded = rows_by_status["superseded"]
 
         assert active["object"] == "San Diego"
-        assert superseded["object"] == "Sacramento"
+        assert superseded["object"] == "Boise"
         assert superseded["superseded_by"] == active["id"]
 
 
@@ -458,7 +458,7 @@ def test_working_expire_with_episodic_consolidation() -> None:
         task_id="task-expire-facts",
         branch="main",
         kind="conversation_turn",
-        content="I live in Sacramento. In 2021, I graduated from Stanford.",
+        content="I live in Boise. In 2021, I graduated from Stanford.",
         evidence_ids=[cid],
         ttl_seconds=60,
         created_at=now.isoformat(),
@@ -484,6 +484,6 @@ def test_working_expire_with_episodic_consolidation() -> None:
     assertions = exp_res["consolidated"]["assertions"]
     relations = exp_res["consolidated"]["relations"]
 
-    assert any(a["predicate"] == "residence" and a["object"] == "Sacramento" for a in assertions)
+    assert any(a["predicate"] == "residence" and a["object"] == "Boise" for a in assertions)
     assert any("Stanford" in a["object"] for a in assertions)
     assert len(relations) >= 2

@@ -67,17 +67,17 @@ def test_verifier_lodging_location_conflict() -> None:
     evidence = [
         {
             "cid": "c1",
-            "content": "User: I booked an Airbnb in San Diego for our summer trip.",
+            "content": "User: I booked a cabin in Asheville for our autumn trip.",
         }
     ]
-    query = "When did I book the Airbnb in Sacramento?"
+    query = "How many nights did I reserve the cabin in Missoula?"
     res = verifier.verify(query, evidence_rows=evidence)
     assert res.is_consistent is False
     assert res.abstention_recommended is True
     m = res.mismatches[0]
     assert m.mismatch_type == "location_conflict"
-    assert "Sacramento" in res.clean_abstention_text
-    assert "San Diego" in res.clean_abstention_text
+    assert "Missoula" in res.clean_abstention_text
+    assert "Asheville" in res.clean_abstention_text
 
 
 def test_verifier_missing_pet_entity() -> None:
@@ -85,7 +85,7 @@ def test_verifier_missing_pet_entity() -> None:
     evidence = [
         {
             "cid": "c1",
-            "content": "User: I took my golden retriever Buster to the vet today.",
+            "content": "User: I took my beagle Biscuit to the vet today.",
         }
     ]
     facts = [
@@ -93,16 +93,16 @@ def test_verifier_missing_pet_entity() -> None:
             tenant_id="default",
             subject="user",
             predicate="family_pet",
-            object="dog Buster",
+            object="dog Biscuit",
         )
     ]
-    query = "What is the name of my pet hamster?"
+    query = "What did I name my pet ferret?"
     res = verifier.verify(query, facts=facts, evidence_rows=evidence)
     assert res.is_consistent is False
     assert res.abstention_recommended is True
     m = res.mismatches[0]
     assert m.mismatch_type == "missing_entity"
-    assert "hamster" in res.clean_abstention_text
+    assert "ferret" in res.clean_abstention_text
 
 
 def test_verifier_comparative_timeline_counterfactual() -> None:
@@ -110,16 +110,16 @@ def test_verifier_comparative_timeline_counterfactual() -> None:
     evidence = [
         {
             "cid": "c1",
-            "content": "User: Tom moved to Seattle last year. Alex started a new job in Boston.",
+            "content": "User: Priya moved to Tucson last year. Marcus started a new job in Raleigh.",
         }
     ]
-    query = "Who became a parent first, Tom or Alex?"
+    query = "Who bought a house first, Priya or Marcus?"
     res = verifier.verify(query, evidence_rows=evidence)
     assert res.is_consistent is False
     assert res.abstention_recommended is True
     m = res.mismatches[0]
     assert m.mismatch_type == "counterfactual_comparison"
-    assert "Neither Tom nor Alex" in res.clean_abstention_text
+    assert "Neither Priya nor Marcus" in res.clean_abstention_text
 
 
 def test_verifier_consistent_query() -> None:
@@ -127,10 +127,10 @@ def test_verifier_consistent_query() -> None:
     evidence = [
         {
             "cid": "c1",
-            "content": "User: I booked an Airbnb in San Diego for our summer trip.",
+            "content": "User: I booked a cabin in Asheville for our autumn trip.",
         }
     ]
-    query = "When did I book the Airbnb in San Diego?"
+    query = "How many nights did I reserve the cabin in Asheville?"
     res = verifier.verify(query, evidence_rows=evidence)
     assert res.is_consistent is True
     assert res.abstention_recommended is False
@@ -145,13 +145,13 @@ def test_decisive_direct_answering_hedging_cleaner() -> None:
     t2 = "According to the relevant chat history, your role is Senior Tech Lead."
     assert _clean_hedging_headers(t2) == "Your role is Senior Tech Lead."
 
-    t3 = "It appears that you spent $65 on a car cover."
-    assert _clean_hedging_headers(t3) == "You spent $65 on a car cover."
+    t3 = "It appears that you spent $40 on a phone case."
+    assert _clean_hedging_headers(t3) == "You spent $40 on a phone case."
 
     t4 = "As an AI, I see that you visited Paris in 2024."
     assert _clean_hedging_headers(t4) == "I see that you visited Paris in 2024."
 
-    t5 = "You have 2 siblings: your brother David and your sister Sarah."
+    t5 = "You have 2 siblings: your brother Omar and your sister Ines."
     assert _clean_hedging_headers(t5) == t5
 
     t6 = "Please note that your subscription expires tomorrow."
@@ -166,15 +166,15 @@ def test_verifier_comparative_timeline_cooccurring_entities() -> None:
     evidence = [
         {
             "cid": "c1",
-            "content": "User: Tom moved to Seattle last year. Alex graduated from MIT.",
+            "content": "User: Priya moved to Tucson last year. Marcus graduated from Rice.",
         }
     ]
-    query = "Who graduated first, Tom or Alex?"
+    query = "Who graduated first, Priya or Marcus?"
     res = verifier.verify(query, evidence_rows=evidence)
     assert res.is_consistent is False
     assert res.abstention_recommended is True
-    assert "Alex is recorded as having graduated" in (res.clean_abstention_text or "")
-    assert "no record of Tom" in (res.clean_abstention_text or "")
+    assert "Marcus is recorded as having graduated" in (res.clean_abstention_text or "")
+    assert "no record of Priya" in (res.clean_abstention_text or "")
 
 
 def test_orchestrator_premise_verifier_integration() -> None:
@@ -185,7 +185,7 @@ def test_orchestrator_premise_verifier_integration() -> None:
             user_id="u1",
             actor="user",
             source_type="conversation",
-            content="User: I booked an Airbnb in San Diego for our trip in July.",
+            content="User: I booked a cabin in Asheville for our trip in July.",
             session_id="s1",
         )
     )
@@ -200,16 +200,16 @@ def test_orchestrator_premise_verifier_integration() -> None:
             return {"claims": [], "unresolved": False}
 
     orchestrator = GroundedAnswerOrchestrator(engine, SimpleDecomposer())
-    # False premise query: asking about Sacramento when booking is in San Diego
+    # False premise query: asking about Missoula when booking is in Asheville
     request = AnswerRequest(
-        question="When did I book the Airbnb in Sacramento?",
+        question="How many nights did I reserve the cabin in Missoula?",
         context=context,
     )
     result = orchestrator.answer(request, SimpleReader())
     assert result.abstained is True
     assert result.public_reason == "premise_mismatch"
-    assert "Sacramento" in result.answer
-    assert "San Diego" in result.answer
+    assert "Missoula" in result.answer
+    assert "Asheville" in result.answer
     # Another tenant's evidence must never feed the premise wording.
     other = orchestrator.answer(
         AnswerRequest(
@@ -226,13 +226,13 @@ def test_adaptive_synthesize_premise_mismatch_abstention() -> None:
     evidence = [
         {
             "cid": "c1",
-            "content": "User: I bought vinyl records on Bandcamp in San Francisco.",
+            "content": "User: I bought a wool scarf at the market in Halifax.",
         }
     ]
-    # False premise: asking about purchases in Sacramento
-    synth = adaptive_synthesize("What did I buy in Sacramento?", evidence)
+    # False premise: asking about purchases in a city never mentioned
+    synth = adaptive_synthesize("What did I buy in Kelowna?", evidence)
     assert synth["abstained"] is True
-    assert "Sacramento" in synth["answer"]
+    assert "Kelowna" in synth["answer"]
     assert "premise_verification" in synth
 
 
@@ -241,10 +241,10 @@ def test_verifier_semicolon_clause_splitting() -> None:
     evidence = [
         {
             "cid": "c1",
-            "content": "User: Tom moved to Seattle; Alex graduated from MIT in June.",
+            "content": "User: Priya moved to Tucson; Marcus graduated from Rice in June.",
         }
     ]
-    res = verifier.verify("Who graduated first, Tom or Alex?", evidence_rows=evidence)
+    res = verifier.verify("Who graduated first, Priya or Marcus?", evidence_rows=evidence)
     assert res.is_consistent is False
     assert res.abstention_recommended is True
-    assert "Tom" in (res.clean_abstention_text or "")
+    assert "Priya" in (res.clean_abstention_text or "")
