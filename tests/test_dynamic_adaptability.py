@@ -139,6 +139,7 @@ def test_taxonomic_expansion_and_dynamic_concept_bridge():
     # Static taxonomy
     assert "van" in expand_taxonomic_concepts(["vehicle"])
     assert "motorcycle" in expand_taxonomic_concepts(["vehicles"])
+    assert "suv" in expand_taxonomic_concepts(["vehicles"])
     assert "mother" in expand_taxonomic_concepts(["parents"])
     assert "grandfather" in expand_taxonomic_concepts(["grandpa"])
 
@@ -155,6 +156,7 @@ def test_taxonomic_expansion_and_dynamic_concept_bridge():
     assert similar_query_terms("vehicle", "van")
     assert similar_query_terms("vehicle", "motorcycle")
     assert similar_query_terms("parent", "mother")
+    assert similar_query_terms("parents", "dad")
     assert similar_query_terms("grandpa", "grandfather")
 
     # Co-hyponyms must NEVER match each other

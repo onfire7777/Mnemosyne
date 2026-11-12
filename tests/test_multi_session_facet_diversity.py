@@ -81,23 +81,23 @@ def test_counting_synonyms_passage_scores() -> None:
 
 
 def test_facet_extraction_and_coverage_diversification() -> None:
-    query = "Tell me about the hobbies of me, my aunts, and my roommates"
+    query = "Tell me about the hobbies of me, my teammates, and my roommates"
     facets = _extract_query_facets(query)
     assert len(facets) >= 3
 
-    # Generate 6 hits: hits 0-3 about user, hit 4 about aunts, hit 5 about roommates
+    # Generate 6 hits: hits 0-3 about user, hit 4 about teammates, hit 5 about roommates
     hits = [
         _make_hit("h0", "I love playing guitar and writing code.", score=0.95),
         _make_hit("h1", "I spend my weekends hiking mountain trails.", score=0.90),
         _make_hit("h2", "I enjoy baking sourdough bread at home.", score=0.85),
         _make_hit("h3", "I play chess online every evening.", score=0.80),
-        _make_hit("h4", "My aunts enjoy quilting and growing orchids.", score=0.75),
+        _make_hit("h4", "My teammates enjoy quilting and growing orchids.", score=0.75),
         _make_hit("h5", "My roommates love bouldering and landscape painting.", score=0.70),
     ]
 
     diversified = _diversify_facets(query, hits, k=5)
     diversified_ids = [h.id for h in diversified[:3]]
-    # Facet diversification must ensure aunts (h4) and roommates (h5) are promoted
+    # Facet diversification must ensure teammates (h4) and roommates (h5) are promoted
     # into the top slots alongside the user hit (h0)
     assert "h0" in diversified_ids
     assert "h4" in diversified_ids
