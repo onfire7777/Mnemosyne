@@ -7,7 +7,7 @@ reproduction scripts. They were subsequently located at
 and `C:\Users\Onfire\Desktop\QT projects\Mnemosyne\_scratch\benchmark`.
 The current source, Desktop Mnemetric harness/reports, and MnemetricData corpus
 and diagnostics were inspected instead. The checkout is newer than the brief's
-`e1ad2d0c` pin; the starting revision was `1e19ac52`.
+`2dd2f243` pin; the starting revision was `27f267cb`.
 Landed as one commit on `main` on 7 Oct 2026, with one fix found on review: once
 the CID header left the summary text, two summaries with the same words over
 different sources or RAPTOR levels hashed to the same evidence CID and collapsed
@@ -132,7 +132,7 @@ summary blockage, not a general rolling-window budget redesign.
 
 ## Measurement follow-up — 2026-10-13
 
-Local, uncommitted follow-up against `be29799f`:
+Local, uncommitted follow-up against `d9e85561`:
 
 - `eval/store_recall.py` now uses the shared ranked-document resolver. Working
   memory citations no longer create extra ranked hits; ambiguous ID-less
@@ -375,7 +375,7 @@ successfully (exit 0, all 59 cases passed). This checks the accumulated evaluato
 bundle-helper and retrieval-integrity changes together; it is not a full-suite
 or model-backed acceptance result. The completed M06 milestone was not rerun.
 
-Fresh inspection on 2026-10-17 UTC found HEAD at `9b4e2895` (1.3.0), with
+Fresh inspection on 2026-10-17 UTC found HEAD at `52d81297` (1.3.0), with
 this chat's evaluator/bundle/test changes still uncommitted. On that combined
 working tree, `test_passage_graph.py` and `test_public_hipporag.py` completed
 with **57 passed, zero failures or skips**. This is focused compatibility
@@ -436,7 +436,7 @@ allocated, no new rejection policy was introduced, and no unrelated edits were
 touched. A future bounded-memory implementation must preserve validation and
 cross-file scanner semantics rather than simply imposing an unstated quota.
 
-On the newer `d81ae5a0` (1.5.0) working tree, combined passage-graph,
+On the newer `9a43176c` (1.5.0) working tree, combined passage-graph,
 public-HippoRAG and store-recall verification completed with **83 passed,
 zero failures/skips**. This supersedes the older-head compatibility evidence
 for those selected files only; it does not validate model-backed replay,
@@ -458,7 +458,7 @@ replace the outstanding full reproducibility and platform verification.
 
 ### 2026-10-18: ranked-ID deduplication after repository split
 
-On clean baseline `a1953d89` in the migrated Mnemosyne `Repository` checkout,
+On clean baseline `40cd6055` in the migrated Mnemosyne `Repository` checkout,
 the shared ranked-ID resolver used repeated list membership checks. It now
 uses a set for membership while retaining the ordered result list. Direct-ID
 precedence and ambiguous-provenance rejection are unchanged. A regression
@@ -500,7 +500,7 @@ unchanged. This is input validation, not model-backed replay acceptance.
 
 After the production batch-size guard, combined verification of passage graph,
 store recall, retrieval integrity and shared metrics completed with **97 passed,
-zero failures/skips** on the `a1953d89` working tree plus these uncommitted
+zero failures/skips** on the `40cd6055` working tree plus these uncommitted
 changes. This is a selected compatibility check, not the full suite or the
 outstanding model-backed, cross-shard, Postgres and efficiency acceptance.
 
@@ -520,7 +520,7 @@ store-recall tests and touched-file Ruff checks passed. Missing kinds still
 use the existing `?` grouping. No model calls or historical report edits were
 made; full acceptance remains open.
 
-On fresh HEAD `ef0e51ca` (v1.7.0), the same four-file combined verification
+On fresh HEAD `63e90d2d` (v1.7.0), the same four-file combined verification
 completed with **103 passed, zero failures/skips**, including the distinct-gold
 and optional-kind changes. This verifies selected compatibility with the newer
 HEAD plus this chat's uncommitted fixes, not the full suite, deployed connector,
@@ -607,7 +607,7 @@ boundary. Six new regressions use an uninitialized graph to prove rejection
 precedes store access. The 12 selected invalid-batch-size tests passed and
 Ruff passed; the 113-test combined milestone predates this indexing change.
 
-Post-indexing-guard compatibility check on ef0e51ca: all 57 tests in
+Post-indexing-guard compatibility check on 63e90d2d: all 57 tests in
 tests/test_passage_graph.py passed (exit 0). The production MCP indexing caller
 uses the valid default batch size. This is focused graph/unit compatibility,
 not model-backed shard replay or full efficiency acceptance.
@@ -662,7 +662,7 @@ and Ruff passed. Existing native helper tests were not rerun. This verifies
 command wiring only, not real retrieval memory, serialization peaks, or a
 fresh-process end-to-end measurement; the preceding acceptance gap remains.
 
-Oct26 combined compatibility on ef0e51ca: 141 tests passed, exit 0, across
+Oct26 combined compatibility on 63e90d2d: 141 tests passed, exit 0, across
 test_passage_graph, test_store_recall, test_retrieval_integrity,
 eval/tests/test_metrics, test_cli_peak_memory and test_provider_bakeoff.
 This combines the indexing guard, timing-scope field, provider unit correction

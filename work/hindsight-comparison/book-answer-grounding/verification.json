@@ -1,5 +1,5 @@
 {
-  "baseline": "97091695ccd90330e8300804524bd5b2d3043c7a",
+  "baseline": "22a03aab23e3c687c51d8a2389a453ce359a96d1",
   "python": {
     "tests": "262",
     "failures": "0",
@@ -20,10 +20,10 @@
   },
   "benchmark_run": false,
   "provider_inference_run": false,
-  "source_commit": "1557f8aafa47018a5218a821ce397f00f9592a5b",
+  "source_commit": "0c3e70bc5efa73ce40dc2466dbf9a256135d38a3",
   "remote_confirmation": {
     "ref": "refs/heads/main",
-    "observed_commit": "1557f8aafa47018a5218a821ce397f00f9592a5b",
+    "observed_commit": "0c3e70bc5efa73ce40dc2466dbf9a256135d38a3",
     "method": "git ls-remote --heads origin main"
   }
 }

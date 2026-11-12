@@ -16,7 +16,7 @@
 > evidence remains the blocking strict-parity class.
 
 > **Addendum (2026-07-20) — post-blueprint memory-plane merge:** PR #39
-> (`main@0784340`) merged the W3 prospective-memory and working-memory planes
+> (`main@a60114a`) merged the W3 prospective-memory and working-memory planes
 > across Local/Postgres/Sqlite, the W2 D5 signed deletion manifest
 > (`src/mnemosyne/deletion.py` + `deletion_manifest.py`), the explicit
 > cross-engine `assertion_id_map` branch-merge identity map, and the W3 I0R
@@ -184,9 +184,9 @@ several carry production-evidence gates (release-audit / provider-check / OIDC-J
 Lane-routed. Status tracked here; owning lane commits only its own files. Cross-lane pairs agree an interface, each committing its own side.
 
 ### CC-PG (B4) — schema parity (migration-safe additive)
-> **✅ CLOSED @`5103a3a`** (migration-safe additive `ALTER … ADD COLUMN IF NOT EXISTS`): `assertions.{salience,calibrated_confidence,recorded_time}`, `relations.{weight,recorded_at,expired_at,justification_id,status}`, `preferences.superseded_by` — closes items #1–#4 and the column side of #18. (#5 column-level drift guard: B4 `2c1a40d`.)
+> **✅ CLOSED @`b10529d`** (migration-safe additive `ALTER … ADD COLUMN IF NOT EXISTS`): `assertions.{salience,calibrated_confidence,recorded_time}`, `relations.{weight,recorded_at,expired_at,justification_id,status}`, `preferences.superseded_by` — closes items #1–#4 and the column side of #18. (#5 column-level drift guard: B4 `21b31c9`.)
 
-1. `[C]` add `assertions.salience` (I4 activation) + populate. ✅ column @`5103a3a`
+1. `[C]` add `assertions.salience` (I4 activation) + populate. ✅ column @`b10529d`
 2. `[C]` restore bitemporal `evidence.event_time`+`recorded_time` (or document the collapse w/ test). 🟡
 3. `[C]` `relations.{weight,recorded_at,expired_at,justification_id,status}`. 🟡
 4. `[C]` `preferences.superseded_by`. 🟡
@@ -201,17 +201,17 @@ Lane-routed. Status tracked here; owning lane commits only its own files. Cross-
 
 ### CC-BC (B12) — belief/calibration/consolidation/lifecycle
 11. `[C]` real IVM dirty-set/memoization + auto-trigger (I6). ✅ local: projection recompute walks affected evidence/projection edges, queues only dirty surviving source inputs, and memo-skips unchanged fingerprints; production proof remains Tier B.
-12. `[C]` per-example conformal nonconformity (I8). ✅ closed @`b8bfc36a` (PR #59) — per-example nonconformity in `engine.py`/`postgres_engine.py`; `tests/test_conformal_per_example.py`
-13. `[C]` explicit AGM expansion/revision/contraction + ATMS labels (I2). ✅ closed @`51acba55` (PR #60) — `BeliefStore.contract()` + `atms_label()` in `belief.py`
-14. `[C]` enforce `must_keep` in lifecycle demotion + pointer-to-original (I7/§25). ✅ closed @`34effb4b` (PR #61) — `must_keep` gates demotion in `lifecycle.py`; `tests/test_must_keep_properties.py`
+12. `[C]` per-example conformal nonconformity (I8). ✅ closed @`371b1743` (PR #59) — per-example nonconformity in `engine.py`/`postgres_engine.py`; `tests/test_conformal_per_example.py`
+13. `[C]` explicit AGM expansion/revision/contraction + ATMS labels (I2). ✅ closed @`f2a0f0cd` (PR #60) — `BeliefStore.contract()` + `atms_label()` in `belief.py`
+14. `[C]` enforce `must_keep` in lifecycle demotion + pointer-to-original (I7/§25). ✅ closed @`ce915cb0` (PR #61) — `must_keep` gates demotion in `lifecycle.py`; `tests/test_must_keep_properties.py`
 15. `[C]` tier-0 correction → same-turn supersession in belief core (pairs #23). ✅ closed locally.
 16. `[C]` cadence-bound consolidation anti-thrash (§21). ✅ closed locally.
 17. `[C]` gate fact-candidates by external corroboration (§23.3).
-18. `[C]` persist + compute per-memory `calibrated_confidence`, fuse signals (§26). *(CC-PG column `assertions.calibrated_confidence` landed @`5103a3a`)* ✅ closed @`3d0ed940` (PR #58) — `fuse_calibrated_confidence()` in `calibration.py`, weights pinned by `tests/test_calibrated_confidence_fuse.py`
+18. `[C]` persist + compute per-memory `calibrated_confidence`, fuse signals (§26). *(CC-PG column `assertions.calibrated_confidence` landed @`b10529d`)* ✅ closed @`5272b7d0` (PR #58) — `fuse_calibrated_confidence()` in `calibration.py`, weights pinned by `tests/test_calibrated_confidence_fuse.py`
 
 ### CC-LS (B2) — learning/self-opt/eval
-19. `[C]` implement counterfactual replay + wire dead `counterfactual_replay_score()` into gate/eval (I12/§30.6). ✅ closed @`a8581e7c`,`d8e63960`,`85a7ab0d` (PRs #55/#56/#57) — `counterfactual_replay_score()` now wired into `self_optimization.py` + `mcp_tools.py` (no longer dead)
-20. `[C]` hot-loop CRITIC verify-with-tools → candidate-lesson (§23.1). *(in progress — see commit `f7e4180`)*
+19. `[C]` implement counterfactual replay + wire dead `counterfactual_replay_score()` into gate/eval (I12/§30.6). ✅ closed @`16ee959d`,`fe94e79b`,`e9435307` (PRs #55/#56/#57) — `counterfactual_replay_score()` now wired into `self_optimization.py` + `mcp_tools.py` (no longer dead)
+20. `[C]` hot-loop CRITIC verify-with-tools → candidate-lesson (§23.1). *(in progress — see commit `8afe401`)*
 21. `[C/T]` `eval.py` recall@k/nDCG + ECE + poison-block-rate% + TTL-lift + shadow-mode harness.
 22. `[C/T]` pin numeric invariant-rail VALUES (`max_supersession_rate`≈0.05, `min_corroboration`≈2, `max_prune_fraction`) as live constants tested by config-drift (§31). *(CC-LS adds constants on `OperatingPolicy`; AUX-DOCS pins them in `config/drift-baseline.toml` + `test_config_drift.py`.)*
 
@@ -274,7 +274,7 @@ local feature rows.
 
 ## 10. Completion-merge & gap-closure update — 2026-06-23
 
-The `completion/blueprint-parity` bundle landed on `main` (`70f34dd`; additive — 196 files, zero existing files modified) adding the production-parity surface that §2–§9 (the pre-completion AUX-XREF snapshot) did not yet reflect:
+The `completion/blueprint-parity` bundle landed on `main` (`81ed983`; additive — 196 files, zero existing files modified) adding the production-parity surface that §2–§9 (the pre-completion AUX-XREF snapshot) did not yet reflect:
 
 - **`eval/`** — §33 evaluation harness: `benches/`, `calibration/`, `datasets/v2/`, `harness/`, `ignition_seed/`, `latency/`, `judge_claude.py` (addresses the §16 measurement gaps #10/#21 — recall@k/nDCG/ECE/latency-SLO).
 - **`infra/`** — operator-deferred (🔒) evidence now locally exercisable: `keycloak/` (OIDC/JWKS), `vault/` (secrets), `c2pa/` (provenance cert-chain), `docker-compose.providers.yml`, `validate/`, `scripts/`.
@@ -285,18 +285,18 @@ The `completion/blueprint-parity` bundle landed on `main` (`70f34dd`; additive �
 
 | Item | Area | Landed (commit) |
 |---|---|---|
-| #12 | per-example conformal nonconformity (I8) | `3ba1e41` |
-| #13 | explicit AGM ops + ATMS labels (I2) | `290077e` |
-| #14 | enforce `must_keep` in demotion (I7/§25) | `27c4275` |
-| #19 | counterfactual replay wired into gate (I12/§30.6) | `da98b65`, `cbea404` |
-| #20 | hot-loop CRITIC → candidate-lesson (§23.1) | `f7e4180` |
-| #21 | eval recall@k/nDCG/ECE + shadow-mode (§16/§33) | `80db68c` |
-| #22 | §31 numeric rail constants + config-drift pin | `975ce8f` + `70d8b00` (AUX-DOCS) — **drift test now enforces, not skips** |
-| #23 | tier-0 user-correction hot-path (§20.7/§30.2) — *was a top-2 missing feature* | `c582e82` |
-| #24 | learn-from-mistakes scoped support (§24) — *was a top-2 missing feature* | `1dc9141`, `9d42ec8` |
-| #25 | semiring how-provenance (I5) | `c82cb77` |
-| #27 | data-never-instruction taint on write path (I11) | `a778b5c` |
-| #29/#30 | CC-RT `route()` + long-horizon anti-degradation (§30.4/§25) | `28decd7` |
+| #12 | per-example conformal nonconformity (I8) | `645375a` |
+| #13 | explicit AGM ops + ATMS labels (I2) | `b34dab6` |
+| #14 | enforce `must_keep` in demotion (I7/§25) | `5c303b6` |
+| #19 | counterfactual replay wired into gate (I12/§30.6) | `4f90f01`, `00282dc` |
+| #20 | hot-loop CRITIC → candidate-lesson (§23.1) | `8afe401` |
+| #21 | eval recall@k/nDCG/ECE + shadow-mode (§16/§33) | `c57f03f` |
+| #22 | §31 numeric rail constants + config-drift pin | `0cc48d4` + `e20e37d` (AUX-DOCS) — **drift test now enforces, not skips** |
+| #23 | tier-0 user-correction hot-path (§20.7/§30.2) — *was a top-2 missing feature* | `0158fa9` |
+| #24 | learn-from-mistakes scoped support (§24) — *was a top-2 missing feature* | `e563e84`, `508e09b` |
+| #25 | semiring how-provenance (I5) | `3ecde21` |
+| #27 | data-never-instruction taint on write path (I11) | `e3ea108` |
+| #29/#30 | CC-RT `route()` + long-horizon anti-degradation (§30.4/§25) | `597124d` |
 
 Both formerly-missing **features** (#23 tier-0 correction, #24 learn-from-mistakes) are now implemented, collapsing the AUX-XREF "2 ❌ features" headline to 0. At the time, remaining work included residual depth items in §7, the final no-DSN gate (AUX-QA), genuinely-cloud 🔒 evidence (§8), and the CC-SYNC origin push. Those local/code items have since been superseded by the current Tier-A/Tier-B split and the `capture-bc10` Tier-B attestation, not by the old merge/push checklist. The §2–§7 status cells above are the pre-completion audit snapshot; this section is retained historical overlay.
 
@@ -316,7 +316,7 @@ The §2–§7 audit was `src/mnemosyne/`-scoped. Builder 7's re-verification pas
 | regression-ignition (OQ) | ✅ implemented-in-`eval/` | `eval/ignition_seed/` (cases.json + loader + ignition_status) |
 | OQ3 recompute-amplification / OQ7 capability-overhead | ✅ benched | `eval/benches/bench_oq3_*` + `bench_oq7_*` |
 
-Also verified-closed by AUX-XREF on the merged baseline (`@67cbf6c`): **#23** tier-0 correction (`ingestion.py:is_tier0_user_correction`→ungated `upsert_assertion`, `c582e82`), **#24** user-mistake support strategy (`user_model.py:record_user_mistake`→scoped `SupportStrategy`, `1dc9141`), **#25** semiring how-provenance (`provenance.py:HowProvenance` combine_or/and/prune, `c82cb77`).
+Also verified-closed by AUX-XREF on the merged baseline (`@f519772`): **#23** tier-0 correction (`ingestion.py:is_tier0_user_correction`→ungated `upsert_assertion`, `0158fa9`), **#24** user-mistake support strategy (`user_model.py:record_user_mistake`→scoped `SupportStrategy`, `e563e84`), **#25** semiring how-provenance (`provenance.py:HowProvenance` combine_or/and/prune, `3ecde21`).
 
 **Caveat (AUX-QA owns):** these harnesses target the deterministic local engine; "green / at-target" is confirmed by AUX-QA (B6) *running* them, not asserted here.
 
@@ -329,7 +329,7 @@ Also verified-closed by AUX-XREF on the merged baseline (`@67cbf6c`): **#23** ti
 Remaining-vs-done splits into three buckets that must **not** be conflated. Nothing in 12.2/12.3 is fabricated as "done."
 
 ### 12.1 CLOSED — structurally implemented + landed
-- **DDL parity** — B4 `5103a3a` (migration-safe additive `ALTER … ADD COLUMN IF NOT EXISTS`): `assertions.{salience, calibrated_confidence, recorded_time}`, `relations.{weight, recorded_at, expired_at, justification_id, status}`, `preferences.superseded_by`. Closes §7 items #1–#4 + the column side of #18; column-level drift guard `2c1a40d`.
+- **DDL parity** — B4 `b10529d` (migration-safe additive `ALTER … ADD COLUMN IF NOT EXISTS`): `assertions.{salience, calibrated_confidence, recorded_time}`, `relations.{weight, recorded_at, expired_at, justification_id, status}`, `preferences.superseded_by`. Closes §7 items #1–#4 + the column side of #18; column-level drift guard `21b31c9`.
 - **Feature + depth closures** (§10): items #12–14, #19–25, #27, #29–30 — including both formerly-missing features (#23 tier-0 correction, #24 learn-from-mistakes).
 - **Measurement cluster** (§11): recall@k / nDCG / ECE / poison-block-rate / latency-SLO implemented in `eval/` (AUX-QA confirms at-target by running).
 

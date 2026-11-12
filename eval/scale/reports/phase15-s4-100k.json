@@ -6,7 +6,7 @@
   "claim_status": "harness-ready-blocked",
   "harness_ready": true,
   "identity": {
-    "based_on_sha": "e32e1cb7ceb455ffbfd06ddc6c0bd2d526bfe4d4",
+    "based_on_sha": "a71599efffb3e4eb65c3fcfbe425d01c06a26e82",
     "workload": "phase15-s4-100k-synthetic-dev-v1",
     "item_count": 100000
   },

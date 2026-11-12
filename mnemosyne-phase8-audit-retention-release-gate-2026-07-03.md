@@ -8,7 +8,7 @@ source_kind: put_page
 
 # Mnemosyne Phase 8.5 audit retention release gate (2026-07-03)
 
-Commit `3973b3c` on `/Users/admin/Mnemosyne` branch `phase3/providers-consolidation` adds a source-side production release-audit gate for the Phase 8.5 tamper-evident audit row.
+Commit `6c7a3b1` on `/Users/admin/Mnemosyne` branch `phase3/providers-consolidation` adds a source-side production release-audit gate for the Phase 8.5 tamper-evident audit row.
 
 What changed:
 - `release-audit` now requires production `ops-report` evidence to include an `audit` section.

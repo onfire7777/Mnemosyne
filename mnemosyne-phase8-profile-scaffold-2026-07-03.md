@@ -2,7 +2,7 @@
 type: concept
 title: Mnemosyne Phase 8.1 status refresh
 date: '2026-07-03T00:00:00.000Z'
-head: aaf13422a4f79d15ac5f3083cfad4d6f1bb8949d
+head: 8acc7605c075b3e290c66ab7bf5728a080775236
 branch: phase3/providers-consolidation
 ci_run: 28681189928
 project: mnemosyne
@@ -13,7 +13,7 @@ source_kind: put_page
 
 # Mnemosyne Phase 8.1 status refresh
 
-As of 2026-07-03, `/Users/admin/Mnemosyne` is clean and pushed on `phase3/providers-consolidation` at `aaf13422a4f79d15ac5f3083cfad4d6f1bb8949d`; GitHub Actions run `28681189928` passed for that head.
+As of 2026-07-03, `/Users/admin/Mnemosyne` is clean and pushed on `phase3/providers-consolidation` at `8acc7605c075b3e290c66ab7bf5728a080775236`; GitHub Actions run `28681189928` passed for that head.
 
 Phase 8.1 self-hosted profile scaffold is complete: stale completion/status docs were archived under `docs/_archive/2026-07-03/`, `infra/docker-compose.prod.yml` gained internal-only `vmalert`, `infra/observability/vmalert/mnemosyne.yml` defines stale ops report and release-gate alerts, `infra/profiles/self-hosted.env` now carries explicit `forbid_local:true` guidance, and focused compose/runbook policy tests cover the new contract.
 

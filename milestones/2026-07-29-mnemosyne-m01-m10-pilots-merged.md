@@ -7,7 +7,7 @@ captured_via: mnemosyne-code
 
 # Mnemosyne M01 and M10 development pilots merged
 
-PR #81 merged normally from exact source head `98b83e4be373cf0acd5411769b80b98dfd1a8caa` to `main@392b1fc173f454893e1b133ff3a727462586a8b0`. The reviewed candidate lineage includes `c9e7884e4263cdeedeaf2fe5b30f9796226082b3`. All required exact-head checks passed with zero unresolved current review threads, and exact-merge CI run `30506775012` completed successfully.
+PR #81 merged normally from exact source head `8efa67377fc88d7aa1be15358a4b56edbb0a723a` to `main@2d07577653b88b8fb15943a704f42d9ee8820981`. The reviewed candidate lineage includes `81847c44f34d5dac31a3a369599255576fc527bd`. All required exact-head checks passed with zero unresolved current review threads, and exact-merge CI run `30506775012` completed successfully.
 
 The focused M01/M10/public-eval/reference suite passed 507 tests and Ruff passed. Canonical `/Users/admin/Mnemosyne` was cleanly fast-forwarded to the merge head, which equals `origin/main`; CBM was refreshed once afterward. CBM 0.8.1 reports the project ready but does not expose a stored Git revision.
 

@@ -9,7 +9,7 @@
 
 ## Status reconciliation — 2026-10-04
 
-Source inspection at `3c21be5d`; historical instructions below describe the original execution contract, not a request to repeat landed work. The compact acceptance harness exists in `eval/compact_answering/acceptance.py` and Phase 15 S4 records explicit missing physical evidence. Model selection, sidecar promotion, production parity and physical 8 GiB Windows/Linux acceptance remain open. Receipt files are not proof of a successful physical acceptance run.
+Source inspection at `f2903662`; historical instructions below describe the original execution contract, not a request to repeat landed work. The compact acceptance harness exists in `eval/compact_answering/acceptance.py` and Phase 15 S4 records explicit missing physical evidence. Model selection, sidecar promotion, production parity and physical 8 GiB Windows/Linux acceptance remain open. Receipt files are not proof of a successful physical acceptance run.
 
 ### Native execution checkpoint — 2026-10-04
 
@@ -23,13 +23,13 @@ including clean process exit. See `services/answering-ort/README.md` for the
 exact reproduction command and limitations.
 [Raw validation evidence](../../../eval/reports/compact-onnx-native-development-2026-10-04/README.md)
 retains successful clean-source checks plus the failed SDK invocation. A
-bounded Linux CI job now passed at `e1ad2d0c` (51 native tests, formatting,
+bounded Linux CI job now passed at `2dd2f243` (51 native tests, formatting,
 Clippy); see `eval/reports/compact-onnx-linux-ci-2026-10-04`.
 
 A subsequent experimental span-only `InferenceSession` now connects the native
 tensor adapter to a digest-checked tokenizer and exact source-byte offsets.
 Clean-source decoded-reader evidence: `eval/reports/compact-decoded-reader-development-2026-10-04`
-(`fe753290`; raw logs, fixture bytes and hash manifest).
+(`89a0f22a`; raw logs, fixture bytes and hash manifest).
 Ten generated cases match a separate Python reference's decoded spans/nulls,
 including Unicode, later windows and multi-document ties. The original tensor
 result alone did not prove these properties. The named window/null policy is
@@ -55,7 +55,7 @@ Source-document grouping now finds 919 connected components; one holds
 152,706 of 220,744 staged rows, including 89,667 Hotpot rows. This constrains
 independent Hotpot selection/calibration coverage (758 rows outside that
 component). `eval/reports/compact-train-groups-2026-10-04` retains the policy,
-histogram and full-edge audit. The first partition plan is subsequently frozen at `db54506a`: 176,595 train,
+histogram and full-edge audit. The first partition plan is subsequently frozen at `863cd2ce`: 176,595 train,
 22,075 selection and 22,074 calibration rows. Evidence and coverage limits are
 in `eval/reports/compact-train-partitions-2026-10-04`. This is quarantined;
 protected/entity screening and attribution remain required before admission.

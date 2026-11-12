@@ -320,7 +320,7 @@ def test_t6_terminal_receipts_are_consistent_across_lifecycle_files() -> None:
         r"PR #95 at `main@([0-9a-f]{8})`(?: \(|, )exact head `([0-9a-f]{8})`, "
         r"exact-head CI `([0-9]+)`, (?:and )?post-merge CI `([0-9]+)`\)?"
     )
-    expected = {("42abaab7", "d7c0938f", "30737466988", "30738303497")}
+    expected = {("89f7ff82", "b05ee030", "30737466988", "30738303497")}
     for label, text in normalized.items():
         assert set(receipt_pattern.findall(text)) == expected, (
             f"{label} has inconsistent T6 receipts"

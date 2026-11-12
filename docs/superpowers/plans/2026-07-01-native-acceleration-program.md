@@ -1,6 +1,6 @@
 # Native Acceleration Program — Plan Map
 
-**Spec:** `docs/superpowers/specs/2026-07-01-native-acceleration-design.md` (commit 31c50a5).
+**Spec:** `docs/superpowers/specs/2026-07-01-native-acceleration-design.md` (commit cf5c15e).
 The spec defines six independently-shippable phases → one implementation plan per phase. Each later plan is written when its predecessor's real interfaces exist to cite (no speculative signatures).
 
 | # | Plan | Status | Gated on |

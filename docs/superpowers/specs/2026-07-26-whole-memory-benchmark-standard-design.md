@@ -533,7 +533,7 @@ domain diversity, and external-validity limits remain explicit research gaps.
 ### 7.2 Live requirement matrix
 
 Status below is copied from `.planning/REQUIREMENTS.md` at the
-`origin/main@489e1361` hardening cutoff; this document does not promote it.
+`origin/main@e962b05e` hardening cutoff; this document does not promote it.
 
 | Requirement | Current status | Standard trace | Hardening disposition |
 |---|---|---|---|
@@ -571,7 +571,7 @@ Status below is copied from `.planning/REQUIREMENTS.md` at the
 ### 7.3 Current-goal boundary
 
 At this revision `GOAL.md` still records the Phase 13 P13-BEAM-B reader/judge
-configuration contract and a stale `main@2834834a` baseline with unchecked
+configuration contract and a stale `main@ce7c307f` baseline with unchecked
 push/merge steps, although current main already contains the merged source.
 This documentation lease does not rewrite that owner record. Its recorded
 lease is limited to `GOAL.md`,

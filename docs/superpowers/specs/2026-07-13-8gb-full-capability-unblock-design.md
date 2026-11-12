@@ -25,16 +25,16 @@ receipts.
 
 This dated delta supersedes only the mutable operational status in P5, P7, and
 P9 below; their 2026-07-13 evidence remains historical. R1c merged
-through PR #12 as `97f3c66`. Exact-head CI `29313243324` and post-merge CI
+through PR #12 as `2612c45`. Exact-head CI `29313243324` and post-merge CI
 `29314015888` are green; ordinary scheduled-main CI `29318113932` is also
 green. Graphify (16,202 nodes / 27,648 edges / 1,174 communities), CBM (17,685
 nodes / 70,259 edges), and gbrain `mnemosyne-code` remain the last accepted
 merge-bound receipt at PR #12 until the final-main refresh below. R2a exact
-head `5bfd53d` passed static gates, 55/55 focused tests, 39/39 section-31 rails,
+head `97c8940` passed static gates, 55/55 focused tests, 39/39 section-31 rails,
 7/7 section-33 tests, 2/2 planning tests, terminal CodeRabbit, independent
-review, and exact-head CI `29377793617`. It merged through PR #13 as `33967b1`;
+review, and exact-head CI `29377793617`. It merged through PR #13 as `55268ec`;
 that stacked head passed PR #11 CI `29378482152` and merged to `main` as
-`79f6b58`. Post-merge main CI `29379113689` passed all six gating jobs; this
+`cc78261`. Post-merge main CI `29379113689` passed all six gating jobs; this
 documentation reconciliation's exact-head/final-main CI and exact-final-main
 mutable-index refresh complete the delivery receipt.
 R2b-R2d, R3/R4, live
@@ -92,11 +92,11 @@ agent may prepare materials but may not perform the decision or external act.
 | P2 | Protected QA remains 0.0833 vs ≥0.85 | v17 and v18 each answered 2/24 and abstained at hop 0 on 22/24, with EM/F1 0.083333. v19's deterministic planner passes synthetic/dev gates but its protected effect and remaining reader residual are unmeasured. Both `qa_hard_v2` and held-out LongMemEval-QA must reach ≥0.85 without retrieval regression. | Critical |
 | P3 | One-shot evidence economics | Five protected attempts are recorded: v3, v12, v13, v17, and v18. v12 produced no result because the 120-second outer wrapper expired. A digest-bound 24/24 exact-scale development receipt is now mandatory before another protected attempt. | High |
 | P4 | No physical-8-GiB product path is proven | The compact reader/reranker work is design and preregistration only: no model has been selected, trained, downloaded, or accepted. Four probed local generative substitutes were rejected; that evidence does not exclude every possible model. Physical Windows and Linux x86-64 acceptance remains mandatory, with ARM64 additional rather than substitutive. | High |
-| P5 | Production admission rails remain unfinished | MCP rotation R1c is merged through PR #12 with exact-head and post-merge CI. R2a passed static gates, 55/55 focused tests, 39/39 section-31 rails, 7/7 section-33 tests, 2/2 planning tests, terminal CodeRabbit, independent review, exact-head CI `29377793617`, stacked CI `29378482152`, and post-merge main CI `29379113689`; it merged to `main` as `79f6b58`. Final-reconciliation CI and the exact-final-main index receipt close its delivery record. R2b-R2d integrations; R3/R4; live rotation/no-op proof; Vault/trust/renewal operations; and restart-stability evidence remain open. | High |
+| P5 | Production admission rails remain unfinished | MCP rotation R1c is merged through PR #12 with exact-head and post-merge CI. R2a passed static gates, 55/55 focused tests, 39/39 section-31 rails, 7/7 section-33 tests, 2/2 planning tests, terminal CodeRabbit, independent review, exact-head CI `29377793617`, stacked CI `29378482152`, and post-merge main CI `29379113689`; it merged to `main` as `cc78261`. Final-reconciliation CI and the exact-final-main index receipt close its delivery record. R2b-R2d integrations; R3/R4; live rotation/no-op proof; Vault/trust/renewal operations; and restart-stability evidence remain open. | High |
 | P6 | Passing frozen QA alone cannot close Phase 12 | LongMemEval-QA ≥0.85, deterministic retrieval non-regression, positive provenance-linked graph/PPR effect, §31 rails, §33 classes, custody, and held-out controls are independent exit bars. Current Hippo evidence has zero positive graph/PPR participation. | High |
 | P7 | CI is restored, but final-reconciliation and cost controls remain open | Billing was restored on 2026-07-12. R1c exact-head `29313243324`, post-merge `29314015888`, and ordinary scheduled-main `29318113932` are green. R2a exact-head `29377793617`, stacked `29378482152`, and post-merge main `29379113689` are green; the final documentation reconciliation retains the same exact-head rule. Hosted macOS wheel cadence should be optimized only from measured billing artifacts. | Medium |
 | P8 | Governance and reproduction are human-owned long leads | Agents may prepare charters, recruitment packets, evidence bundles, and reproduction instructions. They may not recruit or seat the board, ratify policy on its behalf, commission the independent reproducer, approve public wording, or publish a number. | High, external |
-| P9 | Knowledge freshness has one bounded post-merge closure step | Graphify, CBM, and gbrain were refreshed and recorded at PR #12's merge `97f3c66`. R2a is now on `main`, so a ready mutable index is not final-head proof; all three must refresh after this reconciliation lands and be recorded against that exact final main SHA in the merged PR's live receipt. | Medium, controlled |
+| P9 | Knowledge freshness has one bounded post-merge closure step | Graphify, CBM, and gbrain were refreshed and recorded at PR #12's merge `2612c45`. R2a is now on `main`, so a ready mutable index is not final-head proof; all three must refresh after this reconciliation lands and be recorded against that exact final main SHA in the merged PR's live receipt. | Medium, controlled |
 
 **System diagnosis:** the admitted full-suite window closes P1 for this slice,
 but not for later model/index/live/protected workloads, which must re-gate.

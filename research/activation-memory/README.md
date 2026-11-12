@@ -13,7 +13,7 @@ The authoritative closure is [GO-NO-GO.md](GO-NO-GO.md). It states one
 decision for each path: cartridge A/B, J-lens tripwire, and persona drift.
 Each decision is exactly one of `adopt`, `research-only`, or `reject`.
 Those decisions are relative to evidence tip
-`097bd6828c190e28261d799f4b57c4b3d038ec52` and do not adopt any path into
+`7e77574a80e8f1e4a3969d36fc73e144b52b3d15` and do not adopt any path into
 the product.
 
 ## Contract

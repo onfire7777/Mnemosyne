@@ -1,7 +1,7 @@
 """The engine must reproduce the legacy golden dumps exactly.
 
 The fixtures in eval/perf/golden were dumped by eval/perf/golden_equivalence.py from main at
-2083ffc4 - before the batch-scale engine work - under its deterministic runtime. Every gate
+737a1ef8 - before the batch-scale engine work - under its deterministic runtime. Every gate
 decision, the final main-branch state and the eval-query-batch output must stay byte for byte
 the same; only branch bookkeeping (merged canaries, per-merge reinforce rows) is excluded, as the
 harness documents.
@@ -59,7 +59,7 @@ one on the 11 Nov tree; no open relation, active fact or abstention changed. Wha
 
 To reproduce the original historical baseline instead:
 
-    python eval/perf/golden_equivalence.py dump --scenario NAME --src <2083ffc4 checkout>/src --out x.json
+    python eval/perf/golden_equivalence.py dump --scenario NAME --src <737a1ef8 checkout>/src --out x.json
 """
 
 from __future__ import annotations

@@ -4,7 +4,7 @@
 #   1. Restore the prior colima size (recorded in the apply state file;
 #      falls back to the measured pre-perf default of 4 CPU / 10 GiB).
 #   2. git-checkout the previous docker-compose.prod.yml (default ref: the
-#      perf-branch base ee30b5b — the last compose without the perf ceilings
+#      perf-branch base b77b4c7 — the last compose without the perf ceilings
 #      and BEFORE host-Metal became the default LLM path).
 #   3. `docker compose up -d --remove-orphans` — reverts to the pre-perf
 #      topology: in-VM ollama runs by default again and the host-llm-proxy
@@ -19,7 +19,7 @@ INFRA_DIR="$(cd "${HERE}/.." && pwd)"
 REPO_ROOT="$(cd "${INFRA_DIR}/.." && pwd)"
 COMPOSE_FILE="${INFRA_DIR}/docker-compose.prod.yml"
 
-ROLLBACK_REF="${1:-ee30b5b}"
+ROLLBACK_REF="${1:-b77b4c7}"
 STATE_FILE="${MNEMO_PERF_STATE_FILE:-${HOME}/.mnemosyne-perf-runtime-state}"
 PREV_CPUS=4
 PREV_MEMORY_GIB=10

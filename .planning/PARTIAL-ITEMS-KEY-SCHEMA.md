@@ -5,7 +5,7 @@
 > and is not a blueprint-parity blocker unless the strict audit explicitly
 > reactivates it.
 
-**Spec version:** 2.0 (2026-06-23) — supersedes 1.0 (`f470de7`); see Appendix R for the reconciliation log.
+**Spec version:** 2.0 (2026-06-23) — supersedes 1.0 (`89e2400`); see Appendix R for the reconciliation log.
 **Lane:** A (Memory schema) — owns key/title/field/link **definitions** + the guardrail/lock contract. One owner per lane; A never writes another lane's artifact.
 **Type:** Canonical schema + guardrails. **Not** prose/body content (Lane B), **not** ops content (Lanes C–G).
 **Source of truth:** this file. It is **published into the hub as two read-only mirror nodes** Lane B references by exact title: **`[[Memory Key Schema]]`** (Parts 1–5) and **`[[Memory Guardrails]]`** (Parts 6–10). Those titles are canonical and binding; the hub nodes mirror this file and add nothing.
@@ -178,7 +178,7 @@ The **registry conforms** iff §8 holds. The ops "validate conformance to key sc
 
 ---
 
-## Appendix R — Reconciliation log (v1.0 `f470de7` → v2.0)
+## Appendix R — Reconciliation log (v1.0 `89e2400` → v2.0)
 
 Every divergence from the committed v1.0, with rationale and source evidence. Revert any item if Lane A's owner disagrees.
 

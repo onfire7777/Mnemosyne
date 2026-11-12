@@ -60,7 +60,7 @@ GRANT DELETE ON entity_aliases TO mnemosyne_app;
 
 ## Disposable database setup
 
-The container is `mnemosyne-reliability-pg-1f2e3f3c`, bound only to
+The container is `mnemosyne-reliability-pg-aa164347`, bound only to
 `127.0.0.1:55434`, with tmpfs database storage. It uses the existing
 `colima-pentestswarm` Docker context and cached `pgvector/pgvector:pg16` image.
 The repository's `sql/schema.sql` and `infra/postgres/roles.sql` were mounted as
@@ -73,13 +73,13 @@ From the repository root, recreate the disposable fixture with the recorded imag
 
 ```sh
 docker --context colima-pentestswarm run -d \
-  --name mnemosyne-reliability-pg-1f2e3f3c \
+  --name mnemosyne-reliability-pg-aa164347 \
   -p 127.0.0.1:55434:5432 --tmpfs /var/lib/postgresql/data \
   -e POSTGRES_DB=mnemosyne -e POSTGRES_PASSWORD=mnemosyne-disposable-test \
   -v "$PWD/sql/schema.sql:/docker-entrypoint-initdb.d/05-schema.sql:ro" \
   -v "$PWD/infra/postgres/roles.sql:/docker-entrypoint-initdb.d/10-roles.sql:ro" \
   sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
-docker --context colima-pentestswarm exec mnemosyne-reliability-pg-1f2e3f3c \
+docker --context colima-pentestswarm exec mnemosyne-reliability-pg-aa164347 \
   pg_isready -U postgres -d mnemosyne
 ```
 
@@ -87,7 +87,7 @@ After the initialization scripts complete and the database is ready, set only
 these disposable login passwords:
 
 ```sh
-docker --context colima-pentestswarm exec mnemosyne-reliability-pg-1f2e3f3c \
+docker --context colima-pentestswarm exec mnemosyne-reliability-pg-aa164347 \
   psql -U postgres -d mnemosyne -v ON_ERROR_STOP=1 -c \
   "ALTER ROLE app_user PASSWORD 'mnemosyne-disposable-test'; ALTER ROLE consolidator_user PASSWORD 'mnemosyne-disposable-test'; ALTER ROLE eval_user PASSWORD 'mnemosyne-disposable-test';"
 MNEMOSYNE_POSTGRES_DSN=postgresql://consolidator_user:mnemosyne-disposable-test@127.0.0.1:55434/mnemosyne \
@@ -101,5 +101,5 @@ services were preserved; see [cleanup verification](../cleanup.json).
 The cleanup command targets only this named disposable container:
 
 ```sh
-docker --context colima-pentestswarm rm -f mnemosyne-reliability-pg-1f2e3f3c
+docker --context colima-pentestswarm rm -f mnemosyne-reliability-pg-aa164347
 ```

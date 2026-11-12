@@ -1,6 +1,6 @@
 # E-dependency-alert-6 — package-name collision
 
-Date: 2026-10-22. Reviewed source: `f21ef47b06a13d53e8e7922ddcd51684df7f1c8f`.
+Date: 2026-10-22. Reviewed source: `1f08ca9984934c58e171f75f8146c8c9b7fbff06`.
 
 GitHub reported [Dependabot alert #6](https://github.com/onfire7777/Mnemosyne/security/dependabot/6)
 during the push to `main`. The [upstream advisory GHSA-xcw4-53cc-hv32](https://github.com/advisories/GHSA-xcw4-53cc-hv32)

@@ -6,8 +6,8 @@ synthetic data only. It does not use MuSiQue, 2WikiMultiHopQA, HotpotQA,
 
 ## Scope and engine custody
 
-- Engine-under-test base commit: `7bca39e250f6227298cf3f0b1950fdd9d59905b3`
-- Baseline runner/evidence commit: `833af4fe519af6fbc57bcd2e4eb983c38afe5000`
+- Engine-under-test base commit: `d0c0ad6681640c715a15bf83f6f458d1ca21815c`
+- Baseline runner/evidence commit: `628b626ce1f8b3d8f69ea6232be847be4d89fa39`
   (contains the reviewed runner, regression test, and report used for reproduction)
 - Dataset: `eval/datasets/v2/qa_scale_dev_v1.json` (`24` questions)
 - Decomposition matrix: `eval/datasets/v2/qa_decomposition_dev_v1.json`

@@ -2,19 +2,19 @@
 
 ## Status reconciliation — 2026-10-04
 
-Source inspected at `3c21be5d`. This dated reconciliation supersedes older
+Source inspected at `f2903662`. This dated reconciliation supersedes older
 prospective status statements below; historical receipts and candidate SHAs
 remain unchanged. Source delivery is distinct from measured acceptance.
 
-- N12 result-v2 dispatch landed in PR #139 (`4af5b20c`); REPRO-001 bundle
-  standard landed in PR #144 (`54dea434`). REPRO-002 remains evidence-blocked.
-- Phase 15 S2 source/development closure landed through PR #160 (`cccc2700`),
-  S3 through #162/#164 (`7db0c810`, `8691bbd6`), S4 report through #177
-  (`336d34b4`), and S5 research-only go/no-go through #199 (`118f1e51`).
+- N12 result-v2 dispatch landed in PR #139 (`73bea352`); REPRO-001 bundle
+  standard landed in PR #144 (`525d2a13`). REPRO-002 remains evidence-blocked.
+- Phase 15 S2 source/development closure landed through PR #160 (`75ae284f`),
+  S3 through #162/#164 (`50e52925`, `b29ba998`), S4 report through #177
+  (`315c7770`), and S5 research-only go/no-go through #199 (`a6933b51`).
   These deliveries do not satisfy official security/calibration, real provider,
   protected QA, exact-scale, or physical Windows/Linux 8 GiB acceptance.
-- M06 Stage A landed in #202 (`cff84192`) and Stage B registry reachability
-  in #205 (`74f23509`). The development cell remains PROPOSED, non-publishable,
+- M06 Stage A landed in #202 (`d2fa3084`) and Stage B registry reachability
+  in #205 (`f5b113b7`). The development cell remains PROPOSED, non-publishable,
   and does not establish whole-memory capability or public admission.
 - Phase 12 protected QA, official dataset/provider evidence, REPRO-002,
   physical 8 GiB acceptance, and publication/launch gates remain open.
@@ -28,11 +28,11 @@ of implementation coverage, not a new execution or measurement receipt.
 
 
 Updated: 2026-10-04 (source-delivery reconciliation; historical baseline retained)
-Baseline: `main@f688c74757365a9d946100687a04288cde12a7fc`
+Baseline: `main@d181666b61cd483e50326f42eb59328f6c8f9da4`
 
 This is the checkout-resident admission map for the remaining Mnemosyne v2.0
 benchmark program. It supersedes the runtime snapshot in the original
-`a7221348` version while preserving that map's dependency, exact-lease,
+`2779a434` version while preserving that map's dependency, exact-lease,
 single-owner, and concurrency rules. `GOAL.md`, `.planning/ROADMAP.md`,
 `.planning/REQUIREMENTS.md`, `.planning/STATE.md`, and the named approved plans
 remain the lifecycle authorities; this map does not create another roadmap.
@@ -49,16 +49,16 @@ The following packages are complete source history, not runnable work:
 - PR #85: Phase 13-15 contract freeze.
 - PR #86: bounded weekly/manual development regression source.
 - PR #87: canonical truth reconciliation of the GOAL/GSD lifecycle files
-  (`main@2ba4ed80`, post-merge CI `30566984814`).
+  (`main@5b07f320`, post-merge CI `30566984814`).
 - PR #88: public-regression README documentation and workflow contract-test
-  hardening (`main@4a891042`, post-merge CI `30659705054`).
+  hardening (`main@a6a92ac9`, post-merge CI `30659705054`).
 - PR #89: this map and `.planning/STATE.md` recomputed after PR #88
-  (`main@a8e9444c`, post-merge CI `30672194635`). Documentation only: it moved
+  (`main@064cb4fe`, post-merge CI `30672194635`). Documentation only: it moved
   no package status, so the rows below are unchanged by it.
 - PR #90: the previously stranded M12/M13 development gap disclosures in
   `eval/public/README.md`, their two pinning test suites, a cert-rotator
   lock-timeout flake fix, and the pilots-plan delivery checkpoints
-  (`main@061c2e1c`, exact-head CI `30679262270`, post-merge CI `30680201900`).
+  (`main@94c0c96a`, exact-head CI `30679262270`, post-merge CI `30680201900`).
   Development-source documentation and tests only: it moved no package status,
   changed no benchmark, measurement, admission state, or publication claim, and
   left `eval/public/registry.json`, the fixtures, and all adapter/scoring code
@@ -66,40 +66,40 @@ The following packages are complete source history, not runnable work:
   `pbpp_headline_eligible:false`, so the rows below are unchanged by it.
 - PR #91: the GoalEx lifecycle delivery of the previously stranded controller
   delta — the three lifecycle files, the pilots-plan PR #90 checkpoint, and the
-  26 round records (`main@e157e035`, exact-head CI `30686224929`, post-merge CI
+  26 round records (`main@f75b58cc`, exact-head CI `30686224929`, post-merge CI
   `30687385118`). Documentation only: it moved no package status, changed no
   benchmark, measurement, admission state, or publication claim, and touched no
   source, test, or workflow path. This is node `T3`, now `MERGED`; the rows
   below are unchanged by it except for `T3`'s own state.
 - PR #92: the receipt-level lifecycle update discharging `T3`'s residue — the
-  three lifecycle files at `Baseline: main@e157e035` plus the round-38 and
-  round-39 records (`main@39cfa67a`, exact-head CI `30693874030`, post-merge CI
+  three lifecycle files at `Baseline: main@f75b58cc` plus the round-38 and
+  round-39 records (`main@c56e65fb`, exact-head CI `30693874030`, post-merge CI
   `30694818231`). Documentation only: it moved no package status, changed no
   benchmark, measurement, admission state, or publication claim, and touched no
   source, test, or workflow path. This is node `T4`, now `MERGED`; the rows
   below are unchanged by it except for `T4`'s own state.
 - PR #93: fail-closed GoalEx round-cleanup and ignored-state custody contract,
-  including behavioral traceability (`main@effc5e03`, exact-head CI
+  including behavioral traceability (`main@7aabe560`, exact-head CI
   `30718912376`, post-merge CI `30719645207`). It changed no benchmark source,
   measurement, admission state, roadmap percentage, or publication claim.
-- PR #94: the `T5` lifecycle delivery (`main@2091d01c`, exact head
-  `41b21305`, exact-head CI `30730185494`, post-merge CI `30730918452`).
+- PR #94: the `T5` lifecycle delivery (`main@fe7e6adc`, exact head
+  `41e7ac3e`, exact-head CI `30730185494`, post-merge CI `30730918452`).
   Documentation, contract-test, and CI configuration only: it admitted no
   source node. Its own
   `docs/plans/` lease omitted the round-42 record, which is the non-receipt
   residue discharged by `T6`.
-- PR #95: the `T6` lifecycle delivery (`main@42abaab7`, exact head
-  `d7c0938f`, exact-head CI `30737466988`, post-merge CI `30738303497`).
+- PR #95: the `T6` lifecycle delivery (`main@89f7ff82`, exact head
+  `b05ee030`, exact-head CI `30737466988`, post-merge CI `30738303497`).
   Documentation only: it delivered the r42 and r43 round records, admitted no
   source node, and changed no benchmark, measurement, admission state, or
   publication claim.
 - PR #96: the independently delivered development-only M02/M04/M05 evaluation
-  oracles (`main@088e2f31`, exact head `1050749a`, CI `30744318093`). This
+  oracles (`main@82a2fb65`, exact head `e9206707`, CI `30744318093`). This
   advanced canonical `main` outside the GoalEx lifecycle-node sequence without
   changing publication eligibility.
 - PR #97: the round-43 review adjudication and controller
   reconciliation. It records PR #96 above, recomputes
-  the canonical baseline to `main@088e2f31`, makes M05's source events conform
+  the canonical baseline to `main@82a2fb65`, makes M05's source events conform
   to the frozen `portable_event` ABI, and replaces the traceability test's
   ancestry assertion with the unrecorded-merge detector this row satisfies.
   It admits no source node and changes no benchmark, measurement, admission
@@ -110,35 +110,35 @@ The following packages are complete source history, not runnable work:
   the commit recording one would change it. **The GoalEx loop is paused at this
   PR, not retired**: it is stopped with its blocking condition cleared, and a
   later round may resume and recompute this map. Its receipts, verifiable only
-  from a later commit and recorded here now: merge `71e492b4`, exact head
-  `13c05d65`, exact-head CI `30774834604`, post-merge CI `30775783472`.
+  from a later commit and recorded here now: merge `3d0ad051`, exact head
+  `97745878`, exact-head CI `30774834604`, post-merge CI `30775783472`.
 - PR #98: documentation-only correction of PR #97's overstated claim that the
   loop was retired, restoring it to paused. It admits no source node and
   changes no benchmark, measurement, admission state, or publication claim.
   Recorded here before merge for the same reason as PR #97: the detector
   requires every PR merged after the baseline to appear in this map. Its
-  receipts, likewise recorded only now: merge `b8673031`, exact head
-  `b49b0b35`, exact-head CI `30787319275`, post-merge CI `30788531829`.
+  receipts, likewise recorded only now: merge `2c6a63f1`, exact head
+  `d0021d12`, exact-head CI `30787319275`, post-merge CI `30788531829`.
 - PR #99: the Round-0 M01-M20 whole-memory module inventory and its derivations,
   `tests/test_wmbs_module_inventory.py`, the `T7` M02/M04/M05 Stage-A disclosure
   in `eval/public/README.md` with `tests/test_public_wmbs_stage_a_disclosure.py`,
   and the admission of lease-map nodes `T8` and `T9`. It changed no benchmark,
   measurement, admission state, or publication claim. Its receipts: merge
-  `d7eefb7c`, exact head `2375aba5`, exact-head CI `30808291831` green. **It did
+  `e5d0f6a9`, exact head `5cc1c866`, exact-head CI `30808291831` green. **It did
   not pre-record itself here**, so its post-merge run `30810160121` failed on the
   baseline-lapse detector and left `main` red; run `30894938975` reproduced the
   same single failure. PR #101 below discharges that lapse — recorded honestly
   rather than elided.
-- PR #101: this recomputation of the canonical baseline from `main@b8673031` to
-  `main@d7eefb7c`, updating this map's `Baseline:` line, `GOAL.md`, and
+- PR #101: this recomputation of the canonical baseline from `main@2c6a63f1` to
+  `main@e5d0f6a9`, updating this map's `Baseline:` line, `GOAL.md`, and
   `.planning/STATE.md`, and recording PR #99's receipts above so the
   baseline-lapse detector passes and `main` is green again. It admits no source
   node and changes no benchmark, measurement, admission state, or publication
   claim. Recorded here before merge for the same reason as PRs #97 and #98: the
   detector requires every PR merged after the baseline to appear in this map.
-  Delivered from exact head `0d3e3069b9ca061d9f894f1396239fe2c2f817cb`
+  Delivered from exact head `380294beeffaf4881e0c1531c9edb1efa2bde1f9`
   with all required exact-head CI green in run `30957633560`; merge
-  `58ae5bbafeffab3388c6539a419e56fcd85112da` at
+  `39e25411e81f7cc1189929211464d0fcf09a0ffe` at
   `2026-08-04T23:13:57Z`.
 - PR #100: the node `T9` M03 registry admission, registering
   `wmbs-m03-valid-time-development` in `eval/public/registry.json` with its
@@ -146,58 +146,58 @@ The following packages are complete source history, not runnable work:
   handling in `eval/public/bundle.py`, `eval/public/README.md` disclosure, and
   `tests/test_public_wmbs_m03_registry_admission.py`. Reachability only: M03
   stays `PROPOSED` and full bitemporal transaction-time remains a hard deferral.
-  Delivered from exact head `e072dda5a9e7ef078d317156c49c54bbee7a5124`
+  Delivered from exact head `0a9e5bedd991409e58c4317f2fa48b78c3458c1e`
   after all required exact-head CI and Greptile passed in run `31854371658`;
-  merge `b3570937918c7de40cd89ea543fab9e7b16f7471` at
+  merge `b84b351bcd5a0397065821f60db425ae8c85a13a` at
   `2026-08-15T01:12:26Z`; successful post-merge CI `31855873247`. It changed no
   fixture byte, scorer, schema, admission state, publication claim, or progress
   counter and admitted no source node or successor node.
-- PR #103: Restore canonical memory sources and patch cryptography (merge 5b0d99bcd7).
+- PR #103: Restore canonical memory sources and patch cryptography (merge 4b086a3d4a).
 - PR #105: preserve hash-bound text as LF and make installer/custody tests
   explicit about their native-Windows and POSIX execution contracts. Delivered
-  from exact head `d60857fdf61122106eeede789432dd5bac955137` after all
+  from exact head `c1cbae81a579ea1f8398c98074b522aae7209d7e` after all
   required exact-head CI passed in run `31856191898`; merge
-  `7b6c5a121107ee80533a5b4ec794e602e1e1ab33` at
+  `66c989ef2fa599b41388975ad0516ff8d7f0e7e7` at
   `2026-08-15T01:46:23Z`. Post-merge run `31857410462` failed solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   (1 failed, 4709 passed, 151 skipped, 191 deselected) because PR #105 was
   absent from the lifecycle authorities; PR #108 repairs that traceability
   lapse here.
-- PR #106: record merged PR #103 in the write-lease map (merge 18e7e2f6c0cf92af399bc66385b0cbf335d1e8f7).
+- PR #106: record merged PR #103 in the write-lease map (merge 4128b070f50cdf3b34c8cea97d53007c218e40ed).
 - PR #107: record merged PR #106 in the write-lease map; delivered from exact
-  head `9e1df8966fbbf7d0b4c21f1e4aae01fcf3a9adc8` with all required exact-head
+  head `ee319953c9d82cdcf35942b29152954cb1307273` with all required exact-head
   CI green in run `31852940363`; merge
-  `7f305090bb026db7aa4d73a3e127808b8ee4089c` at
+  `518fdb8bb24927bd88bed596cb99e736038374b9` at
   `2026-08-15T00:40:44Z`.
 - PR #108: reconcile PR #100's exact T9 lease and inventory wording and repair
   PR #105's baseline-lapse receipt. Delivered from exact head
-  `bda5588abc2a181c1bd7b5ae17ca31deeae7d85e` after all required exact-head CI
+  `2d8409c055f7f2eeb6453cd3b7caab002e4676e1` after all required exact-head CI
   passed in run `31859014653`; merge
-  `7c5264d815d44c375173dcd1e8ab57783a397a7e` at
+  `b87331b2eaad7576728e07941983972ce19b906b` at
   `2026-08-15T02:45:01Z`; successful post-merge CI `31859997325`. It changed no
   source, benchmark, measurement, admission state, publication claim, or
   progress counter.
 - PR #113: controller-only `T10` lifecycle receipt reserving the four frozen
   Windows portability content and its strict integration order. Delivered from
-  exact head `c1bf6a10335e30fe797c54a42285922552647a9e` after all required
+  exact head `37afb7e839277746b76baf01775a6f072deb2b09` after all required
   exact-head checks passed in run `31863057094`; merge
-  `6929fd3703ff262d3264b58a5af90d506a804da2` at
+  `fbbd5c0ccebe9c4d821bcf619adec5d6cf1b2c24` at
   `2026-08-15T04:22:14Z`; successful post-merge CI `31864254074`. It changed
   only `GOAL.md`, `.planning/STATE.md`, and this map and admitted no benchmark
   authority.
 - PR #114: controller-only `T10` amendment recording PR #109 delivery and
   replacing the ruleset-incompatible full-head freeze with immutable content
   anchors plus exact lifecycle-parent equality. Delivered from exact head
-  `7a2777663115554d7683dcb9f59301dd9d83fbf7` after all required exact-head
+  `282d184baafaaa0164f06019bedf476bb3767d48` after all required exact-head
   checks passed in run `31868231552`; merge
-  `c4337f6315833b930cba2d31c7e95778c4f6ddd5` at
+  `94f1afd2d5bf5282764f4d1582e2425757490891` at
   `2026-08-15T06:26:57Z`; successful post-main CI `31869469070`. It changed
   only `GOAL.md`, `.planning/STATE.md`, and this map and granted no benchmark
   authority.
 - PR #115: M02 Stage-B public-harness delivery from exact head
-  `c14c7a590aa12707e324d57d4dc15afc7fc9c0b7`; all required exact-head checks
+  `422883bf6fb75b125744ba23afe0bb15ba449362`; all required exact-head checks
   passed in run `31899050596`; merge
-  `f688c74757365a9d946100687a04288cde12a7fc` at
+  `d181666b61cd483e50326f42eb59328f6c8f9da4` at
   `2026-08-15T18:10:28Z`. Post-main run `31900402252` failed solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #115 was absent from the lifecycle authorities (1 failed, 4752
@@ -218,15 +218,15 @@ The following packages are complete source history, not runnable work:
   topology-only refresh, changes no benchmark result or admission state, and
   must pass fresh exact-head review, security, and CI before merge.
   Subsequent delivery verified on 2026-09-05: merged from
-  `b818ab3237f85f311bb6a1e6ae7195f40a9d6f63` as
-  `d11ffe5e61511269efcf38ccd2ad064564580109` at `2026-08-31T18:03:53Z`.
+  `a660b8f80af424ca700dd8660dfbda6b92baf42c` as
+  `752e1d1672ceb7c1a9b05301d296d42c250e90b2` at `2026-08-31T18:03:53Z`.
   The OPEN/READY text above is the historical self-record; PR #117 owns no
   current lifecycle writer.
 - PR #121: M04-B public-harness registration of `wmbs-m04-development`
   (title: M04-B: register wmbs-m04-development (PROPOSED)) from exact head
-  `5c629a67f7466e9a4d75b82681bac53612abb076`; all required exact-head
+  `a3c5836677f041043817f738c8ac83cb0d76f494`; all required exact-head
   checks passed in run `33425340224`; merge
-  `eea12f798c22e281100a62552589225321b6c424` at `2026-08-31T19:05:18Z`
+  `08d39639c43e590688f66c196e5bea4835dd9a35` at `2026-08-31T19:05:18Z`
   (GitHub mergedAt `2026-08-31T19:05:19Z`). Post-main run `33428621397`
   (and later scheduled run `33867306126`) failed solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
@@ -245,10 +245,10 @@ The following packages are complete source history, not runnable work:
   exact-head review, security, and CI before merge.
 - PR #128: WMBS M05-B public-harness registration of `wmbs-m05-development`
   (title: WMBS M05-B: register wmbs-m05-development (provenance adapter))
-  from exact head `7d4803e46463197e0cb9659cc22ecf02aa2c6b92`; all
+  from exact head `dad0d1d329b913edb08f58355cdafd5d64fef6fc`; all
   required exact-head checks passed in run `33910693005`; merge
-  `ad9d5f809bb2a26df506c3958aef6a149a173f4a` at `2026-09-04T19:46:04Z`.
-  Prior tip was `b7f351cdeeb989d7b84e7e2a0ad736efd5a6f5a1` (PR #129 /
+  `eb3320d4eab18326e8013169c8b94bddf70ebb67` at `2026-09-04T19:46:04Z`.
+  Prior tip was `9b451b192ea71dd5619deb073d3456d4ae7c9e49` (PR #129 /
   #121 receipt). Post-main run `33912845409` failed solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #128 was absent from this lease-map (1 failed, 4798
@@ -267,10 +267,10 @@ The following packages are complete source history, not runnable work:
   exact-head review, security, and CI before merge.
 - PR #130: docs M05 README hierarchy residual + M12/M13 peer cells
   (title: docs: M05 README hierarchy residual + M12/M13 peer cells)
-  from exact head `a75ec87431b9ee1c0caf9be49a12350afd88efba`; all
+  from exact head `92cc44f27486fec58442b5b81ef7818c0b7be152`; all
   required exact-head checks passed in run `33918171983`; merge
-  `0679cdc762d6ac7be610b6be11f62a474fa74240` at `2026-09-04T21:20:51Z`.
-  Prior tip was `ec8aa1f28822ac7e992cf110cd9be18643c12e46` (PR #131 /
+  `0bb4f559eb716a5c5958acf44859c774646d4c28` at `2026-09-04T21:20:51Z`.
+  Prior tip was `94825265b0276cef1fc73d430d0d89f1a514b1b1` (PR #131 /
   #128 receipt). Post-main may fail solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #130 is absent from this lease-map; this receipt repairs
@@ -288,10 +288,10 @@ The following packages are complete source history, not runnable work:
   exact-head review, security, and CI before merge.
 - PR #132: inventory ACCEPT plan-PR receipts for M06–M09/M11/M17–M19
   (title: docs: inventory — record ACCEPT plan PRs for M06–M09/M11/M17–M19)
-  from exact head `681bddd535dde6e8712d6be61bedb48bce50f8ce`; all
+  from exact head `8d4a1ec29efb4f16fdff1b13f2c11aeef69db287`; all
   required exact-head checks passed in run `33923271250`; merge
-  `83804715d19c90c77161924f6acc79e62e567998` at `2026-09-04T22:26:38Z`.
-  Prior tip was `661e3f3f3b8fc8714094e6e84c186871c842f756` (PR #133 /
+  `9288c12c88a7a408b3d1ed047e142f96ea13aa63` at `2026-09-04T22:26:38Z`.
+  Prior tip was `6e41fb161a3dfd4cf88ea301895a3488fec0fa71` (PR #133 /
   #130 receipt). Post-main may fail solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #132 is absent from this lease-map; this receipt repairs
@@ -300,7 +300,7 @@ The following packages are complete source history, not runnable work:
   Owner: Docs / CoS (inventory ACCEPT). Purpose: Accept plan-PR
   receipts for M06–M09/M11/M17–M19 inventory; docs-only privacy.
   Gate: MERGED (merge commit
-  `83804715d19c90c77161924f6acc79e62e567998`). The merge touched only
+  `9288c12c88a7a408b3d1ed047e142f96ea13aa63`). The merge touched only
   that inventory file. This receipt changes no benchmark result or
   admission state and does not recompute the canonical baseline.
 - PR #134: ordinary documentation receipt recording the merged PR #132
@@ -316,10 +316,10 @@ The following packages are complete source history, not runnable work:
   exact-head review, security, and CI before merge.
 - PR #138: M02 canonical-replay seed pin
   (title: eval: pin M02 canonical-replay seed)
-  from exact head `93bb5845a57a7c08a74e858dc4850fd9f02424b1`; all
+  from exact head `3d339c9eda07f8c2cccb9fd7c5b195cd859bf5fa`; all
   required exact-head checks passed in run `33938772720`; merge
-  `ec26c40d359fc1f6904a97eac51aab461f9fd0f6` at `2026-09-05T02:50:49Z`.
-  Prior tip was `c67e917410d7b468a337fda19ba654d57367d843` (PR #135).
+  `eb51a0654545f31e123932dfd5598a67fb6de734` at `2026-09-05T02:50:49Z`.
+  Prior tip was `89a74a019d0daff163e4319a7b59b0f8eb617dce` (PR #135).
   Post-main run `33940223834` failed solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #138 was absent from this lease-map; this receipt repairs
@@ -328,23 +328,23 @@ The following packages are complete source history, not runnable work:
   Purpose: M02 canonical-replay seed pin; docs-only privacy for THIS
   receipt PR (the recorded #138 was code). This receipt changes no
   benchmark result or admission state and does not recompute the
-  canonical baseline (baseline stays `main@f688c747`).
+  canonical baseline (baseline stays `main@d181666b`).
 - PR #141: ordinary documentation receipt recording the merged PR #138
   lease-map lapse. It is **MERGED** at tip
-  `1df2416ad89afbc11b12943a6984bbcbc17ee5a2`. It was **OPEN/READY** at the
+  `9eefd48274462ecc8961dd5f53f053b496eb7d25`. It was **OPEN/READY** at the
   `2026-09-05T11:24:20Z` capture and adds only the PR #138 merged-baseline
   bullet and this structured self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #141 changes no benchmark result or admission state and does not
   recompute the canonical baseline. The OPEN/READY pre-merge instruction
   is historical; delivery is MERGED at tip
-  `1df2416ad89afbc11b12943a6984bbcbc17ee5a2`.
+  `9eefd48274462ecc8961dd5f53f053b496eb7d25`.
 - PR #139: N12 result-v2 Exact 12 leaderboard files
   (title: feat(leaderboard): additive result-v2 integration (N12))
-  from exact head `eef9c57316ca28a3ef3959f024bd0d132bb0ecb7`; all
+  from exact head `363b60e5ff1bcef6787eec9793c8db3b278304fd`; all
   required exact-head checks passed in run `33966741689`; merge
-  `4af5b20ca871c9768965f808a7482839bc92d26a` at `2026-09-05T13:11:54Z`.
-  Prior tip was `1df2416ad89afbc11b12943a6984bbcbc17ee5a2` (PR #141).
+  `73bea352a86e7eb868c9928219a4f9421fdea93b` at `2026-09-05T13:11:54Z`.
+  Prior tip was `9eefd48274462ecc8961dd5f53f053b496eb7d25` (PR #141).
   Post-main tip CI may fail solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #139 was absent from this lease-map; this receipt repairs
@@ -360,22 +360,22 @@ The following packages are complete source history, not runnable work:
   Purpose: additive result-v2 integration (N12); docs-only privacy
   for THIS receipt PR (the recorded #139 was code). This receipt
   changes no benchmark result or admission state and does not
-  recompute the canonical baseline (baseline stays `main@f688c747`).
+  recompute the canonical baseline (baseline stays `main@d181666b`).
 - PR #142: ordinary documentation receipt recording the merged PR #139
   lease-map lapse. It is **MERGED** at tip
-  `687884dbd14b32d3245fba2e6bc9797fc705e1f2`. It adds only the PR #139
+  `47f44ef364ff726ab9bb4d409a1b49ac23ea1fa5`. It adds only the PR #139
   merged-baseline bullet, the #141 MERGED mark, and this structured
   self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #142 changes no benchmark result or admission state and does not
   recompute the canonical baseline. Delivery is MERGED at tip
-  `687884dbd14b32d3245fba2e6bc9797fc705e1f2`.
+  `47f44ef364ff726ab9bb4d409a1b49ac23ea1fa5`.
 - PR #140: Exact 1 smoke `tests/test_leaderboard_render_output_smoke.py`
   (title: test(leaderboard): Frontend render-output smoke (CLEAR of N12))
-  from exact head `65f39d6bab91a4e6e29b1c89bd02f543cec2cde1`; all
+  from exact head `45a7ea18df6ba32b5664b408174376781aaf2b4f`; all
   required exact-head checks passed in run `33973084704`; merge
-  `bfdff701892aa4419a7eda5e3bf2c52e935608cc` at `2026-09-05T18:33:19Z`.
-  Prior tip was `687884dbd14b32d3245fba2e6bc9797fc705e1f2` (PR #142).
+  `8badc4efe97f38119adc8ac24cdbdb06977aa8d4` at `2026-09-05T18:33:19Z`.
+  Prior tip was `47f44ef364ff726ab9bb4d409a1b49ac23ea1fa5` (PR #142).
   Post-main tip CI may fail solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #140 was absent from this lease-map; this receipt repairs
@@ -384,23 +384,23 @@ The following packages are complete source history, not runnable work:
   Purpose: Frontend render-output smoke (CLEAR of N12); docs-only privacy
   for THIS receipt PR (the recorded #140 was test). This receipt
   changes no benchmark result or admission state and does not
-  recompute the canonical baseline (baseline stays `main@f688c747`).
+  recompute the canonical baseline (baseline stays `main@d181666b`).
 - PR #143: ordinary documentation receipt recording the merged PR #140
   lease-map lapse. It is **MERGED** at tip
-  `012f791347369f9adb0ae065b7fe016af3060201`. It adds only the PR #140
+  `d98bf6467a2915b5a596830ec40add1f90a3bc38`. It adds only the PR #140
   merged-baseline bullet, the #142 MERGED mark, and this structured
   self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #143 changes no benchmark result or admission state and does not
   recompute the canonical baseline. Delivery is MERGED at tip
-  `012f791347369f9adb0ae065b7fe016af3060201`.
+  `d98bf6467a2915b5a596830ec40add1f90a3bc38`.
 - PR #137: Exact 1 ship-day receipt
   `docs/coordination/2026-09-04-ship-day-receipt.md`
   (title: docs(coordination): 2026-09-04 ship-day receipt)
-  from exact head `41db83ad976521440df30230a84e75a252c92cbc`; all
+  from exact head `54bbb3274f3060b8534ae52a30f970310870eecf`; all
   required exact-head checks passed in run `33988815458`; merge
-  `59e9378603b6cbbf36821f01f00e6a706a2bfd24` at `2026-09-05T20:30:00Z`.
-  Prior tip was `012f791347369f9adb0ae065b7fe016af3060201` (PR #143).
+  `787a0052e5319b103cbaae9b2aeeea5a066c3b1e` at `2026-09-05T20:30:00Z`.
+  Prior tip was `d98bf6467a2915b5a596830ec40add1f90a3bc38` (PR #143).
   Post-main tip CI may fail solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #137 was absent from this lease-map; this receipt repairs
@@ -409,25 +409,25 @@ The following packages are complete source history, not runnable work:
   Purpose: 2026-09-04 ship-day receipt; docs-only privacy for THIS
   receipt PR (the recorded #137 was documentation). This receipt
   changes no benchmark result or admission state and does not
-  recompute the canonical baseline (baseline stays `main@f688c747`).
+  recompute the canonical baseline (baseline stays `main@d181666b`).
 - PR #145: ordinary documentation receipt recording the merged PR #137
   lease-map lapse. It is **MERGED** at tip
-  `a74e31ef213d87cf75fc1c1f6c3dbe998de30918`. It adds only the PR #137
+  `30b3657b81bd28600296df4e658bb2104cb1cf1f`. It adds only the PR #137
   merged-baseline bullet, the #143 MERGED mark, and this structured
   self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #145 changes no benchmark result or admission state and does not
   recompute the canonical baseline. Delivery is MERGED at tip
-  `a74e31ef213d87cf75fc1c1f6c3dbe998de30918`.
+  `30b3657b81bd28600296df4e658bb2104cb1cf1f`.
 - PR #144: Exact 4 REPRO-001 files
   `eval/public/README.md`, `eval/public/bundle.py`,
   `eval/public/schema/reproducibility-bundle-v1.schema.json`,
   `tests/test_public_reproducibility.py`
   (title: feat(eval): REPRO-001 closed reproducibility-bundle/v1 standard)
-  from exact head `1387da5549fa23e9bbb036827871b03a43c0419f`; all
+  from exact head `cbe1b8e95ddfec1f6283bfcf948e0bbb659a3a9a`; all
   required exact-head checks passed in run `33995734474`; merge
-  `54dea434b447f1ef96c11e4fec690ca4c63d67d9` at `2026-09-05T22:53:04Z`.
-  Prior tip was `a74e31ef213d87cf75fc1c1f6c3dbe998de30918` (PR #145).
+  `525d2a1335b97b9ec44308623460e262427e8172` at `2026-09-05T22:53:04Z`.
+  Prior tip was `30b3657b81bd28600296df4e658bb2104cb1cf1f` (PR #145).
   Post-main tip CI may fail solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #144 was absent from this lease-map; this receipt repairs
@@ -438,25 +438,25 @@ The following packages are complete source history, not runnable work:
   Purpose: REPRO-001 closed reproducibility-bundle/v1 standard; docs-only
   privacy for THIS receipt PR (the recorded #144 was code). This receipt
   changes no benchmark result or admission state and does not
-  recompute the canonical baseline (baseline stays `main@f688c747`).
+  recompute the canonical baseline (baseline stays `main@d181666b`).
 - PR #146: ordinary documentation receipt recording the merged PR #144
   lease-map lapse. It is **MERGED** at tip
-  `6a8399b344fbc365643aadbf0505289bbd2c06ba`. It adds only the PR #144
+  `a648ab730f92b6d84d2c32580656184d8ce830f4`. It adds only the PR #144
   merged-baseline bullet, the #145 MERGED mark, and this structured
   self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #146 changes no benchmark result or admission state and does not
   recompute the canonical baseline. Delivery is MERGED at tip
-  `6a8399b344fbc365643aadbf0505289bbd2c06ba`.
+  `a648ab730f92b6d84d2c32580656184d8ce830f4`.
 - PR #147: Exact 3 P15-S2/15-01-01 cadence-tier files
   `src/mnemosyne/policy.py`, `src/mnemosyne/consolidation.py`,
   `tests/test_consolidation_timescales.py`
   (title: feat(consolidation): P15-S2 15-01-01 deterministic
   fast|medium|slow cadence tiers)
-  from exact head `27c22840905888fadb247c6b6bb783b2a7fac24b`; all
+  from exact head `a9131fc3de0f37e7ebb0670c68d0edb683c97d0e`; all
   required exact-head checks passed in run `34000600922`; merge
-  `72f3d94b87b46f379d9c93a3a029c4d121ecd111` at `2026-09-06T00:39:38Z`.
-  Prior tip was `6a8399b344fbc365643aadbf0505289bbd2c06ba` (PR #146).
+  `1fb9b6e35c25ebc1e822d0f0bce8b9a05a45838b` at `2026-09-06T00:39:38Z`.
+  Prior tip was `a648ab730f92b6d84d2c32580656184d8ce830f4` (PR #146).
   Post-main Unit+drift may fail solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #147 was absent from this lease-map; this receipt repairs
@@ -470,29 +470,29 @@ The following packages are complete source history, not runnable work:
   remains lease-OUT / deferred (not admitted by #147). Hold 15-01-02
   remains serialized after this. This receipt changes no benchmark
   result or admission state, admits no successor source node, and does
-  not recompute the canonical baseline (baseline stays `main@f688c747`).
+  not recompute the canonical baseline (baseline stays `main@d181666b`).
 - PR #148: ordinary documentation receipt recording the merged PR #147
   lease-map lapse. It is **MERGED** at tip
-  `bc954737fa0daf9196e012a5237feac398c09cdd`. It was **OPEN/READY** at
+  `9f9b9c7841d789a42d24299d4f406a8ce2efc8a7`. It was **OPEN/READY** at
   the `2026-09-06T00:42:00Z` capture and adds only the PR #147
   merged-baseline bullet, the #146 MERGED mark, and this structured
   self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #148 changes no benchmark result or admission state and does not
   recompute the canonical baseline. Delivery is MERGED at tip
-  `bc954737fa0daf9196e012a5237feac398c09cdd`.
+  `9f9b9c7841d789a42d24299d4f406a8ce2efc8a7`.
 - PR #118: Exact 1 M07 retention plan
   `docs/plans/wmb-m07-retention-rehearsal-decay-implementation-plan.md`
   (title: docs: PROPOSED M07 retention plan (not code-ready) — CoS
   ACCEPT merged)
-  from exact head `d0afa6f69d24e4c240d81f2a0b5cc9a23df1168d`; all
+  from exact head `301a1c60fc935697c2127cf74c088bd2057e7646`; all
   required exact-head checks passed in run `34004284333`; merge
-  `543b4167ba1e0c4d37e0a5270389df904c2e4de8` at `2026-09-06T02:04:19Z`.
-  Prior tip was `bc954737fa0daf9196e012a5237feac398c09cdd` (PR #148).
+  `1e46378319a3dbc189e9c7298eda026360a64354` at `2026-09-06T02:04:19Z`.
+  Prior tip was `9f9b9c7841d789a42d24299d4f406a8ce2efc8a7` (PR #148).
   Post-main Unit+drift FAILED CI `34005513700` solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #118 was absent from this lease-map (baseline
-  `main@f688c747`); this receipt repairs that bookkeeping.
+  `main@d181666b`); this receipt repairs that bookkeeping.
   Exclusive File Set (Exact 1):
   `docs/plans/wmb-m07-retention-rehearsal-decay-implementation-plan.md`.
   Purpose: ACCEPT M07 retention/rehearsal/decay implementation plan
@@ -501,28 +501,28 @@ The following packages are complete source history, not runnable work:
   admit Stage A code or invent M16; the M14 freeze is unchanged.
   This receipt changes no benchmark result or admission state,
   admits no successor source node, and does not recompute the
-  canonical baseline (baseline stays `main@f688c747`).
+  canonical baseline (baseline stays `main@d181666b`).
 - PR #150: ordinary documentation receipt recording the merged PR #118
   lease-map lapse. It is **MERGED** at tip
-  `1e5ec3cff03f8b5ebdec5165fef84174635f79d4`. It was **OPEN/READY** at
+  `b9c669adfd76dd3f2dbf76ffde35f5fb867cf3e1`. It was **OPEN/READY** at
   the `2026-09-06T02:28:00Z` capture and adds only the PR #118
   merged-baseline bullet, the #148 MERGED mark, and this structured
   self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #150 changes no benchmark result or admission state and does not
   recompute the canonical baseline. Delivery is MERGED at tip
-  `1e5ec3cff03f8b5ebdec5165fef84174635f79d4`.
+  `b9c669adfd76dd3f2dbf76ffde35f5fb867cf3e1`.
 - PR #149: Exact 3 P15-S2/15-01-02 async sleep job and freshness files
   `src/mnemosyne/consolidation.py`, `src/mnemosyne/jobs.py`,
   `tests/test_consolidation_timescales.py`
   (title: feat(consolidation): P15-S2 15-01-02 async sleep job and
   freshness)
-  from exact head `efd7421bcd9b785489b9af59a648b5866b81760c`; merge
-  `8aad159b47b332ea83b3f50424dc0a57dbca2e11` at `2026-09-06T03:54:58Z`.
-  Prior tip was `1e5ec3cff03f8b5ebdec5165fef84174635f79d4` (PR #150).
+  from exact head `d6f85c776f2129328bcb223aee40d93c148c91ce`; merge
+  `9013b5dfe46897a68075774913a764fdaa555df6` at `2026-09-06T03:54:58Z`.
+  Prior tip was `b9c669adfd76dd3f2dbf76ffde35f5fb867cf3e1` (PR #150).
   Post-main tip Unit+drift proving on CI `34010182120`
   because PR #149 was absent from this lease-map (baseline
-  `main@f688c747`); this receipt repairs that bookkeeping like
+  `main@d181666b`); this receipt repairs that bookkeeping like
   prior Exact-1 receipts. Exclusive File Set (Exact 3):
   `src/mnemosyne/consolidation.py`, `src/mnemosyne/jobs.py`,
   `tests/test_consolidation_timescales.py`.
@@ -532,27 +532,27 @@ The following packages are complete source history, not runnable work:
   the M14 freeze is unchanged. This receipt changes no benchmark
   result or admission state, admits no successor source node, and
   does not recompute the canonical baseline (baseline stays
-  `main@f688c747`).
+  `main@d181666b`).
 - PR #151: ordinary documentation receipt recording the merged PR #149
   lease-map lapse. It is **MERGED** at tip
-  `7429b8221501cd1f52bda2d5e590a4ba38863850`. It was **OPEN/READY** at
+  `0478bc02b73e4a6672b625b6246868f86dc067b1`. It was **OPEN/READY** at
   the `2026-09-06T03:58:00Z` capture and adds only the PR #149
   merged-baseline bullet, the #150 MERGED mark, and this structured
   self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #151 changes no benchmark result or admission state and does not
   recompute the canonical baseline. Delivery is MERGED at tip
-  `7429b8221501cd1f52bda2d5e590a4ba38863850`.
+  `0478bc02b73e4a6672b625b6246868f86dc067b1`.
 - PR #152: Exact 1 M01/M03/M10 peer public README cells
   `eval/public/README.md`
   (title: docs(eval): promote M01/M03/M10 to peer public README cells)
-  from exact head `88f184373de7ea4a6f188931c1bc102f7c3ce0a7`; all
+  from exact head `ce1a3a8a8b2f9b94ad0d1205e30bec6e66351452`; all
   required exact-head checks passed in run `34011817634`; merge
-  `5fc5eb80bbeaedb38a37e905147be69dc944a80c` at `2026-09-06T05:04:23Z`.
-  Prior tip was `7429b8221501cd1f52bda2d5e590a4ba38863850` (PR #151).
+  `b164c90f72019478ed009e3e03f8a7dd1048901e` at `2026-09-06T05:04:23Z`.
+  Prior tip was `0478bc02b73e4a6672b625b6246868f86dc067b1` (PR #151).
   Post-main tip Unit+drift proving on CI `34013065647`
   because PR #152 was absent from this lease-map (baseline
-  `main@f688c747`); this receipt repairs that bookkeeping like
+  `main@d181666b`); this receipt repairs that bookkeeping like
   prior Exact-1 receipts. Exclusive File Set (Exact 1):
   `eval/public/README.md`.
   Purpose: promote M01/M03/M10 to peer public README cells;
@@ -561,30 +561,30 @@ The following packages are complete source history, not runnable work:
   invent modules; the M14 freeze is unchanged. This receipt
   changes no benchmark result or admission state, admits no
   successor source node, and does not recompute the canonical
-  baseline (baseline stays `main@f688c747`).
+  baseline (baseline stays `main@d181666b`).
 - PR #154: ordinary documentation receipt recording the merged PR #152
   lease-map lapse. It is **MERGED** at tip
-  `4574830cc428192b1b824ccd0f76a482c583d8e4`. It was **OPEN/READY** at
+  `7b2921f0a01cdb65f8079fd2907d1c0439c61dc5`. It was **OPEN/READY** at
   the `2026-09-06T05:07:00Z` capture and adds only the PR #152
   merged-baseline bullet, the #151 MERGED mark, and this structured
   self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #154 changes no benchmark result or admission state and does not
   recompute the canonical baseline. Delivery is MERGED at tip
-  `4574830cc428192b1b824ccd0f76a482c583d8e4`.
+  `7b2921f0a01cdb65f8079fd2907d1c0439c61dc5`.
 - PR #119: Exact 1 M08 reversible-forgetting plan
   `docs/plans/wmb-m08-reversible-forgetting-implementation-plan.md`
   (title: docs: PROPOSED M08 reversible-forgetting plan (not
   code-ready))
-  from exact head `08b521dbbb6e1872ad39c954ea4a1b983ee904fc`; all
+  from exact head `83d73817ca407b8731412522dfd724d798c42e06`; all
   required exact-head checks passed in run `34016028705`; merge
-  `b6a8e39212445f41b22a922ddbcdbfce46980785` at `2026-09-06T23:56:22Z`.
-  Prior tip was `4574830cc428192b1b824ccd0f76a482c583d8e4` (PR #154).
+  `dfe27e78a0b2b1b704056d5e22c37060073997b1` at `2026-09-06T23:56:22Z`.
+  Prior tip was `7b2921f0a01cdb65f8079fd2907d1c0439c61dc5` (PR #154).
   Post-main Unit+drift FAILED CI `34068262456` (and later scheduled
   nightly `34593641592`) solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #119 was absent from this lease-map (baseline
-  `main@f688c747`); this receipt repairs that bookkeeping.
+  `main@d181666b`); this receipt repairs that bookkeeping.
   Exclusive File Set (Exact 1):
   `docs/plans/wmb-m08-reversible-forgetting-implementation-plan.md`.
   Purpose: ACCEPT M08 reversible-forgetting implementation plan
@@ -593,17 +593,17 @@ The following packages are complete source history, not runnable work:
   admit Stage A code or invent M16; the M14 freeze is unchanged.
   This receipt changes no benchmark result or admission state,
   admits no successor source node, and does not recompute the
-  canonical baseline (baseline stays `main@f688c747`).
+  canonical baseline (baseline stays `main@d181666b`).
 - PR #156: ordinary documentation receipt recording the merged PR #119
   lease-map lapse. It is **MERGED** at tip
-  `36257d6582c40b8b43890cf21acb0b8c70dd08c6`. It was **OPEN/READY** at
+  `b7a0b8db65c5a91ce4b102491108ee027f7153ac`. It was **OPEN/READY** at
   the `2026-09-11T21:42:00Z` capture and adds only the PR #119
   merged-baseline bullet, the #154 MERGED mark, and this structured
   self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #156 changes no benchmark result or admission state and does not
   recompute the canonical baseline. Delivery is MERGED at tip
-  `36257d6582c40b8b43890cf21acb0b8c70dd08c6`.
+  `b7a0b8db65c5a91ce4b102491108ee027f7153ac`.
 - PR #153: Exact 7 global_sensemaking RAPTOR projection
   `eval/g0/sensemaking.py`, `src/mnemosyne/engine.py`,
   `src/mnemosyne/pipeline.py`, `src/mnemosyne/postgres_engine.py`,
@@ -611,15 +611,15 @@ The following packages are complete source history, not runnable work:
   `tests/test_global_sensemaking.py`
   (title: feat(retrieval): global_sensemaking RAPTOR projection
   (15-01-03))
-  from exact head `5b7beea65a86297817cd388644dfa3adf4f0bafb`; all
+  from exact head `c7382cdf626dcd522585dc27ba457f0874950eeb`; all
   required exact-head checks passed in run `34656393990`; merge
-  `3b6763d6b74a886f082cdac9ab8d70c4c237d3e1` at `2026-09-11T23:28:34Z`.
-  Prior tip was `36257d6582c40b8b43890cf21acb0b8c70dd08c6` (PR #156).
+  `1fc359792616910d003f4a22862851251c19f646` at `2026-09-11T23:28:34Z`.
+  Prior tip was `b7a0b8db65c5a91ce4b102491108ee027f7153ac` (PR #156).
   Post-main tip Unit+drift will FAIL on CI `34658202166`
   solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #153 is absent from this lease-map (baseline
-  `main@f688c747`); this receipt repairs that bookkeeping
+  `main@d181666b`); this receipt repairs that bookkeeping
   like prior Exact-1 receipts. Exclusive File Set (Exact 7):
   `eval/g0/sensemaking.py`, `src/mnemosyne/engine.py`,
   `src/mnemosyne/pipeline.py`, `src/mnemosyne/postgres_engine.py`,
@@ -631,30 +631,30 @@ The following packages are complete source history, not runnable work:
   the M14 freeze is unchanged. This receipt changes no benchmark
   result or admission state, admits no successor source node, and
   does not recompute the canonical baseline (baseline stays
-  `main@f688c747`).
+  `main@d181666b`).
 - PR #157: ordinary documentation receipt recording the merged PR #153
   lease-map lapse. It is **MERGED** at tip
-  `7a54fe4af8a7885409b3f7f2f2884d995303a8f0`. It was **OPEN/READY** at
+  `cd8439c09f8940e2e6f3d427e79e303e0a5bb57e`. It was **OPEN/READY** at
   the `2026-09-11T23:31:00Z` capture and adds only the PR #153
   merged-baseline bullet, the #156 MERGED mark, and this structured
   self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #157 changes no benchmark result or admission state and does not
   recompute the canonical baseline. Delivery is MERGED at tip
-  `7a54fe4af8a7885409b3f7f2f2884d995303a8f0`.
+  `cd8439c09f8940e2e6f3d427e79e303e0a5bb57e`.
 - PR #158: Exact 4 surprise-gated write closure
   `src/mnemosyne/ingestion.py`, `src/mnemosyne/consolidation.py`,
   `eval/g0/write_gating.py`, `tests/test_surprise_gated_writes.py`
   (title: feat(write-gate): surprise-gated write closure (15-01-04))
-  from exact head `317b2ab9d4d970cda2c082eaf00f6ad7bea29ef6`; all
+  from exact head `51cf8326fc7b603989c5ed4d5ce93341a8589ab1`; all
   required exact-head checks passed in run `34662859990`; merge
-  `a26f36896a3d29e021d6cc6ddc2cd28f03f90289` at `2026-09-12T01:17:36Z`.
-  Prior tip was `7a54fe4af8a7885409b3f7f2f2884d995303a8f0` (PR #157).
+  `deca887c71f7f94652645faf076420668dfcb599` at `2026-09-12T01:17:36Z`.
+  Prior tip was `cd8439c09f8940e2e6f3d427e79e303e0a5bb57e` (PR #157).
   Post-main tip Unit+drift will FAIL on CI `34664389273`
   solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #158 is absent from this lease-map (baseline
-  `main@f688c747`); this receipt repairs that bookkeeping
+  `main@d181666b`); this receipt repairs that bookkeeping
   like prior Exact-1 receipts. Exclusive File Set (Exact 4):
   `src/mnemosyne/ingestion.py`, `src/mnemosyne/consolidation.py`,
   `eval/g0/write_gating.py`, `tests/test_surprise_gated_writes.py`.
@@ -664,29 +664,29 @@ The following packages are complete source history, not runnable work:
   the M14 freeze is unchanged. This receipt changes no benchmark
   result or admission state, admits no successor source node, and
   does not recompute the canonical baseline (baseline stays
-  `main@f688c747`).
+  `main@d181666b`).
 - PR #159: ordinary documentation receipt recording the merged PR #158
   lease-map lapse. It is **MERGED** at tip
-  `df3d8101d4fc2e6b09bb74086c19a6085e55e2da`. It was **OPEN/READY** at
+  `fd7864cc9a5e773be37168157a53078a44ded44a`. It was **OPEN/READY** at
   the `2026-09-12T01:20:00Z` capture and adds only the PR #158
   merged-baseline bullet, the #157 MERGED mark, and this structured
   self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #159 changes no benchmark result or admission state and does not
   recompute the canonical baseline. Delivery is MERGED at tip
-  `df3d8101d4fc2e6b09bb74086c19a6085e55e2da`.
+  `fd7864cc9a5e773be37168157a53078a44ded44a`.
 - PR #160: Exact 2 S2 continual-learning evidence closure
   `eval/g0/continual_learning.py`, `eval/reports/phase-15-s2-capabilities.md`
   (title: feat(eval): S2 continual-learning evidence closure (15-01-06))
-  from exact head `22b8082ddb47b8db0e3db965c529cbee2a6c1a6b`; all
+  from exact head `35e06e7955b479480ae4670fc75ec88ad519bd58`; all
   required exact-head checks passed in run `34667992401`; merge
-  `cccc27009de00acd71009fca271430e1df2cc71b` at `2026-09-12T03:03:18Z`.
-  Prior tip was `df3d8101d4fc2e6b09bb74086c19a6085e55e2da` (PR #159).
+  `75ae284f7137bd527e983b4f493709e7f83f87c5` at `2026-09-12T03:03:18Z`.
+  Prior tip was `fd7864cc9a5e773be37168157a53078a44ded44a` (PR #159).
   Post-main tip Unit+drift will FAIL on CI `34669328279`
   solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #160 is absent from this lease-map (baseline
-  `main@f688c747`); this receipt repairs that bookkeeping
+  `main@d181666b`); this receipt repairs that bookkeeping
   like prior Exact-1 receipts. Exclusive File Set (Exact 2):
   `eval/g0/continual_learning.py`, `eval/reports/phase-15-s2-capabilities.md`.
   Purpose: P15-S2/15-01-06 S2 continual-learning evidence closure;
@@ -695,31 +695,31 @@ The following packages are complete source history, not runnable work:
   the M14 freeze is unchanged. This receipt changes no benchmark
   result or admission state, admits no successor source node, and
   does not recompute the canonical baseline (baseline stays
-  `main@f688c747`).
+  `main@d181666b`).
 - PR #161: ordinary documentation receipt recording the merged PR #160
   lease-map lapse. It is **MERGED** at tip
-  `ac66fcf9f08a5c25118c386cf75c26d1261e321f`. It was **OPEN/READY** at
+  `0313630ed2f3a1a3ef8685976ae7428a7df25024`. It was **OPEN/READY** at
   the `2026-09-12T03:05:00Z` capture and adds only the PR #160
   merged-baseline bullet, the #159 MERGED mark, and this structured
   self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #161 changes no benchmark result or admission state and does not
   recompute the canonical baseline. Delivery is MERGED at tip
-  `ac66fcf9f08a5c25118c386cf75c26d1261e321f`.
+  `0313630ed2f3a1a3ef8685976ae7428a7df25024`.
 - PR #162: Exact 3 security-calibration development Stage A
   `eval/public/fixtures/security-calibration-development.json`,
   `eval/public/security_calibration.py`,
   `tests/test_public_security_calibration.py`
   (title: feat(eval): security-calibration development Stage A (15-02))
-  from exact head `b91f081b8187e181a8eb169b8c0bd6a4852aff97`; all
+  from exact head `b03f3a73fe60c363fa15d79e689db0204783e386`; all
   required exact-head checks passed in run `34701573916`; merge
-  `7db0c810f53cbef36c83c884b971a4796aa7fca6` at `2026-09-12T15:37:22Z`.
-  Prior tip was `ac66fcf9f08a5c25118c386cf75c26d1261e321f` (PR #161).
+  `50e5292513e0d7ce5f1bfaaa5aab9c6bc89de022` at `2026-09-12T15:37:22Z`.
+  Prior tip was `0313630ed2f3a1a3ef8685976ae7428a7df25024` (PR #161).
   Post-main tip Unit+drift will FAIL on CI `34702788518`
   solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #162 is absent from this lease-map (baseline
-  `main@f688c747`); this receipt repairs that bookkeeping
+  `main@d181666b`); this receipt repairs that bookkeeping
   like prior Exact-1 receipts. Exclusive File Set (Exact 3):
   `eval/public/fixtures/security-calibration-development.json`,
   `eval/public/security_calibration.py`,
@@ -730,17 +730,17 @@ The following packages are complete source history, not runnable work:
   the M14 freeze is unchanged. This receipt changes no benchmark
   result or admission state, admits no successor source node, and
   does not recompute the canonical baseline (baseline stays
-  `main@f688c747`).
+  `main@d181666b`).
 - PR #163: ordinary documentation receipt recording the merged PR #162
   lease-map lapse. It is **MERGED** at tip
-  `cab5ba4590c65d87034a4393d4fed8d2e2880607`. It was **OPEN/READY** at
+  `c7cf6958dec615baa2ad1c20a6dc5aad900cd9c5`. It was **OPEN/READY** at
   the `2026-09-12T15:40:00Z` capture and adds only the PR #162
   merged-baseline bullet, the #161 MERGED mark, and this structured
   self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #163 changes no benchmark result or admission state and does not
   recompute the canonical baseline. Delivery is MERGED at tip
-  `cab5ba4590c65d87034a4393d4fed8d2e2880607`.
+  `c7cf6958dec615baa2ad1c20a6dc5aad900cd9c5`.
 - PR #164: Exact 8 security-calibration Stage B
   `eval/public/adapters/security_calibration_probe.py`,
   `eval/public/bundle.py`,
@@ -752,15 +752,15 @@ The following packages are complete source history, not runnable work:
   `tests/test_wmbs_module_inventory.py`
   (title: feat(eval): security-calibration Stage B public registration
   (15-02))
-  from exact head `1e24bc107b6d2d894e73f94b4016dc882024c1e5`; all
+  from exact head `3876a62a3be158beb65fab2439f79adbfccda160`; all
   required exact-head checks passed in run `34709624586`; merge
-  `8691bbd696759459b39dec798831768df16dd1c5` at `2026-09-12T18:21:34Z`.
-  Prior tip was `cab5ba4590c65d87034a4393d4fed8d2e2880607` (PR #163).
+  `b29ba9983c844cddd1673db4a5503222e695155a` at `2026-09-12T18:21:34Z`.
+  Prior tip was `c7cf6958dec615baa2ad1c20a6dc5aad900cd9c5` (PR #163).
   Post-main tip Unit+drift will FAIL on CI `34710947939`
   solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #164 is absent from this lease-map (baseline
-  `main@f688c747`); this receipt repairs that bookkeeping
+  `main@d181666b`); this receipt repairs that bookkeeping
   like prior Exact-1 receipts. Exclusive File Set (Exact 8):
   `eval/public/adapters/security_calibration_probe.py`,
   `eval/public/bundle.py`,
@@ -776,17 +776,17 @@ The following packages are complete source history, not runnable work:
   the M14 freeze is unchanged. This receipt changes no benchmark
   result or admission state, admits no successor source node, and
   does not recompute the canonical baseline (baseline stays
-  `main@f688c747`).
+  `main@d181666b`).
 - PR #165: ordinary documentation receipt recording the merged PR #164
   lease-map lapse. It is **MERGED** at tip
-  `034decfad1b2868b34463a9a07737f42eb6338fb`. It was **OPEN/READY** at
+  `f0f31d31bc0b3ec753d3f1505ae230b76d591e19`. It was **OPEN/READY** at
   the `2026-09-12T18:26:00Z` capture and adds only the PR #164
   merged-baseline bullet, the #163 MERGED mark, and this structured
   self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #165 changes no benchmark result or admission state and does not
   recompute the canonical baseline. Delivery is MERGED at tip
-  `034decfad1b2868b34463a9a07737f42eb6338fb`.
+  `f0f31d31bc0b3ec753d3f1505ae230b76d591e19`.
 - PR #166: Exact 6 CAP-006 / P15-S4 / 15-03-01 warm-serial + concurrent
   latency receipts
   `eval/latency/bench.py`,
@@ -797,15 +797,15 @@ The following packages are complete source history, not runnable work:
   `eval/latency/reports/phase15-s4-concurrent.json`
   (title: feat(eval): freeze CAP-006 warm and concurrent latency
   receipt ABI (15-03-01))
-  from exact head `b1d375374faa5176ab76feb708a81604c9841593`; all
+  from exact head `2d578aedfdee91051bd9963ffd0940789dc679c6`; all
   required exact-head Unit+drift checks passed in run `34715638835`;
-  merge `88724b16b30aa232c03018ec1768362032981d41` at
+  merge `6a6d88a41081c95124a2e1e3c82ea857b0b392eb` at
   `2026-09-12T20:21:56Z`.
-  Prior tip was `034decfad1b2868b34463a9a07737f42eb6338fb` (PR #165).
+  Prior tip was `f0f31d31bc0b3ec753d3f1505ae230b76d591e19` (PR #165).
   Post-main tip Unit+drift will FAIL solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #166 is absent from this lease-map (baseline
-  `main@f688c747`); this receipt repairs that bookkeeping
+  `main@d181666b`); this receipt repairs that bookkeeping
   like prior Exact-1 receipts. Exclusive File Set (Exact 6):
   `eval/latency/bench.py`,
   `eval/latency/bench_concurrent.py`,
@@ -819,30 +819,30 @@ The following packages are complete source history, not runnable work:
   the M14 freeze is unchanged. This receipt changes no benchmark
   result or admission state, admits no successor source node, and
   does not recompute the canonical baseline (baseline stays
-  `main@f688c747`).
+  `main@d181666b`).
 - PR #167: ordinary documentation receipt recording the merged PR #166
   lease-map lapse. It is **MERGED** at tip
-  `e32e1cb7ceb455ffbfd06ddc6c0bd2d526bfe4d4`. It was **OPEN/READY** at
+  `a71599efffb3e4eb65c3fcfbe425d01c06a26e82`. It was **OPEN/READY** at
   the `2026-09-12T20:24:00Z` capture and adds only the PR #166
   merged-baseline bullet, the #165 MERGED mark, and this structured
   self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #167 changes no benchmark result or admission state and does not
   recompute the canonical baseline. Delivery is MERGED at tip
-  `e32e1cb7ceb455ffbfd06ddc6c0bd2d526bfe4d4`.
+  `a71599efffb3e4eb65c3fcfbe425d01c06a26e82`.
 - PR #170: Exact 1 sitecustomize/planning_traceability fix
   `tests/test_planning_traceability.py`
   (title: fix planning_traceability sitecustomize bootstrap test for
   Ubuntu 3.12 site import)
-  from exact head `70e564e1b131087f2f3ab098a7ed24f9394ad17e`; all
+  from exact head `bad2911b0ab6ca01f9daee64b408d69147c7c98c`; all
   required exact-head Unit+drift checks passed in run `35463262102`;
-  merge `f027282a5f6dcbe1a3828ccdb7dbb9a20ebf3284` at
+  merge `d070681cd27633a2387fac0634c3e307777d8102` at
   `2026-09-19T19:27:35Z`.
-  Prior tip was `e32e1cb7ceb455ffbfd06ddc6c0bd2d526bfe4d4` (PR #167).
+  Prior tip was `a71599efffb3e4eb65c3fcfbe425d01c06a26e82` (PR #167).
   Post-main tip Unit+drift will FAIL solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #170 is absent from this lease-map (baseline
-  `main@f688c747`); this receipt repairs that bookkeeping
+  `main@d181666b`); this receipt repairs that bookkeeping
   like prior Exact-1 receipts. Exclusive File Set (Exact 1):
   `tests/test_planning_traceability.py`.
   Purpose: sitecustomize/planning_traceability Ubuntu 3.12 site-import
@@ -851,32 +851,32 @@ The following packages are complete source history, not runnable work:
   the M14 freeze is unchanged. This receipt changes no benchmark
   result or admission state, admits no successor source node, and
   does not recompute the canonical baseline (baseline stays
-  `main@f688c747`).
+  `main@d181666b`).
 - PR #171: ordinary documentation receipt recording the merged PR #170
   lease-map lapse. It is **MERGED** at tip
-  `9861b6e1dc95c5a85df8fe0fc878084a0303cb27`. It was **OPEN/READY** at
+  `7789649d1f40d3b047d4edfec93c56c3edb0a6d2`. It was **OPEN/READY** at
   the `2026-09-19T19:55:00Z` capture and adds only the PR #170
   merged-baseline bullet, the #167 MERGED mark, and this structured
   self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #171 changes no benchmark result or admission state and does not
   recompute the canonical baseline. Delivery is MERGED at tip
-  `9861b6e1dc95c5a85df8fe0fc878084a0303cb27`.
+  `7789649d1f40d3b047d4edfec93c56c3edb0a6d2`.
 - PR #169: Exact 4 harness-only 15-03-03 scale/100k
   `eval/scale/bench_100k.py`,
   `tests/test_scale_100k.py`,
   `tests/test_postgres_perf_lanes.py`,
   `eval/scale/reports/phase15-s4-100k.json`
   (title: feat(eval): add harness-only 15-03-03 100k scale stubs)
-  from exact head `04c41f2e185677e57315eb8bad838cfdfe7420f2`; all
+  from exact head `9427b497f319f8c82a79ed4f080e7644fdfc9f77`; all
   required exact-head Unit+drift checks passed in run `35466916029`;
-  merge `ac5a8aefc4e7713a0f274b48bc681e39090fad13` at
+  merge `5c6cf6dd3ed9e61d3f932e0d02fa69256e756599` at
   `2026-09-19T20:41:16Z`.
-  Prior tip was `9861b6e1dc95c5a85df8fe0fc878084a0303cb27` (PR #171).
+  Prior tip was `7789649d1f40d3b047d4edfec93c56c3edb0a6d2` (PR #171).
   Post-main tip Unit+drift will FAIL solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #169 is absent from this lease-map (baseline
-  `main@f688c747`); this receipt repairs that bookkeeping
+  `main@d181666b`); this receipt repairs that bookkeeping
   like prior Exact-1 receipts. Exclusive File Set (Exact 4):
   `eval/scale/bench_100k.py`,
   `tests/test_scale_100k.py`,
@@ -888,33 +888,33 @@ The following packages are complete source history, not runnable work:
   invent M16; the M14 freeze is unchanged. This receipt changes no
   benchmark result or admission state, admits no successor source
   node, and does not recompute the canonical baseline (baseline stays
-  `main@f688c747`).
+  `main@d181666b`).
 - PR #172: ordinary documentation receipt recording the merged PR #169
   lease-map lapse. It is **MERGED** at tip
-  `4534761ae547c3c04de644f0f7c9d033e2f4763b`. It was **OPEN/READY** at
+  `041bfd25ccea9abaacc34e5198b56ef13f4e81bd`. It was **OPEN/READY** at
   the `2026-09-19T20:50:00Z` capture and adds only the PR #169
   merged-baseline bullet, the #171 MERGED mark, and this structured
   self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #172 changes no benchmark result or admission state and does not
   recompute the canonical baseline. Delivery is MERGED at tip
-  `4534761ae547c3c04de644f0f7c9d033e2f4763b`.
+  `041bfd25ccea9abaacc34e5198b56ef13f4e81bd`.
 - PR #168: Exact 3 P15-S4/15-03-02 provider bake-off
   `eval/provider_bakeoff/run.py`,
   `eval/tests/test_provider_bakeoff.py`,
   `eval/provider_bakeoff/reports/phase15-s4-provider.json`
   (title: feat(eval): freeze CAP-006 provider bake-off decision ABI
   (15-03-02))
-  from exact head `e00ce62d291bb88f8c817ad76aa583e035d47e5e`; all
+  from exact head `dd0f44ab668b22e56a8e4ddc0d3cd471c93b88fa`; all
   required exact-head Unit+drift checks passed in run `35469947839`;
-  merge `bd07367a119398680c9ec571dc2dc0bf5c5e4a30` at
+  merge `8f3781a1ac24c85b1c155e2f1bd259da38eb1e3f` at
   `2026-09-19T21:44:41Z`.
-  Prior tip was `4534761ae547c3c04de644f0f7c9d033e2f4763b` (PR #172).
+  Prior tip was `041bfd25ccea9abaacc34e5198b56ef13f4e81bd` (PR #172).
   Post-main tip Unit+drift will FAIL on CI `35471317284`
   solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #168 is absent from this lease-map (baseline
-  `main@f688c747`); this receipt repairs that bookkeeping
+  `main@d181666b`); this receipt repairs that bookkeeping
   like prior Exact-1 receipts. Exclusive File Set (Exact 3):
   `eval/provider_bakeoff/run.py`,
   `eval/tests/test_provider_bakeoff.py`,
@@ -925,17 +925,17 @@ The following packages are complete source history, not runnable work:
   invent M16; the M14 freeze is unchanged. This receipt changes no
   benchmark result or admission state, admits no successor source
   node, and does not recompute the canonical baseline (baseline stays
-  `main@f688c747`).
+  `main@d181666b`).
 - PR #173: ordinary documentation receipt recording the merged PR #168
   lease-map lapse. It is **MERGED** at tip
-  `eed2d1f8a531b181665c4d1745b54472df0e7a41`. It was **OPEN/READY** at
+  `625f01ff10fe58e84bd081be19ea4fdc5a36e7ce`. It was **OPEN/READY** at
   the `2026-09-19T21:50:00Z` capture and adds only the PR #168
   merged-baseline bullet, the #172 MERGED mark, and this structured
   self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #173 changes no benchmark result or admission state and does not
   recompute the canonical baseline. Delivery is MERGED at tip
-  `eed2d1f8a531b181665c4d1745b54472df0e7a41`.
+  `625f01ff10fe58e84bd081be19ea4fdc5a36e7ce`.
 - PR #174: Exact 5 P15-S4/15-03-04 CAP-011 compact 8GB acceptance
   harness
   `eval/compact_answering/acceptance.py`,
@@ -945,16 +945,16 @@ The following packages are complete source history, not runnable work:
   `eval/compact_answering/reports/phase15-s4-8gb-linux.json`
   (title: feat(eval): Exact 5 CAP-011 compact 8GB acceptance harness
   (15-03-04))
-  from exact head `4acd2f5d1ff2084e71507e9c5ce3c6bb4bcf4537`; all
+  from exact head `20eeea3b333f74e0dad3ffbff89ebbdceeabc85f`; all
   required exact-head Unit+drift checks passed in run `35474061398`;
-  merge `03501545899f5bb2bb15816e217c26002fe58244` at
+  merge `21642c7c88d0b69c1c05ace45e58e0b9aa7786db` at
   `2026-09-19T23:06:23Z`.
-  Prior tip was `eed2d1f8a531b181665c4d1745b54472df0e7a41` (PR #173).
+  Prior tip was `625f01ff10fe58e84bd081be19ea4fdc5a36e7ce` (PR #173).
   Post-main tip Unit+drift will FAIL on CI `35475178719`
   solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #174 is absent from this lease-map (baseline
-  `main@f688c747`); this receipt repairs that bookkeeping
+  `main@d181666b`); this receipt repairs that bookkeeping
   like prior Exact-1 receipts. Exclusive File Set (Exact 5):
   `eval/compact_answering/acceptance.py`,
   `tests/test_compact_answering_acceptance.py`,
@@ -968,17 +968,17 @@ The following packages are complete source history, not runnable work:
   invent M16; the M14 freeze is unchanged. This receipt changes no
   benchmark result or admission state, admits no successor source
   node, and does not recompute the canonical baseline (baseline stays
-  `main@f688c747`).
+  `main@d181666b`).
 - PR #175: ordinary documentation receipt recording the merged PR #174
   lease-map lapse. It is **MERGED** at tip
-  `e1424ce049dccc0e91117ee5b59ad3de8dcaa984`. It was **OPEN/READY** at
+  `e04263af9445239d8c3fbca4ab294dc85000ba35`. It was **OPEN/READY** at
   the `2026-09-19T23:12:00Z` capture and adds only the PR #174
   merged-baseline bullet, the #173 MERGED mark, and this structured
   self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #175 changes no benchmark result or admission state and does not
   recompute the canonical baseline. Delivery is MERGED at tip
-  `e1424ce049dccc0e91117ee5b59ad3de8dcaa984`.
+  `e04263af9445239d8c3fbca4ab294dc85000ba35`.
 - PR #176: Exact 4 residual RAPTOR/global-sensemaking harden post-#155
   SPLIT
   `src/mnemosyne/retrieval.py`,
@@ -987,34 +987,34 @@ The following packages are complete source history, not runnable work:
   `tests/test_postgres_engine_live.py`
   (title: feat(retrieval): Exact residual RAPTOR/global-sensemaking
   harden (post-#155 SPLIT))
-  from exact head `8bb2131d3b535c2591e7a53d664356b5462d9ec7`; all
+  from exact head `9502948fca1de93c61421b0215971d63bfa58883`; all
   required exact-head Unit+drift checks passed in run `35476826176`;
-  merge `2cd543e51464b2a390cb96d9574e7c0f0e9d5919` at
+  merge `4d1ff09868175493837e2c6ff8484f0e6ac44811` at
   `2026-09-20T00:12:33Z`.
-  Prior tip was `e1424ce049dccc0e91117ee5b59ad3de8dcaa984` (PR #175).
+  Prior tip was `e04263af9445239d8c3fbca4ab294dc85000ba35` (PR #175).
   Post-main tip Unit+drift will FAIL on CI `35478157511`
   solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #176 is absent from this lease-map (baseline
-  `main@f688c747`); this receipt repairs that bookkeeping
+  `main@d181666b`); this receipt repairs that bookkeeping
   like prior Exact-1 receipts. Exclusive File Set (Exact 4):
   `src/mnemosyne/retrieval.py`,
   `src/mnemosyne/pipeline.py`,
   `tests/test_global_sensemaking.py`,
   `tests/test_postgres_engine_live.py`.
   Purpose: Exact residual RAPTOR/global-sensemaking harden post-#155
-  SPLIT (3-way reconcile from closed #155 `b8847bdd`; NOT historical
+  SPLIT (3-way reconcile from closed #155 `e16b92d0`; NOT historical
   Exact 8 #164); docs-only privacy for THIS receipt PR is Exact-1
   lease-map only (the recorded #176 was code). This receipt does not
   invent M16; the M14 freeze is unchanged. This receipt changes no
   benchmark result or admission state, admits no successor source
   node, and does not recompute the canonical baseline (baseline stays
-  `main@f688c747`).
+  `main@d181666b`).
 - PR #178: ordinary documentation receipt recording the merged PR #176
   lease-map lapse (Exact-1 lease-map receipt for product #176 residual
-  RAPTOR harden @ `8bb2131d3b535c2591e7a53d664356b5462d9ec7`). It is
-  **MERGED** at tip `649b911b5d23fae975cd4aae07aeadae9e454995` from
-  Exact HEAD `b48d5398d5f43640dae5e2791b981d3b6ea9cdcd`. It was
+  RAPTOR harden @ `9502948fca1de93c61421b0215971d63bfa58883`). It is
+  **MERGED** at tip `5fe064d4a090d8a62f8cfb7bb93e494e09c0cf2d` from
+  Exact HEAD `a3ddda39ff998e18ba3d897734777a82fe9259a8`. It was
   **OPEN/READY** at the `2026-09-20T00:14:48Z` capture and adds only
   the PR #176 merged-baseline bullet, the #175 MERGED mark, and this
   structured self-record in this map. Exclusive File Set:
@@ -1023,36 +1023,36 @@ The following packages are complete source history, not runnable work:
   job `105995001280` solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #178 is absent from this lease-map (baseline
-  `main@f688c747`); this receipt repairs that bookkeeping
+  `main@d181666b`); this receipt repairs that bookkeeping
   like prior Exact-1 receipts. PR #178 changes no benchmark result
   or admission state and does not recompute the canonical baseline
-  (baseline stays `main@f688c747`). Delivery is MERGED at tip
-  `649b911b5d23fae975cd4aae07aeadae9e454995`.
+  (baseline stays `main@d181666b`). Delivery is MERGED at tip
+  `5fe064d4a090d8a62f8cfb7bb93e494e09c0cf2d`.
 - PR #179: ordinary documentation receipt recording the merged PR #178
   lease-map lapse. It is **MERGED** at tip
-  `69213f95754edfd4c97fcb109c3fb0656c951419` from Exact HEAD
-  `b4325df8b149c5796a607c0b2b4b13b3e857f5df`. It was **OPEN/READY**
+  `b17cd5eda8db34e345074ebbc681c93f85368238` from Exact HEAD
+  `71e7eeef1db990401937e60a635bb57c228213a1`. It was **OPEN/READY**
   at the `2026-09-20T01:16:00Z` capture and adds only the PR #178
   merged-baseline bullet and this structured self-record in this
   map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #179 changes no benchmark result or admission state and does
   not recompute the canonical baseline. Delivery is MERGED at tip
-  `69213f95754edfd4c97fcb109c3fb0656c951419`.
+  `b17cd5eda8db34e345074ebbc681c93f85368238`.
 - PR #177: Exact 1 P15-S4/15-03-05 performance-scale report
   `eval/reports/phase-15-s4-performance-scale.md`
   (title: docs(eval): Exact 1 P15-S4 performance-scale report
   (15-03-05))
-  from exact head `dd5147431f6896f61f999af16d6ca92cc1e75849`; all
+  from exact head `ce4c86ee808038efe88d41a74045556a0efb357f`; all
   required exact-head Unit+drift checks passed in run `35482333874`;
-  merge `336d34b4db930907081824d765748c9f585a2bca` at
+  merge `315c7770b10364e1e4afc06fcb6313c1e52050f9` at
   `2026-09-20T02:15:39Z`.
-  Prior tip was `69213f95754edfd4c97fcb109c3fb0656c951419` (PR #179).
+  Prior tip was `b17cd5eda8db34e345074ebbc681c93f85368238` (PR #179).
   Post-main tip Unit+drift will FAIL on CI `35483526085`
   solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #177 is absent from this lease-map (baseline
-  `main@f688c747`); this receipt repairs that bookkeeping
+  `main@d181666b`); this receipt repairs that bookkeeping
   like prior Exact-1 receipts. Exclusive File Set (Exact 1):
   `eval/reports/phase-15-s4-performance-scale.md`.
   Purpose: P15-S4/15-03-05 performance-scale report (CAP-006 OPEN;
@@ -1061,36 +1061,36 @@ The following packages are complete source history, not runnable work:
   was docs). This receipt does not invent M16; the M14 freeze is
   unchanged. This receipt changes no benchmark result or admission
   state, admits no successor source node, and does not recompute
-  the canonical baseline (baseline stays `main@f688c747`).
+  the canonical baseline (baseline stays `main@d181666b`).
 - PR #180: ordinary documentation receipt recording the merged PR #177
   lease-map lapse (Exact-1 lease-map receipt for product #177
   P15-S4/15-03-05 performance-scale report @
-  `dd5147431f6896f61f999af16d6ca92cc1e75849`). It is **MERGED** at tip
-  `7ae3f615c5b47c6768fc6d20782ea2fe2a767cbd` from Exact HEAD
-  `f223c753e43f5dd0999d1406ee4d3abf4d3e5e54`. It was **OPEN/READY**
+  `ce4c86ee808038efe88d41a74045556a0efb357f`). It is **MERGED** at tip
+  `3f2fc35ec05187ccac44154879307e59b7598b44` from Exact HEAD
+  `913728daacd7357a48f8d3c841302af64222372d`. It was **OPEN/READY**
   at the `2026-09-20T02:18:16Z` capture and adds only the PR #177
   merged-baseline bullet, the #179 MERGED mark, and this structured
   self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #180 changes no benchmark result or admission state and does
   not recompute the canonical baseline. Delivery is MERGED at tip
-  `7ae3f615c5b47c6768fc6d20782ea2fe2a767cbd`.
+  `3f2fc35ec05187ccac44154879307e59b7598b44`.
 - PR #181: Exact 3 P15-S5/15-04-01 activation-memory contract
   `research/activation-memory/contract.py`,
   `research/activation-memory/fixtures/development.json`,
   `tests/test_activation_memory_contract.py`
   (title: feat(research): Exact 3 activation-memory contract
   (15-04-01))
-  from exact head `4b4a1ba13d946e7e457762b60aa867659ee3d504`; all
+  from exact head `9ac7077b93d7f20e2889bca8773198179c4478db`; all
   required exact-head Unit+drift checks passed in run `35484900818`;
-  merge `20277f736af103ea505f32e507c5558030ed37b4` at
+  merge `15467fe0ba09b556c2ac410fd3edbd2e06ef7b8c` at
   `2026-09-20T03:15:43Z`.
-  Prior tip was `7ae3f615c5b47c6768fc6d20782ea2fe2a767cbd` (PR #180).
+  Prior tip was `3f2fc35ec05187ccac44154879307e59b7598b44` (PR #180).
   Post-main tip Unit+drift will FAIL on CI `35486118444`
   solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #181 is absent from this lease-map (baseline
-  `main@f688c747`); this receipt repairs that bookkeeping
+  `main@d181666b`); this receipt repairs that bookkeeping
   like prior Exact-1 receipts. Exclusive File Set (Exact 3):
   `research/activation-memory/contract.py`,
   `research/activation-memory/fixtures/development.json`,
@@ -1102,36 +1102,36 @@ The following packages are complete source history, not runnable work:
   the M14 freeze is unchanged. This receipt changes no benchmark
   result or admission state, admits no successor source node, and
   does not recompute the canonical baseline (baseline stays
-  `main@f688c747`).
+  `main@d181666b`).
 - PR #182: ordinary documentation receipt recording the merged PR #181
   lease-map lapse (Exact-1 lease-map receipt for product #181
   P15-S5/15-04-01 activation-memory contract @
-  `4b4a1ba13d946e7e457762b60aa867659ee3d504`). It is **MERGED** at tip
-  `d3cd013fe07540c3e561bab821e42504b15c82ce` from Exact HEAD
-  `e39ea06bec8763b0cf490de5f01bf04a4fb858ea`. It was **OPEN/READY**
+  `9ac7077b93d7f20e2889bca8773198179c4478db`). It is **MERGED** at tip
+  `d8a3e4d3802a369e005c1d4d093b8cc99c4b226d` from Exact HEAD
+  `c877c95b596c1a077a445f66db71b62765559025`. It was **OPEN/READY**
   at the `2026-09-20T03:18:00Z` capture and adds only the PR #181
   merged-baseline bullet, the #180 MERGED mark, and this structured
   self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #182 changes no benchmark result or admission state and does
   not recompute the canonical baseline. Delivery is MERGED at tip
-  `d3cd013fe07540c3e561bab821e42504b15c82ce`.
+  `d8a3e4d3802a369e005c1d4d093b8cc99c4b226d`.
 - PR #183: Exact 3 P15-S5/15-04-02 CAP-009 cartridge A/B harness
   `eval/benches/bench_cartridge_ab.py`,
   `eval/benches/reports/phase15-s5-cartridge.json`,
   `tests/test_cartridge_ab.py`
   (title: feat(eval): Exact 3 P15-S5/15-04-02 CAP-009 cartridge
   A/B harness)
-  from exact head `5ebdbd2f486f21fcde2c2d991894b6dee66a9450`; all
+  from exact head `6ca7c11540f7af343cc4aa4e82dda54c808e76f0`; all
   required exact-head Unit+drift checks passed in run `35488845280`;
-  merge `3eb8c30ee721c890c5339ebbbaeae43300f36bf4` at
+  merge `5c53a11447a0d14f5782c9016a8b9b099c5dab90` at
   `2026-09-20T04:50:52Z`.
-  Prior tip was `d3cd013fe07540c3e561bab821e42504b15c82ce` (PR #182).
+  Prior tip was `d8a3e4d3802a369e005c1d4d093b8cc99c4b226d` (PR #182).
   Post-main tip Unit+drift will FAIL on CI `35490166255`
   solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #183 is absent from this lease-map (baseline
-  `main@f688c747`); this receipt repairs that bookkeeping
+  `main@d181666b`); this receipt repairs that bookkeeping
   like prior Exact-1 receipts. Exclusive File Set (Exact 3):
   `eval/benches/bench_cartridge_ab.py`,
   `eval/benches/reports/phase15-s5-cartridge.json`,
@@ -1143,35 +1143,35 @@ The following packages are complete source history, not runnable work:
   the M14 freeze is unchanged. This receipt changes no benchmark
   result or admission state, admits no successor source node, and
   does not recompute the canonical baseline (baseline stays
-  `main@f688c747`).
+  `main@d181666b`).
 - PR #184: ordinary documentation receipt recording the merged PR #183
   lease-map lapse (Exact-1 lease-map receipt for product #183
   P15-S5/15-04-02 CAP-009 cartridge A/B harness @
-  `5ebdbd2f486f21fcde2c2d991894b6dee66a9450`). It is **MERGED** at tip
-  `004286f7233d14d26937af0ea899b07474bf293d` from Exact HEAD
-  `db4a7473e8b2dd235acc3c0c27f633e73ed99b93`. It was **OPEN/READY**
+  `6ca7c11540f7af343cc4aa4e82dda54c808e76f0`). It is **MERGED** at tip
+  `3d3a71e66d88284cc7235bfa915fa7ead24c56a9` from Exact HEAD
+  `a2196f9b4a3ebc72d4410e1d3dc92fdf49201073`. It was **OPEN/READY**
   at the `2026-09-20T04:53:00Z` capture and adds only the PR #183
   merged-baseline bullet, the #182 MERGED mark, and this structured
   self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #184 changes no benchmark result or admission state and does
   not recompute the canonical baseline. Delivery is MERGED at tip
-  `004286f7233d14d26937af0ea899b07474bf293d`.
+  `3d3a71e66d88284cc7235bfa915fa7ead24c56a9`.
 - PR #185: Exact 3 P15-S5/15-04-03 J-lens tripwire
   `research/activation-memory/j_lens_eval.py`,
   `research/activation-memory/reports/phase15-s5-j-lens.json`,
   `tests/test_j_lens_tripwire.py`
   (title: feat(research): Exact 3 P15-S5/15-04-03 J-lens tripwire)
-  from exact head `aed883d5928929dc410d55bd41e6852d71cd1f7f`; all
+  from exact head `9b7ec59652ade7678d7d442934d0a1632e47b93e`; all
   required exact-head Unit+drift checks passed in run `35492870190`;
-  merge `d15d78aea6fc677517b89c87f6dbe8303c306fb9` at
+  merge `2840a149eb538ebed713c81f2b49cc63a89f3bbd` at
   `2026-09-20T06:24:56Z`.
-  Prior tip was `004286f7233d14d26937af0ea899b07474bf293d` (PR #184).
+  Prior tip was `3d3a71e66d88284cc7235bfa915fa7ead24c56a9` (PR #184).
   Post-main tip Unit+drift will FAIL on CI `35494168611`
   solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #185 is absent from this lease-map (baseline
-  `main@f688c747`); this receipt repairs that bookkeeping
+  `main@d181666b`); this receipt repairs that bookkeeping
   like prior Exact-1 receipts. Exclusive File Set (Exact 3):
   `research/activation-memory/j_lens_eval.py`,
   `research/activation-memory/reports/phase15-s5-j-lens.json`,
@@ -1183,120 +1183,120 @@ The following packages are complete source history, not runnable work:
   the M14 freeze is unchanged. This receipt changes no benchmark
   result or admission state, admits no successor source node, and
   does not recompute the canonical baseline (baseline stays
-  `main@f688c747`).
+  `main@d181666b`).
 - PR #186: ordinary documentation receipt recording the merged PR #185
   lease-map lapse (Exact-1 lease-map receipt for product #185
   P15-S5/15-04-03 J-lens tripwire @
-  `aed883d5928929dc410d55bd41e6852d71cd1f7f`). It is **MERGED** at tip
-  `c0ff999c135955eb65dfe65ccfe403ed0dbed3e7` from Exact HEAD
-  `a742f674e1aaaef5b419dff6213de8b50a052afa`. It was **OPEN/READY**
+  `9b7ec59652ade7678d7d442934d0a1632e47b93e`). It is **MERGED** at tip
+  `dd65c86c9607ca74e15aeccb259842c40beb508a` from Exact HEAD
+  `9805361fd5b9a048059e033a492357e259a68877`. It was **OPEN/READY**
   at the `2026-09-20T06:27:00Z` capture and adds only the PR #185
   merged-baseline bullet, the #184 MERGED mark, and this structured
   self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #186 changes no benchmark result or admission state and does
   not recompute the canonical baseline. Delivery is MERGED at tip
-  `c0ff999c135955eb65dfe65ccfe403ed0dbed3e7`.
+  `dd65c86c9607ca74e15aeccb259842c40beb508a`.
 - PR #187: ordinary documentation receipt recording the merged PR #186
   lease-map lapse (Exact-1 lease-map receipt for receipt #186
   of product #185 @
-  `a742f674e1aaaef5b419dff6213de8b50a052afa`). It is **MERGED** at tip
-  `9d2cedc30da6d44cc26e2fe0f05e70f551219db8` from Exact HEAD
-  `4dfd8bf628c8228a00773230b8b4487f4c358b01`. It was **OPEN/READY**
+  `9805361fd5b9a048059e033a492357e259a68877`). It is **MERGED** at tip
+  `a7fdf0e8d7b6453aaef7f333f332c2b968f17884` from Exact HEAD
+  `c05805064203cf2876da2e35c2878246ad3198e0`. It was **OPEN/READY**
   at the `2026-09-20T06:49:00Z` capture and adds only the #186 MERGED
   mark and this structured self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #187 changes no benchmark result or admission state and does
   not recompute the canonical baseline. Delivery is MERGED at tip
-  `9d2cedc30da6d44cc26e2fe0f05e70f551219db8`.
+  `a7fdf0e8d7b6453aaef7f333f332c2b968f17884`.
 - PR #188: ordinary documentation receipt recording the merged PR #187
   lease-map lapse (Exact-1 lease-map receipt for receipt #187
   of product #185 @
-  `4dfd8bf628c8228a00773230b8b4487f4c358b01`). It is **MERGED** at tip
-  `f894e3ad1fe76fc015258ad0148c5b1f1a68f668` from Exact HEAD
-  `a5bb2f813e17e536a7c02bbdc5ab7c360e12d596`. It was **OPEN/READY**
+  `c05805064203cf2876da2e35c2878246ad3198e0`). It is **MERGED** at tip
+  `85ce18f8f420be87a683a2d44519378a0e4b9c5e` from Exact HEAD
+  `202e8c30beaafb0f74d657903ab0483a05e4f217`. It was **OPEN/READY**
   at the `2026-09-20T07:17:00Z` capture and adds only the #187 MERGED
   mark and this structured self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #188 changes no benchmark result or admission state and does
   not recompute the canonical baseline. Delivery is MERGED at tip
-  `f894e3ad1fe76fc015258ad0148c5b1f1a68f668`.
+  `85ce18f8f420be87a683a2d44519378a0e4b9c5e`.
 - PR #189: ordinary documentation receipt recording the merged PR #188
   lease-map lapse (Exact-1 lease-map receipt for receipt #188
   of product #185 @
-  `a5bb2f813e17e536a7c02bbdc5ab7c360e12d596`). It is **MERGED** at tip
-  `ae858c7a690c9f9849a842365c9da7489f246fa8` from Exact HEAD
-  `630845c8290ded8fbec80c442428262ef3175c38`. It was **OPEN/READY**
+  `202e8c30beaafb0f74d657903ab0483a05e4f217`). It is **MERGED** at tip
+  `60d737a82b789f267475f621e7f1faadbb3d6b01` from Exact HEAD
+  `785d6bd11493a2ca054f134b45a4020fac66196f`. It was **OPEN/READY**
   at the `2026-09-20T07:49:00Z` capture and adds only the #188 MERGED
   mark and this structured self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #189 changes no benchmark result or admission state and does
   not recompute the canonical baseline. Delivery is MERGED at tip
-  `ae858c7a690c9f9849a842365c9da7489f246fa8`.
+  `60d737a82b789f267475f621e7f1faadbb3d6b01`.
 - PR #190: ordinary documentation receipt recording the merged PR #189
   lease-map lapse (Exact-1 lease-map receipt for receipt #189
   of product #185 @
-  `630845c8290ded8fbec80c442428262ef3175c38`). It is **MERGED** at tip
-  `ec1fc9bcc42ffa3dc92626413d5869bf89b3e0dc` from Exact HEAD
-  `5a11189c404c8a9b65c48f440be0885c1e49534e`. It was **OPEN/READY**
+  `785d6bd11493a2ca054f134b45a4020fac66196f`). It is **MERGED** at tip
+  `2b6cbac4b9b6a969641b1d923052f65bbb709a52` from Exact HEAD
+  `ae64511924fe8f1ca8e35c4640988edb09b2660d`. It was **OPEN/READY**
   at the `2026-09-20T08:21:00Z` capture and adds only the #189 MERGED
   mark and this structured self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #190 changes no benchmark result or admission state and does
   not recompute the canonical baseline. Delivery is MERGED at tip
-  `ec1fc9bcc42ffa3dc92626413d5869bf89b3e0dc`.
+  `2b6cbac4b9b6a969641b1d923052f65bbb709a52`.
 - PR #191: ordinary documentation receipt recording the merged PR #190
   lease-map lapse (Exact-1 lease-map receipt for receipt #190
   of product #185 @
-  `5a11189c404c8a9b65c48f440be0885c1e49534e`). It is **MERGED** at tip
-  `20c9158d42e6a8bf992326746502e73a0315c023` from Exact HEAD
-  `fc9b05cc10f00ef266869aa7e0421042132eb69c`. It was **OPEN/READY**
+  `ae64511924fe8f1ca8e35c4640988edb09b2660d`). It is **MERGED** at tip
+  `ccdb326d871421b9385954734a55dd0871e5f25d` from Exact HEAD
+  `4ac86d78e44f7c7bcbf356e7cb4f708dcfdd65ad`. It was **OPEN/READY**
   at the `2026-09-20T08:48:00Z` capture and adds only the #190 MERGED
   mark and this structured self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #191 changes no benchmark result or admission state and does
   not recompute the canonical baseline. Delivery is MERGED at tip
-  `20c9158d42e6a8bf992326746502e73a0315c023`.
+  `ccdb326d871421b9385954734a55dd0871e5f25d`.
 - PR #192: ordinary documentation receipt recording the merged PR #191
   lease-map lapse (Exact-1 lease-map receipt for receipt #191
   of product #185 @
-  `fc9b05cc10f00ef266869aa7e0421042132eb69c`). It is **MERGED** at tip
-  `4517bf13785a18223865ccc2a6fc6ff908bc8908` from Exact HEAD
-  `ca266e2ba9b6343d8a85d16162b450950a90049f`. It was **OPEN/READY**
+  `4ac86d78e44f7c7bcbf356e7cb4f708dcfdd65ad`). It is **MERGED** at tip
+  `f77fd73beef550565d6f595bb23872137fdee165` from Exact HEAD
+  `4e4f8f79369f9df79295e43f6e4d9144648b34b5`. It was **OPEN/READY**
   at the `2026-09-20T09:20:00Z` capture and adds only the #191 MERGED
   mark and this structured self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #192 changes no benchmark result or admission state and does
   not recompute the canonical baseline. Delivery is MERGED at tip
-  `4517bf13785a18223865ccc2a6fc6ff908bc8908`.
+  `f77fd73beef550565d6f595bb23872137fdee165`.
 - PR #194: ordinary documentation receipt recording the merged PR #192
   lease-map lapse (Exact-1 lease-map receipt for receipt #192
   of product #185 @
-  `ca266e2ba9b6343d8a85d16162b450950a90049f`). It is **MERGED** at tip
-  `bb3ba186e0faa0e21cd5fae3df2588dfc657e69a` from Exact HEAD
-  `eb92f3456e3ce71bccbc0a916702cddb6efe324a`. It was **OPEN/READY**
+  `4e4f8f79369f9df79295e43f6e4d9144648b34b5`). It is **MERGED** at tip
+  `eb0d5e1ce4971c189c2a274c000b902bf1d19fb5` from Exact HEAD
+  `52d4e10482930f916a397c80bbae42f3d942113f`. It was **OPEN/READY**
   at the `2026-09-20T09:53:00Z` capture and adds only the #192 MERGED
   mark and this structured self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #194 changes no benchmark result or admission state and does
   not recompute the canonical baseline. Delivery is MERGED at tip
-  `bb3ba186e0faa0e21cd5fae3df2588dfc657e69a`.
+  `eb0d5e1ce4971c189c2a274c000b902bf1d19fb5`.
 - PR #193: Exact 3 P15-S5/15-04-04 persona-drift diagnostic
   `research/activation-memory/persona_drift_eval.py`,
   `research/activation-memory/reports/phase15-s5-persona-drift.json`,
   `tests/test_persona_drift_eval.py`
   (title: feat(research): Exact 3 P15-S5/15-04-04 persona-drift
   diagnostic)
-  from exact head `60e5150880a9d3931c03b6eb9230b73ee254afa2`; all
+  from exact head `06f54766dfa27166205ad9bd3acb7ccca957ac6b`; all
   required exact-head Unit+drift checks passed in run `35504813545`;
-  merge `02b1982f2a6d8010f36a4d38031bcbe65ba5d82c` at
+  merge `c7b28b41e20daeecfea8e0cfc5b3562baa3450b9` at
   `2026-09-20T10:50:24Z`.
-  Prior tip was `bb3ba186e0faa0e21cd5fae3df2588dfc657e69a` (PR #194).
+  Prior tip was `eb0d5e1ce4971c189c2a274c000b902bf1d19fb5` (PR #194).
   Post-main tip Unit+drift will FAIL on CI `35506179082`
   solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #193 is absent from this lease-map (baseline
-  `main@f688c747`); this receipt repairs that bookkeeping
+  `main@d181666b`); this receipt repairs that bookkeeping
   like prior Exact-1 receipts. Exclusive File Set (Exact 3):
   `research/activation-memory/persona_drift_eval.py`,
   `research/activation-memory/reports/phase15-s5-persona-drift.json`,
@@ -1308,48 +1308,48 @@ The following packages are complete source history, not runnable work:
   the M14 freeze is unchanged. This receipt changes no benchmark
   result or admission state, admits no successor source node, and
   does not recompute the canonical baseline (baseline stays
-  `main@f688c747`).
+  `main@d181666b`).
 - PR #195: ordinary documentation receipt recording the merged PR #193
   lease-map lapse (Exact-1 lease-map receipt for product #193
   P15-S5/15-04-04 persona-drift diagnostic @
-  `60e5150880a9d3931c03b6eb9230b73ee254afa2`; folds the #194 MERGED
+  `06f54766dfa27166205ad9bd3acb7ccca957ac6b`; folds the #194 MERGED
   receipt and voids stale Exact-1 HEAD
   `2ad9879c82349894ae4c16ee66149a73a801f810`). It is **MERGED** at tip
-  `511171b8910b155dd3c445a9f46f6440a7279b4a` from Exact HEAD
-  `a495f70700015c2cbd838bd7c2df7427c444fce1`. It was **OPEN/READY**
+  `a6673cfd03d0c801dc46a7a33d8fcb8f48e67b11` from Exact HEAD
+  `77f1b6baf9f0b3f4b54a5aaf9b5127e56777bc2b`. It was **OPEN/READY**
   at the `2026-09-20T10:53:16Z` capture and adds the #193 MERGED
   mark, the #194 MERGED mark, and this structured self-record in
   this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #195 changes no benchmark result or admission state and does
   not recompute the canonical baseline. Delivery is MERGED at tip
-  `511171b8910b155dd3c445a9f46f6440a7279b4a`.
+  `a6673cfd03d0c801dc46a7a33d8fcb8f48e67b11`.
 - PR #196: ordinary documentation receipt recording the merged PR #195
   lease-map lapse (Exact-1 lease-map receipt for receipt #195
   of product #193 @
-  `a495f70700015c2cbd838bd7c2df7427c444fce1`). It is **MERGED** at tip
-  `097bd6828c190e28261d799f4b57c4b3d038ec52` from Exact HEAD
-  `f58d536e4dac3f42290e6f07fcae953f4f25d2d0`. It was **OPEN/READY**
+  `77f1b6baf9f0b3f4b54a5aaf9b5127e56777bc2b`). It is **MERGED** at tip
+  `7e77574a80e8f1e4a3969d36fc73e144b52b3d15` from Exact HEAD
+  `f90672e63a9ab23fe4d44a26c7088aa98510cf01`. It was **OPEN/READY**
   at the `2026-09-20T11:25:00Z` capture and adds only the #195 MERGED
   mark and this structured self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #196 changes no benchmark result or admission state and does
   not recompute the canonical baseline. Delivery is MERGED at tip
-  `097bd6828c190e28261d799f4b57c4b3d038ec52`.
+  `7e77574a80e8f1e4a3969d36fc73e144b52b3d15`.
 - PR #199: Exact 2 P15-S5/15-04-05 go/no-go closure
   `research/activation-memory/README.md`,
   `research/activation-memory/GO-NO-GO.md`
   (title: Exact 2 · 15-04-05 P15-S5 go/no-go closure)
-  from exact head `6a835ffe055633524475588f5ff9e384dbb91c6d`; all
+  from exact head `bd5f27bf1d9be3aabbf3746111bb8c285b0be7e1`; all
   required exact-head Unit+drift checks passed in run `36196910526`;
-  merge `118f1e51d60fbaeda3a1b4e706d8983967c29040` at
+  merge `a6933b51f4eceff469cfc8cd30389f3abaf12e2d` at
   `2026-09-25T22:49:37Z`.
-  Prior tip was `097bd6828c190e28261d799f4b57c4b3d038ec52` (PR #196).
+  Prior tip was `7e77574a80e8f1e4a3969d36fc73e144b52b3d15` (PR #196).
   Post-main tip Unit+drift failed on CI `36198508216`
   solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #199 is absent from this lease-map (baseline
-  `main@f688c747`); this receipt repairs that bookkeeping
+  `main@d181666b`); this receipt repairs that bookkeeping
   like prior Exact-1 receipts. Exclusive File Set (Exact 2):
   `research/activation-memory/README.md`,
   `research/activation-memory/GO-NO-GO.md`.
@@ -1361,20 +1361,20 @@ The following packages are complete source history, not runnable work:
   not invent M16; the M14 freeze is unchanged. This receipt changes
   no benchmark result or admission state, admits no successor source
   node, and does not recompute the canonical baseline (baseline stays
-  `main@f688c747`).
+  `main@d181666b`).
 - PR #200: ordinary documentation receipt recording the merged PR #199
   lease-map lapse (Exact-1 lease-map receipt for product #199
   P15-S5/15-04-05 go/no-go closure @
-  `6a835ffe055633524475588f5ff9e384dbb91c6d`). It is **MERGED** at tip
-  `ba48dc89c6de8663e02d7bb576dd0cc94b8ef334` from Exact HEAD
-  `1f42bcebae5ffaaf46ec8ffd717a983ffced38e7`. It was **OPEN/READY**
+  `bd5f27bf1d9be3aabbf3746111bb8c285b0be7e1`). It is **MERGED** at tip
+  `75f98f9bf4a806906a402202e1ecb8a685089295` from Exact HEAD
+  `a626f0d12a8ab143fe707b05b4fa1fcf5f76b645`. It was **OPEN/READY**
   at the `2026-09-25T23:20:09Z` capture and adds the PR #199
   merged-baseline bullet, the #196 MERGED mark, and this structured
   self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #200 changes no benchmark result or admission state and does
   not recompute the canonical baseline. Delivery is MERGED at tip
-  `ba48dc89c6de8663e02d7bb576dd0cc94b8ef334`.
+  `75f98f9bf4a806906a402202e1ecb8a685089295`.
 - PR #202: Exact 15-05-01 · WMBS M06 Stage A development cell
   `eval/public/wmbs_m06.py`,
   `eval/public/fixtures/wmbs-m06-consolidation-development.json`,
@@ -1382,16 +1382,16 @@ The following packages are complete source history, not runnable work:
   `eval/public/README.md`,
   `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md`
   (title: Exact 15-05-01 · WMBS M06 Stage A development cell)
-  from exact head `a3c1890c8103896f1ad4db0a3636b9db6ee14cd6`; all
+  from exact head `2dfa70a923b24a7e93b92ce54e365462fb72168b`; all
   required exact-head Unit+drift checks passed in run `36259034748`;
-  merge `cff84192f271e5ecdc9d72a3e139ed69e544b10f` at
+  merge `d2fa30844a1ab5a0cd1582518f3885e5a25b5002` at
   `2026-09-26T17:56:50Z`.
-  Prior tip was `d374be71314252d35f02323143da279b94a5446e` (PR #201 plan).
+  Prior tip was `7dcadd21b5f65a69546e3f0adadeee5800f1a3a0` (PR #201 plan).
   Post-main tip Unit+drift failed on CI `36260812674`
   solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #202 is absent from this lease-map (baseline
-  `main@f688c747`); this receipt repairs that bookkeeping
+  `main@d181666b`); this receipt repairs that bookkeeping
   like prior Exact-1 receipts. Plan `15-05-PLAN.md` / Exact Exclusive-3
   authorized only:
   `eval/public/wmbs_m06.py`,
@@ -1421,13 +1421,13 @@ The following packages are complete source history, not runnable work:
   does not invent M16; the M14 freeze is unchanged. This receipt
   changes no benchmark result or admission state, admits no successor
   source node, and does not recompute the canonical baseline
-  (baseline stays `main@f688c747`).
+  (baseline stays `main@d181666b`).
 - PR #203: ordinary documentation receipt recording the merged PR #202
   lease-map lapse (Exact-1 lease-map receipt for product #202
   Exact 15-05-01 WMBS M06 Stage A development cell @
-  `a3c1890c8103896f1ad4db0a3636b9db6ee14cd6`). It is **MERGED** at tip
-  `7727ee4ec4a50454aeb5db6d6db4c644d3d9155b` from Exact HEAD
-  `7b06155b106438f8a5ae156346958967ca168702` (amended GO HEAD).
+  `2dfa70a923b24a7e93b92ce54e365462fb72168b`). It is **MERGED** at tip
+  `0628b23fd9dd9ff8adfa85a8f6281d3b2061873f` from Exact HEAD
+  `9999e20e1b0b3150883b2faa49f2644cb47dd6b6` (amended GO HEAD).
   Post-main CI SUCCESS run `36266686905`. It was **OPEN/READY**
   at the `2026-09-26T18:27:47Z` capture and adds the PR #202
   merged-baseline bullet, the #200 MERGED mark, and this structured
@@ -1435,20 +1435,20 @@ The following packages are complete source history, not runnable work:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #203 changes no benchmark result or admission state and does
   not recompute the canonical baseline. Delivery is MERGED at tip
-  `7727ee4ec4a50454aeb5db6d6db4c644d3d9155b`.
+  `0628b23fd9dd9ff8adfa85a8f6281d3b2061873f`.
 - PR #204: docs: add 15-06 Exact plan for WMBS M06 Stage B reachability
   `.planning/phases/15-security-calibration-performance-and-scale-columns/15-06-PLAN.md`
   (title: docs: add 15-06 Exact plan for WMBS M06 Stage B reachability)
-  from exact head `22616ffb5dd0516d617156547502944813db5e30`; all
+  from exact head `bf1fb8f33b8f089987700f2f76e98def9602e588`; all
   required exact-head Unit+drift checks passed in run `36357084597`;
-  merge `d82f401703f2ab8755772d8b2e885b86edc7bcc9` at
+  merge `17e044de55a4c4df4353d5cbdab0dd447d55a0c4` at
   `2026-09-27T23:29:59Z`.
-  Prior tip was `7727ee4ec4a50454aeb5db6d6db4c644d3d9155b` (PR #203 Exact-1).
+  Prior tip was `0628b23fd9dd9ff8adfa85a8f6281d3b2061873f` (PR #203 Exact-1).
   Post-main tip Unit+drift failed on CI `36358892337`
   solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #204 is absent from this lease-map (baseline
-  `main@f688c747`); this receipt repairs that bookkeeping
+  `main@d181666b`); this receipt repairs that bookkeeping
   like prior Exact-1 receipts. Exclusive File Set (Exact 1):
   `.planning/phases/15-security-calibration-performance-and-scale-columns/15-06-PLAN.md`.
   Purpose: Exact plan bar for WMBS M06 Stage B reachability (15-06).
@@ -1458,13 +1458,13 @@ The following packages are complete source history, not runnable work:
   invent M16; the M14 freeze is unchanged. This receipt changes no
   benchmark result, admission state, or publication claim, admits no
   successor source node, and does not recompute the canonical baseline
-  (baseline stays `main@f688c747`).
+  (baseline stays `main@d181666b`).
 - PR #206: ordinary documentation receipt recording the merged PR #204
   lease-map lapse (Exact-1 lease-map receipt for product #204
   15-06 Exact plan for WMBS M06 Stage B reachability @
-  `22616ffb5dd0516d617156547502944813db5e30`). It is **MERGED** at tip
-  `e270a90cc231c64f05084439b3346eb98f77e327` from Exact HEAD
-  `e7da24a4dab1729841bc308f9b950169a230449d`.
+  `bf1fb8f33b8f089987700f2f76e98def9602e588`). It is **MERGED** at tip
+  `166b2a0a25a93478876b05de2682588a08476d82` from Exact HEAD
+  `490a7e305d3476958aff16760011527c08d75dcd`.
   Post-main CI SUCCESS run `36362670329`. It was **OPEN/READY**
   at the `2026-09-28T00:01:02Z` capture and adds the PR #204
   merged-baseline bullet, the #203 MERGED mark, and this structured
@@ -1472,19 +1472,19 @@ The following packages are complete source history, not runnable work:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #206 changes no benchmark result or admission state and does
   not recompute the canonical baseline. Delivery is MERGED at tip
-  `e270a90cc231c64f05084439b3346eb98f77e327`.
+  `166b2a0a25a93478876b05de2682588a08476d82`.
 - PR #205: Exact 15-06-01 · WMBS M06 Stage B reachability
   (title: Exact 15-06-01: WMBS M06 Stage B reachability)
-  from exact head `d20cad69bd0cd1ffcfeaf1b3f4b2c458aae2e917`; all
+  from exact head `7bcd9ded1ffefc8864fa2512fa0d17a62a8c0ad1`; all
   required exact-head Unit+drift checks passed in run `36367066800`;
-  merge `74f23509215461adb8cd06107a23008273d4aa75` at
+  merge `f5b113b7760fb22b16a93653e008b474e2705141` at
   `2026-09-28T02:20:21Z`.
-  Prior tip was `e270a90cc231c64f05084439b3346eb98f77e327` (PR #206 Exact-1).
+  Prior tip was `166b2a0a25a93478876b05de2682588a08476d82` (PR #206 Exact-1).
   Post-main tip Unit+drift failed on CI `36369440257`
   solely at
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #205 is absent from this lease-map (baseline
-  `main@f688c747`); this receipt repairs that bookkeeping
+  `main@d181666b`); this receipt repairs that bookkeeping
   like prior Exact-1 receipts. Exclusive File Set (Exact Exclusive-7):
   `eval/public/registry.json`,
   `eval/public/runner.py`,
@@ -1502,13 +1502,13 @@ The following packages are complete source history, not runnable work:
   string; never copies gold. Does not invent M16; M14 freeze unchanged.
   Changes no admission/publication claim beyond the leased Exact
   reachability; admits no successor source node; does not recompute the
-  canonical baseline (baseline stays `main@f688c747`).
+  canonical baseline (baseline stays `main@d181666b`).
   docs-only privacy for THIS receipt PR is Exact-1 lease-map only
   (the recorded #205 shipped the Exclusive-7 product paths above).
 - PR #207: ordinary documentation receipt recording the merged PR #205
   lease-map lapse (Exact-1 lease-map receipt for product #205
   Exact 15-06-01 WMBS M06 Stage B reachability @
-  `d20cad69bd0cd1ffcfeaf1b3f4b2c458aae2e917`). It is **OPEN/READY**
+  `7bcd9ded1ffefc8864fa2512fa0d17a62a8c0ad1`). It is **OPEN/READY**
   at the `2026-09-28T02:50:30Z` capture and adds the PR #205
   merged-baseline bullet, the #206 MERGED mark, and this structured
   self-record in this map. Exclusive File Set:
@@ -1647,63 +1647,63 @@ Current delivery receipts are appended to the affected rows:
 
 - PR #109: Windows configured-command portability and the first native Windows
   workflow gate. Immutable non-lifecycle content anchor
-  `08397dab1220c87a3e8e3a92bf353cc65b68dba3`; first refreshed topology head
-  `cb44f21296fc22cf92f847b8201a6881e915400c`. The two trees differ only at
+  `0b07441e3641608177f9500d28a305fffdca87d6`; first refreshed topology head
+  `f07d0733c8d9c9bfb5d5015c4a3ed57fa185029e`. The two trees differ only at
   `GOAL.md`, `.planning/STATE.md`, and this map. Refreshed exact-head CI run
   `31865413163` completed successfully, including every required/native job.
   Anchor scan
   `aa623d98-c231-40f3-8831-64db80ca7744` is sealed with complete coverage and
   zero findings. PR #109 nevertheless raced this amendment and is **MERGED** as
-  `6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4` at
+  `83444101f65c49c4d70d32bcd5a4362f2655367d` at
   `2026-08-15T05:24:36Z`; post-main run `31866875258` succeeded. Its
   implementation content and pre-merge gates matched this receipt, but the
   ordering deviation is recorded explicitly and opens no later edge.
 - PR #110: shared stdlib POSIX/Windows file locking and signed-ledger migration,
   with immutable cumulative non-lifecycle content anchor
-  `7e282b7c95f51a6446e25d92f8284de261551703` and first refreshed topology head
-  `26f95a09827d3e56ffe86e65b7db7493ecf79c73`. The exclusion check is clean.
+  `212af50442f3c50525d4eec7a698427ac523ebe2` and first refreshed topology head
+  `e5bfea116e6c059309e9bafecbbdb807e1e195ee`. The exclusion check is clean.
   Refreshed exact-head CI run `31865422216` completed successfully, including
   every required/native job.
   Component head
-  `1aacf2a8244dda853e1385707072a9e391f7271c` has sealed zero-finding security
+  `a3b181c2a58c8f56b53ca19495d53a08d26ca15a` has sealed zero-finding security
   scan `90861fd0-f76f-4207-b1df-36e4cdec69e4`. Delivered from exact refreshed
-  head `9655ef411399fed9d72fddb6f660d0fae39e8449`, exact-head CI
-  `31870720134`, merge `6241984b15e85171bc036100fa5e20e05588bd81`
+  head `2841a73077cf8a47453d64fdc71b35c3969653e0`, exact-head CI
+  `31870720134`, merge `e4121325f0ef0f75a6c2e47679882a01d0f75b39`
   at `2026-08-15T07:19:40Z`, and successful post-main CI `31871667827`.
 - PR #111: bounded native-Windows process-tree containment while preserving the
   existing POSIX runner. Immutable cumulative non-lifecycle content anchor
-  `226e4416a4e76671d7ca079fe97664b8617f5bfa`; first refreshed topology head
-  `02a724e9333a47a1cb7096d59b558ab80c1e5300`; the exclusion check is clean.
+  `4c88322843923b3afe611d0aa2eea3383e12c2e5`; first refreshed topology head
+  `5d17b0044ab6fb053536c30421043c8e89961cc4`; the exclusion check is clean.
   Refreshed exact-head CI run `31865430468` completed successfully, including
   every required/native job.
-  Component head `0382f13132dd69bf93d123009c4bee2ba972a82d` has sealed
+  Component head `4f59e1cd6672800fc0a1f82cdd96fff714b8ab82` has sealed
   zero-finding security scan `a2660fdb-115a-4f0e-80a8-10266d48403b`.
   Delivered from exact refreshed head
-  `7754980eb2b5fdc227763e34c7b2af394fb1ea2c`, exact-head CI
-  `31872923876`, merge `f95aabaca85ed6cbfbda66c0ceea12df22bfdd00`
+  `4ac53dc2f0357cbc9cb47561b517420d19082d60`, exact-head CI
+  `31872923876`, merge `ba32c2cef6851d73a5eaf1a031228c7dd891c586`
   at `2026-08-15T08:18:20Z`, and successful post-main CI `31874150626`.
 - PR #112: Windows filesystem/environment/LF portability. Immutable cumulative
-  non-lifecycle content anchor `259a6361355ab80cbbfa75ca1a6de6ec4b1f9a96`;
-  first refreshed topology head `c8d95dafe5131f965591b84aeabb095fac34f1b6`;
+  non-lifecycle content anchor `1ad03788618e0c2659f367dc5babbc03924da5fc`;
+  first refreshed topology head `5f79d384ec0ace10c18bbfca84b5dda153c639db`;
   the exclusion check is clean. Refreshed exact-head CI run `31865438529`
   completed successfully, including all three native-Windows jobs and every
   required job. Its
   isolated filesystem head
-  `760377381c72f5d0494e96571977fd52260517a0` has sealed zero-finding security
+  `3c0a0152a3e47d4f86bdaab8fa5e91912a65f7de` has sealed zero-finding security
   scan `866900a1-641e-4278-b652-c1e4797b5979`. Cumulative exact-stack scan
   `8f92e955-a68a-4bec-817a-810a76fce21b` is sealed at the content anchor with
   complete coverage of 20 source items plus 12 workflow/test files and zero
   findings. Fresh refreshed-stack scan
   `e95df6b0-da9d-4688-a2a0-4378be4973d1` covers all 32 changed files at exact
-  head `c8d95dafe5131f965591b84aeabb095fac34f1b6`, validates the contract, and
+  head `5f79d384ec0ace10c18bbfca84b5dda153c639db`, validates the contract, and
   reports zero findings. Delivered from exact refreshed head
-  `afc00bae1af9e9db7016ef3adffaca9bdc226bcf`, exact-head CI
-  `31875248786`, merge `61f55b94a6f878973437d075adfcecf2cb684ae6`
+  `72db90ae0223c560c1ac49352777d14080fd23e5`, exact-head CI
+  `31875248786`, merge `661ebbed48d78a846c507cfb8ec4764e4e7e9a1e`
   at `2026-08-15T14:48:25Z`, and successful post-main CI `31890934043`.
 
 The completed integration receipt verifies the serialized merge chain
-`main@6801fbd0` -> PR #114 `c4337f63` -> PR #110 `6241984b` -> PR #111
-`f95aabac` -> PR #112 `61f55b94`. Every edge preserved its immutable
+`main@83444101` -> PR #114 `94f1afd2` -> PR #110 `e4121325` -> PR #111
+`ba32c2ce` -> PR #112 `661ebbed`. Every edge preserved its immutable
 non-lifecycle anchor, inherited the immediately preceding lifecycle blobs,
 passed exact-head required/native CI and fresh security review, and waited for
 successful post-main CI. The cumulative diff retained binary hash
@@ -1711,7 +1711,7 @@ successful post-main CI. The cumulative diff retained binary hash
 exactly three unique Windows jobs and the five PR #112 filesystem nodes landed.
 The Windows stack is delivered and no implementation writer remains open.
 
-This map is recomputed from the new baseline `main@f688c747`, which the
+This map is recomputed from the new baseline `main@d181666b`, which the
 controller branch has fully merged into it — no commit on `main` is absent from
 the controller branch. **The GoalEx lifecycle backlog is delivered except for
 its own merge receipts.** PR #91
@@ -1727,34 +1727,34 @@ files, the two new `docs/plans/completed/goalex-r36-*.md` and
 `T3` below, which carried that delivery, is now `MERGED`. The GoalEx lifecycle
 lease and the public-harness lease stayed unmixed: PR #91 touched nothing
 outside the GoalEx lifecycle surfaces. This revision **is** the recomputation
-from the resulting `main@e157e035` that the delivery required before any further
+from the resulting `main@f75b58cc` that the delivery required before any further
 admission, and it records the receipt residue that could not exist inside the
 commit it describes: PR #91, exact-head CI `30686224929`, merge SHA
-`e157e035`, post-merge `main` CI `30687385118`. That recomputation was
+`f75b58cc`, post-merge `main` CI `30687385118`. That recomputation was
 **branch-resident only** until node `T4` delivered it as PR #92: this revision
 is therefore also the recomputation from the resulting
-`main@39cfa67aa7692bf47d5dde5842af3d8ec0736bb0`, and it records `T4`'s own
-receipt residue — PR #92, exact-head CI `30693874030`, merge SHA `39cfa67a`,
+`main@c56e65fbe9bcd9b0ae249694f563fc104a5fea03`, and it records `T4`'s own
+receipt residue — PR #92, exact-head CI `30693874030`, merge SHA `c56e65fb`,
 post-merge `main` CI `30694818231`. `T4` carried exactly that receipt-level
 update to the three lifecycle files plus the round-38 record and the round-39
 record, and nothing else; it was documentation only and admitted no source node.
 PR #93 then merged independently from the `codex/goalmd-round-ends-clean` lane
-at `main@effc5e03` (exact-head CI `30718912376`, post-merge CI `30719645207`).
+at `main@7aabe560` (exact-head CI `30718912376`, post-merge CI `30719645207`).
 That external merge lapsed the branch-resident carve-out. At lapse, the residue
 was no longer receipt-only: it included the undelivered baseline-pinning test
 contract and the r39, r40, and r41 round records. Node `T5` discharged that
-bounded residue as PR #94 at `main@2091d01c`, with exact-head CI `30730185494`
+bounded residue as PR #94 at `main@fe7e6adc`, with exact-head CI `30730185494`
 and post-merge CI `30730918452`; it admitted no source node. Its delivery
 omitted the r42 record from its own `docs/plans/` lease. `T6` discharged that
-non-receipt residue together with the r43 record as PR #95 at `main@42abaab7`,
-with exact head `d7c0938f`, exact-head CI `30737466988`, and post-merge CI
+non-receipt residue together with the r43 record as PR #95 at `main@89f7ff82`,
+with exact head `b05ee030`, exact-head CI `30737466988`, and post-merge CI
 `30738303497`; it admitted no source node and no successor node. This
 branch-resident recomputation is `T6`'s own standing-condition residue. It
 admits no successor node and no source node. The plan-doc backlog is disclosed
 here rather than left to accumulate silently.
 That pilots-plan checkpoint is a correction, not an addition: PR #90 shipped
 `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
-without updating its earlier paragraph, so canonical `main@061c2e1c` still
+without updating its earlier paragraph, so canonical `main@94c0c96a` still
 stated that the M12/M13 gap-disclosure paragraphs and their pinning tests
 "are not on main and are still pending PR delivery" — a claim that same
 commit falsified. That sentence was known-stale on `main` from PR #90 until
@@ -1769,8 +1769,8 @@ These receipts do not prove an official benchmark, measured sandbox, hardware
 profile, publishable result, leaderboard activation, or launch.
 
 - PR #116: M06 plan-only delivery from head
-  `e463f61f00fef1913bd7a0df9db739616a906b54`, with successful exact-head CI
-  `33933485295`; merged as `1f6b3b1c236c837aee77ba504f9eb06eab2a9c98`
+  `78d9453f1f8e3b81c38ac886ad973ab5ca257c9b`, with successful exact-head CI
+  `33933485295`; merged as `51bdf0c51a043b2bf1780da685787b05315b3b2e`
   at `2026-09-05T01:11:18Z`. It adds only
   `docs/plans/wmb-m06-consolidation-learning-implementation-plan.md`; it
   changes no N12 path and does not deliver M06 implementation. PR #135's
@@ -1796,7 +1796,7 @@ to reconcile BENCH-007's sole remaining cadence gate, plus the lease-status
 checkpoints in `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
 so that the executable authority agrees with N12's admission state. Its approved
 implementation contract is unchanged. The gate
-check used clean `origin/main@3281e61ed6b3d077628e3fd03ce0ec8de22cde18`, whose
+check used clean `origin/main@e29ea51bf1b76d6fa50958eaf0bdde4054373642`, whose
 post-main CI run `33927734374` succeeded. The standing canonical baseline
 above is preserved; this receipt admits no source writer.
 
@@ -1804,7 +1804,7 @@ above is preserved; this receipt admits no source writer.
   [Public regression run 30807305055](https://github.com/onfire7777/Mnemosyne/actions/runs/30807305055):
   `event=schedule`, `status=completed`, `conclusion=success`, workflow
   `.github/workflows/public-regression.yml`, head
-  `b8673031a80158c49d552a4b3647829d213243bd`, started
+  `2c6a63f12291eb938b2d284c938298fc035d6105`, started
   `2026-08-03T10:52:57Z`, updated `2026-08-03T10:53:18Z`.
   Job `91665545558` (`public-regression`) completed successfully at
   `2026-08-03T10:53:17Z`; its `Run fixed public contract regression` step
@@ -1817,9 +1817,9 @@ above is preserved; this receipt admits no source writer.
   its merged source and this retained scheduled run satisfy its contract;
   Phase 13 remains open for BENCH-006, and the source plan was already complete.
 - **Signed-publication source: MERGED.** PR #69 merged at
-  `2026-07-26T12:42:20Z` as `a4e80b5a67b0437d3a864af0fe347febfe32e58b`.
+  `2026-07-26T12:42:20Z` as `d8f131f85cbc708b2e81cca25f3fe0aed8e471b2`.
   PR #70 delivered its completion receipt at `2026-07-26T12:59:59Z` as
-  `eeb8765ea1f4cc924002ad8234df50326e227aed`. Both are ancestors of the
+  `882f7fb38311188244b9cd1cda314241ef1419a2`. Both are ancestors of the
   inspected main tip. `leaderboard/publish.py` exists there with blob
   `f6506215ece4dba8d37ce07829b5c22d84020963`.
 - **Protected signed-publication lease: RELEASED.** On 2026-09-05 the owner
@@ -1833,7 +1833,7 @@ above is preserved; this receipt admits no source writer.
   Any future recovery requires a fresh handoff/review and cannot revive this
   retired reservation. The separate whole-memory-spec lease is unchanged.
 - **N12: READY FOR ADMISSION after this receipt lands.** Recomputed against
-  `origin/main@3281e61ed6b3d077628e3fd03ce0ec8de22cde18`: the result-v1 schema,
+  `origin/main@e29ea51bf1b76d6fa50958eaf0bdde4054373642`: the result-v1 schema,
   validator, signed ledger, renderer, publisher, and readiness source exist;
   `leaderboard/schema/result-v2.schema.json` is absent, so N12 is not delivered.
   Open PRs #116, #118-#120, #122-#127, #135, and #137 change none of N12's
@@ -1846,7 +1846,7 @@ above is preserved; this receipt admits no source writer.
   that time. This closes the obsolete lease blocker; it neither implements
   N12 nor starts a source writer automatically.
   Refresh after PR #116: main advanced to
-  `1f6b3b1c236c837aee77ba504f9eb06eab2a9c98`; its sole changed file is the
+  `51bdf0c51a043b2bf1780da685787b05315b3b2e`; its sole changed file is the
   M06 plan, so the N12 lease/source assessment is unchanged. PR #116 is now
   merged rather than open. Before N12 source edits, the assigned owner must
   snapshot result-v1 golden bytes/behavior and prove its existing contract
@@ -1881,19 +1881,19 @@ exact lease, shared owner/integration edge, and external gate.
 
 | ID | Class | Package and prerequisites / consumes | Produces | Exact write lease and owner | Integration dependency / external gate |
 |---|---|---|---|---|---|
-| T0 | MERGED | Canonical truth PR after PR #86; consumed exact-head CI `30559003114`, merge `661343ce`, manual run `30561430522`, and post-merge CI `30561266140` | Truthful GOAL/GSD lifecycle state and this current map | `GOAL.md`; `.planning/STATE.md`; `.planning/ROADMAP.md`; `.planning/REQUIREMENTS.md`; `.planning/phases/13-external-benchmark-adapters-and-scheduled-ci/13-01-PLAN.md`; `.planning/phases/13-external-benchmark-adapters-and-scheduled-ci/13-01-SUMMARY.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `tests/test_planning_traceability.py`. GoalEx owner only | Complete: merged as PR #87 at `main@2ba4ed80` with post-merge CI `30566984814` |
-| T3 | MERGED | GoalEx lifecycle delivery of the previously undelivered controller delta; consumed verified canonical `main@061c2e1c` and PR #90's post-merge receipts, delivered from a lane cut from `main@061c2e1c` | The three lifecycle files, the pilots-plan PR #90 checkpoint, and the 26 round records delivered on `main`, reducing the `GOAL.md` Authority carve-out to receipt scope | `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`; `docs/plans/`. GoalEx owner only | Complete: merged as PR #91 at `main@e157e035` with exact-head CI `30686224929` and post-merge CI `30687385118`. Documentation only; it was disjoint from every public-harness, CI, and result-v2 lease and admitted no new implementation package. This map is recomputed from that `main` and the receipt block it could not contain is recorded here; that recomputation was branch-resident, so `T3`'s residual undelivered item was exactly the receipt-level lifecycle update carried by node `T4`, now `MERGED` as PR #92 |
-| T4 | MERGED | Receipt-level lifecycle update discharging `T3`'s residue; consumed verified canonical `main@e157e035` and PR #91's post-merge receipts, delivered from a lane cut from `main@e157e035` | This map at `Baseline: main@e157e035` with `T3` as `MERGED`, the matching `GOAL.md` and `.planning/STATE.md` receipt text, the updated round-38 record (whose original text PR #91 already landed on `main`), and the round-39 record, delivered on `main`, plus the branch-resident receipt recomputation below | `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/plans/`. GoalEx owner only | Complete: merged as PR #92 at `main@39cfa67a` with exact-head CI `30693874030` and post-merge CI `30694818231`. Documentation only; exact-lease-disjoint from every public-harness, CI, result-v2, and evidence lease, and it admitted no source node. This map is recomputed here from that `main`, and the receipt block PR #92 could not contain is recorded above. That recomputation is `T4`'s own receipt residue, generated for the same structural reason `T3`'s was: no commit describes its own merge, so `main`'s copy of this map always lags by exactly one receipt block. That residual lag is an accepted standing condition and admits **no successor node** and **no source node**; `T4` is the last node this carve-out admits |
-| T5 | MERGED | Bounded GoalEx lifecycle delivery after PR #93's independent merge lapsed the branch-resident carve-out; consumed verified canonical `main@effc5e03`, PR #93 exact-head CI `30718912376` and post-merge CI `30719645207`, and a lane cut from `main@effc5e03` | The three lifecycle files, both baseline-pinning tests, and the r39/r40/r41 round records delivered by PR #94 | `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/plans/`; `tests/test_planning_traceability.py`; `.github/workflows/ci.yml`. GoalEx owner with CI integration shared-owner serialization | Complete: merged as PR #94 at `main@2091d01c`, exact head `41b21305`, exact-head CI `30730185494`, post-merge CI `30730918452`. Documentation, contract-test, and CI configuration only; it admitted no source node. Its delivery omitted the round-42 record from its own `docs/plans/` lease, the non-receipt residue discharged by `T6` |
-| T6 | MERGED | Verified canonical `main@2091d01c` plus PR #94 exact-head CI `30730185494` and post-merge CI `30730918452`; lane cut from `main@2091d01c` | The three lifecycle files at `Baseline: main@2091d01c` with `T5` as `MERGED`, plus the r42 and r43 round records | `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/plans/`. GoalEx owner only | Complete: merged as PR #95 at `main@42abaab7`, exact head `d7c0938f`, exact-head CI `30737466988`, post-merge CI `30738303497`. Documentation only; it admitted no source node and no successor node. This branch-resident recomputation is `T6`'s own accepted standing-condition residue and admits no successor or source node |
-| T7 | MERGED | Bounded documentation-and-tests node disclosing PR #96's development-only M02/M04/M05 evaluation oracles; consumed verified canonical `main@b8673031` plus PR #97 (merge `71e492b4`, exact-head CI `30774834604`, post-merge CI `30775783472`) and PR #98 (merge `b8673031`, exact-head CI `30787319275`, post-merge CI `30788531829`) receipts | The M02/M04/M05 Stage-A development gap disclosures in `eval/public/README.md`, their pinning tests, and the three lifecycle files recomputed to `Baseline: main@b8673031` | `eval/public/README.md` and `tests/test_public_wmbs_stage_a_disclosure.py` under the **Public-harness integration owner**, serialized as sole writer on `eval/public/*` for this documentation-only edit; `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/plans/` under the **GoalEx lifecycle owner**. Both owners are required and they land together in one serialized PR (PR-1 of round 46); no other lane touches `eval/public/*` at this baseline | Documentation and tests only. It admits **no source node**, **no Stage-B integration**, and **no successor node**: no `eval/public/registry.json` entry, adapter, runner routing, profile contract, or scoring-profile registration is authorized, no module behavior or fixture byte changes, M02/M04/M05 stay `PROPOSED` / `publishable:false` / `pbpp_headline_eligible:false`, and no progress counter moves. Stage B for all three remains blocked on the public-harness integration owner's lease. **Delivery statement:** the `eval/public/README.md` M02/M04/M05 Stage-A development-oracle gap disclosure and its pinning suite `tests/test_public_wmbs_stage_a_disclosure.py` are delivered by PR-1 of GoalEx round 46 **Merged receipts:** delivered as PR #99, merge `d7eefb7c`, exact head `2375aba5`, exact-head CI `30808291831`; its post-merge run `30810160121` failed the baseline lapse detector because PR #99 landed after the then-recorded baseline `main@b8673031` without pre-recording itself, which PR #101 discharges by recomputing this map to `main@d7eefb7c` |
-| T8 | MERGED | Bounded GoalEx lifecycle documentation-and-tests node landing the stranded Round-0 M01-M20 completeness inventory; consumes verified canonical `main@b8673031` and the same PR #97/#98 receipts `T7` consumes | The M01-M20 module completeness inventory, its line-level derivations, the drift test that pins the inventory to the tree, and the three lifecycle files recomputed to `Baseline: main@b8673031` | Exactly `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md`; `docs/coordination/2026-08-03-wmbs-module-completeness-derivation.md`; `tests/test_wmbs_module_inventory.py`; `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/plans/`. GoalEx owner only | Documentation and tests only. It admits **no source node** and **no publication claim**: no module implementation, protocol, scorer, adapter, registry entry, fixture byte, schema, or admission state changes, and no progress counter moves. Its lease contains no public-harness source path. It **overlaps `T7`** on `GOAL.md`, `.planning/STATE.md`, this map, and `docs/plans/`, so `T7` and `T8` are not concurrent writers: they are one serialized GoalEx lifecycle writer landing as a single PR (PR-1 of round 46) **Merged receipts:** delivered as PR #99, merge `d7eefb7c`, exact head `2375aba5`, exact-head CI `30808291831`; its post-merge run `30810160121` failed the baseline lapse detector because PR #99 landed after the then-recorded baseline `main@b8673031` without pre-recording itself, which PR #101 discharges by recomputing this map to `main@d7eefb7c` |
-| T9 | MERGED | Public-harness Stage-B M03 registry-admission node; consumed canonical `main` through PR #107 at `main@7f305090` | The `wmbs-m03-valid-time-development` entry in `eval/public/registry.json`, its `_ADAPTERS` and `_PROFILE_CONTRACTS` keys in `eval/public/runner.py`, its matching `allowed_profile` label in `eval/public/bundle.py` (a second, independent profile-contract table that rejects an unlabelled profile with `wrong interval-family metadata`), its `eval/public/README.md` documentation, its tests, and the derived-fact inventory update already present in this PR | Exactly `eval/public/registry.json`; `eval/public/runner.py`; `eval/public/bundle.py`; `eval/public/README.md`; `tests/test_public_whole_memory_reference.py`; `tests/test_public_wmbs_m03_registry_admission.py`; `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md`. Delivered under the public-harness integration owner's exclusive serialized lease after `T7`'s `eval/public/README.md` write; that serialization is discharged and no active writer remains on the lease | Authorizes **M03 only**. It admits no other module, changes no fixture byte, no scorer logic, and no schema, and it advances **no admission state**: M03 stays `PROPOSED` / `publishable:false` / `pbpp_headline_eligible:false`, with full bitemporal transaction-time query semantics retained as a hard deferral per `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md` line 68. Reachability fix only; it admits **no successor node** or source node. **Merged receipts:** PR #100 exact head `e072dda5a9e7ef078d317156c49c54bbee7a5124`; all required exact-head CI and Greptile green in run `31854371658`; merge `b3570937918c7de40cd89ea543fab9e7b16f7471` at `2026-08-15T01:12:26Z`; post-merge CI `31855873247` successful |
-| T10 | MERGED | Windows portability stack from PR #109 through PR #112, with controller amendment PR #114, immutable non-lifecycle content anchors, exact lifecycle-parent equality, and three native-Windows CI jobs | Delivered configured-command portability, shared stdlib file locking, bounded native-Windows process-tree containment, and filesystem/environment/LF portability | Historical lifecycle authority: `GOAL.md`; `.planning/STATE.md`; this map. Historical implementation anchors: PR #110 `7e282b7c95f51a6446e25d92f8284de261551703`, PR #111 `226e4416a4e76671d7ca079fe97664b8617f5bfa`, PR #112 `259a6361355ab80cbbfa75ca1a6de6ec4b1f9a96`; `.github/workflows/ci.yml` remained under one integration owner | Complete: PR #114 merge `c4337f63` and post-main CI `31869469070`; PR #110 merge `6241984b` and post-main CI `31871667827`; PR #111 merge `f95aabac` and post-main CI `31874150626`; PR #112 merge `61f55b94` and post-main CI `31890934043`. Exact-head required/native CI and fresh security review passed at every edge; no Windows stack writer remains open |
+| T0 | MERGED | Canonical truth PR after PR #86; consumed exact-head CI `30559003114`, merge `60b82731`, manual run `30561430522`, and post-merge CI `30561266140` | Truthful GOAL/GSD lifecycle state and this current map | `GOAL.md`; `.planning/STATE.md`; `.planning/ROADMAP.md`; `.planning/REQUIREMENTS.md`; `.planning/phases/13-external-benchmark-adapters-and-scheduled-ci/13-01-PLAN.md`; `.planning/phases/13-external-benchmark-adapters-and-scheduled-ci/13-01-SUMMARY.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `tests/test_planning_traceability.py`. GoalEx owner only | Complete: merged as PR #87 at `main@5b07f320` with post-merge CI `30566984814` |
+| T3 | MERGED | GoalEx lifecycle delivery of the previously undelivered controller delta; consumed verified canonical `main@94c0c96a` and PR #90's post-merge receipts, delivered from a lane cut from `main@94c0c96a` | The three lifecycle files, the pilots-plan PR #90 checkpoint, and the 26 round records delivered on `main`, reducing the `GOAL.md` Authority carve-out to receipt scope | `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`; `docs/plans/`. GoalEx owner only | Complete: merged as PR #91 at `main@f75b58cc` with exact-head CI `30686224929` and post-merge CI `30687385118`. Documentation only; it was disjoint from every public-harness, CI, and result-v2 lease and admitted no new implementation package. This map is recomputed from that `main` and the receipt block it could not contain is recorded here; that recomputation was branch-resident, so `T3`'s residual undelivered item was exactly the receipt-level lifecycle update carried by node `T4`, now `MERGED` as PR #92 |
+| T4 | MERGED | Receipt-level lifecycle update discharging `T3`'s residue; consumed verified canonical `main@f75b58cc` and PR #91's post-merge receipts, delivered from a lane cut from `main@f75b58cc` | This map at `Baseline: main@f75b58cc` with `T3` as `MERGED`, the matching `GOAL.md` and `.planning/STATE.md` receipt text, the updated round-38 record (whose original text PR #91 already landed on `main`), and the round-39 record, delivered on `main`, plus the branch-resident receipt recomputation below | `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/plans/`. GoalEx owner only | Complete: merged as PR #92 at `main@c56e65fb` with exact-head CI `30693874030` and post-merge CI `30694818231`. Documentation only; exact-lease-disjoint from every public-harness, CI, result-v2, and evidence lease, and it admitted no source node. This map is recomputed here from that `main`, and the receipt block PR #92 could not contain is recorded above. That recomputation is `T4`'s own receipt residue, generated for the same structural reason `T3`'s was: no commit describes its own merge, so `main`'s copy of this map always lags by exactly one receipt block. That residual lag is an accepted standing condition and admits **no successor node** and **no source node**; `T4` is the last node this carve-out admits |
+| T5 | MERGED | Bounded GoalEx lifecycle delivery after PR #93's independent merge lapsed the branch-resident carve-out; consumed verified canonical `main@7aabe560`, PR #93 exact-head CI `30718912376` and post-merge CI `30719645207`, and a lane cut from `main@7aabe560` | The three lifecycle files, both baseline-pinning tests, and the r39/r40/r41 round records delivered by PR #94 | `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/plans/`; `tests/test_planning_traceability.py`; `.github/workflows/ci.yml`. GoalEx owner with CI integration shared-owner serialization | Complete: merged as PR #94 at `main@fe7e6adc`, exact head `41e7ac3e`, exact-head CI `30730185494`, post-merge CI `30730918452`. Documentation, contract-test, and CI configuration only; it admitted no source node. Its delivery omitted the round-42 record from its own `docs/plans/` lease, the non-receipt residue discharged by `T6` |
+| T6 | MERGED | Verified canonical `main@fe7e6adc` plus PR #94 exact-head CI `30730185494` and post-merge CI `30730918452`; lane cut from `main@fe7e6adc` | The three lifecycle files at `Baseline: main@fe7e6adc` with `T5` as `MERGED`, plus the r42 and r43 round records | `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/plans/`. GoalEx owner only | Complete: merged as PR #95 at `main@89f7ff82`, exact head `b05ee030`, exact-head CI `30737466988`, post-merge CI `30738303497`. Documentation only; it admitted no source node and no successor node. This branch-resident recomputation is `T6`'s own accepted standing-condition residue and admits no successor or source node |
+| T7 | MERGED | Bounded documentation-and-tests node disclosing PR #96's development-only M02/M04/M05 evaluation oracles; consumed verified canonical `main@2c6a63f1` plus PR #97 (merge `3d0ad051`, exact-head CI `30774834604`, post-merge CI `30775783472`) and PR #98 (merge `2c6a63f1`, exact-head CI `30787319275`, post-merge CI `30788531829`) receipts | The M02/M04/M05 Stage-A development gap disclosures in `eval/public/README.md`, their pinning tests, and the three lifecycle files recomputed to `Baseline: main@2c6a63f1` | `eval/public/README.md` and `tests/test_public_wmbs_stage_a_disclosure.py` under the **Public-harness integration owner**, serialized as sole writer on `eval/public/*` for this documentation-only edit; `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/plans/` under the **GoalEx lifecycle owner**. Both owners are required and they land together in one serialized PR (PR-1 of round 46); no other lane touches `eval/public/*` at this baseline | Documentation and tests only. It admits **no source node**, **no Stage-B integration**, and **no successor node**: no `eval/public/registry.json` entry, adapter, runner routing, profile contract, or scoring-profile registration is authorized, no module behavior or fixture byte changes, M02/M04/M05 stay `PROPOSED` / `publishable:false` / `pbpp_headline_eligible:false`, and no progress counter moves. Stage B for all three remains blocked on the public-harness integration owner's lease. **Delivery statement:** the `eval/public/README.md` M02/M04/M05 Stage-A development-oracle gap disclosure and its pinning suite `tests/test_public_wmbs_stage_a_disclosure.py` are delivered by PR-1 of GoalEx round 46 **Merged receipts:** delivered as PR #99, merge `e5d0f6a9`, exact head `5cc1c866`, exact-head CI `30808291831`; its post-merge run `30810160121` failed the baseline lapse detector because PR #99 landed after the then-recorded baseline `main@2c6a63f1` without pre-recording itself, which PR #101 discharges by recomputing this map to `main@e5d0f6a9` |
+| T8 | MERGED | Bounded GoalEx lifecycle documentation-and-tests node landing the stranded Round-0 M01-M20 completeness inventory; consumes verified canonical `main@2c6a63f1` and the same PR #97/#98 receipts `T7` consumes | The M01-M20 module completeness inventory, its line-level derivations, the drift test that pins the inventory to the tree, and the three lifecycle files recomputed to `Baseline: main@2c6a63f1` | Exactly `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md`; `docs/coordination/2026-08-03-wmbs-module-completeness-derivation.md`; `tests/test_wmbs_module_inventory.py`; `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/plans/`. GoalEx owner only | Documentation and tests only. It admits **no source node** and **no publication claim**: no module implementation, protocol, scorer, adapter, registry entry, fixture byte, schema, or admission state changes, and no progress counter moves. Its lease contains no public-harness source path. It **overlaps `T7`** on `GOAL.md`, `.planning/STATE.md`, this map, and `docs/plans/`, so `T7` and `T8` are not concurrent writers: they are one serialized GoalEx lifecycle writer landing as a single PR (PR-1 of round 46) **Merged receipts:** delivered as PR #99, merge `e5d0f6a9`, exact head `5cc1c866`, exact-head CI `30808291831`; its post-merge run `30810160121` failed the baseline lapse detector because PR #99 landed after the then-recorded baseline `main@2c6a63f1` without pre-recording itself, which PR #101 discharges by recomputing this map to `main@e5d0f6a9` |
+| T9 | MERGED | Public-harness Stage-B M03 registry-admission node; consumed canonical `main` through PR #107 at `main@518fdb8b` | The `wmbs-m03-valid-time-development` entry in `eval/public/registry.json`, its `_ADAPTERS` and `_PROFILE_CONTRACTS` keys in `eval/public/runner.py`, its matching `allowed_profile` label in `eval/public/bundle.py` (a second, independent profile-contract table that rejects an unlabelled profile with `wrong interval-family metadata`), its `eval/public/README.md` documentation, its tests, and the derived-fact inventory update already present in this PR | Exactly `eval/public/registry.json`; `eval/public/runner.py`; `eval/public/bundle.py`; `eval/public/README.md`; `tests/test_public_whole_memory_reference.py`; `tests/test_public_wmbs_m03_registry_admission.py`; `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md`. Delivered under the public-harness integration owner's exclusive serialized lease after `T7`'s `eval/public/README.md` write; that serialization is discharged and no active writer remains on the lease | Authorizes **M03 only**. It admits no other module, changes no fixture byte, no scorer logic, and no schema, and it advances **no admission state**: M03 stays `PROPOSED` / `publishable:false` / `pbpp_headline_eligible:false`, with full bitemporal transaction-time query semantics retained as a hard deferral per `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md` line 68. Reachability fix only; it admits **no successor node** or source node. **Merged receipts:** PR #100 exact head `0a9e5bedd991409e58c4317f2fa48b78c3458c1e`; all required exact-head CI and Greptile green in run `31854371658`; merge `b84b351bcd5a0397065821f60db425ae8c85a13a` at `2026-08-15T01:12:26Z`; post-merge CI `31855873247` successful |
+| T10 | MERGED | Windows portability stack from PR #109 through PR #112, with controller amendment PR #114, immutable non-lifecycle content anchors, exact lifecycle-parent equality, and three native-Windows CI jobs | Delivered configured-command portability, shared stdlib file locking, bounded native-Windows process-tree containment, and filesystem/environment/LF portability | Historical lifecycle authority: `GOAL.md`; `.planning/STATE.md`; this map. Historical implementation anchors: PR #110 `212af50442f3c50525d4eec7a698427ac523ebe2`, PR #111 `4c88322843923b3afe611d0aa2eea3383e12c2e5`, PR #112 `1ad03788618e0c2659f367dc5babbc03924da5fc`; `.github/workflows/ci.yml` remained under one integration owner | Complete: PR #114 merge `94f1afd2` and post-main CI `31869469070`; PR #110 merge `e4121325` and post-main CI `31871667827`; PR #111 merge `ba32c2ce` and post-main CI `31874150626`; PR #112 merge `661ebbed` and post-main CI `31890934043`. Exact-head required/native CI and fresh security review passed at every edge; no Windows stack writer remains open |
 | T1 | COMPLETE | GitHub Wiki reconciliation; consumed verified canonical main | Current Home, status, evaluation, and development pages with no v2 claim upgrade | `wiki:Home.md`; `wiki:Roadmap-and-Status.md`; `wiki:Calibration-and-Evaluation.md`; `wiki:Development-Guide.md`. Wiki owner only | Complete: wiki commit `46c34287fe064842e72c3f52a9afad0c822b1846`; PR #88 changed no benchmark boundary, claim, or status any wiki page asserts, so it required no further wiki change |
-| T2 | COMPLETE | Deduplicated knowledge refresh; consumed final canonical and wiki source | One current CBM graph and one Gbrain milestone | No product/source lease | Complete: single deduplicated refresh of 2026-07-30, Gbrain milestone `milestones/mnemosyne-pr86-pr87-wiki-canonical-delivery-2026-07-30`; the earlier refresh at `90841427` was not duplicated |
+| T2 | COMPLETE | Deduplicated knowledge refresh; consumed final canonical and wiki source | One current CBM graph and one Gbrain milestone | No product/source lease | Complete: single deduplicated refresh of 2026-07-30, Gbrain milestone `milestones/mnemosyne-pr86-pr87-wiki-canonical-delivery-2026-07-30`; the earlier refresh at `1fcf4925` was not duplicated |
 | P12-E | EXTERNAL/OPERATOR BLOCKED | Phase 12 measured closure; consumes existing 12-04 source, production Postgres PPR parity, runtime readiness, grounded-reader QA, protected attempt | Frozen/held-out EM/F1 and positive graph/PPR evidence | No new code lease; operator evidence paths in Phase 12 plan 12-04 | Protected data, production/runtime, operator authorization |
-| P13-C | DISCHARGED | First real weekly cron receipt; consumes merged fixed workflow, whose cron is `23 7 * * 1` (Mondays 07:23 UTC) | Retained scheduled-cadence receipt for BENCH-007 | No code lease | Real `schedule` run `30807305055` succeeded on `b8673031a80158c49d552a4b3647829d213243bd` on 2026-08-03; job `91665545558` and its fixed public-contract test step succeeded. Metadata and scope are retained in the P13-C discharge section; no official benchmark or publication claim |
+| P13-C | DISCHARGED | First real weekly cron receipt; consumes merged fixed workflow, whose cron is `23 7 * * 1` (Mondays 07:23 UTC) | Retained scheduled-cadence receipt for BENCH-007 | No code lease | Real `schedule` run `30807305055` succeeded on `2c6a63f12291eb938b2d284c938298fc035d6105` on 2026-08-03; job `91665545558` and its fixed public-contract test step succeeded. Metadata and scope are retained in the P13-C discharge section; no official benchmark or publication claim |
 | P13-O | EXTERNAL/PLAN BLOCKED | Official MemoryAgentBench and BEAM; consumes P12-E plus pinned upstream revisions/protocols | BENCH-006 conforming upstream evidence | No admitted lease; a future exact plan must name every source/evidence path | Rights/license, provider/model/judge disclosure, capacity, operator admission |
 | SBOX | QUARANTINED | Development sandbox/external-meter candidate; consumes the common ABI and local reviewed sandbox commits | Only development-source isolation receipts until enforcement is proven | Current local source/test lease: `eval/public/sandbox.py`, `eval/public/sandbox/Dockerfile`, `tests/test_public_sandbox.py`; public-harness owner for any later shared integration | No push/PR/merge until immutable image, daemon probe, filesystem/network/write-boundary enforcement, SBOM, provenance, and resource receipts exist |
 | N12 | SOURCE DELIVERED (#139) | Additive result-v2 and M20 publication-integrity dispatch; consumes result-v1, signed ledger, renderer/publisher/readiness, official/enhanced lineage, atomic attempt identities | Compatible result-v2 projections, visible safety failures, cross-version supersession | `leaderboard/schema/result-v2.schema.json`; `leaderboard/validate.py`; `leaderboard/ledger.py`; `leaderboard/render.py`; `leaderboard/publish.py`; `leaderboard/readiness.py`; `eval/provider_bakeoff/README.md`; `tests/test_leaderboard_result_contract.py`; `tests/test_leaderboard_ledger.py`; `tests/test_leaderboard_render.py`; `tests/test_leaderboard_publish.py`; result-v2 owner only | Obsolete protected reservation released by the 2026-09-05 owner confirmation; effective after this receipt lands. Assign one owner and recheck current main/exact leases before implementation; result-v1 bytes and behavior remain immutable |
@@ -1912,25 +1912,25 @@ Only dependency-ready and exact-lease-disjoint nodes may share a wave.
 
 ```text
 Prior delivery wave (complete)
-  T0 PR #87 canonical truth            [merged main@2ba4ed80]
+  T0 PR #87 canonical truth            [merged main@5b07f320]
     -> T1 GitHub Wiki reconciliation   [wiki 46c34287]
       -> T2 one deduplicated CBM/Gbrain refresh [done 2026-07-30]
-  PR #88 documentation/contract-test hardening merged at main@4a891042
+  PR #88 documentation/contract-test hardening merged at main@a6a92ac9
   and admitted no new implementation package.
-  PR #89 recomputed this map and STATE at main@a8e9444c
+  PR #89 recomputed this map and STATE at main@064cb4fe
   and admitted no new implementation package.
   PR #90 landed the stranded M12/M13 development gap disclosures, their
-  pinning tests, and a cert-rotator lock-timeout flake fix at main@061c2e1c
+  pinning tests, and a cert-rotator lock-timeout flake fix at main@94c0c96a
   and admitted no new implementation package.
-  T3 GoalEx lifecycle backlog delivery merged as PR #91 at main@e157e035
+  T3 GoalEx lifecycle backlog delivery merged as PR #91 at main@f75b58cc
   and admitted no new implementation package.
-  T4 receipt-level lifecycle update merged as PR #92 at main@39cfa67a
+  T4 receipt-level lifecycle update merged as PR #92 at main@c56e65fb
   and admitted no new implementation package.
-  PR #93 independently merged at main@effc5e03 (the merge that lapsed the branch-resident carve-out), lapsing the
+  PR #93 independently merged at main@7aabe560 (the merge that lapsed the branch-resident carve-out), lapsing the
   branch-resident carve-out.
-  T5 lifecycle delivery merged as PR #94 at main@2091d01c
+  T5 lifecycle delivery merged as PR #94 at main@fe7e6adc
   and admitted no source node.
-  T6 lifecycle delivery merged as PR #95 at main@42abaab7
+  T6 lifecycle delivery merged as PR #95 at main@89f7ff82
   and admitted no source node or successor node. Its branch-resident
   recomputation is T6's own accepted standing-condition residue.
 
@@ -1939,7 +1939,7 @@ Current delivery wave
   node is admitted. PR #96 independently merged
   development-only M02/M04/M05 evaluation oracles; no writer for them remains
   active, and their publication eligibility is unchanged. PR #99 then delivered
-  T7 and T8 (merge d7eefb7c, exact head 2375aba5, exact-head CI 30808291831):
+  T7 and T8 (merge e5d0f6a9, exact head 5cc1c866, exact-head CI 30808291831):
     T7 documentation-and-tests (MERGED as PR #99): discloses those three oracles in
     eval/public/README.md and pins the disclosure with tests. It admits no
     source node, no Stage-B integration, and no successor node, and it leaves
@@ -1954,9 +1954,9 @@ Current delivery wave
     reachable from run_public_suite. It is a reachability fix for M03 only. It
     changes no fixture byte, no scorer, no schema, and no admission state, and
     it admits no successor node or source node. Exact head
-    e072dda5a9e7ef078d317156c49c54bbee7a5124 passed all required exact-head CI
+    0a9e5bedd991409e58c4317f2fa48b78c3458c1e passed all required exact-head CI
     and Greptile in run 31854371658; merge
-    b3570937918c7de40cd89ea543fab9e7b16f7471 at 2026-08-15T01:12:26Z;
+    b84b351bcd5a0397065821f60db425ae8c85a13a at 2026-08-15T01:12:26Z;
     post-merge CI 31855873247 successful.
   T7 and T8 are NOT lease-disjoint: both write GOAL.md, .planning/STATE.md,
   this map, and docs/plans/. They are one serialized GoalEx lifecycle writer
@@ -1967,8 +1967,8 @@ Current delivery wave
   T7, T8, and T9 are all MERGED, and no writer remains admitted from this wave.
 
 Delivered Windows portability wave (serialized; content-anchored)
-  PR #113 receipt@6929fd37 -> PR #109@6801fbd0 -> PR #114@c4337f63
-    -> PR #110@6241984b -> PR #111@f95aabac -> PR #112@61f55b94
+  PR #113 receipt@fbbd5c0c -> PR #109@83444101 -> PR #114@94f1afd2
+    -> PR #110@e4121325 -> PR #111@ba32c2ce -> PR #112@661ebbed
   Every edge preserved its immutable non-lifecycle anchor, inherited the
   immediately preceding lifecycle blobs, and closed on successful post-main CI.
 
@@ -2008,7 +2008,7 @@ Quarantine
   writers**. N12 is ready for a single result-v2 owner's admission after this
   receipt lands; other packages retain their dependency, evidence, and spec
   conditions. `T7` and `T8` were delivered by PR #99; `T9` was delivered
-  by PR #100 at `main@b3570937`. Their required order is discharged, and no
+  by PR #100 at `main@b84b351b`. Their required order is discharged, and no
   writer remains admitted from that wave or active on `eval/public/*`. `T7` and
   `T8` shared the lifecycle files and landed together; `T9` shared
   `eval/public/README.md` with `T7` and therefore landed strictly afterward.
@@ -2073,7 +2073,7 @@ Quarantine
   Measured on this host: the 6119-document 2Wiki corpus (59,867 candidates)
   `capture-batch --consolidate` in **296 s and 333 s across two runs**, against a
   600 s acceptance and a baseline that never completed; all 11 golden scenarios
-  IDENTICAL to legacy `2083ffc4` with and without the native kernels. It is
+  IDENTICAL to legacy `737a1ef8` with and without the native kernels. It is
   **OPEN/READY** and adds this structured self-record. Exclusive File Set: the files
   named above, `tests/test_batched_promotion_gate.py`,
   `tests/test_read_decision_memo.py`, `tests/test_store_shared_values.py`,
@@ -2100,8 +2100,8 @@ Quarantine
   documentation ancestry is retained on the single development branch.
 
 - PR #213: dependency lock update merged on 2026-10-04 at
-  `8c103f0f383994cbc5753601fef804278ff5e6d2`, from exact reviewed head
-  `17a68580da4b33ddcdf5d37290270840d39cca5b`. The only changed file was
+  `34c521eecb12037dd611fb153e84c4aa5334fb47`, from exact reviewed head
+  `c61332ba64a40e50b7739613ff09ce8d1af04941`. The only changed file was
   `uv.lock`: PyJWT 2.15.0, AnyIO 4.15.1 and typing-extensions 4.16.0.
   PR workflow `36962578172` completed with all nine applicable jobs passing;
   its nightly-only chaos job was skipped. This receipt does not claim a
@@ -2111,8 +2111,8 @@ Quarantine
 
 - PR #212: receipt repair, contributor README and AnyIO lockfile consolidation;
   MERGED on 2026-10-02 at 03:57:07 UTC, merge commit
-  `3c21be5d480f0b47c80046cfe10aa86775f4d537`, head
-  `746842ba40a4d6d26382bf6d2142dd31df0df8c0`. GitHub merge metadata was
+  `f2903662e0693ab84f82bb59dfb87207bb85d666`, head
+  `5ad8a0d1301e62103b71d2faa9f2e363de6e57b9`. GitHub merge metadata was
   verified on 2026-10-04. This records delivery without claiming new measured
   capability, implementation admission or historical baseline advancement.
 
@@ -2124,8 +2124,8 @@ Quarantine
   These consolidation records do not claim either source PR merged to main.
 
 - PR #120: MERGED on October 2, 2026 at 00:54:50 UTC; merge commit
-  `a7b95e9bc93a7eecd97c0bdf51a508e4487d1459`, reviewed head
-  `4f5d4fcfd51ac35beea0fbad1ceb3f622f8f51a5`, exact-head CI
+  `5b31e965e00b4962d943ed805c6dbfd8d7395e8e`, reviewed head
+  `9b730c66eb16c1aac8c676c3231fc4a51ceec799`, exact-head CI
   `36945970613` SUCCESS. All six repaired source heads from PR #122–127
   are ancestors of this merge; GitHub marked those PRs MERGED and retired
   their branches. This is a documentation-placement receipt only, not
@@ -2133,7 +2133,7 @@ Quarantine
 
 On October 1, 2026 the repository owner explicitly requested repairing the
 documentation review findings and consolidating plan-only branches. This is
-one serialized documentation writer on canonical `main@ac440866`, not a
+one serialized documentation writer on canonical `main@41c375a6`, not a
 successor source node or module implementation admission. PR #120 consumes
 the repaired proposed documents from PR #122, PR #123, PR #124, PR #125,
 PR #126 and PR #127 and updates their on-tree inventory atomically.

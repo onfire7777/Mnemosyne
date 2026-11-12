@@ -174,7 +174,7 @@ MNEMO_CONFIRM=1 infra/scripts/rollback-perf-runtime.sh [ref]
 
 Restores the recorded prior VM size (fallback: the measured pre-perf
 4 CPU / 10 GiB), checks out `infra/docker-compose.prod.yml` from `ref`
-(default `ee30b5b`, the perf-branch base — before the ceilings AND before
+(default `b77b4c7`, the perf-branch base — before the ceilings AND before
 host-Metal became the default), then `up -d --remove-orphans` — which reverts
 to in-VM ollama as the default LLM path and prunes the now-orphaned
 host-llm-proxy relay container.

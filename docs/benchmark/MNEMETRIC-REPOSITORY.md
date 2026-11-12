@@ -24,7 +24,7 @@ The local checkout is `/Users/admin/Desktop/Mnemetric`.
 Mnemosyne continues to own the memory engine, storage/retrieval/consolidation,
 native runtime, serving interfaces and BurnOS compatibility. Mnemetric initially
 installs the runtime from exact revision
-`e1ad2d0cf5ac19298547740363795c2ad25da356`.
+`2dd2f2438b60e0df611c72ea3a86689384760773`.
 
 Existing copies here are retained as a compatibility bridge; future benchmark
 and website changes belong in Mnemetric. There is no automatic bidirectional
@@ -72,10 +72,10 @@ The real CLI regression exercises two chunks individually larger than the
 default budget, verifies both can be returned under the explicit evaluation
 budget, checks all store files remain byte-identical, and repeats the default
 query to prove its result is unchanged. Bounds are validated before loading
-input files or the store. The paired 771-query experiment subsequently completed with runtime `3595dc86`
+input files or the store. The paired 771-query experiment subsequently completed with runtime `0e20fd7c`
 in an isolated environment and verified unchanged frozen stores. Its expanded
 profile used top-k 10 and 65,536 estimated tokens, versus the default top-k 8
 and 4,096 estimated tokens. These retained runs establish retrieval behavior,
 not matched-tokenizer budgets or answer quality. See Mnemetric
 `docs/verification/memoryagentbench-budget-comparison-result.json`; the main
-Mnemetric dependency remains pinned to `e1ad2d0c`.
+Mnemetric dependency remains pinned to `2dd2f243`.

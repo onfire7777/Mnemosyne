@@ -1,6 +1,6 @@
 # E-postgres-live — real-session validation and integration repairs
 
-Date: 2026-10-22. Parent baseline: `d59d4e5d3b3736cbf28719b659f766a65ad9559c`.
+Date: 2026-10-22. Parent baseline: `e81ca477d8cbc89a607e7494bdc67e7f2849f762`.
 
 The complete PostgreSQL test set passed **235 mixed live/unit cases**, zero skips,
 failures or errors, in **53.296 seconds**. The new mental-model module adds **16

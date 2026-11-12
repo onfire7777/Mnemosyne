@@ -37,7 +37,7 @@ A local-first "memory compiler." An append-only, content-addressed **evidence le
   Phase 12 Plan 12-04 remains open only on operator measurement and protected
   evidence; no agent may infer CAP-003 or BENCH-005 completion from merged code.
 - The six Phase 16 L1-L4 source packages are merged through PR #72
-  (`main@b9c475ad`): result contract, signed ledger, deterministic renderer,
+  (`main@81f4935f`): result contract, signed ledger, deterministic renderer,
   signed publication, metric taxonomy, and fail-closed launch-readiness
   admission. They do not supply real entrant results or satisfy launch gates.
 - The public harness, LongMemEval retrieval, and deterministic HippoRAG
@@ -175,9 +175,9 @@ engagement complete around them.
 
 ## 8. Definition of done
 
-**R2a source-delivery receipt:** exact head `5bfd53d` passed CI `29377793617`,
-merged through PR #13 as `33967b1`, passed stacked CI `29378482152`, and merged
-through PR #11 to `main@79f6b58`. The merged reconciliation PR body is the live
+**R2a source-delivery receipt:** exact head `97c8940` passed CI `29377793617`,
+merged through PR #13 as `55268ec`, passed stacked CI `29378482152`, and merged
+through PR #11 to `main@cc78261`. The merged reconciliation PR body is the live
 owner for its own exact-head/final-main CI and the hardware-admitted
 Graphify/CBM/gbrain receipt. Closing R2a does not close R2b-R2d, R3/R4, Vault
 CA repair, live proof, candidate-v19 evidence, or Phase 12.

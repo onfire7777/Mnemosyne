@@ -17,15 +17,15 @@ Mnemosyne delivered the closed `wmbs/0.1-draft` whole-memory common ABI to `main
 ## Source evidence
 
 - PR: https://github.com/onfire7777/Mnemosyne/pull/79
-- Delivered head: `8d64f554c565edeb0c43868ff6d436e6e09df33a`
-- Normal merge commit on `main`: `a95fe4d291093253f8ce49adff32ba875a35e884`
+- Delivered head: `6bbcd39edb506b9916c3cb9d15c9ec748b43b476`
+- Normal merge commit on `main`: `a9adfb86d6bf422a108e691b0f401beafc2b314f`
 - Schema: `eval/public/schema/wmbs-0.1-draft.schema.json`
 - Standard-library reference validator: `eval/public/adapters/whole_memory_reference.py`
 - Contract tests: `tests/test_public_whole_memory_reference.py`
 - Frozen schema SHA-256: `cbf79292ef6e9840b2b148e1457699e6aace33e10f9389895c661b1aa3d29376`
 - Focused ABI suite: 67 passed.
 - Exact-head PR CI: run `30410191434`, successful.
-- Post-merge CI on `a95fe4d291093253f8ce49adff32ba875a35e884`: run `30411040920`, successful; the nightly chaos soak was skipped as explicitly non-gating.
+- Post-merge CI on `a9adfb86d6bf422a108e691b0f401beafc2b314f`: run `30411040920`, successful; the nightly chaos soak was skipped as explicitly non-gating.
 - CodeRabbit approved the exact head, Greptile was green, and all 23 review threads were resolved before merge.
 
 ## Boundary and next dependency

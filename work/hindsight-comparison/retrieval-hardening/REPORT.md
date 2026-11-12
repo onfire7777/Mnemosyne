@@ -1,6 +1,6 @@
 # Retrieval and document privacy hardening
 
-Date: 2026-10-26. Baseline: `fe1f8695`. This follow-up reviewed existing uncommitted
+Date: 2026-10-26. Baseline: `bd6660b4`. This follow-up reviewed existing uncommitted
 retrieval work before editing. It ran no full benchmark and no model inference.
 
 ## Reproduced findings and repairs

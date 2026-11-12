@@ -1,7 +1,7 @@
 # Mnemosyne G0 Benchmark Report
 
 - Generated: `2026-06-29T23:40:35.294166+00:00`
-- Baseline: `baseline-0` at `67c229ace12313a8b8a6c6ede99d0a2096bae178`
+- Baseline: `baseline-0` at `86616ade88528595c9012d08a67d125bbf936e1d`
 - Gate ready: **True** (72/72 metrics measured)
 
 ## Metrics
@@ -124,5 +124,5 @@
 
 ## Artifact Custody
 
-- Source commit at generation: `be32a1c0d3c9b16f4504f2f107fd27a328c7c8db`
+- Source commit at generation: `7647718278e9650cab4e1eea22a215c78f9a13e6`
 - Note: Committed G0 reports are source-tree custody snapshots. The commit that contains a report cannot be embedded in that report before the commit exists; use git log to identify the containing artifact commit.

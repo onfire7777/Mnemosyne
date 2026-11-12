@@ -20,7 +20,7 @@ intermediate work. The [scope audit](../docs/plans/benchmark-platform-scope-audi
 maps original requirements to missing platform surfaces and module work.
 No phase, acceptance target or progress counter changes from this clarification.
 
-## Development evidence checkpoint — paired runs at `d59949ed`
+## Development evidence checkpoint — paired runs at `fc58241b`
 
 The Mnemetric website now presents benchmark families, coverage, memory systems,
 methods and explicit evidence limits. M12 development work includes real public
@@ -54,19 +54,19 @@ acceptance scope; source components alone do not complete those phases.
 
 ## Status reconciliation — 2026-10-04
 
-Source inspected at `3c21be5d`. This dated reconciliation supersedes older
+Source inspected at `f2903662`. This dated reconciliation supersedes older
 prospective status statements below; historical receipts and candidate SHAs
 remain unchanged. Source delivery is distinct from measured acceptance.
 
-- N12 result-v2 dispatch landed in PR #139 (`4af5b20c`); REPRO-001 bundle
-  standard landed in PR #144 (`54dea434`). REPRO-002 remains evidence-blocked.
-- Phase 15 S2 source/development closure landed through PR #160 (`cccc2700`),
-  S3 through #162/#164 (`7db0c810`, `8691bbd6`), S4 report through #177
-  (`336d34b4`), and S5 research-only go/no-go through #199 (`118f1e51`).
+- N12 result-v2 dispatch landed in PR #139 (`73bea352`); REPRO-001 bundle
+  standard landed in PR #144 (`525d2a13`). REPRO-002 remains evidence-blocked.
+- Phase 15 S2 source/development closure landed through PR #160 (`75ae284f`),
+  S3 through #162/#164 (`50e52925`, `b29ba998`), S4 report through #177
+  (`315c7770`), and S5 research-only go/no-go through #199 (`a6933b51`).
   These deliveries do not satisfy official security/calibration, real provider,
   protected QA, exact-scale, or physical Windows/Linux 8 GiB acceptance.
-- M06 Stage A landed in #202 (`cff84192`) and Stage B registry reachability
-  in #205 (`74f23509`). The development cell remains PROPOSED, non-publishable,
+- M06 Stage A landed in #202 (`d2fa3084`) and Stage B registry reachability
+  in #205 (`f5b113b7`). The development cell remains PROPOSED, non-publishable,
   and does not establish whole-memory capability or public admission.
 - Phase 12 protected QA, official dataset/provider evidence, REPRO-002,
   physical 8 GiB acceptance, and publication/launch gates remain open.
@@ -170,12 +170,12 @@ Plans:
 
 **Boundary:** The MemoryAgentBench and BEAM source contracts are merged, and
 PR #86 merged the scheduled development-regression workflow at
-`main@661343ce`. Input-free manual run `30561430522` passed the same fixed
+`main@60b82731`. Input-free manual run `30561430522` passed the same fixed
 four-test job, and exact post-merge main CI run `30561266140` passed on the
 merge commit. BENCH-006 remains Partial because official/upstream execution,
 rights, provider/model/judge disclosure, and operator evidence are still
 gated. BENCH-007 is Complete: real `schedule` run `30807305055` succeeded on
-`b8673031a80158c49d552a4b3647829d213243bd` on 2026-08-03, including the fixed
+`2c6a63f12291eb938b2d284c938298fc035d6105` on 2026-08-03, including the fixed
 public-contract test step in job `91665545558`. The verified metadata receipt
 is retained in the lease map. This closes scheduled development cadence only;
 Phase 13 remains open for BENCH-006's official/upstream evidence.
@@ -228,7 +228,7 @@ except that its promised research artifact must exist before Plan A is complete.
 
 **Boundary:** The W3 prospective-memory and working-memory planes (CAP-012,
 CAP-013) landed early and are merged across Local/Postgres/Sqlite via PR #39
-(`main@0784340`); both requirement rows are Complete in `.planning/REQUIREMENTS.md`
+(`main@a60114a`); both requirement rows are Complete in `.planning/REQUIREMENTS.md`
 and test-pinned by `tests/test_planning_traceability.py`. The same merge landed
 the W2 D5 signed deletion manifest and the W3 I0R signed-session public-action
 evaluator, whose PM-Bench/TriggerBench/Working-Memory suites are development-split

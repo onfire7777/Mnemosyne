@@ -37,7 +37,7 @@
   "host": "127.0.0.1",
   "port": 55434,
   "docker_context": "colima-pentestswarm",
-  "container": "mnemosyne-reliability-pg-1f2e3f3c",
+  "container": "mnemosyne-reliability-pg-aa164347",
   "storage": "tmpfs",
   "results": {
     "name": "pytest",

@@ -2,13 +2,13 @@
 
 ## Overview
 
-Work only in `/Users/admin/.codex/worktrees/9697/Mnemosyne` on `codex/goalex-whole-memory-pilot`. PR #79 already merged the closed ABI at `main@a95fe4d291093253f8ce49adff32ba875a35e884`. Rounds 12–13 produced preliminary remediation head `eb1e15be6b35b41f64b6b9b0b76663218b5313fb`; normal Task 2 review fixes advanced the final remediation head to `0d42f9436397a04e12ceaa3bdbd60d925e2640e9`.
+Work only in `/Users/admin/.codex/worktrees/9697/Mnemosyne` on `codex/goalex-whole-memory-pilot`. PR #79 already merged the closed ABI at `main@a9adfb86d6bf422a108e691b0f401beafc2b314f`. Rounds 12–13 produced preliminary remediation head `67cb53c0e7cdd3dd5043e3a0052177f8bc9a4cde`; normal Task 2 review fixes advanced the final remediation head to `a2f51e532a5704953edc68a7e617b9c26d4cd982`.
 
 Do not start result-v2, execute benchmark cells, alter result-v1/leaderboard behavior, consume external worktrees, add dependencies, or rewrite branch history. At plan creation, the current checkout was clean and its remote branch pointed to the same head, but live GitHub state could not be queried because `api.github.com` was unreachable. Reconcile the PR and exact-head gates live, address only confirmed remediation findings, then merge normally and prove post-merge `main`. No independent post-round findings were supplied.
 
 ## Validation Commands
 
-- `set -euo pipefail; test "$(pwd -P)" = "/Users/admin/.codex/worktrees/9697/Mnemosyne"; test "$(git branch --show-current)" = "codex/goalex-whole-memory-pilot"; test -z "$(git status --porcelain)"; git fetch --prune origin; test "$(git rev-parse HEAD)" = "$(git rev-parse origin/codex/goalex-whole-memory-pilot)"; git merge-base --is-ancestor a95fe4d291093253f8ce49adff32ba875a35e884 HEAD`
+- `set -euo pipefail; test "$(pwd -P)" = "/Users/admin/.codex/worktrees/9697/Mnemosyne"; test "$(git branch --show-current)" = "codex/goalex-whole-memory-pilot"; test -z "$(git status --porcelain)"; git fetch --prune origin; test "$(git rev-parse HEAD)" = "$(git rev-parse origin/codex/goalex-whole-memory-pilot)"; git merge-base --is-ancestor a9adfb86d6bf422a108e691b0f401beafc2b314f HEAD`
 - `gh pr list --repo onfire7777/Mnemosyne --state open --head codex/goalex-whole-memory-pilot --json number,url,headRefOid,mergeStateStatus,reviewDecision,statusCheckRollup`
 - `git diff --check origin/main...HEAD && uv run ruff check eval/public/adapters/whole_memory_reference.py tests/test_public_whole_memory_reference.py tests/test_runtime_exclusive_lock.py`
 - `PYTHONPATH=src uv run --extra mcp pytest -q tests/test_public_whole_memory_reference.py tests/test_runtime_exclusive_lock.py`
@@ -22,7 +22,7 @@ Do not start result-v2, execute benchmark cells, alter result-v1/leaderboard beh
 - [x] Create one PR against `main` only if none exists. Otherwise update the existing PR description with the exact lease, focused/full verification receipts, unchanged result-v1 boundary, and explicit result-v2 deferral.
 
 Task 1 receipt: refs were fetched and PR #80 matched the published remediation
-head `eb1e15be6b35b41f64b6b9b0b76663218b5313fb`. The PR targets `main`, is
+head `67cb53c0e7cdd3dd5043e3a0052177f8bc9a4cde`. The PR targets `main`, is
 mergeable, has no unresolved review threads, and the latest CodeRabbit review
 approved that exact head. These GitHub facts were captured live during Task 1
 on 2026-07-29 after API access recovered; its temporary blocked state was the
@@ -46,7 +46,7 @@ the changed-file secret scan, Ruff, focused adapter/runtime-lock tests, and the
 locked full suite were exercised; local runtime-lock timeouts were traced to
 host saturation while exact-head CI passed the same suite. The fixes were
 pushed normally as final remediation head
-`0d42f9436397a04e12ceaa3bdbd60d925e2640e9`. All required CI and review checks
+`a2f51e532a5704953edc68a7e617b9c26d4cd982`. All required CI and review checks
 then passed on that head, PR #80 was mergeable and clean, and zero review
 threads remained unresolved.
 
@@ -58,8 +58,8 @@ threads remained unresolved.
 - [x] Reassess the authoritative pilot plan only after this proof. If no new blocker or lease exists, leave result-v2 compatibility and ledger support as the next dependency-ready increment without implementing it in this round.
 
 Task 3 receipt: PR #80 merged normally as
-`28805ccf54f99f098a5abc23fe6f1155400d0f22`; remediation head
-`0d42f9436397a04e12ceaa3bdbd60d925e2640e9` is its ancestor. Canonical
+`69687abfcb354f7f5d19ddab1c540a3f3575037f`; remediation head
+`a2f51e532a5704953edc68a7e617b9c26d4cd982` is its ancestor. Canonical
 `/Users/admin/Mnemosyne` was cleanly fast-forwarded so local `main` equals
 `origin/main` at the merge SHA, without touching the benchmark-spec or
 signed-publication worktrees. Exact-merge CI run `30484986865` completed green

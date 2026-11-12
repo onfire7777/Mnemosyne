@@ -1,7 +1,7 @@
 # Book answer grounding and CI repairs — 2026-10-26
 
-Baseline: `97091695ccd90330e8300804524bd5b2d3043c7a`.
-Delivered implementation: [`1557f8aa`](https://github.com/onfire7777/Mnemosyne/commit/1557f8aafa47018a5218a821ce397f00f9592a5b), confirmed on main.
+Baseline: `22a03aab23e3c687c51d8a2389a453ce359a96d1`.
+Delivered implementation: [`0c3e70bc`](https://github.com/onfire7777/Mnemosyne/commit/0c3e70bc5efa73ce40dc2466dbf9a256135d38a3), confirmed on main.
 Exact tested source: [source-sha256.json](source-sha256.json).
 
 ## Corrected behavior

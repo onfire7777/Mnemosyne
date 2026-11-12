@@ -3,7 +3,7 @@ phase: quick-temporal-refresh
 status: passed
 runtime_status: passed
 delivery_status: confirmed
-source_commit: 0d947f5ce8eeb8884103080aa7d9364488cb2628
+source_commit: 8e6b109821c78b225df3cb78974292f91af74f3c
 score: 4/4 requirements verified
 covered_files:
   - .planning/quick/2026-10-26-temporal-refresh/PLAN.md

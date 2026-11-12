@@ -140,7 +140,7 @@ Contention returns exactly `lock_deferred`/75. It is not the still-open R2
 cross-workflow `${MNEMO_CUSTODY_DIR}/locks/runtime-exclusive` contract and does
 not claim protection from a malicious same-UID process.
 
-Pre-commit working-tree verification based on `82bc5d5e` passes the full
+Pre-commit working-tree verification based on `a7f01e5e` passes the full
 369-test rotator/blackbox
 pair, the unchanged 41-test production regression tier, all 39 section-31
 invariant rails, all 7 section-33 harness tests, and both planning traceability
@@ -152,9 +152,9 @@ initialized/unsealed Vault, stable API/stream identities and zero restart
 counts, and a valid production MCP client chain. The locked configured suite
 collected 2,636 tests: 2,496 passed, 140 expected skips, 0 failures, and 0 errors
 in 702.564 seconds. These are pre-commit working-tree artifacts based on
-`82bc5d5e`; the tested source/test bytes were committed unchanged as `8e97442`,
-with evidence documentation at `6afd3b3`. Exact-head CI `29313243324` passed on
-final PR head `88067bc`; PR #12 merged as `97f3c66`, and post-merge CI
+`a7f01e5e`; the tested source/test bytes were committed unchanged as `5f45846`,
+with evidence documentation at `6824659`. Exact-head CI `29313243324` passed on
+final PR head `1550c18`; PR #12 merged as `2612c45`, and post-merge CI
 `29314015888` passed all six gating jobs. Older pre-completion evidence is
 historical only. A fresh independent read-only security/correctness
 audit found no actionable issue and retained the documented same-UID,

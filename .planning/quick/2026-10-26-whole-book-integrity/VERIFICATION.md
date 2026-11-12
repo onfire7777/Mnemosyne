@@ -4,7 +4,7 @@ verified: "2026-10-26T21:09:08Z"
 status: passed
 runtime_status: passed
 delivery_status: confirmed
-source_commit: 9340354c7cc20601d736dbb56d19d073e4b4ae43
+source_commit: 84c832788bd63a5ea1b4a4c5f4c99b7ac3c27247
 score: 7/7 WB criteria verified
 behavior_unverified: 0
 overrides_applied: 0
@@ -49,7 +49,7 @@ Test locators below omit the common `tests/` prefix. They name actual behavioral
 | WB4 | Joined nodes/edges retain original contributions; bounded global review accounts for them or reports incomplete. | VERIFIED | `join`, `_merge`, `_contributions`, `_bounded_logic`, `render`. `test_join_preserves_all_chapter_fields_quotes_and_original_parts`, `test_join_preserves_both_chapter_relationship_rationales`, `test_large_merged_node_audits_all_contributions_without_cartesian_edges`, `test_large_merged_edge_audits_every_rationale_in_bounded_views`, oversized-node and global-provider-error tests. |
 | WB5 | Work and context remain bounded; cached identical calls are reusable; completed work survives partial failures. | VERIFIED | Source windows 60,000 characters; map context 12,000; map/chapter workers 3; helper pool at most 8; global batches 150,000; absolute request check 250,000. `test_map_and_chapter_prompts_only_carry_their_source_window`, worker/concurrency/context/prompt-limit tests, `test_concurrent_identical_cached_calls_publish_atomically`, chapter/global failure tests. `test_book_ask_integrity.py` checks both source/document tails and oversized rejection before dispatch. |
 | WB6 | Import/activation recomputes integrity; bad work cannot displace the active revision; retry and CLI outcomes are truthful. | VERIFIED | `_verified_framework` is called by conversion/import and active-state validation; `_import_book` verifies reuse; `make_burnskill` selects the intended unfinished revision. `test_incomplete_framework_does_not_replace_active_revision`, malformed/forged-import, defensive-copy, structural/field-repair and correct-source-retry tests. All queued and immediate outcome branches of `_emit_framework_job` are covered by `test_book_cli_wait.py`; the immediate-result bug found during review is fixed. |
-| WB7 | Guidance agrees with the code and delivery is confirmed on `origin/main`. | VERIFIED | README, `docs/BURNSKILL.md`, and `docs/whole-book-processing.md` agree with inspected code, command signatures, inventories, bounds, retry and limitations. Implementation commit `9340354c7cc20601d736dbb56d19d073e4b4ae43` was pushed and the same SHA was observed on `refs/heads/main`. |
+| WB7 | Guidance agrees with the code and delivery is confirmed on `origin/main`. | VERIFIED | README, `docs/BURNSKILL.md`, and `docs/whole-book-processing.md` agree with inspected code, command signatures, inventories, bounds, retry and limitations. Implementation commit `84c832788bd63a5ea1b4a4c5f4c99b7ac3c27247` was pushed and the same SHA was observed on `refs/heads/main`. |
 
 All WB requirements are claimed in PLAN frontmatter; none are orphaned. PLAN's first three must-have truths map to WB1–WB6 and pass. Its fourth truth maps to WB7 and passes after the observed source-commit push. No gap is deferred to an unrelated historical milestone.
 
@@ -89,4 +89,4 @@ D-01 and D-04 are honored by the scoped checks and explicit non-claims; D-03's l
 
 No user approval checkpoint is needed for these deterministic checks. The PLAN's documentation review was performed by this verifier; it is not a request for human authorization. Interpreting a real book still needs judgment, but semantic accuracy, real-model speed/quality, OCR/visual understanding and exhaustive cross-chapter pair comparison are explicitly outside this quick task's guarantees. Source accounting is not semantic exhaustiveness. No historical acceptance gate is closed.
 
-**Delivery evidence:** normal push succeeded for `9340354c7cc20601d736dbb56d19d073e4b4ae43`; `git ls-remote --heads origin main` returned that exact SHA. Final durable test receipts and the covered-file fingerprint are refreshed. No remaining gap in this scoped continuation; historical acceptance remains open.
+**Delivery evidence:** normal push succeeded for `84c832788bd63a5ea1b4a4c5f4c99b7ac3c27247`; `git ls-remote --heads origin main` returned that exact SHA. Final durable test receipts and the covered-file fingerprint are refreshed. No remaining gap in this scoped continuation; historical acceptance remains open.

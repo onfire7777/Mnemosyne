@@ -5,8 +5,8 @@ node and relationship contributions through bounded book conversion. Incomplete
 or inconsistent results remain drafts. This is implementation and regression
 evidence, not a benchmark or evidence of superiority over another memory system.
 
-Baseline: `b63b34616f65e31457f3bc243b158d479f734e68`.
-Delivered implementation: [`9340354c`](https://github.com/onfire7777/Mnemosyne/commit/9340354c7cc20601d736dbb56d19d073e4b4ae43), confirmed on `origin/main`.
+Baseline: `6673f84400face6f5378d22879af81e6bbd3f008`.
+Delivered implementation: [`84c83278`](https://github.com/onfire7777/Mnemosyne/commit/84c832788bd63a5ea1b4a4c5f4c99b7ac3c27247), confirmed on `origin/main`.
 The exact tested source and test bytes are in [source-sha256.json](source-sha256.json).
 
 ## Delivered behavior

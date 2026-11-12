@@ -8,7 +8,7 @@
 
 ## Status reconciliation — 2026-10-04
 
-Source inspection at `3c21be5d`; historical instructions below describe the original execution contract, not a request to repeat landed work. The signed deletion-manifest capability landed with PR #39. Full Memora/FAMA and AFTER/STATE-Bench adapter files named below are still absent; their benchmark targets and full production deletion-residue evidence remain open. Existing temporal and provenance development modules are not substitutes for those official acceptance criteria.
+Source inspection at `f2903662`; historical instructions below describe the original execution contract, not a request to repeat landed work. The signed deletion-manifest capability landed with PR #39. Full Memora/FAMA and AFTER/STATE-Bench adapter files named below are still absent; their benchmark targets and full production deletion-residue evidence remain open. Existing temporal and provenance development modules are not substitutes for those official acceptance criteria.
 
 ## Goal
 

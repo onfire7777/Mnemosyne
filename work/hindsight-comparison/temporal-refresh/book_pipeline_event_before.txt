@@ -1,4 +1,4 @@
-HEAD 0d947f5c; local deterministic regressions only; no providers or benchmarks.
+HEAD 8e6b1098; local deterministic regressions only; no providers or benchmarks.
 FFFFFFFFFFFFFFFFFFFFFFFFFF..FFFFFFF....FF......                          [100%]
 =================================== FAILURES ===================================
 __ test_event_and_source_queries_choose_different_authoritative_clocks[local] __

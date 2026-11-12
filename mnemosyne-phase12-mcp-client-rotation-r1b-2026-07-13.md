@@ -12,7 +12,7 @@ Production MCP client certificate rotation R1b is source-complete and exact-head
 ## Evidence
 
 - Branch: `codex/phase12-candidate-v19-custody`
-- Commit: `b4547479224da94289f30550ebba8cb951c12eef`
+- Commit: `8fb845325948cbd8d6093741ca64b31c20b07b9e`
 - Draft PR: https://github.com/onfire7777/Mnemosyne/pull/11
 - Exact-head CI: https://github.com/onfire7777/Mnemosyne/actions/runs/29238993180
 - Required CI jobs and CodeRabbit passed.

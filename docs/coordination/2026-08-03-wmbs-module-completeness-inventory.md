@@ -1,16 +1,16 @@
 # Whole-Memory Benchmark Standard — M01–M20 completeness inventory
 
-**Historical Round-0 baseline:** recomputed from the tree at `main@b8673031` plus the
+**Historical Round-0 baseline:** recomputed from the tree at `main@2c6a63f1` plus the
 `codex/goalex-whole-memory-pilot` controller branch, on 2026-08-03, as Round 0
 of the operator's benchmark directive in `GOAL.md`.
 
-**Current reconciliation: 2026-10-04**, source `3c21be5d` plus the dedicated
+**Current reconciliation: 2026-10-04**, source `f2903662` plus the dedicated
 development branch. M07/M08 proposal files are present after #118/#119; M16
 now has a development-source plan. Source existence never implies admission.
 
 **October 1, 2026 scoped reconciliation:** PR #120 consolidates the repaired
 M09/M11/M17/M18/M19/M20 proposed plan documents from PRs #122–#127 against
-`main@ac440866`. Their paths are now on this candidate tree; landing the
+`main@41c375a6`. Their paths are now on this candidate tree; landing the
 documents does not freeze their contracts or admit implementation. All six
 remain `PROPOSED` / `NOT CODE-READY`, with the M19 module still `DEFERRED`.
 Historical Round-0 counts and unrelated module receipts are not new evidence.
@@ -84,7 +84,7 @@ mapping is its C01–C24 table (same file, lines 502–525).
 ## Corrections to the recorded counts
 
 Each figure below is quoted from `GOAL.md`'s Current Priority section
-("Measured at `main@b8673031`"). The operator's directive text is left intact;
+("Measured at `main@2c6a63f1`"). The operator's directive text is left intact;
 these are the recomputation's corrections, as the directive itself instructs
 ("Do not trust the counts above; recompute them from the tree and correct
 them").

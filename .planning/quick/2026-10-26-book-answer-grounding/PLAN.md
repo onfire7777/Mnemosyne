@@ -7,7 +7,7 @@ requirements: [BA1, BA2, BA3, BA4]
 
 # Book answer grounding continuation
 
-Baseline: `97091695ccd90330e8300804524bd5b2d3043c7a`.
+Baseline: `22a03aab23e3c687c51d8a2389a453ce359a96d1`.
 The preceding goal turn made progress: whole-book conversion fixes and their
 verification records were pushed. This continuation improves the downstream
 answer path; it does not redefine the broader memory-quality goal as complete.

@@ -20,7 +20,7 @@ validation. The older counts and milestone snapshot below describe their stated 
 > (core dep = `cryptography`); Postgres, an embedding/reranker service, Keycloak, Vault and
 > C2PA are *optional real-provider* upgrades, each with a deterministic local fallback.
 >
-> **Status (2026-07-20):** `main` @ `0784340` · W3 prospective-/working-memory planes + W2
+> **Status (2026-07-20):** `main` @ `a60114a` · W3 prospective-/working-memory planes + W2
 > signed deletion manifest merged (PR #39) · **6/6 headline SLOs proven** · ~**82%** blended
 > complete. Remaining ~18% = Tier-B *real-infrastructure operational evidence*, not code.
 
@@ -841,5 +841,5 @@ Mnemosyne session (header `X-Mnemosyne-Session-Token`); `--require-session` enfo
 ---
 
 *Generated from a structural read of `/Users/admin/Mnemosyne` @ `main`; reconciled to the merged W3
-prospective-/working-memory planes + W2 signed deletion manifest (PR #39 @ `0784340`). Counts computed from
+prospective-/working-memory planes + W2 signed deletion manifest (PR #39 @ `a60114a`). Counts computed from
 code: 119 CLI subcommands, 60 MCP tools, 28 schema tables.*

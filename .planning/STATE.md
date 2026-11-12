@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: "Scoped temporal recall and refresh efficiency at main@f688c747; see quick/2026-10-26-temporal-refresh. No full benchmarks or provider inference. Historical milestone acceptance remains open."
+stopped_at: "Scoped temporal recall and refresh efficiency at main@d181666b; see quick/2026-10-26-temporal-refresh. No full benchmarks or provider inference. Historical milestone acceptance remains open."
 last_updated: "2026-10-26"
 last_activity: 2026-10-26
 progress:
@@ -20,7 +20,7 @@ progress:
 
 The active continuation is Mnemosyne temporal recall and refresh efficiency in
 [`quick/2026-10-26-temporal-refresh`](quick/2026-10-26-temporal-refresh/PLAN.md).
-The preceding book-answer and runtime repairs are pushed at `0d947f5c`.
+The preceding book-answer and runtime repairs are pushed at `8e6b1098`.
 Current implementation, review, verification and delivery are recorded in the
 new task's summary. The current user restriction forbids full
 benchmarks and provider inference. Mnemosyne and Mnemetric have independent code
@@ -38,21 +38,21 @@ rescan retains only the paste maintenance advisory. Evidence and limitations:
 `eval/reports/dependency-audit-2026-10-04`. GitHub's private critical alert remains
 unverified; this does not assert default-branch or full security clearance.
 
-The first whole-component partition plan at `db54506a` is frozen in
+The first whole-component partition plan at `863cd2ce` is frozen in
 `eval/reports/compact-train-partitions-2026-10-04`: 176,595 train / 22,075
 selection / 22,074 calibration rows. Hotpot selection/calibration coverage is
 only 246/249 rows. This remains a quarantined plan: semantic entity resolution,
 pre/post protected overlap, whole-component exclusions and attribution custody
 are still required. Do not rebalance survivors after screening outcomes.
 
-TRAIN document connectivity at `51bb3975` now groups all 220,744 staged rows
+TRAIN document connectivity at `bc4cd058` now groups all 220,744 staged rows
 into 919 components. The largest has 152,706 rows (89,667 Hotpot and 63,039
 SQuAD); only 758 Hotpot rows remain outside it. See
 `eval/reports/compact-train-groups-2026-10-04`. Random row splits would violate
 source-document isolation. At that checkpoint no partitions were assigned; semantic entity and
 protected-overlap screening remain open before training admission.
 
-Exact-source TRAIN staging at `19b9e0b9` processed 220,766 upstream rows:
+Exact-source TRAIN staging at `f70cdc62` processed 220,766 upstream rows:
 220,744 retained, 22 rejected for invalid Hotpot support indices. The independent
 raw-source audit checked every retained row and 194,069 exact spans. Evidence:
 `eval/reports/compact-train-staging-2026-10-04`. This advances row provenance and
@@ -71,10 +71,10 @@ W5 native tensor execution is now implemented behind the optional Rust `onnx`
 feature. A 314-byte synthetic graph has exact Rust/Python output parity for
 lengths 1/64/128/384/512, with clean process exit on ONNX Runtime 1.28.0 and
 ort rc.13. The earlier 1.22.1/rc.10 trial aborted at shutdown and is not a pass.
-The clean-source validation at `5cce12c6` passed 48 native tests, 23 Python
+The clean-source validation at `d6b3dedb` passed 48 native tests, 23 Python
 compatibility/provider tests, Clippy and formatting. Raw evidence is retained in
 `eval/reports/compact-onnx-native-development-2026-10-04`. Linux CI job 111548962454 passed all 51 native tests, formatting and Clippy
-at `e1ad2d0c`; raw logs are retained in
+at `2dd2f243`; raw logs are retained in
 `eval/reports/compact-onnx-linux-ci-2026-10-04`. The full workflow remains pending.
 This advances the missing execution layer, not learned QA or physical 8 GiB acceptance. The experimental span-only reader now implements tokenizer/offset-preserving
 integration behind the existing Runtime interface. Ten synthetic decoded
@@ -87,7 +87,7 @@ preparation, full artifact/configuration custody, and real compact-model
 selection; keep the default server and candidate-v19 configuration unpromoted.
 
 
-The paired v2 public-transport pressure capture at `d59949ed` completed and
+The paired v2 public-transport pressure capture at `fc58241b` completed and
 passed full source-bound replay: MCP stdio 320/320 correct, CLI 200/320 with
 120 missed short windows. Both recovered every exact-time intention and had
 no duplicate or cancelled firings. Total elapsed with setup: 12.374 s / 78.113 s;
@@ -102,7 +102,7 @@ Phase completion counters are unchanged.
 checks passed; lint passed and the refreshed page was verified without
 horizontal overflow at the current 495 px viewport.
 
-The observatory UI refresh is committed at `327ba016`, with grid/list benchmark
+The observatory UI refresh is committed at `0a4b612f`, with grid/list benchmark
 browsing and direct development-evidence navigation. Fifty-eight renderer/export
 checks and responsive keyboard/browser checks passed; this is not a new score.
 
@@ -123,7 +123,7 @@ before scheduling. Three regression cases reproduced the gap before the fix;
 keyed retries remain supported, and production/BurnOS APIs are unchanged.
 Historical failed model captures retain their original source and results.
 
-A real Qwen3 1.7B dependency attempt from `1fbaa7de` is retained: one case
+A real Qwen3 1.7B dependency attempt from `c87b4dbc` is retained: one case
 completed, the second failed on keyed task rebinding, and 98 were not attempted.
 Four responses are retained. The completed case failed final state comparison
 and missed one expected firing. Normal sampled pressure and cleanup are recorded;
@@ -160,7 +160,7 @@ four weekly dates; ten corpus tests pass, including unchanged original fixture
 bytes. This is corpus availability only. Dependency identity normalization,
 scoring/execution/replay support and actual model measurements remain open.
 
-The `c4a9d32a` paired decoding diagnostic completed 22 first-turn calls: all
+The `1e03b3f8` paired decoding diagnostic completed 22 first-turn calls: all
 11 plain-JSON outputs failed envelope validation; all 11 schema outputs passed.
 Plain JSON still substituted a timer for the first event request. No task was
 executed; semantic correctness and full M12 acceptance remain open. Evidence,
@@ -171,9 +171,9 @@ Provider usage accounting now preserves per-call reported tokens/timing and
 unknown counters for incomplete attempts. The retained 22-call prompt experiment
 reports 18,180 input and 3,788 generated tokens; this is not monetary cost or
 full M12 cost acceptance. Eight accounting checks pass. Existing CI at
-`30184aeb` was still active when this work began; newer commits remain local.
+`0d7c86f1` was still active when this work began; newer commits remain local.
 
-A paired Qwen3 1.7B diagnostic at clean `cccb4b24` completed all 22 first-turn
+A paired Qwen3 1.7B diagnostic at clean `74488e4e` completed all 22 first-turn
 calls across the first 11 frozen cases. Semantic instructions fixed one
 recurrence proposal but left event/condition timer substitutions and introduced
 an unrelated task. Both profiles remain development-only; `contract-v1` stays
@@ -186,28 +186,28 @@ Failed-attempt analysis now accounts for all 220 planned cases. The initial
 capture has 0 completed / 1 incomplete / 219 not attempted; the schema capture
 has 21 / 1 / 198. Completed-prefix diagnostics retain 17 misses without a
 full-corpus score. Formation checks: 108 passed; no acceptance gate closed.
-The website refinement is committed at `ea3832d0` with 57 rendering checks.
-CI run 37238287825 on `30184aeb` remains in progress at this checkpoint; later
+The website refinement is committed at `02dea321` with 57 rendering checks.
+CI run 37238287825 on `0d7c86f1` remains in progress at this checkpoint; later
 local commits have not been pushed or validated by that run.
 
-At `a927ee4e`, a four-cell diagnostic holds one public input fixed while varying
+At `1922a00e`, a four-cell diagnostic holds one public input fixed while varying
 compact model and schema wire order. Both models changed from clarification to
 an incorrect exact-time proposal when keys followed declaration order. Exact
 HTTP request bytes are now retained; canonical order remains the default.
 This is adapter sensitivity evidence, not successful formation. The earlier
 HTTP failure did not repeat once, but its cause remains unknown.
 
-The schema-constrained Qwen3 0.6B attempt at clean `dec91100` has ended: 21
+The schema-constrained Qwen3 0.6B attempt at clean `7fe11f67` has ended: 21
 cases completed, then an HTTP error stopped the next request. Its 25 successful
 responses only requested clarification; no task writes occurred and 17 eligible
 occurrences were missed in the completed prefix. All 161 pressure samples were
 normal. Raw evidence and partial diagnostics are retained; this is not a
 completed benchmark. The wrapper now records bounded HTTP error details.
-CI at pushed `55ae2ef9` passed; newer local commits require their own CI.
+CI at pushed `d1d967aa` passed; newer local commits require their own CI.
 
 The formation runner now retains twelve fixed public-input virtual probes per
 conversation and scoped inert receipts for every observed firing. A real local
-Qwen3 0.6B attempt at clean 88a56f24 stopped on its first invalid response,
+Qwen3 0.6B attempt at clean ff531410 stopped on its first invalid response,
 before any task write; all three sampled pressure readings were normal. No
 model benchmark completed. Evaluator-only timing diagnostics now score complete
 probe sequences against labeled eligibility, retaining misses, false alarms,
@@ -242,7 +242,7 @@ write; no completed candidate score or general implicit-formation capability is
 claimed. Broader/held-out coverage and full measured acceptance remain open.
 
 A [separate full fan-out resource observation](../eval/reports/m12-fanout-resource-development-2026-10-04/README.md)
-from 421a1fcd completed and replayed all 1,220 operations in 304.701 monotonic
+from 989b1834 completed and replayed all 1,220 operations in 304.701 monotonic
 seconds. Its 292 samples recorded at most 88 MiB process-group RSS and 3,913,523
 logical file bytes, including temporary stores under the measured root. All
 pressure samples were normal. These sampled maxima are not certified resource
@@ -302,7 +302,7 @@ idempotency keys through CLI/MCP and all three engine implementations. New keyed
 updates and cancellations also require a current-state content revision;
 recognized retries never reapply the mutation. Creation returns its original
 acknowledgement; update and cancellation return current state. Local/SQLite
-regressions passed. At `55ae2ef9`, CI run `37229007622`
+regressions passed. At `d1d967aa`, CI run `37229007622`
 completed the live PostgreSQL job, including BurnOS session compatibility and
 prospective transitions/durable retries. The full unit-and-drift job was still
 in progress at the 2026-10-04 resource-capture checkpoint, so this evidence does
@@ -313,14 +313,14 @@ remain open. See
 [the contract](../docs/ENGINE-CONTRACT.md#prospective-memory-contract).
 
 M12 now also has a [sink-enabled development capture](../eval/reports/m12-inert-sink-development-2026-10-04/README.md)
-from `d2af156a`: 30 inert records and 60 attempts, with all 30 deliberate
+from `56049007`: 30 inert records and 60 attempts, with all 30 deliberate
 retries identified without extra records. Reports and the sink annex replay
 exactly; earlier capture compatibility is retained. Registered retry/recovery
 evidence, full trigger coverage, calibration, cost/resource and admission
 remain open.
 
 The M12 exact-time diagnostic now has a [saved five-seed public-CLI execution](../eval/reports/m12-exact-time-development-2026-10-04/README.md)
-from clean harness source `82311010`: 145 operations, complete operation logs
+from clean harness source `c0b8be9b`: 145 operations, complete operation logs
 and exact report recomputation. Twenty runner/scorer checks passed. Delayed
 polling observations remain visible; this does not close M12 admission or
 full timing/cost/baseline requirements.
@@ -339,11 +339,11 @@ real-artifact diagnostic tests passed; no model loaded. The 4,096-token
 historical context cannot accommodate the observed 4,035-token runner prompt
 plus 512 output tokens without shifting. Full-input/runtime equivalence,
 effective context for the next candidate and resource admission remain open.
-CI `37225669534` at `762f12c8` has passed all gating jobs except unit/drift,
+CI `37225669534` at `f28617b4` has passed all gating jobs except unit/drift,
 which was still running at inspection. Later local commits are not covered
 by that head's results; no merge or phase completion is recorded.
 
-At `4a0e4c4c`, the Mnemetric comparison/coverage/attempt surfaces and real local
+At `3260cda5`, the Mnemetric comparison/coverage/attempt surfaces and real local
 retrieval preview are implemented; the single retrieval run has an exact
 nine-file clean-checkout reproduction. It is nonpublishable and not an official
 QA or multi-system comparison. Local combined platform/BurnOS/bundle regression
@@ -370,7 +370,7 @@ separates upstream model baselines from public memory-system execution and lists
 the remaining bundle, resource and admission gates. Dataset rights/admission,
 grounded-model preflight (the [latest synthetic retry](../docs/research/benchmark-intake/local-reader-feasibility-2026-10-04-repeat.json)
 again stopped on memory pressure), official measurements and broader original acceptance
-criteria remain open. CI passed on `df99593b`; the accumulated development
+criteria remain open. CI passed on `56074730`; the accumulated development
 changes require synchronization and new-head validation; no phase counter or measured-acceptance status changes here.
 
 ## Benchmark-platform scope reaffirmed — 2026-10-04
@@ -386,19 +386,19 @@ criteria remain in force. No completion counter is advanced by this review.
 
 ## Status reconciliation — 2026-10-04
 
-Source inspected at `3c21be5d`. This dated reconciliation supersedes older
+Source inspected at `f2903662`. This dated reconciliation supersedes older
 prospective status statements below; historical receipts and candidate SHAs
 remain unchanged. Source delivery is distinct from measured acceptance.
 
-- N12 result-v2 dispatch landed in PR #139 (`4af5b20c`); REPRO-001 bundle
-  standard landed in PR #144 (`54dea434`). REPRO-002 remains evidence-blocked.
-- Phase 15 S2 source/development closure landed through PR #160 (`cccc2700`),
-  S3 through #162/#164 (`7db0c810`, `8691bbd6`), S4 report through #177
-  (`336d34b4`), and S5 research-only go/no-go through #199 (`118f1e51`).
+- N12 result-v2 dispatch landed in PR #139 (`73bea352`); REPRO-001 bundle
+  standard landed in PR #144 (`525d2a13`). REPRO-002 remains evidence-blocked.
+- Phase 15 S2 source/development closure landed through PR #160 (`75ae284f`),
+  S3 through #162/#164 (`50e52925`, `b29ba998`), S4 report through #177
+  (`315c7770`), and S5 research-only go/no-go through #199 (`a6933b51`).
   These deliveries do not satisfy official security/calibration, real provider,
   protected QA, exact-scale, or physical Windows/Linux 8 GiB acceptance.
-- M06 Stage A landed in #202 (`cff84192`) and Stage B registry reachability
-  in #205 (`74f23509`). The development cell remains PROPOSED, non-publishable,
+- M06 Stage A landed in #202 (`d2fa3084`) and Stage B registry reachability
+  in #205 (`f5b113b7`). The development cell remains PROPOSED, non-publishable,
   and does not establish whole-memory capability or public admission.
 - Phase 12 protected QA, official dataset/provider evidence, REPRO-002,
   physical 8 GiB acceptance, and publication/launch gates remain open.
@@ -419,8 +419,8 @@ Tier-B is CLOSED. A genuine operator-run production capture over the live self-h
 - Bundle fingerprint: `sha256:6dc117d6bb95e7a683915d432b2d2b21997133e9bfbd53624427a7317eeb2271`
 - captured_at: `2026-07-07T15:53:18Z`
 - Verifier report: `mnemosyne-evidence-out/verify-bc10.json`
-- Evidence capture code: `main@58e722c` (adds the `production-evidence-verify` executable tool-artifact rewrite fix, test-first)
-- Documentation checkpoint at Tier-B attestation: `main@02337fa2f334b7421673585de9d8c60df6c29a7a` plus that cleanup pass.
+- Evidence capture code: `main@94f2dfb` (adds the `production-evidence-verify` executable tool-artifact rewrite fix, test-first)
+- Documentation checkpoint at Tier-B attestation: `main@a5d1d3fedfab5e5a7c664860f1c41f88ddcb4f9c` plus that cleanup pass.
 - Gate: real evidence only — no validator weakened; no row flipped without a genuine `production-evidence-verify` `ok:true`.
 
 ## Project Reference
@@ -428,7 +428,7 @@ Tier-B is CLOSED. A genuine operator-run production capture over the live self-h
 See: .planning/PROJECT.md (updated 2026-06-19)
 
 **Core value:** Build a memory compiler with lossless evidence, typed projections, safe retrieval, branchable updates, and gated self-improvement.
-**Current focus:** Plan 12-04 closure remains the measured critical path — the #46–#61 lease sweep is delivered to main and Blueprint §7 code residuals are closed; what remains is **operator measurement**, not implementation: CAP-003/BENCH-005 stay Partial pending measured EM/F1 ≥ 0.85, and 12-04-03 stays held. In parallel, the Phase 13 adapter contracts and bounded scheduled-development-regression source are merged through PR #86 (`main@661343ce`), Phase 14 reproducibility source and Phase 15 S2–S5 source/research artifacts are delivered, while their open measured acceptance remains explicit, and the six Phase 16 L1-L4 source packages remain complete. None of those source milestones satisfies an official benchmark, headline, launch, or publication gate.
+**Current focus:** Plan 12-04 closure remains the measured critical path — the #46–#61 lease sweep is delivered to main and Blueprint §7 code residuals are closed; what remains is **operator measurement**, not implementation: CAP-003/BENCH-005 stay Partial pending measured EM/F1 ≥ 0.85, and 12-04-03 stays held. In parallel, the Phase 13 adapter contracts and bounded scheduled-development-regression source are merged through PR #86 (`main@60b82731`), Phase 14 reproducibility source and Phase 15 S2–S5 source/research artifacts are delivered, while their open measured acceptance remains explicit, and the six Phase 16 L1-L4 source packages remain complete. None of those source milestones satisfies an official benchmark, headline, launch, or publication gate.
 
 Plan counters count the 17 enumerated GSD plans in phases 10–15: 14 checked
 source/development contracts, with 12-04, 15-01 and 15-03 acceptance still open.
@@ -439,7 +439,7 @@ closed phases (2 of 7), not program completion or benchmark quality.
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 4 of 4
-Status: Plan 12-04's full lease sweep is **delivered to `main`**. **12-04-01** preserved. **12-04-02** landed via PR #46. Residual Leases **A, C, D, E, F** via PRs #47–#51; **Lease G / G-wire / G-consol** external corroboration via #52–#54; Blueprint §7 **#19a, #19a.1, #19b** counterfactual fidelity via #55–#57; **#18** multi-signal `calibrated_confidence` fuse via #58; **#12** per-example conformal via #59; **#13** AGM contraction + ATMS labels via #60; **#14** `must_keep` + pointer-to-original via #61. All sixteen merged on green required CI, ending at `main@34effb4b`; the `.planning/STATE.md` reconcile followed as PR #62 (`main@e1b02221`). Delivery was verified by content, not commit count: every product tree was byte-identical between `main` and the retired staging branch. Blueprint §7 items **#12, #13, #14, #18, #19** are now marked closed in `BLUEPRINT-PARITY-MATRIX.md` with their merge SHAs — each re-verified as genuinely wired in `src/` before marking, including `counterfactual_replay_score()`, which is no longer dead. CAP-003/BENCH-005 remain **Partial** until measured EM/F1 ≥ 0.85 — no benchmark or headline claim changed. **12-04-03** and production VM/Vault/W4–W5/headline stay Blocked. W3 memory planes + CAP-012/013 Complete history via PR #39 `main@0784340` unchanged.
+Status: Plan 12-04's full lease sweep is **delivered to `main`**. **12-04-01** preserved. **12-04-02** landed via PR #46. Residual Leases **A, C, D, E, F** via PRs #47–#51; **Lease G / G-wire / G-consol** external corroboration via #52–#54; Blueprint §7 **#19a, #19a.1, #19b** counterfactual fidelity via #55–#57; **#18** multi-signal `calibrated_confidence` fuse via #58; **#12** per-example conformal via #59; **#13** AGM contraction + ATMS labels via #60; **#14** `must_keep` + pointer-to-original via #61. All sixteen merged on green required CI, ending at `main@ce915cb0`; the `.planning/STATE.md` reconcile followed as PR #62 (`main@c3dc9d25`). Delivery was verified by content, not commit count: every product tree was byte-identical between `main` and the retired staging branch. Blueprint §7 items **#12, #13, #14, #18, #19** are now marked closed in `BLUEPRINT-PARITY-MATRIX.md` with their merge SHAs — each re-verified as genuinely wired in `src/` before marking, including `counterfactual_replay_score()`, which is no longer dead. CAP-003/BENCH-005 remain **Partial** until measured EM/F1 ≥ 0.85 — no benchmark or headline claim changed. **12-04-03** and production VM/Vault/W4–W5/headline stay Blocked. W3 memory planes + CAP-012/013 Complete history via PR #39 `main@a60114a` unchanged.
 Last activity: 2026-10-04 — reconciled delivered source against current
 roadmaps and kept measured acceptance gates open.
 
@@ -450,25 +450,25 @@ available. N12 is ready for one owner's admission after this receipt lands;
 no source writer starts here. Phase/plan progress counters remain unchanged.
 
 Historical activity: 2026-08-02 — PR #86 merged the two-file bounded scheduled
-development-regression workflow at `main@661343ce`; input-free manual run
+development-regression workflow at `main@60b82731`; input-free manual run
 `30561430522` passed the fixed four-test contract job. PR #87 then merged the
-canonical truth reconciliation at `main@2ba4ed80` (post-merge CI
+canonical truth reconciliation at `main@5b07f320` (post-merge CI
 `30566984814`), and PR #88 merged public-regression README documentation plus
-hardened workflow contract tests at `main@4a891042` with post-merge CI
+hardened workflow contract tests at `main@a6a92ac9` with post-merge CI
 `30659705054`. PR #89 then merged the post-PR-#88 recomputation of the
-dependency/write-lease map and this file at `main@a8e9444c` (post-merge CI
+dependency/write-lease map and this file at `main@064cb4fe` (post-merge CI
 `30672194635`); it is documentation only and moved no package status. PR #90
 then landed the previously stranded M12/M13 development gap disclosures in
 `eval/public/README.md`, their two pinning suites
 (`tests/test_public_pm_bench_triggerbench.py`,
 `tests/test_public_working_memory_action_probe.py`), a cert-rotator
 lock-timeout flake fix, and the pilots-plan delivery checkpoints at
-`main@061c2e1c` (exact-head CI `30679262270`, post-merge CI `30680201900`).
+`main@94c0c96a` (exact-head CI `30679262270`, post-merge CI `30680201900`).
 PR #90 is development-source documentation and tests only: it moved no package
 status, left `eval/public/registry.json`, the fixtures, and all adapter and
 scoring code untouched, and M12/M13 remain `PROPOSED` / `publishable:false` /
 `pbpp_headline_eligible:false`. PR #91 then delivered the stranded GoalEx
-lifecycle backlog at `main@e157e035` (exact-head CI `30686224929`, post-merge
+lifecycle backlog at `main@f75b58cc` (exact-head CI `30686224929`, post-merge
 CI `30687385118`). It landed exactly:
 `GOAL.md`,
 this file, and the lease map (recording PR #90's post-merge receipts on top of
@@ -484,66 +484,66 @@ status and changed no benchmark, measurement, admission state, or publication
 claim. It was the GoalEx-owner delivery of lease-map
 node `T3`, now `MERGED`, and it kept the lifecycle and public-harness leases
 unmixed, and no source node remains admitted in the wave. The lease map was
-recomputed from the resulting `main@e157e035` and carries PR #91's own receipt
+recomputed from the resulting `main@f75b58cc` and carries PR #91's own receipt
 block — the residue that could not exist inside the commit it describes — and
 that recomputation was branch-resident until PR #92 delivered it as
-documentation-only lease-map node `T4` at `main@39cfa67a` (exact-head CI
+documentation-only lease-map node `T4` at `main@c56e65fb` (exact-head CI
 `30693874030`, post-merge CI `30694818231`). PR #93 then merged the
 fail-closed round-cleanup and ignored-state custody contract at
-`main@effc5e03` (exact-head CI `30718912376`, post-merge CI `30719645207`),
+`main@7aabe560` (exact-head CI `30718912376`, post-merge CI `30719645207`),
 which supplied the merge anchor for the bounded T5 reconciliation below. PR #92 is documentation only, admitted no source node, and moved no
 package status or publication claim. PR #93's independent merge lapsed the
 branch-resident Authority carve-out. `T5` then merged as PR #94 at
-`main@2091d01c` (exact head `41b21305`, exact-head CI `30730185494`, post-merge
+`main@fe7e6adc` (exact head `41e7ac3e`, exact-head CI `30730185494`, post-merge
 CI `30730918452`). It admitted no source node, but omitted the r42 record from
 its own `docs/plans/` lease. `T6` delivered the three-file recomputation plus
-the r42/r43 records as PR #95 at `main@42abaab7` (exact head `d7c0938f`,
+the r42/r43 records as PR #95 at `main@89f7ff82` (exact head `b05ee030`,
 exact-head CI `30737466988`, post-merge CI `30738303497`). It admitted no source
 node and no successor node, and through PR #96 the recorded position was that
 no lifecycle writer is now admitted. PRs #97 and #98 then advanced canonical
-`main` to `main@b8673031`; PR #99 delivered the bounded
+`main` to `main@2c6a63f1`; PR #99 delivered the bounded
 documentation-and-tests nodes `T7` (the M02/M04/M05 Stage-A disclosure and its
 pinning suite) and `T8` (the Round-0 M01-M20 completeness inventory, its
-derivations, and its drift test) at `main@d7eefb7c`. PR #101 discharged that
+derivations, and its drift test) at `main@e5d0f6a9`. PR #101 discharged that
 merge's baseline lapse, and PRs #103, #106, and #107 advanced canonical history
-through `main@7f305090`. PR #100 then delivered `T9`, the public-harness Stage-B
+through `main@518fdb8b`. PR #100 then delivered `T9`, the public-harness Stage-B
 node that makes the already-merged, already-tested M03 valid-time development
-cell reachable from `run_public_suite`, at `main@b3570937` (exact head
-`e072dda5a9e7ef078d317156c49c54bbee7a5124`, all required exact-head CI and
+cell reachable from `run_public_suite`, at `main@b84b351b` (exact head
+`0a9e5bedd991409e58c4317f2fa48b78c3458c1e`, all required exact-head CI and
 Greptile green in run `31854371658`, merge
-`b3570937918c7de40cd89ea543fab9e7b16f7471` at
+`b84b351bcd5a0397065821f60db425ae8c85a13a` at
 `2026-08-15T01:12:26Z`, successful post-merge CI `31855873247`). `T7`, `T8`,
 and `T9` are now all delivered. PR #105 then merged from exact head
-`d60857fdf61122106eeede789432dd5bac955137` after all required exact-head CI
+`c1cbae81a579ea1f8398c98074b522aae7209d7e` after all required exact-head CI
 passed in run `31856191898`, as merge
-`7b6c5a121107ee80533a5b4ec794e602e1e1ab33` at
+`66c989ef2fa599b41388975ad0516ff8d7f0e7e7` at
 `2026-08-15T01:46:23Z`. Its post-merge run `31857410462` failed solely at
 `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
 (1 failed, 4709 passed, 151 skipped, 191 deselected) because PR #105 was absent
 from the lifecycle authorities. PR #108 repaired that traceability lapse from
-exact head `bda5588abc2a181c1bd7b5ae17ca31deeae7d85e`, with all required
+exact head `2d8409c055f7f2eeb6453cd3b7caab002e4676e1`, with all required
 exact-head CI green in run `31859014653`, and merged as
-`7c5264d815d44c375173dcd1e8ab57783a397a7e` at
+`b87331b2eaad7576728e07941983972ce19b906b` at
 `2026-08-15T02:45:01Z`; post-merge run `31859997325` succeeded. No writer
 remains admitted from the T7-T9 wave. Controller PR #113 delivered `T10` from
-exact head `c1bf6a10335e30fe797c54a42285922552647a9e`, with all required
+exact head `37afb7e839277746b76baf01775a6f072deb2b09`, with all required
 exact-head CI green in run `31863057094`, and merged as
-`6929fd3703ff262d3264b58a5af90d506a804da2` at
+`fbbd5c0ccebe9c4d821bcf619adec5d6cf1b2c24` at
 `2026-08-15T04:22:14Z`; post-merge run `31864254074` succeeded. `T10` is the
 separately serialized, controller-owned Windows portability stack. Its immutable
 non-lifecycle content anchors are PR #109
-`08397dab1220c87a3e8e3a92bf353cc65b68dba3` -> PR #110
-`7e282b7c95f51a6446e25d92f8284de261551703` -> PR #111
-`226e4416a4e76671d7ca079fe97664b8617f5bfa` -> PR #112
-`259a6361355ab80cbbfa75ca1a6de6ec4b1f9a96`. Ruleset `19157561` requires
+`0b07441e3641608177f9500d28a305fffdca87d6` -> PR #110
+`212af50442f3c50525d4eec7a698427ac523ebe2` -> PR #111
+`4c88322843923b3afe611d0aa2eea3383e12c2e5` -> PR #112
+`1ad03788618e0c2659f367dc5babbc03924da5fc`. Ruleset `19157561` requires
 strict status-check freshness, so topology-only merges of current `main` or the
 immediately preceding stack PR are permitted when those three lifecycle blobs
 exactly equal that parent and every non-lifecycle blob equals the matching
 content anchor. The first such refresh produced PR #109
-`cb44f21296fc22cf92f847b8201a6881e915400c` -> PR #110
-`26f95a09827d3e56ffe86e65b7db7493ecf79c73` -> PR #111
-`02a724e9333a47a1cb7096d59b558ab80c1e5300` -> PR #112
-`c8d95dafe5131f965591b84aeabb095fac34f1b6`; all four exclusion checks pass.
+`f07d0733c8d9c9bfb5d5015c4a3ed57fa185029e` -> PR #110
+`e5bfea116e6c059309e9bafecbbdb807e1e195ee` -> PR #111
+`5d17b0044ab6fb053536c30421043c8e89961cc4` -> PR #112
+`5f79d384ec0ace10c18bbfca84b5dda153c639db`; all four exclusion checks pass.
 Exact-head CI runs `31865413163`, `31865422216`, `31865430468`, and
 `31865438529` all completed successfully, including every required and native-
 Windows job.
@@ -553,7 +553,7 @@ diff hash matches the approved cumulative stack.
 PR #109's sequencing deviation remains recorded in the lease map. PR #114 then
 delivered the topology amendment, and PRs #110, #111, and #112 merged in the
 required serialized order with exact-head and post-main CI green at every edge,
-ending at `main@61f55b94`. Their lifecycle blobs were parent-exact and their
+ending at `main@661ebbed`. Their lifecycle blobs were parent-exact and their
 non-lifecycle bytes matched the immutable anchors; no Windows stack writer
 remains open.
 One controller owns every serialized `.github/workflows/ci.yml` integration
@@ -568,7 +568,7 @@ pilots-plan checkpoint is a correction plus PR #90's receipt block — it
 rewrites one stale paragraph and adds a new twelve-line `Gap-disclosure
 delivery:` receipt in the M12/M13 checkpoint section: PR #90 shipped
 `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
-without updating its earlier paragraph, so canonical `main@061c2e1c` still
+without updating its earlier paragraph, so canonical `main@94c0c96a` still
 stated that the M12/M13 gap-disclosure paragraphs and their pinning tests
 "are not on main and are still pending PR delivery" — a claim that same
 commit falsified. That sentence was known-stale on `main` from PR #90 until
@@ -578,7 +578,7 @@ task boxes: those boxes record the plan as written at the time and are not a
 delivery signal, because each round's merged receipts are recorded in this
 file and in the lease map rather than back-filled into the round record. P13-C's
 first actual scheduled-cadence receipt is discharged: `schedule` run
-`30807305055` succeeded on `b8673031a80158c49d552a4b3647829d213243bd`, started
+`30807305055` succeeded on `2c6a63f12291eb938b2d284c938298fc035d6105`, started
 `2026-08-03T10:52:57Z`, with successful job `91665545558` and fixed
 public-contract test step. GitHub metadata was verified on 2026-09-05 and is
 retained in the lease map; this is real cron evidence, not the manual dispatch.
@@ -604,7 +604,7 @@ and the six `docs/plans/2026-07-25-phase16-*` /
 Phase 13 source contracts are merged. Plan 13-01 delivered the bounded
 weekly/manual development-regression workflow through PR #86 with no dispatch
 inputs, secrets, artifacts, providers, official assets, or claim outputs.
-Exact post-merge main CI run `30561266140` passed on `main@661343ce`.
+Exact post-merge main CI run `30561266140` passed on `main@60b82731`.
 BENCH-006 remains Partial behind official/upstream rights, disclosure,
 operator, and execution evidence. The P13-C scheduled-cadence subgate is
 discharged by retained run `30807305055`; the passing manual run proves only
@@ -616,9 +616,9 @@ BENCH-006. This does not establish official benchmark evidence.
 Phase 14 has one frozen plan. REPRO-001 implementation is blocked on additive
 result-v2 dispatch; the obsolete signed-publication reservation is released
 by the owner-confirmed unavailability disposition recorded on 2026-09-05.
-PR #69's source merge `a4e80b5a67b0437d3a864af0fe347febfe32e58b` and PR #70's
-delivery-receipt merge `eeb8765ea1f4cc924002ad8234df50326e227aed` are verified
-ancestors of inspected `origin/main@3281e61ed6b3d077628e3fd03ce0ec8de22cde18`.
+PR #69's source merge `d8f131f85cbc708b2e81cca25f3fe0aed8e471b2` and PR #70's
+delivery-receipt merge `882f7fb38311188244b9cd1cda314241ef1419a2` are verified
+ancestors of inspected `origin/main@e29ea51bf1b76d6fa50958eaf0bdde4054373642`.
 The owner confirmed that the old Mac and its files are no longer available.
 The reservation for `/Users/admin/Mnemosyne.codex-phase16-signed-publication`
 is retired; this does not claim its files were inspected, recovered, or deleted.
@@ -663,10 +663,10 @@ reported as implemented evidence.
 
 ### Decisions
 
-- [Whole-memory benchmark]: PR #81 merged exact M01/M10 source head `98b83e4be373cf0acd5411769b80b98dfd1a8caa` to `main@392b1fc173f454893e1b133ff3a727462586a8b0`; PR #82 merged bounded M12/M13 evidence to `main@7e9cd01feb2a31cbba96252943697245a4edd024`; PR #83 merged bounded M03 valid-time source head `3189cc24c570f12be06e3d04252a06f48c71f971` to `main@7f60d8ba8274a8ac8036a80737467654f862008f`; PR #84 merged M15 canonical replay and the composed M01→M03→M10 cassette to `main@e0dd41594cec890f598718160f919c13eee1e552`. M01/M10 remain `PILOT-READY-DEV`, M03/M12/M13 remain `PROPOSED`, M15 remains development-only, and all results remain non-publishable. The next package requires fresh dependency/write-lease admission; the obsolete result-v2 reservation is released by the 2026-09-05 owner confirmation, making N12 ready for admission after PR #135 lands. Sandbox retains its enforcement-evidence blocker.
+- [Whole-memory benchmark]: PR #81 merged exact M01/M10 source head `8efa67377fc88d7aa1be15358a4b56edbb0a723a` to `main@2d07577653b88b8fb15943a704f42d9ee8820981`; PR #82 merged bounded M12/M13 evidence to `main@3008f4a1089de4a9fb071621e99b273ec3d30ed2`; PR #83 merged bounded M03 valid-time source head `927ad7d75ed2b6f208c011e763224412c63089a8` to `main@8542ca420c8e5aa79da9e9b9a8f1e6de17131fe3`; PR #84 merged M15 canonical replay and the composed M01→M03→M10 cassette to `main@160cc933f8b39f33470145f6455e40b8147f5b02`. M01/M10 remain `PILOT-READY-DEV`, M03/M12/M13 remain `PROPOSED`, M15 remains development-only, and all results remain non-publishable. The next package requires fresh dependency/write-lease admission; the obsolete result-v2 reservation is released by the 2026-09-05 owner confirmation, making N12 ready for admission after PR #135 lands. Sandbox retains its enforcement-evidence blocker.
 - [Phase 12]: W1 local development is complete through the baseline, Fix A, and Fix B receipts, but it does not close CAP-003, BENCH-005, or Plan 12-04 without production-Postgres parity, runtime readiness, grounded-reader development QA, and the protected attempt.
-- [W3]: The full prospective-memory + working-memory plane is merged across Local/Postgres/Sqlite through PR #39 as `main@0784340` (Phase 1 hardening had landed earlier via PR #37 `7a1db210`). CAP-012/CAP-013 are Complete and test-pinned by `tests/test_planning_traceability.py`; the W2 D5 signed deletion manifest and the I0R signed-session public-action evaluator landed in the same merge. The I0R action suites are development-split and `publishable:false`, so they add no public/headline benchmark claim. Remaining W3 retrieval/rails/benchmark integration beyond those development suites, and the W4/W5 external-adapter GATEs, stay operator-gated and are not claimed complete.
-- [Operations]: The local/full verification and Graphify/CBM/gbrain refresh were hardware-admitted and completed at `main@7a1db210`. VM/Vault restart, runtime-readiness repair, R3/R4 live rotation, grounded-reader development QA, the protected attempt, and W1 production parity remain operator-gated and must not be reported as failures or silently run while the production stack is intentionally stopped.
+- [W3]: The full prospective-memory + working-memory plane is merged across Local/Postgres/Sqlite through PR #39 as `main@a60114a` (Phase 1 hardening had landed earlier via PR #37 `2fc90971`). CAP-012/CAP-013 are Complete and test-pinned by `tests/test_planning_traceability.py`; the W2 D5 signed deletion manifest and the I0R signed-session public-action evaluator landed in the same merge. The I0R action suites are development-split and `publishable:false`, so they add no public/headline benchmark claim. Remaining W3 retrieval/rails/benchmark integration beyond those development suites, and the W4/W5 external-adapter GATEs, stay operator-gated and are not claimed complete.
+- [Operations]: The local/full verification and Graphify/CBM/gbrain refresh were hardware-admitted and completed at `main@2fc90971`. VM/Vault restart, runtime-readiness repair, R3/R4 live rotation, grounded-reader development QA, the protected attempt, and W1 production parity remain operator-gated and must not be reported as failures or silently run while the production stack is intentionally stopped.
 - [Phase 12]: Production MCP client rotation preserves the unchanged six-hour validator. Its separate diagnostic is restricted to the exact canonical current pair, admits only the validator's leaf-expiry-window failure with at most six hours remaining, requires live leaves to have a chain valid now, and permits historical chain probing only for an already-expired leaf.
 - [Phase 12]: Rotation R1a is staged-only and offline-tested: Docker context/network/image/CLI identity, fixed container confinement, secret-free child environment/output, canonical private staging containment, staged ownership/modes/device, and normal post-issuance validation all fail closed before any later publication work.
 - [Phase 12]: Rotation R1b uses a strict bounded secret-free journal and retained mode-0600 generations on the canonical filesystem. File and parent fsyncs bracket each journal/rename transition; startup accepts only phase-reachable old/new pair states. R1b auto-restores `pair_published` and earlier. Residual schema-v2 `published_validated` remains activation-ambiguous because the prior fixture used that phase across consumer recreation, so it is preserved and fails closed; R1c owns the later runtime-aware phases.
@@ -682,7 +682,7 @@ reported as implemented evidence.
 - [Phase 12]: Reuse shared retrieval/PPR and the existing Ollama role-provider boundary; add a narrow orchestration layer with external CID validation, complete caller-context propagation, and ephemeral answers.
 - [Phase 11]: BENCH-004 is complete; BENCH-005 remains partial because all three Hippo tracks measured zero positive graph/PPR participation and Phase 12 still owns real reader-produced EM/F1.
 - [Phase 11]: HippoRAG retrieval is deterministic, but EM/F1 needs real reader-produced predictions; the scorer lands in Phase 11 and Phase 12 owns prediction closure.
-- [CI]: The GitHub Actions billing block was resolved on 2026-07-12. R1c exact-head run `29313243324`, post-merge run `29314015888`, and ordinary scheduled-main run `29318113932` are green. R2a exact head `5bfd53d` passed run `29377793617`; stacked head `33967b1` passed PR #11 run `29378482152` and merged to `main` as `79f6b58`. Post-merge run `29379113689` passed all six gating jobs and accepts that main merge.
+- [CI]: The GitHub Actions billing block was resolved on 2026-07-12. R1c exact-head run `29313243324`, post-merge run `29314015888`, and ordinary scheduled-main run `29318113932` are green. R2a exact head `97c8940` passed run `29377793617`; stacked head `55268ec` passed PR #11 run `29378482152` and merged to `main` as `cc78261`. Post-merge run `29379113689` passed all six gating jobs and accepts that main merge.
 
 - [Phase 0]: V2 blueprint is controlling; v1 is lineage only.
 - [Phase 0]: Build originally moved to `/Users/admin/Projects/Mnemosyne` because `/Users/admin/Desktop/Mnemosyne` was write-blocked; the current canonical checkout is `/Users/admin/Mnemosyne`.
@@ -829,44 +829,44 @@ receipts, **Phase 13-15 Planning and Source Status** for the Phase 13 source
 contracts merged through PR #86, and **Current Position → Last activity** for
 the PR #87, PR #88, PR #89, PR #90, PR #91, PR #92, PR #93, PR #94, PR #95, PR #96,
 PR #97, and PR #98 merge receipts. PR #99 delivered `T7` and `T8` at
-`main@d7eefb7c` (exact head `2375aba5`, exact-head CI `30808291831`); PR #101
+`main@e5d0f6a9` (exact head `5cc1c866`, exact-head CI `30808291831`); PR #101
 discharged its baseline lapse, and PRs #103, #106, and #107 advanced the merged
-history through `main@7f305090`. PR #100 delivered `T9` from exact head
-`e072dda5a9e7ef078d317156c49c54bbee7a5124` after all required exact-head CI and
+history through `main@518fdb8b`. PR #100 delivered `T9` from exact head
+`0a9e5bedd991409e58c4317f2fa48b78c3458c1e` after all required exact-head CI and
 Greptile passed in run `31854371658`, merged as
-`b3570937918c7de40cd89ea543fab9e7b16f7471` at
+`b84b351bcd5a0397065821f60db425ae8c85a13a` at
 `2026-08-15T01:12:26Z`, and passed post-merge CI `31855873247`. PR #105 merged
 from exact head
-`d60857fdf61122106eeede789432dd5bac955137` after all required exact-head CI
+`c1cbae81a579ea1f8398c98074b522aae7209d7e` after all required exact-head CI
 passed in run `31856191898`, as merge
-`7b6c5a121107ee80533a5b4ec794e602e1e1ab33` at
+`66c989ef2fa599b41388975ad0516ff8d7f0e7e7` at
 `2026-08-15T01:46:23Z`; post-merge run `31857410462` failed solely at the
 canonical-baseline traceability test (1 failed, 4709 passed, 151 skipped, 191
 deselected) because PR #105 was absent from the lifecycle authorities. PR #108
 repaired that lapse from exact head
-`bda5588abc2a181c1bd7b5ae17ca31deeae7d85e`, exact-head CI run
-`31859014653`, merge `7c5264d815d44c375173dcd1e8ab57783a397a7e`
+`2d8409c055f7f2eeb6453cd3b7caab002e4676e1`, exact-head CI run
+`31859014653`, merge `b87331b2eaad7576728e07941983972ce19b906b`
 at `2026-08-15T02:45:01Z`, and successful post-merge run `31859997325`. The
 controller receipt delivered as PR #113 from exact head
-`c1bf6a10335e30fe797c54a42285922552647a9e`, exact-head CI run
-`31863057094`, merge `6929fd3703ff262d3264b58a5af90d506a804da2`
+`37afb7e839277746b76baf01775a6f072deb2b09`, exact-head CI run
+`31863057094`, merge `fbbd5c0ccebe9c4d821bcf619adec5d6cf1b2c24`
 at `2026-08-15T04:22:14Z`, and successful post-merge run `31864254074`. PR
-#109 then merged from exact head `cb44f21296fc22cf92f847b8201a6881e915400c`
+#109 then merged from exact head `f07d0733c8d9c9bfb5d5015c4a3ed57fa185029e`
 after exact-head CI `31865413163` passed, as
-`6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4` at
+`83444101f65c49c4d70d32bcd5a4362f2655367d` at
 `2026-08-15T05:24:36Z`; post-main run `31866875258` succeeded. The
-current canonical baseline is `main@f688c747`. Node `T10` is delivered through
+current canonical baseline is `main@d181666b`. Node `T10` is delivered through
 PR #112. PR #115 merged M02 Stage-B at this baseline, but its reproduced review
 defects remain open and require a serialized corrective successor. PR #117
 delivered the coupled lifecycle reconciliation and topology-verifier remediation
-as merge `d11ffe5e61511269efcf38ccd2ad064564580109` on 2026-08-31; it owns no
+as merge `752e1d1672ceb7c1a9b05301d296d42c250e90b2` on 2026-08-31; it owns no
 active writer. PR #90 is
 development-source
 documentation and tests only, PRs #91-#92 are lifecycle documentation only,
 and `T5` is discharged as PR #94; `T6` is discharged as PR #95;
 PR #96 independently delivered development-only M02/M04/M05 evaluation
-oracles; PR #97 adjudicated the round-43 review at `main@71e492b4` (exact head
-`13c05d65`, exact-head CI `30774834604`, post-merge CI `30775783472`); and
+oracles; PR #97 adjudicated the round-43 review at `main@3d0ad051` (exact head
+`97745878`, exact-head CI `30774834604`, post-merge CI `30775783472`); and
 PR #98 corrected PR #97's overstated "loop retired" claim back to paused.
 Nodes `T7` and `T8` were delivered together by PR #99; they remain
 documentation and tests only and admit no source or successor node. Node `T9`
@@ -883,9 +883,9 @@ admits no successor node or source node. No writer remains admitted from the
 `T7`-`T9` wave.
 Evidence and publication boundaries are unchanged.
 
-Latest checkpoint (2026-07-23): the answering-ort custody protocol landed on `main` — PR #42 as `main@074c101` (`feat: add answering ort custody protocol`, merged `059bb82`) and PR #43 as `main@bd48b3e` (`fix(answering-ort): load custody identity from env`). `services/answering-ort/` is a bounded, local-only Rust ONNX (`ort`) compact-answering sidecar skeleton (W5): it loads its custody identity from the environment and fails closed with `runtime_unavailable`; it does not load an ONNX model, produce model outputs, or claim runtime parity with another runtime. No public benchmark, headline SLO, or Tier-B production-evidence claim changed. W1 production parity, grounded-reader development QA, the single protected attempt, R3/R4 live rotation, and the W4/W5 external-adapter GATEs remain operator-gated and were neither run nor claimed here.
+Latest checkpoint (2026-07-23): the answering-ort custody protocol landed on `main` — PR #42 as `main@ade20f3` (`feat: add answering ort custody protocol`, merged `bf0fc9d`) and PR #43 as `main@28b6cec` (`fix(answering-ort): load custody identity from env`). `services/answering-ort/` is a bounded, local-only Rust ONNX (`ort`) compact-answering sidecar skeleton (W5): it loads its custody identity from the environment and fails closed with `runtime_unavailable`; it does not load an ONNX model, produce model outputs, or claim runtime parity with another runtime. No public benchmark, headline SLO, or Tier-B production-evidence claim changed. W1 production parity, grounded-reader development QA, the single protected attempt, R3/R4 live rotation, and the W4/W5 external-adapter GATEs remain operator-gated and were neither run nor claimed here.
 
-Latest checkpoint (2026-07-20): PR #39 merged to `main` as `0784340`, delivering the full W3 prospective-memory and working-memory planes across Local, Postgres, and Sqlite engines, the W2 D5 signed deletion manifest (`src/mnemosyne/deletion.py` / `deletion_manifest.py`), the explicit cross-engine `assertion_id_map` branch-merge identity map, and the W3 I0R signed-session public-action evaluator (`eval/public/action_cli.py`) with the development-split `pm-bench-development`, `triggerbench-development`, and `working-memory-action-development` suites. All three action suites are `publishable:false`/`pbpp_headline_eligible:false`, so no public benchmark or headline claim changed. CAP-012/CAP-013 are Complete and test-pinned by `tests/test_planning_traceability.py`. Documentation (README, `docs/ARCHITECTURE-OVERVIEW.md`, `docs/ENGINE-CONTRACT.md`) and these planning files were reconciled to the merged code. W1 production parity, grounded-reader development QA, the single protected attempt, R3/R4 live rotation, and the W4/W5 external-adapter GATEs remain operator-gated and were neither run nor claimed here.
+Latest checkpoint (2026-07-20): PR #39 merged to `main` as `a60114a`, delivering the full W3 prospective-memory and working-memory planes across Local, Postgres, and Sqlite engines, the W2 D5 signed deletion manifest (`src/mnemosyne/deletion.py` / `deletion_manifest.py`), the explicit cross-engine `assertion_id_map` branch-merge identity map, and the W3 I0R signed-session public-action evaluator (`eval/public/action_cli.py`) with the development-split `pm-bench-development`, `triggerbench-development`, and `working-memory-action-development` suites. All three action suites are `publishable:false`/`pbpp_headline_eligible:false`, so no public benchmark or headline claim changed. CAP-012/CAP-013 are Complete and test-pinned by `tests/test_planning_traceability.py`. Documentation (README, `docs/ARCHITECTURE-OVERVIEW.md`, `docs/ENGINE-CONTRACT.md`) and these planning files were reconciled to the merged code. W1 production parity, grounded-reader development QA, the single protected attempt, R3/R4 live rotation, and the W4/W5 external-adapter GATEs remain operator-gated and were neither run nor claimed here.
 
 Historical source-hardening checkpoint (2026-06-30): The exact-parity lane closed the Phase 8 MFA elevation defect: elevated OIDC authz rules require non-tenant claim evidence, configured `required_acr`/`required_amr`, positive `max_auth_age_seconds`, and fresh token `auth_time` before minting operator/consolidator or trust-tier≤1 sessions. This checkpoint predates and is superseded by the Tier-B attestation above.
 
@@ -936,12 +936,12 @@ Historical source-hardening checkpoint (2026-06-30): Phase 8 provenance fail-ope
 
 Latest review checkpoint (2026-07-16): a host reboot at `2026-07-16T12:41Z`
 killed the round-8 executor mid-way through its post-landing review-fix gate,
-leaving three review-fix commits (`50106d7`, `4ee5668`, `6f445df`) on local
+leaving three review-fix commits (`0079cdd`, `c9b95a4`, `8c82372`) on local
 `main` (unpushed) and a fourth iteration uncommitted. The work was recovered
 onto `codex/r8-review-fix-recovery` with no reset, rebase, force-push, or
-direct push to `main`, completed as `6ee2900` (symlinked capture-batch store
+direct push to `main`, completed as `09eeed2` (symlinked capture-batch store
 rejection; non-destructive PostgresEngine.merge clone replay), adversarially
-verified by a 27-agent multi-lens review, and hardened as `7108f4a`:
+verified by a 27-agent multi-lens review, and hardened as `2f79ddb`:
 UUID-shaped deterministic summary-relation ids (the prior `relation-<sha256>`
 form would have failed the CI Postgres job against the UUID primary key),
 deterministic merge-clone ids so re-merging the same branch converges instead
@@ -960,12 +960,12 @@ live-rotation-proof gap, not a new incident). Concluded goalex round plans
 
 Previous review checkpoint (2026-07-15): the round-5 HIGH finding is CONFIRMED and
 resolved. The orphaned review-fix range landed through merge-commit PR #20 from
-feature head `f4636ee8560b7f17bbf3fe5ad33fdb85d87d818b`; exact-head CI run
+feature head `18c75af4fc8e08bdacdbc47d9e3d46488fa69ca5`; exact-head CI run
 `29465778730` passed from `2026-07-16T02:06:24Z` through `02:20:20Z`, PR #20
 merged at `02:20:36Z` as
-`51fa8982cca39b7c765f44d47a64a2937c0c913b`, and post-merge main CI run
-`29466355604` passed from `02:20:39Z` through `02:34:50Z`. Commits `7b06de5` and
-`2520c14` are now ancestors of `origin/main`; no reset, rebase, force-push, or
+`1ccbe511ff0abff68a2df6430af685b93b85f2f9`, and post-merge main CI run
+`29466355604` passed from `02:20:39Z` through `02:34:50Z`. Commits `9ff84e5` and
+`454562d` are now ancestors of `origin/main`; no reset, rebase, force-push, or
 direct push to `main` occurred. The fixes reduce the reentry proof channel to
 the inherited owner descriptor plus authoritative locked metadata, make
 `run_child` require acquired state, add direct `--verify-child` regression cases
@@ -986,21 +986,21 @@ CBM-reindex, or gbrain mutation occurred.
 Round-6 execution precondition receipt (`2026-07-16T01:28:52Z`): the first
 attempt stopped fail-closed before creating the delivery branch because the live refs did not
 match the plan contract. The checkout was clean on
-`goalex-r6-land-orphaned-r2b-review-fixes-via-pr-re@c62257d`, local `main` also
-pointed at `c62257d`, and `origin/main` remained `435fb53`; therefore
+`goalex-r6-land-orphaned-r2b-review-fixes-via-pr-re@46cb41d`, local `main` also
+pointed at `46cb41d`, and `origin/main` remained `1209386`; therefore
 `git log --oneline origin/main..main` contained the additional round-6 plan
-commit `c62257d` ahead of the expected `2520c14` and `7b06de5`. Reflog evidence
+commit `46cb41d` ahead of the expected `454562d` and `9ff84e5`. Reflog evidence
 shows the plan commit advanced local `main` at `2026-07-15T18:25:20-07:00` and
 the Ralphex execution branch was then created from that head. No
 `codex/r2b-review-fix-landing` branch, PR, push, rebase, reset, or review-fix
 landing was attempted in that first attempt. The retry preserved local `main`,
-created `codex/r2b-review-fix-landing` at the required `2520c14`, proved that
+created `codex/r2b-review-fix-landing` at the required `454562d`, proved that
 start point, and then advanced only the delivery branch to include the round-6
 plan and this receipt. The exact branch head is the only head permitted for the
 landing PR.
 
 Previous checkpoint (2026-07-15): R2b tracker reconciliation is merged through
-PR #18 as final `main@f50cec0ddc65e81c0f819376bcb3224eb6328618`, with exact-head
+PR #18 as final `main@3697cc91dbc2a502eee456bcf1bdf0d5d078b19d`, with exact-head
 CI run `29454727897` and post-merge main CI run `29455686269` green. The
 complete read-only preflight on that SHA recorded 53% free memory with
 load1/load5 1.66/1.97 at `2026-07-15T22:59:07Z`, 55% with 1.85/2.00 at
@@ -1030,9 +1030,9 @@ live mutation ran. The fully merged remote branch was deleted, along with the
 listed superseded local and remote reconciliation/review branches.
 
 Historical checkpoint (2026-07-15): R2b review hardening is merged to
-`main@5a6ce1921c1537b6090cf40600581f9fe956fe1f` through PR #17. Exact-head CI
+`main@0417e9f6ffe0836c998aba000f7e768b16b45eef` through PR #17. Exact-head CI
 run `29452661004` passed on
-`e5ffa1c76bc392660731a02f9831405299fe385b`; post-merge main CI run
+`60c70e554c5b63882e5dc605a1c77aff386342c1`; post-merge main CI run
 `29453529951` passed on the merge commit. Review accepted position-independent
 inherited-owner reads, bounded caller-source assertions, and
 behavior-regression-aware CI guidance; the published-branch rewrite request
@@ -1051,18 +1051,18 @@ Graphify/CBM/gbrain refresh. The last accepted merge-bound knowledge receipt
 remains PR #12. No live/protected/public/Vault/CA action occurred.
 
 Historical checkpoint (2026-07-15): R2b capture and rotator shared-lock
-integration merged to `main@13d15138a431ecbd4ca2a919cbf05b87a7a9004b`
+integration merged to `main@d329c50acbe0718b9f2a297fcde8ab2450dca1c0`
 through PR #15 after exact-head CI run `29437230000` passed on
-`43e6cb4b86ae89146cd3bd553bdd4e83676db695` and post-merge main CI run
+`f44ec3048a8a7597e7ed0f8dfa6f014e2203c1d8` and post-merge main CI run
 `29439142225` passed on the merge commit.
 
-Historical checkpoint (2026-07-14): R2a baseline `a91da2e`, review hardening
-`fb713d4`, and final documentation successor `5bfd53d` passed static checks,
+Historical checkpoint (2026-07-14): R2a baseline `11373d2`, review hardening
+`a7cb59d`, and final documentation successor `97c8940` passed static checks,
 55/55 focused lock tests, 39/39 section-31 rails, 7/7 section-33 tests, 2/2
 planning tests, independent review, and terminal CodeRabbit. Exact head
-`5bfd53d` passed CI `29377793617` and merged through PR #13 as `33967b1`;
+`97c8940` passed CI `29377793617` and merged through PR #13 as `55268ec`;
 that stacked head passed PR #11 CI `29378482152` and merged to `main` as
-`79f6b58`. Post-merge main CI `29379113689` passed all six gating jobs; this
+`cc78261`. Post-merge main CI `29379113689` passed all six gating jobs; this
 reconciliation's own exact-head/final-main CI and an exact-final-main
 Graphify/CBM/gbrain refresh complete the delivery receipt.
 Full/index/model/live work remains hardware-gated. R2b-R2d, R3/R4, live
@@ -1154,7 +1154,7 @@ admission floor. No live certificate, private key, Vault state, or container was
 changed.
 
 Historical checkpoint (2026-07-12): GitHub Actions billing is no longer blocking
-execution. Exact-SHA CI run 29205132770 for code-bearing commit `2b2817d`
+execution. Exact-SHA CI run 29205132770 for code-bearing commit `1186ec6`
 completed green:
 Ruff, Postgres integration, Rust provider conformance, macOS and Ubuntu native
 wheels, and unit/drift all passed; unit/drift reported 2064 passed, 106 skipped,
@@ -1280,14 +1280,14 @@ probes, durable commit, rollback, and every live action remained for later R1c
 slices; the direct-probe status is superseded by the newer checkpoint below.
 
 Exact-SHA replacement CI run 29242251462 for blackbox-helper locale-hardening
-commit `ed3fda9` is green. Ruff, Postgres integration, provider conformance,
+commit `edebef8` is green. Ruff, Postgres integration, provider conformance,
 Ubuntu and macOS native wheels, and unit/drift all passed; only the explicitly
 non-gating nightly soak was skipped.
 
 Historical checkpoint (2026-07-13): R1c committed recovery/finalization and its
 success-completion protocol are fixture-proven in source committed as
-`8e97442`; the cited runtime artifacts were captured from the pre-commit
-working tree based on `82bc5d5e`.
+`5f45846`; the cited runtime artifacts were captured from the pre-commit
+working tree based on `a7f01e5e`.
 Only `activated` and `committed_recovered` may authorize a schema-v1 completion
 receipt. The rotator first binds the canonical certificate/key bytes to the
 retained transaction `new` generations and re-runs the unchanged six-hour
@@ -1307,18 +1307,18 @@ secret-root path plus lock device/inode/uid/mode/link identity and returns the
   coordinator is merged through PRs #13 and #11, while caller integrations R2b-R2d remain
   open. Neither lock claims isolation from a malicious same-uid process.
 
-Pre-commit working-tree verification based on `82bc5d5e` records 369 rotator/blackbox tests, 41
+Pre-commit working-tree verification based on `a7f01e5e` records 369 rotator/blackbox tests, 41
 production TLS/bootstrap/Compose-policy regressions, all 39 section-31 rails,
 all 7 section-33 harness tests, and both planning traceability tests, all green.
 After bounded orphan-agent reclamation, a fresh strong gate admitted the full
 suite at 64%/64%/64% free memory with loads within policy, zero models or
 competing work, one canonical 20-service stack, valid MCP mTLS, unsealed Vault,
 and stable API/stream identities. JUnit artifact
-`/tmp/mnemosyne-r1c-full-workingtree-82bc5d5e-20260713T2324.xml` records 2,636
+`/tmp/mnemosyne-r1c-full-workingtree-a7f01e5e-20260713T2324.xml` records 2,636
 total, 2,496 passed, 140 expected skips, 0 failures, 0 errors, and 702.564
 seconds; wrapper status is 0. Postflight remained clean. This is pre-commit
-working-tree evidence based on `82bc5d5e`; the tested source/test bytes were
-committed unchanged as `8e97442`, with evidence documentation at `6afd3b3`.
+working-tree evidence based on `a7f01e5e`; the tested source/test bytes were
+committed unchanged as `5f45846`, with evidence documentation at `6824659`.
 At the R1c checkpoint, exact-head CI for the final status reconciliation,
 merge/main verification, R2/R3/R4, live rotation/no-op proof, and post-merge
 Graphify/CBM/gbrain freshness were open. R2a later merged through PRs #13 and
@@ -1331,19 +1331,19 @@ fail-closed before creating or pushing either delivery branch because the live
 refs do not match the plan contract. After `git fetch --prune origin`, the
 working tree was clean and `gh pr list --state open` was empty, but local
 `main` and the execution checkout both pointed at
-`5fbd4a28010157f253236480c691019729b97ce3`, while `origin/main` remained
-`4d691e80c17dc0df0618e309f28b45c854028248`. Therefore local `main` was ahead
+`9644d331ff11801900d28e3d0d8ae00ff78a3f10`, while `origin/main` remained
+`e8b3f0fa0c3b6eb5a55d9c1d34aa530210ccbca5`. Therefore local `main` was ahead
 by eight commits rather than the required seven and did not equal the expected
-`ac28f00b2213d1a5559d47aafe0f27e6cd408225`; the extra tip is the round-7 plan
-commit `5fbd4a2`. No delivery branch, push, PR, merge, branch deletion, reset,
+`acbe49e4149ba6784f2974d1688529583e6cbb6e`; the extra tip is the round-7 plan
+commit `9644d33`. No delivery branch, push, PR, merge, branch deletion, reset,
 rebase, force-push, or direct push to `main` was attempted. The next executor
 must reconcile the plan-commit custody mismatch explicitly before retrying
 Task 1; it must not silently widen the seven-commit landing range.
 
 Round-8 Task-1 reconciliation (`2026-07-16`): the round-5 R2b review finding is
-resolved. Fix commits `7b06de5` and `2520c14` landed through PR #20 merge
-`51fa898` and PR #21 merge `69cd2cf`; all four commits are verified ancestors
-of `origin/main`. PR #24 merged head `5fbd4a2` as `fbc1857` at `05:35:18Z`,
+resolved. Fix commits `9ff84e5` and `454562d` landed through PR #20 merge
+`1ccbe51` and PR #21 merge `ae43437`; all four commits are verified ancestors
+of `origin/main`. PR #24 merged head `9644d33` as `9ed2867` at `05:35:18Z`,
 before its final required exact-head check became green at `05:46:23Z`. Both
 PR-head run `29474245544` and post-merge run `29474289329` ultimately completed
 successfully, but later green does not cure that merge-before-green delivery

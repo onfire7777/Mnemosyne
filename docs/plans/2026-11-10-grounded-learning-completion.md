@@ -1,6 +1,6 @@
 # Grounded memory and learning completion
 
-This follow-up implements the gaps audited after `b67c2b0c`. It preserves the
+This follow-up implements the gaps audited after `13506fa3`. It preserves the
 distinction between source retention, verified knowledge, a task outcome, and
 evidence that a memory improves future tasks.
 

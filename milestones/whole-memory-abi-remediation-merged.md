@@ -11,7 +11,7 @@ tags:
 
 # Whole-memory ABI remediation merged
 
-PR #80 merged the bounded post-merge whole-memory ABI remediation normally into `main` as merge commit `28805ccf54f99f098a5abc23fe6f1155400d0f22` on 2026-07-29. The immutable remediation head `0d42f9436397a04e12ceaa3bdbd60d925e2640e9` is an ancestor of that merge.
+PR #80 merged the bounded post-merge whole-memory ABI remediation normally into `main` as merge commit `69687abfcb354f7f5d19ddab1c540a3f3575037f` on 2026-07-29. The immutable remediation head `a2f51e532a5704953edc68a7e617b9c26d4cd982` is an ancestor of that merge.
 
 Post-merge CI run `30484986865` completed successfully on the exact merge SHA. Required jobs passed: Ruff, unit and drift checks, provider conformance, Postgres integration, and native wheels on macOS and Ubuntu. The nightly DST/chaos soak was non-gating and skipped.
 

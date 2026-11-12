@@ -66,10 +66,10 @@ After this review, the following blocker fixes were implemented and verified:
 
 Current verification: `uv run python -m compileall -q src tests` passes; `uv run pytest -q` collects 167 tests and returns 146 passing tests plus 21 skipped live-DB tests; `MNEMOSYNE_POSTGRES_DSN=postgresql://... uv run pytest -q tests/test_postgres_engine_live.py tests/test_shared_engine_contract.py` returns 32 passing live/shared adapter tests covering tenant RLS, SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR, explain channels/rails/provenance, branch/discard, branch merge retrieval, bitemporal supersession, tenant isolation, tombstone and hard-delete forget modes, command-backed object key management, transitive derived-evidence erasure, retrieval trust/sensitivity/quarantine filtering, deep graph tenant/branch isolation, hard-delete audit export, stateless MCP ingestion over tenant-scoped durable Postgres queues, HTTP-configurable retrieval adapter wiring with strict provider response validation, operator-authorized command-backed parametric adapter proposal/evaluation/rollback with structural local rails, CLI `--backend postgres`, fail-closed CLI `provider-check`, durable Postgres queue leasing/drain, signed-provenance asset/root binding, externalized payload derived-text retrieval, async media extraction, gated consolidation promotion, and shared local/Postgres evidence/retrieval/explain/branch/as-of/relation/preference/correction/forget-propagation contract parity.
 
-## Resolution Update 2 — 2026-06-20 (verified against committed `main` @ `fe72a66`)
+## Resolution Update 2 — 2026-06-20 (verified against committed `main` @ `6e358ee`)
 
-A follow-up verification reviewed the committed source on `main` (HEAD `fe72a66`) after the
-post-review remediation commits (`5b0fefd` → `fe72a66`). All six blockers are now remediated at
+A follow-up verification reviewed the committed source on `main` (HEAD `6e358ee`) after the
+post-review remediation commits (`78db995` → `6e358ee`). All six blockers are now remediated at
 the code-contract level; the remaining items are production-grade provider integrations and exact
 1:1 blueprint parity, tracked by `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`.
 
@@ -78,12 +78,12 @@ the code-contract level; the remaining items are production-grade provider integ
   `explain` (`:977`), `correct` (`:980`), `forget` (`:1019`), and `export_tenant` (`:1185`) — and
   is exercised by the shared local/Postgres contract suite (`tests/test_shared_engine_contract.py`).
 - **CR-04 resolved:** branch/merge/discard are tenant-scoped through `_stable_uuid("tenant", …)`
-  and the `fix(branch)` commits (`f9b1166` scope local branch rows by tenant, `5b0fefd` prune
-  orphaned TMS rows on discard, `30ba57b` normalize local branch exports); branch/discard and
+  and the `fix(branch)` commits (`3cc5b1e` scope local branch rows by tenant, `78db995` prune
+  orphaned TMS rows on discard, `1362c6e` normalize local branch exports); branch/discard and
   branch-merge retrieval are covered by the shared contract suite.
 - **CR-05 resolved:** `tools/call` returns an MCP `CallToolResult` envelope with `content`,
   `structuredContent`, and `isError` (`mcp_server.py:536-538`), `notifications/initialized` is
-  handled (`:220`), and `fix(mcp): validate json-rpc tool schemas` (`1d4112f`) validates tool
+  handled (`:220`), and `fix(mcp): validate json-rpc tool schemas` (`39e5186`) validates tool
   argument schemas.
 - **CR-06 resolved (channel architecture):** `vector_search` performs real pgvector cosine
   retrieval (`embedding <=> %s::vector`, channel `postgres_pgvector`, with a deterministic
@@ -91,7 +91,7 @@ the code-contract level; the remaining items are production-grade provider integ
   rather than an empty-result fallback. Production hardening work — external embedding/reranker providers,
   ParadeDB/BM25, AGE/specialist graph adapters, cross-encoder reranking — is hardening, not a
   missing blueprint channel.
-- **CR-01 / CR-03 / WR-01 / WR-02 / WR-03** remain resolved as recorded above; `f75189b`
+- **CR-01 / CR-03 / WR-01 / WR-02 / WR-03** remain resolved as recorded above; `1483109`
   (`fix(privacy): prevent evidence replay after tombstone`) further hardens the WR-01 erasure path.
 
 Net status: all 9 findings (6 critical, 3 warning) are remediated at the contract level. Residual

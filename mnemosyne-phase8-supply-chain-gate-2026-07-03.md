@@ -4,7 +4,7 @@ title: Mnemosyne Phase 8 Supply Chain Gate
 date: '2026-07-03T00:00:00.000Z'
 repo: /Users/admin/Mnemosyne
 branch: phase3/providers-consolidation
-commit: 58fa10b93f424c6abdffede9fb0fa76f902efd1c
+commit: 9bbd4a0e500dd9e073360a4316e4dd28d3d6c5f2
 status: source-control-progress
 project: Mnemosyne
 ---

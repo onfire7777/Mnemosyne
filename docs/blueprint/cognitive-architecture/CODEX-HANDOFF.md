@@ -4,7 +4,7 @@
 freeze a prose "latest commit" as current truth. Future agents must refresh
 `git status`, `git log -1`, and GitHub Actions before making current-state
 claims. The earlier 2026-06-30 handoff revision verified `/Users/admin/Mnemosyne` on `main` at
-`b79cb87a97ebb220ae09de0db2ec69900a84411b`
+`10b66522981891e8610fb7eb4d5fc97f2d6cc1b2`
 (`fix(infra): include runtime env in Tier-B summary`), with GitHub Actions CI
 run `28477936121` passing; later commits supersede that checkpoint. The current
 Tier-B evidence state is closed by the retained `capture-bc10` bundle.
@@ -82,7 +82,7 @@ stage.
 ## Latest Verified Snapshot
 
 - Current handoff baseline verified for this refresh:
-  `b79cb87a97ebb220ae09de0db2ec69900a84411b` on `main`, clean against
+  `10b66522981891e8610fb7eb4d5fc97f2d6cc1b2` on `main`, clean against
   `origin/main`, with GitHub CI run `28477936121` completed successfully.
   This latest slice makes the custody-packet CLI summary name all three
   operator input surfaces: non-secret `production-render.env`,
@@ -95,36 +95,36 @@ stage.
   infra-hardening plus production-runbook consistency slice (`40 passed`), a
   no-secret changed-file scan, and GitHub CI. This is readiness/handoff
   verification only, not Tier-B production evidence.
-- Recent Tier-B handoff commits after the older `9621971` baseline add render
+- Recent Tier-B handoff commits after the older `2bb108e` baseline add render
   env plans, artifact contracts, provider-env action plans, row-owned versus
   shared provider-ref splits, complete primary row ownership for provider refs,
   runtime env inventory grouping, numeric row ordering, global render blocker
   visibility, and runtime-env summary routing. They reduce operator handoff
   ambiguity but do not flip any strict audit row without wrapper-captured
   production bundles plus offline custody verification.
-- Historical source baseline `9621971` remains useful for the earlier
+- Historical source baseline `2bb108e` remains useful for the earlier
   row-readiness routing fix: `gate-suite-check` belongs to B4, `ops-report`
   belongs to B8, and hosted LLM/calibration evidence plus
   `hosted-llm-manifest.json` and `calibration-dataset.json` belong to B9. Do
-  not treat `9621971` or CI run `28414377562` as the latest baseline after the
+  not treat `2bb108e` or CI run `28414377562` as the latest baseline after the
   later Tier-B handoff commits.
-- Earlier custody follow-up `03f2611` remains a historical checkpoint for
+- Earlier custody follow-up `6cb166c` remains a historical checkpoint for
   reviewer-report hardening: capture summaries retain the offline replay
   template with `--report-output <external-review-report-json>`, offline
   verification accepts both legacy and current retained templates, and
   provider-manifest negative tests pass valid report outputs unless
   intentionally testing missing-report-output diagnostics.
-- Terminal hard-stop and evidence-security cleanup is closed on `5417096`: `ShadowWorkspaceService` rejects post-hard-stop ticks without trace/cycle growth until a fresh service window starts, hosted provider and OIDC JWKS checks reject URL userinfo, invalid ports, private/reserved DNS targets, redirects, rebinding-prone fetch paths through address pinning, and inline `api_key` material, and evidence redaction scans structured JSON secret-key scalar fields while allowing non-secret proof metadata objects.
-- Stateful workspace tick hardening is closed on `eb46643`: `ShadowWorkspaceService.tick()` now carries its cycle guard, idle/non-useful counters, trace history, and dreamer invocation guard across calls, so anti-rumination, max-cycle escalation, and one-dreamer-burst-per-service-window behavior are measured on the continuous service path rather than only on batch `run_shadow_stream()`.
+- Terminal hard-stop and evidence-security cleanup is closed on `a4f3681`: `ShadowWorkspaceService` rejects post-hard-stop ticks without trace/cycle growth until a fresh service window starts, hosted provider and OIDC JWKS checks reject URL userinfo, invalid ports, private/reserved DNS targets, redirects, rebinding-prone fetch paths through address pinning, and inline `api_key` material, and evidence redaction scans structured JSON secret-key scalar fields while allowing non-secret proof metadata objects.
+- Stateful workspace tick hardening is closed on `c2bd03c`: `ShadowWorkspaceService.tick()` now carries its cycle guard, idle/non-useful counters, trace history, and dreamer invocation guard across calls, so anti-rumination, max-cycle escalation, and one-dreamer-burst-per-service-window behavior are measured on the continuous service path rather than only on batch `run_shadow_stream()`.
 - T-SEC registry reconciliation is closed locally: `memory_poisoning_cases()` returns all 22 playbook cases as active curated protected `RegressionCase` rows, and tests assert the registry cannot shrink or drop `T-SEC-016b`, `T-SEC-020`, or `T-SEC-021`.
 - §24 runtime persistence, §24 public mutation surfaces, protected gate-case ratchet, replay-fidelity report hygiene, and Row 08 hosted-only release evidence are closed as local source/harness items. Focused regressions cover local support strategy reload/retirement, public CLI/MCP record/retire flows, local/Postgres support-strategy parity, contaminated Postgres support payload filtering, protected-case demotion/overwrite rejection, strict replay JSON, and package-mode dashboard release-audit rejection.
 - OQ3 recompute now uses a dirty surviving-source enqueue filter, projection-specific default pass selection, and a memo key scoped by that dirty set and pass list; the §17 bench docs have been refreshed to stop reporting historical cached-PPR, dirty-check/memo, and retrieved-text mediation gaps as current source gaps.
-- `eval/g0/reports/report.{json,md}` has been regenerated from source commit `5417096` with the committed sanitized controller-telemetry fixture; it reports `72/72` metrics measured and `gate_ready=True` without claiming production power/cost evidence.
+- `eval/g0/reports/report.{json,md}` has been regenerated from source commit `a4f3681` with the committed sanitized controller-telemetry fixture; it reports `72/72` metrics measured and `gate_ready=True` without claiming production power/cost evidence.
 - Production evidence custody hardening now includes retained bundle artifacts plus reviewer routing: production render/capture requires absolute external output and capture paths, full production capture requires an explicit external output root, production output rendering validates non-symlinked canonical C2PA tool paths and provider-manifest command executables before capture, renderer readiness/capture/offline verification reject provider-manifest commands with any arguments after `argv[0]` because only the executable is retained under `tool-artifacts/`, production capture rejects generated `ops-report --dashboard-html` / `--dashboard-package-dir` output targets as input-artifact custody sources, hosted dashboard evidence requires retained `ops-dashboard-bundle.json` production operations proof, `production-evidence-verify` rejects symlinked required JSON metadata before reading it and rescans retained metadata files for secret-shaped material, hosted evidence rejects inline secrets and unsafe fetch targets, HTTP embedding/reranker providers plus hosted dashboard/JSON/SSE probes use the shared fail-closed URL validator and pinned safe opener instead of raw `urlopen`, HTTP provider error bodies are omitted from retained errors, offline custody docs require an out-of-band retained bundle fingerprint, `summary.json.offline_verify` is validated only as a replay-command template and cannot embed its own expected fingerprint, production input artifacts are retained under `input-artifacts/`, executable verifier references such as the C2PA tool and provider-manifest commands are retained under `tool-artifacts/` and hash-bound in `preflight.json.executable_tool_references`, offline verification checks retained snapshot bytes rather than mutable external paths, renderer readiness output lists required production input artifacts with check/command/option ownership before environment values exist, `production-operator-env.inventory.md` lists render/provider/runtime env names without values, `provider-manifest.production.template.json` gives operators the shared provider-check artifact for B1/B2/B4/B6/B7/B9/B10 including the residency-policy provider block, retained `preflight.json` is included in the offline custody surface, `summary.json.parity_row_readiness` mirrors the retained preflight rows, verifier `row_review` output exposes those rows directly for lane/runbook review, verifier output separates expected, retained, and recomputed bundle fingerprints for review, and sensitive evidence CID scoping prevents live unscoped sensitive rows from suppressing user-scoped sensitive writes while preserving tombstone replay blocking.
 - Production evidence review routing is now carried into both the top-level handoff summary and verifier report: `summary.json.parity_row_readiness` mirrors `preflight.json.parity_row_readiness`, `summary.json.row_review_source` points reviewers back to the retained preflight source of authority, `production-evidence-verify` rejects summary/preflight row-readiness drift, emits non-gating `row_review` rows derived only from retained preflight data, emits diagnostic-only `reviewer_guidance`, and can write the verifier JSON to an external no-overwrite `--report-output` path outside the bundle under review. This is routing metadata only; it does not create production evidence or flip strict-parity rows without a real operator-captured production bundle.
 - Follow-up privacy review findings are closed: provider packets omit raw content fingerprints and secret-shaped provider context, sensitive/detected-PII evidence CIDs are user-scoped without weakening tombstone replay blocking, privacy backfill rejects unsafe PII sensitivity floors, and legacy Postgres sensitive vectors are remediated away from public partitions.
 - Full local verification passed for focused regressions, `py_compile`, `ruff`, `git diff --check`, the no-DSN pytest suite, explicit-controller-telemetry G0 (`72/72 measured; gate_ready=True`), and 15 zero-delta G0 preregistration replays.
-- Earlier pushed GitHub CI baseline `28348813467` passed on `5417096`; it was superseded by run `28371493805` on `1ce9641` before this handoff update.
+- Earlier pushed GitHub CI baseline `28348813467` passed on `a4f3681`; it was superseded by run `28371493805` on `19d762f` before this handoff update.
 - Direct default G0 without controller telemetry still intentionally reports `71/72 measured; gate_ready=False`; no controller power/cost estimate is fabricated.
 
 ## Prior Verified History

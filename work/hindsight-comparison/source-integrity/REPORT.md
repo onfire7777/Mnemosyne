@@ -59,7 +59,7 @@ or override the source access policy.
 ## Reproduction
 
 The database setup matches the [previous disposable fixture](../reliability-followup/postgres/REPORT.md),
-with container name `mnemosyne-source-integrity-ca7da5ef`. It uses the cached
+with container name `mnemosyne-source-integrity-54a7b574`. It uses the cached
 PostgreSQL 16/pgvector image, loopback port 55434 and tmpfs storage; see
 [environment identity](environment.json). No existing database is used.
 

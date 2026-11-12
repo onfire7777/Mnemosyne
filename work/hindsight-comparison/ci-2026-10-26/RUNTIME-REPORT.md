@@ -1,6 +1,6 @@
 # CI failure investigation and runtime completion fix
 
-The investigated CI run is [40400787108](https://github.com/onfire7777/Mnemosyne/actions/runs/40400787108), at ancestor commit `b63b34616f65e31457f3bc243b158d479f734e68`. The local checkout was `97091695` before these fixes. This is not a claim that the later CI run passed. No workflow rerun was dispatched.
+The investigated CI run is [40400787108](https://github.com/onfire7777/Mnemosyne/actions/runs/40400787108), at ancestor commit `6673f84400face6f5378d22879af81e6bbd3f008`. The local checkout was `22a03aab` before these fixes. This is not a claim that the later CI run passed. No workflow rerun was dispatched.
 
 ## Observed failures
 

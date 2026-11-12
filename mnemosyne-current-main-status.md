@@ -7,7 +7,7 @@ captured_via: claude-code-session
 
 # Mnemosyne current main status
 
-As of 2026-07-16, `/Users/admin/Mnemosyne` `main` is at `489895a30156e372db8784d791248baf5b707fca` (merge of PR #32), local == origin, tree clean.
+As of 2026-07-16, `/Users/admin/Mnemosyne` `main` is at `d489b9683542447409315768a6d8d1187b5d5fcd` (merge of PR #32), local == origin, tree clean.
 
 A host reboot at 2026-07-16T12:41Z killed the goalex round-8 executor mid-way through its review-fix gate. The orphaned work (3 committed review-fix iterations plus an uncommitted 4th) was recovered onto `codex/r8-review-fix-recovery`, completed, adversarially verified by a 27-agent multi-lens review, hardened, and landed via PR #32 with all exact-head checks green: symlinked-store rejection (capture-batch CLI seam plus engine persistence), non-destructive idempotent `PostgresEngine.merge` clone replay with deterministic clone ids and supersession-reference resolution, UUID-shaped deterministic summary-relation ids (the prior `relation-<sha256>` form would have failed PostgreSQL's UUID primary key), and per-merge (not per-row) schema-ensure DDL.
 

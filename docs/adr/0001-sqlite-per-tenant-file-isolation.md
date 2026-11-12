@@ -4,7 +4,7 @@
 - **Date:** 2026-07-03
 - **Phase:** Native Acceleration Program, Phase 2 (SqliteEngine / C2)
 - **Deciders:** Mnemosyne engine team (phase2/sqlite-engine)
-- **Spec:** `docs/superpowers/specs/2026-07-01-native-acceleration-design.md` (commit `31c50a5`)
+- **Spec:** `docs/superpowers/specs/2026-07-01-native-acceleration-design.md` (commit `cf5c15e`)
 - **Plan:** `docs/superpowers/plans/2026-07-02-phase2-sqlite-engine.md` (Task 13)
 
 ## Context
@@ -178,5 +178,5 @@ ADR is the durable home:
   Task 9 (erasure wiring, deletion-log HMAC), Task 13 (this ADR).
 - `.superpowers/sdd/progress.md` — P2 Task 7 (synchronous `_record_retrieval_access`),
   Task 9 (branch-propagation matches Local single-branch; cross-engine
-  deletion-log HMAC / invariant-13 fix `f363c7c`).
+  deletion-log HMAC / invariant-13 fix `8e48a52`).
 - `src/mnemosyne/erasure_ids.py` (salted-hash / HMAC placeholder producers).

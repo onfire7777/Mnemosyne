@@ -12,9 +12,9 @@ Production `release-audit` now rejects weak `parametric-trainer-check` evidence 
 Evidence:
 - Repo: `/Users/admin/Mnemosyne`
 - Branch: `phase3/providers-consolidation`
-- Commit: `9b83cd5 fix(release): require parametric trainer evidence`
+- Commit: `54dc2f9 fix(release): require parametric trainer evidence`
 - PR: https://github.com/onfire7777/Mnemosyne/pull/7
-- CI: https://github.com/onfire7777/Mnemosyne/actions/runs/28687793079 passed for head `9b83cd50b51f3cc4520cdb4bb0943f21402f4d64`.
+- CI: https://github.com/onfire7777/Mnemosyne/actions/runs/28687793079 passed for head `54dc2f981747723a8b8673931b5ae9872d5203ee`.
 - Local checks passed: focused parametric release-audit tests, full `tests/test_cli_runtime_tools.py`, `uv run ruff check`, `git diff --check`, and full `uv run pytest -q`.
 - CBM refreshed after the commit: project `Users-admin-Mnemosyne`, fast index, no repo artifact.
 

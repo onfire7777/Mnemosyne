@@ -5,8 +5,8 @@ preparation; it does not close those deliverables or replace Plans A/B.
 
 ## Implemented and checked
 
-Latest sink continuation: the previous `82311010`/`857372cb` turn made progress
-by retaining a replayable timing execution. `d2af156a` adds the durable inert
+Latest sink continuation: the previous `c0b8be9b`/`a9854178` turn made progress
+by retaining a replayable timing execution. `56049007` adds the durable inert
 sink, concurrent/reopen/rollback checks and the optional replayed sink annex.
 The [committed-source execution](../../eval/reports/m12-inert-sink-development-2026-10-04/README.md)
 retains 30 records and 60 attempts without hidden retries. Thirty-four tests
@@ -16,8 +16,8 @@ CI `37225669534` was rechecked: unit/drift is still live, with no observed
 failure on that job. The elapsed run was only about eleven minutes at the
 18:56:57 UTC clock check; no restart or inference of a hang is justified.
 
-Latest persisted-execution continuation: the preceding `97bb84c7` turn made
-progress with public observations and scoring. `82311010` adds the deterministic
+Latest persisted-execution continuation: the preceding `be962e9f` turn made
+progress with public observations and scoring. `c0b8be9b` adds the deterministic
 five-seed runner, partial-failure retention and operation-bound replay. Twenty
 tests passed, followed by a separate committed-source CLI run and replay. Its
 [raw development evidence](../../eval/reports/m12-exact-time-development-2026-10-04/README.md)
@@ -28,7 +28,7 @@ cost/resource or publication gates. Only `main` and `codex/development` are
 named local branches. CI `37225669534` was rechecked and remains live in
 unit/drift; later local work has not superseded that run.
 
-Latest timing continuation: the prior `5882d192` turn made progress by fixing
+Latest timing continuation: the prior `520c12ae` turn made progress by fixing
 duplicate-observation suppression. The next [M12 diagnostic implementation](../../eval/reports/m12-exact-time-diagnostic-2026-10-04.md)
 adds opt-in public firing observations and an independent descriptive
 exact-time scorer, exercised by the five seeded four-week real-CLI sequences.
@@ -36,12 +36,12 @@ exact-time scorer, exercised by the five seeded four-week real-CLI sequences.
 pending, early, late, duplicate, cancelled and unexpected outcomes remain
 distinct; no aggregate score, complete M12 claim or admission is implied.
 The website now describes this source state. CI run `37225669534` was polled
-again: unit/drift remains live; all other gating jobs passed on `762f12c8`.
+again: unit/drift remains live; all other gating jobs passed on `f28617b4`.
 Later local commits remain outside that head. No push, restart or merge was
 used to interrupt the active run.
 
 Latest action continuation: the preceding offline-tokenizer turn made progress
-at `b8a8dc7a`. The [M12 follow-up](../../eval/reports/m12-action-observation-integrity-2026-10-04.md)
+at `ee12404e`. The [M12 follow-up](../../eval/reports/m12-action-observation-integrity-2026-10-04.md)
 fixes a real observation-integrity bug: the public adapter silently deduplicated
 firing evidence before the benchmark could reject it. Two regressions prove
 the fix, and five seeded four-week real-CLI cases cover delayed polling,
@@ -50,7 +50,7 @@ stale documentation assertion are recorded in the report. Lateness magnitude
 and cost remain unimplemented; no registered result or acceptance gate changes.
 
 Latest continuation: the preceding website turn made verified progress
-(`4f240e36`, clearer benchmark-coverage example, live page checked, 54 rendering
+(`f346496c`, clearer benchmark-coverage example, live page checked, 54 rendering
 tests passed). This turn advances the Plan A S1 / native-run context prerequisite:
 the [offline Qwen diagnostic](../research/benchmark-intake/local-reader-reference-tokens-2026-10-04.md)
 matches actual model vocabulary, added IDs and ordered merges to a pinned
@@ -61,7 +61,7 @@ target is lowered and no M07/M08 or official benchmark gate is closed.
 
 The specific live CI run `37225669534` was re-polled: nine gating jobs have
 succeeded and unit/drift remains in progress, currently in the test-suite step.
-It covers `762f12c8`, not subsequent local commits. Leave that run running;
+It covers `f28617b4`, not subsequent local commits. Leave that run running;
 do not merge on partial checks. Next model-execution prerequisites remain
 effective context plus complete rendered-input coverage and a viable resource
 configuration. The full original platform/module slate remains in scope.
@@ -194,9 +194,9 @@ the corrected label; the temporary synthetic site was then removed and the
 empty real-results preview restored.
 
 The signed registration in
-`eval/registrations/2026-10-04-longmemeval-retrieval-b0cdbd89/` fixes a
+`eval/registrations/2026-10-04-longmemeval-retrieval-63956d5b/` fixes a
 500-question, retrieval-only characterization at source commit
-`b0cdbd8986b94c91a3bf20833ed33f405612025a`. Its signature, seven source-file
+`63956d5baed364f86fdc7ab42840ae2e24850595`. Its signature, seven source-file
 hashes, clean detached checkout and both raw dataset digests were verified.
 The detached checkout creates no additional named branch. Public registration
 verification, completion of the existing local test workload, and an exclusive
@@ -276,7 +276,7 @@ capabilities are documented in `infra/README.md`; no safe-PATH, certificate or
 test gate was relaxed to turn these failures green.
 
 The fifth failure was the obsolete M12 README assertion, corrected in commit
-`19dc2c6c`. Its focused follow-up passed while preserving the outstanding
+`e4fc1c16`. Its focused follow-up passed while preserving the outstanding
 multiweek, calibrated-baseline and lateness evidence requirements. The local
 skips include unavailable PostgreSQL, platform-specific and optional-extension
 coverage; they are not successes. GitHub PostgreSQL and platform jobs provide
@@ -293,7 +293,7 @@ navigation from every page and a downloadable `data/catalog.json`. The versioned
 catalog separates program scope from result records. It maps all 24 original
 capabilities to 20 modules, retains the six joint scenarios and groups the
 original external slate into 14 benchmark families. Scope and status links are
-pinned to source commit `963a56e6a0617aff72fb3029efee9a7b4215ad08`.
+pinned to source commit `b65335ed13a6708c37d6f6935af1cad91f236e4f`.
 
 The coverage page reports implemented development work and remaining evidence;
 it does not assign unsupported competitor capabilities or quality scores. The
@@ -388,7 +388,7 @@ identity. Three regressions failed before the fix; all 307 related checks now
 pass. Ruff and diff checks pass. These are comparison semantics only; frozen
 benchmark source and signed registration remain untouched.
 
-CI run 37222196669 for pushed revision df99593b has eight successful platform,
+CI run 37222196669 for pushed revision 56074730 has eight successful platform,
 lint, provider and PostgreSQL jobs; Unit + drift checks remains in progress.
 This does not validate the later local grouping/workspace commits. Those remain
 queued locally to avoid cancelling the active run before it yields evidence.
@@ -397,7 +397,7 @@ with normal pressure. A score and terminal status are not yet available.
 
 ## Registered retrieval source run completed
 
-The frozen b0cdbd89 source run completed once in 312.304 seconds, with all sampled
+The frozen 63956d5b source run completed once in 312.304 seconds, with all sampled
 memory-pressure levels normal. The bundle verifier passed and the trace contains
 500 distinct question IDs, matching the registered population. The original
 bundle, exact metrics, signed start/terminal/outcome/result and verified signed
@@ -452,9 +452,9 @@ or nonpublishable historical contents through this preview-only option.
 
 The registered 500-question retrieval result completed exact local reproduction: all nine bundle files matched SHA-256. Source execution took 312.30 seconds and reproduction 303.39 seconds, with normal monitored memory pressure. The signed `verified-reproduction.json` receipt is retained under the local retrieval-run custody directory. The local Mnemetric preview now renders the signed operator result, two metrics, 500 trace pages and its signed attempt history. Recall@5 is 0.2806 and nDCG@5 is 0.2967188496001503. This remains non-publishable and is not an independent reproduction, official upstream comparison or superiority claim. The original signed v1 configuration is preserved and the result is excluded from new comparison groups because comparison-context metadata is unavailable.
 
-## Combined platform verification at d7b810d2
+## Combined platform verification at 6ae6db44
 
-Ran the complete `tests/test_leaderboard*` selection with the installed verified virtual environment: all 439 tests passed (exit 0). Ruff passed for the leaderboard package and the changed grouping, history, workspace, ledger and rendering tests. Reviewed the accumulated comparison/history changes against artifact verification, duplicate atomic-cell rejection, compatibility grouping, signed-result membership and explicit local-only publication status. GitHub run 37222196669 remains active at df99593b: eight jobs passed, the full unit/drift job is still executing, and the optional nightly soak is skipped. These results do not claim full-suite coverage of the newer local commits; they are held for a single subsequent push so the active integration run can finish.
+Ran the complete `tests/test_leaderboard*` selection with the installed verified virtual environment: all 439 tests passed (exit 0). Ruff passed for the leaderboard package and the changed grouping, history, workspace, ledger and rendering tests. Reviewed the accumulated comparison/history changes against artifact verification, duplicate atomic-cell rejection, compatibility grouping, signed-result membership and explicit local-only publication status. GitHub run 37222196669 remains active at 56074730: eight jobs passed, the full unit/drift job is still executing, and the optional nightly soak is skipped. These results do not claim full-suite coverage of the newer local commits; they are held for a single subsequent push so the active integration run can finish.
 
 ## Verified raw downloads for retained legacy results
 
@@ -496,7 +496,7 @@ Reconciled stale N12/P14-B/P15-S2 predecessor claims against delivered source. V
 
 ## Reader feasibility recheck after local suite completion
 
-At `4c4c9021`, repeated the unchanged 24,000-character synthetic request after
+At `c951448b`, repeated the unchanged 24,000-character synthetic request after
 the long local test suite had finished. The pinned `qwen3:8b` model was initially
 unloaded, Ollama reported 0.35.1, and macOS pressure was normal. The existing
 outer guard sampled pressure every 0.5 seconds and retained a fresh attempt,
@@ -529,7 +529,7 @@ Validation: 135 isolated scorer/ingestion/tokenizer/replay/derivation tests;
 95 production native/replay/reader-policy/reproducibility tests; and 26 QA/reader
 policy tests passed, with one skip in that last group. Ruff passed. The live
 benchmark page was also checked for the coverage-versus-compatibility explanation.
-Current remote CI at 046f08a8 remains in progress; these local changes have not
+Current remote CI at 48b668fa remains in progress; these local changes have not
 been represented as remotely verified or merged.
 
 ## Native option-order and wire-byte custody
@@ -638,7 +638,7 @@ or deleting audit protection.
 The engine contract, M12 protocol, scope audit, state checkpoint and site
 catalog distinguish creation retries from still-open update revisions and
 idempotency. Full M12 calibration, trigger/cost/resource and admission work
-remains. CI run 37225669534 at the earlier 762f12c8 head remains in progress;
+remains. CI run 37225669534 at the earlier f28617b4 head remains in progress;
 none of its results certify this new source, and no merge is authorized by
 partial checks.
 
@@ -698,7 +698,7 @@ The combined response-loss, recurrence, PM-Bench/TriggerBench and persisted
 timing-runner regressions passed 63 tests in 42.69s. Repository-wide Ruff and
 whitespace checks passed. The served coverage page now names the response-loss
 evidence and still-open keyed-cancellation/recovery gates. Remote branch reads
-confirmed main at 8c103f0f and development at 762f12c8; newer local work is not
+confirmed main at 34c521ee and development at f28617b4; newer local work is not
 represented as remote-verified or merged.
 
 ## Cancellation revisions and durable retry receipts
@@ -791,7 +791,7 @@ reference comparison; do not substitute this small development result for them.
 
 ## Operation recovery runner implementation
 
-The preceding `2618294d` turn made progress with the retained five-trigger
+The preceding `37e4f495` turn made progress with the retained five-trigger
 execution. This continuation adds a separate versioned response-loss recovery
 runner over five seeded four-week timelines. It preserves original keyed
 creation/update/cancel requests across adapter resets, resolves revisions from
@@ -816,11 +816,11 @@ resolved recovery requests use the same exact comparison. Thirty-three focused
 checks passed, and all three prior retained captures replayed unchanged.
 This tightens evidence validation without changing input generation or the
 production API. The clean-source recovery run was already executing source
-`1fddb7d7`; its receipt must retain that actual source, while replay additionally
+`208e7114`; its receipt must retain that actual source, while replay additionally
 applies these stricter checks.
 
 
-The clean-source recovery execution completed from `1fddb7d7`. All 360
+The clean-source recovery execution completed from `208e7114`. All 360
 operations were retained; 50 response losses and 50 adapter resets preserved
 original request revisions and task identity. Ten uncancelled actions fired
 once, and ten cancelled controls remained unfired. Its recorded harness hashes
@@ -837,7 +837,7 @@ resource/cost gates remain unchanged.
 
 ## Sink-connected action workloads
 
-The previous `2ef09be5` turn made progress by retaining clean-source response-loss
+The previous `50847958` turn made progress by retaining clean-source response-loss
 recovery evidence. Both five-trigger and recovery runners now support `--sink`,
 reusing the exact-time runner's durable sink and replay implementation. Each
 observed firing produces a candidate delivery followed by a labelled harness
@@ -853,7 +853,7 @@ separately; this implementation alone is not a measured admission result.
 
 ## Mixed-trigger load extension
 
-The preceding `0a03fd76` turn added sink wiring and launched the two full
+The preceding `60b83e4a` turn added sink wiring and launched the two full
 sink-enabled workloads. Session `45044` remained live at inspection; it must
 not be restarted based on an observation timeout. While it runs, the new
 `m12-trigger-fanout-run/v1` generator advances the original overload requirement
@@ -872,7 +872,7 @@ development evidence; no full fan-out result is claimed yet.
 
 The full standard trigger/sink run is now retained at
 `eval/reports/m12-trigger-sink-development-2026-10-04/`. It completed 525 operations
-from clean source `0a03fd76`, with 130 valid firings, 130 inert receipts and
+from clean source `60b83e4a`, with 130 valid firings, 130 inert receipts and
 260 delivery attempts. All deliberate retries were duplicates. Source hashes
 match the exact commit; timing reports and sink annex replay. The local SQLite
 size/hash are documented with the artifact. The recovery half of session

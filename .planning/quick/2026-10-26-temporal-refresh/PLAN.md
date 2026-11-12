@@ -7,7 +7,7 @@ requirements: [TR1, TR2, TR3, TR4]
 
 # Temporal recall and refresh efficiency
 
-Baseline: `0d947f5ce8eeb8884103080aa7d9364488cb2628`.
+Baseline: `8e6b109821c78b225df3cb78974292f91af74f3c`.
 The preceding continuation delivered whole-book answering and runtime repairs.
 This scoped continuation advances the ongoing memory-quality goal without
 claiming leaderboard superiority or closing historical benchmark acceptance.

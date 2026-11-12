@@ -1,6 +1,6 @@
 {
   "checked_at": "2026-10-22T23:36:08.038648+00:00",
-  "removed_container": "mnemosyne-audit-pg-d59d4e5d",
+  "removed_container": "mnemosyne-audit-pg-e81ca477",
   "container_absent": true,
   "other_containers_preserved": [
     "mnemosyne-hindsight-controlled",

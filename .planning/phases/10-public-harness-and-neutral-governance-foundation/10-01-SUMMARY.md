@@ -20,7 +20,7 @@ trace, and metric artifacts.
 
 ## Integrity and Truth Boundaries
 
-- The fixture is pinned to the real immutable commit `1f4d6a4` and a canonical
+- The fixture is pinned to the real immutable commit `76479b4` and a canonical
   SHA-256 digest.
 - Registry metadata is the verifier trust anchor; jointly changing bundle data,
   its embedded digest, and its internal manifest no longer passes.

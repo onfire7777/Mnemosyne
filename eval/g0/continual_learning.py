@@ -36,29 +36,29 @@ S2_HANDOFFS: tuple[dict[str, str], ...] = (
         "task_id": "15-01-01",
         "name": "fast|medium|slow consolidation cadence",
         "pr": "147",
-        "merge_sha": "72f3d94b87b46f379d9c93a3a029c4d121ecd111",
+        "merge_sha": "1fb9b6e35c25ebc1e822d0f0bce8b9a05a45838b",
     },
     {
         "task_id": "15-01-02",
         "name": "queue-backed sleep consolidation",
         "pr": "149",
-        "merge_sha": "8aad159b47b332ea83b3f50424dc0a57dbca2e11",
+        "merge_sha": "9013b5dfe46897a68075774913a764fdaa555df6",
     },
     {
         "task_id": "15-01-03",
         "name": "global RAPTOR sensemaking",
         "pr": "153",
-        "merge_sha": "3b6763d6b74a886f082cdac9ab8d70c4c237d3e1",
+        "merge_sha": "1fc359792616910d003f4a22862851251c19f646",
     },
     {
         "task_id": "15-01-04",
         "name": "surprise-gated write closure",
         "pr": "158",
-        "merge_sha": "a26f36896a3d29e021d6cc6ddc2cd28f03f90289",
+        "merge_sha": "deca887c71f7f94652645faf076420668dfcb599",
     },
 )
 
-S2_INTEGRATION_BASE_SHA = "df3d8101d4fc2e6b09bb74086c19a6085e55e2da"
+S2_INTEGRATION_BASE_SHA = "fd7864cc9a5e773be37168157a53078a44ded44a"
 S2_VERIFY_COMMAND = (
     "uv run --locked python -m pytest "
     "tests/test_consolidation_timescales.py "

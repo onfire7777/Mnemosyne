@@ -1,5 +1,5 @@
 {
-  "base_commit": "00d8ea9f7389d3a423d233e5fc0ab959ead8e520",
+  "base_commit": "273b12599c7b5e2ba3f54688058cbd612ea28ce3",
   "captured_at": "2026-10-22T23:28:07.326230+00:00",
   "files": {
     ".github/workflows/ci.yml": "5fe6b14763fc15fd166c37f41e3e2aae961fddb3d9cd47bdb436d71e2a19d378",

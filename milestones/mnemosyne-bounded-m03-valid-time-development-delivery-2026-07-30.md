@@ -17,8 +17,8 @@ Mnemosyne delivered the bounded M03 valid-time development slice to `main` throu
 ## Source evidence
 
 - PR: https://github.com/onfire7777/Mnemosyne/pull/83
-- Reviewed source head: `3189cc24c570f12be06e3d04252a06f48c71f971`
-- Normal merge commit: `7f60d8ba8274a8ac8036a80737467654f862008f`
+- Reviewed source head: `927ad7d75ed2b6f208c011e763224412c63089a8`
+- Normal merge commit: `8542ca420c8e5aa79da9e9b9a8f1e6de17131fe3`
 - Exact-head CI: `30532543366`, all required jobs successful
 - Exact-merge CI: `30534061552`, successful
 - CodeRabbit and Greptile green; zero unresolved review threads

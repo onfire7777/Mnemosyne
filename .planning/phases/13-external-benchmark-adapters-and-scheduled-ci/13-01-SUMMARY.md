@@ -19,15 +19,15 @@ claim output.
 
 ## Verification
 
-- Exact PR head `baf5c1852593885e37eed75da69b02d93e1bff11` passed CI run
+- Exact PR head `8d64afd8fb344f45ddd4c0adde2fcef2140f8365` passed CI run
   `30559003114` before normal merge.
-- PR #86 merged as `661343ce05186e9a7f0f0740d1edef7c23532857`.
+- PR #86 merged as `60b8273175aca2cbdec36364d307075c6c0f7f1a`.
 - Input-free `workflow_dispatch` run `30561430522` passed the fixed
   development job on that merge commit.
 - Exact post-merge main CI run `30561266140` passed all gating jobs on that
   merge commit; the nightly-only soak was correctly skipped.
 - Cadence evidence added on 2026-09-05: real `schedule` run `30807305055`
-  succeeded on `b8673031a80158c49d552a4b3647829d213243bd`, started
+  succeeded on `2c6a63f12291eb938b2d284c938298fc035d6105`, started
   `2026-08-03T10:52:57Z`. Job `91665545558` and its fixed public-contract test
   step succeeded. Authenticated GitHub run/job metadata is retained in
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.

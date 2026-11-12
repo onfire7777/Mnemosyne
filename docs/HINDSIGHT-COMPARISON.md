@@ -2,14 +2,14 @@
 
 Reviewed: 2026-10-22. This is a source-based engineering assessment, not a benchmark result or a claim that Mnemosyne is first in the world.
 
-Mnemosyne status reconciled: 2026-10-26, against `0d947f5c`. This updates the
+Mnemosyne status reconciled: 2026-10-26, against `8e6b1098`. This updates the
 Mnemosyne implementation status below; the Hindsight review remains pinned to the
 22 October source revision and documentation, not a new review of its current release.
 
 ## Scope and evidence
 
 - Hindsight source revision: [`0691b504a88480844b2db53384b8c81971b7cf1e`](https://github.com/vectorize-io/hindsight/commit/0691b504a88480844b2db53384b8c81971b7cf1e), fetched through the GitHub connector; commit timestamp 2026-10-22 22:06:11 UTC. Public architecture/API documentation was read on the review date and may subsequently change.
-- Initial Mnemosyne source baseline: `00d8ea9f7389d3a423d233e5fc0ab959ead8e520`, with later working-tree repairs inspected. The live PostgreSQL follow-up began at `d59d4e5d3b3736cbf28719b659f766a65ad9559c`; its [source hashes and receipts](../work/hindsight-comparison/postgres-live/REPORT.md) identify the tested candidate. Local links below identify implementation evidence, not proof that all configurations pass.
+- Initial Mnemosyne source baseline: `273b12599c7b5e2ba3f54688058cbd612ea28ce3`, with later working-tree repairs inspected. The live PostgreSQL follow-up began at `e81ca477d8cbc89a607e7494bdc67e7f2849f762`; its [source hashes and receipts](../work/hindsight-comparison/postgres-live/REPORT.md) identify the tested candidate. Local links below identify implementation evidence, not proof that all configurations pass.
 - Hindsight's public repository is [MIT licensed](https://github.com/vectorize-io/hindsight/blob/0691b504a88480844b2db53384b8c81971b7cf1e/LICENSE). Preserve the copyright and permission notice for any copied substantial implementation. This report describes behavior; it does not import Hindsight code.
 - On the review date, the [official homepage](https://hindsight.vectorize.io/) reported LongMemEval-S **94.6%**, LoCoMo **92.0%**, PersonaMem **86.6%**, PrecisionMemBench **85.7%**, LifeBench **71.5%**, and BEAM at 10M tokens **64.1%**. The [October 13 announcement](https://hindsight.vectorize.io/blog/2026/10/13/memlake) repeats 94.6%, 92%, and 64.1%. These are vendor-published results; matching their conditions requires examining the individual run artifacts.
 - The [original paper](https://arxiv.org/abs/2512.12818) reports older 91.4% LongMemEval and 89.61% LoCoMo results. Those numbers must not silently substitute for the current comparison target.

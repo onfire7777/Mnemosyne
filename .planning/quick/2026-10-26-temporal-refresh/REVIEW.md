@@ -1,6 +1,6 @@
 # Code Review: Temporal Refresh & Refresh Efficiency (TR1–TR4)
 
-**Review Target**: Working tree uncommitted changes against baseline `0d947f5ce8eeb8884103080aa7d9364488cb2628`.  
+**Review Target**: Working tree uncommitted changes against baseline `8e6b109821c78b225df3cb78974292f91af74f3c`.  
 **Review Focus Areas**: Correctness, Concurrency, Privacy & Access Control, Anti-Spoofing, and Live PostgreSQL Parity.
 
 ---
@@ -58,7 +58,7 @@
 
 ## 4. Cross-Backend Parity (Local, SQLite, PostgreSQL)
 
-- Direct execution of `tests/test_candidate_time_metadata.py` and `tests/test_event_time_recall.py` against live PostgreSQL container `mnemosyne-documents-0ef9b6df` (port 55434) across all 4 database roles confirms 100% feature and observable parity with Local and SQLite engines.
+- Direct execution of `tests/test_candidate_time_metadata.py` and `tests/test_event_time_recall.py` against live PostgreSQL container `mnemosyne-documents-488289d6` (port 55434) across all 4 database roles confirms 100% feature and observable parity with Local and SQLite engines.
 - `_candidate_created_at`, `event_start`, `event_end`, and `_candidate_event_calendar` survive JSON and relational round-tripping identically across all backends.
 
 ---

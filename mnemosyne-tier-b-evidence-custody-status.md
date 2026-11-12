@@ -11,7 +11,7 @@ tags:
 
 # Mnemosyne Tier-B Evidence Custody Status
 
-As of 2026-07-03, `/Users/admin/Mnemosyne` is clean and synchronized on `phase3/providers-consolidation` at `61120d315a759c1e21f61efd4ca9b538c0f3a991`, with GitHub CI run `28677518645` passing for that SHA. This does not close Tier-B parity, because the production/operator evidence packet remains blocked.
+As of 2026-07-03, `/Users/admin/Mnemosyne` is clean and synchronized on `phase3/providers-consolidation` at `ed5b746af1dd237efc7be67f006a7c003f2cbcbc`, with GitHub CI run `28677518645` passing for that SHA. This does not close Tier-B parity, because the production/operator evidence packet remains blocked.
 
 ## Current Blockers
 
@@ -36,8 +36,8 @@ An ignored local file exists at `/Users/admin/Mnemosyne/production-inputs/proven
 
 On 2026-07-03 the branch added two documentation checkpoints:
 
-- `8527825497feb73af65e63932391b36897f60965`: clarified in `.planning/ENV-AND-SECRETS.md` and `infra/templates/production-operator-env.inventory.md` that blank runtime env-file values count as missing provider manifest refs.
-- `61120d315a759c1e21f61efd4ca9b538c0f3a991`: refreshed `.planning/STATE.md` to match `.planning/ROADMAP.md` counters and record the current Tier-B custody blocker.
+- `d1d72846ded307a052ce036c1245f79735ffe952`: clarified in `.planning/ENV-AND-SECRETS.md` and `infra/templates/production-operator-env.inventory.md` that blank runtime env-file values count as missing provider manifest refs.
+- `ed5b746af1dd237efc7be67f006a7c003f2cbcbc`: refreshed `.planning/STATE.md` to match `.planning/ROADMAP.md` counters and record the current Tier-B custody blocker.
 
 ## Durable Rule
 

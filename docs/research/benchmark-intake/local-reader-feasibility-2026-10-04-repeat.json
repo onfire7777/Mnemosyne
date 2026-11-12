@@ -83,7 +83,7 @@
   "reason": "memory-pressure",
   "returncode": -15,
   "schema": "mnemosyne.hardware-feasibility-receipt/v1",
-  "source_commit": "4c4c902129df2b9c018f3d63e9a02fcd5f2c0ee0",
+  "source_commit": "c951448b165bf976a20fdad0b6bf9ec362d026b9",
   "source_files": {
     "eval/public/monitor.py": "d40d2d9bd20a2148afaf69a06d27e9a930b302125a4312f4679d927e1347c8ef",
     "infra/providers/role-llm.py": "17c8764ba9863525be2dfcbedc32a1adfff656d18cd8a71d39e9307a90a981a2",

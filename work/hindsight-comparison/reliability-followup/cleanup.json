@@ -1,6 +1,6 @@
 {
   "container_removed": true,
-  "removed_container": "mnemosyne-reliability-pg-1f2e3f3c",
+  "removed_container": "mnemosyne-reliability-pg-aa164347",
   "database_storage": "tmpfs; discarded with container",
   "preexisting_containers_preserved": {
     "pentestswarm-redis-1": true,

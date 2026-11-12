@@ -2,7 +2,7 @@
 
 > **Status note (updated 2026-06-29).** This is a **historical Waves 1–3 scoreboard**, kept for lineage only. Do not use this file as the active Tier-B handoff checklist. For current completion status read **`docs/ROADMAP-TO-100.md`**, **`.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`**, **`infra/PRODUCTION-EVIDENCE.md`**, and **`.planning/runbooks/README.md`**. Since this scoreboard was written, the mandatory Tier A `src` reconciliation items (A1–A10, A13, A14) have all landed; current production-evidence custody also includes retained `input-artifacts/`, retained `tool-artifacts/`, `summary.json.offline_verify`, row-readiness routing from retained `preflight.json.parity_row_readiness`, verifier `row_review.rows[]`, and an external no-overwrite verifier `--report-output` artifact. Historical strict-xfail source-gap notes below describe the 2026-06-21 state, not today.
 
-**Date:** 2026-06-21 · **Branch:** `completion/blueprint-parity` (rebased onto Codex `main` @ `730589b`)
+**Date:** 2026-06-21 · **Branch:** `completion/blueprint-parity` (rebased onto Codex `main` @ `43a7320`)
 **Authoring note:** the Wave-3 cross-wave critic agent was hit by a **prompt-injection** (a payload,
 most likely from the adversarial poison corpus, surfaced an "output-style OVERRIDE" instruction in
 its free text). That output was **discarded, not obeyed**; this scoreboard is authored directly from
@@ -30,7 +30,7 @@ the structured wave results. The injection is not present in any committed file 
 
 **6 of 6 headline SLO families now PASS** — recall, nDCG, G2 lift, poison on the real path, ECE **0.0063**, and fast-path P95 **149.5ms warm+serial** (Wave-6 in-process harness). The remaining gap is no longer headline SLO code; it is operator-captured Tier B production infrastructure evidence.
 
-**Historical Wave-6 forcing-function audit (vs Codex `8be6dab`, superseded):** this originally reported rails 32✅/5 xfail · erasure 4✅/1 xfail · scope 21✅ · portability 22✅ · replay-fidelity 15✅ · calibration 3✅ · v2-selftest 1✅. Since then, the mandatory Tier A source wirings have landed on `main`; the current blocker is Tier B production operator evidence, not those historical `src` xfails.
+**Historical Wave-6 forcing-function audit (vs Codex `d1447ac`, superseded):** this originally reported rails 32✅/5 xfail · erasure 4✅/1 xfail · scope 21✅ · portability 22✅ · replay-fidelity 15✅ · calibration 3✅ · v2-selftest 1✅. Since then, the mandatory Tier A source wirings have landed on `main`; the current blocker is Tier B production operator evidence, not those historical `src` xfails.
 
 ## SLO scoreboard — Wave-2 (initial real-provider proof, tiny corpus)
 | SLO (§16) | Target | Result | Status |

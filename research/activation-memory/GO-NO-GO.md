@@ -13,7 +13,7 @@ promised research artifact and leaves the capability claim unsatisfied.
 ## Evidence head
 
 Decisions below are relative to tip
-`097bd6828c190e28261d799f4b57c4b3d038ec52` (merge of pull request #196).
+`7e77574a80e8f1e4a3969d36fc73e144b52b3d15` (merge of pull request #196).
 That commit contains the three receipts unchanged. This closure commit
 only adds `research/activation-memory/README.md` and this file. It is not
 a new measurement candidate, and the receipt `candidate_sha` values are
@@ -22,7 +22,7 @@ not rewritten to this tip or to the pull-request head.
 Unit + drift checks on that tip succeeded in CI run `36193689225`
 (`https://github.com/onfire7777/Mnemosyne/actions/runs/36193689225`,
 job `Unit + drift checks`, `headSha`
-`097bd6828c190e28261d799f4b57c4b3d038ec52`). That run is the tip check.
+`7e77574a80e8f1e4a3969d36fc73e144b52b3d15`). That run is the tip check.
 It is not an admitted cartridge or activation measurement.
 
 Receipts were admitted on main by these merges (git history at the tip;
@@ -30,10 +30,10 @@ distinct from each receipt's recorded `candidate_sha`):
 
 | Task | Exact head | Merge |
 | --- | --- | --- |
-| 15-04-01 contract | `4b4a1ba13d946e7e457762b60aa867659ee3d504` | `20277f736af103ea505f32e507c5558030ed37b4` (#181) |
-| 15-04-02 cartridge | `2f6200d910847bf3e5b96007e29a084662caa042` | `3eb8c30ee721c890c5339ebbbaeae43300f36bf4` (#183) |
-| 15-04-03 J-lens | `aed883d5928929dc410d55bd41e6852d71cd1f7f` | `d15d78aea6fc677517b89c87f6dbe8303c306fb9` (#185) |
-| 15-04-04 persona drift | `60e5150880a9d3931c03b6eb9230b73ee254afa2` | `02b1982f2a6d8010f36a4d38031bcbe65ba5d82c` (#193) |
+| 15-04-01 contract | `9ac7077b93d7f20e2889bca8773198179c4478db` | `15467fe0ba09b556c2ac410fd3edbd2e06ef7b8c` (#181) |
+| 15-04-02 cartridge | `1fe9cf148e666db8dcff465ba183aa8718a2dd67` | `5c53a11447a0d14f5782c9016a8b9b099c5dab90` (#183) |
+| 15-04-03 J-lens | `9b7ec59652ade7678d7d442934d0a1632e47b93e` | `2840a149eb538ebed713c81f2b49cc63a89f3bbd` (#185) |
+| 15-04-04 persona drift | `06f54766dfa27166205ad9bd3acb7ccca957ac6b` | `c7b28b41e20daeecfea8e0cfc5b3562baa3450b9` (#193) |
 
 ## Rule applied
 
@@ -71,8 +71,8 @@ Receipt: `eval/benches/reports/phase15-s5-cartridge.json`
 
 Identity, as recorded:
 
-- `identity.repository_sha`: `d3cd013fe07540c3e561bab821e42504b15c82ce`
-- `identity.candidate_sha`: `d3cd013fe07540c3e561bab821e42504b15c82ce`
+- `identity.repository_sha`: `d8a3e4d3802a369e005c1d4d093b8cc99c4b226d`
+- `identity.candidate_sha`: `d8a3e4d3802a369e005c1d4d093b8cc99c4b226d`
 - `identity.clean_tree`: false
 - `identity.command`: `eval/benches/bench_cartridge_ab.py`
 - `identity.arguments.workload`: `phase15-s5-cartridge-synthetic-dev-v1`
@@ -105,10 +105,10 @@ Identity, as recorded:
 - `workload.tenant_digest`:
   `sha256:7893e78b82bb8f1d70513f209b1d35f08101acf945382e388db8215ecee9a1b7`
 
-`d3cd013fe07540c3e561bab821e42504b15c82ce` resolves in this repository as
+`d8a3e4d3802a369e005c1d4d093b8cc99c4b226d` resolves in this repository as
 the merge of pull request #182. It is the receipt's recorded candidate,
 with `clean_tree: false`. It is not replaced by the later #183 merge
-`3eb8c30ee721c890c5339ebbbaeae43300f36bf4`.
+`5c53a11447a0d14f5782c9016a8b9b099c5dab90`.
 
 ### Hard-gate status
 
@@ -243,10 +243,10 @@ Identity, as recorded:
 
 `35033f3d85d4192fcae5e8c5930cf05514c740f9` does not resolve as a commit
 in this checkout (`git cat-file -t` fails at tip
-`097bd6828c190e28261d799f4b57c4b3d038ec52`) and GitHub has no commit for
+`7e77574a80e8f1e4a3969d36fc73e144b52b3d15`) and GitHub has no commit for
 that SHA. The same string is `identity.candidate_sha` in
 `research/activation-memory/fixtures/development.json`. It is cited as
-recorded and is not replaced by merge `d15d78aea6fc677517b89c87f6dbe8303c306fb9`.
+recorded and is not replaced by merge `2840a149eb538ebed713c81f2b49cc63a89f3bbd`.
 
 Development cases, scorer-owned: `am-dev-j-lens-benign` (content digest
 `1bf0a15321ad0220545e801787cc860c1d1d6d32e2ce692be89aef5a9a0ebb6f`) and
@@ -378,7 +378,7 @@ Identity matches the J-lens receipt field for field, including unresolved
 `identity.seed` `20260920`, and `identity.sut_boundary`
 `external-collector-json`. The same non-resolution applies: that SHA is
 not a commit in this repository. It is not replaced by merge
-`02b1982f2a6d8010f36a4d38031bcbe65ba5d82c`.
+`c7b28b41e20daeecfea8e0cfc5b3562baa3450b9`.
 
 Development cases, scorer-owned: `am-dev-persona-shift` (content digest
 `e716adbd2b290724fe78e1d0ea9e0e85b4e132993ccb5af35422631a9489b230`,

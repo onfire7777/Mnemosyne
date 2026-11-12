@@ -3,8 +3,8 @@
   "source": "GitHub plugin fetch_workflow_job_logs",
   "reviewed_on": "2026-10-26",
   "failing_run_id": 40400787108,
-  "failing_commit": "b63b34616f65e31457f3bc243b158d479f734e68",
-  "local_review_head": "97091695",
+  "failing_commit": "6673f84400face6f5378d22879af81e6bbd3f008",
+  "local_review_head": "22a03aab",
   "jobs": [
     {
       "id": 121845744435,

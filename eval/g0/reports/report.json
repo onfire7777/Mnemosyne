@@ -1,7 +1,7 @@
 {
   "artifact_custody": {
     "snapshot_note": "Committed G0 reports are source-tree custody snapshots. The commit that contains a report cannot be embedded in that report before the commit exists; use git log to identify the containing artifact commit.",
-    "source_commit": "be32a1c0d3c9b16f4504f2f107fd27a328c7c8db"
+    "source_commit": "7647718278e9650cab4e1eea22a215c78f9a13e6"
   },
   "baseline": {
     "environment": {
@@ -18,14 +18,14 @@
       "reranker_provider": "cross-encoder/ms-marco-MiniLM-L-6-v2"
     },
     "name": "baseline-0",
-    "pinned_commit": "67c229ace12313a8b8a6c6ede99d0a2096bae178",
+    "pinned_commit": "86616ade88528595c9012d08a67d125bbf936e1d",
     "seeds": {
       "harness_bootstrap_mean": 1234,
       "harness_bootstrap_percentile": 4321,
       "synthetic_retrieval": 7
     },
     "tag_exists": true,
-    "tag_target": "35d3344ec71ccaaf00f19f9feaf413e5fdb848f5"
+    "tag_target": "cad99b455f172fbcaa14e25fed8318634906ca32"
   },
   "blueprint_refs": [
     "docs/blueprint/cognitive-architecture/04-G0-BENCHMARK-SPEC.md",

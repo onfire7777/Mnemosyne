@@ -8,8 +8,8 @@
   "speedup_asserted": false,
   "cap_go_no_go": "15-04-05",
   "identity": {
-    "repository_sha": "d3cd013fe07540c3e561bab821e42504b15c82ce",
-    "candidate_sha": "d3cd013fe07540c3e561bab821e42504b15c82ce",
+    "repository_sha": "d8a3e4d3802a369e005c1d4d093b8cc99c4b226d",
+    "candidate_sha": "d8a3e4d3802a369e005c1d4d093b8cc99c4b226d",
     "clean_tree": false,
     "command": [
       "/workspace/.venv/bin/python3",

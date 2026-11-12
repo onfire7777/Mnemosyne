@@ -4,7 +4,7 @@
 
 **Goal:** Ship Phase 3 from the native-acceleration spec without changing the authoritative Python memory semantics: C3 adds a Rust `mneme-providers` HTTP sidecar behind the existing `HttpEmbeddingProvider` / `HttpReranker` contracts, and A3 adds the proposal-role consolidation ladder with recorded proposals, disclosure-axis gates, and production-evidence hooks.
 
-**Current branch:** `phase3/providers-consolidation` from `main` @ `fa217c1`.
+**Current branch:** `phase3/providers-consolidation` from `main` @ `ef698b6`.
 
 **Source of truth:** `docs/superpowers/specs/2026-07-01-native-acceleration-design.md` §4.3 and §4.5, `.superpowers/sdd/progress.md`, and `.superpowers/sdd/phase3-grounding.md` (verified 2026-07-02). Re-grep every cited anchor before editing; line numbers drift.
 

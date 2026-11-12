@@ -245,7 +245,7 @@ def test_committed_receipt_is_harness_ready_stub_not_measured_cap006() -> None:
     identity = payload["identity"]
     assert identity["workload"] == WORKLOAD_ID
     assert identity["item_count"] == ITEM_COUNT
-    assert identity["based_on_sha"] == "e32e1cb7ceb455ffbfd06ddc6c0bd2d526bfe4d4"
+    assert identity["based_on_sha"] == "a71599efffb3e4eb65c3fcfbe425d01c06a26e82"
     assert "admitted_100k_measurement_missing" in payload["blockers"]
     assert "production_backfill_operator_window_missing" in payload["blockers"]
     distributions = payload.get("distributions") or []

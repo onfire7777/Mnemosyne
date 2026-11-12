@@ -1,6 +1,6 @@
 {
   "recorded_at": "2026-10-22T23:41:55.005278+00:00",
-  "parent_commit": "d59d4e5d3b3736cbf28719b659f766a65ad9559c",
+  "parent_commit": "e81ca477d8cbc89a607e7494bdc67e7f2849f762",
   "description": "Source and test identity after expanded change-refresh verification; local suite 2192 passed,114 optional skips. No comparative benchmark score.",
   "sha256": {
     "eval/benches/_bench_common.py": "8621e1e9569b9661f54c92114d2b46405bd1516816d91076d5c4b13f4f068942",

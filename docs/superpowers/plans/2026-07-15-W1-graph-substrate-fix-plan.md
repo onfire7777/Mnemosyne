@@ -6,7 +6,7 @@
 **Requirements:** CAP-001/002/003, BENCH-005 (Phase 12 / Plan 12-04).
 **Status:** PARTIAL — Phases 1-3 and the local development portions of Phase 4
 are complete through PRs #23, #26, #28, and disclosure-audit PR #30 (merge
-`0865271`; receipt `eval/reports/disclosure-audit-2026-07-16.md`). Production-Postgres parity,
+`7df2070`; receipt `eval/reports/disclosure-audit-2026-07-16.md`). Production-Postgres parity,
 runtime readiness, grounded-reader QA, and protected evidence remain open. This
 document is the durable acceptance contract; the loop generates tactical plans
 under `docs/plans/goalex-r*.md`.
@@ -14,7 +14,7 @@ under `docs/plans/goalex-r*.md`.
 
 ## Status reconciliation — 2026-10-04
 
-Source inspection at `3c21be5d`; historical instructions below describe the original execution contract, not a request to repeat landed work. Local graph development fixes remain delivered (PRs #23/#26/#28). The Phase 12 source lease sweep is also delivered (#46–#61), but production graph parity, grounded QA targets and protected evidence remain open under 12-04. No measured acceptance is inferred from source.
+Source inspection at `f2903662`; historical instructions below describe the original execution contract, not a request to repeat landed work. Local graph development fixes remain delivered (PRs #23/#26/#28). The Phase 12 source lease sweep is also delivered (#46–#61), but production graph parity, grounded QA targets and protected evidence remain open under 12-04. No measured acceptance is inferred from source.
 
 ## Goal
 
@@ -24,7 +24,7 @@ engine mismatch — the keystone that unblocks BENCH-005 and the retrieval half 
 CAP-003. The channel is a *cut wire* (0 hits / 1000 questions, channel sum 0), a
 concrete wiring defect, not a quality gap.
 
-## Root cause (verified at baseline `fbc1857`; symbols below)
+## Root cause (verified at baseline `9ed2867`; symbols below)
 
 - **Cause A (dominant):** the HippoRAG adapter (`eval/public/adapters/hipporag_multihop.py`)
   and the QA harness (`eval/datasets/v2/run_grounded_qa_v2.py`) ingested via

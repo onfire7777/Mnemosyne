@@ -8,7 +8,7 @@ source_kind: put_page
 
 # Mnemosyne Phase 8.2 provider latency release gate (2026-07-03)
 
-Commit `bea1edb` on `/Users/admin/Mnemosyne` branch `phase3/providers-consolidation` adds source-side CPU P95 evidence gating for the self-hosted provider path.
+Commit `bd6cd55` on `/Users/admin/Mnemosyne` branch `phase3/providers-consolidation` adds source-side CPU P95 evidence gating for the self-hosted provider path.
 
 What changed:
 - `provider-check` supports `--provider-latency-samples` and `--max-provider-p95-latency-ms`.

@@ -124,7 +124,7 @@ without inventing additional terminal results.
    `${MNEMO_CUSTODY_DIR}/locks/runtime-exclusive`; its parent is a mode-`0700`,
    non-symlink directory. The local process lock remains separate. R2b capture
    and rotator callers are merged and source-accepted on
-   `main@13d15138a431ecbd4ca2a919cbf05b87a7a9004b`; R2c and R2d caller
+   `main@d329c50acbe0718b9f2a297fcde8ab2450dca1c0`; R2c and R2d caller
    integrations remain open.
 5. A separate status-only directory is mounted read-only into `mnemo-metrics`.
    It contains only a schema-validated `status.json`; it contains no
@@ -344,9 +344,9 @@ begins.
 ## Shared runtime lock contract
 
 **R2 status: R2a and R2b are merged and source-accepted; R2b integration landed
-through PR #15 on `main@13d15138a431ecbd4ca2a919cbf05b87a7a9004b`, and
+through PR #15 on `main@d329c50acbe0718b9f2a297fcde8ab2450dca1c0`, and
 post-merge review hardening landed through PR #17 on
-`main@5a6ce1921c1537b6090cf40600581f9fe956fe1f`; R2c-R2d and live proof remain
+`main@0417e9f6ffe0836c998aba000f7e768b16b45eef`; R2c-R2d and live proof remain
 open.** The current
 `.mcp-client-rotation.lock` prevents overlapping cooperative rotator invocations
 and is deliberately held for the whole process, but it does not serialize
@@ -539,8 +539,8 @@ git diff --check
 ### R1c — Consumer activation, probes, and rollback
 
 Status: The success-completion/committed-finalization source-and-fixture slice
-was committed as `8e97442`, with evidence documentation at `6afd3b3`, and
-merged through PR #12 as `97f3c66`. Exact-head CI `29313243324` and post-merge
+was committed as `5f45846`, with evidence documentation at `6824659`, and
+merged through PR #12 as `2612c45`. Exact-head CI `29313243324` and post-merge
 CI `29314015888` are green. Remaining R1c live-readiness work and live proof
 remain open. The isolated
 blackbox-query helper selects exactly one running `infra` Caddy container,
@@ -593,7 +593,7 @@ same key on a later invocation; receivers must deduplicate it. No receiver ack
 exists, historical emitted receipts are retained, and rollback terminal
 receipts remain open.
 
-Pre-commit working-tree verification based on `82bc5d5e` passes the full
+Pre-commit working-tree verification based on `a7f01e5e` passes the full
 369-test rotator/blackbox
 pair, the unchanged 41-test TLS/bootstrap/Compose-policy tier, all 39
 section-31 invariant rails, all 7 section-33 harness tests, and both planning
@@ -605,10 +605,10 @@ initialized/unsealed Vault, stable API/stream identities and restart counts,
 and a valid production MCP client chain. The locked configured suite then
 collected 2,636 tests: 2,496 passed, 140 expected skips, 0 failures, and 0
 errors in 702.564 seconds. These artifacts exercise the pre-commit working tree
-based on `82bc5d5e`; the tested source/test bytes were committed unchanged as
-`8e97442`, with evidence documentation at `6afd3b3`. Exact-head CI
-`29313243324` passed on final PR head `88067bc`; PR #12 then merged as
-`97f3c66`, whose post-merge CI `29314015888` passed all six gating jobs. Older
+based on `a7f01e5e`; the tested source/test bytes were committed unchanged as
+`5f45846`, with evidence documentation at `6824659`. Exact-head CI
+`29313243324` passed on final PR head `1550c18`; PR #12 then merged as
+`2612c45`, whose post-merge CI `29314015888` passed all six gating jobs. Older
 pre-completion evidence is historical only.
 A fresh independent read-only security/correctness audit found no actionable
 issue in the committed R1c diff. Its residual limits match this contract: same-UID
@@ -664,13 +664,13 @@ git diff --check
 
 ### R2a — Runtime lock helper
 
-Status: Baseline `a91da2e`, review hardening `fb713d4`, and final reviewed head
-`5bfd53d` are delivered. The committed RED baselines are `199b898` and
-`93e0dc6`. Static gates, 55/55 focused tests, 39/39 section-31 rails, 7/7
+Status: Baseline `11373d2`, review hardening `a7cb59d`, and final reviewed head
+`97c8940` are delivered. The committed RED baselines are `a8b39b4` and
+`053f114`. Static gates, 55/55 focused tests, 39/39 section-31 rails, 7/7
 section-33 tests, 2/2 planning tests, terminal CodeRabbit, and independent
-review are green. Exact head `5bfd53d` passed CI `29377793617` and merged
-through PR #13 as `33967b1`; that stacked head passed PR #11 CI `29378482152`
-and merged to `main` through PR #11 as `79f6b58`. Post-merge main CI
+review are green. Exact head `97c8940` passed CI `29377793617` and merged
+through PR #13 as `55268ec`; that stacked head passed PR #11 CI `29378482152`
+and merged to `main` through PR #11 as `cc78261`. Post-merge main CI
 `29379113689` passed all six gating jobs; this reconciliation's
 exact-head/final-main CI and an exact-final-main mutable-index refresh complete
 the delivery receipt. The live
@@ -736,9 +736,9 @@ The RED failure must prove at least one entrypoint can mutate before locking;
 GREEN must prove acquisition precedes every side effect.
 
 R2b integration is merged and source-accepted through PR #15 on
-`main@13d15138a431ecbd4ca2a919cbf05b87a7a9004b`. Post-merge review hardening is
+`main@d329c50acbe0718b9f2a297fcde8ab2450dca1c0`. Post-merge review hardening is
 merged through PR #17 on
-`main@5a6ce1921c1537b6090cf40600581f9fe956fe1f`: the forgeable environment
+`main@0417e9f6ffe0836c998aba000f7e768b16b45eef`: the forgeable environment
 sentinel was replaced by `--verify-child` coordinator-ownership re-validation,
 and inherited-owner reads are position-independent. The validated RED baseline
 and green focused regression cell prove both callers acquire the shared lock

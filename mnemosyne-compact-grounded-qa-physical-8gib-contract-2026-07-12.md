@@ -20,7 +20,7 @@ Canonical repository artifacts:
 - `/Users/admin/Mnemosyne/.planning/runbooks/COMPACT-MODEL-8GB-ACCEPTANCE.md`
 - `/Users/admin/Mnemosyne/docs/EXECUTION-PLAN-A-Memory-System.md` S1.2 and S4.5
 - requirement `CAP-011`
-- source commit `373b765a9978cd5b64e46fc12e384d917a26e110`
+- source commit `cf5de6ddebfa595d569758bc8acf3097e9b63294`
 
 The global deterministic retrieval path and its scored column remain unchanged. A future compact reader/reranker is shadow-only, default-off, hosted behind the optional Rust/ONNX sidecar, and cannot enter the active candidate-v19 CLI, registry, bundles, or protected datasets before separate preregistration and promotion.
 

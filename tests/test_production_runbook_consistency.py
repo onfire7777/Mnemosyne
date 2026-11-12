@@ -324,7 +324,7 @@ def test_current_state_docs_do_not_reopen_closed_local_feature_gaps() -> None:
 
     assert "current parity status is the Tier-B `capture-bc10` attestation" in matrix
     assert "The only two genuinely-missing **features** are" not in matrix
-    assert "b79cb87a97ebb220ae09de0db2ec69900a84411b" in handoff
+    assert "10b66522981891e8610fb7eb4d5fc97f2d6cc1b2" in handoff
     assert "This file intentionally does not freeze a prose \"latest commit\"" in (
         handoff_flat
     )
@@ -333,13 +333,13 @@ def test_current_state_docs_do_not_reopen_closed_local_feature_gaps() -> None:
     assert "later commits supersede that checkpoint" in handoff_flat
     assert "GitHub Actions CI run `28477936121` passing" in handoff_flat
     assert "GitHub Actions CI run `28475668973` passing" not in handoff_flat
-    assert "9621971" in handoff
+    assert "2bb108e" in handoff
     assert "CI run `28414377562` passed" not in handoff
     assert (
-        "Do not treat `9621971` or CI run `28414377562` as the latest baseline"
+        "Do not treat `2bb108e` or CI run `28414377562` as the latest baseline"
         in handoff_flat
     )
-    assert "Latest source-bearing baseline before this handoff update, `03f2611`" not in handoff
+    assert "Latest source-bearing baseline before this handoff update, `6cb166c`" not in handoff
     assert "Last recorded green source-bearing GitHub baseline before this handoff update" not in handoff
 
 

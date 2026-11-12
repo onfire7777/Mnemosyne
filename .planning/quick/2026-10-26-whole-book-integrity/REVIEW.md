@@ -1,6 +1,6 @@
 # Whole-book integrity review
 
-Scope: the current book continuation against `CONTEXT.md` WB1–WB7 and `PLAN.md`, compared with baseline `b63b34616f65e31457f3bc243b158d479f734e68`. Reviewed the three changed runtime modules, five book regression files, README book guidance, and both book guides. This is not historical Phase 15 or v2.0 milestone acceptance.
+Scope: the current book continuation against `CONTEXT.md` WB1–WB7 and `PLAN.md`, compared with baseline `6673f84400face6f5378d22879af81e6bbd3f008`. Reviewed the three changed runtime modules, five book regression files, README book guidance, and both book guides. This is not historical Phase 15 or v2.0 milestone acceptance.
 
 ## Findings
 
@@ -32,6 +32,6 @@ Final suite identities and file fingerprints belong in `VERIFICATION.md`. Commit
 ## Orchestrator delivery confirmation
 
 The final retained suites passed 171 book checks and 664 CLI checks (823 unique).
-Implementation commit `9340354c7cc20601d736dbb56d19d073e4b4ae43` was pushed to `origin/main` and confirmed
+Implementation commit `84c832788bd63a5ea1b4a4c5f4c99b7ac3c27247` was pushed to `origin/main` and confirmed
 by `git ls-remote --heads origin main`. The pending-delivery statements above
 describe the reviewer handoff before that push.

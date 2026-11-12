@@ -20,7 +20,7 @@
 
 - Repo: `/Users/admin/Mnemosyne` → `origin = github.com/onfire7777/Mnemosyne`. Branch `main` is **in sync** with `origin/main` (no ahead/behind).
 - Untracked WIP (belongs to sibling lanes — **their owners commit, not Sync, not code lanes**): `.planning/INDEXING-AND-RETRIEVAL-POLICY.md`, `CONFIG-DRIFT-CHECKS.md`, `Mnemosyne-Secret-Handling-Policy.md`.
-- `REVIEW.md`: 9/9 findings remediated @ `fe72a66`. **Remaining = Phase 6 parity + production hardening**, not bug-fixing.
+- `REVIEW.md`: 9/9 findings remediated @ `6e358ee`. **Remaining = Phase 6 parity + production hardening**, not bug-fixing.
 - Test gate: full local suite **354 passing + 63 skipped live-DB**. Run: `uv run pytest` (live-DB tests need `MNEMOSYNE_POSTGRES_DSN`).
 
 ---

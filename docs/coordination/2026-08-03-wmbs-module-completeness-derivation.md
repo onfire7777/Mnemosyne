@@ -5,7 +5,7 @@
 > counts are reconciled in `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md`.
 > Do not use historical missing-plan/source statements here as current status.
 
-**Recomputed from the tree** at canonical `main@b8673031` plus the unpushed
+**Recomputed from the tree** at canonical `main@2c6a63f1` plus the unpushed
 controller branch `codex/goalex-whole-memory-pilot`. **Documentation only.**
 This file authorizes no artifact: no module implementation, no scorer or
 registry admission, no protocol change, no publication claim, and no progress
@@ -194,8 +194,8 @@ Per-module implementation contracts that exist:
 | M14 | `docs/plans/wmb-m14-procedural-task-utility-implementation-plan.md` | `Status: **PLANNING ARTIFACT ONLY — NOT CODE-READY.**` — line 3 |
 
 **None of the four is frozen or approved.** All four were authored at
-`origin/main@effc5e03`, and the M14 plan records unrepaired base drift to
-`2091d01c` at its head. Under the `GOAL.md` ladder every one of them is at
+`origin/main@7aabe560`, and the M14 plan records unrepaired base drift to
+`fe7e6adc` at its head. Under the `GOAL.md` ladder every one of them is at
 step 1 complete / step 2 (freeze/approve) outstanding.
 
 M03, M12, M13 and M15 have **round records** rather than module contracts:
@@ -316,7 +316,7 @@ directive text is not rewritten.
    nine modules, not ten.
 4. **"per-module implementation plans: M02, M04, M05, M14 — 4 of 20"** — the
    count of *existing* plans is right, but all four are `PROPOSED` planning
-   artifacts (§2.8) authored at `origin/main@effc5e03`; none is frozen or
+   artifacts (§2.8) authored at `origin/main@7aabe560`; none is frozen or
    approved, and the M14 plan carries unrepaired base drift. Under the ladder
    at `GOAL.md:39-52`, step 2 is outstanding for every one of them, so no
    module is plan-complete in the sense `U-MODULES` requires.

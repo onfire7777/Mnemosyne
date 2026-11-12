@@ -22,8 +22,8 @@ the exact stopping point, the owner's standing rules and the next steps. **Read 
 - Only two branches: `main` and `codex/development`. Local and GitHub match.
 - `codex/development` is ~294 commits ahead of `main`. **[PR #214](https://github.com/onfire7777/Mnemosyne/pull/214)** (dev → main) is open
   with CI green and is **not merged**. The Codex goal said *don't merge to main without the owner's authorization*, so **ask first**.
-- Latest engine change: `3595dc86` added the read-only evaluation retrieval policy overrides
-  (`eval-query-batch --retrieval-token-budget/--retrieval-top-k`, which require `--evaluation-read-only`). The latest doc update is `db42ce13`.
+- Latest engine change: `0e20fd7c` added the read-only evaluation retrieval policy overrides
+  (`eval-query-batch --retrieval-token-budget/--retrieval-top-k`, which require `--evaluation-read-only`). The latest doc update is `5e1456e4`.
 - Codex's task ledger: [`docs/plans/completion-2026-10-04.md`](../docs/plans/completion-2026-10-04.md) (see "Remaining program after this slice").
 
 ## Next engine-side work (from the ledger)

@@ -11,7 +11,7 @@ tags:
 
 # Mnemosyne Phase 8 network egress hardening 2026-07-03
 
-Commit `e745909` on `/Users/admin/Mnemosyne` branch `phase3/providers-consolidation` routes Vault transit, Vault session-secret, internal Ollama role-LLM, and embedding self-test HTTP calls through `mnemosyne.network_safety.safe_urlopen` / `validate_fetch_url`.
+Commit `fc0fb22` on `/Users/admin/Mnemosyne` branch `phase3/providers-consolidation` routes Vault transit, Vault session-secret, internal Ollama role-LLM, and embedding self-test HTTP calls through `mnemosyne.network_safety.safe_urlopen` / `validate_fetch_url`.
 
 The source-owned decision is default-deny internal resolution: private/internal addresses are rejected unless the host is explicitly allowlisted through `MNEMOSYNE_VAULT_ALLOWED_INTERNAL_HOSTS` or `MNEMOSYNE_OLLAMA_ALLOWED_INTERNAL_HOSTS`. `safe_urlopen` now accepts a custom TLS context so the Vault step-ca CA bundle can be used without bypassing redirect denial or DNS pinning.
 

@@ -1,8 +1,8 @@
 # E-background-refresh — scheduling and publication
 
-Date: 2026-10-22. Parent baseline: `00d8ea9f7389d3a423d233e5fc0ab959ead8e520`.
+Date: 2026-10-22. Parent baseline: `273b12599c7b5e2ba3f54688058cbd612ea28ce3`.
 
-Historical phase receipt. Status reconciled on 2026-10-26 against `0d947f5c`:
+Historical phase receipt. Status reconciled on 2026-10-26 against `8e6b1098`:
 the [subsequent PostgreSQL follow-up](../postgres-live/change-refresh/REPORT.md)
 completed live publication, permission, lock-timeout and source-change refresh
 checks: 239 mixed tests passed, including 20 live cases, with 9/9 role checks.

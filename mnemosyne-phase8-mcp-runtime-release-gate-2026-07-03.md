@@ -18,8 +18,8 @@ Production `release-audit` now rejects weak `mcp-ops-check` evidence unless repl
 Evidence:
 - Repo: `/Users/admin/Mnemosyne`
 - Branch: `phase3/providers-consolidation`
-- Commit: `9d21d53 fix(release): require mcp runtime evidence`
-- CI: GitHub run `28686363935` passed for head `9d21d5384e10a0587a5cdeeb331d30c48843fa9b`.
+- Commit: `fa0694e fix(release): require mcp runtime evidence`
+- CI: GitHub run `28686363935` passed for head `fa0694e247bea3d958545a224d7aefa6177fc834`.
 - Local verification: focused MCP/release-audit tests passed, `tests/test_cli_runtime_tools.py -q` passed, full `uv run pytest -q` passed, `uv run ruff check` passed, and `git diff --check` passed.
 
 Scope boundary: this is source-side gate hardening only. It does not close Tier-B or claim blueprint parity. Hosted MCP operator evidence from real production infrastructure is still required before the fail-closed production-defaults row can close.

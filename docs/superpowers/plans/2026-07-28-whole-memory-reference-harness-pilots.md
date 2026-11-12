@@ -31,7 +31,7 @@ Ed25519/ledger infrastructure.
 
 - Governing design:
   `docs/superpowers/specs/2026-07-26-whole-memory-benchmark-standard-design.md`.
-- Authored against `origin/main@489e1361` after the documentation branch
+- Authored against `origin/main@e962b05e` after the documentation branch
   merged current main. Before implementation, fetch current main and re-run a
   read-only conflict/authority check.
 - Do not start implementation while another active `GOAL.md` lease owns an
@@ -79,9 +79,9 @@ must exist for the claimed state.
 ## M01/M10 delivery checkpoint
 
 On 2026-07-29, PR #81 merged exact source head
-`98b83e4be373cf0acd5411769b80b98dfd1a8caa` (reviewed candidate lineage
-`c9e7884e4263cdeedeaf2fe5b30f9796226082b3`) to
-`main@392b1fc173f454893e1b133ff3a727462586a8b0`. Exact-merge CI run
+`8efa67377fc88d7aa1be15358a4b56edbb0a723a` (reviewed candidate lineage
+`81847c44f34d5dac31a3a369599255576fc527bd`) to
+`main@2d07577653b88b8fb15943a704f42d9ee8820981`. Exact-merge CI run
 `30506775012` passed all required jobs. The focused M01/M10/public-eval/
 reference suite passed 507 tests and Ruff passed.
 
@@ -96,7 +96,7 @@ mapped lease. The integration owner has now admitted only
 can accept optional timezone-aware `valid_from`. PR #82 delivered the Task 7
 and Task 8 unit contracts only; the M12/M13 gap-disclosure paragraphs in
 `eval/public/README.md` and the tests pinning them were delivered separately by
-PR #90 at `main@061c2e1c` (exact-head CI `30679262270`, post-merge CI
+PR #90 at `main@94c0c96a` (exact-head CI `30679262270`, post-merge CI
 `30680201900`), which closes Tasks 7 and 8 on canonical main. Full
 transaction-time M03 remains deferred, and M15 requires
 the admitted M03 cell. The result-v2 lease blocker recorded at that checkpoint
@@ -128,8 +128,8 @@ registered fixture or M12 admission. The lateness/cost, calibrated-baseline,
 idempotent-sink and full benchmark-corpus requirements remain open.
 
 On 2026-07-30, PR #82 merged final candidate
-`a3ca8108c22de350810dc3f574931a0d85810ed5` to
-`main@7e9cd01feb2a31cbba96252943697245a4edd024`. Exact-head CI run
+`a85e364a9d7682e737bc99fef0e246f634f6c290` to
+`main@3008f4a1089de4a9fb071621e99b273ec3d30ed2`. Exact-head CI run
 `30521721192`, exact-merge CI run `30522846090`, the 46-test focused M12/M13
 suite, focused Ruff, and `git diff --check` passed.
 
@@ -148,7 +148,7 @@ their pinning suites
 (`tests/test_public_pm_bench_triggerbench.py::test_public_readme_m12_gap_disclosure_matches_committed_fixtures`
 and
 `tests/test_public_working_memory_action_probe.py::test_public_readme_records_development_evidence_gaps`)
-at `main@061c2e1c13cbf1fd5324361a6ff61f47cd2a6534`. Exact-head CI run
+at `main@94c0c96a399f0b88106a6d7c117d304195c0b204`. Exact-head CI run
 `30679262270` and post-merge CI run `30680201900` passed. It moved no package
 status: `registry.json`, the fixtures, and all adapter and scoring code are
 untouched, and M12/M13 remain `PROPOSED`, `publishable:false`, and
@@ -157,8 +157,8 @@ untouched, and M12/M13 remain `PROPOSED`, `publishable:false`, and
 ## M15 delivery checkpoint
 
 On 2026-07-30, PR #84 merged final candidate
-`a4e5fd2b5d46583998821a8c146d98c512c88b73` as
-`main@e0dd41594cec890f598718160f919c13eee1e552`. Exact-head CI, independent
+`051a944c6dd889482b6bfd1dee6e9ca3027e24fa` as
+`main@160cc933f8b39f33470145f6455e40b8147f5b02`. Exact-head CI, independent
 review, mergeability, and the focused 339-test/Ruff/diff/lease gates passed;
 post-merge CI run `30543119233` is the exact-main receipt.
 
@@ -193,15 +193,15 @@ work behind the sandbox, hardware, resource, BOM/rights, and custody gates.
 ### Task 1: Freeze the closed ABI and fail-closed validator
 
 **Status:** Closed-ABI slice completed at source head
-`8d64f554c565edeb0c43868ff6d436e6e09df33a`, merged by PR #79 at
-`a95fe4d291093253f8ce49adff32ba875a35e884`. Its bounded remediation merged by
-PR #80 at `28805ccf54f99f098a5abc23fe6f1155400d0f22`, with exact-merge CI run
+`6bbcd39edb506b9916c3cb9d15c9ec748b43b476`, merged by PR #79 at
+`a9adfb86d6bf422a108e691b0f401beafc2b314f`. Its bounded remediation merged by
+PR #80 at `69687abfcb354f7f5d19ddab1c540a3f3575037f`, with exact-merge CI run
 `30484986865` green. PR #81 subsequently merged the reviewed M01/M10
-development pilots at `main@392b1fc1`; exact-merge CI run `30506775012`, 507
+development pilots at `main@2d075776`; exact-merge CI run `30506775012`, 507
 focused tests, and Ruff passed. PR #83 then merged the bounded M03 valid-time
-development slice at `main@7f60d8ba`; exact-head CI run `30532543366` was
+development slice at `main@8542ca42`; exact-head CI run `30532543366` was
 green. PR #84 then merged M15 canonical replay and the composed M01→M03→M10
-development slice at `main@e0dd4159`. The result-v2 schema and RED
+development slice at `main@160cc933`. The result-v2 schema and RED
 compatibility/ledger fixtures remain unimplemented. PR #135's 2026-09-05
 owner-confirmation receipt retires the unavailable Mac's signed-publication
 reservation; N12 is ready for single-owner admission after that receipt lands,
@@ -480,8 +480,8 @@ validation, M01 remains `PROPOSED`.
 ### Task 5: Implement only the honest M03 valid-time development slice
 
 **Delivery checkpoint:** PR #83 merged reviewed source head
-`3189cc24c570f12be06e3d04252a06f48c71f971` as
-`main@7f60d8ba8274a8ac8036a80737467654f862008f`. Exact-head CI run
+`927ad7d75ed2b6f208c011e763224412c63089a8` as
+`main@8542ca420c8e5aa79da9e9b9a8f1e6de17131fe3`. Exact-head CI run
 `30532543366`, exact-merge CI run `30534061552`, CodeRabbit, Greptile, focused
 M03 tests, Ruff, Gitleaks, and `git diff --check` passed. The delivered cell
 remains `PROPOSED`,
@@ -653,8 +653,8 @@ control are frozen and measured.
 ### Task 9: Enforce M15 canonical replay across all pilot payloads
 
 **Status:** Development-only source slice completed at final candidate
-`a4e5fd2b5d46583998821a8c146d98c512c88b73`, merged by PR #84 as
-`main@e0dd41594cec890f598718160f919c13eee1e552`. Task 11 measured execution
+`051a944c6dd889482b6bfd1dee6e9ca3027e24fa`, merged by PR #84 as
+`main@160cc933f8b39f33470145f6455e40b8147f5b02`. Task 11 measured execution
 and exact executable-build provenance remain deferred.
 
 **Files:**

@@ -242,7 +242,7 @@ user-quote gate evidence. No full-suite pass is claimed for this follow-up.
 
 This cleanup integrates the learning implementation with Mnemosyne's existing APIs. All 22 learning components retain their `active` default. Explicit pause/off settings and mandatory provenance, outcome, effect-approval, and erasure guards remain effective.
 
-The implementation is integrated with the reorganized `dev`/`main` baseline `d0143fe8`, including its journal/SQLite tenant ownership, redacted retrieval, ingestion validation, queue recovery, and parametric artifact-path fixes. The local architecture work and separately edited source files are preserved.
+The implementation is integrated with the reorganized `dev`/`main` baseline `f1d67a03`, including its journal/SQLite tenant ownership, redacted retrieval, ingestion validation, queue recovery, and parametric artifact-path fixes. The local architecture work and separately edited source files are preserved.
 
 ## Ownership after cleanup
 
@@ -348,7 +348,7 @@ local package validation, not deployed-host or learning-benefit evidence.
 
 ## Separate benchmark ownership
 
-Mnemetric owns public benchmark reporting and archives. The public LongMemEval report and copied receipts added to Mnemosyne in `f73f90e9` were removed from its current tree. All 14 original JSON/JSONL receipts were byte-checked against Mnemetric: eight already existed in its October 29 evidence archive, and six development receipts were preserved in its `development/` subdirectory with hashes and provenance. Mnemetric's corrected report remains authoritative; the superseded report remains recoverable in Mnemosyne's Git history and a local backup.
+Mnemetric owns public benchmark reporting and archives. The public LongMemEval report and copied receipts added to Mnemosyne in `33d853ba` were removed from its current tree. All 14 original JSON/JSONL receipts were byte-checked against Mnemetric: eight already existed in its October 29 evidence archive, and six development receipts were preserved in its `development/` subdirectory with hashes and provenance. Mnemetric's corrected report remains authoritative; the superseded report remains recoverable in Mnemosyne's Git history and a local backup.
 
 Mnemosyne retains its runtime, internal regression fixtures, and independent development runner. Local runner output is ignored by Git. This correction runs no external benchmark and changes no public scores.
 
@@ -359,7 +359,7 @@ Live PostgreSQL verification still requires a configured PostgreSQL test databas
 The implementation and verification window spans 6–8 November 2026. Long-run
 wall time includes a host suspension and is unsuitable as a throughput result.
 
-The implementation checkpoint is `0bae7e93`. Codex lifecycle capture now
+The implementation checkpoint is `05c9a2c5`. Codex lifecycle capture now
 recovers completed turns from session-bound transcripts, retains actual command
 outcomes, deduplicates retries, and excludes subagent instructions from human
 turns. The worker reconsiders changed outcomes, artifact state, and protected
@@ -424,7 +424,7 @@ learning defaults.
 ### Local model measurement
 
 The completed Qwen3 1.7B diagnostic used development seed 11 and 128 tasks per
-arm at `f624623f`, for 384 model calls. All calls completed, with zero transport
+arm at `07316c60`, for 384 model calls. All calls completed, with zero transport
 errors, prompt-truncation events, or guard detections. The source hashes stayed
 unchanged throughout the run.
 
@@ -457,7 +457,7 @@ was 26.72% for frozen memory and 23.59% for no memory.
 The frozen-memory slope interval included zero, and all comparison workloads
 matched. This establishes learning benefit for this scripted procedure task.
 The report remains a development diagnostic covering one family, so its overall
-all-family acceptance flag remains false. The run began at `0bae7e93`; later
+all-family acceptance flag remains false. The run began at `05c9a2c5`; later
 changes affected the model transport and optional zero-count diagnostics,
 with the source hashes retained in the report. Raw rows and comparisons are in
 `/Users/admin/.codex/tmp/mnemosyne-completion-20261106/evaluation/final-v2-f2-paired512.json`.
@@ -501,7 +501,7 @@ consistent benefit over controls. These are outstanding capability or empirical
 validation gaps; passing software tests and enabling components do not resolve
 them. The longer F2 run does not substitute for this matrix.
 
-This run started at `0bae7e93`. The report records source drift during the run,
+This run started at `05c9a2c5`. The report records source drift during the run,
 including later model-adapter, profile-privacy, and compatibility changes. It is
 retained as a development diagnostic with its original hashes, not relabeled as
 a sealed result for the final checkout. Summary and raw data are in
@@ -510,7 +510,7 @@ and `final-all-arm32.json`. No sealed evaluation was consumed.
 
 ### Profile erasure and failed cleanup
 
-The profile corrections are committed in `3d1bd9a0` and `ec83e883`. Cleanup now runs after the
+The profile corrections are committed in `09efb05c` and `0781bbb7`. Cleanup now runs after the
 owning source transaction commits, with its captured request context. A rollback
 cancels cleanup. A cleanup failure cannot
 skip cache invalidation or journal erasure, and the committed deletion remains
@@ -550,7 +550,7 @@ processes retain already imported code; new host processes load these changes.
 
 ### Matched retention setup
 
-A separate F11 development check at `06235183` used the same 258 setup rows
+A separate F11 development check at `710f0620` used the same 258 setup rows
 and five evaluation tasks for each arm. The simulated long-gap success rates
 were 80% with learning, 100% with frozen memory, and 20% without memory. Both
 memory arms passed the family threshold, with zero guard detections. This

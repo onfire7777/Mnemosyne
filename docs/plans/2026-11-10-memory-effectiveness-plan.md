@@ -2,7 +2,7 @@
 
 Status: proposed implementation plan; no implementation is recorded by this document.
 
-Date: 2026-11-10. Starting release: `dev@d3b22e81`.
+Date: 2026-11-10. Starting release: `dev@ffc799e2`.
 
 ## Objective and comparison boundary
 

@@ -1,9 +1,9 @@
 # E-mental-models — private maintained answers
 
-Date: 2026-10-22. Baseline: `00d8ea9f7389d3a423d233e5fc0ab959ead8e520`.
+Date: 2026-10-22. Baseline: `273b12599c7b5e2ba3f54688058cbd612ea28ce3`.
 Branch: `codex/hindsight-memory-audit`, local uncommitted implementation.
 
-Historical phase receipt. Status reconciled on 2026-10-26 against `0d947f5c`:
+Historical phase receipt. Status reconciled on 2026-10-26 against `8e6b1098`:
 the PostgreSQL limitation below was subsequently closed by the publication guard
 and [live PostgreSQL validation](../postgres-live/change-refresh/REPORT.md).
 The follow-up passed 239 mixed tests, including 20 live cases, and 9/9 role checks.

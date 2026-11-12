@@ -51,7 +51,7 @@ def _complete_physical_receipt(*, platform: str = "linux") -> dict:
         "virtualization": "none",
         "platform": platform,
         "identity": {
-            "based_on_sha": "eed2d1f8a531b181665c4d1745b54472df0e7a41",
+            "based_on_sha": "625f01ff10fe58e84bd081be19ea4fdc5a36e7ce",
             "workload": "phase15-s4-8gb-acceptance-v1",
             "host": {
                 "os_family": platform,

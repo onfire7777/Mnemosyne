@@ -44,4 +44,4 @@ export MNEMOSYNE_POSTGRES_RLS_TEST_ROLE=mnemosyne_app
 
 The macOS native test helper used the process-local `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk`. The schema-upgrade test drops its isolated schema; all remaining synthetic tenant/audit data is removed by destroying the disposable container. Do not run this test setup against a production database.
 
-Cleanup was completed and verified: `mnemosyne-audit-pg-d59d4e5d` is absent, its tmpfs data was removed, and the separate Hindsight/PentestSwarm containers remain present. [Cleanup receipt](cleanup.json).
+Cleanup was completed and verified: `mnemosyne-audit-pg-e81ca477` is absent, its tmpfs data was removed, and the separate Hindsight/PentestSwarm containers remain present. [Cleanup receipt](cleanup.json).

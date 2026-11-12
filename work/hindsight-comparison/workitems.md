@@ -1,6 +1,6 @@
 # Work Items
 
-Mnemosyne status reconciled on 2026-10-26 against `0d947f5c`. Earlier test counts
+Mnemosyne status reconciled on 2026-10-26 against `8e6b1098`. Earlier test counts
 remain receipts for their individual phases. The Hindsight research in WI-002
 remains pinned to the 2026-10-22 review; this reconciliation is not a new vendor
 comparison or benchmark result.

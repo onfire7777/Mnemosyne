@@ -1,6 +1,6 @@
 # Tier-B Completion - Self-Hosted Strict Parity (historical design; superseded)
 
-Status: approved 2026-07-05. Branch: `tier-b/completion-selfhosted` off `main @ 4c59c43`.
+Status: approved 2026-07-05. Branch: `tier-b/completion-selfhosted` off `main @ bc0f81e`.
 Superseded 2026-07-07 by the attested `capture-bc10` bundle: 29/29
 deployment-soak green, release-audit `ok:true` with 0 findings, and offline
 `production-evidence-verify` `ok:true` with fingerprint

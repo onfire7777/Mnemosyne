@@ -542,7 +542,7 @@ def test_phase15_reports_are_separate_synthetic_receipts(tmp_path, monkeypatch):
     assert warm["raw_artifacts"]["result_digest"] != concurrent["raw_artifacts"]["result_digest"]
     assert warm["official_claim"] is False
     assert concurrent["official_claim"] is False
-    stale_sha = "c3a16b7e0d1e593f6957a291f2ae61cd469a7359"
+    stale_sha = "ffaf13b91af892d3459233c1bc3e770b0a25d514"
     # A local run can have uncommitted work. Bind the reported cleanliness to
     # the actual checkout instead of mislabeling fresh output as a clean run.
     assert warm["identity"]["clean_tree"] is expected_clean

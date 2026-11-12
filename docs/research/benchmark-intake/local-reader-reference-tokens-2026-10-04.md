@@ -1,6 +1,6 @@
 # Offline Qwen reference-tokenizer measurement
 
-Source inspected: `4f240e3672271964dc58d336cdf7f495f4b0b0dc`.
+Source inspected: `f346496cf238108f9153a8be0973d6050c915865`.
 This advances the context prerequisite for Plan A S1 and native benchmark
 execution. It is not a QA result, a resource admission or a changed candidate.
 

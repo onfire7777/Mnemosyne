@@ -8,7 +8,7 @@ source_kind: put_page
 
 # Mnemosyne Phase 8.2 query-prefix source wiring (2026-07-03)
 
-Commit `d56093cb90652a103ac94dace471f45dcbf5a613` on `/Users/admin/Mnemosyne` branch `phase3/providers-consolidation` closes the source-side query-prefix portion of Phase 8.2 without claiming deployment evidence.
+Commit `fca2e4faeb811cf8c6c099f5cfb7fb75f1b00df5` on `/Users/admin/Mnemosyne` branch `phase3/providers-consolidation` closes the source-side query-prefix portion of Phase 8.2 without claiming deployment evidence.
 
 What changed:
 - `HttpEmbeddingProvider.embed()` still sends document text unchanged.

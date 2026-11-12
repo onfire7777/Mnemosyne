@@ -1,6 +1,6 @@
 # Memory effectiveness follow-up
 
-This change addresses the five functional gaps found after `f2b8725f`. It does
+This change addresses the five functional gaps found after `cee67c6b`. It does
 not claim a competitive result against Anthropic or substitute synthetic
 outcomes for the personal memory store's actual experience.
 

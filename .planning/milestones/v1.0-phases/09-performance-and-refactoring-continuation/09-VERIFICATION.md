@@ -182,7 +182,7 @@ claim provider bake-off evidence.
 - `node /Users/admin/.codex/get-shit-done/bin/gsd-tools.cjs verify phase-completeness 09`
   passed.
 - GitHub CI run `28999614665` attempt 2 passed for
-  `29a50e8737844e98e955ac1a21fe908ccb3b7c94`, including the macOS arm64 and
+  `793b52b6e5ba2650f20d7f0d042ca74464d2cd3d`, including the macOS arm64 and
   Linux x86_64 `Native wheels` jobs with the `Install built wheel and smoke
   import` step green.
 

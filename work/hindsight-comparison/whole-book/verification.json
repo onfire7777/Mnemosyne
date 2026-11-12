@@ -1,5 +1,5 @@
 {
-  "baseline": "b63b34616f65e31457f3bc243b158d479f734e68",
+  "baseline": "6673f84400face6f5378d22879af81e6bbd3f008",
   "suites": {
     "book": {
       "tests": "171",
@@ -20,10 +20,10 @@
   "book_pdf_parser": "pypdf 6.10.0 from existing bundled runtime",
   "benchmark_run": false,
   "model_provider_calls": false,
-  "source_commit": "9340354c7cc20601d736dbb56d19d073e4b4ae43",
+  "source_commit": "84c832788bd63a5ea1b4a4c5f4c99b7ac3c27247",
   "remote_confirmation": {
     "ref": "refs/heads/main",
-    "observed_commit": "9340354c7cc20601d736dbb56d19d073e4b4ae43",
+    "observed_commit": "84c832788bd63a5ea1b4a4c5f4c99b7ac3c27247",
     "method": "git ls-remote --heads origin main"
   }
 }

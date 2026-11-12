@@ -9,7 +9,7 @@ project: Mnemosyne
 
 # Mnemosyne M15 canonical replay pilot delivery
 
-PR #84 merged to canonical `main` as `e0dd41594cec890f598718160f919c13eee1e552` after exact-head CI, independent review, and clean mergeability gates.
+PR #84 merged to canonical `main` as `160cc933f8b39f33470145f6455e40b8147f5b02` after exact-head CI, independent review, and clean mergeability gates.
 
 The development-only M15 replay pilot now provides canonical replay projections and digests for M01, bounded M03, and M10, plus a composed M01 -> M03 -> M10 cassette with seven enforced rails: deduplication, current state, historical state, deterministic answer, abstention, custody completeness, and canonical equality.
 

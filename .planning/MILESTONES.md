@@ -16,7 +16,7 @@
 - All 23 canonical requirements resolve through one-owner, three-source traceability with complete verification and Nyquist coverage.
 - Local, SQLite, and PostgreSQL contracts, production identity/security/retrieval gates, native wheels, and provider conformance are exact-SHA CI verified.
 
-**Git range:** initial v1.0 implementation through `c86c0c4f7150ca30d746372feabd232f7da3bdc1`
+**Git range:** initial v1.0 implementation through `9c89eb920776fdf67e198a9d2384183448f331d2`
 
 **What's next:** Plan B public benchmark harness and neutral governance in parallel with Plan A multi-hop capability work.
 

@@ -1,6 +1,6 @@
 {
   "schema_version": "mnemosyne.local-verification/v1",
-  "source_commit": "ad8b1ac5",
+  "source_commit": "da971159",
   "environment": "fresh isolated environment; Mnemosyne distribution not installed",
   "python": "3.11.16",
   "architecture": "arm64",

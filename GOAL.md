@@ -20,19 +20,19 @@ remove or reinterpret its arguments as part of roadmap completion.
 
 ## Status reconciliation — 2026-10-04
 
-Source inspected at `3c21be5d`. This dated reconciliation supersedes older
+Source inspected at `f2903662`. This dated reconciliation supersedes older
 prospective status statements below; historical receipts and candidate SHAs
 remain unchanged. Source delivery is distinct from measured acceptance.
 
-- N12 result-v2 dispatch landed in PR #139 (`4af5b20c`); REPRO-001 bundle
-  standard landed in PR #144 (`54dea434`). REPRO-002 remains evidence-blocked.
-- Phase 15 S2 source/development closure landed through PR #160 (`cccc2700`),
-  S3 through #162/#164 (`7db0c810`, `8691bbd6`), S4 report through #177
-  (`336d34b4`), and S5 research-only go/no-go through #199 (`118f1e51`).
+- N12 result-v2 dispatch landed in PR #139 (`73bea352`); REPRO-001 bundle
+  standard landed in PR #144 (`525d2a13`). REPRO-002 remains evidence-blocked.
+- Phase 15 S2 source/development closure landed through PR #160 (`75ae284f`),
+  S3 through #162/#164 (`50e52925`, `b29ba998`), S4 report through #177
+  (`315c7770`), and S5 research-only go/no-go through #199 (`a6933b51`).
   These deliveries do not satisfy official security/calibration, real provider,
   protected QA, exact-scale, or physical Windows/Linux 8 GiB acceptance.
-- M06 Stage A landed in #202 (`cff84192`) and Stage B registry reachability
-  in #205 (`74f23509`). The development cell remains PROPOSED, non-publishable,
+- M06 Stage A landed in #202 (`d2fa3084`) and Stage B registry reachability
+  in #205 (`f5b113b7`). The development cell remains PROPOSED, non-publishable,
   and does not establish whole-memory capability or public admission.
 - Phase 12 protected QA, official dataset/provider evidence, REPRO-002,
   physical 8 GiB acceptance, and publication/launch gates remain open.
@@ -67,7 +67,7 @@ highest-value thing this loop can do, and unlike the evidence gates it is
 almost entirely *ungated*: exact plans, deterministic fixtures, scorers, and
 tests are ordinary source work needing no operator authorization.
 
-Measured at `main@b8673031`:
+Measured at `main@2c6a63f1`:
 
 - implemented (`eval/public/wmbs_*.py`): **M01, M02, M04, M05, M10** — 5 of 20
 - registry-admitted: **M01, M10** — 2 of 20
@@ -172,71 +172,71 @@ package statuses must be recomputed from current main after every merge; the
 map is not blanket permission to launch stale or overlapping lanes.
 
 One carve-out applies and has never closed. It arose while the GoalEx lifecycle
-delivery was deferred: `main`'s copy of that map was two merges behind (`Baseline: main@4a891042`; its
+delivery was deferred: `main`'s copy of that map was two merges behind (`Baseline: main@a6a92ac9`; its
 merged-baseline list ended at PR #88, so it carried neither a PR #89 nor a
-PR #90 row), and the recomputed map at `Baseline: main@061c2e1c` existed only on
+PR #90 row), and the recomputed map at `Baseline: main@94c0c96a` existed only on
 the controller branch, which made the branch-resident map the operative
 revision. **That carve-out is now reduced to receipt scope.** PR #91 was the
 deferred GoalEx-owner delivery: it landed the recomputed map, `GOAL.md`,
 `.planning/STATE.md`, the pilots-plan PR #90 checkpoint, and the round-record
-backlog on `main` (merge `e157e035`, exact-head CI `30686224929`, post-merge CI
+backlog on `main` (merge `f75b58cc`, exact-head CI `30686224929`, post-merge CI
 `30687385118`), so the bulk gap is closed and `main`'s map is no longer two
 merges behind. That receipt-level remainder has since been delivered too:
-`T4` merged as PR #92 at `main@39cfa67a` (exact-head CI `30693874030`,
+`T4` merged as PR #92 at `main@c56e65fb` (exact-head CI `30693874030`,
 post-merge CI `30694818231`), landing the recomputation to
-`Baseline: main@e157e035` with `T3` as `MERGED` plus PR #91's receipt block, and
+`Baseline: main@f75b58cc` with `T3` as `MERGED` plus PR #91's receipt block, and
 the matching `GOAL.md` and `.planning/STATE.md` text, on `main`. PR #93 then
-merged independently from a separate lane at `main@effc5e03` (exact-head CI
+merged independently from a separate lane at `main@7aabe560` (exact-head CI
 `30718912376`, post-merge CI `30719645207`), so the carve-out's explicit lapse
 rule fired. The residue was no longer receipt-only: it contained an undelivered
 test contract and the r39, r40, and r41 round records. Exactly one node, `T5`,
 was admitted to discharge that bounded residue. It admitted no source node.
 This terminates because the lapse was triggered by an independent external
 merge, not by the residue regenerating itself. `T5` merged as PR #94 at
-`main@2091d01c` (exact head `41b21305`,
+`main@fe7e6adc` (exact head `41e7ac3e`,
 exact-head CI `30730185494`, post-merge CI `30730918452`). It discharged the
 test-contract residue without admitting a source node, but omitted the r42
 record from its own `docs/plans/` lease. `T6` discharged that residue and the
-r42/r43 records as PR #95 at `main@42abaab7` (exact head `d7c0938f`, exact-head
+r42/r43 records as PR #95 at `main@89f7ff82` (exact head `b05ee030`, exact-head
 CI `30737466988`, post-merge CI `30738303497`). It admitted no source node and
 no successor node; this branch-resident recomputation is its own accepted
 standing-condition residue.
 
-PRs #96-#99 then advanced canonical `main` through `main@d7eefb7c`; PR #99
+PRs #96-#99 then advanced canonical `main` through `main@e5d0f6a9`; PR #99
 delivered `T7` and `T8`, the documentation-and-tests-only disclosure and
 inventory nodes. PR #101 discharged PR #99's baseline lapse at
-`main@58ae5bba`, and PRs #103, #106, and #107 advanced `main` through
-`main@7f305090` without changing the whole-memory admission boundary. PR #100
+`main@39e25411`, and PRs #103, #106, and #107 advanced `main` through
+`main@518fdb8b` without changing the whole-memory admission boundary. PR #100
 then delivered `T9` as the bounded M03 registry-reachability node: exact head
-`e072dda5a9e7ef078d317156c49c54bbee7a5124`, all required exact-head CI and
+`0a9e5bedd991409e58c4317f2fa48b78c3458c1e`, all required exact-head CI and
 Greptile green in run `31854371658`, merge
-`b3570937918c7de40cd89ea543fab9e7b16f7471` at
+`b84b351bcd5a0397065821f60db425ae8c85a13a` at
 `2026-08-15T01:12:26Z`, and successful post-merge CI `31855873247`. The
 subsequent PR #105 preserved hash-bound LF text and made installer/custody tests
 explicit about native-Windows and POSIX execution contracts: exact head
-`d60857fdf61122106eeede789432dd5bac955137`, all required exact-head CI green in
-run `31856191898`, merge `7b6c5a121107ee80533a5b4ec794e602e1e1ab33`
+`c1cbae81a579ea1f8398c98074b522aae7209d7e`, all required exact-head CI green in
+run `31856191898`, merge `66c989ef2fa599b41388975ad0516ff8d7f0e7e7`
 at `2026-08-15T01:46:23Z`. Its post-merge run `31857410462` failed solely at
 `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
 (1 failed, 4709 passed, 151 skipped, 191 deselected) because PR #105 was absent
 from the lifecycle authorities. PR #108 repaired that lapse from exact head
-`bda5588abc2a181c1bd7b5ae17ca31deeae7d85e`, with all required exact-head CI
+`2d8409c055f7f2eeb6453cd3b7caab002e4676e1`, with all required exact-head CI
 green in run `31859014653`, and merged as
-`7c5264d815d44c375173dcd1e8ab57783a397a7e` at
+`b87331b2eaad7576728e07941983972ce19b906b` at
 `2026-08-15T02:45:01Z`; post-merge run `31859997325` succeeded. Controller PR
 #113 then delivered the three-file `T10` reservation from exact head
-`c1bf6a10335e30fe797c54a42285922552647a9e`, with all required exact-head CI
+`37afb7e839277746b76baf01775a6f072deb2b09`, with all required exact-head CI
 green in run `31863057094`, as merge
-`6929fd3703ff262d3264b58a5af90d506a804da2` at
+`fbbd5c0ccebe9c4d821bcf619adec5d6cf1b2c24` at
 `2026-08-15T04:22:14Z`; post-merge run `31864254074` succeeded. PR #109 then
 merged from audited topology head
-`cb44f21296fc22cf92f847b8201a6881e915400c`, after all required and native-
+`f07d0733c8d9c9bfb5d5015c4a3ed57fa185029e`, after all required and native-
 Windows checks passed in exact-head run `31865413163`, as
-`6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4` at
+`83444101f65c49c4d70d32bcd5a4362f2655367d` at
 `2026-08-15T05:24:36Z`. That merge raced this lifecycle amendment; post-merge
 run `31866875258` completed successfully at `2026-08-15T05:51:12Z`; no later
 stack edge opened before that gate closed. The
-carve-out is therefore recomputed from `main@6801fbd0`. `T7`, `T8`, and `T9` are all
+carve-out is therefore recomputed from `main@83444101`. `T7`, `T8`, and `T9` are all
 **MERGED**, and no writer remains admitted from that wave. None is a source
 node or admits a successor node. `T9` changed reachability only: M03 remains
 `PROPOSED` / `publishable:false` / `pbpp_headline_eligible:false`, with no
@@ -244,17 +244,17 @@ fixture, scorer, schema, admission-state, or progress-counter change.
 
 Controller node `T10` reserves the Windows portability stack by immutable
 non-lifecycle content anchors: PR #109
-`08397dab1220c87a3e8e3a92bf353cc65b68dba3` -> PR #110
-`7e282b7c95f51a6446e25d92f8284de261551703` -> PR #111
-`226e4416a4e76671d7ca079fe97664b8617f5bfa` -> PR #112
-`259a6361355ab80cbbfa75ca1a6de6ec4b1f9a96`. Repository ruleset `19157561`
+`0b07441e3641608177f9500d28a305fffdca87d6` -> PR #110
+`212af50442f3c50525d4eec7a698427ac523ebe2` -> PR #111
+`4c88322843923b3afe611d0aa2eea3383e12c2e5` -> PR #112
+`1ad03788618e0c2659f367dc5babbc03924da5fc`. Repository ruleset `19157561`
 enforces strict required-check freshness, so PR #113 correctly made those
 pre-controller full heads behind `main`. Their first topology-only refresh onto
-`main@6929fd37` produced PR #109
-`cb44f21296fc22cf92f847b8201a6881e915400c` -> PR #110
-`26f95a09827d3e56ffe86e65b7db7493ecf79c73` -> PR #111
-`02a724e9333a47a1cb7096d59b558ab80c1e5300` -> PR #112
-`c8d95dafe5131f965591b84aeabb095fac34f1b6`. Each refreshed tree is byte-for-
+`main@fbbd5c0c` produced PR #109
+`f07d0733c8d9c9bfb5d5015c4a3ed57fa185029e` -> PR #110
+`e5bfea116e6c059309e9bafecbbdb807e1e195ee` -> PR #111
+`5d17b0044ab6fb053536c30421043c8e89961cc4` -> PR #112
+`5f79d384ec0ace10c18bbfca84b5dda153c639db`. Each refreshed tree is byte-for-
 byte identical to its content anchor outside `GOAL.md`, `.planning/STATE.md`,
 and the lease map. Exact-head CI runs `31865413163`, `31865422216`,
 `31865430468`, and `31865438529` all completed successfully, including every
@@ -265,7 +265,7 @@ findings; its binary diff hash exactly matches the approved cumulative stack at
 PR #109's sequencing deviation is preserved in the lease-map receipt rather
 than silently reclassified. PR #114 then delivered the topology amendment, and
 PRs #110, #111, and #112 merged in the required serialized order with exact-
-head and post-main CI green at every edge, ending at `main@61f55b94`. Their
+head and post-main CI green at every edge, ending at `main@661ebbed`. Their
 immutable-anchor and lifecycle-parent proofs remain the audit basis; no Windows
 stack writer remains open.
 Topology-only merges of current `main` or the immediately
@@ -356,7 +356,7 @@ remediation merged through PRs #79-#80; reviewed development pilots M01/M10,
 M12/M13, M03, and M15 merged through PRs #81-#84. PR #85 froze the Phase
 13-15 execution contracts, and PR #86 merged the development-only scheduled
 regression workflow as
-`main@661343ce05186e9a7f0f0740d1edef7c23532857`:
+`main@60b8273175aca2cbdec36364d307075c6c0f7f1a`:
 
 - `docs/superpowers/specs/2026-07-26-whole-memory-benchmark-standard-design.md`
 - `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
@@ -380,70 +380,70 @@ reference validation, and the bounded M01/M03/M10/M12/M13/M15 development
 pilots are merged through PR #84. PR #85 froze one Phase 13 plan, one Phase 14
 plan, and four ordered Phase 15 plans without claiming their gated evidence.
 PR #86 merged the two-file scheduled-regression source at exact head
-`baf5c1852593885e37eed75da69b02d93e1bff11`; manual development operability
+`8d64afd8fb344f45ddd4c0adde2fcef2140f8365`; manual development operability
 run `30561430522` and exact post-merge main CI run `30561266140` passed on the
 exact merge commit. PR #87 then merged the canonical truth reconciliation at
-`main@2ba4ed80` (post-merge CI `30566984814`), PR #88 merged public-regression
-README documentation plus hardened workflow contract tests at `main@4a891042`
+`main@5b07f320` (post-merge CI `30566984814`), PR #88 merged public-regression
+README documentation plus hardened workflow contract tests at `main@a6a92ac9`
 (post-merge CI `30659705054`), and PR #89 merged the post-PR-#88 recomputation
-of the dependency/write-lease map and `.planning/STATE.md` at `main@a8e9444c`
+of the dependency/write-lease map and `.planning/STATE.md` at `main@064cb4fe`
 (post-merge CI `30672194635`). PR #90 then landed the previously stranded
 M12/M13 development gap disclosures in `eval/public/README.md`, their two
 pinning test suites, a cert-rotator lock-timeout flake fix, and the
-pilots-plan delivery checkpoints at `main@061c2e1c` (exact-head CI
+pilots-plan delivery checkpoints at `main@94c0c96a` (exact-head CI
 `30679262270`, post-merge CI `30680201900`). PR #91 then delivered the stranded
-GoalEx lifecycle backlog at `main@e157e035` (exact-head CI `30686224929`,
+GoalEx lifecycle backlog at `main@f75b58cc` (exact-head CI `30686224929`,
 post-merge CI `30687385118`). PR #92 then delivered the receipt-level
-lifecycle update carried by lease-map node `T4` at `main@39cfa67a` (exact-head
+lifecycle update carried by lease-map node `T4` at `main@c56e65fb` (exact-head
 CI `30693874030`, post-merge CI `30694818231`). PR #93 then merged the
 fail-closed round-cleanup and ignored-state custody contract at
-`main@effc5e03` (exact-head CI `30718912376`, post-merge CI `30719645207`),
-then PR #94 delivered `T5` at `main@2091d01c` (exact head `41b21305`,
+`main@7aabe560` (exact-head CI `30718912376`, post-merge CI `30719645207`),
+then PR #94 delivered `T5` at `main@fe7e6adc` (exact head `41e7ac3e`,
 exact-head CI `30730185494`, post-merge CI `30730918452`). PR #95 then
-delivered `T6` at `main@42abaab7`
-(exact head `d7c0938f`, exact-head CI `30737466988`, post-merge CI
+delivered `T6` at `main@89f7ff82`
+(exact head `b05ee030`, exact-head CI `30737466988`, post-merge CI
 `30738303497`). PR #96 then independently delivered the development-only
-M02/M04/M05 evaluation oracles at `main@088e2f31` (exact head `1050749a`, CI
+M02/M04/M05 evaluation oracles at `main@82a2fb65` (exact head `e9206707`, CI
 `30744318093`). PR #97 then merged the round-43 review adjudication and
-controller reconciliation at `main@71e492b4` (exact head `13c05d65`, exact-head
+controller reconciliation at `main@3d0ad051` (exact head `97745878`, exact-head
 CI `30774834604`, post-merge CI `30775783472`), and PR #98 merged the
 documentation-only correction of PR #97's "retired" claim back to "paused" at
-`main@b8673031` (exact head `b49b0b35`, exact-head CI `30787319275`, post-merge
+`main@2c6a63f1` (exact head `d0021d12`, exact-head CI `30787319275`, post-merge
 CI `30788531829`). PR #99 then merged the `T7`/`T8` disclosure-and-admission
-work at `main@d7eefb7c` (exact head `2375aba5`, exact-head CI `30808291831`,
+work at `main@e5d0f6a9` (exact head `5cc1c866`, exact-head CI `30808291831`,
 post-merge CI `30810160121`, which failed the lapse detector because PR #99
 landed without pre-recording itself). PR #101 discharged that lapse at
-`main@58ae5bba`; PRs #103, #106, and #107 subsequently advanced the recorded
-history through `main@7f305090`. PR #100 then merged `T9` at
-`main@b3570937`: exact head
-`e072dda5a9e7ef078d317156c49c54bbee7a5124`, all required exact-head CI and
+`main@39e25411`; PRs #103, #106, and #107 subsequently advanced the recorded
+history through `main@518fdb8b`. PR #100 then merged `T9` at
+`main@b84b351b`: exact head
+`0a9e5bedd991409e58c4317f2fa48b78c3458c1e`, all required exact-head CI and
 Greptile green in run `31854371658`, merge
-`b3570937918c7de40cd89ea543fab9e7b16f7471` at
+`b84b351bcd5a0397065821f60db425ae8c85a13a` at
 `2026-08-15T01:12:26Z`, and successful post-merge CI `31855873247`. PR #105
-then merged at exact head `d60857fdf61122106eeede789432dd5bac955137`
+then merged at exact head `c1cbae81a579ea1f8398c98074b522aae7209d7e`
 after all required exact-head CI passed in run `31856191898`, as merge
-`7b6c5a121107ee80533a5b4ec794e602e1e1ab33` at
+`66c989ef2fa599b41388975ad0516ff8d7f0e7e7` at
 `2026-08-15T01:46:23Z`. Post-merge run `31857410462` failed solely at the
 canonical-baseline traceability test (1 failed, 4709 passed, 151 skipped, 191
 deselected) because PR #105 was absent from the lifecycle authorities. PR #108
 repaired that lapse from exact head
-`bda5588abc2a181c1bd7b5ae17ca31deeae7d85e`, all-required-green exact-head CI
-run `31859014653`, merge `7c5264d815d44c375173dcd1e8ab57783a397a7e`
+`2d8409c055f7f2eeb6453cd3b7caab002e4676e1`, all-required-green exact-head CI
+run `31859014653`, merge `b87331b2eaad7576728e07941983972ce19b906b`
 at `2026-08-15T02:45:01Z`, and successful post-merge run `31859997325`. The
 controller receipt then delivered as PR #113 from exact head
-`c1bf6a10335e30fe797c54a42285922552647a9e`, all-required-green exact-head CI
-run `31863057094`, merge `6929fd3703ff262d3264b58a5af90d506a804da2`
+`37afb7e839277746b76baf01775a6f072deb2b09`, all-required-green exact-head CI
+run `31863057094`, merge `fbbd5c0ccebe9c4d821bcf619adec5d6cf1b2c24`
 at `2026-08-15T04:22:14Z`, and successful post-merge run `31864254074`. PR
-#109 then merged from exact head `cb44f21296fc22cf92f847b8201a6881e915400c`
+#109 then merged from exact head `f07d0733c8d9c9bfb5d5015c4a3ed57fa185029e`
 after all required/native checks passed in run `31865413163`, as
-`6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4` at
+`83444101f65c49c4d70d32bcd5a4362f2655367d` at
 `2026-08-15T05:24:36Z`; post-main run `31866875258` succeeded. The
-current canonical baseline is `main@f688c747`. `T5` and `T6` are discharged.
+current canonical baseline is `main@d181666b`. `T5` and `T6` are discharged.
 PR #115 is merged at that baseline, but its reproduced M02 Stage-B review
 defects are not waived; a serialized corrective successor remains mandatory
 before M02 can be treated as clean or publishable. PR #117 delivered the
 coupled lifecycle reconciliation and topology-verifier remediation as merge
-`d11ffe5e61511269efcf38ccd2ad064564580109` on 2026-08-31; it owns no active writer.
+`752e1d1672ceb7c1a9b05301d296d42c250e90b2` on 2026-08-31; it owns no active writer.
 Through PR #96
 the recorded position was that no GoalEx lifecycle or source node is currently
 admitted; PR #99 admitted and delivered `T7` and `T8`, and PR #100 has now
@@ -489,16 +489,16 @@ records touched since round 14 without being delivered through a PR: 23 new
 That delivery kept the lifecycle and public-harness leases unmixed; it was
 carried by lease-map node `T3`, now `MERGED`. The wave that held it is closed
 and admits no source node. The lease map was recomputed from the
-resulting `main@e157e035` and carried PR #91's own receipt block; that
+resulting `main@f75b58cc` and carried PR #91's own receipt block; that
 recomputation was branch-resident until PR #92 — the documentation-only
 receipt-level lifecycle update carried by lease-map node `T4`, the sole writer
 admitted from that baseline, which admitted no source node — landed it,
 this file's and `.planning/STATE.md`'s matching post-merge text, and the
-round-38 and round-39 records on `main` at `39cfa67a`. PR #93's independent
-merge at `main@effc5e03` then lapsed the branch-resident carve-out. `T5` was the
+round-38 and round-39 records on `main` at `c56e65fb`. PR #93's independent
+merge at `main@7aabe560` then lapsed the branch-resident carve-out. `T5` was the
 one bounded delivery admitted to discharge the resulting non-receipt-only
-residue and merged as PR #94 at `main@2091d01c`; it admitted **no source node**.
-`T6` then merged as PR #95 at `main@42abaab7` (exact head `d7c0938f`,
+residue and merged as PR #94 at `main@fe7e6adc`; it admitted **no source node**.
+`T6` then merged as PR #95 at `main@89f7ff82` (exact head `b05ee030`,
 exact-head CI `30737466988`, post-merge CI `30738303497`) and admitted no source
 node or successor node. No lifecycle writer is now admitted. The
 plan-doc backlog is
@@ -507,7 +507,7 @@ checkpoint is a correction plus PR #90's receipt block — it rewrites one stale
 paragraph and adds a new twelve-line `Gap-disclosure delivery:` receipt in the
 M12/M13 checkpoint section: PR #90 shipped
 `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
-without updating its earlier paragraph, so canonical `main@061c2e1c` still
+without updating its earlier paragraph, so canonical `main@94c0c96a` still
 stated that the M12/M13 gap-disclosure paragraphs and their pinning tests
 "are not on main and are still pending PR delivery" — a claim that same
 commit falsified. That sentence was known-stale on `main` from PR #90 until
@@ -517,7 +517,7 @@ those boxes record the plan as written at the time and are not a delivery
 signal, because each round's merged receipts are recorded here and in the
 lease map rather than back-filled into the round record. P13-C's first actual
 scheduled-cadence receipt is discharged by successful `schedule` run
-`30807305055` on `b8673031a80158c49d552a4b3647829d213243bd`, started
+`30807305055` on `2c6a63f12291eb938b2d284c938298fc035d6105`, started
 `2026-08-03T10:52:57Z`; job `91665545558` and its fixed public-contract test
 step succeeded. The GitHub run/job metadata was verified on 2026-09-05 and is
 retained in the lease map. BENCH-007 is Complete, with the requirement,
@@ -527,9 +527,9 @@ Every official/upstream benchmark run remains open.
 
 The obsolete Mac signed-publication reservation is released by the owner-confirmed unavailability
 disposition above. PR #69 merged the signed-publication source as
-`a4e80b5a67b0437d3a864af0fe347febfe32e58b`; PR #70 merged its delivery receipt
-as `eeb8765ea1f4cc924002ad8234df50326e227aed`. Both are ancestors of inspected
-`origin/main@3281e61ed6b3d077628e3fd03ce0ec8de22cde18`, where
+`d8f131f85cbc708b2e81cca25f3fe0aed8e471b2`; PR #70 merged its delivery receipt
+as `882f7fb38311188244b9cd1cda314241ef1419a2`. Both are ancestors of inspected
+`origin/main@e29ea51bf1b76d6fa50958eaf0bdde4054373642`, where
 `leaderboard/publish.py` has blob `f6506215ece4dba8d37ce07829b5c22d84020963`.
 The release relies on the owner's confirmation, not an inference that the
 unavailable worktree was clean. N12 is READY FOR ADMISSION after this receipt
@@ -804,14 +804,14 @@ Achieved for the current development-source milestone:
   development operability run `30561430522` and passing exact post-merge main
   CI run `30561266140`;
 - documentation- and contract-test-only reconciliation through PR #87
-  (`main@2ba4ed80`, post-merge CI `30566984814`), PR #88 (`main@4a891042`,
-  post-merge CI `30659705054`), PR #89 (`main@a8e9444c`, post-merge CI
-  `30672194635`), PR #90 (`main@061c2e1c`, exact-head CI `30679262270`,
-  post-merge CI `30680201900`), PR #91 (`main@e157e035`, exact-head CI
-  `30686224929`, post-merge CI `30687385118`), PR #92 (`main@39cfa67a`,
+  (`main@5b07f320`, post-merge CI `30566984814`), PR #88 (`main@a6a92ac9`,
+  post-merge CI `30659705054`), PR #89 (`main@064cb4fe`, post-merge CI
+  `30672194635`), PR #90 (`main@94c0c96a`, exact-head CI `30679262270`,
+  post-merge CI `30680201900`), PR #91 (`main@f75b58cc`, exact-head CI
+  `30686224929`, post-merge CI `30687385118`), PR #92 (`main@c56e65fb`,
   exact-head CI `30693874030`, post-merge CI `30694818231`), and PR #93
-  (`main@effc5e03`, exact-head CI `30718912376`, post-merge CI `30719645207`),
-  and PR #94 (`main@2091d01c`, exact head `41b21305`, exact-head CI
+  (`main@7aabe560`, exact-head CI `30718912376`, post-merge CI `30719645207`),
+  and PR #94 (`main@fe7e6adc`, exact head `41e7ac3e`, exact-head CI
   `30730185494`, post-merge CI `30730918452`), none of which
   changed a benchmark, measurement, admission state, or publication claim.
 
@@ -888,29 +888,29 @@ for field, path in (
 ):
     require(receipt[field] == hashlib.sha256(path.read_bytes()).hexdigest(), field)
 PY
-git merge-base --is-ancestor 661343ce05186e9a7f0f0740d1edef7c23532857 main
-git merge-base --is-ancestor a95fe4d291093253f8ce49adff32ba875a35e884 main
-git merge-base --is-ancestor baf5c1852593885e37eed75da69b02d93e1bff11 main
-git merge-base --is-ancestor 061c2e1c13cbf1fd5324361a6ff61f47cd2a6534 main
-git merge-base --is-ancestor e157e0350c503c9cde4aca0eff71d643a4adb200 main
-git merge-base --is-ancestor 39cfa67aa7692bf47d5dde5842af3d8ec0736bb0 main
-git merge-base --is-ancestor effc5e039505c09e575ca5e4aeb2b96949676366 main
-git merge-base --is-ancestor 2091d01c8cea22da49a50bb1f0859d8108102f29 main
-git merge-base --is-ancestor 42abaab7ba4fa83f9838c3d32ee96db4256bfcad main
-git merge-base --is-ancestor 088e2f31003e3a7e96119bc8cdba162252226ac1 main
-git merge-base --is-ancestor 71e492b4507d84e6631fef851cec820bcd80215b main
-git merge-base --is-ancestor b8673031a80158c49d552a4b3647829d213243bd main
-git merge-base --is-ancestor d7eefb7c3595e786851a7d416ba54ea3997a8b6c main
-git merge-base --is-ancestor b3570937918c7de40cd89ea543fab9e7b16f7471 main
-git merge-base --is-ancestor 7b6c5a121107ee80533a5b4ec794e602e1e1ab33 main
-git merge-base --is-ancestor 7c5264d815d44c375173dcd1e8ab57783a397a7e main
-git merge-base --is-ancestor 6929fd3703ff262d3264b58a5af90d506a804da2 main
-git merge-base --is-ancestor 6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4 main
-git merge-base --is-ancestor c4337f6315833b930cba2d31c7e95778c4f6ddd5 main
-git merge-base --is-ancestor 6241984b15e85171bc036100fa5e20e05588bd81 main
-git merge-base --is-ancestor f95aabaca85ed6cbfbda66c0ceea12df22bfdd00 main
-git merge-base --is-ancestor 61f55b94a6f878973437d075adfcecf2cb684ae6 main
-git merge-base --is-ancestor f688c74757365a9d946100687a04288cde12a7fc main
+git merge-base --is-ancestor 60b8273175aca2cbdec36364d307075c6c0f7f1a main
+git merge-base --is-ancestor a9adfb86d6bf422a108e691b0f401beafc2b314f main
+git merge-base --is-ancestor 8d64afd8fb344f45ddd4c0adde2fcef2140f8365 main
+git merge-base --is-ancestor 94c0c96a399f0b88106a6d7c117d304195c0b204 main
+git merge-base --is-ancestor f75b58cce2f01c94158df0aa0d0e16d39545b333 main
+git merge-base --is-ancestor c56e65fbe9bcd9b0ae249694f563fc104a5fea03 main
+git merge-base --is-ancestor 7aabe560facf9ac5ddae8f2944927045ef273492 main
+git merge-base --is-ancestor fe7e6adcef662ad34b078142d9c99f5d9486103c main
+git merge-base --is-ancestor 89f7ff8205ed586f92528bd11bee6273f0e34684 main
+git merge-base --is-ancestor 82a2fb653891bbcbc231ae33f676e9669e13118b main
+git merge-base --is-ancestor 3d0ad05104185924c206ccf60e367e1ee4d85369 main
+git merge-base --is-ancestor 2c6a63f12291eb938b2d284c938298fc035d6105 main
+git merge-base --is-ancestor e5d0f6a9c22d13cfb33adbed0ea66ac7404e1066 main
+git merge-base --is-ancestor b84b351bcd5a0397065821f60db425ae8c85a13a main
+git merge-base --is-ancestor 66c989ef2fa599b41388975ad0516ff8d7f0e7e7 main
+git merge-base --is-ancestor b87331b2eaad7576728e07941983972ce19b906b main
+git merge-base --is-ancestor fbbd5c0ccebe9c4d821bcf619adec5d6cf1b2c24 main
+git merge-base --is-ancestor 83444101f65c49c4d70d32bcd5a4362f2655367d main
+git merge-base --is-ancestor 94f1afd2d5bf5282764f4d1582e2425757490891 main
+git merge-base --is-ancestor e4121325f0ef0f75a6c2e47679882a01d0f75b39 main
+git merge-base --is-ancestor ba32c2cef6851d73a5eaf1a031228c7dd891c586 main
+git merge-base --is-ancestor 661ebbed48d78a846c507cfb8ec4764e4e7e9a1e main
+git merge-base --is-ancestor d181666b61cd483e50326f42eb59328f6c8f9da4 main
 # Exact canonical baseline. Ancestry alone also passes when `main` carries later,
 # unrecorded merges, which is precisely the condition under which the Authority
 # carve-out lapses. This equality is the lapse detector: if it fails, `main` has
@@ -924,7 +924,7 @@ git merge-base --is-ancestor f688c74757365a9d946100687a04288cde12a7fc main
 # permanently red. The suite enforces the same invariant in the form that
 # survives its own merge — `tests/test_planning_traceability.py` fails if any PR
 # merged into `main` after the recorded baseline is absent from the lease map.
-test "$(git rev-parse main)" = "f688c74757365a9d946100687a04288cde12a7fc"
+test "$(git rev-parse main)" = "d181666b61cd483e50326f42eb59328f6c8f9da4"
 test -f .planning/STATE.md
 test -f .planning/ROADMAP.md
 test -f .planning/REQUIREMENTS.md

@@ -2,7 +2,7 @@
 phase: 10-public-harness-and-neutral-governance-foundation
 status: passed
 verified: 2026-07-10
-audited_sha: ed6eb98300f0c330d43eeb85f68548d77f40edfc
+audited_sha: 8db78f7baa3462d81abc46915350be61c6a6c02b
 score: 100/100-source-scope
 requirements-complete:
   - BENCH-001
@@ -51,7 +51,7 @@ ratification owns final GOV-001 satisfaction.
 ## Exact-SHA CI External Blocker
 
 GitHub Actions run `29128327918` for closure SHA
-`e6b437bd294b01734ff470f9e5ff1b6b2b341ce1` was retried once. Every job was
+`703ddb6246c2805779912471ad5526a6e6bf2638` was retried once. Every job was
 rejected before checkout with GitHub's annotation that recent account payments
 failed or the spending limit must be increased. This is not recorded as a
 passing CI run. Local full/focused/lint gates are green; exact-SHA CI remains an

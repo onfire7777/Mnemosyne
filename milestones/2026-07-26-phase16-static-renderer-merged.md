@@ -10,7 +10,7 @@ source_kind: put_page
 
 # Mnemosyne Phase 16 static renderer merged
 
-PR #68 merged normally to main as b0ae16caab02d49bc96f0467cb34f997cfd5724f after exact-head Unit + drift, CodeRabbit, and Greptile all passed and review threads cleared. Post-merge main CI run 30199937608 completed successfully at that exact merge head.
+PR #68 merged normally to main as 06bd050fac08a8fd07bc6d60cb95b61c1021a80e after exact-head Unit + drift, CodeRabbit, and Greptile all passed and review threads cleared. Post-merge main CI run 30199937608 completed successfully at that exact merge head.
 
 The merged package completes P16-L2-C: deterministic static leaderboard rendering from the existing validated result-v1 and public trace contracts, including stable trace pages and fail-closed atomic publication. It does not constitute benchmark, production, governance, protected-environment, or hardware evidence.
 

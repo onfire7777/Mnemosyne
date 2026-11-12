@@ -1,6 +1,6 @@
 {
   "schema_version": "mnemosyne.public-lifecycle-clock-characterization/v1",
-  "source_commit": "b29543bf",
+  "source_commit": "f5379e0e",
   "backend": "local",
   "public_commands": [
     "ingest",

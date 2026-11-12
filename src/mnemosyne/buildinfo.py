@@ -4,7 +4,7 @@ A memory server that has been running for a week, or a copy bundled beside
 another program, can be several commits behind the checkout its operator is
 looking at. ``build_version()`` is what the MCP server reports in
 ``serverInfo.version`` and in ``/healthz``: the package version, plus the git
-commit when it is known - ``1.0.1+ece2807d`` - so a stale install is visible to
+commit when it is known - ``1.0.1+c60e75b9`` - so a stale install is visible to
 whoever connects.
 
 The commit is looked for, in order:

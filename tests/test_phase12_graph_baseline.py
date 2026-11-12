@@ -171,11 +171,11 @@ def test_graph_baseline_report_matches_generated_metrics(tmp_path: Path) -> None
     assert all(row in report for row in expected_rows)
     assert (
         "- Engine-under-test base commit: "
-        "`7bca39e250f6227298cf3f0b1950fdd9d59905b3`"
+        "`d0c0ad6681640c715a15bf83f6f458d1ca21815c`"
     ) in report
     assert (
         "- Baseline runner/evidence commit: "
-        "`833af4fe519af6fbc57bcd2e4eb983c38afe5000`"
+        "`628b626ce1f8b3d8f69ea6232be847be4d89fa39`"
     ) in report
     assert Path("eval/datasets/v2/run_graph_ppr_baseline.py").is_file()
     assert "Full answer-harness Recall@5 was not measured" in report

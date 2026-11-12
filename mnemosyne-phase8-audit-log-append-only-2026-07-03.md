@@ -8,7 +8,7 @@ source_kind: put_page
 
 # Mnemosyne Phase 8 audit-log append-only hardening - 2026-07-03
 
-Commit 57d4732ccf3a0b6a505557cc7c098f55b92e8503 on /Users/admin/Mnemosyne branch phase3/providers-consolidation adds source-side Postgres audit-log append-only enforcement.
+Commit d97d4d5cc59e11d533cbf0c1fecf44b3aaaf5349 on /Users/admin/Mnemosyne branch phase3/providers-consolidation adds source-side Postgres audit-log append-only enforcement.
 
 What changed:
 - sql/schema.sql installs mnemosyne_audit_log_append_only() and a BEFORE UPDATE OR DELETE trigger on audit_log.
@@ -22,7 +22,7 @@ Verification:
 - uv run --locked ruff check passed.
 - git diff --check passed.
 - uv run --locked pytest -q passed locally.
-- GitHub CI run 28683870536 passed for head 57d4732, including Postgres integration loading the canonical schema and running live Postgres tests.
+- GitHub CI run 28683870536 passed for head d97d4d5, including Postgres integration loading the canonical schema and running live Postgres tests.
 
 Still open:
 - This does not claim Tier-B completion or blueprint parity.

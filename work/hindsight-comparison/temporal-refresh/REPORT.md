@@ -1,6 +1,6 @@
 # Temporal Recall and Mental-Model Scan Efficiency — 2026-10-26
 
-Baseline: `0d947f5ce8eeb8884103080aa7d9364488cb2628`.
+Baseline: `8e6b109821c78b225df3cb78974292f91af74f3c`.
 Exact tested source digests: [source-sha256.json](source-sha256.json).
 Verification summary: [verification.json](verification.json).
 
@@ -10,7 +10,7 @@ This continuation delivers four scoped capabilities and performance improvements
 1. **TR1 (Correct Temporal Axis)**: Separates the conversation recording axis (`source`) from the event occurrence axis (`event`). Queries asking about real-world events query `[event_start, event_end]` intervals rather than conversation capture timestamps. Unknown event dates fail closed rather than borrowing recording timestamps. Broad date-only matches achieve recall without hallucinating or penalizing missing framing words.
 2. **TR2 (Calendar Coverage & Projection)**: Adds calendar parsing for exact ISO days (`on YYYY-MM-DD`), named years (`in YYYY`), `last month`, and `last year` with caller-calendar and daylight-saving time (DST) semantics. Preserves civil calendar period spans (`_candidate_event_calendar`) across UTC/DST normalization while preventing client-side metadata spoofing in PostgreSQL.
 3. **TR3 (Mental-Model Scan Efficiency)**: Eliminates redundant corpus snapshotting. Pending and error model views return lightweight metadata without reading source evidence. Listing filters owner and scope before snapshotting, skipping snapshots on empty/out-of-scope queries. Advisory change scans coalesce with a 5.0-second monotonic cooldown per worker. Due work, authority checks, ready-answer reads, and publication re-validations remain immediate.
-4. **TR4 (Evidence, Parity & Test Reconciliation)**: Fully reconciled documentation and evidence across `docs/` and `work/`. Triage and reconciliation of 6 legacy expectation diffs (`test_phase12_graph_baseline.py` and `test_golden_equivalence.py`) caused by prior continuous confidence calibration and bridge retrieval. Verified full functional parity against live PostgreSQL container `mnemosyne-documents-0ef9b6df` on port 55434.
+4. **TR4 (Evidence, Parity & Test Reconciliation)**: Fully reconciled documentation and evidence across `docs/` and `work/`. Triage and reconciliation of 6 legacy expectation diffs (`test_phase12_graph_baseline.py` and `test_golden_equivalence.py`) caused by prior continuous confidence calibration and bridge retrieval. Verified full functional parity against live PostgreSQL container `mnemosyne-documents-488289d6` on port 55434.
 
 ---
 
@@ -38,11 +38,11 @@ This continuation delivers four scoped capabilities and performance improvements
 
 ### TR4: Legacy Test Expectation Reconciliation
 - **`tests/test_phase12_graph_baseline.py` (2 tests)**:
-  - Commit `b63b3461` introduced 2-hop bridge retrieval and round-robin `interleave_fusion`, successfully retrieving the second bridge document for `q01` (`d2`: "Helios ships in Q3 2026") alongside `d1` ("Mara owns Helios").
+  - Commit `6673f844` introduced 2-hop bridge retrieval and round-robin `interleave_fusion`, successfully retrieving the second bridge document for `q01` (`d2`: "Helios ships in Q3 2026") alongside `d1` ("Mara owns Helios").
   - This raised direct-retrieval Recall@5 and nDCG@5 from `0.5` to `1.0`. The test comment in lines 60-63 explicitly stated: `round 7 must create relations, produce a graph_ppr hit, and lift q01's direct-retrieval Recall@5 proxy from 0.5 to 1.0`.
   - Reconciled the assertions in `test_phase12_graph_baseline.py` and the matching rows in `eval/reports/phase-12-graph-baseline-2026-07-15.md` to `1.0`.
 - **`tests/test_golden_equivalence.py` (4 tests)**:
-  - Commit `b63b3461` replaced legacy clamped confidence floors (`0.96`/`1.0`) with continuous evidence-based calibration. Across `synthetic-conflicts` and `synthetic-growth`, candidate IDs, hit counts, and hit orderings remained 100% byte-for-byte identical; only confidence fields adjusted to continuous values (`~0.53–0.75`).
+  - Commit `6673f844` replaced legacy clamped confidence floors (`0.96`/`1.0`) with continuous evidence-based calibration. Across `synthetic-conflicts` and `synthetic-growth`, candidate IDs, hit counts, and hit orderings remained 100% byte-for-byte identical; only confidence fields adjusted to continuous values (`~0.53–0.75`).
   - In `synthetic-growth` Query 3 (`"Which city did Entity 4 visit in 2024?"`), TR1 event-axis routing correctly identified that no 2024 visit evidence survived the promotion gate, causing the engine to properly abstain rather than returning 8 irrelevant passages with an ungrounded 0.97 score.
   - Regenerated `eval/perf/golden/synthetic-growth.json.gz` and `synthetic-conflicts.json.gz` using `eval/perf/golden_equivalence.py dump`.
 
@@ -61,7 +61,7 @@ This continuation delivers four scoped capabilities and performance improvements
 
 ### Scan Efficiency Measurements
 
-Running `work/hindsight-comparison/temporal-refresh/scan-efficiency-20261026T211844Z.py` against baseline `0d947f5c` vs current implementation:
+Running `work/hindsight-comparison/temporal-refresh/scan-efficiency-20261026T211844Z.py` against baseline `8e6b1098` vs current implementation:
 
 | Scenario | Baseline Exports / Reads | Optimized Exports / Reads | Efficiency Delta |
 |---|---:|---:|---:|
@@ -71,7 +71,7 @@ Running `work/hindsight-comparison/temporal-refresh/scan-efficiency-20261026T211
 
 ### Live PostgreSQL Parity Verification
 
-Testing against container `mnemosyne-documents-0ef9b6df` (port 55434):
+Testing against container `mnemosyne-documents-488289d6` (port 55434):
 - All 4 database roles (`consolidator_user`, `app_user`, `eval_user`, `postgres`) connected and verified.
 - `_candidate_time_metadata` and `_candidate_event_calendar` projection verified against live `PostgresEngine` with tenant-scoped isolation.
 - Zero cross-backend divergences detected between Local, SQLite, and PostgreSQL backends.

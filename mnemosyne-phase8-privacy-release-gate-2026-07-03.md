@@ -13,8 +13,8 @@ Production `release-audit` now rejects weak `privacy-ops-check` evidence unless 
 Evidence:
 - Repo: `/Users/admin/Mnemosyne`
 - Branch: `phase3/providers-consolidation`
-- Commit: `9f1c065 fix(release): require privacy runtime evidence`
-- CI: GitHub run `28686764026` passed for head `9f1c06501843828ab7a93a6df2217d2bda9c262a`.
+- Commit: `255ebf5 fix(release): require privacy runtime evidence`
+- CI: GitHub run `28686764026` passed for head `255ebf582a52984e6701b57ed19083bd5d64c0a8`.
 - Local verification: focused privacy/release-audit tests passed, `tests/test_cli_runtime_tools.py -q` passed, full `uv run pytest -q` passed, `uv run ruff check` passed, and `git diff --check` passed.
 - CBM: `/Users/admin/Mnemosyne` was refreshed after the commit as project `Users-admin-Mnemosyne`.
 

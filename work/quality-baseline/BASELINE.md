@@ -1,7 +1,7 @@
 # Mnemosyne Quality Gate Baseline Report
 
 - **Run Timestamp:** 2026-10-23T09:11:30.948356+00:00
-- **Git Commit:** `4cdc7e83de1cd846853d4a48a1668fc02a94e559`
+- **Git Commit:** `ad6f2e1213bcb1ba9c755a524b0ce5459845bbb8`
 - **Backend:** `local`
 - **Partition:** `all`
 - **Random Seed:** `42`
@@ -20,7 +20,7 @@ Summary of baseline evaluation run:
   - Safety & Poison Guard: 100.0% block rate (Pass >= 95.0%).
   - Mandatory Cognitive Classes: 100.0% pass.
   - Gaming-Resistant Abstention: Balanced Accuracy 0.5035, F1 0.0588.
-  - Fail-Closed Scoring Parity: Genuine fail-closed evaluation of G2 answer quality confirmed zero score change vs 4cdc7e83 (lift remains exactly +0.1667; composite score remains 0.6099) with all fallbacks removed.
+  - Fail-Closed Scoring Parity: Genuine fail-closed evaluation of G2 answer quality confirmed zero score change vs ad6f2e12 (lift remains exactly +0.1667; composite score remains 0.6099) with all fallbacks removed.
 
 ---
 

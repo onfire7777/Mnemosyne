@@ -10,7 +10,7 @@ a disposable live database; its results and limits are recorded below.
 It does not establish feature parity, a competitive ranking, or elimination of all defects. No Hindsight code was
 copied and no external service was penetration-tested.
 
-Work began from Mnemosyne `00d8ea9f7389d3a423d233e5fc0ab959ead8e520` on
+Work began from Mnemosyne `273b12599c7b5e2ba3f54688058cbd612ea28ce3` on
 `codex/hindsight-memory-audit`. The explicitly authorized local case is recorded in
 `work/hindsight-comparison/scope.md`. The reverse-skill router selected code audit after its
 initial generic fallback was narrowed to the actual source-review task. Report flavor: none.
@@ -427,7 +427,7 @@ the source mapping and test receipt. No dependency or package-version change was
 
 ## Live PostgreSQL follow-up
 
-The authorized follow-up began at `d59d4e5d3b3736cbf28719b659f766a65ad9559c` and
+The authorized follow-up began at `e81ca477d8cbc89a607e7494bdc67e7f2849f762` and
 used a disposable PostgreSQL **16.15** container bound to `127.0.0.1:55432`, with the
 repository schema and role policy. Runtime tests used the non-superuser,
 non-BYPASSRLS consolidator login. Separate app and readonly logins exercised permission

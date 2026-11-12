@@ -1,6 +1,6 @@
 # Bounded mental-model scan verification
 
-Date: 2026-10-26. Baseline: `0d947f5c`. This is a small provider-free operation-count regression, not a latency measurement or benchmark score.
+Date: 2026-10-26. Baseline: `8e6b1098`. This is a small provider-free operation-count regression, not a latency measurement or benchmark score.
 
 ## Change
 
@@ -24,7 +24,7 @@ The due-work count deliberately remains unchanged: each refresh performs its ind
 Artifacts:
 
 - `scan-efficiency-20261026T211844Z.py`: repeatable bounded probe.
-- `scan-efficiency-20261026T211844Z-baseline.json`: probe run with the two original modules loaded from `git show 0d947f5c:src/mnemosyne/{mental_models,mental_model_refresh}.py` in a fresh interpreter.
+- `scan-efficiency-20261026T211844Z-baseline.json`: probe run with the two original modules loaded from `git show 8e6b1098:src/mnemosyne/{mental_models,mental_model_refresh}.py` in a fresh interpreter.
 - `scan-efficiency-20261026T211844Z-results.json`: probe run with the updated workspace modules.
 
 Updated probe command:

@@ -12,9 +12,9 @@ Production `release-audit` now rejects weak `retrieval-ops-check` evidence unles
 Evidence:
 - Repo: `/Users/admin/Mnemosyne`
 - Branch: `phase3/providers-consolidation`
-- Commit: `391f09a fix(release): require retrieval runtime evidence`
+- Commit: `ce4e43e fix(release): require retrieval runtime evidence`
 - PR: https://github.com/onfire7777/Mnemosyne/pull/7
-- CI: https://github.com/onfire7777/Mnemosyne/actions/runs/28687245979 passed for head `391f09a874f553ede4242dfc5242c1d7a9190b61`
+- CI: https://github.com/onfire7777/Mnemosyne/actions/runs/28687245979 passed for head `ce4e43e754a2671de342e3ab002dd73d9c01dbf8`
 - Local checks passed: focused retrieval release-audit tests, full `tests/test_cli_runtime_tools.py`, `uv run ruff check`, `git diff --check`, and full `uv run pytest -q`.
 - CBM refreshed after the commit: project `Users-admin-Mnemosyne`, fast index, no repo artifact.
 
