@@ -37,6 +37,26 @@ dumps; what moved, and why:
 g0-write-gating was not refreshed: it reproduces the 5 Nov dump once a consolidated fact that
 revises an unowned fact continues that fact's lineage.
 
+synthetic-growth and synthetic-conflicts were refreshed on 12 Nov 2026 for the deliberate
+audit fixes of 11-12 Nov. Each movement was traced to its fix by replaying the fixes one by
+one on the 11 Nov tree; no open relation, active fact or abstention changed. What moved, and why:
+
+* the forgetter no longer treats a row without lifecycle metadata as 30 days old with
+  importance 0.1, so fresh rows are no longer demoted to summary/gist tiers one per pass; each
+  row instead gets its lifecycle (importance 0.5, verbatim tier), hence more forgetter
+  ``update_evidence_metadata`` rows and slightly higher evidence activation;
+* forget scrubs every relation it expires, the summary-gist links of the forgotten solo
+  sources included, so those closed links become ``[erased]`` tombstones and merge with the
+  other erased relation like the fact tombstones already did (conflicts: 39 -> 35 relations);
+* the local lexical, hashing-vector, graph-seed, reranker and MMR stages score the question
+  without function words, so "is"/"the" no longer pull in unrelated "X is Y" facts: hit
+  order, kinds (assertion vs evidence), scores, grounding-floor rows and standing move, and a
+  query answered by a single hit reports lower confidence (it counts hits) but still answers;
+* the graph channel yields each neighbour's edge to the query entity, so ``graph_ppr``
+  candidate counts grow; no hit changed;
+* an automatic capture-batch job over one row no longer writes a gist of it (the two "Deal"
+  gists and their links are gone), and forget drops the vector of the rows it erases.
+
 To reproduce the original historical baseline instead:
 
     python eval/perf/golden_equivalence.py dump --scenario NAME --src <2083ffc4 checkout>/src --out x.json
