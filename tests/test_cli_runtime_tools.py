@@ -14556,9 +14556,9 @@ def test_cli_parametric_tier_can_use_command_provider(tmp_path: Path) -> None:
     assert rolled_back["protected_suite"]["source"] == "runtime_state"
     assert rollback_record["payload"]["provider"]["rollback_ref"] == f"provider-rollback-{artifact['id']}"
     assert rollback_record["payload"]["protected_suite"]["protected_case_ids"] == ["parametric-runtime-protected"]
-    # The unmeasured evaluation deactivates through the provider before the
-    # operator's own rollback.
-    assert [call["action"] for call in calls] == ["propose", "rollback", "rollback"]
+    # The artifact was never promoted, so the unmeasured evaluation has nothing
+    # to deactivate; only the operator's own rollback reaches the provider.
+    assert [call["action"] for call in calls] == ["propose", "rollback"]
     assert calls[-1]["protected_cases"] == ["parametric-runtime-protected"]
     assert calls[-1]["protected_suite"]["protected_case_count"] == 1
 

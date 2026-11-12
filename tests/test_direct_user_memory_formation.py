@@ -122,11 +122,17 @@ def test_directives_require_explicit_profile_mode(text):
 
 
 @pytest.mark.parametrize("text", [
-    "No, use bullet points instead.", "Actually, please use JSON.", "No, I prefer short answers.",
+    "No, use bullet points instead.", "Actually, please use JSON.",
 ])
 def test_profile_mode_matches_past_a_correction_opener(text):
     assert direct_user_clauses(text) == []
     assert direct_user_clauses(text, include_directives=True) == [text]
+
+
+def test_correction_opener_before_a_first_person_statement_is_dropped():
+    # "Actually, I moved to Berlin." must form a belief that can replace the old one.
+    assert direct_user_clauses("No, I prefer short answers.") == ["I prefer short answers."]
+    assert direct_user_clauses("No, I prefer short answers.", include_directives=True) == ["I prefer short answers."]
 
 
 @pytest.mark.parametrize("text", [
