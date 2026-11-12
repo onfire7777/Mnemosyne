@@ -69,6 +69,8 @@ CREATE INDEX IF NOT EXISTS evidence_embedding_public_hnsw ON evidence USING hnsw
 CREATE INDEX IF NOT EXISTS evidence_embedding_private_hnsw ON evidence USING hnsw (embedding vector_cosine_ops) WHERE embedding_partition = 'private';
 CREATE INDEX IF NOT EXISTS evidence_embedding_none_btree ON evidence (tenant_id, branch, created_at DESC, cid) WHERE embedding_partition = 'none';
 CREATE INDEX IF NOT EXISTS evidence_null_embedding_fallback_idx ON evidence (tenant_id, branch, created_at DESC, cid) WHERE embedding IS NULL AND embedding_partition <> 'none' AND erased = false;
+-- Every append probes erased rows to refuse replay; without this it scans the whole tenant.
+CREATE INDEX IF NOT EXISTS evidence_erased_idx ON evidence (tenant_id, branch) WHERE erased;
 CREATE INDEX IF NOT EXISTS evidence_lexeme_gin ON evidence USING gin (lexeme);
 
 CREATE TABLE IF NOT EXISTS assertions (

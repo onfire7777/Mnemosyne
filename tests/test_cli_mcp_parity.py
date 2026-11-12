@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import gc
 import inspect
 import json
 from functools import lru_cache
@@ -157,6 +158,8 @@ def test_renamed_commands_keep_working_and_share_one_handler() -> None:
 
 def _run(capsys: pytest.CaptureFixture[str], store: Path, *args: str) -> dict[str, Any]:
     capsys.readouterr()
+    # Each real CLI command is its own process; collect the previous command's engine so its store claim ends.
+    gc.collect()
     assert cli.main(["--store", str(store), *args]) == 0
     return json.loads(capsys.readouterr().out)
 

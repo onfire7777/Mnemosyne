@@ -4839,7 +4839,6 @@ class MemoryTools:
 
     def _refresh_user_model(self) -> None:
         # Another process may have changed the profile since this one loaded it.
-        # shortcut: PostgresRuntimeState has no refresh, a long-lived PostgreSQL process serves its start-up copy
         refresh = getattr(self.runtime_state, "refresh_user_model", None)
         if refresh:
             refresh(self.user_model)

@@ -187,6 +187,15 @@ class PostgresRuntimeState:
             ]
         return model
 
+    def refresh_user_model(self, model: UserModel) -> None:
+        """Fold the profile another process saved into a live model, in place: its holders keep the object."""
+        saved = self._load_payload("user_model", None)
+        if saved is None or saved == getattr(self, "_user_model_base", None):
+            return
+        fresh = vars(self.load_user_model())
+        fresh.pop("_source_custody")
+        vars(model).update(fresh)
+
     def save_user_model(self, model: UserModel) -> None:
         entries = [entry for entry in model.entries.values() if entry.tenant_id == self.tenant_id]
         latent_profiles = [
@@ -331,13 +340,20 @@ class PostgresRuntimeState:
         with self.connect() as conn:
             with conn.cursor() as cur:
                 self._set_tenant(cur)
-                cur.execute("DELETE FROM eval_cases WHERE tenant_id = %s AND origin = 'runtime_state'", (self.db_tenant_id,))
+                # No DELETE for the app role: a removed case is blanked and leaves the runtime_state origin.
+                cur.execute(
+                    "UPDATE eval_cases SET origin = 'runtime_state_removed', signature = '', query = '', "
+                    "expected = '{}'::jsonb, protected = false "
+                    "WHERE tenant_id = %s AND origin = 'runtime_state' AND NOT (id = ANY(%s::uuid[]))",
+                    (self.db_tenant_id, [_gate_case_db_id(self.db_tenant_id, case.id) for case in cases]),
+                )
                 for case in cases:
                     cur.execute(
                         """
                         INSERT INTO eval_cases(id, tenant_id, origin, signature, query, expected, tier, protected)
                         VALUES (%s, %s, 'runtime_state', %s, %s, %s, %s, %s)
                         ON CONFLICT (id) DO UPDATE SET
+                          origin = EXCLUDED.origin,
                           signature = EXCLUDED.signature,
                           query = EXCLUDED.query,
                           expected = EXCLUDED.expected,
@@ -477,9 +493,13 @@ class PostgresRuntimeState:
         with nullcontext(connection) as conn:
             with conn.cursor() as cur:
                 self._set_tenant(cur)
+                # The app role has no DELETE here: blank a dropped entry into the
+                # engine's erased-preference tombstone instead (scope '{}' unmarks it).
                 cur.execute(
-                    "DELETE FROM preferences WHERE tenant_id = %s AND scope ? '_mnemosyne_runtime'",
-                    (self.db_tenant_id,),
+                    "UPDATE preferences SET status = 'retracted', valid_to = now(), source_evidence_cids = %s, "
+                    "statement = '[erased]', scope = '{}'::jsonb, exceptions = '{}'::jsonb "
+                    "WHERE tenant_id = %s AND scope ? '_mnemosyne_runtime' AND NOT (id = ANY(%s::uuid[]))",
+                    (_cid_list_to_bytes([]), self.db_tenant_id, [entry.id for entry in entries]),
                 )
                 for entry in entries:
                     scope = dict(entry.scope)
@@ -497,6 +517,7 @@ class PostgresRuntimeState:
                         )
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (id) DO UPDATE SET
+                          category = EXCLUDED.category,
                           statement = EXCLUDED.statement,
                           scope = EXCLUDED.scope,
                           confidence = EXCLUDED.confidence,
@@ -523,7 +544,12 @@ class PostgresRuntimeState:
                             entry.status,
                         ),
                     )
-                cur.execute("DELETE FROM user_latent WHERE tenant_id = %s", (self.db_tenant_id,))
+                cur.execute(
+                    "UPDATE user_latent SET embedding = NULL, summary = NULL, updated_at = now() "
+                    "WHERE tenant_id = %s AND NOT (user_id = ANY(%s::uuid[])) "
+                    "AND (summary IS NOT NULL OR embedding IS NOT NULL)",
+                    (self.db_tenant_id, [_stable_uuid("user", profile.user_id) for profile in latent_profiles]),
+                )
                 for profile in latent_profiles:
                     embedding = _vector_literal(profile.embedding) if len(profile.embedding) == 1024 else None
                     cur.execute(

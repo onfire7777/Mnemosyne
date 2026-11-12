@@ -3899,6 +3899,23 @@ def retrieval_adapters_from_env(prefix: str = "MNEMOSYNE") -> RetrievalAdapters:
     )
 
 
+def adopt_stored_embedding_dims(engine: Any) -> None:
+    """With no explicit embedding width, read the store at the width of the hashing
+    vectors it already holds, so every entry point uses one vector space per store."""
+    adapters = engine.adapters
+    probe = getattr(engine, "stored_embedding_dims", None)
+    if type(adapters.embedding) is not HashingEmbeddingProvider or not callable(probe):
+        return
+    dims = probe()
+    if not dims or dims == adapters.embedding.dims:
+        return
+    embedding = HashingEmbeddingProvider(dims=dims)
+    reranker = adapters.reranker
+    if type(reranker) is LocalSimilarityReranker and reranker.embedding_provider == adapters.embedding:
+        reranker = replace(reranker, embedding_provider=embedding)
+    engine.adapters = replace(adapters, embedding=embedding, reranker=reranker)
+
+
 def semantic_entropy(alternatives: Sequence[str]) -> float:
     """Estimate answer uncertainty from lexical clusters of alternatives.
 

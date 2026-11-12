@@ -31,13 +31,15 @@ CREATE ROLE eval_user          LOGIN IN ROLE mnemosyne_readonly;
 --   CREATE POLICY tenant_isolation ON <t> USING (tenant_id = current_setting('mnemosyne.tenant_id')::uuid);
 -- tenant_id is set per request via SET LOCAL from the VERIFIED session claim only.
 
-REVOKE ALL ON DATABASE mnemosyne FROM PUBLIC;
+-- current_database(): a hard-coded name grants on another database of the same cluster.
+DO $$ BEGIN EXECUTE format('REVOKE ALL ON DATABASE %I FROM PUBLIC', current_database()); END $$;
 
 -- ---------------------------------------------------------------------------
 -- Concrete grants. In the prod compose, sql/schema.sql runs FIRST (mounted as
 -- /docker-entrypoint-initdb.d/05-schema.sql), so the 24 tables exist here.
 -- ---------------------------------------------------------------------------
-GRANT CONNECT ON DATABASE mnemosyne TO mnemosyne_app, mnemosyne_consolidator, mnemosyne_readonly;
+DO $$ BEGIN EXECUTE format('GRANT CONNECT ON DATABASE %I TO mnemosyne_app, mnemosyne_consolidator, mnemosyne_readonly',
+  current_database()); END $$;
 GRANT USAGE ON SCHEMA public TO mnemosyne_app, mnemosyne_consolidator, mnemosyne_readonly;
 GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO mnemosyne_app;            -- no DELETE/TRUNCATE
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO mnemosyne_consolidator;
@@ -54,7 +56,9 @@ GRANT mnemosyne_app TO consolidator_user;   -- consolidator manages runtime side
 DO $$
 DECLARE t record;
 BEGIN
-  FOR t IN SELECT tablename FROM pg_tables WHERE schemaname='public' LOOP
+  -- ALTER OWNER takes an ACCESS EXCLUSIVE lock even when nothing changes; skipping owned
+  -- tables keeps a re-apply on a live database from deadlocking with app transactions.
+  FOR t IN SELECT tablename FROM pg_tables WHERE schemaname='public' AND tableowner <> 'mnemosyne_app' LOOP
     EXECUTE format('ALTER TABLE public.%I OWNER TO mnemosyne_app', t.tablename);
   END LOOP;
 END $$;
@@ -78,6 +82,9 @@ GRANT DELETE ON documents TO mnemosyne_app;
 -- The FK action runs as this table owner, so it needs the same narrow grant.
 -- This does not permit the app role to delete entities or evidence directly.
 GRANT DELETE ON entity_aliases TO mnemosyne_app;
+-- runtime_jobs is an operational queue, not memory: a worker on the app role
+-- deletes each job it finishes, so job results never outlive a forget.
+GRANT DELETE ON runtime_jobs TO mnemosyne_app;
 -- Audit rows are append-only even for write-capable runtime roles; schema.sql
 -- installs the BEFORE UPDATE/DELETE trigger that enforces this at execution.
 REVOKE UPDATE, DELETE, TRUNCATE ON audit_log FROM mnemosyne_app, mnemosyne_consolidator;

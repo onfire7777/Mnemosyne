@@ -146,6 +146,7 @@ POSTGRES_ROLE_CHECK_REQUIRED_CHECKS = (
     "app_role_safety",
     "app_group_membership",
     "app_destructive_writes_denied",
+    "app_queue_drain_delete",
     "audit_log_append_only_app",
     "consolidator_role_safety",
     "consolidator_group_membership",
@@ -419,7 +420,7 @@ def load_retrieval_adapters(args: argparse.Namespace) -> RetrievalAdapters:
         RetrievalAdapters,
     )
 
-    dims = int(args.embedding_dims)
+    dims = 1024 if args.embedding_dims is None else int(args.embedding_dims)
     timeout = float(args.retrieval_timeout)
     evaluation_read_only = bool(getattr(args, "evaluation_read_only", False))
     if evaluation_read_only and (
@@ -574,12 +575,19 @@ def load_engine(args: argparse.Namespace) -> MemoryEngine:
 
         # --store doubles as the per-tenant SQLite root directory (one
         # <tenant>.db per tenant), mirroring how local/postgres read --store/DSN.
-        return SqliteEngine(Path(args.store), adapters=load_retrieval_adapters(args))
-    return LocalMemoryEngine(
-        store_path=Path(args.store),
-        adapters=load_retrieval_adapters(args),
-        read_only=bool(getattr(args, "evaluation_read_only", False)),
-    )
+        engine: MemoryEngine = SqliteEngine(Path(args.store), adapters=load_retrieval_adapters(args))
+    else:
+        _hold_local_store(args)
+        engine = LocalMemoryEngine(
+            store_path=Path(args.store),
+            adapters=load_retrieval_adapters(args),
+            read_only=bool(getattr(args, "evaluation_read_only", False)),
+        )
+    if args.embedding_dims is None:
+        from mnemosyne.retrieval import adopt_stored_embedding_dims
+
+        adopt_stored_embedding_dims(engine)
+    return engine
 
 
 def load_provenance_verifier(args: argparse.Namespace) -> SignedProvenanceVerifier | C2paToolVerifier:
@@ -849,7 +857,36 @@ def load_runtime_state(args: argparse.Namespace) -> RuntimeState | PostgresRunti
             tenant_id=runtime_state_tenant(args),
             require_safe_role=bool(getattr(args, "postgres_require_safe_role", False)),
         )
+    _hold_local_store(args)
     return RuntimeState.from_store_path(Path(args.store))
+
+
+def _local_store_lock(args: argparse.Namespace) -> Any:
+    """The local JSON store's cross-process lock; nothing to hold on the other backends."""
+    from contextlib import nullcontext
+
+    from mnemosyne.engine import LocalMemoryEngine
+
+    if args.backend != "local" or getattr(args, "evaluation_read_only", False):
+        return nullcontext()
+    return LocalMemoryEngine.store_lock(args.store)
+
+
+def _hold_local_store(args: argparse.Namespace) -> None:
+    """A one-shot command is one read-modify-write: lock the store from its first load until main() returns."""
+    hold = getattr(args, "store_hold", None)
+    if hold is not None:
+        hold.enter_context(_local_store_lock(args))
+
+
+def _local_store_stamps(args: argparse.Namespace) -> Any:
+    """What a long-running command last saw of the local store and its runtime side file."""
+    from mnemosyne.engine import _file_stamp
+
+    if args.backend != "local":
+        return None
+    store = Path(args.store).expanduser()
+    return _file_stamp(store), _file_stamp(store.with_suffix(store.suffix + ".runtime.json"))
 
 
 def load_queue(
@@ -1301,15 +1338,20 @@ def cmd_postgres_role_check(args: argparse.Namespace) -> None:
             # roles.sql grants the app role DELETE on exactly the ON DELETE CASCADE
             # foreign-key targets (justifications, contradictions, mental_models,
             # entity_aliases), which PostgreSQL
-            # executes as the table owner (mnemosyne_app); the hard-delete boundary is
-            # RLS + the capability layer. DELETE on any other table, and all TRUNCATE,
-            # remain forbidden.
+            # executes as the table owner (mnemosyne_app), plus runtime_jobs, the operational
+            # queue a worker drains; the hard-delete boundary is RLS + the capability layer.
+            # DELETE on any other table, and all TRUNCATE, remain forbidden.
             "app role must not hold DELETE (outside the documented FK-cascade targets) "
             "or TRUNCATE on any public table",
             delete_table_count=len(app["delete_tables"]),
             delete_tables_outside_fk_cascade=app_delete_outside_cascade,
             allowed_fk_cascade_delete_tables=sorted(allowed_app_delete),
             truncate_table_count=len(app["truncate_tables"]),
+        )
+        check(
+            "app_queue_drain_delete",
+            "runtime_jobs" not in app["table_names"] or "runtime_jobs" in app["delete_tables"],
+            "app role must hold DELETE on runtime_jobs to finish queue jobs (re-apply infra/postgres/roles.sql)",
         )
         check(
             "audit_log_append_only_app",
@@ -1762,7 +1804,7 @@ def cmd_capture_batch(args: argparse.Namespace) -> None:
     """Capture a bounded, prevalidated JSONL batch through one engine process."""
     from contextlib import ExitStack
 
-    from mnemosyne._file_lock import exclusive_file_lock
+    from mnemosyne.engine import LocalMemoryEngine
     from mnemosyne.media_limits import ensure_file_within_limit
 
     if args.backend != "local":
@@ -1850,9 +1892,7 @@ def cmd_capture_batch(args: argparse.Namespace) -> None:
     try:
         # The batch works on a copy and renames it over the store: hold the store's writer
         # lock from copy to rename, or a capture saved in between is erased.
-        release.enter_context(
-            exclusive_file_lock(store.with_suffix(store.suffix + ".lock"), timeout=30.0)
-        )
+        release.enter_context(LocalMemoryEngine.store_lock(store))
         if store.exists():
             if store.is_symlink() or not store.is_file():
                 raise ValueError("local capture-batch store must be a real file")
@@ -1862,6 +1902,7 @@ def cmd_capture_batch(args: argparse.Namespace) -> None:
         staged_args = argparse.Namespace(**vars(args))
         staged_args.store = str(staged)
         staged_args.disable_runtime_state = True
+        staged_args.store_hold = None  # the private copy needs no lock past the rename
         staged_args.consolidation_gate_cases = consolidation_gate_cases
         tools = load_tools(staged_args)
         release.callback(tools.engine.close)
@@ -3641,6 +3682,15 @@ def cmd_vector_backfill_apply(args: argparse.Namespace) -> None:
     )
     emit(report)
     if not report.get("ok"):
+        raise SystemExit(1)
+
+
+def cmd_residue_cleanup(args: argparse.Namespace) -> None:
+    from mnemosyne.residue import residue_cleanup
+
+    report = residue_cleanup(load_engine(args), load_runtime_state(args), apply=bool(args.apply))
+    emit(report)
+    if not report["ok"]:
         raise SystemExit(1)
 
 
@@ -9607,26 +9657,35 @@ def cmd_framework_import(args: argparse.Namespace) -> None:
     tools = load_tools(args)
     result = tools.framework_import(args.path, model=args.model, name=args.name, tenant_id=args.tenant_id,
                                     user_id=args.user_id)
-    _emit_framework_job(tools, result, wait_for_completion=getattr(args, "wait", False))
+    _emit_framework_job(tools, result, wait_for_completion=getattr(args, "wait", False),
+                        store_hold=getattr(args, "store_hold", None))
 
 
 def cmd_skill_make_burnskill(args: argparse.Namespace) -> None:
     tools = load_tools(args)
     result = tools.skill_make_burnskill(args.skill_id, model=args.model, tenant_id=args.tenant_id,
                                         user_id=args.user_id)
-    _emit_framework_job(tools, result, wait_for_completion=getattr(args, "wait", False))
+    _emit_framework_job(tools, result, wait_for_completion=getattr(args, "wait", False),
+                        store_hold=getattr(args, "store_hold", None))
 
 
-def _emit_framework_job(tools: Any, result: dict[str, Any], *, wait_for_completion: bool) -> None:
+def _emit_framework_job(
+    tools: Any, result: dict[str, Any], *, wait_for_completion: bool, store_hold: Any = None
+) -> None:
     """Keep the CLI's conversion worker alive when completion was requested."""
+    from contextlib import nullcontext
+
     if not wait_for_completion or result.get("status") != "converting":
         emit(result)
         if wait_for_completion and result.get("status") != "ready":
             raise SystemExit(1)
         return
+    if store_hold is not None:
+        store_hold.close()  # a conversion takes minutes: lock the local store per poll, not for the whole wait
     progress = None
     while True:
-        status = tools.framework_status(result["skill_id"], revision=result["revision"])
+        with getattr(getattr(tools, "engine", None), "store_operation", nullcontext)():
+            status = tools.framework_status(result["skill_id"], revision=result["revision"])
         if status.get("progress") and status["progress"] != progress:
             progress = status["progress"]
             print(progress, file=sys.stderr, flush=True)
@@ -10044,6 +10103,7 @@ def cmd_projection_recompute_once(args: argparse.Namespace) -> None:
 
 def _runtime_worker_components(
     args: argparse.Namespace,
+    metrics: MetricsRegistry | None = None,
 ) -> tuple[RuntimeState | PostgresRuntimeState | None, InProcessQueue | PostgresQueue, MemoryTools, MetricsRegistry, QueueWorker]:
     from mnemosyne.jobs import RuntimeJobHandlers
     from mnemosyne.observability import MetricsRegistry
@@ -10052,7 +10112,7 @@ def _runtime_worker_components(
     runtime_state = load_runtime_state(args)
     queue = load_queue(args, runtime_state)
     tools = load_tools(args, ingestion_queue=queue, runtime_state=runtime_state)
-    metrics = MetricsRegistry()
+    metrics = MetricsRegistry() if metrics is None else metrics
     handlers = RuntimeJobHandlers(
         tools.engine,
         queue,
@@ -10246,7 +10306,9 @@ def cmd_worker_run(args: argparse.Namespace) -> None:
     if args.poll_interval < 0:
         raise SystemExit("--poll-interval must be zero or greater.")
 
-    runtime_state, queue, tools, metrics, worker = _runtime_worker_components(args)
+    with _local_store_lock(args):
+        runtime_state, queue, tools, metrics, worker = _runtime_worker_components(args)
+        stamps = _local_store_stamps(args)
     workspace_service = _runtime_workspace_service()
     workspace_service.start()
     workspace_frozen = False
@@ -10262,13 +10324,19 @@ def cmd_worker_run(args: argparse.Namespace) -> None:
     for cycle_number in range(1, args.max_cycles + 1):
         cycle_jobs = []
         cycle_started = time.monotonic()
-        for _ in range(args.limit):
-            job = worker.run_once(args.kind)
-            if job is None:
-                break
-            cycle_jobs.append(job)
-            processed_jobs.append(job.to_dict())
-        _persist_worker_state(args, runtime_state, queue, tools)
+        # Each cycle is one locked read-modify-write; it starts from what other processes saved meanwhile.
+        with _local_store_lock(args):
+            if _local_store_stamps(args) != stamps:
+                tools.engine.close()
+                runtime_state, queue, tools, _, worker = _runtime_worker_components(args, metrics)
+            for _ in range(args.limit):
+                job = worker.run_once(args.kind)
+                if job is None:
+                    break
+                cycle_jobs.append(job)
+                processed_jobs.append(job.to_dict())
+            _persist_worker_state(args, runtime_state, queue, tools)
+            stamps = _local_store_stamps(args)
 
         if cycle_jobs:
             idle_cycles = 0
@@ -10687,24 +10755,25 @@ def cmd_ops_metrics_push(args: argparse.Namespace) -> None:
         raise SystemExit("ops-metrics-push interval must be zero or greater")
 
     def push_once() -> dict[str, Any]:
-        runtime_state = load_runtime_state(args)
-        # load_queue(args, ...) honors --queue-backend/--queue-tenant so the
-        # durable Postgres queue is snapshotted, not the serialized in-process
-        # payload from runtime state (which is always empty on this profile).
-        queue = load_queue(args, runtime_state)
-        tools = load_tools(args, ingestion_queue=queue, runtime_state=runtime_state)
-        report = build_ops_report(
-            engine=tools.engine,
-            tenant_id=args.tenant,
-            queue_snapshot=queue.snapshot(),
-            learning=tools.learning,
-            metrics=tools.metrics.snapshot(),
-            proxy_score=None,
-            true_score=None,
-            min_diversity=args.min_diversity,
-            max_proxy_gap=args.max_proxy_gap,
-            max_open_contradictions=args.max_open_contradictions,
-        )
+        with _local_store_lock(args):  # one locked read of the store per push, released before the network call
+            runtime_state = load_runtime_state(args)
+            # load_queue(args, ...) honors --queue-backend/--queue-tenant so the
+            # durable Postgres queue is snapshotted, not the serialized in-process
+            # payload from runtime state (which is always empty on this profile).
+            queue = load_queue(args, runtime_state)
+            tools = load_tools(args, ingestion_queue=queue, runtime_state=runtime_state)
+            report = build_ops_report(
+                engine=tools.engine,
+                tenant_id=args.tenant,
+                queue_snapshot=queue.snapshot(),
+                learning=tools.learning,
+                metrics=tools.metrics.snapshot(),
+                proxy_score=None,
+                true_score=None,
+                min_diversity=args.min_diversity,
+                max_proxy_gap=args.max_proxy_gap,
+                max_open_contradictions=args.max_open_contradictions,
+            )
         exposition = ops_report_to_prometheus(
             report, tenant_id=args.tenant, now_seconds=_time.time()
         )
@@ -19948,7 +20017,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--embedding-model", default=os.environ.get("MNEMOSYNE_EMBEDDING_MODEL"))
     parser.add_argument("--embedding-model-revision", default=os.environ.get("MNEMOSYNE_EMBEDDING_MODEL_REVISION"))
     parser.add_argument("--embedding-api-key", default=os.environ.get("MNEMOSYNE_EMBEDDING_API_KEY"))
-    parser.add_argument("--embedding-dims", type=int, default=int(os.environ.get("MNEMOSYNE_EMBEDDING_DIMS", "1024")))
+    parser.add_argument("--embedding-dims", type=int, default=os.environ.get("MNEMOSYNE_EMBEDDING_DIMS") or None)
     parser.add_argument("--embedding-cache-size", type=int, default=int(os.environ.get("MNEMOSYNE_EMBEDDING_CACHE_SIZE", "8192")))
     parser.add_argument("--embedding-cache-path", default=os.environ.get("MNEMOSYNE_EMBEDDING_CACHE_PATH"))
     parser.add_argument(
@@ -20418,12 +20487,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--app-fk-cascade-delete-tables",
         default=os.environ.get(
             "MNEMOSYNE_POSTGRES_APP_FK_CASCADE_DELETE_TABLES",
-            "justifications,contradictions,mental_models,documents,entity_aliases",
+            "justifications,contradictions,mental_models,documents,entity_aliases,runtime_jobs",
         ),
         help=(
             "Comma-separated public tables the app role is permitted to hold DELETE on "
             "for documented derived-record deletion and ON DELETE CASCADE targets "
-            "(assertions/branches/entities -> these tables) executed as the table owner (mnemosyne_app). See infra/postgres/roles.sql and "
+            "(assertions/branches/entities -> these tables) executed as the table owner (mnemosyne_app), "
+            "plus the runtime_jobs operational queue. See infra/postgres/roles.sql and "
             "sql/schema.sql. DELETE on any other table, and all TRUNCATE, remain forbidden."
         ),
     )
@@ -20993,6 +21063,12 @@ def build_parser() -> argparse.ArgumentParser:
     vector_backfill_apply.add_argument("--actor", default="operator")
     vector_backfill_apply.add_argument("--confirm-apply", action="store_true")
     vector_backfill_apply.set_defaults(func=cmd_vector_backfill_apply)
+
+    residue_cleanup = sub.add_parser(
+        "residue-cleanup", help="Count leftovers older versions wrote to this store; --apply removes them"
+    )
+    residue_cleanup.add_argument("--apply", action="store_true", help="Change the store (default: count only)")
+    residue_cleanup.set_defaults(func=cmd_residue_cleanup)
 
     privacy_ops_check = sub.add_parser("privacy-ops-check")
     privacy_ops_check.add_argument("--bundle", help="Path to production privacy/KMS/residency evidence bundle")
@@ -22450,7 +22526,13 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.command not in {"session-exchange", "idp-authz-policy-check"}:
         apply_session_identity(args)
-    args.func(args)
+    from contextlib import ExitStack
+
+    with ExitStack() as store_hold:
+        # Long-running commands lock the local store per call or cycle, and soak spawns children on it.
+        if args.command not in {"mcp-serve", "worker-run", "ops-metrics-push", "deployment-soak"}:
+            args.store_hold = store_hold
+        args.func(args)
     return 0
 
 

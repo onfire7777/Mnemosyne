@@ -105,7 +105,8 @@ class MnemoCLI:
         argv = [self.python, "-m", "mnemosyne.cli", "--backend", self.backend]
         if self.backend == "postgres" and self.postgres_dsn:
             argv += ["--postgres-dsn", self.postgres_dsn]
-        if self.backend == "local":
+        # SQLite uses --store as its root; without it every run shares the cwd default store.
+        if self.backend in {"local", "sqlite"}:
             argv += ["--store", self.store]
         argv += list(self.global_flags)
         return argv

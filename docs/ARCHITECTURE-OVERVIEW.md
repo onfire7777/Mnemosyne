@@ -420,7 +420,7 @@ The per-pass mutation budget is the `MutationRailBudget` dataclass (`consolidati
 `max_prune_fraction_per_pass` against the active fact / memory counts, so the rates below are enforced
 numerically rather than advisorily.
 
-**Key invariant rails enforced here** (`§31`, all **7/7 ENFORCED**):
+**Key invariant rails enforced here** (`§31`, all **7/7 ENFORCED**; R7 with the scope stated in its row):
 
 | Rail | Invariant |
 |---|---|
@@ -430,7 +430,7 @@ numerically rather than advisorily.
 | R4 | monotonic trust tiers (never widened) |
 | R5 | reward derived only from external signals |
 | R6 | retrieved text is **data, not instructions** (`security.sanitize_retrieved_text`) |
-| R7 | consolidation cadence ∈ **[5 steps, 24h]** (`consolidation_min_steps=5`, `consolidation_max_interval_seconds=24h`) |
+| R7 | consolidation cadence ∈ **[5 steps, 24h]** (`consolidation_min_steps=5`, `consolidation_max_interval_seconds=24h`) per tenant on a `ConsolidationWorker` built with its defaults, and per item on tier-scheduled passes (`consolidation_cadence_tier_min_steps`). Queue jobs run through `RuntimeJobHandlers` use `consolidation_min_steps=0`: each job names new evidence to consolidate once, and the per-process step counter could only refuse it until its retries ran out. R1 and R3 still bound every pass. |
 
 ---
 
@@ -535,10 +535,14 @@ flowchart TB
   registers path-keyed ownership in a process-local `_writer_owners` `WeakValueDictionary`: a second
   *writable* engine on the same on-disk store raises
   `RuntimeError("local memory store already has a writer: …")`, and ownership is released on `close()` (or
-  garbage collection). Across processes the writer also holds an exclusive file lock on `<store>.lock` until
-  `close()`: a writer in another process waits up to 30 s, then gets the same error. There is no heartbeat,
-  renewal, epoch, or fencing token
-  — and read-only engines take neither, so many readers coexist; on the Postgres/Sqlite lanes
+  garbage collection). Across processes, writers share the store one operation at a time through an
+  exclusive file lock on `<store>.lock`, held only for that operation: a one-shot CLI command holds it from
+  its first load of the store (or `<store>.runtime.json`) until it exits, the MCP server for each tool call
+  (`store_operation()`), and `worker-run` for each cycle. At the start of an operation the engine reloads
+  the JSON file if its stamp (inode, mtime, size) differs from the one it last loaded or wrote, and
+  `_persist()` refuses to replace a file another process saved meanwhile. Waiters block for the current
+  holder's operation, not a timeout. There is no heartbeat, renewal, epoch, or fencing token
+  — and read-only engines register no ownership, so many readers coexist; on the Postgres/Sqlite lanes
   single-writer discipline is delegated to the database. All local mutators funnel through the single
   `_persist()` write choke point (which bumps `_store_version`). **(2) Durable job leases** — the
   `queued → running → retry → complete → dead` lease state machine in `queue.py` (`InProcessQueue` /
@@ -758,7 +762,7 @@ tests self-skip when no live DB.
 A known **non-headline** gap remains: hard-QA multi-hop **answer-synthesis** (recall/nDCG ≈ 0.625 / 0.594) —
 retrieval is strong, multi-hop synthesis is the open frontier.
 
-**§31 invariant rails:** 7/7 ENFORCED in source. **Engine self-model rails:** promotion gate + parametric
+**§31 invariant rails:** 7/7 ENFORCED in source (R7 not on queue jobs; see §4). **Engine self-model rails:** promotion gate + parametric
 rollback.
 
 **Completion:** ~**82%** blended (≈85% functional/architectural scaffold; ≈55–60% production-grade 1:1

@@ -331,7 +331,7 @@ services:
     mem_limit: 1g
     cpus: 2.0
     # datasec: required for command-backed Vault key custody (session verify + object DEK wrap);
-    # DB writes stay least-privilege via app_user (no DELETE/TRUNCATE, RLS forced).
+    # DB writes stay least-privilege via app_user (no TRUNCATE, DELETE only on roles.sql's narrow list, RLS forced).
     networks: [edge, internal, datasec]
     depends_on: [keycloak, embedder]
 
@@ -357,7 +357,7 @@ services:
     secrets: [pgpass_app, step_ca_root, vault_app_token, mcp_bearer_token]
     tmpfs: ["/data:size=32m", "/tmp:size=64m"]   # ephemeral: object store + wrapped-DEK sidecars
     # datasec: required for command-backed Vault key custody (session verify + object DEK wrap);
-    # DB writes stay least-privilege via app_user (no DELETE/TRUNCATE, RLS forced).
+    # DB writes stay least-privilege via app_user (no TRUNCATE, DELETE only on roles.sql's narrow list, RLS forced).
     networks: [edge, internal, datasec]
     depends_on: [keycloak, embedder]
 

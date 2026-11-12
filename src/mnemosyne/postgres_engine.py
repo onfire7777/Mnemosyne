@@ -68,6 +68,7 @@ from mnemosyne.engine import (
     intention_fire_receipt_id,
     validate_intention_evaluation_inputs,
     validate_intention_provenance_claim,
+    trimmed_calibration,
 )
 from mnemosyne.erasure_ids import (
     build_erasure_placeholder_map,
@@ -3613,7 +3614,7 @@ class PostgresEngine:
         return True
 
     def _invalidate_mental_models(
-        self, cur: Any, db_tenant_id: Any, branch: str
+        self, cur: Any, db_tenant_id: Any, branch: str, affected_cids: set[str] | None = None
     ) -> None:
         cur.execute(
             "SELECT record FROM mental_models WHERE tenant_id = %s AND branch = %s FOR UPDATE",
@@ -3631,7 +3632,7 @@ class PostgresEngine:
                     saved["model_id"],
                 ),
             )
-        self._scrub_automatic_knowledge(cur, db_tenant_id, branch)
+        self._scrub_automatic_knowledge(cur, db_tenant_id, branch, affected_cids)
 
     def get_evidence_for_read(
         self,
@@ -4727,6 +4728,10 @@ class PostgresEngine:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
                 self._ensure_preference_access_policy_schema(cur)
+                # Serialize the open-pair probe with its insert across connections.
+                self._lock_working_tenant(
+                    cur, "contradiction|" + "|".join([db_tenant_id, *sorted([contradiction.a, contradiction.b])])
+                )
                 cur.execute(
                     """
                     SELECT id
@@ -4786,6 +4791,10 @@ class PostgresEngine:
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
+                # Serialize the replay probe with its insert across connections.
+                self._lock_working_tenant(
+                    cur, "preference|" + "|".join([db_tenant_id, db_user_id, pref.category])
+                )
                 cur.execute(
                     """
                     SELECT id, explicit, source_evidence_cids
@@ -6248,6 +6257,8 @@ class PostgresEngine:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._ensure_entity_registry_schema(cur)
                 self._set_tenant(cur, db_tenant_id)
+                # Serialize the policy read with its merge-upsert across connections.
+                self._lock_working_tenant(cur, "entity|" + "|".join([db_tenant_id, canonical]))
                 cur.execute(
                     """
                     SELECT access_policy
@@ -7098,7 +7109,7 @@ class PostgresEngine:
                         """,
                         (db_tenant_id, branch, affected_cid_bytes),
                     )
-                self._invalidate_mental_models(cur, db_tenant_id, branch)
+                self._invalidate_mental_models(cur, db_tenant_id, branch, affected_cids)
                 self._scrub_document_records(cur, db_tenant_id, branch, affected_cids)
                 for retained_bytes, metadata in retained_metadata.items():
                     cur.execute(
@@ -7131,8 +7142,14 @@ class PostgresEngine:
                     ]
                     if sources and not conjunctive:
                         cur.execute(
-                            "UPDATE assertions SET source_evidence_cids = %s WHERE id = %s",
-                            (_cid_list_to_bytes(sources), row["id"]),
+                            "SELECT cid, content FROM evidence WHERE tenant_id = %s AND branch = %s "
+                            "AND erased = false AND cid = ANY(%s)",
+                            (db_tenant_id, branch, _cid_list_to_bytes(sources)),
+                        )
+                        live = {_bytes_to_cid(item["cid"]): item["content"] for item in cur.fetchall()}
+                        cur.execute(
+                            "UPDATE assertions SET source_evidence_cids = %s, calibration = %s WHERE id = %s",
+                            (_cid_list_to_bytes(sources), self._jsonb(trimmed_calibration(calibration, sources, live)), row["id"]),
                         )
                         propagated["trimmed_assertions"].append(str(row["id"]))
                     else:

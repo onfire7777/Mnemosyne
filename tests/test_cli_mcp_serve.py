@@ -114,3 +114,35 @@ def test_module_entry_point_works_without_console_scripts() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["prog"] == "mneme-mcp"
+
+
+def test_cli_and_mcp_server_read_a_store_in_its_stored_vector_width(tmp_path, monkeypatch) -> None:
+    from mnemosyne.mcp_server import MnemosyneMcpServer
+    from mnemosyne.retrieval import HashingEmbeddingProvider
+
+    monkeypatch.delenv("MNEMOSYNE_EMBEDDING_DIMS", raising=False)
+    monkeypatch.delenv("MNEMOSYNE_EMBEDDING_PROVIDER", raising=False)
+    text = "The deploy server is hosted in Frankfurt."
+    filt = {"tenant_id": "t", "branch": "main"}
+
+    def cli_engine(store, *flags):
+        return cli.load_engine(cli.build_parser().parse_args(["--backend", "sqlite", "--store", str(store), *flags, "search", "--tenant", "t", "--query", "x"]))
+
+    for store, width in ((tmp_path / "old", 256), (tmp_path / "new", None)):
+        server = MnemosyneMcpServer(backend="sqlite", store_path=store)
+        cid = server.call_tool("capture", {"tenant_id": "t", "user_id": "u", "actor": "user", "source_type": "chat", "content": text})["cid"]
+        if width:  # what an older MCP server's embedder pass stored
+            server.engine.set_evidence_embedding("t", cid, HashingEmbeddingProvider(dims=width).embed(text))
+        server.close()
+        server, engine = MnemosyneMcpServer(backend="sqlite", store_path=store), cli_engine(store)
+        expected = width or 1024
+        assert server.engine.adapters.embedding.dims == engine.adapters.embedding.dims == expected
+        assert [hit.id for hit in server.engine.vector_search("deploy server", 5, filt)] == [cid]
+        assert [hit.id for hit in engine.vector_search("deploy server", 5, filt)] == [cid]
+        server.close()
+        engine.close()
+    # An explicit width re-hashes the stored 256-dim row instead of dropping it.
+    engine = cli_engine(tmp_path / "old", "--embedding-dims", "1024")
+    assert engine.adapters.embedding.dims == 1024
+    assert len(engine.vector_search("deploy server", 5, filt)) == 1
+    engine.close()

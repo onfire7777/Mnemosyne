@@ -423,9 +423,12 @@ class ParametricTier:
 
     def evaluate_measured(self, artifact, protected_cases, *, allow_activation=True):
         """Run a configured evaluator; a caller flag can veto, never grant, promotion."""
+        # Providers activate only promoted artifacts, so only those can need deactivating.
+        was_promoted = artifact.status == "promoted"
+
         def deactivate():
             rollback = getattr(self.trainer, "rollback", None)
-            if rollback:
+            if rollback and was_promoted:
                 rollback(artifact, "measured reevaluation did not pass", protected_cases=protected_cases)
         if not protected_suite_is_gating(protected_cases):
             deactivate()

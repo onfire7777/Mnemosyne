@@ -319,10 +319,9 @@ def test_postgres_queue_lifecycle_and_tenant_isolation_live() -> None:
     leased.result = {"ok": True}
     queue.complete(leased.id)
 
-    jobs = queue.jobs
-    assert jobs[leased.id].status == "complete"
-    assert jobs[leased.id].result is None  # the result stays on the returned job only
-    assert queue.snapshot()["complete"] == 1
+    assert leased.status == "complete"
+    assert queue.jobs == {}  # a finished job leaves the queue; its result stays on the returned job only
+    assert queue.snapshot() == {}
     assert other_queue.snapshot() == {}
 
 
@@ -451,7 +450,7 @@ def test_postgres_queue_cli_enqueue_and_drain_live() -> None:
     assert drained["jobs"][0]["status"] == "complete"
     assert drained["jobs"][0]["result"]["kind"] == "calibrate"
     assert drained["jobs"][0]["result"]["details"]["tenant_id"] == tenant
-    assert after["queue"]["complete"] == 1
+    assert after["queue"] == {}
 
 
 def test_postgres_queue_worker_drains_maintenance_handlers_live() -> None:
@@ -540,7 +539,7 @@ def test_postgres_queue_worker_drains_maintenance_handlers_live() -> None:
     persisted = {job.kind: job for job in drained}  # results are not stored on the queue row
 
     assert [job.status for job in drained] == ["complete", "complete", "complete", "complete", "complete"]
-    assert queue.snapshot()["complete"] == 5
+    assert queue.snapshot() == {}
     assert persisted[CALIBRATE_JOB].result["details"]["abstain"] is True
     assert persisted[LIFECYCLE_SWEEP_JOB].result["details"]["demoted"] == 1
     assert persisted[LIFECYCLE_SWEEP_JOB].result["details"]["rehearsed"] == 1
@@ -2529,3 +2528,35 @@ def test_postgres_merge_assertion_id_map_source_differs_from_destination_live() 
     reconnected = PostgresEngine(dsn)
     merge_log = reconnected.export_tenant(tenant)["merge_log"]
     assert merge_log[-1]["assertion_id_map"][source_id] == confirmed["confirmed_id"]
+
+
+def test_postgres_profile_writers_share_entries_without_app_delete_live() -> None:
+    # Two processes on one tenant, as the restricted app role: no DELETE needed, each sees the other's entries.
+    from mnemosyne.postgres_runtime_state import PostgresRuntimeState
+    from mnemosyne.user_model import LatentUserProfile, UserMemoryKind, UserModelEntry
+
+    dsn = os.environ.get("MNEMOSYNE_POSTGRES_APP_DSN") or live_dsn()
+    tenant = f"tenant-profile-writers-{uuid4()}"
+    a, b = PostgresRuntimeState(dsn, tenant_id=tenant), PostgresRuntimeState(dsn, tenant_id=tenant)
+    model_a, model_b = a.load_user_model(), b.load_user_model()
+    tabs = UserModelEntry(tenant, "alice", UserMemoryKind.EXPLICIT_PREFERENCE, "Always use tabs.")
+    model_a.add_entry(tabs)
+    model_a.set_latent_profile(LatentUserProfile(tenant, "alice", [0.0] * 1024, "latent secret"))
+    a.save_user_model(model_a)
+    b.refresh_user_model(model_b)
+    assert tabs.id in model_b.entries
+    model_b.add_entry(UserModelEntry(tenant, "bob", UserMemoryKind.EXPLICIT_PREFERENCE, "Reply in German."))
+    b.save_user_model(model_b)
+    del model_a.latent_profiles[(tenant, "alice")]  # erasure drops the latent profile
+    a.save_user_model(model_a)
+    a.save_gate_cases([RegressionCase("c1", "s", "q", "e"), RegressionCase("c2", "s", "q", "e")])
+    a.save_gate_cases([RegressionCase("c1", "s", "q", "e")])
+
+    fresh = PostgresRuntimeState(dsn, tenant_id=tenant)
+    assert sorted(entry.statement for entry in fresh.load_user_model().entries.values()) == [
+        "Always use tabs.", "Reply in German."]
+    assert [case.id for case in fresh._load_gate_cases_from_tables()] == ["c1"]
+    with fresh.connect() as conn, conn.cursor() as cur:
+        fresh._set_tenant(cur)
+        cur.execute("SELECT summary FROM user_latent WHERE tenant_id = %s", (fresh.db_tenant_id,))
+        assert "latent secret" not in str(cur.fetchall())

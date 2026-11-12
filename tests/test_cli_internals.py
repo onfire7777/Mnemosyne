@@ -135,11 +135,7 @@ def test_capture_batch_consolidation_preserves_trust_boundaries(tmp_path: Path) 
             "pass_results"
         ]
     }
-    assert untrusted_passes["summarizer"] == {
-        "name": "summarizer",
-        "status": "skipped",
-        "details": {"reason": "source_marked_data_only"},
-    }
+    assert "summarizer" not in untrusted_passes  # a one-row group is never summarized
     assert untrusted_passes["user_model_updater"] == {
         "name": "user_model_updater",
         "status": "skipped",
@@ -266,6 +262,34 @@ def test_concurrent_cli_processes_on_one_local_store_keep_every_capture(tmp_path
             job.result()
     assert len(json.loads(store.read_text())["evidence"]) == 7
     assert not list(tmp_path.glob(".store.json-batch-*"))
+
+
+def test_live_mcp_server_and_cli_processes_share_one_local_store(tmp_path: Path) -> None:
+    from mnemosyne.mcp_server import MnemosyneMcpServer
+
+    store = tmp_path / "store.json"
+    cli = MnemoCLI(store=str(store))
+
+    def capture(server: MnemosyneMcpServer, content: str) -> None:
+        server.call_tool("capture", {"tenant_id": "t", "user_id": "u", "actor": "user", "source_type": "chat", "content": content})
+
+    with MnemosyneMcpServer(store_path=str(store)) as server:
+        capture(server, "Server row: the vault is blue.")
+        cli_cid = cli.capture("t", "u", "CLI row: the door code is 4417.")["cid"]
+        hits = server.call_tool("search", {"tenant_id": "t", "user_id": "u", "query": "What is the door code?"})
+        assert "4417" in json.dumps(hits)
+        server.call_tool("forget", {"tenant_id": "t", "cid": cli_cid})
+        cli.capture("t", "u", "CLI row 2: the gate is red.")
+        capture(server, "Server row 2: the roof is grey.")
+    rows = json.loads(store.read_text())["evidence"]
+    assert sorted(row["content"][:12] for row in rows if not row.get("erased")) == [
+        "CLI row 2: t", "Server row 2", "Server row: "
+    ]
+    with MnemosyneMcpServer(store_path=str(store)) as server:
+        store.unlink()  # deleted by another process: the server starts empty and never writes the old rows back
+        assert not server.call_tool("search", {"tenant_id": "t", "user_id": "u", "query": "What colour is the vault?"})["hits"]
+        capture(server, "Server row 3: the lamp is on.")
+    assert "vault" not in store.read_text() and "lamp is on" in store.read_text()
 
 
 def test_local_engine_deferred_persistence_flushes_once_or_discards(

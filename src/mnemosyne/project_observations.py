@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import configparser
+from datetime import timedelta
 import hashlib
 import json
 import os
@@ -513,7 +514,8 @@ def _reconcile_snapshot(engine, source, branch, snapshot, retained, report):
     if identifier not in retained:
         marker = Assertion(source.tenant_id, "configuration snapshot", "configuration_snapshot",
             snapshot["content_hash"], user_id=source.user_id, branch=branch, scope=snapshot["scope"],
-            status="superseded", valid_from=source.created_at, valid_to=source.created_at,
+            # PostgreSQL rejects an empty validity interval (valid_to > valid_from).
+            status="superseded", valid_from=source.created_at, valid_to=source.created_at + timedelta(microseconds=1),
             trust_tier=source.trust_tier, sensitivity=source.sensitivity,
             access_policy=merge_access_policies([source.access_policy,
                 {"tenant": source.tenant_id, "allow_principals": [source.user_id]}], tenant_id=source.tenant_id),
@@ -531,12 +533,13 @@ def _reconcile_snapshot(engine, source, branch, snapshot, retained, report):
                 or not row.get("predicate", "").startswith("configuration.")
                 or row["predicate"] in snapshot["keys"] or parse_dt(row["valid_from"]) > source.created_at):
             continue
-        retired = {**row, "status": "superseded", "valid_to": source.created_at.isoformat(), "superseded_by": identifier}
+        valid_to = max(source.created_at, parse_dt(row["valid_from"]) + timedelta(microseconds=1))
+        retired = {**row, "status": "superseded", "valid_to": valid_to.isoformat(), "superseded_by": identifier}
         engine.upsert_assertion(Assertion.from_dict(retired), branch=branch)
         retained[row["id"]] = retired
         relation_id = str(uuid5(NAMESPACE_URL, "project-observation-relation:" + row["id"]))
         engine.add_relation(Relation(source.tenant_id, row["subject"], row["predicate"], row["object"], branch=branch,
-            valid_from=parse_dt(row["valid_from"]), valid_to=source.created_at, source_evidence_cids=row["source_evidence_cids"],
+            valid_from=parse_dt(row["valid_from"]), valid_to=valid_to, source_evidence_cids=row["source_evidence_cids"],
             access_policy=row["access_policy"], id=relation_id), branch=branch)
         report.setdefault("withdrawn_assertion_ids", []).append(row["id"])
 

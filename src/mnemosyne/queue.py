@@ -299,8 +299,16 @@ class PostgresQueue:
 
     def complete(self, job_id: str) -> None:
         job = self._leased.get(job_id)
-        # The result stays on the returned job only: it quotes evidence that may later be forgotten.
-        self._update_status(job_id, status="complete")
+        db_tenant_id = self._tenant_db_id()
+        with self.connect() as conn:
+            with conn.cursor() as cur:
+                self._ensure_tenant(cur, db_tenant_id)
+                # A finished job leaves the queue: its result quotes evidence that may later be forgotten.
+                # The status clause also sweeps rows completed by older versions.
+                cur.execute(
+                    "DELETE FROM runtime_jobs WHERE tenant_id = %s AND (id = %s OR status = 'complete')",
+                    (db_tenant_id, job_id),
+                )
         self._leased.pop(job_id, None)
         if job:
             job.status = "complete"
@@ -353,7 +361,6 @@ class PostgresQueue:
         job_id: str,
         *,
         status: str,
-        result: Any | None = None,
         last_error: str | None = None,
     ) -> None:
         db_tenant_id = self._tenant_db_id()
@@ -364,12 +371,11 @@ class PostgresQueue:
                     """
                     UPDATE runtime_jobs
                     SET status = %s,
-                        result = COALESCE(%s, result),
                         last_error = COALESCE(%s, last_error),
                         updated_at = now()
                     WHERE id = %s AND tenant_id = %s
                     """,
-                    (status, self._jsonb(result), last_error, job_id, db_tenant_id),
+                    (status, last_error, job_id, db_tenant_id),
                 )
 
     def _get_job(self, job_id: str) -> QueueJob | None:

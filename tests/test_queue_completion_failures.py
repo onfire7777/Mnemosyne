@@ -58,10 +58,17 @@ def test_postgres_failed_status_write_preserves_running_job(monkeypatch, operati
 
     assert job.to_dict() == before
     persisted = []
-    monkeypatch.setattr(queue, "_update_status", lambda job_id, **fields: persisted.append((job_id, fields)))
+
+    class Connection:
+        def __enter__(self): return self
+        def __exit__(self, *exc): return False
+        def cursor(self): return self
+        def execute(self, sql, params=()): persisted.append(sql.split()[0])
+
+    monkeypatch.setattr(queue, "connect", Connection)
     queue.complete(job.id)
     assert job.status == "complete"
-    assert persisted == [(job.id, {"status": "complete"})]
+    assert persisted[-1] == "DELETE"
 
 
 def test_completed_job_leaves_the_queue_with_its_result(tmp_path):

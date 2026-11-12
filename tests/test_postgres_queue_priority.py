@@ -89,10 +89,13 @@ def test_postgres_lease_skips_locked_job_and_respects_kind(queue_dsn):
 
 def test_postgres_completed_job_does_not_store_its_result_live(queue_dsn):
     queue = PostgresQueue(queue_dsn, uuid4().hex, require_safe_role=False)
+    legacy = queue.enqueue("work", {})
+    with queue.connect() as conn:  # a row finished by an older version, result kept
+        conn.execute("UPDATE runtime_jobs SET status = 'complete', result = '\"forgotten text\"' WHERE id = %s",
+                     (legacy.id,))
     queue.enqueue("work", {})
     leased = queue.lease()
     leased.result = {"answer": 42}
     queue.complete(leased.id)
-    assert queue.jobs[leased.id].status == "complete"
-    assert queue.jobs[leased.id].result is None
+    assert queue.jobs == {}
     assert leased.status == "complete" and leased.result == {"answer": 42}

@@ -332,7 +332,7 @@ def test_role_check_default_matches_narrow_schema_grants(monkeypatch):
     grants = {table.strip() for group in re.findall(
         r"GRANT\s+DELETE\s+ON\s+([^;]+?)\s+TO\s+mnemosyne_app\s*;", roles, re.I)
         for table in group.split(",")}
-    expected = {"justifications", "contradictions", "mental_models", "documents", "entity_aliases"}
+    expected = {"justifications", "contradictions", "mental_models", "documents", "entity_aliases", "runtime_jobs"}
     assert grants == expected
     assert set(args.app_fk_cascade_delete_tables.split(",")) == grants
 

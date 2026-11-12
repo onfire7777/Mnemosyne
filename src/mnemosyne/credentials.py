@@ -7,6 +7,7 @@ self-generated thoughts within the self-generated Standing band.
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from typing import Any, Iterable, Mapping
@@ -103,11 +104,11 @@ def credential_policy_from_operating_policy(policy: Any | None) -> CredentialPol
     if policy is None:
         return CredentialPolicy()
     return CredentialPolicy(
-        min_success_rate=_bounded_unit(getattr(policy, "credential_min_success_rate", DEFAULT_MIN_SUCCESS_RATE)),
-        min_train_events=_positive_int(getattr(policy, "credential_min_train_events", DEFAULT_MIN_TRAIN_EVENTS)),
-        min_holdout_events=_positive_int(getattr(policy, "credential_min_holdout_events", DEFAULT_MIN_HOLDOUT_EVENTS)),
-        max_birth_uplift=_bounded_unit(getattr(policy, "credential_max_birth_uplift", DEFAULT_MAX_BIRTH_UPLIFT)),
-        decay_per_window=_bounded_unit(getattr(policy, "credential_decay_per_window", DEFAULT_DECAY_PER_WINDOW)),
+        min_success_rate=_bounded_unit(getattr(policy, "credential_min_success_rate", None), default=DEFAULT_MIN_SUCCESS_RATE),
+        min_train_events=_positive_int(getattr(policy, "credential_min_train_events", None), default=DEFAULT_MIN_TRAIN_EVENTS),
+        min_holdout_events=_positive_int(getattr(policy, "credential_min_holdout_events", None), default=DEFAULT_MIN_HOLDOUT_EVENTS),
+        max_birth_uplift=_bounded_unit(getattr(policy, "credential_max_birth_uplift", None), default=DEFAULT_MAX_BIRTH_UPLIFT),
+        decay_per_window=_bounded_unit(getattr(policy, "credential_decay_per_window", None), default=DEFAULT_DECAY_PER_WINDOW),
     )
 
 
@@ -218,7 +219,7 @@ def birth_groundedness_from_value(value: float, *, policy: CredentialPolicy | No
 
     effective_policy = policy or CredentialPolicy()
     return round(
-        SELF_BIRTH_GROUNDEDNESS_BASE + _bounded_unit(value) * effective_policy.max_birth_uplift,
+        SELF_BIRTH_GROUNDEDNESS_BASE + _bounded_unit(value, default=0.0) * effective_policy.max_birth_uplift,
         6,
     )
 
@@ -356,21 +357,22 @@ def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
 
-def _bounded_unit(value: Any) -> float:
+def _bounded_unit(value: Any, *, default: float) -> float:
+    # Invalid or non-finite input takes the knob's default: 0.0 is the loosest setting for some knobs.
     try:
         numeric = float(value)
     except (TypeError, ValueError):
-        numeric = 0.0
-    if numeric != numeric:
-        numeric = 0.0
+        return default
+    if not math.isfinite(numeric):
+        return default
     return round(max(0.0, min(1.0, numeric)), 6)
 
 
-def _positive_int(value: Any) -> int:
+def _positive_int(value: Any, *, default: int) -> int:
     try:
         numeric = int(value)
-    except (TypeError, ValueError):
-        numeric = 1
+    except (TypeError, ValueError, OverflowError):
+        return default
     return max(1, numeric)
 
 

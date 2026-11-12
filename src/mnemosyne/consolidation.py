@@ -57,6 +57,8 @@ DEFAULT_CONSOLIDATION_PASSES = [
     "user_model_updater",
     "learning_reflect",
 ]
+# Jobs the runtime queues by itself (not an explicit summary request); one row never gets a gist.
+_AUTOMATIC_TRIGGERS = frozenset({"ingest", "media_extract", "capture_batch", "projection_recompute"})
 REPLAY_PRIORITY_FACTORS = ("importance", "novelty", "surprise", "reward")
 DEFAULT_EMBED_BATCH_SIZE = 32
 PROVIDER_PROPOSAL_SOURCE_TYPE = "provider-proposal"
@@ -829,6 +831,9 @@ class ConsolidationWorker:
             passes_run = [str(name) for name in raw_passes] if isinstance(raw_passes, list) else []
         else:
             passes_run = [str(name) for name in payload.get("passes") or DEFAULT_CONSOLIDATION_PASSES]
+            if str(payload.get("trigger")) in _AUTOMATIC_TRIGGERS and len(set(source_evidence_cids)) < 2:
+                # One row has nothing to cluster; its gist would be a copy. Also covers jobs older versions queued.
+                passes_run = [name for name in passes_run if name != "summarizer"]
         if prediction_gate["gate"] == "low_prediction_error_metadata_only":
             allowed = {"replayer", "forgetter", "embedder", "user_model_updater"}
             passes_run = [name for name in passes_run if name in allowed]

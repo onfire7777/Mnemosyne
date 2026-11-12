@@ -7362,6 +7362,7 @@ def production_release_stdout(command: str, provider_stdout: dict) -> dict:
                     "app_role_safety",
                     "app_group_membership",
                     "app_destructive_writes_denied",
+                    "app_queue_drain_delete",
                     "audit_log_append_only_app",
                     "consolidator_role_safety",
                     "consolidator_group_membership",

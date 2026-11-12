@@ -83,8 +83,10 @@ from mnemosyne.access_policy import (
     vector_partition_for_item,
 )
 from mnemosyne.calibration import CalibrationSet
+from mnemosyne.canary_overlay import _relation_group_keys
 from mnemosyne.engine import (
     _CANDIDATE_MEMO_SIZE,
+    _clone_candidate_hit,
     _to_utc_opt,
     _evaluate_trigger,
     Intention,
@@ -110,6 +112,7 @@ from mnemosyne.engine import (
     validate_intention_dependencies,
     validate_intention_evaluation_inputs,
     validate_intention_provenance_claim,
+    trimmed_calibration,
 )
 from mnemosyne.erasure_ids import (
     build_erasure_placeholder_map,
@@ -194,7 +197,7 @@ from mnemosyne.standing import (
     SELF_GENERATED_CEILING,
     standing_erasure_cascade_report,
 )
-from mnemosyne.text import cosine, lexical_score, tokenize
+from mnemosyne.text import SparseCosine, cosine, lexical_score, tokenize
 from mnemosyne.workspace import self_generation_budget_report, source_backed_summary
 
 
@@ -2478,12 +2481,27 @@ class SqliteEngine:
                     "critical_path_allowed": False,
                 }
             with self._source_write(conn):
-                self._insert_evidence_row(conn, stored)
+                op = "append_evidence"
+                try:
+                    self._insert_evidence_row(conn, stored)
+                except sqlite3.IntegrityError:
+                    # Another connection may have stored this cid since the probe above.
+                    raced = conn.execute(
+                        "SELECT erased FROM evidence WHERE tenant_id = ? AND branch = ? AND cid = ?",
+                        (ev.tenant_id, branch, cid),
+                    ).fetchone()
+                    if raced is None:
+                        raise
+                    op = (
+                        "append_evidence.blocked_erased_replay"
+                        if raced["erased"]
+                        else "append_evidence.noop_dedup"
+                    )
                 self._audit_row(
                     conn,
                     ev.tenant_id,
                     ev.actor,
-                    "append_evidence",
+                    op,
                     cid,
                     {
                         "source_type": ev.source_type,
@@ -2494,6 +2512,8 @@ class SqliteEngine:
                     trust_tier=ev.trust_tier,
                     capability_tags=ev.capability_tags,
                 )
+            if op != "append_evidence":
+                return cid
 
             def committed_effects():
                 # A later operation in the same batch may already have erased
@@ -2545,37 +2565,40 @@ class SqliteEngine:
             raise ValueError("pii_sensitivity must be at least 3 for detected PII")
         with self._lock:
             conn = self._connect(tenant_id)
-            ev = self._fetch_evidence(tenant_id, cid, branch)
-            if ev is None or ev.erased:
-                return False
-            before = _privacy_backfill_controls(
-                ev.sensitivity, ev.access_policy, ev.metadata
-            )
-            target_sensitivity = max(
-                int(ev.sensitivity),
-                int(pii_sensitivity) if tags else int(ev.sensitivity),
-            )
-            access_policy = _privacy_backfill_access_policy(
-                ev.access_policy,
-                tenant_id=tenant_id,
-                pii_tags=tags,
-                target_sensitivity=target_sensitivity,
-            )
-            embedding_partition = vector_partition_for_item(
-                sensitivity=target_sensitivity,
-                access_policy=access_policy,
-            )
-            ev.sensitivity = target_sensitivity
-            ev.access_policy = access_policy
-            ev.metadata = _privacy_backfill_metadata(
-                ev.metadata,
-                access_policy=access_policy,
-                pii_tags=tags,
-                embedding_partition=embedding_partition,
-            )
-            if embedding_partition == "none":
-                ev.embedding = None
             with conn:
+                # Read under the write lock so a concurrent tightening cannot be overwritten.
+                if not conn.in_transaction:
+                    conn.execute("BEGIN IMMEDIATE")
+                ev = self._fetch_evidence(tenant_id, cid, branch)
+                if ev is None or ev.erased:
+                    return False
+                before = _privacy_backfill_controls(
+                    ev.sensitivity, ev.access_policy, ev.metadata
+                )
+                target_sensitivity = max(
+                    int(ev.sensitivity),
+                    int(pii_sensitivity) if tags else int(ev.sensitivity),
+                )
+                access_policy = _privacy_backfill_access_policy(
+                    ev.access_policy,
+                    tenant_id=tenant_id,
+                    pii_tags=tags,
+                    target_sensitivity=target_sensitivity,
+                )
+                embedding_partition = vector_partition_for_item(
+                    sensitivity=target_sensitivity,
+                    access_policy=access_policy,
+                )
+                ev.sensitivity = target_sensitivity
+                ev.access_policy = access_policy
+                ev.metadata = _privacy_backfill_metadata(
+                    ev.metadata,
+                    access_policy=access_policy,
+                    pii_tags=tags,
+                    embedding_partition=embedding_partition,
+                )
+                if embedding_partition == "none":
+                    ev.embedding = None
                 self._write_evidence_mutable(conn, ev)
                 self._scrub_automatic_knowledge(conn, tenant_id, branch, {cid})
                 # Privacy tightening (raised sensitivity / added restriction /
@@ -2887,7 +2910,7 @@ class SqliteEngine:
 
     @staticmethod
     def _invalidate_mental_models(
-        conn: sqlite3.Connection, tenant_id: str, branch: str
+        conn: sqlite3.Connection, tenant_id: str, branch: str, affected_cids: set[str] | None = None
     ) -> None:
         rows = conn.execute(
             "SELECT record FROM mental_models WHERE tenant_id = ? AND branch = ?",
@@ -2905,7 +2928,7 @@ class SqliteEngine:
                     saved["model_id"],
                 ),
             )
-        SqliteEngine._scrub_automatic_knowledge(conn, tenant_id, branch)
+        SqliteEngine._scrub_automatic_knowledge(conn, tenant_id, branch, affected_cids)
 
     def get_evidence_for_read(
         self,
@@ -3046,12 +3069,15 @@ class SqliteEngine:
             )
         with self._lock:
             conn = self._connect(tenant_id)
-            ev = self._fetch_evidence(tenant_id, cid, branch)
-            if ev is None or ev.erased:
-                return False
-            before_keys = sorted(ev.metadata.keys())
-            ev.metadata = {**ev.metadata, **metadata_patch}
             with self._source_write(conn):
+                # Read under the write lock so another connection's patch cannot be overwritten.
+                if not conn.in_transaction:
+                    conn.execute("BEGIN IMMEDIATE")
+                ev = self._fetch_evidence(tenant_id, cid, branch)
+                if ev is None or ev.erased:
+                    return False
+                before_keys = sorted(ev.metadata.keys())
+                ev.metadata = {**ev.metadata, **metadata_patch}
                 self._write_evidence_mutable(conn, ev)
                 self._scrub_automatic_knowledge(conn, tenant_id, branch, {cid})
                 # A metadata patch that signals a restriction/hold/quarantine
@@ -3768,8 +3794,39 @@ class SqliteEngine:
         query_vec = embed_query(self.adapters.embedding, query)
         dims = len(query_vec)
         oracle, raw_blobs = self._scan_oracle(filt, with_blobs=True)
-        candidates = oracle._candidate_hits(filt)
         hits: list[Hit] = []
+        if (
+            text_kernels.NATIVE is None
+            and self.adapters.embed_missing_on_read
+            and type(self.adapters.embedding) is HashingEmbeddingProvider
+        ):
+            # Local's exact sparse path (see LocalMemoryEngine.vector_search): score the memoized
+            # candidates and clone only the hits kept; same scores, metadata and order as the loop below.
+            sparse = SparseCosine(query_vec)
+            templates = oracle._candidate_templates(filt)
+            finish = getattr(templates, "finish", None)
+            for template in templates:
+                stored_vec = oracle._stored_embedding_value(template, filt)
+                if stored_vec is None and str(
+                    template.metadata.get("embedding_partition") or VECTOR_PARTITION_PUBLIC
+                ) == "none":
+                    continue
+                score = (
+                    cosine(query_vec, stored_vec)
+                    if stored_vec is not None
+                    else sparse.hashing(template.text, int(self.adapters.embedding.dims))
+                )
+                if score > 0:
+                    hit = _clone_candidate_hit(template)
+                    if finish is not None:
+                        hit = finish(hit, template)
+                    hit.metadata["stored_embedding_used"] = stored_vec is not None
+                    self._apply_dense_channel(hit, score)
+                    hits.append(hit)
+            return LocalMemoryEngine._mark_retrieved_text_as_data(
+                sorted(hits, key=lambda item: item.score, reverse=True)[:k]
+            )
+        candidates = oracle._candidate_hits(filt)
         if text_kernels.NATIVE is not None:
             chunks = [
                 self._packed_embedding_for_hit(
@@ -4036,6 +4093,29 @@ class SqliteEngine:
             (tenant_id, str(cache_key)),
         )
         return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+
+    def stored_embedding_dims(self) -> int | None:
+        """Most common width of the newest stored text vectors across every tenant
+        file (media vectors excluded); None when none are stored."""
+        widths: dict[int, int] = {}
+        for path in self._iter_tenant_db_paths():
+            conn, owned = self._borrow_conn(path)
+            try:
+                # The newest vectors show the writer's width; a full scan cost ~200 ms per open at 20k rows.
+                for dims, count in conn.execute(
+                    "SELECT dims, COUNT(*) FROM (SELECT length(embedding) / 8 AS dims FROM evidence "
+                    "WHERE embedding IS NOT NULL AND json_extract(metadata, '$.media_embedding') IS NULL "
+                    "ORDER BY rowid DESC LIMIT 256) GROUP BY 1"
+                ):
+                    widths[dims] = widths.get(dims, 0) + count
+            except sqlite3.OperationalError as exc:
+                if "no such table" not in str(exc):
+                    raise
+                # A queue-only file holds no evidence vectors.
+            finally:
+                if owned:
+                    conn.close()
+        return max(widths, key=widths.__getitem__) if widths else None
 
     def purge_embedding_cache(self, tenant_id: str, cid: str) -> int:
         """Purge every cached vector for ``cid`` (all model_ids). Exposed for the
@@ -4527,30 +4607,48 @@ class SqliteEngine:
     # ``correct``) mirror Local's short body directly over SQL.
 
     def _assertion_oracle(
-        self, conn: sqlite3.Connection, tenant_id: str, branch: str
+        self, conn: sqlite3.Connection, incoming: Assertion, branch: str
     ) -> LocalMemoryEngine:
-        """Hydrate an upsert-scope oracle: the tenant's branch registry (so
-        Local's own ``_require_branch`` passes), the (tenant, branch) evidence
-        (read by projection-reality-monitoring + independent-corroboration), and
-        the (tenant, branch) assertions (the supersede/contest peer set). Keys
-        match Local's internal keying exactly (``_evidence_key`` / ``_branch_key``)."""
+        """Hydrate an upsert-scope oracle with exactly the rows Local's upsert
+        reads or writes: the tenant's branch registry (Local's ``_require_branch``),
+        the assertions that can be peers (same subject, active or contested) or
+        share ``incoming.id``, the evidence those rows and ``incoming`` cite
+        (projection-reality-monitoring + independent-corroboration), and the
+        relations a supersession can close (``_relation_group_keys``). Rowid
+        order is kept, so tie-breaks match a full hydration. Keys match Local's
+        internal keying exactly (``_evidence_key`` / ``_branch_key``)."""
         oracle = LocalMemoryEngine(policy=self.policy, adapters=self.adapters)
+        tenant_id = incoming.tenant_id
         with self._lock:
             branch_rows = conn.execute(
                 "SELECT name, from_branch, kind, created_at FROM branches "
                 "WHERE tenant_id = ? ORDER BY rowid",
                 (tenant_id,),
             ).fetchall()
-            ev_rows = conn.execute(
-                "SELECT * FROM evidence WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
-                (tenant_id, branch),
-            ).fetchall()
             a_rows = conn.execute(
-                "SELECT * FROM assertions WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
-                (tenant_id, branch),
+                "SELECT * FROM assertions WHERE tenant_id = ? AND branch = ? AND "
+                "((subject = ? AND status IN ('active', 'contested')) OR id = ?) ORDER BY rowid",
+                (tenant_id, branch, incoming.subject, incoming.id),
             ).fetchall()
+            assertions = [_assertion_from_row(row) for row in a_rows]
+            cids = {str(cid) for item in [incoming, *assertions] for cid in item.source_evidence_cids if cid}
+            ev_rows = conn.execute(
+                "SELECT * FROM evidence WHERE tenant_id = ? AND branch = ? AND "
+                "cid IN (SELECT value FROM json_each(?)) ORDER BY rowid",
+                (tenant_id, branch, json_text(sorted(cids))),
+            ).fetchall()
+            groups = set().union(*(
+                _relation_group_keys(incoming.subject, item.predicate)
+                for item in [incoming, *assertions]
+                if item.subject == incoming.subject
+            ))
+            conn.create_function(
+                "mnemosyne_relation_group", 2,
+                lambda source, predicate: (source.strip().lower(), predicate.strip().lower()) in groups,
+            )
             rel_rows = conn.execute(
-                "SELECT * FROM relations WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
+                "SELECT * FROM relations WHERE tenant_id = ? AND branch = ? AND "
+                "mnemosyne_relation_group(source, predicate) ORDER BY rowid",
                 (tenant_id, branch),
             ).fetchall()
         for row in branch_rows:
@@ -4564,8 +4662,7 @@ class SqliteEngine:
             oracle.evidence[
                 oracle._evidence_key(ev.tenant_id, ev.branch, ev.cid or "")
             ] = ev
-        for row in a_rows:
-            assertion = _assertion_from_row(row)
+        for assertion in assertions:
             oracle.assertions[
                 oracle._branch_key(assertion.tenant_id, assertion.branch, assertion.id)
             ] = assertion
@@ -4653,7 +4750,7 @@ class SqliteEngine:
                 if not conn.in_transaction:
                     conn.execute("BEGIN IMMEDIATE")
                 self._require_branch(conn, assertion.tenant_id, branch)
-                oracle = self._assertion_oracle(conn, assertion.tenant_id, branch)
+                oracle = self._assertion_oracle(conn, assertion, branch)
                 before = {item.id: item.to_dict() for item in oracle.assertions.values()}
                 before_relations = {
                     item.id: item.to_dict() for item in oracle.relations.values()
@@ -4790,6 +4887,8 @@ class SqliteEngine:
             item = copy.deepcopy(contradiction)
             conn = self._connect(item.tenant_id)
             with conn:
+                if not conn.in_transaction:
+                    conn.execute("BEGIN IMMEDIATE")
                 rows = conn.execute(
                     "SELECT record FROM contradictions WHERE tenant_id = ?",
                     (item.tenant_id,),
@@ -4830,10 +4929,12 @@ class SqliteEngine:
         rowid preserved) plus Local's audit rows in one transaction."""
         with self._lock:
             conn = self._connect(preference.tenant_id)
-            oracle = self._preference_oracle(conn, preference.tenant_id)
-            before = {pref.id: pref.to_dict() for pref in oracle.preferences.values()}
-            result_id = oracle.add_preference(copy.deepcopy(preference))
             with conn:
+                if not conn.in_transaction:
+                    conn.execute("BEGIN IMMEDIATE")
+                oracle = self._preference_oracle(conn, preference.tenant_id)
+                before = {pref.id: pref.to_dict() for pref in oracle.preferences.values()}
+                result_id = oracle.add_preference(copy.deepcopy(preference))
                 for pref in oracle.preferences.values():
                     if pref.tenant_id != preference.tenant_id:
                         continue
@@ -4985,19 +5086,21 @@ class SqliteEngine:
         same ``dict`` shape Local returns."""
         with self._lock:
             conn = self._connect(tenant_id)
-            oracle = self._entity_oracle(conn, tenant_id)
-            row = oracle.register_entity(
-                tenant_id,
-                canonical,
-                alias=alias,
-                entity_type=entity_type,
-                summary=summary,
-                source_evidence_cids=source_evidence_cids,
-                access_policy=access_policy,
-            )
-            key = (tenant_id, canonical.strip() or "unknown-entity")
-            record = oracle.entities[key]
             with conn:
+                if not conn.in_transaction:
+                    conn.execute("BEGIN IMMEDIATE")
+                oracle = self._entity_oracle(conn, tenant_id)
+                row = oracle.register_entity(
+                    tenant_id,
+                    canonical,
+                    alias=alias,
+                    entity_type=entity_type,
+                    summary=summary,
+                    source_evidence_cids=source_evidence_cids,
+                    access_policy=access_policy,
+                )
+                key = (tenant_id, canonical.strip() or "unknown-entity")
+                record = oracle.entities[key]
                 conn.execute(
                     "INSERT INTO entities(tenant_id, canonical, record) VALUES (?, ?, ?) "
                     "ON CONFLICT(tenant_id, canonical) DO UPDATE SET record = excluded.record",
@@ -6026,7 +6129,7 @@ class SqliteEngine:
                 else:
                     for affected_cid in affected_order:
                         conn.execute(
-                            "UPDATE evidence SET content = '', erased = 1 "
+                            "UPDATE evidence SET content = '', erased = 1, embedding = NULL "
                             "WHERE tenant_id = ? AND branch = ? AND cid = ?",
                             (tenant_id, branch, affected_cid),
                         )
@@ -6041,7 +6144,7 @@ class SqliteEngine:
                         ),
                     )
                 # Assertions (branch-scoped): trim surviving sources or retract.
-                self._invalidate_mental_models(conn, tenant_id, branch)
+                self._invalidate_mental_models(conn, tenant_id, branch, affected_cids)
                 self._scrub_document_records(conn, tenant_id, branch, affected_cids)
                 dependent_relations = set()
                 for row in conn.execute(
@@ -6058,10 +6161,16 @@ class SqliteEngine:
                         dependent_relations.add((row["subject"], row["predicate"], row["object"], frozenset(sources)))
                     surviving = [item for item in sources if item not in affected_cids]
                     if surviving and not conjunctive:
+                        live = dict(conn.execute(
+                            "SELECT cid, content FROM evidence WHERE tenant_id = ? AND branch = ? "
+                            "AND erased = 0 AND cid IN (SELECT value FROM json_each(?))",
+                            (tenant_id, branch, json_text(surviving)),
+                        ).fetchall())
                         conn.execute(
-                            "UPDATE assertions SET source_evidence_cids = ? "
+                            "UPDATE assertions SET source_evidence_cids = ?, calibration = ? "
                             "WHERE tenant_id = ? AND branch = ? AND id = ?",
-                            (json_text(surviving), tenant_id, branch, row["id"]),
+                            (json_text(surviving), json_text(trimmed_calibration(calibration, surviving, live)),
+                             tenant_id, branch, row["id"]),
                         )
                         propagated["trimmed_assertions"].append(row["id"])
                     else:

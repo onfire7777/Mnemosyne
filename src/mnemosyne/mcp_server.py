@@ -323,29 +323,22 @@ class MnemosyneMcpServer:
             if getattr(engine, "adapters", None) is not None:
                 from dataclasses import replace as _replace
 
-                from mnemosyne.retrieval import retrieval_adapters_from_env
+                from mnemosyne.retrieval import adopt_stored_embedding_dims, retrieval_adapters_from_env
 
                 # The retrieval providers the CLI uses; each engine keeps its own backend labels.
-                # shortcut: with none of these set the engine keeps its own default embedder (256-dim
-                # hashing on local/SQLite, the CLI uses 1024); unify when stored vectors can be re-embedded.
                 env = retrieval_adapters_from_env()
-                chosen = {
-                    name: getattr(env, name)
-                    for name, keys in (
-                        ("embedding", ("EMBEDDING_PROVIDER", "EMBEDDING_DIMS")),
-                        ("reranker", ("EMBEDDING_PROVIDER", "EMBEDDING_DIMS", "RERANKER_PROVIDER")),
-                    )
-                    if any(os.environ.get(f"MNEMOSYNE_{key}") for key in keys)
-                }
                 engine.adapters = _replace(
                     engine.adapters,
-                    **chosen,
+                    embedding=env.embedding,
+                    reranker=env.reranker,
                     lexical_retriever=env.lexical_retriever,
                     graph_retriever=env.graph_retriever,
                     passage_graph=self.passage_graph
                     if self.passage_graph is not None
                     else engine.adapters.passage_graph,
                 )
+                if not os.environ.get("MNEMOSYNE_EMBEDDING_DIMS"):
+                    adopt_stored_embedding_dims(engine)
             if self.queue_backend == "postgres":
                 dsn = self.postgres_dsn or os.environ.get("MNEMOSYNE_POSTGRES_DSN")
                 if not dsn:
@@ -652,19 +645,22 @@ class MnemosyneMcpServer:
                 else nullcontext()
             )
             with transaction:
-                _, queue, runtime_state, tools = self._stateless_tools_for(
+                engine, queue, runtime_state, tools = self._stateless_tools_for(
                     self._queue_tenant_from_arguments(arguments), arguments
                 )
-                result = getattr(tools, name)(**arguments)
-                self._save_queue(runtime_state, queue)
+                with getattr(engine, "store_operation", nullcontext)():
+                    result = getattr(tools, name)(**arguments)
+                    self._save_queue(runtime_state, queue)
                 return result
         if self._stateful_tools_closed:
             # The stateful bundle is single-shot: its resources are already
             # released, so serving on would raise an opaque backend error on
             # sqlite and silently return stale in-memory reads on local.
             raise RuntimeError("MCP server is closed")
-        result = getattr(self.tools, name)(**arguments)
-        self._save_queue(self.runtime_state, self.queue)
+        # Local JSON: each call is one locked read-modify-write that starts from what other processes saved.
+        with getattr(self.engine, "store_operation", nullcontext)():
+            result = getattr(self.tools, name)(**arguments)
+            self._save_queue(self.runtime_state, self.queue)
         return result
 
     def serve(self, stdin: TextIO = sys.stdin, stdout: TextIO = sys.stdout) -> None:
@@ -1020,7 +1016,9 @@ def build_sdk_server(**kwargs: Any) -> Any:
             if not facade._authorized({}):
                 raise ValueError("unauthorized: valid MCP auth token required")
             facade.prepare_tool_arguments("skill_search", {}, {})  # the session gate a skill tool call passes
-            return (facade._stateless_tools_for(None, {})[3] if facade.stateless else facade.tools)._skills()
+            tools = facade._stateless_tools_for(None, {})[3] if facade.stateless else facade.tools
+            with getattr(tools.engine, "store_operation", nullcontext)():  # _skills() may write finished skills to memory
+                return tools._skills()
 
         async def list_prompts(_ctx: Any, _params: Any) -> Any:
             return types.ListPromptsResult(prompts=[types.Prompt(name=s["name"], description=s["applicability"] or None)

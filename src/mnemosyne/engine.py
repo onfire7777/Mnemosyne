@@ -10,9 +10,9 @@ import secrets
 import threading
 import weakref
 from collections import OrderedDict, defaultdict
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from functools import lru_cache
-from contextlib import ExitStack, contextmanager
+from contextlib import AbstractContextManager, ExitStack, contextmanager
 from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
 from datetime import UTC, datetime, timedelta
@@ -2285,6 +2285,97 @@ def _normalized_sources(values: CidList) -> list[str]:
     return normalized
 
 
+def reality_monitoring_report(source_classes: dict[str, str]) -> dict[str, Any]:
+    """Projection reality monitoring of a fact from the reality class of each source cid."""
+    classes: dict[str, int] = {}
+    for reality_class in source_classes.values():
+        classes[reality_class] = classes.get(reality_class, 0) + 1
+    risky = {"self_generated", "simulated", "externally_suggested"}
+    grounded_count = classes.get("grounded", 0)
+    risky_count = sum(classes.get(item, 0) for item in risky)
+    if not source_classes:
+        reality_class = "unknown"
+    elif grounded_count:
+        reality_class = "grounded"
+    elif classes.get("simulated", 0):
+        reality_class = "simulated"
+    elif classes.get("self_generated", 0):
+        reality_class = "self_generated"
+    elif classes.get("externally_suggested", 0):
+        reality_class = "externally_suggested"
+    else:
+        reality_class = "unknown"
+    return {
+        "source": "g1_projection_reality_monitoring",
+        "applied": True,
+        "reality_class": reality_class,
+        "classes": classes,
+        "source_classes": source_classes,
+        "source_count": len(source_classes),
+        "grounded_source_count": grounded_count,
+        "risky_source_count": risky_count,
+        "missing_source_count": classes.get("unknown", 0),
+        "mixed": bool(grounded_count and risky_count),
+    }
+
+
+def trimmed_calibration(
+    calibration: dict[str, Any], sources: list[str], live: dict[str, str]
+) -> dict[str, Any]:
+    """Calibration of a belief that lost some sources to forget, keeping only what its
+    remaining ``sources`` still support: spans re-anchor onto the live source containing
+    their quote or are dropped, a quote or time wording no live source contains is
+    removed, and reality monitoring and rejected corroborators drop the lost cids.
+
+    ``live`` maps each remaining, readable source cid to its current content.
+    """
+    def anchor(quote: Any) -> dict[str, Any] | None:
+        for cid, content in live.items():
+            start = content.find(quote) if isinstance(quote, str) and quote else -1
+            if start >= 0:
+                return {"cid": cid, "start": start, "end": start + len(quote), "quote": quote}
+        return None
+
+    result = copy.deepcopy(calibration)
+    # Span lists also nest (e.g. entailment_review.support_spans), so walk every mapping.
+    nodes = [result]
+    while nodes:
+        node = nodes.pop()
+        for key, value in node.items():
+            if isinstance(value, dict):
+                nodes.append(value)
+            elif isinstance(value, list) and key.endswith("_spans"):
+                spans = [
+                    span if isinstance(span, dict) and span.get("cid") in live
+                    else anchor(span.get("quote") if isinstance(span, dict) else None)
+                    for span in value
+                ]
+                node[key] = [span for i, span in enumerate(spans) if span is not None and span not in spans[:i]]
+    if "source_quote" in result and anchor(result["source_quote"]) is None:
+        del result["source_quote"]
+    event_time = result.get("event_time")
+    if isinstance(event_time, dict) and event_time.get("wording") and anchor(event_time["wording"]) is None:
+        result["event_time"] = {**event_time, "wording": ""}
+    monitoring = result.get("reality_monitoring")
+    if isinstance(monitoring, dict) and isinstance(monitoring.get("source_classes"), dict):
+        report = reality_monitoring_report(
+            {cid: kind for cid, kind in monitoring["source_classes"].items() if cid in sources}
+        )
+        result["reality_monitoring"] = {**monitoring, **report}
+        if "reality_class" in result:
+            result["reality_class"] = report["reality_class"]
+    fast_path = result.get("schema_fast_path")
+    if isinstance(fast_path, dict) and isinstance(fast_path.get("rejected_corroborators"), list):
+        rejected = [
+            item for item in fast_path["rejected_corroborators"]
+            if not isinstance(item, dict) or item.get("cid") in sources
+        ]
+        result["schema_fast_path"] = {
+            **fast_path, "rejected_corroborators": rejected, "rejected_corroboration_count": len(rejected)
+        }
+    return result
+
+
 def _share_sources(item: Any) -> Any:
     """Give a row about to be stored the shared read-only form of its source list.
 
@@ -3090,6 +3181,16 @@ def _clone_candidate_hit(hit: Hit) -> Hit:
     )
 
 
+def _file_stamp(file: Path | int) -> tuple[int, int, int] | None:
+    """Identity of a file's current contents (a path or an open descriptor), None when absent."""
+    # shortcut: inode+mtime+size, not a content hash; hash the bytes if a same-tick same-size rewrite is ever seen
+    try:
+        stat = os.stat(file)
+    except FileNotFoundError:
+        return None
+    return stat.st_ino, stat.st_mtime_ns, stat.st_size
+
+
 class LocalMemoryEngine(CanaryOverlayMixin):
     """A deterministic local engine that implements the blueprint contract.
 
@@ -3099,6 +3200,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
     counterfactual replay, and single-user operation.
     """
 
+    _disk_stamp: tuple[int, int, int] | None = None  # of the store file this engine last loaded or wrote
     _writer_owners_lock = threading.Lock()
     _writer_owners: weakref.WeakValueDictionary[str, LocalMemoryEngine] = (
         weakref.WeakValueDictionary()
@@ -3245,28 +3347,34 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     )
                 self._writer_owners[writer_path_key] = self
                 self._writer_path_key = writer_path_key
-            # Every writer loads the whole file and rewrites it, so a writer in another
-            # process would erase this one's memories: hold a file lock until close().
-            from mnemosyne._file_lock import exclusive_file_lock
 
-            file_lock = ExitStack()
-            try:
-                self.store_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-                file_lock.enter_context(
-                    exclusive_file_lock(
-                        self.store_path.with_suffix(self.store_path.suffix + ".lock"),
-                        timeout=30.0,
-                    )
-                )
-            except BaseException as exc:
-                self.close()
-                if isinstance(exc, TimeoutError):
-                    raise RuntimeError(
-                        "local memory store already has a writer in another process: "
-                        f"{writer_path_key}; use --backend sqlite for concurrent processes"
-                    ) from None
-                raise
-            self._writer_file_lock = file_lock
+    @staticmethod
+    def store_lock(store_path: str | os.PathLike[str]) -> AbstractContextManager[None]:
+        """The cross-process lock every reader-modifier-writer of this JSON store holds."""
+        from mnemosyne._file_lock import process_shared_file_lock
+
+        path = Path(store_path).expanduser()
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        return process_shared_file_lock(path.with_suffix(path.suffix + ".lock"))
+
+    @contextmanager
+    def store_operation(self) -> Iterator[None]:
+        """Run one read-modify-write of the store: lock it across processes and start from what is on disk."""
+        if not self.store_path:
+            yield
+            return
+        with self.store_lock(self.store_path):
+            with self._lock:
+                if _file_stamp(self.store_path) != self._disk_stamp:
+                    self._reload()
+            yield
+
+    def _reload(self) -> None:
+        """Adopt the store another process saved; memos and overlays describe the old contents."""
+        self._overlay_init()
+        self._load()
+        self._bump_store_version()
+        self._passage_bm25_index = None
 
     def attach_store(self, store_path: str | os.PathLike[str]) -> None:
         """Give an ephemeral engine a new durable home without copying its state."""
@@ -3317,9 +3425,6 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             if self._writer_owners.get(writer_path_key) is self:
                 del self._writer_owners[writer_path_key]
         self._writer_path_key = None
-        file_lock = self.__dict__.pop("_writer_file_lock", None)
-        if file_lock is not None:
-            file_lock.close()
 
     def __enter__(self) -> LocalMemoryEngine:
         return self
@@ -4585,21 +4690,28 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             }
         tmp = self.store_path.with_suffix(self.store_path.suffix + ".tmp")
         payload = json.dumps(data, indent=2, sort_keys=True)
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                fh.write(payload)
-                fh.flush()
-                os.fsync(fh.fileno())
-        except Exception:
-            tmp.unlink(missing_ok=True)
-            raise
-        try:
-            tmp.chmod(0o600)
-            tmp.replace(self.store_path)
-        except BaseException:
-            tmp.unlink(missing_ok=True)
-            raise
+        with self.store_lock(self.store_path), self._lock:
+            # Writing over a file another process saved after this engine loaded it would erase its writes.
+            if _file_stamp(self.store_path) != self._disk_stamp:
+                raise RuntimeError(
+                    "local memory store was changed by another process; write inside store_operation()"
+                )
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    fh.write(payload)
+                    fh.flush()
+                    os.fsync(fh.fileno())
+            except Exception:
+                tmp.unlink(missing_ok=True)
+                raise
+            try:
+                tmp.chmod(0o600)
+                tmp.replace(self.store_path)
+            except BaseException:
+                tmp.unlink(missing_ok=True)
+                raise
+            self._disk_stamp = _file_stamp(self.store_path)
 
     @contextmanager
     def defer_persistence(self):
@@ -4627,7 +4739,12 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 self._persist()
 
     def _load(self) -> None:
-        data = json.loads(self.store_path.read_text(encoding="utf-8"))
+        try:
+            with self.store_path.open(encoding="utf-8") as handle:
+                disk_stamp = _file_stamp(handle.fileno())  # of the bytes read, even if replaced since
+                data = json.loads(handle.read())
+        except FileNotFoundError:
+            disk_stamp, data = None, {}  # deleted by another process: start empty, never write it back
         shared = data.pop(_SHARED_VALUES_KEY, None) if isinstance(data, dict) else None
         # Advisory records are plain JSON, never shared-value encoded. Keep
         # arbitrary scope/answer keys out of the core ledger's marker decoder.
@@ -4753,6 +4870,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         self.audit_log = list(data.get("audit_log", []))
         self.deletion_log = list(data.get("deletion_log", []))
         self.merge_log = list(data.get("merge_log", []))
+        self._disk_stamp = disk_stamp  # last: a load that failed part-way must not be written back
 
     @contextmanager
     def source_transaction(self, tenant_id: str, branch: str = "main"):
@@ -6769,44 +6887,15 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         branch: str,
         source_evidence_cids: list[str],
     ) -> dict[str, Any]:
-        classes: dict[str, int] = {}
         source_classes: dict[str, str] = {}
         for cid in sorted({str(item) for item in source_evidence_cids if item}):
             ev = self._evidence_row(tenant_id, branch, cid)
-            reality_class = (
+            source_classes[cid] = (
                 self._classify_evidence_reality(ev)
                 if ev is not None and not ev.erased
                 else "unknown"
             )
-            classes[reality_class] = classes.get(reality_class, 0) + 1
-            source_classes[cid] = reality_class
-        risky = {"self_generated", "simulated", "externally_suggested"}
-        grounded_count = classes.get("grounded", 0)
-        risky_count = sum(classes.get(item, 0) for item in risky)
-        if not source_classes:
-            reality_class = "unknown"
-        elif grounded_count:
-            reality_class = "grounded"
-        elif classes.get("simulated", 0):
-            reality_class = "simulated"
-        elif classes.get("self_generated", 0):
-            reality_class = "self_generated"
-        elif classes.get("externally_suggested", 0):
-            reality_class = "externally_suggested"
-        else:
-            reality_class = "unknown"
-        return {
-            "source": "g1_projection_reality_monitoring",
-            "applied": True,
-            "reality_class": reality_class,
-            "classes": classes,
-            "source_classes": source_classes,
-            "source_count": len(source_classes),
-            "grounded_source_count": grounded_count,
-            "risky_source_count": risky_count,
-            "missing_source_count": classes.get("unknown", 0),
-            "mixed": bool(grounded_count and risky_count),
-        }
+        return reality_monitoring_report(source_classes)
 
     @classmethod
     def _projection_reality_monitoring_from_calibration(
@@ -8979,6 +9068,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             else:
                 ev.content = ""
                 ev.erased = True
+                ev.embedding = None
                 for derived_cid in derived_cids:
                     derived = self.evidence.get(
                         self._evidence_key(tenant_id, branch, derived_cid)
@@ -8986,6 +9076,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     if derived:
                         derived.content = ""
                         derived.erased = True
+                        derived.embedding = None
             for retained_cid, metadata in retained_derived.items():
                 retained = self.evidence.get(
                     self._evidence_key(tenant_id, branch, retained_cid)
@@ -9097,6 +9188,13 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     propagated["retracted_assertions"].append(assertion.id)
                 else:
                     assertion.source_evidence_cids = surviving_sources
+                    live = {
+                        cid: ev.content
+                        for cid in surviving_sources
+                        if (ev := self._evidence_row(tenant_id, branch, cid)) is not None
+                        and not ev.erased
+                    }
+                    assertion.calibration = trimmed_calibration(assertion.calibration, surviving_sources, live)
                     propagated["trimmed_assertions"].append(assertion.id)
             for preference in self.preferences.values():
                 if preference.tenant_id != tenant_id:
@@ -10125,8 +10223,27 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     access_policy=ev.access_policy,
                     embedding_partition=ev.metadata.get("embedding_partition"),
                 ):
+                    embedder = self.adapters.embedding
+                    if (
+                        type(embedder) is HashingEmbeddingProvider
+                        and len(ev.embedding) != embedder.dims
+                        and not ev.metadata.get("media_embedding")
+                    ):
+                        # A text vector hashed at another width cannot be compared; re-hash the text instead.
+                        return None
                     return ev.embedding
         return None
+
+    def stored_embedding_dims(self) -> int | None:
+        """Most common width of the stored text vectors (media vectors excluded); None when none are stored."""
+        from collections import Counter
+
+        widths = Counter(
+            len(ev.embedding)
+            for ev in self.evidence.values()
+            if ev.embedding and not ev.metadata.get("media_embedding")
+        )
+        return widths.most_common(1)[0][0] if widths else None
 
     def _embed_text(self, text: str) -> list[float]:
         return self.adapters.embedding.embed(text)

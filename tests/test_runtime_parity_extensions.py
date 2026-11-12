@@ -3392,8 +3392,8 @@ def test_postgres_user_model_save_merges_writers_instead_of_overwriting() -> Non
                 self.row = None if self.work["blob"] is None else (copy.deepcopy(self.work["blob"]),)
             elif sql.startswith("INSERT INTO runtime_state"):
                 self.work["blob"] = json.loads(json.dumps(params[-1]))
-            elif sql.startswith("DELETE FROM preferences"):
-                self.work["prefs"].clear()
+            elif sql.startswith("UPDATE preferences SET status = 'retracted'"):  # tombstone dropped entries
+                self.work["prefs"] = {key: value for key, value in self.work["prefs"].items() if key in params[-1]}
             elif sql.startswith("INSERT INTO preferences"):
                 self.work["prefs"][params[0]] = params[4]
 

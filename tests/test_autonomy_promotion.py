@@ -136,3 +136,23 @@ def test_g0_autonomy_promotion_fixture_reports_meta_rail_contracts() -> None:
     assert metrics["echo_chamber_uplift"] == 0.0
     assert report["assigned_mislabel_domain"] == "finance"
     assert report["passed"] is True
+
+
+def test_non_finite_or_garbage_credential_knobs_take_their_defaults() -> None:
+    from types import SimpleNamespace
+
+    from mnemosyne.credentials import birth_groundedness_from_value, credential_policy_from_operating_policy
+
+    default = CredentialPolicy()
+    for bad in (float("inf"), float("-inf"), float("nan"), "garbage", None):
+        knobs = SimpleNamespace(
+            credential_min_success_rate=bad,
+            credential_min_train_events=bad,
+            credential_min_holdout_events=bad,
+            credential_max_birth_uplift=bad,
+            credential_decay_per_window=bad,
+        )
+        assert credential_policy_from_operating_policy(knobs) == default
+        assert birth_groundedness_from_value(bad) == birth_groundedness_from_value(0.0)
+    permissive = SimpleNamespace(credential_min_success_rate=0.0, credential_max_birth_uplift=1.0, credential_decay_per_window=0.0)
+    assert credential_policy_from_operating_policy(permissive).min_success_rate == 0.0

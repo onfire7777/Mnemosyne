@@ -10,6 +10,7 @@ all against the ``LocalMemoryEngine`` oracle.
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -472,16 +473,97 @@ def test_stale_write_back_cannot_undo_a_forget(tmp_path: Path, monkeypatch):
     assert locked == [True]
 
     fetch = reader._fetch_evidence
+    forgetting = []
 
     def fetch_then_forget(*args, **kwargs):
+        import threading
+
         snapshot = fetch(*args, **kwargs)
         monkeypatch.setattr(reader, "_fetch_evidence", fetch)
-        assert other.forget("t", cid)["erased"] is True
+        forgetting.append(threading.Thread(target=other.forget, args=("t", cid)))
+        forgetting[0].start()
+        forgetting[0].join(0.5)
+        assert forgetting[0].is_alive()  # the metadata read holds the write lock
         return snapshot
 
     monkeypatch.setattr(reader, "_fetch_evidence", fetch_then_forget)
     reader.update_evidence_metadata("t", cid, {"topic": "x"})
+    forgetting[0].join()
     row = reader._connect("t").execute("SELECT erased, content FROM evidence WHERE cid = ?", (cid,)).fetchone()
     assert tuple(row) == (1, "")
     reader.close()
     other.close()
+
+
+def test_residue_cleanup_counts_then_removes_what_older_versions_left(tmp_path: Path) -> None:
+    from mnemosyne.consolidation import ConsolidationWorker
+    from mnemosyne.residue import residue_cleanup
+    from mnemosyne.sqlite_schema import pack_embedding
+
+    engine = SqliteEngine(tmp_path)
+    erased, kept = (engine.append_evidence(_ev("t", text)) for text in ("Vault code 4417.", "Deploys run on Fridays."))
+    engine.set_evidence_embedding("t", erased, [0.1] * 8)
+    engine.forget("t", erased)
+    conn = engine._connect("t")
+    assert conn.execute("SELECT embedding FROM evidence WHERE cid = ?", (erased,)).fetchone()[0] is None
+    ConsolidationWorker(engine, gate_cases=[]).run_queue_payload(
+        {"tenant_id": "t", "source_evidence_cids": [kept], "passes": ["summarizer"]})
+    with conn:  # what older versions left: the erased vector, the cache mirror, a finished job with its result
+        conn.execute("UPDATE evidence SET embedding = ? WHERE cid = ?", (pack_embedding([0.1] * 8), erased))
+        conn.execute("INSERT INTO embedding_cache VALUES ('t', ?, 'm', ?, 8, 0, 'x')", (kept, pack_embedding([0.1] * 8)))
+        conn.execute("INSERT INTO runtime_jobs(id, tenant_id, kind, status, result, created_at, updated_at) "
+                     "VALUES ('j', 't', 'consolidate_evidence', 'complete', '{}', 'x', 'x')")
+    expected = {"erased_rows": 1, "embedding_cache_rows": 1, "finished_jobs": 1, "single_source_gists": 1}
+    dry = residue_cleanup(engine)
+    assert {key: value for key, value in dry["counts"].items() if value} == expected
+    assert residue_cleanup(engine)["counts"] == dry["counts"]  # the scan changes nothing
+    applied = residue_cleanup(engine, apply=True)
+    assert applied["ok"] and not any(applied["after"].values())
+    assert not any(residue_cleanup(engine)["counts"].values())
+    assert engine.retrieve(query="Deploys Fridays", tenant_id="t").hits
+    engine.close()
+
+
+def test_concurrent_preference_replay_keeps_one_row(tmp_path: Path, monkeypatch):
+    """add_preference reads under the write lock: a second engine's replay waits, then dedups."""
+    import threading
+
+    first, second = _make(tmp_path), _make(tmp_path)
+
+    def pref(pid):
+        return Preference(id=pid, tenant_id="t", user_id="u", category="format", statement="terse",
+                          source_evidence_cids=["c1"], access_policy={"tenant": "t"})
+
+    oracle = first._preference_oracle
+    racing = []
+
+    def oracle_then_race(*args):
+        result = oracle(*args)
+        racing.append(threading.Thread(target=second.add_preference, args=(pref("p-2"),)))
+        racing[0].start()
+        racing[0].join(0.5)
+        return result
+
+    monkeypatch.setattr(first, "_preference_oracle", oracle_then_race)
+    first.add_preference(pref("p-1"))
+    racing[0].join()
+    assert len(first.export_tenant("t")["preferences"]) == 1
+    first.close()
+    second.close()
+
+
+@pytest.mark.parametrize("backend", ["local", "sqlite"])
+def test_trimmed_belief_keeps_no_text_of_the_forgotten_source(tmp_path: Path, backend):
+    from mnemosyne.mcp_tools import MemoryTools
+
+    engine = LocalMemoryEngine() if backend == "local" else _make(tmp_path)
+    tools = MemoryTools(engine)
+    erased = tools.capture(tenant_id="t", user_id="u", actor="user", source_type="chat",
+                           content="I live in Rotterdam with my partner Xandrius.")["cid"]
+    kept = tools.capture(tenant_id="t", user_id="u", actor="user", source_type="chat",
+                         content="Yes, I live in Rotterdam.", session_id="s2")["cid"]
+    result = engine.forget("t", erased, requested_by="user")
+    assert result["propagated"]["trimmed_assertions"]
+    [belief] = [row for row in engine.export_tenant("t")["assertions"] if row["status"] == "active"]
+    assert belief["source_evidence_cids"] == [kept] and belief["object"] == "Rotterdam"
+    assert "Xandrius" not in json.dumps(belief) and erased not in json.dumps(belief["calibration"])

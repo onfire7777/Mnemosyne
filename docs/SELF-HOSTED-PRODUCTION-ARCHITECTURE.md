@@ -127,7 +127,7 @@ byte-binding). The work is closing **intent-vs-enforcement** gaps and shipping *
      real step-ca/Caddy/mTLS evidence was later captured and retained in
      `capture-bc10`.
 2. **Postgres role separation under RLS:** ship `mnemosyne_app` (NOSUPERUSER, NOBYPASSRLS, no
-   DELETE/TRUNCATE), a separate `mnemosyne_consolidator` (sole write/destructive authority), and
+   TRUNCATE, DELETE only on the narrow derived-table and `runtime_jobs` queue list in `roles.sql`), a separate `mnemosyne_consolidator` (sole write/destructive authority), and
    SELECT-only eval roles; an ops-check that live-probes `rolsuper`/`rolbypassrls` and fails if true.
    - 2026-06-30 implementation note: `MNEMOSYNE_POSTGRES_REQUIRE_SAFE_ROLE=1` now makes
      `PostgresEngine`, `PostgresRuntimeState`, and `PostgresQueue` refuse connections whose

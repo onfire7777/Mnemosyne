@@ -3,11 +3,44 @@
 from __future__ import annotations
 
 import errno
+import os
 import sys
+import threading
 import time
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
+from types import SimpleNamespace
+
+_process_holds: dict[str, SimpleNamespace] = {}
+_process_holds_lock = threading.Lock()
+
+
+@contextmanager
+def process_shared_file_lock(path: Path) -> Iterator[None]:
+    """exclusive_file_lock taken once per process: nested and concurrent entries by its threads share it.
+
+    Two descriptors of one file conflict even inside one process, so a plain nested
+    exclusive_file_lock on the same path would wait on itself.
+    """
+    with _process_holds_lock:
+        hold = _process_holds.setdefault(
+            os.path.realpath(path), SimpleNamespace(gate=threading.Lock(), count=0, release=None)
+        )
+    with hold.gate:
+        if not hold.count:
+            release = ExitStack()
+            release.enter_context(exclusive_file_lock(path))
+            hold.release = release
+        hold.count += 1
+    try:
+        yield
+    finally:
+        with hold.gate:
+            hold.count -= 1
+            if not hold.count:
+                hold.release.close()
+                hold.release = None
 
 
 @contextmanager
