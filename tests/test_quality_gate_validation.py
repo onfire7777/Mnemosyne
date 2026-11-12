@@ -117,9 +117,11 @@ def test_markdown_reports_observed_calibration_without_obsolete_floor_claims():
 
 
 def test_dev_contract_uses_dev_floor_not_higher_all_floor():
+    floor = baseline()
+    floor["summary"]["composite_score"] = 1.0  # an all-partition floor above the dev score
     report = candidate("dev")
-    assert report["summary"]["composite_score"] < baseline()["summary"]["composite_score"]
-    contract._assert_nonregression(report, baseline(), "dev")
+    assert report["summary"]["composite_score"] < floor["summary"]["composite_score"]
+    contract._assert_nonregression(report, floor, "dev")
 
 
 def test_report_contract_accepts_safe_improvement_above_difficulty_ceiling():
@@ -188,7 +190,7 @@ def test_current_run_determinism_keeps_stable_detail_and_preserves_all_split_cov
         calls.append(command)
         assert command[command.index("--split") + 1] == "all"
         assert command[command.index("--seed") + 1] == "42"
-        report = candidate("all", composite=.8)  # Improvement must not need a rewritten baseline.
+        report = candidate("all", composite=.99)  # Improvement must not need a rewritten baseline.
         report["meta"]["generated_at"] = f"run-{len(calls)}"
         report["meta"]["runtime_seconds"] = len(calls)
         report["query_details"][0]["latency_ms"] = len(calls)
