@@ -9,6 +9,13 @@ def episode(events):
     return {"tool_events": events, "reward": 1, "signals": [{"kind": "verifier", "value": 1}]}
 
 
+def test_finished_ok_actions_are_steps_and_unfinished_ones_are_not():
+    done = [{"name": "inspect", "source": "tool", "status": "ok"},
+            {"name": "verify", "source": "tool", "status": "completed"}]
+    assert observed_steps(episode(done)) == ["inspect", "verify"]
+    assert observed_steps(episode([*done, {"name": "deploy", "source": "tool", "status": "inProgress"}])) == []
+
+
 def test_shell_commands_and_arguments_remain_distinct_steps():
     checks = episode([
         {"name": "shell", "source": "tool", "command": "ruff check src", "cwd": "/project"},

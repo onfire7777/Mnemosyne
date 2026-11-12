@@ -1188,8 +1188,18 @@ def test_normal_runtime_serves_compiled_lesson_page_after_real_probation():
             "t", episode_id=row["episode_id"], kind="verifier", value=1, final=True
         )
     runtime.consolidate("t")
+    from mnemosyne.experience.candidates import learning_knowledge_context
+
+    # Promotion publishes the compiled page for the active revision.
+    [page] = learning_knowledge_context(
+        runtime, "t", "u", task, query, selected_artifact_ids=[learned["id"]]
+    )
+    assert page["content"] == learned["content"]
+    assert page["source_cids"]
+    # The composed context carries each claim once: a one-lesson page repeats
+    # the lesson served beside it, so only the lesson is delivered.
     context = runtime.prepare_context("t", "u", "page-consumer", query, task_type=task)
-    assert context["knowledge_pages"][0]["content"] == learned["content"]
-    assert context["knowledge_pages"][0]["source_cids"]
+    assert [row["content"] for row in context["lessons"]] == [learned["content"]]
+    assert context["knowledge_pages"] == []
     receipt = runtime.writer.read("t")["receipts"][context["receipt_id"]]
     assert learned["id"] in {item["item_id"] for item in receipt["items"]}

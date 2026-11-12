@@ -180,12 +180,15 @@ def test_probation_promotes_only_after_real_served_and_control_outcomes():
             "done" if served else "unknown",
             receipt_ids=[context["receipt_id"]],
         )
+        # A task-level pass alone no longer verifies a served memory: the
+        # verifier names the skill it checked (see test_learning_outcome_relevance).
         runtime.record_signal(
             "t",
             episode_id=observed["episode_id"],
             kind="verifier",
             value=served,
             final=True,
+            target_ids=[artifact["id"]] if served else None,
         )
     state = runtime.writer.read("t")
     stats = state["stats"][stat_key("skill", artifact["id"], 1, "deploy")]
@@ -262,6 +265,7 @@ def test_protected_projection_checks_source_cids_and_handles_missing_sources(
         return original(tenant, key, branch)
 
     monkeypatch.setattr(engine, "get_evidence", source)
+    provenance = [cid]
     monkeypatch.setattr(
         engine,
         "retrieve",
@@ -275,15 +279,24 @@ def test_protected_projection_checks_source_cids_and_handles_missing_sources(
                     text="Protected fact",
                     score=1,
                     channel="graph_ppr",
-                    provenance=[cid, "missing-source"],
+                    provenance=list(provenance),
                 )
             ]
         ),
     )
+    # Full withholding still serves a projection of a protected source.
     context = runtime.prepare_context(
         "t", "u", "s", "Protected fact", task_type="lookup"
     )
     assert [hit["id"] for hit in context["hits"]] == ["assertion-id"]
+    assert set(probes) == {cid}
+    # A missing source is probed without error, but delivery requires every
+    # cited source to be readable, so that projection is no longer served.
+    provenance.append("missing-source")
+    context = runtime.prepare_context(
+        "t", "u", "s2", "Protected fact", task_type="lookup"
+    )
+    assert context["hits"] == []
     assert set(probes) == {cid, "missing-source"}
 
 

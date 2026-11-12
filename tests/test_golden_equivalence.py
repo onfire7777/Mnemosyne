@@ -21,6 +21,22 @@ The harness authenticates encrypted audit payloads before normalizing internal i
 it retains every payload field, envelope key id, and encryption timestamp. See
 docs/learning-integration-validation.md for the scoped regression evidence.
 
+The three synthetic fixtures were refreshed on 11 Nov 2026 for the deliberate changes of
+9-10 Nov, after two regressions those changes introduced were fixed (a superseded fact merged
+through a canary left its relation open on main, and a forget spanning several branches wiped
+its own audit report). With both fixed, the set of open relations is the same as in the 5 Nov
+dumps; what moved, and why:
+
+* consolidated facts carry the owner of their sources, and a fact citing several sources
+  depends on all of them, so forgetting one retracts and scrubs it instead of trimming it;
+* a fact that is replayed already superseded or retracted takes no part in revision, so the
+  per-merge ``supersede``/``trust_rejected`` audit rows and the duplicate closed relations
+  those replays produced are gone;
+* consolidation reports the hypotheses it reviewed.
+
+g0-write-gating was not refreshed: it reproduces the 5 Nov dump once a consolidated fact that
+revises an unowned fact continues that fact's lineage.
+
 To reproduce the original historical baseline instead:
 
     python eval/perf/golden_equivalence.py dump --scenario NAME --src <2083ffc4 checkout>/src --out x.json

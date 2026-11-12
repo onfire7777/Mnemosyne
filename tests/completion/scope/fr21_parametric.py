@@ -68,7 +68,28 @@ REAL_DEPLOYMENT_VALIDATION: tuple[str, ...] = (
 _SRC_PARAMETRIC = Path(__file__).resolve().parents[3] / "src" / "mnemosyne" / "parametric.py"
 
 
-def _tools(tmp: Path):
+class _MeasuredTrainer:
+    """An in-process adapter provider whose evaluator reports the protected cases it ran.
+
+    Promotion needs a measured evaluation: a caller's ``gate_promoted`` flag can veto a
+    promotion but never grant one. The default tier has no evaluator and stays shadow-only.
+    """
+
+    adapter_kind = "scope-measured-adapter"
+
+    def propose(self, tenant_id, lessons, procedures, source_ids, immutable_rails):
+        return {"artifact_ref": f"scope://{tenant_id}/adapter", "metadata": {"reward_signal": "external_only"}}
+
+    def rollback(self, artifact, reason, protected_cases=None):
+        return {"rollback_ref": f"rollback-{artifact.id}"}
+
+    def evaluate(self, artifact, provider, protected_cases):
+        from mnemosyne.gate import GateResult
+
+        return GateResult(artifact.id, True, [], [], [case.id for case in protected_cases], 1.0, None)
+
+
+def _tools(tmp: Path, *, measured: bool = False):
     """Build a real MemoryTools with a disk-backed parametric artifact store."""
     from mnemosyne.engine import LocalMemoryEngine
     from mnemosyne.gate import RegressionCase
@@ -93,7 +114,7 @@ def _tools(tmp: Path):
             for index in range(2)
         ]
     )
-    tier = ParametricTier(ParametricArtifactStore(tmp / "parametric"))
+    tier = ParametricTier(ParametricArtifactStore(tmp / "parametric"), _MeasuredTrainer() if measured else None)
     return MemoryTools(engine, security=SecurityPolicy(), runtime_state=runtime_state, parametric=tier)
 
 
@@ -298,8 +319,25 @@ def _check_promotion_clears_only_on_clean_protected_gate() -> str | None:
 
     from mnemosyne.security import TrustTier
 
-    with tempfile.TemporaryDirectory(prefix="mnemo-scope-fr21-promote-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="mnemo-scope-fr21-unmeasured-") as tmp:
+        # Without a measured evaluator the caller's own "it passed" promotes nothing.
         tools = _tools(Path(tmp))
+        _seed_validated_lesson(tools)
+        artifact = tools.parametric_propose(
+            "t", role="operator", source_trust_tier=int(TrustTier.OPERATOR)
+        )
+        unmeasured = tools.parametric_evaluate(
+            artifact["artifact_uri"],
+            role="operator",
+            source_trust_tier=int(TrustTier.OPERATOR),
+            protected_case_count=2,
+            gate_promoted=True,
+            protected_regressions=[],
+        )
+        assert unmeasured["promoted"] is False
+        assert unmeasured["reason"] == "measured adapter evaluator required"
+    with tempfile.TemporaryDirectory(prefix="mnemo-scope-fr21-promote-") as tmp:
+        tools = _tools(Path(tmp), measured=True)
         _seed_validated_lesson(tools)
         artifact = tools.parametric_propose(
             "t", role="operator", source_trust_tier=int(TrustTier.OPERATOR)
@@ -330,16 +368,17 @@ def _check_rollback_is_reversible_with_evidence() -> str | None:
     from mnemosyne.security import TrustTier
 
     with tempfile.TemporaryDirectory(prefix="mnemo-scope-fr21-rollback-") as tmp:
-        tools = _tools(Path(tmp))
+        tools = _tools(Path(tmp), measured=True)
         _seed_validated_lesson(tools)
         artifact = tools.parametric_propose(
             "t", role="operator", source_trust_tier=int(TrustTier.OPERATOR)
         )
         uri = artifact["artifact_uri"]
-        tools.parametric_evaluate(
+        promoted = tools.parametric_evaluate(
             uri, role="operator", source_trust_tier=int(TrustTier.OPERATOR),
             protected_case_count=1, gate_promoted=True,
         )
+        assert promoted["promoted"] is True, promoted["reason"]
         rolled = tools.parametric_rollback(
             uri,
             reason="scope-conformance reversibility check",
@@ -349,7 +388,8 @@ def _check_rollback_is_reversible_with_evidence() -> str | None:
         )
         assert rolled["status"] == "rolled_back"
         assert rolled["rollback_ref"], "rollback must record a rollback ref"
-        assert rolled["protected_suite"]["protected_case_count"] == 1
+        # The persisted protected suite is used whole: a caller's smaller count cannot shrink it.
+        assert rolled["protected_suite"]["protected_case_count"] == 2
         return f"promoted -> rolled_back with ref={rolled['rollback_ref'][:18]}... + protected-suite evidence"
 
 

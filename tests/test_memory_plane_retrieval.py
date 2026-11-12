@@ -73,6 +73,23 @@ def _working_item(**overrides: object) -> SimpleNamespace:
 
 
 def _install_working(monkeypatch: pytest.MonkeyPatch, engine: LocalMemoryEngine, items: list[object]) -> None:
+    # Working text is served only while the evidence it came from is readable,
+    # so the items cite a real source instead of a made-up cid.
+    source = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="test",
+            session_id=SESSION,
+            content="Scratch source for the working plane.",
+            access_policy={"tenant": TENANT},
+        )
+    )
+    for item in items:
+        if item.evidence_ids == ["cid-working"]:
+            item.evidence_ids = [source]
+
     def list_working(
         self: LocalMemoryEngine, tenant_id: str, session_id: str, *, as_of: datetime
     ) -> list[object]:
@@ -147,7 +164,7 @@ def test_plane_helpers_preserve_shape_provenance_and_collision_free_ids(
     assert working[0].metadata["memory_plane"] == "working_memory"
     assert working[0].metadata["working_memory_id"] == "shared-id"
     assert prospective[0].provenance
-    assert working[0].provenance == ["cid-working"]
+    assert working[0].provenance == engine.list_working(TENANT, SESSION, as_of=NOW)[0].evidence_ids
 
 
 def test_prospective_owner_selector_must_match_access_principal() -> None:

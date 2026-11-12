@@ -7267,7 +7267,10 @@ class PostgresEngine:
                     "retracted_assertions", "trimmed_assertions", "expired_relations", "trimmed_relations",
                     "retracted_preferences", "trimmed_preferences",
                 ) for identifier in propagated[name]}
-                cur.execute("SELECT id, target_id, diff FROM audit_log WHERE tenant_id = %s", (db_tenant_id,))
+                # An erasure's own record is its custody report (ids, never
+                # source text); a forget on another branch must not wipe it.
+                cur.execute("SELECT id, target_id, diff FROM audit_log WHERE tenant_id = %s AND op <> 'forget'",
+                            (db_tenant_id,))
                 for audit_row in cur.fetchall():
                     original_diff = dict(audit_row["diff"] or {})
                     diff = redact_source_audit_payload(

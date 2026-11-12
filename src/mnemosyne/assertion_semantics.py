@@ -1,6 +1,7 @@
 """Cardinality and explicit replacement shared by assertion writers."""
 
 from collections.abc import Mapping, Collection
+from functools import lru_cache
 import re
 from typing import Any
 
@@ -35,6 +36,7 @@ _NEGATION = re.compile(
 )
 
 
+@lru_cache(maxsize=8192)
 def assertion_predicate_key(predicate: str) -> tuple[str, bool]:
     """Return the semantic attribute and explicit negative polarity."""
     normalized = re.sub(r"\s+", "_", predicate.strip().casefold())

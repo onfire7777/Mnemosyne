@@ -9,7 +9,7 @@ from mnemosyne.answering import AnswerReadContext
 from mnemosyne.consolidation import ConsolidationJob, _PreparedFact
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.knowledge_maintenance import KnowledgeMaintenanceWorker, read_knowledge_context
-from mnemosyne.models import Evidence, utc_now
+from mnemosyne.models import Assertion, Evidence, utc_now
 from mnemosyne.project_observations import project_grounded_synthesis, project_observed_memory
 from mnemosyne.sqlite_engine import SqliteEngine
 
@@ -326,6 +326,21 @@ def test_consolidation_preserves_owner_and_span_metadata(engine):
     assert row["calibration"]["source_spans"][0]["quote"] == "Atlas runs Debian."
     assert row["calibration"]["verification_contract"]["object"] == "Debian"
     assert row["scope"]["workspace"] == "/work/Atlas"
+
+
+def test_consolidation_revises_an_existing_tenant_level_fact(engine):
+    # An owned fact would sit beside the unowned one instead of revising it.
+    engine.upsert_assertion(Assertion(
+        tenant_id="t", subject="Atlas", predicate="runs", object="Fedora", status="active",
+        trust_tier=3, valid_from=utc_now() - timedelta(days=1), access_policy={"tenant": "t"},
+    ))
+    cid = capture(engine, "Atlas runs Debian.")
+    job = ConsolidationJob("t", "signature", "Atlas operating system", "Atlas", "runs", "Debian", [cid], trust_tier=3)
+    _PreparedFact(job, None, {"allow_principals": ["alice"]}).apply(engine, "main")
+    state = {row["object"]: row for row in rows(engine)}
+    assert state["Fedora"]["status"] == "superseded"
+    assert state["Debian"]["status"] == "active"
+    assert state["Debian"]["user_id"] is None
 
 
 def test_unentailed_consolidation_is_not_advertised_as_observed_knowledge(engine):

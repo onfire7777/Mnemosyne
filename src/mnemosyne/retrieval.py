@@ -139,8 +139,12 @@ def prospective_memory_hits(
         action = _plane_value(intention, "action", {})
         text = json.dumps(action, sort_keys=True, separators=(",", ":"), default=str)
         provenance = [str(cid) for cid in _plane_value(intention, "evidence_ids", [])]
+        # A source this reader sees redacted still delivers the reminder: the
+        # loop below applies that source's redactions to the text. Only a source
+        # that cannot be read at all withholds it.
         if not provenance or not projection_sources_readable(
-            ops, provenance, tenant_id=tenant_id, branch=branch, filt=filt, policy=ops.policy
+            ops, provenance, tenant_id=tenant_id, branch=branch, filt=filt, policy=ops.policy,
+            allow_redacted=True,
         ):
             continue
         if isinstance(action, dict) and action.get("type") == "memory_commitment":
@@ -4262,8 +4266,12 @@ def projection_sources_readable(
     branch: str,
     filt: Mapping[str, Any],
     policy: OperatingPolicy,
+    allow_redacted: bool = False,
 ) -> bool:
     """Require current, unredacted custody for a projection's remaining sources.
+
+    ``allow_redacted`` is for a caller that applies each source's redactions to
+    the text it returns; every other caller would reveal the withheld prose.
 
     Source-free assertions and explicit preferences retain their own access rules.
     Once a projection cites evidence, every declared input must remain readable:
@@ -4285,6 +4293,7 @@ def projection_sources_readable(
         branch=branch,
         filt=filt,
         policy=policy,
+        allow_redacted=allow_redacted,
     )
 
 
@@ -4318,6 +4327,7 @@ def _evidence_sources_readable(
     branch: str,
     filt: Mapping[str, Any],
     policy: OperatingPolicy,
+    allow_redacted: bool = False,
 ) -> bool:
     lookup = getattr(ops, "get_evidence", None)
     if not callable(lookup):
@@ -4352,7 +4362,7 @@ def _evidence_sources_readable(
             status="active",
             erased=bool(_item_field(row, "erased")),
         )
-        if not decision.allowed or decision.redacted:
+        if not decision.allowed or (decision.redacted and not allow_redacted):
             return False
         sources, valid = derived_source_cids(row)
         if not valid:

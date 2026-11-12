@@ -165,7 +165,9 @@ def test_hot_loop_diagnostics_deduplicate_without_widening_scope_or_reward():
 @pytest.mark.parametrize("event", [
     {"name": "validator", "verdict": "fail", "output": "schema mismatch"},
     {"name": "tests", "passed": 0, "failed": 2, "output": "two failing checks"},
-    {"name": "compile", "exit_code": 1, "error": "syntax error"},
+    # A bare nonzero exit is not a failure signal (a search that finds nothing
+    # exits 1); only the task's final command is.
+    {"name": "compile", "exit_code": 1, "error": "syntax error", "outcome_scope": "task", "final": True},
 ])
 def test_failure_attribution_accepts_the_shared_external_outcome_formats(event):
     system = LearningSystem(LocalMemoryEngine())
