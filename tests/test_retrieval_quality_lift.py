@@ -43,8 +43,8 @@ def _make_passage_hit(
 
 
 def test_rank_passages_recency_decay_boosts_recent_session() -> None:
-    older_text = "I swim laps three times a week at the community pool with Jo and Ken."
-    newer_text = "I swim laps once a month at the community pool due to a busy schedule."
+    older_text = "I swim laps every Tuesday and Thursday at the community pool with Jo and Ken."
+    newer_text = "These days I swim laps at the community pool only on the first Sunday of each month."
 
     # Both passages talk about swimming laps at the community pool
     older_hit = _make_passage_hit(
