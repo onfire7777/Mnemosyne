@@ -573,7 +573,6 @@ _IRREGULAR_VERB_MAP = {
     "paid": "pay",
     "wore": "wear",
     "worn": "wear",
-    "eps": "ep",
 }
 
 
@@ -846,7 +845,6 @@ class PassageIndex:
             "participating",
             "visit",
             "visited",
-            "model",
             "mention",
             "mentioned",
             "event",

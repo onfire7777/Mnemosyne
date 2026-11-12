@@ -1937,7 +1937,7 @@ def extract_episodic_facts(
             except ValueError:
                 pass
 
-        # Counts: "I bought 3 guitars", "I have 5 bicycles", "I own two cars"
+        # Counts: "I bought 3 lamps", "I have 5 bicycles", "I own two cars"
         for m_count in re.finditer(
             r"(?i)\b(?:I|we)\s+(?:bought|purchased|have|own|got)\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+([a-zA-Z0-9'-]+(?:\s+(?!and\b|or\b|with\b|in\s+\d{4}\b)[a-zA-Z0-9'-]+)*)",
             s_clean,

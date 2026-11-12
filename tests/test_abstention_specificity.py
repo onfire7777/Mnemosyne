@@ -22,17 +22,17 @@ def _make_hit(id: str, text: str, score: float = 1.0, metadata: dict | None = No
 def test_proper_noun_absence_caps_support_and_abstains() -> None:
     hit_sf = _make_hit(
         "h1",
-        "I stayed at the Fairmont Hotel in San Francisco during my California vacation.",
+        "I stayed at the Kestrel Inn in Port Halden during my coastal vacation.",
     )
-    query = "Where did I stay when visiting Sacramento?"
+    query = "Where did I stay when visiting Lakemoor?"
 
     supp = query_support(query, [hit_sf])
     assert supp["anchor_grounding"]["satisfied"] is False
-    assert "Sacramento" in supp["anchor_grounding"]["missing_proper"]
+    assert "Lakemoor" in supp["anchor_grounding"]["missing_proper"]
     assert supp["score"] <= 0.35
     assert supp["anchor_grounding"]["capped"] is True
 
-    # End-to-end engine verification: absence of proper noun Sacramento triggers abstention
+    # End-to-end engine verification: absence of proper noun Lakemoor triggers abstention
     engine = LocalMemoryEngine()
     try:
         engine.append_evidence(
@@ -42,7 +42,7 @@ def test_proper_noun_absence_caps_support_and_abstains() -> None:
                 user_id="u",
                 actor="user",
                 source_type="conversation",
-                content="I stayed at the Fairmont Hotel in San Francisco during my vacation.",
+                content="I stayed at the Kestrel Inn in Port Halden during my vacation.",
                 metadata={},
             )
         )
@@ -55,9 +55,9 @@ def test_proper_noun_absence_caps_support_and_abstains() -> None:
 def test_proper_noun_present_allows_full_support() -> None:
     hit_sac = _make_hit(
         "h1",
-        "I stayed at the Citizen Hotel in Sacramento during my California vacation.",
+        "I stayed at the Wren Lodge in Lakemoor during my coastal vacation.",
     )
-    query = "Where did I stay when visiting Sacramento?"
+    query = "Where did I stay when visiting Lakemoor?"
 
     supp = query_support(query, [hit_sac])
     assert supp["anchor_grounding"]["satisfied"] is True
@@ -73,7 +73,7 @@ def test_proper_noun_present_allows_full_support() -> None:
                 user_id="u",
                 actor="user",
                 source_type="conversation",
-                content="I stayed at the Citizen Hotel in Sacramento during my California vacation.",
+                content="I stayed at the Wren Lodge in Lakemoor during my coastal vacation.",
                 metadata={},
             )
         )
@@ -103,7 +103,7 @@ def test_compound_noun_cross_document_isolation() -> None:
 
 
 def test_possessive_stripping_on_proper_nouns() -> None:
-    hit = _make_hit("h1", "Sarah opened an art studio in Portland last month.")
+    hit = _make_hit("h1", "Sarah opened an art studio in Eastgate last month.")
     query = "Where is Sarah's studio located?"
 
     supp = query_support(query, [hit])
@@ -140,8 +140,8 @@ def test_multihop_bridge_query_supported_via_extra_texts() -> None:
 
 def test_dense_cosine_override_blocked_when_anchor_missing() -> None:
     # When cosine_ranked evaluates top_score >= floor, but an anchor proper noun is missing
-    query = "Where did I stay when visiting Sacramento?"
-    hit = _make_hit("h1", "I stayed at a wonderful hotel in San Francisco.")
+    query = "Where did I stay when visiting Lakemoor?"
+    hit = _make_hit("h1", "I stayed at a wonderful hotel in Port Halden.")
     supp = query_support(query, [hit])
     assert supp["anchor_grounding"]["satisfied"] is False
 

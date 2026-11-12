@@ -25,20 +25,20 @@ def _make_hit(id: str, text: str, score: float = 1.0, metadata: dict | None = No
 # Passing Baseline Tests
 # ---------------------------------------------------------------------------
 
-def test_unanswerable_proper_noun_sacramento() -> None:
-    """Explicit ungrounded proper noun Sacramento triggers abstention."""
+def test_unanswerable_proper_noun_lakemoor() -> None:
+    """Explicit ungrounded proper noun Lakemoor triggers abstention."""
     engine = LocalMemoryEngine()
     try:
         engine.append_evidence(Evidence(
             tenant_id="t1", branch="main", user_id="u", actor="user", source_type="conversation",
-            content="I stayed at the Fairmont Hotel in San Francisco during my California vacation.", metadata={}
+            content="I stayed at the Kestrel Inn in Port Halden during my coastal vacation.", metadata={}
         ))
-        res = engine.retrieve("Where did I stay when visiting Sacramento?", tenant_id="t1", record_access=False)
+        res = engine.retrieve("Where did I stay when visiting Lakemoor?", tenant_id="t1", record_access=False)
         assert res.abstained is True
         qs = res.explain["confidence"]["query_support"]
         assert qs["score"] <= 0.35
         assert qs["anchor_grounding"]["satisfied"] is False
-        assert "Sacramento" in qs["anchor_grounding"]["missing_proper"]
+        assert "Lakemoor" in qs["anchor_grounding"]["missing_proper"]
     finally:
         engine.close()
 

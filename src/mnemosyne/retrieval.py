@@ -949,8 +949,6 @@ def normalise_query_term(token: str) -> str:
         return "notify"
     if token == "co2":
         return "carbon"
-    if token == "eps":
-        return "ep"
     for suffix in ("ingly", "edly", "ing", "ied", "ies", "ed", "es", "s"):
         if len(token) > len(suffix) + 3 and token.endswith(suffix):
             if suffix == "ies":
@@ -1557,17 +1555,10 @@ _LOW_WEIGHT_PREDICATES = frozenset(
         "approximately",
         "related",
         "relat",
-        "exceed",
-        "exce",
-        "relocation",
-        "relocat",
         "earliest",
         "latest",
         "previously",
         "frequently",
-        "downloaded",
-        "download",
-        "listening",
         "listen",
         "six",
         "five",
