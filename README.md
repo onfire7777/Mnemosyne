@@ -38,7 +38,8 @@ works with any model, and is the memory behind [BurnOS](https://github.com/onfir
 
 | What was measured | Result | Evidence |
 | --- | --- | --- |
-| LongMemEval-S answer accuracy, all 500 questions | **92.4%** (462/500); held-out 400: **91.5%** | [Score audit](docs/2026-10-22-memory-audit-report.md#what-the-score-actually-means) |
+| LongMemEval-S answer accuracy, all 500 questions | **97.2%** (486/500), Claude Haiku 5.5 reader; held-out questions were seen while the code changed | [Run receipt](eval/reports/longmemeval-s-2026-10-29/README.md) |
+| LongMemEval-S answer accuracy, audited clean run | **92.4%** (462/500); held-out 400: **91.5%** | [Score audit](docs/2026-10-22-memory-audit-report.md#what-the-score-actually-means) |
 | Retrieval recall@5, frozen 144-query quality gate (dev + held-out) | **0.987** (nDCG@5 0.958) | [Quality gate report](eval/reports/QUALITY_GATE_SUMMARY.md) |
 | Confidence calibration error (ECE, lower is better) | **0.022** | [Quality gate report](eval/reports/QUALITY_GATE_SUMMARY.md) |
 | Memory-poisoning attacks blocked | **59 / 59**, with 0 / 8 false alarms on benign controls | [Quality gate report](eval/reports/QUALITY_GATE_SUMMARY.md#5-safety--guardrails-verification) |
@@ -47,7 +48,7 @@ works with any model, and is the memory behind [BurnOS](https://github.com/onfir
 | Regression validation | 8,668 selected cases, with pass/skip accounting across Local, SQLite and live PostgreSQL | [Validation report](docs/learning-integration-validation.md#2026-11-06-reliability-follow-up) |
 
 Every number links to its receipt. The quality gate is an offline, deterministic, provider-free
-suite with frozen inputs and published checksums, so anyone can reproduce it. The LongMemEval
+suite with frozen inputs and published checksums, so anyone can reproduce it. Each LongMemEval
 score comes from one recorded configuration; Hindsight publishes 94.6% on the same benchmark
 under different models and conditions, so the two are not a controlled comparison. We publish
 how each score was produced, failures included, and claim a ranking only when a run is
