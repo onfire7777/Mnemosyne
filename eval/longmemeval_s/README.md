@@ -75,7 +75,13 @@ retain their evidence and cannot silently retry into a favorable aggregate.
 
 Accuracy reports use a Wilson 95% interval, including for all-correct or
 all-incorrect samples. Small development samples establish functionality, not
-superiority. This runner uses the official grading prompt with the chosen judge;
+superiority. The reader prompts are the official `run_generation.py` prompts,
+unchanged and with no benchmark-specific rules or examples; the judge prompts
+are the official `evaluate_qa.py` prompts. On the OpenRouter path the default
+judge is the official `openai/gpt-4o-2024-08-06` (`--judge` overrides it). Every
+`.summary.json` (and the `--dry-run` report) records `git_commit`, `git_dirty`,
+`reader_prompt_sha256`, `judge_prompt_sha256`, the `reader` and `judge` model
+ids and the `split`. This runner uses the official grading prompt with the chosen judge;
 different readers, judges, ingestion methods or context budgets do not establish
 a controlled comparison with Hindsight's published score. Production `reflect`
 also has a stricter citation protocol than this free-text benchmark reader; this

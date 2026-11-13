@@ -2,13 +2,13 @@
   "categories": {
     "abstention": {
       "dev": 15,
-      "heldout": 15,
-      "total": 30
+      "heldout": 14,
+      "total": 29
     },
     "knowledge_updates_supersession": {
-      "dev": 15,
-      "heldout": 15,
-      "total": 30
+      "dev": 5,
+      "heldout": 5,
+      "total": 10
     },
     "multi_hop": {
       "dev": 12,
@@ -16,9 +16,9 @@
       "total": 24
     },
     "multi_session_aggregation": {
-      "dev": 15,
-      "heldout": 15,
-      "total": 30
+      "dev": 13,
+      "heldout": 12,
+      "total": 25
     },
     "security_attacks": {
       "dev": 30,
@@ -31,27 +31,32 @@
       "total": 8
     },
     "temporal_reasoning": {
-      "dev": 15,
+      "dev": 16,
       "heldout": 15,
-      "total": 30
+      "total": 31
     }
   },
   "counts": {
-    "qa_dev": 72,
-    "qa_heldout": 72,
-    "qa_total": 144,
+    "qa_dev": 61,
+    "qa_heldout": 58,
+    "qa_total": 119,
     "security_dev": 34,
     "security_heldout": 33,
     "security_total": 67,
-    "total_evaluation_items": 211
+    "total_evaluation_items": 186
   },
   "dataset_name": "mnemosyne-quality-gate",
   "files": {
     "integrity_cases.json": "00785304397eb2879eb1758da32faa285258b5b6598967fb2c9dc4ea58b63487",
     "poison_guard.json": "7df4e0722428c6eca872807612bb2a3190c44f55486ec07fe8ff1702bfa4c27a",
-    "quality_gate_dev.json": "1252ba4911d8e9276a1dc77bc9beaf26ac158bc555b9a7ca11ca2f1b86652df2",
-    "quality_gate_heldout.json": "c74b494a481ca7ddb7b2b781d866cd3d747cc2999637ee8804459bfd3438c95f"
+    "quality_gate_dev.json": "a2fd8332de71c9259a74ef397af68c38ffa7315370688d553ca0bc8073e70d88",
+    "quality_gate_heldout.json": "6d3333769644e06c746ba316186951e49c241ab1ad21fcd7f8a5ca511631d99b"
   },
-  "generated_at": "2026-10-23T07:53:41.016842+00:00",
-  "schema_version": "1.0.0"
+  "generated_at": "2026-11-12T22:55:33.630378+00:00",
+  "schema_version": "1.0.0",
+  "source": {
+    "builder": "build_quality_gate.py",
+    "longmemeval_s_cleaned_sha256": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+    "longmemeval_split": "development only: 100 lowest sha256(question_id); held-out questions excluded"
+  }
 }

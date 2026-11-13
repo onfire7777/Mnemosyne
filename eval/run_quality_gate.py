@@ -476,7 +476,7 @@ def _build_markdown_summary(
         f"| **Held-Out (`held-out`)** | {split_bd['held_out']['n_queries']} | {split_bd['held_out']['recall_at_5']:.4f} | {split_bd['held_out']['ndcg_at_5']:.4f} | {split_bd['held_out']['ece']:.4f} | {split_bd['held_out']['composite_score']:.4f} | {split_bd['held_out']['abstention_balanced_acc']:.4f} |",
         f"| **Delta (`held-out` - `dev`)** | — | {split_bd['held_out']['recall_at_5'] - split_bd['dev']['recall_at_5']:+.4f} | {split_bd['held_out']['ndcg_at_5'] - split_bd['dev']['ndcg_at_5']:+.4f} | {split_bd['held_out']['ece'] - split_bd['dev']['ece']:+.4f} | {split_bd['held_out']['composite_score'] - split_bd['dev']['composite_score']:+.4f} | {split_bd['held_out']['abstention_balanced_acc'] - split_bd['dev']['abstention_balanced_acc']:+.4f} |",
         "",
-        f"Measured partitions contain {split_bd['dev']['n_queries']} development and {split_bd['held_out']['n_queries']} held-out queries. The legacy held-out split has been used during tuning.",
+        f"Measured partitions contain {split_bd['dev']['n_queries']} development and {split_bd['held_out']['n_queries']} held-out queries. LongMemEval cases in both partitions come only from the LongMemEval-S development split (see `eval/datasets/quality_gate/build_quality_gate.py`); that split is open to tuning, so neither partition is a blind test.",
         "",
         "---",
         "",

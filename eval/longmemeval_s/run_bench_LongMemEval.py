@@ -10,7 +10,9 @@ development evidence, not directly comparable to published scores with other mod
 The reader prompt (sessions sorted by date, JSON turns, step by step) and the judge prompts are
 copied verbatim from the official repo, github.com/xiaowu0162/LongMemEval:
 src/generation/run_generation.py and src/evaluation/evaluate_qa.py (yes/no, temperature 0,
-max 10 tokens, gpt-4o-mini = gpt-4o-mini-2024-07-18).
+max 10 tokens). The default judge is the official one, gpt-4o-2024-08-06; --judge overrides it.
+The summary records the git commit (and whether the tree was dirty), the sha256 of the reader and
+judge prompt templates, the reader and judge model ids, and the split.
 
 --context rounds stores each ROUND (a user turn and the replies after it) as its own memory instead
 of each whole session, hands the reader the best-ranked rounds that fit --budget tokens, grouped by
@@ -36,6 +38,7 @@ import argparse
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import time
 import urllib.error
@@ -54,70 +57,23 @@ from eval.longmemeval_recall import benchmark_timestamp, split_of  # noqa: E402
 from eval.longmemeval_s.lme_embeddings import CachedProvider, open_cache, query_text  # noqa: E402
 from mnemosyne.engine import LocalMemoryEngine  # noqa: E402
 from mnemosyne.models import Evidence  # noqa: E402
-from mnemosyne.passages import PassageIndex  # noqa: E402
 from mnemosyne.policy import OperatingPolicy  # noqa: E402
-from mnemosyne.retrieval import RetrievalAdapters, compute_calendar_delta  # noqa: E402
+from mnemosyne.retrieval import RetrievalAdapters  # noqa: E402
 
 # --mode dense: the embedding provider (cloud or local, vectors cached on disk) Mnemosyne ranks with.
 EMBEDDER: CachedProvider | None = None
 
 OPENROUTER = "https://openrouter.ai/api/v1/chat/completions"
 GPT_4O_MINI = "openai/gpt-4o-mini-2024-07-18"
+GPT_4O = "openai/gpt-4o-2024-08-06"  # official LongMemEval judge (evaluate_qa.py)
 # Rounds Mnemosyne ranks per question in --context rounds; the budget then takes what fits.
 ROUND_POOL = 200
 
-# Official reader prompts (run_generation.py, retrieval-augmented, with Mnemosyne cognitive reasoning rules).
+# Official reader prompts (run_generation.py, retrieval-augmented, no fact expansion).
 READER_COT = (
     "I will give you several history chats between you and a user. Please answer the question based on the "
     "relevant chat history. Answer the question step by step: first extract all the relevant information, and "
-    "then reason over the information to get the answer.\n"
-    "When reasoning over the history chats, follow these rules:\n"
-    "1. Speaker Authority & Complete Update History: Prioritize facts stated by the 'user' over 'assistant' suggestions, "
-    "hypothetical examples, or general price estimates. If a fact, metric, or count changes across sessions, state the "
-    "most recent user value AND explicitly mention the earlier user value in your final Answer (e.g., '1,300 followers "
-    "(up from 1,250 earlier)'). If a cumulative counter (such as times worn, items read, or followers) has two different "
-    "values on the SAME calendar date (e.g., 4 times and 6 times on the same date), treat the higher cumulative count "
-    "(e.g., 6 times) as the latest updated value and state both ('6 times (and 4 times in another chat from that day)'). "
-    "Never add disclaimers telling the user to check an app or website.\n"
-    "2. Temporal Resolution & Dual Reference Points: Resolve any relative time expressions inside a chat (such as "
-    "'yesterday', 'last Saturday', 'two weeks ago', or specific month/day dates) against that specific session's Session "
-    "Date first. State exact days, weeks + remaining days, AND the nearest rounded whole number of weeks/months (e.g., "
-    "'20 days ago, which is about 3 weeks ago (2 weeks and 6 days)'). When a question asks 'How many days/weeks ago did "
-    "I do X when I did Y?', state BOTH the time elapsed between X and Y (e.g., '21 days before making the cake') AND "
-    "the time from X to Current Date in your final Answer. When asked to order events/visits (such as six museums or "
-    "airlines) chronologically from earliest to latest, if a visit has no separate date inside the turn, use its Session "
-    "Date to place it in the main chronological sequence (do not omit undated visits from the primary ordered list).\n"
-    "3. Multi-Session Counting, Summing & Goal Differences: When counting items, events, actions, or summing amounts "
-    "across sessions, list every candidate with its session date and specific names (e.g., all couple names for weddings). "
-    "In your final Answer sentence, LEAD with the inclusive deduplicated count/sum that includes all relevant items/events "
-    "(such as a coffee maker, vinyl record, mattress, footwear, glassware, leadership graduation, or museum tour), and "
-    "ALSO state the narrower count (e.g., '3 weddings where the couples are named: Rachel and Mike, Emily and Sarah, and "
-    "Jen and Tom, or 4 weddings including your sister's wedding') and the un-deduplicated total session mentions/actions "
-    "(e.g., '3 item pick-up/return actions across the sessions, or 2 distinct items: navy blue blazer and Zara boots'). "
-    "If combining two activities where one is 0 (e.g., 0.5 hours of jogging and 0 completed hours of yoga), state the "
-    "combined total ('0.5 hours') directly. If asked how many points/dollars are needed to reach a reward or goal, "
-    "state BOTH the remaining points needed from the user's current balance (e.g., '100 more points') AND the total "
-    "reward threshold ('300 points total').\n"
-    "4. Closest-Match Evidence First (Never Pedantically Refuse): NEVER refuse to answer when a closely matching item, "
-    "store, description, person, date, or numbers exist in the history! Always give the direct answer, sum, or comparison "
-    "from the closest matching evidence in the VERY FIRST sentence of your Answer: e.g., if asked for a shampoo brand and "
-    "only the store ('Trader Joe's') is named, answer 'Trader Joe's'; if asked for an artist and only a description ('a "
-    "bluegrass band that features a banjo player') is given, state that description; if asked who gave a gift last Saturday "
-    "('my aunt', even if the gift was a crystal chandelier rather than jewelry), answer 'From your aunt' first; if asked "
-    "what bulb was replaced in a lamp ('Philips LED bulb'), what time you went to bed ('2 AM'), when a paper was submitted "
-    "('February 1st'), which bike was serviced/upgraded ('road bike'), the page count of two novels ('440 + 416 = 856 "
-    "pages'), the follower increase ('100'), or a discount comparison ('Yes, 40% at HelloFresh vs. 20% at UberEats'), "
-    "ALWAYS state that answer and calculation directly as your primary Answer! Only after giving the closest-match facts "
-    "(or when the asked entity/role/mode is genuinely absent or contradicted, such as asking about 'Software Engineer "
-    "Manager' when the user is 'Senior Software Engineer', or 'bus' savings when only 'train' vs. 'taxi' was discussed), "
-    "explicitly note if the exact asked premise or detail is not provided in the chat history (so unanswerable questions "
-    "are still clearly flagged as unanswerable).\n"
-    "5. Personalized Recommendations: When asked for recommendations, suggestions, or explanations (e.g., hotels in "
-    "Miami, cultural events, battery tips, or why a bike performs better on group rides), immediately provide concrete, "
-    "tailored recommendations/explanations that explicitly connect all of the user's relevant past details from history "
-    "(such as both the new chain/cassette AND the new Garmin bike computer, or ocean/skyline views, rooftop pool, and "
-    "balcony hot tub) rather than asking clarifying questions first.\n\n\n"
-    "History Chats:\n\n{}\n\nCurrent Date: {}\n"
+    "then reason over the information to get the answer.\n\n\nHistory Chats:\n\n{}\n\nCurrent Date: {}\n"
     "Question: {}\nAnswer (step by step):"
 )
 READER_PLAIN = (
@@ -277,14 +233,10 @@ def retrieve(row: dict, top_k: int, mode: str) -> list[int]:
         rrf: dict[str, float] = {}
         for rank, h in enumerate(d_hits, 1):
             rrf[h.id] = (
-                rrf.get(h.id, 0.0) + 0.65 * (1.0 / (20 + rank)) + 0.028 * h.score
+                rrf.get(h.id, 0.0) + 0.70 * (1.0 / (20 + rank)) + 0.035 * h.score
             )
         for rank, h in enumerate(l_hits, 1):
-            rrf[h.id] = rrf.get(h.id, 0.0) + 0.35 * (1.0 / (20 + rank))
-            if rank <= 2 and h.score >= 7.5:
-                rrf[h.id] += 0.008
-            elif rank <= 4 and h.score >= 5.5:
-                rrf[h.id] += 0.0045
+            rrf[h.id] = rrf.get(h.id, 0.0) + 0.30 * (1.0 / (20 + rank))
         ordered_cids = sorted(rrf, key=lambda cid_key: -rrf[cid_key])
         return list(
             dict.fromkeys(
@@ -379,73 +331,17 @@ def select_rounds(
     return picked, used
 
 
-def _format_session_date(question_date: str, session_date: str) -> str:
-    try:
-        q_dt = benchmark_timestamp(question_date, "question_date")
-        s_dt = benchmark_timestamp(session_date, "haystack_dates")
-        delta = compute_calendar_delta(q_dt, s_dt)
-        weeks, rem_days = divmod(delta.delta_days, 7)
-        rounded_weeks = round(delta.delta_days / 7)
-        if delta.delta_days == 0:
-            rel = "same calendar day as Current Date (0 days)"
-        elif delta.is_past:
-            rel = f"{delta.delta_days} days before Current Date ({weeks} weeks, {rem_days} days; ~{rounded_weeks} weeks rounded; ~{delta.delta_months} full months)"
-        else:
-            rel = f"{delta.delta_days} days after Current Date ({weeks} weeks, {rem_days} days; ~{rounded_weeks} weeks rounded)"
-        return f"{session_date} [{rel}]"
-    except Exception:
-        return session_date
-
-
-def _user_statement_digest(row: dict, ordered: list[tuple[str, int]], chunks: dict[int, list[int]]) -> str:
-    """Build a chronological digest of the highest-signal user-authored turns across retrieved sessions."""
-    q = row.get("question", "")
-    q_date = row.get("question_date", "")
-    user_entries: list[tuple[int, str, int, str]] = []
-    texts: list[str] = []
-    for sess_num, (date, index) in enumerate(ordered, 1):
-        session = row["haystack_sessions"][index]
-        for t_idx in chunks[index]:
-            turn = session[t_idx]
-            if turn.get("role") == "user":
-                content = (turn.get("content") or "").strip()
-                if content:
-                    user_entries.append((sess_num, date, t_idx, content))
-                    texts.append(f"user: {content}")
-    if not user_entries:
-        return ""
-    pidx = PassageIndex(texts)
-    scores = pidx.scores(q)
-    ranked_indices = sorted(
-        range(len(user_entries)),
-        key=lambda i: -scores.get(i, 0.0),
-    )
-    selected = sorted(ranked_indices[:18])
-    lines = [
-        "### Chronological User-Authored Statement Digest (User Statements Only, Ordered by Session Date):"
-    ]
-    for i in selected:
-        sess_num, date, t_idx, content = user_entries[i]
-        clipped = content if len(content) <= 450 else content[:447] + "..."
-        date_label = _format_session_date(q_date, date) if q_date else date
-        lines.append(f"- [Session {sess_num} | {date_label} | USER]: {clipped}")
-    return "\n".join(lines) + "\n\n"
-
-
 def _history(row: dict, chunks: dict[int, list[int]]) -> str:
     # As the official reader: sessions sorted by date, turns as JSON, has_answer never shown.
     ordered = sorted((row["haystack_dates"][index], index) for index in chunks)
-    q_date = row.get("question_date", "")
-    digest = _user_statement_digest(row, ordered, chunks)
-    sessions_str = "".join(
+    return "".join(
         "\n### Session {}:\nSession Date: {}\nSession Content:\n{}\n".format(
             number,
-            _format_session_date(q_date, date) if q_date else date,
+            date,
             "\n" + _turns_json(row, index, chunks[index]),
         )
         for number, (date, index) in enumerate(ordered, 1)
     )
-    return digest + sessions_str
 
 
 def reader_prompt(row: dict, chunks: dict[int, list[int]], cot: bool) -> str:
@@ -651,6 +547,31 @@ def _mean(values: list) -> float | None:
     return round(sum(values) / len(values), 4) if values else None
 
 
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def provenance(args: argparse.Namespace) -> dict:
+    """What produced a result: code revision, exact prompt templates, models and split."""
+    try:
+        commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO, capture_output=True,
+                                text=True, check=True).stdout.strip()
+        dirty = bool(subprocess.run(["git", "status", "--porcelain"], cwd=REPO, capture_output=True,
+                                    text=True, check=True).stdout.strip())
+    except (OSError, subprocess.CalledProcessError):
+        commit, dirty = "unknown", None
+    codex = args.inference_provider == "codex"
+    return {
+        "git_commit": commit,
+        "git_dirty": dirty,
+        "reader_prompt_sha256": _sha256(READER_PLAIN if args.no_cot else READER_COT),
+        "judge_prompt_sha256": _sha256(json.dumps(JUDGE | {"abstention": ABSTENTION}, sort_keys=True)),
+        "reader": args.codex_model if codex else args.reader,
+        "judge": args.codex_model if codex else args.judge,
+        "split": args.split,
+    }
+
+
 def summarize(rows: list[dict], args: argparse.Namespace) -> dict:
     labels = [1 if row["autoeval_label"]["label"] else 0 for row in rows]
     if not labels:
@@ -703,13 +624,9 @@ def summarize(rows: list[dict], args: argparse.Namespace) -> dict:
         "reader_tokens_enforced": args.inference_provider != "codex",
         "judge_tokens": None if args.inference_provider == "codex" else 10,
         "judge_tokens_enforced": args.inference_provider != "codex",
-        "reader": args.codex_model
-        if args.inference_provider == "codex"
-        else args.reader,
         "reasoning_effort": args.codex_reasoning_effort
         if args.inference_provider == "codex"
         else args.reasoning_effort,
-        "judge": args.codex_model if args.inference_provider == "codex" else args.judge,
         "inference_provider": args.inference_provider,
         "model_names_are_requested": args.inference_provider == "codex",
         "mode": args.mode,
@@ -720,8 +637,7 @@ def summarize(rows: list[dict], args: argparse.Namespace) -> dict:
         "top_k": args.top_k if args.context == "sessions" else None,
         "budget": args.budgets[0] if args.context == "rounds" else None,
         "cot": not args.no_cot,
-        "split": args.split,
-    }
+    } | provenance(args)
 
 
 def _codex_manifest(
@@ -862,8 +778,8 @@ def main() -> None:
     )
     ap.add_argument(
         "--judge",
-        default=GPT_4O_MINI,
-        help="OpenRouter model that grades them (official: gpt-4o-mini)",
+        default=GPT_4O,
+        help="OpenRouter model that grades them (official: gpt-4o-2024-08-06)",
     )
     ap.add_argument(
         "--inference-provider", choices=("openrouter", "codex"), default="openrouter"
@@ -1222,10 +1138,9 @@ def main() -> None:
             "questions": len(new),
             "context": args.context,
             "mode": args.mode,
-            "split": args.split,
             "seconds": round(time.perf_counter() - started, 1),
             "coverage": report,
-        }
+        } | provenance(args)
         if args.run:
             out.with_suffix(".dryrun.json").write_text(
                 json.dumps(report, indent=1), encoding="utf-8"
