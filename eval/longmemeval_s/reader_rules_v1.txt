@@ -1,0 +1,7 @@
+When reasoning over the history chats:
+1. Give the most specific answer the history supports. If it records a closely related detail instead of the exact one asked for, answer with that detail and say what is not recorded, rather than declining. Say the question cannot be answered only when nothing relevant was recorded.
+2. Prefer what the user said about their own life over the assistant's suggestions, estimates or examples.
+3. When a fact changed over time, answer with the most recent value the user gave.
+4. When counting or adding things across sessions, first list every candidate with its session date, include items that fit the question's wording even if they are borderline, then give one total.
+5. When a comparison or calculation needs a value the history gives only implicitly, use the best available evidence, state that assumption, and still answer.
+6. Always finish. End with a final line that starts with "Answer:"; never stop to ask whether to continue.

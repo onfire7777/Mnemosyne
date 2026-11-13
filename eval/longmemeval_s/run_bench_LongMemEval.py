@@ -350,9 +350,19 @@ def _history(row: dict, chunks: dict[int, list[int]]) -> str:
     )
 
 
+READER_RULES = ""  # optional, versioned answering rules (--reader-rules); empty = the official prompt
+
+
+def reader_template(cot: bool) -> str:
+    template = READER_COT if cot else READER_PLAIN
+    if READER_RULES:
+        template = template.replace("\n\n\nHistory Chats:", "\n" + READER_RULES + "\n\n\nHistory Chats:", 1)
+    return template
+
+
 def reader_prompt(row: dict, chunks: dict[int, list[int]], cot: bool) -> str:
     """chunks: session position -> the turn indices handed over from it, in turn order."""
-    return (READER_COT if cot else READER_PLAIN).format(
+    return reader_template(cot).format(
         _history(row, chunks), row["question_date"], row["question"]
     )
 
@@ -570,7 +580,8 @@ def provenance(args: argparse.Namespace) -> dict:
     return {
         "git_commit": commit,
         "git_dirty": dirty,
-        "reader_prompt_sha256": _sha256(READER_PLAIN if args.no_cot else READER_COT),
+        "reader_prompt_sha256": _sha256(reader_template(not args.no_cot)),
+        "reader_rules": str(args.reader_rules) if args.reader_rules else None,
         "judge_prompt_sha256": _sha256(json.dumps(JUDGE | {"abstention": ABSTENTION}, sort_keys=True)),
         "reader": args.codex_model if codex else args.reader,
         "judge": args.codex_model if codex else args.judge,
@@ -858,6 +869,11 @@ def main() -> None:
         help="OpenRouter maximum answer length; Codex generation caps are not enforced",
     )
     ap.add_argument(
+        "--reader-rules",
+        type=Path,
+        help="text file of general answering rules inserted after the official instruction (recorded and hashed)",
+    )
+    ap.add_argument(
         "--only-wrong-from",
         default="",
         help="only the questions an earlier run (its --run name) got wrong",
@@ -876,6 +892,11 @@ def main() -> None:
         help="retrieve and build prompts only, call no model (default/passages modes only)",
     )
     args = ap.parse_args()
+    if args.reader_rules:
+        global READER_RULES
+        READER_RULES = args.reader_rules.read_text(encoding="utf-8").strip()
+        if "{" in READER_RULES or "}" in READER_RULES:
+            raise SystemExit("--reader-rules must not contain braces")
     if args.dry_run and args.mode == "dense":
         raise SystemExit(
             "--mode dense does not support --dry-run: missing vectors require model calls. "
