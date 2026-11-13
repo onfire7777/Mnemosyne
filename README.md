@@ -38,7 +38,7 @@ works with any model, and is the memory behind [BurnOS](https://github.com/onfir
 
 | What was measured | Result | Evidence |
 | --- | --- | --- |
-| LongMemEval-S answer accuracy, audited clean run | **92.4%** (462/500); held-out 400: **91.5%** | [Score audit](docs/2026-10-22-memory-audit-report.md#what-the-score-actually-means) |
+| LongMemEval-S answer accuracy, all 500 questions (official reader prompt and gpt-4o judge, Claude Haiku 5.5 reader) | **93.0%** (465/500, 95% CI 90.4–94.9%); held-out 400: **92.3%** | [Run receipt](eval/reports/longmemeval-s-2026-11-13/RECEIPT.md) |
 | Retrieval recall@5, frozen 119-query quality gate (dev + held-out; LongMemEval cases from its development split only) | **0.957** (nDCG@5 0.905) | [Quality gate report](eval/reports/QUALITY_GATE_SUMMARY.md) |
 | Confidence calibration error (ECE, lower is better) | **0.136** (target ≤ 0.05 not met) | [Quality gate report](eval/reports/QUALITY_GATE_SUMMARY.md) |
 | Memory-poisoning attacks blocked | **59 / 59**, with 0 / 8 false alarms on benign controls | [Quality gate report](eval/reports/QUALITY_GATE_SUMMARY.md#5-safety--guardrails-verification) |

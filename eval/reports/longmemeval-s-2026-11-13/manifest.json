@@ -1,0 +1,28 @@
+{
+ "run_id": "b79f4719088a",
+ "frozen_at": "2026-11-13T18:57:41+00:00",
+ "repo_commit": "044ddd7bc3f1ceccfb81dfd1e719bcc02571a735",
+ "repo_remote": "/Users/admin/Desktop/Mnemosyne",
+ "dataset": "longmemeval_s_cleaned.json",
+ "dataset_sha256": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+ "split_sha256": "cee1c4b7a3cb2b8aa84e134fad82922a374d22f3026e53cc674f3dfe302ff9fa",
+ "scope": "all",
+ "reader": "anthropic/claude-haiku-5.5",
+ "judge": "openai/gpt-4o-2024-08-06",
+ "params": {
+  "reasoning_effort": "xhigh",
+  "reader_tokens": "32000",
+  "mode": "dense",
+  "embedding": "cloud:qwen/qwen3-embedding-8b",
+  "top_k": "10",
+  "reader_prompt": "official"
+ },
+ "hashed_files": {
+  "eval/longmemeval_s/run_bench_LongMemEval.py": "c50ea4ad39b039f392ce5b158cd5d2b21599742d3491734a40316b06a0c0587a",
+  "eval/longmemeval_s/split.json": "cee1c4b7a3cb2b8aa84e134fad82922a374d22f3026e53cc674f3dfe302ff9fa"
+ },
+ "command": "python -m eval.longmemeval_s.run_bench_LongMemEval --data longmemeval_s_cleaned.json --reader anthropic/claude-haiku-5.5 --reasoning-effort xhigh --reader-tokens 32000 --mode dense --embed cloud --top-k 10 --split all --workers 4 --run final-500",
+ "leak_check": "passed",
+ "attempt_number_on_this_scope": 1,
+ "rerun_reason": null
+}
