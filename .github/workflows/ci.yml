@@ -24,6 +24,8 @@ jobs:
     steps:
       # actions/checkout v7
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - name: Benchmark leak guard (no held-out LongMemEval material)
+        run: python tools/benchmark_integrity/fingerprints.py check --fp .benchmark-guard/longmemeval_s.fp.json --repo .
       # actions/setup-python v6
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:

@@ -39,10 +39,10 @@ works with any model, and is the memory behind [BurnOS](https://github.com/onfir
 | What was measured | Result | Evidence |
 | --- | --- | --- |
 | LongMemEval-S answer accuracy, audited clean run | **92.4%** (462/500); held-out 400: **91.5%** | [Score audit](docs/2026-10-22-memory-audit-report.md#what-the-score-actually-means) |
-| Retrieval recall@5, frozen 119-query quality gate (dev + held-out; LongMemEval cases from its development split only) | **0.963** (nDCG@5 0.909) | [Quality gate report](eval/reports/QUALITY_GATE_SUMMARY.md) |
-| Confidence calibration error (ECE, lower is better) | **0.131** (target ≤ 0.05 not met) | [Quality gate report](eval/reports/QUALITY_GATE_SUMMARY.md) |
+| Retrieval recall@5, frozen 119-query quality gate (dev + held-out; LongMemEval cases from its development split only) | **0.957** (nDCG@5 0.905) | [Quality gate report](eval/reports/QUALITY_GATE_SUMMARY.md) |
+| Confidence calibration error (ECE, lower is better) | **0.136** (target ≤ 0.05 not met) | [Quality gate report](eval/reports/QUALITY_GATE_SUMMARY.md) |
 | Memory-poisoning attacks blocked | **59 / 59**, with 0 / 8 false alarms on benign controls | [Quality gate report](eval/reports/QUALITY_GATE_SUMMARY.md#5-safety--guardrails-verification) |
-| Abstention on unanswerable questions (balanced accuracy) | **0.78** | [Quality gate report](eval/reports/QUALITY_GATE_SUMMARY.md) |
+| Abstention on unanswerable questions (balanced accuracy) | **0.79** | [Quality gate report](eval/reports/QUALITY_GATE_SUMMARY.md) |
 | Current value ranked above a superseded one | **1.00** | [Quality gate report](eval/reports/QUALITY_GATE_SUMMARY.md) |
 | Regression validation | 8,668 selected cases, with pass/skip accounting across Local, SQLite and live PostgreSQL | [Validation report](docs/learning-integration-validation.md#2026-11-06-reliability-follow-up) |
 

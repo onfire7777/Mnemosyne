@@ -1,25 +1,25 @@
 # Mnemosyne Quality Gate Baseline Report
 
-- **Run Timestamp:** 2026-11-12T22:58:43.696206+00:00
-- **Git Commit:** `116f405a163575424fd48cd0208251ef9f41c119`
+- **Run Timestamp:** 2026-11-13T18:41:04.383783+00:00
+- **Git Commit:** `bea76586ca5b0ad406419ce80a1610ccd1b92774`
 - **Backend:** `local`
 - **Partition:** `all`
 - **Random Seed:** `42`
 - **Execution Mode:** Offline, Deterministic (Provider-Free)
-- **Total Runtime:** 150.20s
+- **Total Runtime:** 150.89s
 
 ---
 
 ## 1. Executive Summary
 Summary of baseline evaluation run:
-- **Composite Quality Score:** 0.9338
+- **Composite Quality Score:** 0.9328
 - **Dataset Difficulty Diagnostic:** ceiling reached (Composite < 0.90 and Recall < 1.0; not a regression gate).
 - **Core Quality Findings:**
-  - ECE Calibration Error: 0.1314 (Target <= 0.05). Observed calibration error for the selected partition; lower is better.
+  - ECE Calibration Error: 0.1360 (Target <= 0.05). Observed calibration error for the selected partition; lower is better.
   - G2 Answer Quality Lift: +0.4167 vs full-context distractor.
   - Safety & Poison Guard: 100.0% block rate (Pass >= 95.0%).
   - Mandatory Cognitive Classes: 100.0% pass.
-  - Gaming-Resistant Abstention: Balanced Accuracy 0.7831, F1 0.6786.
+  - Gaming-Resistant Abstention: Balanced Accuracy 0.7943, F1 0.7037.
 
 ---
 
@@ -27,15 +27,15 @@ Summary of baseline evaluation run:
 
 | Metric Family | Metric Name | Baseline Value | Blueprint Target | Verdict | 95% Confidence Interval |
 |---|---|---|---|---|---|
-| **Retrieval Quality** | Recall@5 (Overall) | 0.9626 | >= 0.8000 | **BASELINE** | [0.9274, 0.9889] (Bootstrap) |
-| **Retrieval Quality** | nDCG@5 (Overall) | 0.9089 | >= 0.8000 | **BASELINE** | [0.8705, 0.9442] (Bootstrap) |
-| **Calibration** | Expected Calibration Error (ECE) | 0.1314 | <= 0.0500 | **FAIL** | Point estimate (10 bins) |
+| **Retrieval Quality** | Recall@5 (Overall) | 0.9570 | >= 0.8000 | **BASELINE** | [0.9200, 0.9863] (Bootstrap) |
+| **Retrieval Quality** | nDCG@5 (Overall) | 0.9046 | >= 0.8000 | **BASELINE** | [0.8648, 0.9402] (Bootstrap) |
+| **Calibration** | Expected Calibration Error (ECE) | 0.1360 | <= 0.0500 | **FAIL** | Point estimate (10 bins) |
 | **Answer Quality (G2)** | Memory vs Full Context Lift | +0.4167 | >= +0.1500 | **PASS** | Distractor-aware judge |
 | **Security (G7)** | Poison Attack Block Rate | 100.0% | >= 95.0% | **PASS** | [0.9389, 1.0000] (Wilson) |
 | **Integrity** | Untrusted Instruction Containment | 100.0% | 100.0% | **PASS** | Measured containment |
 | **Integrity** | Benign False Positive Rate | 0.0% | 0.0% | **PASS** | Measured false positive rate |
 | **Cognitive Classes** | 5 Mandatory §33 Classes | 100.0% | 100.0% | **PASS** | Measured mandatory-class pass rate |
-| **Abstention Gate** | Abstention Balanced Accuracy | 0.7831 | >= 0.8000 | **BASELINE** | Balanced Accuracy (TP vs FP) |
+| **Abstention Gate** | Abstention Balanced Accuracy | 0.7943 | >= 0.8000 | **BASELINE** | Balanced Accuracy (TP vs FP) |
 | **Knowledge Updates** | Supersession Accuracy | 1.0000 | >= 0.8000 | **BASELINE** | Current-above-stale rank in top-k |
 
 ---
@@ -44,17 +44,17 @@ Summary of baseline evaluation run:
 
 | Evaluation Category | Cases ($n$) | Baseline Recall@5 | Baseline nDCG@5 | 95% Bootstrap CI | Failure Mode Observed |
 |---|---|---|---|---|---|
-| **Temporal Reasoning** | 31 | 0.9140 | 0.7901 | [0.8280, 0.9786] | Relative offsets ('a week ago', 'four weeks ago') lack lexical match |
+| **Temporal Reasoning** | 31 | 0.8978 | 0.7776 | [0.8118, 0.9679] | Relative offsets ('a week ago', 'four weeks ago') lack lexical match |
 | **Multi-Session Aggregation** | 25 | 0.9720 | 0.9386 | [0.9240, 1.0000] | Multi-session evidence starved by recency decay & near-twin deduplication |
 | **Knowledge Updates & Supersession** | 10 | 1.0000 | 0.9839 | [1.0000, 1.0000] | Supersession accuracy: 1.0000 |
-| **Abstention & Refusal** | 29 | Prec: 0.7037 | Rec: 0.6552 | BalAcc: 0.7831 | False retrieval rate: 0.3448 (confabulation) |
+| **Abstention & Refusal** | 29 | Prec: 0.7600 | Rec: 0.6552 | BalAcc: 0.7943 | False retrieval rate: 0.3448 (confabulation) |
 | **Multi-Hop Reasoning** | 24 | 1.0000 | 1.0000 | [1.0000, 1.0000] | Direct lexical retrieval misses hop 2 without graph PPR expansion |
 
 ### 3.1 Failure Analysis & Baseline Mechanics
 - **Temporal Supersession in Knowledge Updates:** Current sessions must rank above superseded sessions in top-k. Measured supersession accuracy is 1.0000.
 - **Multi-Hop Recall:** Measured Recall@5 is 1.0000. The query corpus includes bridge-linked hops.
 - **Multi-Hop Reasoning Sample Size & Authentic Coverage:** Multi-hop reasoning is evaluated over all n=24 (12 dev, 12 held-out) authentic multi-hop items present in the local corpus without synthetic fabrication.
-- **Abstention Signal & Gaming-Resistance:** The runner inspects the engine's actual `retrieve(...).abstained` signal for unanswerable queries and answerable controls. This report records unanswerable recall 0.6552, balanced accuracy 0.7831, and F1 0.6786; these aggregate measurements do not establish a specific calibration cause.
+- **Abstention Signal & Gaming-Resistance:** The runner inspects the engine's actual `retrieve(...).abstained` signal for unanswerable queries and answerable controls. This report records unanswerable recall 0.6552, balanced accuracy 0.7943, and F1 0.7037; these aggregate measurements do not establish a specific calibration cause.
 
 ---
 
@@ -62,9 +62,9 @@ Summary of baseline evaluation run:
 
 | Partition | Total Queries ($n$) | Recall@5 | nDCG@5 | ECE | Composite Score | Abstention BalAcc |
 |---|---|---|---|---|---|---|
-| **Development (`dev`)** | 61 | 0.9746 | 0.9166 | 0.1285 | 0.9389 | 0.7674 |
-| **Held-Out (`held-out`)** | 58 | 0.9500 | 0.9008 | 0.1345 | 0.9284 | 0.8003 |
-| **Delta (`held-out` - `dev`)** | — | -0.0246 | -0.0158 | +0.0060 | -0.0105 | +0.0329 |
+| **Development (`dev`)** | 61 | 0.9746 | 0.9166 | 0.1198 | 0.9411 | 0.7783 |
+| **Held-Out (`held-out`)** | 58 | 0.9386 | 0.8920 | 0.1534 | 0.9240 | 0.8117 |
+| **Delta (`held-out` - `dev`)** | — | -0.0360 | -0.0246 | +0.0336 | -0.0171 | +0.0334 |
 
 Measured partitions contain 61 development and 58 held-out queries. LongMemEval cases in both partitions come only from the LongMemEval-S development split (see `eval/datasets/quality_gate/build_quality_gate.py`); that split is open to tuning, so neither partition is a blind test.
 
