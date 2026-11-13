@@ -26,10 +26,10 @@ def _make_hit(
 
 
 def test_hyphenated_compound_token_expansion() -> None:
-    tokens = tokenize("bike-related accessories and state-of-the-art tools")
-    assert "bike-related" in tokens
-    assert "bike" in tokens
-    assert "related" in tokens
+    tokens = tokenize("kayak-friendly accessories and state-of-the-art tools")
+    assert "kayak-friendly" in tokens
+    assert "kayak" in tokens
+    assert "friendly" in tokens
     assert "state-of-the-art" in tokens
     assert "state" in tokens
     assert "art" in tokens
@@ -47,11 +47,11 @@ def test_hyphenated_compound_token_expansion() -> None:
                 user_id="u",
                 actor="user",
                 source_type="conversation",
-                content="I purchased several bike-related components for the spring trip.",
+                content="I purchased several kayak-friendly components for the spring trip.",
                 metadata={},
             )
         )
-        res = engine.retrieve("What bike components did I purchase?", tenant_id="t1", record_access=False)
+        res = engine.retrieve("What kayak components did I purchase?", tenant_id="t1", record_access=False)
         assert len(res.hits) >= 1
         assert res.hits[0].id == e1
     finally:
@@ -68,12 +68,12 @@ def test_counting_synonyms_passage_scores() -> None:
                 user_id="u",
                 actor="user",
                 source_type="conversation",
-                content="I have two brothers and one sister who live in Chicago.",
+                content="I ride a motorcycle to work most weekdays.",
                 metadata={},
             )
         )
-        # Query uses "siblings", passage uses "brothers" and "sister"
-        res = engine.retrieve("How many siblings do I have?", tenant_id="t1", record_access=False)
+        # Query uses "vehicles", passage uses "motorcycle"
+        res = engine.retrieve("How many vehicles do I own?", tenant_id="t1", record_access=False)
         assert len(res.hits) >= 1
         assert res.hits[0].id == e1
     finally:
@@ -81,23 +81,23 @@ def test_counting_synonyms_passage_scores() -> None:
 
 
 def test_facet_extraction_and_coverage_diversification() -> None:
-    query = "Tell me about the hobbies of me, my parents, and my grandparents"
+    query = "Tell me about the hobbies of me, my teammates, and my roommates"
     facets = _extract_query_facets(query)
     assert len(facets) >= 3
 
-    # Generate 6 hits: hits 0-3 about user, hit 4 about parents, hit 5 about grandparents
+    # Generate 6 hits: hits 0-3 about user, hit 4 about teammates, hit 5 about roommates
     hits = [
         _make_hit("h0", "I love playing guitar and writing code.", score=0.95),
         _make_hit("h1", "I spend my weekends hiking mountain trails.", score=0.90),
         _make_hit("h2", "I enjoy baking sourdough bread at home.", score=0.85),
         _make_hit("h3", "I play chess online every evening.", score=0.80),
-        _make_hit("h4", "My parents enjoy gardening and growing organic tomatoes.", score=0.75),
-        _make_hit("h5", "My grandparents love birdwatching and landscape painting.", score=0.70),
+        _make_hit("h4", "My teammates enjoy quilting and growing orchids.", score=0.75),
+        _make_hit("h5", "My roommates love bouldering and landscape painting.", score=0.70),
     ]
 
     diversified = _diversify_facets(query, hits, k=5)
     diversified_ids = [h.id for h in diversified[:3]]
-    # Facet diversification must ensure parents (h4) and grandparents (h5) are promoted
+    # Facet diversification must ensure teammates (h4) and roommates (h5) are promoted
     # into the top slots alongside the user hit (h0)
     assert "h0" in diversified_ids
     assert "h4" in diversified_ids

@@ -43,10 +43,10 @@ def _make_passage_hit(
 
 
 def test_rank_passages_recency_decay_boosts_recent_session() -> None:
-    older_text = "I play tennis three times a week at the local park with John and Sarah."
-    newer_text = "I play tennis once a month at the local park due to a busy schedule."
+    older_text = "I swim laps every Tuesday and Thursday at the community pool with Jo and Ken."
+    newer_text = "These days I swim laps at the community pool only on the first Sunday of each month."
 
-    # Both passages talk about playing tennis at the local park
+    # Both passages talk about swimming laps at the community pool
     older_hit = _make_passage_hit(
         "sess_old",
         older_text,
@@ -59,7 +59,7 @@ def test_rank_passages_recency_decay_boosts_recent_session() -> None:
     )
 
     owner = object()
-    query = "How often do I play tennis at the local park?"
+    query = "How often do I swim laps at the community pool?"
     ranked = rank_passages(owner, query, [older_hit, newer_hit], k=2)
 
     assert len(ranked) == 2
@@ -70,17 +70,17 @@ def test_rank_passages_recency_decay_boosts_recent_session() -> None:
 def test_rank_passages_currency_cue_boosts_latest() -> None:
     p1 = _make_passage_hit(
         "cand_1",
-        "We have four dozen eggs stocked up in our refrigerator for the weekend bake.",
+        "We have six jars of honey stored in our pantry for the holiday baking.",
         "2023-03-01T12:00:00+00:00",
     )
     p2 = _make_passage_hit(
         "cand_2",
-        "We have two dozen eggs stocked up in our refrigerator currently.",
+        "We have two jars of honey stored in our pantry currently.",
         "2023-05-20T12:00:00+00:00",
     )
 
     owner = object()
-    query = "How many dozen eggs do we currently have stocked up in our refrigerator?"
+    query = "How many jars of honey do we currently have stored in our pantry?"
     ranked = rank_passages(owner, query, [p1, p2], k=2)
 
     assert len(ranked) == 2
@@ -89,7 +89,7 @@ def test_rank_passages_currency_cue_boosts_latest() -> None:
 
 
 def test_query_time_window_between_events_returns_none() -> None:
-    query = "How many days had passed between the Sunday mass at St. Mary's Church and the Ash Wednesday service at the cathedral?"
+    query = "What was the gap between the Saturday pottery workshop and the Friday lake cleanup?"
     local_now = datetime(2023, 7, 1, 12, 0, 0, tzinfo=UTC)
     window = query_time_window(query, local_now)
     assert window is None
@@ -103,7 +103,7 @@ def test_query_time_window_what_was_the_date_returns_none() -> None:
 
 
 def test_query_time_window_n_weeks_ago_parses_calendar_week() -> None:
-    query = "I mentioned participating in a sports event two weeks ago. What was the event?"
+    query = "I mentioned visiting a farm stand two weeks ago. Which one was it?"
     # Saturday July 1, 2023
     local_now = datetime(2023, 7, 1, 12, 0, 0, tzinfo=UTC)
     window = query_time_window(query, local_now, query_timezone="UTC")
@@ -118,24 +118,24 @@ def test_query_time_window_n_weeks_ago_parses_calendar_week() -> None:
 
 
 def test_current_currency_hit_id_identifies_latest_match() -> None:
-    h1 = _make_passage_hit("h1", "Company update on Rachel", "2023-05-20T10:00:00+00:00", score=10.0)
-    h2 = _make_passage_hit("h2", "Company update on Rachel", "2023-05-25T14:00:00+00:00", score=9.8)
+    h1 = _make_passage_hit("h1", "Gym update on Dana", "2023-05-20T10:00:00+00:00", score=10.0)
+    h2 = _make_passage_hit("h2", "Gym update on Dana", "2023-05-25T14:00:00+00:00", score=9.8)
     h3 = _make_passage_hit("h3", "Irrelevant unrelated text", "2023-05-26T10:00:00+00:00", score=1.5)
 
     latest_id = _current_currency_hit_id(
-        "What company is Rachel currently working at?",
+        "What gym is Dana currently a member of?",
         [h1, h2, h3],
     )
     assert latest_id == "h2"
 
 
 def test_schema_fast_path_rerank_applies_currency_boost() -> None:
-    h1 = _make_passage_hit("h1", "Company update on Rachel", "2023-05-20T10:00:00+00:00", score=10.0)
-    h2 = _make_passage_hit("h2", "Company update on Rachel", "2023-05-25T14:00:00+00:00", score=9.8)
+    h1 = _make_passage_hit("h1", "Gym update on Dana", "2023-05-20T10:00:00+00:00", score=10.0)
+    h2 = _make_passage_hit("h2", "Gym update on Dana", "2023-05-25T14:00:00+00:00", score=9.8)
 
     policy = OperatingPolicy()
     reranked, explain = schema_fast_path_rerank(
-        "What company is Rachel currently working at?",
+        "What gym is Dana currently a member of?",
         [h1, h2],
         policy,
     )

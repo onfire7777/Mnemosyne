@@ -124,7 +124,7 @@ def test_wiki_answers_inverse_questions_with_resolved_grounded_overview(engine):
         [page] = read_knowledge_context(engine, context, query)
         assert "## Overview" in page["text"]
         assert "Atlas" in page["text"] and "[source:" in page["text"]
-    assert read_knowledge_context(engine, context, "Give me a chocolate cake recipe") == []
+    assert read_knowledge_context(engine, context, "Give me a lemon tart recipe") == []
 
 
 def test_wiki_uses_configured_semantic_vectors_and_rechecks_custody(engine):

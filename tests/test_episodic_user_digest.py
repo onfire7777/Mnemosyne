@@ -102,7 +102,7 @@ def test_multi_turn_mixed_dialogue_digest() -> None:
             actor="user",
             source_type="conversation",
             cid="ev1",
-            content="user: In 2020, I lived in Sacramento.",
+            content="user: In 2020, I lived in Boise.",
             created_at=datetime(2020, 1, 1, 12, 0, tzinfo=UTC),
         ),
         Evidence(
@@ -155,7 +155,7 @@ def test_multi_turn_mixed_dialogue_digest() -> None:
     # Trajectories present
     assert "## Chronological State Trajectories:" in rendered
     assert "user.residence:" in rendered
-    assert "Sacramento" in rendered
+    assert "Boise" in rendered
     assert "San Diego" in rendered
 
 
@@ -168,7 +168,7 @@ def test_episodic_user_digest_as_of_temporal_slicing() -> None:
             branch="main",
             subject="user",
             predicate="residence",
-            object="Sacramento",
+            object="Boise",
             valid_from=datetime(2020, 1, 1, tzinfo=UTC),
             valid_to=datetime(2024, 1, 1, tzinfo=UTC),
             status="superseded",
@@ -188,13 +188,13 @@ def test_episodic_user_digest_as_of_temporal_slicing() -> None:
         ),
     ]
 
-    # As of 2022: Sacramento was current, San Diego had not happened yet
+    # As of 2022: Boise was current, San Diego had not happened yet
     digest_2022 = build_episodic_user_digest(
         assertions, as_of=datetime(2022, 6, 1, tzinfo=UTC)
     )
     current_2022 = [f for f in digest_2022.facts if f.is_current]
     assert len(current_2022) == 1
-    assert current_2022[0].value == "Sacramento"
+    assert current_2022[0].value == "Boise"
 
     # As of 2025: San Diego is current
     digest_2025 = build_episodic_user_digest(

@@ -192,11 +192,11 @@ def test_distinct_negative_preferences_coexist(engine):
 def test_dated_correction_inside_its_open_window_supersedes(engine):
     from datetime import UTC, datetime
 
-    for text, when in (("I live in Sacramento.", datetime(2026, 2, 10, tzinfo=UTC)),
+    for text, when in (("I live in Boise.", datetime(2026, 2, 10, tzinfo=UTC)),
                        ("I moved to San Diego in 2026.", datetime(2026, 6, 11, tzinfo=UTC))):
         project_direct_user_memory(engine, "t", source(engine, text, created_at=when))
     rows = engine.export_tenant("t")["assertions"]
-    assert {row["object"]: row["status"] for row in rows} == {"Sacramento": "superseded", "San Diego": "active"}
+    assert {row["object"]: row["status"] for row in rows} == {"Boise": "superseded", "San Diego": "active"}
 
 
 def test_discourse_lead_is_stripped_only_before_first_person():
