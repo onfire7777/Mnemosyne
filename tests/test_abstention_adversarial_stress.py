@@ -25,56 +25,56 @@ def _make_hit(id: str, text: str, score: float = 1.0, metadata: dict | None = No
 # Passing Baseline Tests
 # ---------------------------------------------------------------------------
 
-def test_unanswerable_proper_noun_sacramento() -> None:
-    """Explicit ungrounded proper noun Sacramento triggers abstention."""
+def test_unanswerable_proper_noun_lakemoor() -> None:
+    """Explicit ungrounded proper noun Lakemoor triggers abstention."""
     engine = LocalMemoryEngine()
     try:
         engine.append_evidence(Evidence(
             tenant_id="t1", branch="main", user_id="u", actor="user", source_type="conversation",
-            content="I stayed at the Fairmont Hotel in San Francisco during my California vacation.", metadata={}
+            content="I stayed at the Kestrel Inn in Port Halden during my coastal vacation.", metadata={}
         ))
-        res = engine.retrieve("Where did I stay when visiting Sacramento?", tenant_id="t1", record_access=False)
+        res = engine.retrieve("Where did I stay when visiting Lakemoor?", tenant_id="t1", record_access=False)
         assert res.abstained is True
         qs = res.explain["confidence"]["query_support"]
         assert qs["score"] <= 0.35
         assert qs["anchor_grounding"]["satisfied"] is False
-        assert "Sacramento" in qs["anchor_grounding"]["missing_proper"]
+        assert "Lakemoor" in qs["anchor_grounding"]["missing_proper"]
     finally:
         engine.close()
 
 
-def test_unanswerable_compound_table_tennis() -> None:
-    """Hardcoded recognized compound anchor table tennis triggers abstention."""
+def test_unanswerable_compound_coffee_table() -> None:
+    """Recognized compound anchor coffee table triggers abstention."""
     engine = LocalMemoryEngine()
     try:
         engine.append_evidence(Evidence(
             tenant_id="t1", branch="main", user_id="u", actor="user", source_type="conversation",
-            content="I play tennis every weekend at the club.", metadata={}
+            content="I bought a new table for the kitchen and I drink coffee every morning.", metadata={}
         ))
-        res = engine.retrieve("How often do I play table tennis?", tenant_id="t1", record_access=False)
+        res = engine.retrieve("When did I buy the coffee table?", tenant_id="t1", record_access=False)
         assert res.abstained is True
         qs = res.explain["confidence"]["query_support"]
         assert qs["score"] <= 0.35
         assert qs["anchor_grounding"]["satisfied"] is False
-        assert "table tennis" in qs["anchor_grounding"]["missing_compounds"]
+        assert "coffee table" in qs["anchor_grounding"]["missing_compounds"]
     finally:
         engine.close()
 
 
-def test_unanswerable_focal_object_football() -> None:
-    """Hardcoded focal object football triggers abstention when memory only has baseballs."""
+def test_unanswerable_focal_object_saxophone() -> None:
+    """Focal object saxophone triggers abstention when memory only has a trumpet."""
     engine = LocalMemoryEngine()
     try:
         engine.append_evidence(Evidence(
             tenant_id="t1", branch="main", user_id="u", actor="user", source_type="conversation",
-            content="I have 5 autographed baseballs in my display case.", metadata={}
+            content="I keep my trumpet in the display case.", metadata={}
         ))
-        res = engine.retrieve("How many autographed footballs do I have in my display case?", tenant_id="t1", record_access=False)
+        res = engine.retrieve("Where do I keep my saxophone in the display case?", tenant_id="t1", record_access=False)
         assert res.abstained is True
         qs = res.explain["confidence"]["query_support"]
         assert qs["score"] <= 0.35
         assert qs["anchor_grounding"]["satisfied"] is False
-        assert "football" in qs["anchor_grounding"]["missing_focal"]
+        assert "saxophone" in qs["anchor_grounding"]["missing_focal"]
     finally:
         engine.close()
 

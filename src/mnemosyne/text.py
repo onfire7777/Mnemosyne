@@ -240,88 +240,8 @@ def approx_tokens(text: str) -> int:
 
 TAXONOMIC_EXPANSIONS: dict[str, tuple[str, ...]] = {
     # Kinship hypernyms -> hyponyms
-    "sibling": ("brother", "sister", "brothers", "sisters"),
-    "siblings": ("brother", "sister", "brothers", "sisters"),
-    "grandma": ("grandmother", "grandparent", "grandparents"),
-    "grandpa": ("grandfather", "grandparent", "grandparents"),
-    "grandmother": ("grandma", "grandmother", "grandparent"),
-    "grandfather": ("grandpa", "grandfather", "grandparent"),
     "parent": ("mother", "father", "mom", "dad"),
     "parents": ("mother", "father", "mom", "dad"),
-    # Appliances & Devices (hypernyms -> concrete hyponyms)
-    "appliance": (
-        "espresso machine", "air fryer", "instant pot", "blender", "toaster", "stand mixer",
-        "microwave", "coffee maker", "food processor", "dishwasher", "kettle",
-        "juicer", "cooker", "smoker", "grill",
-    ),
-    "appliances": (
-        "espresso machine", "air fryer", "instant pot", "blender", "toaster", "stand mixer",
-        "microwave", "coffee maker", "food processor", "dishwasher", "kettle",
-        "juicer", "cooker", "smoker", "grill",
-    ),
-    "gadget": (
-        "instant pot", "air fryer", "espresso machine", "blender", "toaster", "stand mixer",
-        "coffee maker", "food processor", "kettle", "juicer", "cooker",
-    ),
-    "gadgets": (
-        "instant pot", "air fryer", "espresso machine", "blender", "toaster", "stand mixer",
-        "coffee maker", "food processor", "kettle", "juicer", "cooker",
-    ),
-    # Sports & athletic events (hypernyms -> concrete hyponyms)
-    "sport": (
-        "soccer", "basketball", "tennis", "baseball", "marathon", "triathlon",
-        "5k", "running", "run", "cycling", "bike", "swimming", "volleyball", "golf",
-        "hockey", "badminton", "tournament", "race",
-    ),
-    "sports": (
-        "soccer", "basketball", "tennis", "baseball", "marathon", "triathlon",
-        "5k", "running", "run", "cycling", "bike", "swimming", "volleyball", "golf",
-        "hockey", "badminton", "tournament", "race",
-    ),
-    "social": (
-        "instagram", "twitter", "facebook", "tiktok", "hashtag", "shared", "posted",
-        "foodieadventure", "foodieadventures", "plankchallenge", "challenge",
-    ),
-    "museum": (
-        "exhibition", "tour", "gallery", "galleries", "curator", "artifacts",
-    ),
-    "museums": (
-        "exhibition", "tour", "gallery", "galleries", "curator", "artifacts",
-    ),
-    "device": (
-        "fitness tracker", "smartwatch", "blood pressure monitor", "scale",
-        "thermometer", "glucometer", "pulse oximeter", "wearable", "fitbit", "garmin",
-        "hearing aid", "hearing aids", "phonak",
-    ),
-    "devices": (
-        "fitness tracker", "smartwatch", "blood pressure monitor", "scale",
-        "thermometer", "glucometer", "pulse oximeter", "wearable", "fitbit", "garmin",
-        "hearing aid", "hearing aids", "phonak",
-    ),
-    "magazine": (
-        "geographic", "new yorker", "economist", "wired", "vogue", "time magazine",
-    ),
-    "magazines": (
-        "geographic", "new yorker", "economist", "wired", "vogue", "time magazine",
-    ),
-    "kit": (
-        "diorama", "tamiya", "revell", "gundam", "gunpla", "airfix",
-    ),
-    "kits": (
-        "diorama", "tamiya", "revell", "gundam", "gunpla", "airfix",
-    ),
-    # Cuisines (hypernyms -> concrete hyponyms)
-    "cuisine": (
-        "italian", "mexican", "japanese", "chinese", "thai", "indian",
-        "french", "korean", "greek", "spanish", "vietnamese",
-    ),
-    "cuisines": (
-        "italian", "mexican", "japanese", "chinese", "thai", "indian",
-        "french", "korean", "greek", "spanish", "vietnamese",
-    ),
-    # Vehicles (hypernyms -> concrete hyponyms)
-    "vehicle": ("car", "truck", "suv", "motorcycle", "bicycle", "bike", "van"),
-    "vehicles": ("car", "truck", "suv", "motorcycle", "bicycle", "bike", "van"),
 }
 
 

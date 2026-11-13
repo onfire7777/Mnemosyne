@@ -1514,13 +1514,13 @@ def extract_episodic_facts(
     """Extract deterministic assertions and relations across the 4 fact families + open-domain SVO.
 
     Fact Families:
-    1. Residence: "I moved to San Diego", "I live in Sacramento", "My apartment is in Shibuya"
+    1. Residence: "I moved to Halden", "I live in Brookvale", "My apartment is in Eastgate"
        -> Assertion(subject="user", predicate="residence", object=loc) & Relation(source="user", predicate="lives_in", target=loc)
-    2. Family/Pets: "My daughter Emily", "My dog Buster is a Golden Retriever"
+    2. Family/Pets: "My daughter Mira", "My dog Pepper is a Beagle"
        -> Assertion(subject="user", predicate="has_family"/"has_pet", object=name) & Relation(...)
-    3. Expenses/Counts: "I spent $450 on bike repairs", "Total money spent on bike repairs was $450"
-       -> Assertion(subject="user", predicate="expense", object="$450 on bike repairs") & Relation(...)
-    4. Milestones: "In 2021, I graduated from Stanford", "In 2019, I started working at Google"
+    3. Expenses/Counts: "I spent $70 on garden tools", "I bought 3 stools"
+       -> Assertion(subject="user", predicate="expense", object="$70 on garden tools") & Relation(...)
+    4. Milestones: "In 2021, I graduated from Northfield College", "In 2019, I started working at Acme"
        -> Assertion(subject="user", predicate="education"/"milestone", object=institution, valid_from=...) & Relation(...)
     5. Open-Domain SVO: "I am allergic to shellfish", "We deployed the payment service on Kubernetes", etc.
     """
@@ -1696,7 +1696,7 @@ def extract_episodic_facts(
         # ----------------------------------------------------------------------
         # 1. Residence & Location
         # ----------------------------------------------------------------------
-        # Moves: "I moved to San Diego in 2024", "In 2024, I moved to San Diego", "I moved from Sacramento to San Diego"
+        # Moves: "I moved to Halden in 2024", "In 2024, I moved to Halden", "I moved from Brookvale to Halden"
         m_move = re.search(
             r"(?i)(?:(?:in|on)\s+([A-Za-z0-9, ]+?),?\s+)?(?:I|we)\s+moved\s+(?:from\s+[A-Za-z0-9\s'.-]+?\s+to\s+|to\s+)([A-Z][A-Za-z0-9\s'.-]+?)(?:\s+(?:in|on)\s+([A-Za-z0-9, ]+?))?(?:[.,;]|\s+with|\s+and|\s*$)",
             s_clean,
@@ -1727,7 +1727,7 @@ def extract_episodic_facts(
                 add_assertion(effective_subject, "not_residence", loc)
                 add_relation(effective_subject, "not_residence", loc)
 
-        # Current residence: "I live in Sacramento", "I currently live in Sacramento", "I reside in Sacramento"
+        # Current residence: "I live in Brookvale", "I currently live in Brookvale", "I reside in Brookvale"
         m_live = re.search(
             r"(?i)(?:(?:in|since)\s+([A-Za-z0-9, ]+?),?\s+)?(?:I|we)\s+(?:currently\s+|used\s+to\s+)?(?:live|reside|lived|resided)\s+in\s+([A-Z][A-Za-z0-9\s'.-]+?)(?:\s+(?:in|since)\s+([A-Za-z0-9, ]+?))?(?:[.,;]|\s+with|\s+and|\s*$)",
             s_clean,
@@ -1748,7 +1748,7 @@ def extract_episodic_facts(
                 add_relation(effective_subject, "lives_in", loc, vf=dt)
                 add_relation(effective_subject, "residence", loc, vf=dt)
 
-        # "I am living in Shibuya", "I'm currently living in Shibuya"
+        # "I am living in Eastgate", "I'm currently living in Eastgate"
         m_living = re.search(
             r"(?i)(?:I\s+am|I'm)\s+(?:currently\s+)?living\s+in\s+([A-Z][A-Za-z0-9\s'.-]+?)(?:\s+(?:in|since)\s+([A-Za-z0-9, ]+?))?(?:[.,;]|\s+with|\s+and|\s*$)",
             s_clean,
@@ -1765,7 +1765,7 @@ def extract_episodic_facts(
                 add_relation(effective_subject, "lives_in", loc, vf=dt)
                 add_relation(effective_subject, "residence", loc, vf=dt)
 
-        # "My apartment is in Shibuya", "My current apartment is in Shibuya", "My house in Portland"
+        # "My apartment is in Eastgate", "My flat is in Eastgate", "My house in Halden"
         m_apt = re.search(
             r"(?i)my\s+(?:current\s+)?(?:apartment|house|home|condo|place)\s+(?:is\s+)?in\s+([A-Z][A-Za-z0-9\s'.-]+?)(?:[.,;]|\s+with|\s+and|\s*$)",
             s_clean,
@@ -1783,7 +1783,7 @@ def extract_episodic_facts(
                 add_relation(effective_subject, "lives_in", loc, vf=sentence_date)
                 add_relation(effective_subject, "residence", loc, vf=sentence_date)
 
-        # "I bought a house in Portland", "I bought an apartment in Tokyo"
+        # "I bought a house in Halden", "I bought an apartment in Brookvale"
         m_bought_home = re.search(
             r"(?i)(?:I|we)\s+bought\s+(?:an?\s+)?(?:apartment|house|home|condo)\s+in\s+([A-Z][A-Za-z0-9\s'.-]+?)(?:[.,;]|\s+with|\s+and|\s*$)",
             s_clean,
@@ -1804,7 +1804,7 @@ def extract_episodic_facts(
         # ----------------------------------------------------------------------
         # 2. Family & Pets
         # ----------------------------------------------------------------------
-        # Family: "My daughter Emily", "My son Lucas", "My wife Sarah", "My husband John"
+        # Family: "My daughter Mira", "My son Lucas", "My wife Ines", "My husband Arlo"
         for m_fam in re.finditer(
             r"(?i)\bmy\s+(daughter|son|wife|husband|mother|father|mom|dad|brother|sister)\s+([A-Z][a-z]+)\b",
             s_clean,
@@ -1821,7 +1821,7 @@ def extract_episodic_facts(
             add_relation(effective_subject, "has_family", name, vf=sentence_date)
             add_relation(effective_subject, f"has_{role}", name, vf=sentence_date)
 
-        # Family named: "I have a daughter named Emily", "I have a son named Lucas"
+        # Family named: "I have a daughter named Mira", "I have a son named Lucas"
         for m_fam_named in re.finditer(
             r"(?i)(?:I\s+have|I've\s+got)\s+a\s+(daughter|son|wife|husband|brother|sister)\s+(?:named|called)\s+([A-Z][a-z]+)\b",
             s_clean,
@@ -1838,7 +1838,7 @@ def extract_episodic_facts(
             add_relation(effective_subject, "has_family", name, vf=sentence_date)
             add_relation(effective_subject, f"has_{role}", name, vf=sentence_date)
 
-        # Pets: "My dog Buster", "My cat Luna", "My pet dog Buster", "My pet hamster Coco"
+        # Pets: "My dog Pepper", "My cat Miso", "My pet dog Pepper", "My pet rabbit Coco"
         for m_pet in re.finditer(
             r"(?i)\bmy\s+(?:pet\s+)?(dog|cat|hamster|rabbit|parrot|puppy|kitten)\s+([A-Z][a-z]+)\b",
             s_clean,
@@ -1856,7 +1856,7 @@ def extract_episodic_facts(
             add_relation(effective_subject, f"has_{species}", name, vf=sentence_date)
             add_relation(name, "is_a", species, vf=sentence_date)
 
-        # Pets named: "I have a dog named Buster", "I have a pet cat named Luna"
+        # Pets named: "I have a dog named Pepper", "I have a pet cat named Miso"
         for m_pet_named in re.finditer(
             r"(?i)(?:I\s+have|I've\s+got)\s+an?\s+(?:pet\s+)?(dog|cat|hamster|rabbit|parrot)\s+(?:named|called)\s+([A-Z][a-z]+)\b",
             s_clean,
@@ -1874,7 +1874,7 @@ def extract_episodic_facts(
             add_relation(effective_subject, f"has_{species}", name, vf=sentence_date)
             add_relation(name, "is_a", species, vf=sentence_date)
 
-        # Pet breed / attribute: "My dog Buster is a Golden Retriever", "Buster is a Golden Retriever"
+        # Pet breed / attribute: "My dog Pepper is a Beagle", "Pepper is a Beagle"
         m_breed = re.search(
             r"(?i)\b([A-Z][a-z]+)\s+is\s+an?\s+([A-Z][A-Za-z\s]+?)(?:[.,;]|\s*)$",
             s_clean,
@@ -1915,29 +1915,6 @@ def extract_episodic_facts(
             except ValueError:
                 pass
 
-        # "Total money spent on bike repairs was $450"
-        m_total_spent = re.search(
-            r"(?i)total\s+money\s+spent\s+on\s+([a-zA-Z0-9\s'-]+?)\s+(?:was|is)\s+\$?(\d+(?:,\d+)*(?:\.\d+)?)",
-            s_clean,
-        )
-        if m_total_spent:
-            item_raw = m_total_spent.group(1).strip().strip(",.;")
-            amt_raw = m_total_spent.group(2).replace(",", "")
-            try:
-                amt_float = float(amt_raw)
-                obj_str = f"${int(amt_float) if amt_float.is_integer() else amt_float} on {item_raw}"
-                add_assertion(
-                    effective_subject,
-                    "expense",
-                    obj_str,
-                    vf=sentence_date,
-                    scope={"amount": amt_float, "item": item_raw},
-                )
-                add_relation(effective_subject, "expense", item_raw, vf=sentence_date)
-                add_relation(effective_subject, "spent_on", item_raw, vf=sentence_date)
-            except ValueError:
-                pass
-
         # "I paid $80 for dinner"
         m_paid = re.search(
             r"(?i)(?:I|we)\s+paid\s+\$?(\d+(?:,\d+)*(?:\.\d+)?)\s*(?:dollars?)?\s+(?:for|on)\s+([a-zA-Z0-9\s'-]+?)(?:[.,;]|\s*$)",
@@ -1960,7 +1937,7 @@ def extract_episodic_facts(
             except ValueError:
                 pass
 
-        # Counts: "I bought 3 guitars", "I have 5 bicycles", "I own two cars"
+        # Counts: "I bought 3 lamps", "I have 5 bicycles", "I own two cars"
         for m_count in re.finditer(
             r"(?i)\b(?:I|we)\s+(?:bought|purchased|have|own|got)\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+([a-zA-Z0-9'-]+(?:\s+(?!and\b|or\b|with\b|in\s+\d{4}\b)[a-zA-Z0-9'-]+)*)",
             s_clean,
@@ -1998,7 +1975,7 @@ def extract_episodic_facts(
         # ----------------------------------------------------------------------
         # 4. Dated Milestones
         # ----------------------------------------------------------------------
-        # Education: "In 2021, I graduated from Stanford", "I graduated from MIT in 2018"
+        # Education: "In 2021, I graduated from Northfield College", "I graduated from MIT in 2018"
         m_grad = re.search(
             r"(?i)(?:(?:in|on)\s+([A-Za-z0-9, ]+?),?\s+)?(?:I|we)\s+graduated\s+from\s+([A-Z][A-Za-z0-9\s'.-]+?)(?:\s+(?:in|on)\s+([A-Za-z0-9, ]+?))?(?:[.,;]|\s+with|\s+and|\s*$)",
             s_clean,
@@ -2032,7 +2009,7 @@ def extract_episodic_facts(
                 add_relation(effective_subject, "graduated_from", inst, vf=dt)
                 add_relation(effective_subject, "education", inst, vf=dt)
 
-        # Degrees: "I received my degree from UC Berkeley in 2020", "I got my PhD from Harvard in 2017"
+        # Degrees: "I received my degree from Northfield College in 2020", "I got my PhD from Lakeside University in 2017"
         m_degree = re.search(
             r"(?i)(?:(?:in|on)\s+([A-Za-z0-9, ]+?),?\s+)?(?:I|we)\s+(?:received|earned|got|completed)\s+(?:my|a|an)\s+(?:degree|bachelor'?s?|master'?s?|phd|doctorate)\s+from\s+([A-Z][A-Za-z0-9\s'.-]+?)(?:\s+(?:in|on)\s+([A-Za-z0-9, ]+?))?(?:[.,;]|\s*$)",
             s_clean,
@@ -2065,7 +2042,7 @@ def extract_episodic_facts(
                 add_relation(effective_subject, "graduated_from", inst, vf=dt)
                 add_relation(effective_subject, "education", inst, vf=dt)
 
-        # Career milestones: "In 2019, I started working at Google", "In 2022, I joined Apple"
+        # Career milestones: "In 2019, I started working at Acme", "In 2022, I joined Globex"
         m_career = re.search(
             r"(?i)(?:(?:in|on)\s+([A-Za-z0-9, ]+?),?\s+)?(?:I|we)\s+(?:started\s+(?:working\s+at|at|my\s+job\s+at)|joined)\s+([A-Z][A-Za-z0-9\s'.-]+?)(?:\s+(?:in|on)\s+([A-Za-z0-9, ]+?))?(?:[.,;]|\s*$)",
             s_clean,
@@ -2091,7 +2068,7 @@ def extract_episodic_facts(
                 add_relation(effective_subject, "works_at", company, vf=dt)
                 add_relation(effective_subject, "employed_by", company, vf=dt)
 
-        # Marriage: "In 2015, I got married", "On October 12, 2015, I got married to Sarah"
+        # Marriage: "In 2015, I got married", "On October 12, 2015, I got married to Ines"
         m_married = re.search(
             r"(?i)(?:(?:in|on)\s+([A-Za-z0-9, ]+?),?\s+)?(?:I|we)\s+got\s+married(?:\s+to\s+([A-Z][a-z]+))?(?:\s+(?:in|on)\s+([A-Za-z0-9, ]+?))?(?:[.,;]|\s*$)",
             s_clean,
