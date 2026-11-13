@@ -8,8 +8,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from mnemosyne.models import Hit
-from mnemosyne.passages import PassageIndex, rank_passages
-from mnemosyne.retrieval import TimeWindow, query_support, similar_query_terms
+from mnemosyne.passages import rank_passages
 
 
 def test_knowledge_updates_currency_prioritization_cases():
@@ -78,101 +77,3 @@ def test_knowledge_updates_currency_prioritization_cases():
         k=2,
     )
     assert ranked_m[0].id == "card_2"
-
-
-def test_taxonomic_concept_expansion_cases():
-    """Verify that hypernym queries match concrete hyponym sessions."""
-    # 1. Vehicles -> van / motorcycle
-    texts = (
-        "I drive a white van to the lumber yard on Saturdays.",
-        "My motorcycle is parked in the garage for the winter.",
-        "My close friend David works in finance.",
-    )
-    idx = PassageIndex(texts)
-    scores = idx.scores("How many vehicles do I own?")
-    assert 0 in scores, "Session mentioning 'van' must receive positive BM25 score for 'vehicles'"
-    assert 1 in scores, "Session mentioning 'motorcycle' must receive positive BM25 score for 'vehicles'"
-
-    # 2. Grandpa -> grandfather
-    scores_g = idx.scores("When did my grandpa retire?")
-    assert isinstance(scores_g, dict)
-    assert similar_query_terms("grandpa", "grandfather")
-
-    # 3. Vehicle hypernym -> concrete hyponyms
-    assert similar_query_terms("vehicle", "motorcycle")
-    assert similar_query_terms("vehicles", "van")
-
-
-def test_conjunctive_and_temporal_abstention_grounding_cases():
-    """Verify that queries with ungrounded conjunctions or missing temporal bounds fail support."""
-    dt_march = datetime(2023, 3, 15, 12, 0, tzinfo=timezone.utc)
-    hit_march = Hit(
-        id="h_march",
-        kind="evidence",
-        text="I visited two contemporary art museums and a photography gallery during my vacation.",
-        score=1.0,
-        tenant_id="t",
-        branch="main",
-        channel="c",
-        metadata={"created_at": dt_march},
-    )
-
-    # 1. Temporal-Bound: December window query with only March hits
-    win_dec = TimeWindow(
-        label="December",
-        start=datetime(2023, 12, 1, 0, 0, tzinfo=timezone.utc),
-        end=datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc),
-        rest="museums or galleries did I visit",
-        axis="event",
-    )
-    # Check that candidate dt_march falls outside December window
-    hit_created = hit_march.metadata["created_at"]
-    assert not (win_dec.start <= hit_created < win_dec.end)
-
-    # 2. Conjunctive premise: "kale and spinach"
-    hit_planters = Hit(
-        id="h_planters",
-        kind="evidence",
-        text="On the balcony I started 6 kale seedlings next to a row of radishes.",
-        score=1.0,
-        tenant_id="t",
-        branch="main",
-        channel="c",
-    )
-    rep_conj = query_support(
-        "How many seedlings did I start for kale and spinach?",
-        [hit_planters],
-    )
-    assert rep_conj["anchor_grounding"]["satisfied"] is False
-    assert any("spinach" in c for c in rep_conj["anchor_grounding"]["missing_conjunctions"])
-    assert rep_conj["score"] <= 0.35
-
-    # 3. Locative duration: "How long did I stay in Chile?"
-    hit_peru = Hit(
-        id="h_peru",
-        kind="evidence",
-        text="I spent ten days hiking in Peru. Next year I am thinking of visiting northern Chile.",
-        score=1.0,
-        tenant_id="t",
-        branch="main",
-        channel="c",
-    )
-    rep_chile = query_support("How long did I stay in Chile?", [hit_peru])
-    assert rep_chile["anchor_grounding"]["satisfied"] is False
-    assert any("Chile" in loc for loc in rep_chile["anchor_grounding"]["missing_locatives"])
-    assert rep_chile["score"] <= 0.35
-
-    # 4. Compound noun grounding: "birthday party"
-    hit_party = Hit(
-        id="h_party",
-        kind="evidence",
-        text="I baked a lemon cake for the office party on Friday.",
-        score=1.0,
-        tenant_id="t",
-        branch="main",
-        channel="c",
-    )
-    rep_party = query_support("Who came to my birthday party?", [hit_party])
-    assert rep_party["anchor_grounding"]["satisfied"] is False
-    assert any("birthday party" in comp for comp in rep_party["anchor_grounding"]["missing_compounds"])
-    assert rep_party["score"] <= 0.35

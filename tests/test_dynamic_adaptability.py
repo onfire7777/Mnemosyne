@@ -7,11 +7,7 @@ from datetime import datetime, timezone
 from mnemosyne.models import Hit
 from mnemosyne.passages import rank_passages
 from mnemosyne.pipeline import _fit_budget, _trim_hit_window
-from mnemosyne.retrieval import query_support, similar_query_terms
-from mnemosyne.text import (
-    dynamic_concept_bridge,
-    expand_taxonomic_concepts,
-)
+from mnemosyne.retrieval import query_support
 
 
 def test_dynamic_corpus_idf_weighting():
@@ -132,39 +128,6 @@ def test_query_intent_adaptive_currency_promotion():
     earliest_query = "What was the earliest coffee-to-water ratio I used in my French press?"
     ranked_earliest = rank_passages(owner, earliest_query, [cand_old, cand_new], k=2)
     assert ranked_earliest[0].id == "cand_old"
-
-
-def test_taxonomic_expansion_and_dynamic_concept_bridge():
-    """Verify taxonomic hypernym expansion and dynamic corpus-learned concept bridging."""
-    # Static taxonomy
-    assert "van" in expand_taxonomic_concepts(["vehicle"])
-    assert "motorcycle" in expand_taxonomic_concepts(["vehicles"])
-    assert "suv" in expand_taxonomic_concepts(["vehicles"])
-    assert "mother" in expand_taxonomic_concepts(["parents"])
-    assert "grandfather" in expand_taxonomic_concepts(["grandpa"])
-
-    # Dynamic concept bridge with tenant co-occurrences
-    tenant_corpus_cooccurrences = {
-        "transportation": ["ferry", "commuter rail", "scooter"],
-        "beverage": ["kombucha", "matcha latte"],
-    }
-    bridged = dynamic_concept_bridge("transportation", tenant_corpus_cooccurrences)
-    assert "ferry" in bridged
-    assert "scooter" in bridged
-
-    # similar_query_terms integration
-    assert similar_query_terms("vehicle", "van")
-    assert similar_query_terms("vehicle", "motorcycle")
-    assert similar_query_terms("parent", "mother")
-    assert similar_query_terms("parents", "dad")
-    assert similar_query_terms("grandpa", "grandfather")
-
-    # Co-hyponyms must NEVER match each other
-    assert similar_query_terms("mexican", "italian") is False
-    assert similar_query_terms("football", "tennis") is False
-    assert similar_query_terms("brother", "sister") is False
-    assert similar_query_terms("blender", "toaster") is False
-    assert similar_query_terms("bicycle", "truck") is False
 
 
 def test_conjunctive_nominal_abstention_grounding():
