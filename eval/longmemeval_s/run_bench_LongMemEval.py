@@ -181,6 +181,12 @@ def openrouter(
     raise RuntimeError(f"OpenRouter kept failing for {model}: {error}")
 
 
+def _opaque(value: str) -> str:
+    """Dataset ids encode labels ("_abs" marks abstention, "answer_" marks evidence sessions);
+    the memory engine only ever sees this hash of them."""
+    return hashlib.sha256(f"longmemeval-id:{value}".encode()).hexdigest()[:16]
+
+
 def _filter(mode: str, row: dict) -> dict:
     return {
         "role": "reader",
@@ -197,7 +203,7 @@ def retrieve(row: dict, top_k: int, mode: str) -> list[int]:
     default and passages go through Mnemosyne's search pipeline; dense asks its dense channel
     alone (engine.vector_search), with a real embedding model in place of the built-in hash.
     """
-    tenant = f"longmemeval:{row['question_id']}"
+    tenant = f"longmemeval:{_opaque(row['question_id'])}"
     adapters = (
         {"adapters": RetrievalAdapters(embedding=EMBEDDER)} if mode == "dense" else {}
     )
@@ -216,8 +222,8 @@ def retrieve(row: dict, top_k: int, mode: str) -> list[int]:
                 tenant_id=tenant,
                 user_id="longmemeval",
                 actor="user",
-                source_type=f"longmemeval:{session_id}",
-                source_identity=session_id,
+                source_type="longmemeval:session",
+                source_identity=_opaque(session_id),
                 content=text,
                 access_policy={"tenant": tenant},
                 created_at=benchmark_timestamp(
@@ -270,7 +276,7 @@ def rounds_of(session: list[dict]) -> list[list[int]]:
 
 def retrieve_rounds(row: dict, mode: str) -> list[tuple[int, list[int]]]:
     """(session position, turn indices) of the rounds Mnemosyne ranks for the question, best first."""
-    tenant = f"longmemeval:{row['question_id']}"
+    tenant = f"longmemeval:{_opaque(row['question_id'])}"
     engine = LocalMemoryEngine(
         policy=OperatingPolicy(top_k=ROUND_POOL, token_budget=262_144)
     )
@@ -289,8 +295,8 @@ def retrieve_rounds(row: dict, mode: str) -> list[tuple[int, list[int]]]:
                     tenant_id=tenant,
                     user_id="longmemeval",
                     actor="user",
-                    source_type=f"longmemeval:{session_id}",
-                    source_identity=f"{session_id}#round-{number}",
+                    source_type="longmemeval:session",
+                    source_identity=f"{_opaque(session_id)}#round-{number}",
                     content=text,
                     access_policy={"tenant": tenant},
                     created_at=benchmark_timestamp(
@@ -940,6 +946,8 @@ def main() -> None:
     ]
     out_dir = args.out_dir if args.out_dir is not None else HERE / "LongMemEval-results"
     if args.only_wrong_from:
+        if args.split != "dev":
+            raise SystemExit("--only-wrong-from needs --split dev: rerunning held-out misses tunes on the test set")
         earlier = out_dir / f"{args.only_wrong_from}.jsonl"
         wrong = {
             record["question_id"]
