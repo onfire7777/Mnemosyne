@@ -107,7 +107,7 @@ architecture do not support parallel requests; `qwen3` does).
 
 Leave the chat model out and give only the embedding endpoint: the index then extracts nothing
 and ranks passages by the cosine between the question and each passage. This is the retrieval
-behind the 92.4% LongMemEval-S run (qwen3-embedding-8b, 1,024 dimensions, top-10 by cosine),
+behind the LongMemEval-S runs (93.0% in the audited 13 Nov 2026 run; qwen3-embedding-8b, 1,024 dimensions, top-10 by cosine),
 and what BurnOS runs since v0.17.0, through its own OpenRouter key:
 
 ```

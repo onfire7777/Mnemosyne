@@ -5,6 +5,9 @@ audit, not a new benchmark run or a claim of superiority.
 
 ## What sixth place means
 
+> **Retired figure (13 Nov 2026).** The 92.4% LongMemEval-S result discussed here was produced while held-out questions had leaked into development (internal quality gate, engine rules, reader prompt). That material was removed and the benchmark was rerun once under a frozen, audited protocol: **93.0% (465/500), held-out 92.25%** — see the [run receipt](../eval/reports/longmemeval-s-2026-11-13/RECEIPT.md).
+
+
 The [Mnemetric LongMemEval chart](https://mnemetric.burnos.app/#accuracy)
 places Mnemosyne sixth: Chronos 95.6%, Hindsight 94.6%, Mem0 94.4%, ByteRover
 92.8%, Mastra 92.8%, Mnemosyne 92.4%. The site explicitly cautions that this

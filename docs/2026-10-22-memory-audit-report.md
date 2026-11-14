@@ -22,6 +22,9 @@ initial generic fallback was narrowed to the actual source-review task. Report f
 
 ## What the score actually means
 
+> **Retired figure (13 Nov 2026).** The 92.4% LongMemEval-S result discussed here was produced while held-out questions had leaked into development (internal quality gate, engine rules, reader prompt). That material was removed and the benchmark was rerun once under a frozen, audited protocol: **93.0% (465/500), held-out 92.25%** — see the [run receipt](../eval/reports/longmemeval-s-2026-11-13/RECEIPT.md).
+
+
 The historical pinned Mnemetric JSONL contained 500 question records and
 462 correct answers (92.4%). The development subset is 96/100; the held-out subset is
 366/400 (91.5%). All 500 recorded reader completions have finish reason `stop`.

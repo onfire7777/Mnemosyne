@@ -46,7 +46,9 @@ works with any model, and is the memory behind [BurnOS](https://github.com/onfir
 | Current value ranked above a superseded one | **1.00** | [Quality gate report](eval/reports/QUALITY_GATE_SUMMARY.md) |
 | Regression validation | 8,668 selected cases, with pass/skip accounting across Local, SQLite and live PostgreSQL | [Validation report](docs/learning-integration-validation.md#2026-11-06-reliability-follow-up) |
 
-Every number links to its receipt. The quality gate is an offline, deterministic, provider-free
+Every number links to its receipt. The LongMemEval-S score comes from one frozen run, tuned only on a
+development split and audited for leaks, with every attempt logged; earlier LongMemEval-S figures are
+retired ([receipt and disclosure](eval/reports/longmemeval-s-2026-11-13/RECEIPT.md), [integrity tools](tools/benchmark_integrity/README.md)). The quality gate is an offline, deterministic, provider-free
 suite with frozen inputs and published checksums, so anyone can reproduce it. Each LongMemEval
 score comes from one recorded configuration; Hindsight publishes 94.6% on the same benchmark
 under different models and conditions, so the two are not a controlled comparison. We publish
