@@ -16,9 +16,11 @@ The installer atomically replaces each script and writes content hashes into the
 backup directory. Stop the maintenance LaunchAgent during deployment and start
 it afterward. Existing stdio processes must reconnect to load package changes.
 The hook command stays unchanged, so existing command trust entries are retained.
+The installer also updates the CLI adapter, which selects the same installed
+package snapshot as MCP and the worker rather than importing a changing checkout.
 
 `hook.py` runs lifecycle handling in a bounded child process. Prompt recall gets
-8 seconds, followed by a 2.8-second local-only attempt if needed. Local fallback
+8 seconds, followed by a 5-second local-only attempt if needed. Local fallback
 uses the same custody checks and does not mix replacement vectors into the
 persistent embedding index. Fresh MCP `prepare_context`, `search` and `deep_search` calls use the same provider/local deadlines. Session state uses short per-session locks; storage
 transactions protect memory writes. No provider call holds the global host lock.
@@ -51,6 +53,12 @@ Structured verifier evidence retains its original claims and exact target.
 The `--report-capabilities` route accepts an explicit current tool manifest,
 bound to `session_id`, `turn_id` and `receipt_id`, and returns refreshed context.
 Report capabilities before using memory; the new receipt replaces the old one.
+
+Use `used_skills` for actually applied skills, chunks or procedures served by
+the receipt. Reading a skill, observation or knowledge page does not itself
+report application. Tool events that arrive during session-lock contention are
+durably spooled and remain tied to their original turn. Timeout diagnostics
+include sanitized session/turn identity and the last completed host stage.
 
 Completed authenticated turns mirror their existing direct-user sources into session working memory with the original one-hour expiry and stable IDs.
 

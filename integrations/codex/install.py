@@ -11,7 +11,7 @@ import tempfile
 import zipfile
 from datetime import UTC, datetime
 
-FILES = {"runtime_template.py": "runtime.py", "hook.py": "hook.py", "worker.py": "worker.py",
+FILES = {"runtime_template.py": "runtime.py", "cli.py": "cli.py", "hook.py": "hook.py", "worker.py": "worker.py",
          "automatic_learning.py": "automatic_learning.py", "parametric.py": "parametric.py",
          "backfill.py": "backfill.py"}
 

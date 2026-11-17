@@ -1149,6 +1149,11 @@ def _diverse_learning_search(
     duplicate captured turns have crowded a full candidate page. All reads use
     the same authorization filter; no raw corpus or private text is consulted.
     """
+    if not include_operational:
+        # Push the same relevance exclusion below ranking where supported.
+        # Tool transcripts remain available for source custody and explicit
+        # history; ordinary recall must not tokenize them only to discard them.
+        filt = {**filt, "_exclude_operational_evidence": True}
     width = k
     while True:
         hits = search(query, width, filt)

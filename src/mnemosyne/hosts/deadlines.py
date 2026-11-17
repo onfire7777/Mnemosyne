@@ -14,7 +14,10 @@ def run_bounded(command, payload, *, primary_timeout=8.0, allow_local=True):
     into subsequent requests. Failure type and duration remain distinguishable.
     """
     attempts = []
-    phases = [(False, primary_timeout)] + ([(True, 2.8)] if allow_local else [])
+    # Local recall still validates custody, expires pending episodes and commits
+    # a receipt. Measured stores need headroom for that work after the expensive
+    # candidate-scoring path has been removed; keep the fallback process bounded.
+    phases = [(False, primary_timeout)] + ([(True, 5.0)] if allow_local else [])
     for local, timeout in phases:
         environment = dict(os.environ, MNEMOSYNE_INTERACTIVE_READ="1",
                            MNEMOSYNE_PROVIDER_TIMEOUT="2.5")

@@ -156,7 +156,7 @@ def _validate_receipts(before: dict, after: dict, operation: str) -> None:
                 )
 
 
-def _validate_episodes(before: dict, after: dict, operation: str) -> None:
+def _validate_episodes(before: dict, after: dict, operation: str, source_lookup=None) -> None:
     consumed = set()
     for episode_id, episode in after["episodes"].items():
         for item in episode.get("signals", []):
@@ -193,6 +193,19 @@ def _validate_episodes(before: dict, after: dict, operation: str) -> None:
             consumed.add(receipt_id)
         previous = before["episodes"].get(episode_id)
         if previous and operation not in {"erasure", "rollback"}:
+            expected_reprocess = None
+            if operation == "outcome_reprocess":
+                old_sources = previous.get("late_event_source_cids", [])
+                new_sources = episode.get("late_event_source_cids", [])
+                require(isinstance(new_sources, list) and new_sources[:len(old_sources)] == old_sources,
+                        "X3", "late evidence is append-only")
+                try:
+                    expected_reprocess = reprocessed_episode(
+                        previous, after["artifacts"], after["receipts"],
+                        amendment_cids=new_sources[len(old_sources):], source_lookup=source_lookup)
+                except (ValueError, TypeError, KeyError, AttributeError):
+                    require(False, "X3", "late evidence must match retained owned external observations")
+                require(episode == expected_reprocess, "X3", "outcome repair must be source-derived")
             require(
                 episode.get("prediction") == previous.get("prediction"),
                 "X12",
@@ -206,7 +219,7 @@ def _validate_episodes(before: dict, after: dict, operation: str) -> None:
                 require(
                     episode == previous or (
                         operation == "outcome_reprocess"
-                        and episode == reprocessed_episode(previous, after["artifacts"], after["receipts"])
+                        and episode == expected_reprocess
                     ) or (
                         operation == "compatibility_save"
                         and {key: value for key, value in episode.items() if key != "failure_attribution"}
@@ -837,7 +850,7 @@ def validate(before: dict, after: dict, operation: str, *, source_lookup=None) -
         )
     _forbidden_inputs(after["policy"], "X2")
     _validate_receipts(before, after, operation)
-    _validate_episodes(before, after, operation)
+    _validate_episodes(before, after, operation, source_lookup)
     new_credit = _validate_credit(before, after, operation)
     _validate_stats(before, after, operation, new_credit)
     _validate_artifacts(before, after, operation, source_lookup)

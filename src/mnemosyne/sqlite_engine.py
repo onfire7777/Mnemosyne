@@ -197,7 +197,7 @@ from mnemosyne.standing import (
     SELF_GENERATED_CEILING,
     standing_erasure_cascade_report,
 )
-from mnemosyne.text import SparseCosine, cosine, lexical_score, tokenize
+from mnemosyne.text import SparseCosine, cosine, tokenize
 from mnemosyne.workspace import self_generation_budget_report, source_backed_summary
 
 
@@ -3698,19 +3698,48 @@ class SqliteEngine:
             params = (target,)
         with self._lock:
             rel_rows = conn.execute(rel_sql, params).fetchall()
-            # Local graph_ppr builds hits only from relations: without any, evidence is never read.
-            ev_rows = (
-                conn.execute(ev_sql, params).fetchall()
-                if rel_rows or self.adapters.graph_retriever is not None else []
-            )
         for row in rel_rows:
             rel = _relation_from_row(row)
             oracle.relations[rel.id] = rel
-        for row in ev_rows:
-            ev = _evidence_from_row(row)
-            oracle.evidence[
-                oracle._evidence_key(ev.tenant_id, ev.branch, ev.cid or "")
-            ] = ev
+        if self.adapters.graph_retriever is not None:
+            # An external graph adapter may return sources absent from the
+            # native relations; retain its complete scoped custody surface.
+            with self._lock:
+                ev_rows = conn.execute(ev_sql, params).fetchall()
+            for row in ev_rows:
+                ev = _evidence_from_row(row)
+                oracle.evidence[oracle._evidence_key(ev.tenant_id, ev.branch, ev.cid or "")] = ev
+        else:
+            # Native graph traversal reads only relation sources and their
+            # transitive custody. Do not hydrate unrelated (potentially large)
+            # tool transcripts. Retain branch identity, erased/retired rows,
+            # and malformed lineage for the existing fail-closed read gates.
+            from mnemosyne.retrieval import derived_source_cids
+
+            pending = {(rel.branch, cid) for rel in oracle.relations.values()
+                       for cid in rel.source_evidence_cids}
+            seen: set[tuple[str, str]] = set()
+            while pending:
+                source_branch = next(iter(pending))[0]
+                batch = [cid for candidate_branch, cid in pending
+                         if candidate_branch == source_branch][:500]
+                keys = {(source_branch, cid) for cid in batch}
+                pending.difference_update(keys)
+                seen.update(keys)
+                placeholders = ",".join("?" for _ in batch)
+                with self._lock:
+                    rows = conn.execute(
+                        "SELECT * FROM evidence WHERE tenant_id = ? AND branch = ? "
+                        f"AND cid IN ({placeholders})",
+                        (target, source_branch, *batch),
+                    ).fetchall()
+                for row in rows:
+                    ev = _evidence_from_row(row)
+                    oracle.evidence[oracle._evidence_key(ev.tenant_id, ev.branch, ev.cid or "")] = ev
+                    sources, valid = derived_source_cids(ev)
+                    if valid:
+                        pending.update((ev.branch, cid) for cid in sources
+                                       if (ev.branch, cid) not in seen)
         return oracle
 
     def _packed_embedding_for_hit(
@@ -3984,8 +4013,9 @@ class SqliteEngine:
                     hit.channel = "lexical"
                     hits.append(hit)
         else:
+            score_text = text_kernels.lexical_scorer(query)
             for hit in scored:
-                score = lexical_score(query, hit.text)
+                score = score_text(hit.text)
                 if score > 0:
                     hit.score = score
                     hit.channel = "lexical"

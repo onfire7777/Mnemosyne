@@ -1574,15 +1574,64 @@ class LearningRuntime:
                     state["policy"].get("surprised", {}).pop(task, None)
                     return
 
-    def reprocess_outcomes(self, tenant_id: str) -> dict:
+    def reconcile_host_tool_events(self, tenant_id: str, user_id: str, session_id: str,
+                                   episode_id: str, tool_events: list[dict]) -> dict:
+        """Append late trusted-host observations; never replace a finalized call."""
+        import json
+
+        episode = self.episode(tenant_id, episode_id)
+        if (episode.get("tenant_id") != tenant_id or episode.get("user_id") != user_id
+                or episode.get("session_id") != session_id
+                or episode.get("status") not in {"open", "resolved", "unknown"}):
+            raise ValueError("late tool events require their original live owned episode")
+        known = {event.get("call_id"): event for event in episode.get("tool_events", [])
+                 if event.get("call_id")}
+        additions = []
+        for event in tool_events:
+            if (not isinstance(event, dict) or event.get("source") != "tool"
+                    or not isinstance(event.get("call_id"), str) or not event["call_id"]
+                    or event.get("tool_use_id", event["call_id"]) != event["call_id"]):
+                raise ValueError("late tool events require an original external call identity")
+            previous = known.get(event["call_id"])
+            if previous is not None:
+                if previous != event:
+                    raise ValueError("late evidence cannot replace a retained call")
+                continue
+            known[event["call_id"]] = event
+            additions.append(copy.deepcopy(event))
+        if not additions:
+            return {"amended": 0, "episode_id": episode_id}
+        cids = []
+        for event in additions:
+            source = Evidence(tenant_id=tenant_id, user_id=user_id, session_id=session_id,
+                actor="tool", source_type="learning_host_amendment", trust_tier=1,
+                content=json.dumps(event, ensure_ascii=False, sort_keys=True),
+                document_segment_id=digest(["host_amendment", tenant_id, user_id,
+                                           session_id, episode_id, event["call_id"]]),
+                metadata={"memory_role": "operational", "source_episode_id": episode_id,
+                          "tool_observation": event},
+                access_policy={"tenant": tenant_id, "allow_principals": [user_id]})
+            cid = self.engine.append_evidence(source)
+            if not self._sources_live(tenant_id, [cid], user_id):
+                raise ValueError("late event evidence was not retained with live custody")
+            cids.append(cid)
+        result = self.reprocess_outcomes(tenant_id, _host_amendments={episode_id: cids})
+        return {"amended": len(cids) if episode_id in result["episode_ids"] else 0,
+                "episode_id": episode_id, "reprocess": result}
+
+    def reprocess_outcomes(self, tenant_id: str, *, _host_amendments: dict | None = None) -> dict:
         """Audited repair of legacy derived rewards from retained real tool events."""
         from .signals import reprocessed_episode
 
         def repair(state):
             changed = []
             tasks = set()
+            if _host_amendments and not _host_amendments.keys() <= state["episodes"].keys():
+                raise ValueError("late tool evidence refers to an unknown episode")
             for key, episode in list(state["episodes"].items()):
-                updated = reprocessed_episode(episode, state["artifacts"], state["receipts"])
+                updated = reprocessed_episode(episode, state["artifacts"], state["receipts"],
+                    amendment_cids=(_host_amendments or {}).get(key),
+                    source_lookup=lambda cid: self.engine.get_evidence(tenant_id, cid))
                 if updated != episode:
                     state["episodes"][key] = updated
                     changed.append(key)

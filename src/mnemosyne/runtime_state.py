@@ -63,6 +63,27 @@ def migrate_legacy_learning(runtime, learning: LearningSystem, tenant_id: str) -
     """Import compatibility objects into their canonical records exactly once."""
     before = runtime.writer.read(tenant_id)
     if learning.engine is runtime.engine:
+        pending = False
+        for name, collection in (("episodes", learning.trajectories),
+                                 ("artifacts", learning.lessons),
+                                 ("artifacts", learning.procedures)):
+            for item in collection.values():
+                if item.tenant_id != tenant_id:
+                    continue
+                row = item.to_record()
+                if name == "episodes" and item.id in learning.attributions:
+                    row["failure_attribution"] = learning.attributions[item.id].to_dict()
+                if row != getattr(learning, "_baselines", {}).get((tenant_id, name, item.id)):
+                    pending = True
+                    break
+            if pending:
+                break
+        if not pending:
+            # A fresh host normally has nothing to migrate. Still refresh its
+            # compatibility view from the current owner, but avoid a no-op
+            # guarded write and two additional full learning-state copies.
+            learning._refresh(tenant_id, before)
+            return {"archived": 0}
         learning.persist_native([tenant_id])
     else:
         destination = LearningSystem(runtime.engine)

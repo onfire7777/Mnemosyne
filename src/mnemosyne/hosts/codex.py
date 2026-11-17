@@ -299,6 +299,14 @@ def _tool_manifest(payload):
         if not isinstance(name, str) or not name.strip():
             return None
         names.append(name)
+        # Match the names retained by native CommandExecution/McpToolCall
+        # events without treating a past call as a current capability.
+        if name in {"exec_command", "functions.exec_command"}:
+            names.append("shell")
+        if name.startswith("mcp__"):
+            parts = name.split("__", 2)
+            if len(parts) == 3 and parts[1] and parts[2]:
+                names.append(parts[1] + "." + parts[2])
     return sorted(set(names))
 
 
@@ -437,7 +445,8 @@ def _bound_verifications(events, reports, receipt_id, used_lessons, lesson_ids, 
             if not receipt_id or event.get("receipt_id") != receipt_id:
                 continue
             if target not in lesson_ids and target in served_ids:
-                references = [report for report in reports if report.get("item_id") == target]
+                references = [report for report in reports
+                              if report.get("item_id", report.get("skill_id")) == target]
                 if not references or any(report.get("call_id") == event.get("call_id")
                                          and report.get("check_id") == event.get("check_id")
                                          for report in references):
@@ -483,7 +492,8 @@ def reparse_retained_events(events):
                 and event.get("status") in {None, "completed", "complete", "succeeded", "failed", "success", "failure"}):
             counts = _test_counts(event["command"], event["output"], event.get("exit_code"))
             if counts:
-                event.update(counts, runner="unittest" if _pytest_invocation(event["command"], runner="unittest") else "pytest")
+                runner = counts.pop("_runner")
+                event.update(counts, runner=runner)
         result.append(event)
     return result
 
@@ -599,10 +609,6 @@ def _read_transcript(path, session):
                         arguments=item.get("arguments"),
                     )
                     turn["tool_events"] = _merge_events(turn["tool_events"], [event])
-                elif str(item.get("tool", "")).endswith("skill_get"):
-                    skill = item.get("arguments", {}).get("skill_id")
-                    if skill:
-                        turn["used_skills"].append(skill)
     return list(turns.values())
 
 
@@ -619,6 +625,7 @@ class CodexAdapter:
         transcript_root=None,
         report_command=None,
         require_delivery_confirmation=False,
+        stage_callback=None,
     ):
         self.state_dir = Path(state_dir)
         self.tenant_id = tenant_id
@@ -628,6 +635,7 @@ class CodexAdapter:
         self.invoke = invoke
         self.report_command = report_command
         self.require_delivery_confirmation = require_delivery_confirmation
+        self.stage_callback = stage_callback
         self.transcript_root = (
             Path(transcript_root)
             if transcript_root
@@ -642,15 +650,126 @@ class CodexAdapter:
             stream.flush()
             os.fsync(stream.fileno())
         temporary.replace(path)
+        self._prune_spool(path, state)
+
+    def _stage(self, stage, session, turn_id=None):
+        if self.stage_callback is not None:
+            try:
+                self.stage_callback(stage, session, turn_id)
+            except (OSError, ValueError):
+                pass  # Diagnostics must never make a completed hook fail.
+
+    def _reporting_envelope(self, state, session):
+        return {"memory_use_reporting": {
+            "command": self.report_command,
+            "capabilities_command": (self.report_command[:-1] + ["--report-capabilities"]
+                                     if self.report_command else None),
+            "session_id": session, "turn_id": state["turn_id"],
+            "usage": "Send JSON on stdin to the command, with this session_id, turn_id and the context's receipt_id. "
+                     "Report only actually applied IDs in used_items, used_lessons and used_skills; reading is not use. "
+                     "Optional verifications contain item_id, lesson_id or skill_id plus real call_id and check_id, never a grade. "
+                     "Before applying memory, send the complete current available_tools list to capabilities_command when known; "
+                     "use its refreshed receipt/context. Do not reconstruct past use.",
+        }, "correlation_id": state["correlation_id"],
+           "capabilities_status": state.get("capabilities_status", "unknown")}
 
     def _append_spool(self, path: Path, entry: dict) -> None:
         spool_path = path.with_suffix(".spool.jsonl")
         with bounded_lock(path.with_suffix(".spool.lock"), timeout=2.0):
             fd = os.open(str(spool_path), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
             try:
+                entry = {**entry, "spool_id": uuid4().hex}
                 os.write(fd, (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8"))
+                os.fsync(fd)
             finally:
                 os.close(fd)
+
+    def _prune_spool(self, path: Path, state: dict) -> None:
+        """Discard only entries whose incorporation was durably saved."""
+        consumed = set(state.get("consumed_spool_ids", []))
+        spool_path = path.with_suffix(".spool.jsonl")
+        if not consumed or not spool_path.exists():
+            return
+        try:
+            with bounded_lock(path.with_suffix(".spool.lock"), timeout=0.10):
+                if not spool_path.exists():
+                    return
+                retained = []
+                for line in spool_path.read_text().splitlines():
+                    try:
+                        entry = json.loads(line)
+                    except ValueError:
+                        continue
+                    identity = entry.get("spool_id") or digest(entry)
+                    if identity not in consumed:
+                        retained.append(line)
+                if retained:
+                    temporary = spool_path.with_suffix(".tmp")
+                    with temporary.open("w") as stream:
+                        temporary.chmod(0o600)
+                        stream.write("\n".join(retained) + "\n")
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    temporary.replace(spool_path)
+                else:
+                    spool_path.unlink()
+                state.pop("consumed_spool_ids", None)
+        except (OSError, TimeoutError):
+            pass  # The durable acknowledgement makes later draining idempotent.
+
+    @staticmethod
+    def _queue_tool_event(state, entry):
+        event = entry.get("tool_event")
+        if not isinstance(event, dict):
+            return False
+        turn_id = entry.get("turn_id") or state.get("turn_id")
+        if not turn_id:
+            return False
+        if turn_id in state.get("observed_turns", {}):
+            # Keep newly arrived evidence attached to its original episode
+            # until the native append-and-reprocess path commits it.
+            pending = state.setdefault("late_tool_events", {})
+            row = pending.setdefault(turn_id, {
+                "episode_id": state["observed_turns"][turn_id],
+                "status": "pending_native_reconciliation", "tool_events": [],
+            })
+            row["tool_events"] = _merge_events(row["tool_events"], [event])
+        elif turn_id == state.get("turn_id") and state.get("prompt"):
+            state["tool_events"] = _merge_events(state.get("tool_events", []), [event])
+        else:
+            pending = state.setdefault("pending_tool_events", {})
+            pending[turn_id] = _merge_events(pending.get(turn_id, []), [event])
+        return True
+
+    def _reconcile_late_events(self, facade, state, session):
+        pending = state.get("late_tool_events", {})
+        if not pending:
+            return
+        runtime = build_learning_runtime(facade.engine)
+        for turn_id, row in list(pending.items())[:8]:
+            self._stage("reconcile_late_events", session, turn_id)
+            try:
+                episode = runtime.episode(self.tenant_id, row["episode_id"])
+                if episode.get("status") == "erased":
+                    pending.pop(turn_id, None)
+                    continue
+                if episode.get("user_id") != self.user_id or episode.get("session_id") != session:
+                    raise ValueError("late evidence belongs to a different host session")
+                receipt_id = next(iter(episode.get("receipt_ids", [])), None)
+                receipt = runtime.writer.read(self.tenant_id)["receipts"].get(receipt_id, {})
+                lesson_ids = {item["item_id"] for item in receipt.get("items", [])
+                              if item.get("kind") == "lesson"}
+                usage = state.get("completed_memory_uses", {}).get(turn_id, {})
+                reports = usage.get("verification_reports", []) if usage.get("receipt_id") == receipt_id else []
+                events = _bound_verifications(row["tool_events"], reports, receipt_id,
+                    episode.get("used_lessons", []), lesson_ids,
+                    {item["item_id"] for item in receipt.get("items", [])})
+                runtime.reconcile_host_tool_events(self.tenant_id, self.user_id, session,
+                                                  row["episode_id"], events)
+            except (KeyError, ValueError, PermissionError) as error:
+                row["last_error_type"] = type(error).__name__
+                continue  # Keep evidence durable for repair/retry; capture other turns.
+            pending.pop(turn_id, None)
 
     def _drain_spool(self, path: Path, state: dict) -> bool:
         spool_path = path.with_suffix(".spool.jsonl")
@@ -660,7 +779,7 @@ class CodexAdapter:
             if not spool_path.exists():
                 return False
             raw_lines = spool_path.read_text(encoding="utf-8", errors="replace").splitlines()
-            spool_path.unlink(missing_ok=True)
+        consumed = set(state.get("consumed_spool_ids", []))
         changed = False
         for line in raw_lines:
             if not line.strip():
@@ -669,37 +788,14 @@ class CodexAdapter:
                 entry = json.loads(line)
             except ValueError:
                 continue
-            if entry.get("turn_id") and entry["turn_id"] != state.get("turn_id"):
+            identity = entry.get("spool_id") or digest(entry)
+            if identity in consumed:
                 continue
-            if entry.get("skill_id"):
-                state.setdefault("used_skills", []).append(entry["skill_id"])
-                changed = True
-            if entry.get("used_item_id"):
-                served_delivery_ids = set(
-                    (state.get("delivery") or {}).get("delivered_item_ids", [])
-                )
-                if not served_delivery_ids or entry["used_item_id"] in served_delivery_ids:
-                    state.setdefault("used_items", []).append(entry["used_item_id"])
-                    if state.get("receipt_id") and state.get("turn_id"):
-                        usage = state.setdefault("memory_uses", {}).setdefault(
-                            state["turn_id"],
-                            {
-                                "receipt_id": state["receipt_id"],
-                                "used_lessons": list(state.get("used_lessons", [])),
-                                "used_items": [],
-                                "verification_reports": list(state.get("verification_reports", [])),
-                            },
-                        )
-                        if usage.get("receipt_id") == state["receipt_id"]:
-                            usage["used_items"] = list(
-                                dict.fromkeys(usage.get("used_items", []) + [entry["used_item_id"]])
-                            )
-                    changed = True
-            if isinstance(entry.get("tool_event"), dict) and state.get("prompt"):
-                state["tool_events"] = _merge_events(
-                    state.get("tool_events", []), [entry["tool_event"]]
-                )
-                changed = True
+            self._queue_tool_event(state, entry)
+            consumed.add(identity)
+            changed = True
+        if consumed:
+            state["consumed_spool_ids"] = sorted(consumed)
         return changed
 
     def _transcript(self, payload, state, session, *, all_completed=False):
@@ -732,16 +828,8 @@ class CodexAdapter:
         state.setdefault("correlation_id", uuid4().hex)
         state["delivery_status"] = "preparing"
         self._save(path, state)  # completion capture survives provider timeout
-        reporting = {"memory_use_reporting": {
-            "command": self.report_command,
-            "capabilities_command": (self.report_command[:-1] + ["--report-capabilities"]
-                                     if self.report_command else None),
-            "session_id": session, "turn_id": state["turn_id"],
-            "usage": "Report actually used memory IDs in used_items and lessons in used_lessons via MemoryUse. "
-                     "Verification references identify real external checks; never report a success grade. "
-                     "If the current tool manifest is known, report it with receipt_id and turn_id before using memory.",
-        }, "correlation_id": state["correlation_id"],
-           "capabilities_status": state.get("capabilities_status", "unknown")}
+        reporting = self._reporting_envelope(state, session)
+        self._stage("prepare_context", session, state["turn_id"])
         context = self.invoke(
             facade, "prepare_context",
             {"query": state["prompt"], "session_id": session,
@@ -818,31 +906,42 @@ class CodexAdapter:
         if (not isinstance(items, list) or any(not isinstance(key, str) for key in items)
                 or not set(items).issubset(item_ids)):
             raise ValueError("used_items must contain only memory items served by this receipt")
+        skill_ids = {item["item_id"] for item in receipt.get("items", [])
+                     if item.get("kind") in {"skill", "chunk", "procedure"}}
+        skills = payload.get("used_skills", [])
+        if (not isinstance(skills, list) or any(not isinstance(key, str) for key in skills)
+                or not set(skills).issubset(skill_ids)):
+            raise ValueError("used_skills must contain only skills or procedures served by this receipt")
         reports = payload.get("verifications", [])
         if not isinstance(reports, list):
             raise ValueError("verifications must be a list of evidence references")
         for report in reports:
             if not isinstance(report, dict):
                 raise ValueError("verification must be an evidence reference")
-            target_key = "lesson_id" if "lesson_id" in report else "item_id"
+            target_key = ("lesson_id" if "lesson_id" in report else
+                          "skill_id" if "skill_id" in report else "item_id")
+            targets = {"lesson_id": lessons, "item_id": items, "skill_id": skills}[target_key]
             if (set(report) != {target_key, "call_id", "check_id"}
                     or any(not isinstance(value, str) or not value for value in report.values())
-                    or report[target_key] not in (lessons if target_key == "lesson_id" else items)):
+                    or report[target_key] not in targets):
                 raise ValueError("verification must reference a used memory, call_id and check_id; grades are not accepted")
         state["delivery_status"] = "acknowledged"
         state["acknowledged_at"] = datetime.now(UTC).isoformat()
         state["used_lessons"] = list(dict.fromkeys(state.get("used_lessons", []) + lessons))
         state["used_items"] = list(dict.fromkeys(state.get("used_items", []) + items))
+        state["used_skills"] = list(dict.fromkeys(state.get("used_skills", []) + skills))
         references = state.setdefault("verification_reports", [])
         references.extend(report for report in reports if report not in references)
         state.setdefault("memory_uses", {})[state["turn_id"]] = {
             "receipt_id": receipt_id, "used_lessons": state["used_lessons"],
             "used_items": state["used_items"],
+            "used_skills": state["used_skills"],
             "verification_reports": list(references),
         }
         self._save(path, state)
         return {"receipt_id": receipt_id, "used_lessons": state["used_lessons"],
                 **({"used_items": state["used_items"]} if items or state["used_items"] else {}),
+                **({"used_skills": state["used_skills"]} if skills or state["used_skills"] else {}),
                 "verification_references_recorded": len(reports), "verified": False}
 
     def _delivery_confirmed(self, state, session, turn_id, receipt_id):
@@ -891,11 +990,19 @@ class CodexAdapter:
             self._save(path, state)
         record = pending[turn_id]
         record["receipt_id"] = receipt_id
+        record["tool_events"] = _merge_events(
+            state.get("pending_tool_events", {}).get(turn_id, []),
+            record.get("tool_events", []))
         usage = state.get("memory_uses", {}).get(turn_id, {})
         if receipt_id and usage.get("receipt_id") == receipt_id:
             record.update(used_lessons=usage.get("used_lessons", []),
                           used_items=usage.get("used_items", []),
+                          used_skills=usage.get("used_skills", []),
                           verification_reports=usage.get("verification_reports", []))
+        else:
+            # Legacy getter-derived fields do not prove that memory was applied.
+            # Independently observed actions and typed claims remain in tool_events.
+            record.update(used_items=[], used_lessons=[], used_skills=[], verification_reports=[])
         if prior is not None:
             if prior.get("status") != "erased":
                 runtime.resolve(self.tenant_id, prior["id"])
@@ -917,6 +1024,7 @@ class CodexAdapter:
                                                receipt_id, used_lessons, lessons,
                                                {item["item_id"] for item in receipt.get("items", [])},
                                                record.get("used_items", []))
+            self._stage("observe_turn", session, turn_id)
             result = self.invoke(facade, "observe_turn", {
                 "session_id": session,
                 "user_text": record["prompt"],
@@ -930,14 +1038,18 @@ class CodexAdapter:
         observed[turn_id] = result.get("episode_id", result.get("id"))
         state["observed_turn"] = turn_id
         pending.pop(turn_id, None)
-        state.get("memory_uses", {}).pop(turn_id, None)
+        state.get("pending_tool_events", {}).pop(turn_id, None)
+        completed_usage = state.get("memory_uses", {}).pop(turn_id, None)
+        if completed_usage:
+            state.setdefault("completed_memory_uses", {})[turn_id] = completed_usage
         if state.get("turn_id") == turn_id:
             state["tool_events"] = []
         self._save(path, state)
 
     def recover_completed(self, *, max_sessions=8):
         """Retry known host sessions using their complete transcript records."""
-        report = {"checked_sessions": 0, "captured_turns": 0, "errors": []}
+        report = {"checked_sessions": 0, "captured_turns": 0, "errors": [],
+                  "pending_late_event_sessions": 0, "pending_late_events": 0}
         paths = sorted(self.state_dir.glob("session-*.json"),
                        key=lambda item: item.stat().st_mtime, reverse=True)
         for path in paths:
@@ -948,10 +1060,15 @@ class CodexAdapter:
                 session = state.get("session_id")
                 if not session:
                     continue
+                late = state.get("late_tool_events", {})
+                if late:
+                    report["pending_late_event_sessions"] += 1
+                    report["pending_late_events"] += sum(
+                        len(row.get("tool_events", [])) for row in late.values())
                 turns = self._transcript({}, state, session, all_completed=True) or []
                 observed = set(state.get("observed_turns", {}))
                 skipped = set(state.get("skipped_legacy_turns", {}))
-                if not state.get("pending_observations") and not any(
+                if not late and not state.get("pending_observations") and not any(
                     turn["turn_id"] not in observed | skipped for turn in turns
                 ):
                     continue
@@ -960,6 +1077,11 @@ class CodexAdapter:
                              "transcript_path": state.get("transcript_path")})
                 after = json.loads(path.read_text())
                 report["captured_turns"] += len(set(after.get("observed_turns", {})) - observed)
+                if late:
+                    remaining = after.get("late_tool_events", {})
+                    report["pending_late_event_sessions"] += int(bool(remaining)) - 1
+                    report["pending_late_events"] += sum(len(row.get("tool_events", [])) for row in remaining.values()) - sum(
+                        len(row.get("tool_events", [])) for row in late.values())
             except Exception as error:
                 report["errors"].append({"state_file": path.name, "error": type(error).__name__})
         return report
@@ -973,6 +1095,7 @@ class CodexAdapter:
         ):
             return {}
         event = payload.get("hook_event_name")
+        self._stage("session_state", session, payload.get("turn_id"))
         self.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         path = self.state_dir / (
             "session-" + hashlib.sha256(session.encode()).hexdigest() + ".json"
@@ -985,21 +1108,7 @@ class CodexAdapter:
             spool_entry: dict = {}
             if payload.get("turn_id"):
                 spool_entry["turn_id"] = payload["turn_id"]
-            if (
-                name.endswith("skill_get")
-                and isinstance(arguments, dict)
-                and arguments.get("skill_id")
-            ):
-                spool_entry["skill_id"] = str(arguments["skill_id"])
-            elif (
-                name.endswith(("knowledge_page_get", "observation_get"))
-                and isinstance(arguments, dict)
-                and (arguments.get("page_id") or arguments.get("observation_id"))
-            ):
-                spool_entry["used_item_id"] = str(
-                    arguments.get("page_id") or arguments.get("observation_id")
-                )
-            elif "mnemosyne" not in name:
+            if "mnemosyne" not in name:
                 command = (
                     arguments.get("command", arguments.get("cmd"))
                     if isinstance(arguments, dict)
@@ -1043,12 +1152,6 @@ class CodexAdapter:
                         raise ValueError("Codex hook state belongs to another session")
                     state["session_id"] = session
                     self._drain_spool(path, state)
-                    if payload.get("turn_id") and payload["turn_id"] != state.get("turn_id"):
-                        return {}
-                    if spool_entry.get("skill_id"):
-                        state.setdefault("used_skills", []).append(spool_entry["skill_id"])
-                    if spool_entry.get("used_item_id"):
-                        state.setdefault("used_items", []).append(spool_entry["used_item_id"])
                     if isinstance(spool_entry.get("tool_event"), dict) and state.get("prompt"):
                         if (
                             spool_entry["tool_event"].get("runner") == "pytest"
@@ -1064,13 +1167,16 @@ class CodexAdapter:
                                 enc = json.dumps(env_cap, ensure_ascii=False)
                                 if redact(enc) == enc:
                                     spool_entry["tool_event"]["experiment_environment"] = env_cap
-                        state["tool_events"] = _merge_events(
-                            state.get("tool_events", []), [spool_entry["tool_event"]]
-                        )
+                        self._queue_tool_event(state, spool_entry)
                     self._save(path, state)
             except TimeoutError:
                 # Session lock is currently held by UserPromptSubmit or Stop; durably spool
                 # the event in <1ms so no tool observation is ever dropped or fails the hook.
+                if not spool_entry.get("turn_id") and path.exists():
+                    try:
+                        spool_entry["turn_id"] = json.loads(path.read_text()).get("turn_id")
+                    except (OSError, ValueError):
+                        pass
                 self._append_spool(path, spool_entry)
             return {}
 
@@ -1100,6 +1206,7 @@ class CodexAdapter:
                     state.pop("pending_observation", None)
                 if state.get("observed_turn"):
                     state.setdefault("observed_turns", {}).setdefault(state["observed_turn"], None)
+                self._stage("transcript", session, payload.get("turn_id"))
                 self._transcript(payload, state, session)
                 if state.get("unsupported_origin"):
                     self._save(path, state)
@@ -1113,6 +1220,11 @@ class CodexAdapter:
                     else uuid4().hex
                 )
                 if state.get("turn_id") != turn_id or state.get("prompt") != prompt:
+                    if state.get("turn_id") and state.get("tool_events"):
+                        pending_events = state.setdefault("pending_tool_events", {})
+                        previous = state["turn_id"]
+                        pending_events[previous] = _merge_events(
+                            pending_events.get(previous, []), state["tool_events"])
                     state.update(
                         turn_id=turn_id, prompt=prompt, tool_events=[], used_skills=[],
                         used_lessons=[], used_items=[], verification_reports=[],
@@ -1149,26 +1261,10 @@ class CodexAdapter:
                     "capabilities_status": state.get("capabilities_status", "unknown"),
                 }
 
-            reporting = {
-                "memory_use_reporting": {
-                    "command": self.report_command,
-                    "capabilities_command": (
-                        self.report_command[:-1] + ["--report-capabilities"]
-                        if self.report_command
-                        else None
-                    ),
-                    "session_id": session,
-                    "turn_id": prep_snapshot["turn_id"],
-                    "usage": (
-                        "Report actually used memory IDs in used_items and lessons in used_lessons via MemoryUse. "
-                        "Verification references identify real external checks; never report a success grade. "
-                        "If the current tool manifest is known, report it with receipt_id and turn_id before using memory."
-                    ),
-                },
-                "correlation_id": prep_snapshot["correlation_id"],
-                "capabilities_status": prep_snapshot["capabilities_status"],
-            }
+            reporting = self._reporting_envelope(prep_snapshot, session)
+            self._stage("open_facade", session, prep_snapshot["turn_id"])
             with self.open_facade() as facade:
+                self._stage("prepare_context", session, prep_snapshot["turn_id"])
                 context = self.invoke(
                     facade,
                     "prepare_context",
@@ -1182,6 +1278,7 @@ class CodexAdapter:
                     session,
                 )
 
+            self._stage("commit_context", session, prep_snapshot["turn_id"])
             with bounded_lock(path.with_suffix(".lock"), timeout=0.75):
                 state = json.loads(path.read_text()) if path.exists() else {"tool_events": []}
                 self._drain_spool(path, state)
@@ -1192,6 +1289,9 @@ class CodexAdapter:
                     state["prepared_at"] = datetime.now(UTC).isoformat()
                     state["delivery"] = context.get("context_delivery", {})
                     self._save(path, state)
+                else:
+                    self._save(path, state)
+                    return {}  # Superseded preparation was never delivered.
             return {
                 "_mnemosyne_delivery": {
                     "correlation_id": prep_snapshot["correlation_id"],
@@ -1210,6 +1310,7 @@ class CodexAdapter:
             }
 
         # Session state cannot serialize unrelated hooks or background provider work.
+        self._stage("open_facade", session, payload.get("turn_id"))
         with bounded_lock(path.with_suffix(".lock"), timeout=0.75), self.open_facade() as facade:
             state = (
                 json.loads(path.read_text()) if path.exists() else {"tool_events": []}
@@ -1256,6 +1357,8 @@ class CodexAdapter:
                 return self._report_capabilities(facade, state, path, session, payload)
             if event not in {"Stop", "SessionEnd"}:
                 return {}
+            self._reconcile_late_events(facade, state, session)
+            self._stage("transcript", session, state.get("turn_id"))
             recovered = self._transcript(payload, state, session, all_completed=True)
             if state.get("unsupported_origin"):
                 return {}
@@ -1293,6 +1396,9 @@ class CodexAdapter:
                 })
             queued = dict(state.get("pending_observations", {}))
             for turn in recovered:
+                turn["tool_events"] = _merge_events(
+                    state.get("pending_tool_events", {}).get(turn["turn_id"], []),
+                    turn["tool_events"])
                 if turn["turn_id"] == state.get("turn_id"):
                     turn["tool_events"] = _merge_events(state.get("tool_events", []), turn["tool_events"])
                     turn["used_skills"] = list(dict.fromkeys(state.get("used_skills", []) + turn.get("used_skills", [])))
@@ -1311,6 +1417,7 @@ class CodexAdapter:
                             and turn["turn_id"] not in state.get("skipped_legacy_turns", {})
                             for turn in waiting)
             if state.get("end_requested") and not remaining and not state.get("ended_at"):
+                self._stage("end_session", session, state.get("turn_id"))
                 self.invoke(facade, "end_session", {"session_id": session}, session)
                 state["ended_at"] = datetime.now(UTC).isoformat()
                 self._save(path, state)

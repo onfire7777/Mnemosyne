@@ -10038,6 +10038,11 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         ):
             if ev.erased or ev.tenant_id != tenant_id or ev.branch != branch:
                 continue
+            if (filt.get("_exclude_operational_evidence")
+                    and ev.source_type == "learning_tool_result"):
+                # Relevance-only pushdown: retain the source in the ledger and
+                # oracle so assertions may still prove their custody against it.
+                continue
             if not evidence_current_for_context(ev, filt):
                 continue
             if ev.trust_tier > max_trust or ev.sensitivity > max_sensitivity:

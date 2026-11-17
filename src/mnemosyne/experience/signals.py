@@ -318,29 +318,80 @@ def current_signals(episode: dict) -> list[dict]:
     return _repaired_signals(episode, reparse_retained_events(episode.get("tool_events", [])))
 
 
-def reprocessed_episode(episode: dict, artifacts: dict, receipts: dict) -> dict:
+def _append_host_evidence(episode: dict, amendment_cids: list[str], source_lookup, receipts: dict) -> dict:
+    """Accept only retained, append-only observations owned by this exact episode."""
+    import json
+
+    if source_lookup is None or episode.get("status") not in {"open", "resolved", "unknown"}:
+        raise ValueError("late evidence requires a live owned episode and source lookup")
+    updated = deepcopy(episode)
+    retained = list(episode.get("late_event_source_cids", []))
+    known = {event.get("call_id"): event for event in episode.get("tool_events", [])
+             if event.get("call_id")}
+    timestamps = []
+    for cid in amendment_cids:
+        if cid in retained:
+            continue
+        source = source_lookup(cid)
+        if (source is None or source.erased or source.retired_at is not None
+                or source.actor != "tool" or source.source_type != "learning_host_amendment"
+                or source.trust_tier > 1 or source.tenant_id != episode["tenant_id"]
+                or source.user_id != episode["user_id"] or source.session_id != episode["session_id"]
+                or source.metadata.get("source_episode_id") != episode["id"]):
+            raise ValueError("late tool evidence does not belong to this live episode")
+        event = source.metadata.get("tool_observation")
+        if (not isinstance(event, dict) or event.get("source") != "tool"
+                or not isinstance(event.get("call_id"), str) or not event["call_id"]
+                or event.get("tool_use_id", event["call_id"]) != event["call_id"]
+                or source.content != json.dumps(event, ensure_ascii=False, sort_keys=True)):
+            raise ValueError("late evidence must retain the exact external call observation")
+        previous = known.get(event["call_id"])
+        if previous is not None:
+            if previous != event:
+                raise ValueError("late evidence cannot replace a retained call")
+            continue
+        updated.setdefault("tool_events", []).append(deepcopy(event))
+        known[event["call_id"]] = event
+        retained.append(cid)
+        timestamps.append(source.created_at.isoformat())
+    updated["source_cids"] = sorted(set(episode.get("source_cids", [])) | set(retained))
+    if retained:
+        updated["late_event_source_cids"] = retained
+    if timestamps and not updated.get("resolved_at"):
+        updated["resolved_at"] = max(timestamps)
+        updated["resolved_turn_index"] = max([episode["turn_index"], *[
+            row.get("turn_index", 0) for row in receipts.values()
+            if row.get("user_id") == episode["user_id"] and row.get("session_id") == episode["session_id"]
+        ]]) + 1
+    return updated
+
+
+def reprocessed_episode(episode: dict, artifacts: dict, receipts: dict, *,
+                        amendment_cids: list[str] | None = None, source_lookup=None) -> dict:
     """Recompute derived outcome fields from retained observations, never from prose.
 
     This explicit maintenance path preserves manual feedback and all original
     source/receipt identities. LearningWriter retains the original row in its
     encrypted audit. Erased and imported histories are never reconstructed.
     """
-    if episode.get("status") not in {"resolved", "unknown"}:
+    amended = bool(amendment_cids)
+    if not amended and episode.get("status") not in {"resolved", "unknown"}:
         return deepcopy(episode)
     from mnemosyne.hosts.codex import reparse_retained_events
+    updated = _append_host_evidence(episode, amendment_cids, source_lookup, receipts) if amended else deepcopy(episode)
     original_events = episode.get("tool_events", [])
-    events = reparse_retained_events(original_events)
-    if episode.get("outcome_version", 1) >= OUTCOME_VERSION and (
+    events = reparse_retained_events(updated.get("tool_events", []))
+    if not amended and episode.get("outcome_version", 1) >= OUTCOME_VERSION and (
         episode.get("event_parser_version", 0) >= 2 or events == original_events
     ):
         return deepcopy(episode)
-    updated = deepcopy(episode)
     updated["signals"] = _repaired_signals(episode, events)
     updated["outcome_version"] = OUTCOME_VERSION
     updated["event_parser_version"] = 2
     value = reward(updated["signals"])
     updated.update(reward=value, rpe=None if value is None else value - (2 * episode["prediction"] - 1),
-                   status="unknown" if value is None else "resolved", target_outcomes={})
+                   status=("open" if episode.get("status") == "open" else "unknown") if value is None else "resolved",
+                   target_outcomes={})
     if value is not None:
         for rid in episode.get("receipt_ids", []):
             for item in receipts[rid]["items"]:
