@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 
 FILES = {"runtime_template.py": "runtime.py", "cli.py": "cli.py", "hook.py": "hook.py", "worker.py": "worker.py",
          "automatic_learning.py": "automatic_learning.py", "parametric.py": "parametric.py",
-         "backfill.py": "backfill.py"}
+         "backfill.py": "backfill.py", "recall_server.py": "recall_server.py"}
 
 
 def install_release(destination, wheel):
