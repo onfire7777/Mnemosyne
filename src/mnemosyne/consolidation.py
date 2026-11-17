@@ -30,7 +30,7 @@ from mnemosyne.gate import (
 )
 from mnemosyne.learning import Lesson, Procedure
 from mnemosyne.lifecycle import FidelityTier, LifecycleState, apply_rehearsal_schedule, demotion_decision
-from mnemosyne.models import Assertion, Evidence, Relation, parse_dt, utc_now
+from mnemosyne.models import Assertion, Evidence, Hit, Relation, parse_dt, utc_now
 from mnemosyne.policy import OperatingPolicy, validate_cadence_tier
 from mnemosyne.privacy import detect_pii_tags, redact_pii_text
 from mnemosyne.retrieval import HashingEmbeddingProvider, derived_source_cids, is_retired_summary_metadata
@@ -680,7 +680,7 @@ class ConsolidationWorker:
         self.security = security or SecurityPolicy()
         self.gate = PromotionGate(engine, gate_cases)
         self.learning = learning
-        self.entity_resolver = entity_resolver or DeterministicEntityResolver()
+        self.entity_resolver = entity_resolver or ContextualEntityResolver(engine=engine)
         self.candidate_extractor = candidate_extractor or DeterministicCandidateExtractor()
         self.summarizer = summarizer or DeterministicEvidenceSummarizer()
         from mnemosyne.experience.integration import configure_learning
@@ -2888,6 +2888,38 @@ class ConsolidationWorker:
             found = bool(ev is not None and not ev.erased and self._is_derived_evidence_record(ev))
             derived[cid] = found
         return found
+
+    def find_consolidation_neighbors(
+        self,
+        tenant_id: str,
+        query: str,
+        *,
+        branch: str = "main",
+        k: int = 12,
+        filt: dict[str, Any] | None = None,
+    ) -> list[Hit]:
+        """Locate near-twin semantic & lexical neighbor memories using interleave_fusion.
+
+        User recall uses RRF, which can demote a semantic rank-#1 near-twin when lexical
+        routes miss paraphrased phrasing. Consolidation neighbor lookup interleaves dense,
+        lexical, and graph candidates round-robin so top semantic near-twins survive.
+        """
+        from mnemosyne.algorithms import interleave_fusion
+
+        effective_filt = {"tenant_id": tenant_id, "branch": branch, **(filt or {})}
+        lists: list[list[Hit]] = []
+        for method_name in ("vector_search", "lexical_search", "graph_search"):
+            fn = getattr(self.engine, method_name, None)
+            if callable(fn):
+                try:
+                    route_hits = list(fn(query, max(k, 8), effective_filt) or [])
+                except Exception:
+                    route_hits = []
+                if route_hits:
+                    lists.append(route_hits)
+        if not lists:
+            return []
+        return interleave_fusion(lists, k=k)
 
     def _corroboration_cids_for_job(self, job: ConsolidationJob) -> list[str]:
         """CIDs used for external corroboration counting.

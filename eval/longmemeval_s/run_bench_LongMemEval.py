@@ -55,6 +55,7 @@ from eval.codex_reader import read_with_codex  # noqa: E402
 from eval.harness.metrics import wilson_interval  # noqa: E402
 from eval.longmemeval_recall import benchmark_timestamp, split_of  # noqa: E402
 from eval.longmemeval_s.lme_embeddings import CachedProvider, open_cache, query_text  # noqa: E402
+from mnemosyne.compiler_context import MemoryContextCompiler, sanitize_sessions  # noqa: E402
 from mnemosyne.engine import LocalMemoryEngine  # noqa: E402
 from mnemosyne.models import Evidence  # noqa: E402
 from mnemosyne.policy import OperatingPolicy  # noqa: E402
@@ -360,10 +361,38 @@ def reader_template(cot: bool) -> str:
     return template
 
 
-def reader_prompt(row: dict, chunks: dict[int, list[int]], cot: bool) -> str:
+def compiled_memory_plan(row: dict, top_k: int, mode: str):
+    """Build a multi-granularity compiled memory plan using only system-visible session turns & dates."""
+    q_dt = benchmark_timestamp(row["question_date"], "question_date")
+    s_dts = [
+        benchmark_timestamp(d, f"haystack_dates[{i}]")
+        for i, d in enumerate(row["haystack_dates"])
+    ]
+    clean_sessions = sanitize_sessions(
+        row["haystack_sessions"], row["haystack_dates"], s_dts
+    )
+    emb = EMBEDDER if mode in {"dense", "compiler"} else None
+    core_k = min(max(1, top_k), 6) if top_k == 10 else max(1, top_k)
+    extra_k = 10 if top_k >= 10 else max(2, top_k)
+    compiler = MemoryContextCompiler(
+        embedding_provider=emb,
+        core_top_k=core_k,
+        extended_max_extra=extra_k,
+        extended_token_budget=11500,
+    )
+    return compiler.compile_memory(
+        row["question"],
+        row["question_date"],
+        q_dt,
+        clean_sessions,
+    )
+
+
+def reader_prompt(row: dict, chunks: dict[int, list[int]], cot: bool, *, history_override: str | None = None) -> str:
     """chunks: session position -> the turn indices handed over from it, in turn order."""
+    hist = history_override if history_override is not None else _history(row, chunks)
     return reader_template(cot).format(
-        _history(row, chunks), row["question_date"], row["question"]
+        hist, row["question_date"], row["question"]
     )
 
 
@@ -462,7 +491,20 @@ def run_one(row: dict, split: str, args: argparse.Namespace, key: str) -> dict:
         "answer": row["answer"],
     }
     evidence = row["_evidence_turns"]
-    if args.context == "rounds":
+    history_override: str | None = None
+    if args.context == "compiled":
+        plan = compiled_memory_plan(row, args.top_k, args.mode)
+        chunks = plan.chunks
+        history_override = plan.compiled_history_text
+        ordered_picked = [
+            idx for idx in plan.ranked_session_indices if idx in chunks
+        ]
+        record["retrieved_sessions"] = [
+            row["haystack_session_ids"][index] for index in ordered_picked
+        ]
+        record["core_sessions"] = len(plan.core_session_indices)
+        record["extended_sessions"] = len(plan.extended_session_indices)
+    elif args.context == "rounds":
         ranked = retrieve_rounds(row, args.mode)
         if args.dry_run:
             per_budget = {}
@@ -492,7 +534,11 @@ def run_one(row: dict, split: str, args: argparse.Namespace, key: str) -> dict:
         ]
         record["rounds"] = len(picked)
     else:
-        picked_sessions = retrieve(row, args.top_k, args.mode)
+        if args.mode == "compiler":
+            plan = compiled_memory_plan(row, args.top_k, args.mode)
+            picked_sessions = plan.ranked_session_indices[: args.top_k]
+        else:
+            picked_sessions = retrieve(row, args.top_k, args.mode)
         chunks = {
             index: list(range(len(row["haystack_sessions"][index])))
             for index in picked_sessions
@@ -501,7 +547,7 @@ def run_one(row: dict, split: str, args: argparse.Namespace, key: str) -> dict:
             row["haystack_session_ids"][index] for index in picked_sessions
         ]
     record |= coverage(row, chunks, evidence)
-    prompt = reader_prompt(row, chunks, not args.no_cot)
+    prompt = reader_prompt(row, chunks, not args.no_cot, history_override=history_override)
     record["prompt_tokens_est"] = len(prompt) // 4
     if args.dry_run:
         return record | {
@@ -648,10 +694,10 @@ def summarize(rows: list[dict], args: argparse.Namespace) -> dict:
         "model_names_are_requested": args.inference_provider == "codex",
         "mode": args.mode,
         "embedding": f"{args.embed}:{args.embed_model}"
-        if args.mode == "dense"
+        if args.mode in {"dense", "compiler"}
         else None,
         "context": args.context,
-        "top_k": args.top_k if args.context == "sessions" else None,
+        "top_k": args.top_k if args.context in {"sessions", "compiled"} else None,
         "budget": args.budgets[0] if args.context == "rounds" else None,
         "cot": not args.no_cot,
     } | provenance(args)
@@ -830,15 +876,15 @@ def main() -> None:
     )
     ap.add_argument(
         "--mode",
-        choices=("default", "passages", "dense"),
+        choices=("default", "passages", "dense", "compiler"),
         default="default",
-        help="Mnemosyne retrieval: default search, BM25 passages, or the dense channel with --embed",
+        help="Mnemosyne retrieval: default search, BM25 passages, dense channel, or multi-granularity compiler",
     )
     ap.add_argument(
         "--embed",
         choices=("cloud", "local"),
         default="cloud",
-        help="embedding model for --mode dense: OpenRouter qwen3-embedding-8b, or Ollama on this PC",
+        help="embedding model for --mode dense/compiler: OpenRouter qwen3-embedding-8b, or Ollama on this PC",
     )
     ap.add_argument(
         "--embed-max-usd",
@@ -848,9 +894,9 @@ def main() -> None:
     )
     ap.add_argument(
         "--context",
-        choices=("sessions", "rounds"),
+        choices=("sessions", "rounds", "compiled"),
         default="sessions",
-        help="store and hand over whole sessions (default) or single rounds",
+        help="store and hand over whole sessions (default), single rounds, or compiled tiered context",
     )
     ap.add_argument(
         "--budget",
@@ -897,12 +943,12 @@ def main() -> None:
         READER_RULES = args.reader_rules.read_text(encoding="utf-8").strip()
         if "{" in READER_RULES or "}" in READER_RULES:
             raise SystemExit("--reader-rules must not contain braces")
-    if args.dry_run and args.mode == "dense":
+    if args.dry_run and args.mode in {"dense", "compiler"}:
         raise SystemExit(
-            "--mode dense does not support --dry-run: missing vectors require model calls. "
+            f"--mode {args.mode} does not support --dry-run: missing vectors require model calls. "
             "Use --mode default or --mode passages for a dry run."
         )
-    if args.inference_provider == "codex" and args.mode == "dense":
+    if args.inference_provider == "codex" and args.mode in {"dense", "compiler"}:
         raise SystemExit(
             "Codex inference supports --mode default or passages; dense embeddings require a separate provider"
         )
@@ -996,7 +1042,9 @@ def main() -> None:
             benchmark_timestamp(date, "haystack_dates")
 
     shape = (
-        f"top{args.top_k}" if args.context == "sessions" else f"rounds{args.budgets[0]}"
+        f"compiled{args.top_k}"
+        if args.context == "compiled"
+        else (f"top{args.top_k}" if args.context == "sessions" else f"rounds{args.budgets[0]}")
     )
     model_name = (
         (args.codex_model or "codex-default")
@@ -1037,10 +1085,10 @@ def main() -> None:
         print(f"resuming {run}: {len(done)} done, {len(todo)} to go", flush=True)
     out.parent.mkdir(parents=True, exist_ok=True)
 
-    if args.mode == "dense":
-        if args.context != "sessions":
+    if args.mode in {"dense", "compiler"}:
+        if args.context not in {"sessions", "compiled"}:
             raise SystemExit(
-                "--mode dense ranks whole sessions; use it with --context sessions"
+                f"--mode {args.mode} ranks sessions; use it with --context sessions or --context compiled"
             )
         global EMBEDDER
         cache = open_cache(args.embed, out_dir, key)

@@ -764,11 +764,12 @@ class GroundedAnswerOrchestrator:
     def answer(
         self,
         request: AnswerRequest,
-        reader: GroundedReader,
+        reader: GroundedReader | None = None,
         *,
         disposition: ReflectDisposition | Mapping[str, Any] | None = None,
         mission: str | None = None,
         hierarchy_first: bool = False,
+        adaptive_synthesis: bool = False,
     ) -> GroundedAnswer:
         """Validate model-proposed atomic claims against freshly replayed evidence."""
         disp = coerce_disposition(disposition, mission=mission)
@@ -842,18 +843,45 @@ class GroundedAnswerOrchestrator:
                         public_reason="premise_mismatch",
                     )
             return assembled
-        try:
-            proposal = reader.read(
-                {
-                    "question": request.question,
-                    "evidence": [
-                        {"cid": row.cid, "content": row.content}
-                        for row in assembled.evidence
-                    ],
-                }
+        use_adaptive_intent = bool(
+            adaptive_synthesis
+            or reader is None
+            or (
+                disp is not None
+                and disp.abstraction > 0.6
+                and detect_synthesis_intent(request.question)
+                in {"count", "timeline", "state_diff", "comparison"}
             )
-        except Exception:
-            return self._abstain("reader_error")
+        )
+        proposal: Any = None
+        if reader is not None:
+            try:
+                proposal = reader.read(
+                    {
+                        "question": request.question,
+                        "evidence": [
+                            {"cid": row.cid, "content": row.content}
+                            for row in assembled.evidence
+                        ],
+                    }
+                )
+            except Exception:
+                return self._abstain("reader_error")
+        elif use_adaptive_intent:
+            synth = adaptive_synthesize(
+                request.question, assembled.evidence, disposition=disp
+            )
+            if synth.get("abstained") and synth.get("answer"):
+                proposal = {"claims": [], "unresolved": True}
+            else:
+                proposal = {
+                    "claims": [
+                        {"spans": c.get("spans", [])}
+                        for c in synth.get("claims", [])
+                        if c.get("spans")
+                    ],
+                    "unresolved": not bool(synth.get("claims")),
+                }
         replayed = self.assemble(request)
         if replayed.failure_kind is not None:
             return self._abstain(
@@ -871,9 +899,22 @@ class GroundedAnswerOrchestrator:
         ):
             return self._abstain("replay_drift")
         try:
-            claims = self._claims(
-                proposal, {row.cid: row.content for row in replayed.evidence}
-            )
+            replayed_map = {row.cid: row.content for row in replayed.evidence}
+            claims = self._claims(proposal, replayed_map) if proposal is not None else ()
+            if not claims and use_adaptive_intent and adaptive_synthesis:
+                synth_fallback = adaptive_synthesize(
+                    request.question, replayed.evidence, disposition=disp
+                )
+                if not synth_fallback.get("abstained") and synth_fallback.get("claims"):
+                    fb_proposal = {
+                        "claims": [
+                            {"spans": c.get("spans", [])}
+                            for c in synth_fallback["claims"]
+                            if c.get("spans")
+                        ],
+                        "unresolved": False,
+                    }
+                    claims = self._claims(fb_proposal, replayed_map)
             if disp is not None and claims:
                 claims = _apply_disposition_to_claims(claims, disp, replayed.evidence)
             if not claims:

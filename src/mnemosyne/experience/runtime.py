@@ -733,6 +733,10 @@ class LearningRuntime:
                     candidate = min(
                         trial_choices, key=lambda item: (counts[item["id"]], item["id"])
                     )
+                    stat_row = current["stats"].get(
+                        stat_key(candidate["kind"], candidate["id"], candidate["revision"], task),
+                        {},
+                    )
                     posterior = self._target_posterior(
                         current, candidate["kind"], candidate["id"], candidate["revision"], task
                     )
@@ -743,12 +747,30 @@ class LearningRuntime:
                         "low_confidence": posterior.lower_bound < 0.8,
                     }
                     index = counts[candidate["id"]]
-                    assignment = digest([
-                        tenant_id, user_id, task, candidate["id"],
-                        candidate["revision"], index // 2,
-                    ])
-                    first_served = int(assignment[:16], 16) % 2 == 0
-                    chosen_exploration = (index % 2 == 0) == first_served
+                    resolved_served = int(stat_row.get("served_n", 0))
+                    resolved_control = int(stat_row.get("control_n", 0))
+                    probation_cfg = getattr(
+                        self.engine.policy, "learning_probation_outcomes", {}
+                    )
+                    req_served = (
+                        probation_cfg.get("schema", 5)
+                        if candidate.get("schema_ref")
+                        else probation_cfg.get("standalone", 12)
+                    )
+                    # Adaptive Neyman deficit balancing over RESOLVED trial arms:
+                    # prevents unresolved chat turns from starving one arm (e.g. 10 served vs 1 control)
+                    # while falling back to deterministic hash-paired 50/50 when balanced.
+                    if resolved_served - resolved_control >= 2 and resolved_control < 8:
+                        chosen_exploration = False
+                    elif resolved_control - resolved_served >= 2 and resolved_served < req_served:
+                        chosen_exploration = True
+                    else:
+                        assignment = digest([
+                            tenant_id, user_id, task, candidate["id"],
+                            candidate["revision"], index // 2,
+                        ])
+                        first_served = int(assignment[:16], 16) % 2 == 0
+                        chosen_exploration = (index % 2 == 0) == first_served
                     trial_record = {
                         "candidate_id": candidate["id"],
                         "revision": candidate["revision"],

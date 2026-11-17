@@ -1136,6 +1136,7 @@ class PostgresEngine:
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
+                self._acquire_tenant_source_write_lock(cur, db_tenant_id)
                 self._ensure_evidence_vector_schema(cur)
                 cur.execute(
                     """
@@ -2754,10 +2755,21 @@ class PostgresEngine:
             with conn.cursor() as cur:
                 self._ensure_tenant_and_branch_cursor(cur, tenant_id, branch, kind)
 
+    @staticmethod
+    def _acquire_tenant_source_write_lock(cur: Any, db_tenant_id: Any) -> None:
+        """Coordinate tenant source writes against tenant-scoped mental_model_guard readers
+        without blocking unrelated tenants via whole-table SHARE locks.
+        """
+        cur.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended('mnemosyne.source_guard:' || %s::text, 0))",
+            (str(db_tenant_id),),
+        )
+
     def _ensure_tenant_and_branch_cursor(
         self, cur: Any, tenant_id: str, branch: str, kind: str
     ) -> None:
         db_tenant_id = _stable_uuid("tenant", tenant_id)
+        self._acquire_tenant_source_write_lock(cur, db_tenant_id)
         cur.execute(
             "INSERT INTO tenants(id, name) VALUES (%s, %s) ON CONFLICT (id) DO NOTHING",
             (db_tenant_id, tenant_id),
@@ -3488,11 +3500,20 @@ class PostgresEngine:
                 # A deployment may default to repeatable read. After waiting
                 # for writers, validation must observe their committed state,
                 # not the snapshot created by the tenant-binding SELECT.
+                db_guard_tenant = _stable_uuid("tenant", tenant_id)
                 cur.execute("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
                 cur.execute("SET LOCAL lock_timeout = '5s'")
-                self._set_tenant(cur, _stable_uuid("tenant", tenant_id))
+                self._set_tenant(cur, db_guard_tenant)
+                # Tenant-scoped shared advisory lock + row-level tenant SHARE lock:
+                # blocks concurrent source writes/erasure/privacy backfill in THIS tenant
+                # while leaving all other tenants 100% unblocked (no whole-table SHARE lock).
                 cur.execute(
-                    "LOCK TABLE tenants, branches, evidence, assertions, relations, preferences IN SHARE MODE"
+                    "SELECT pg_advisory_xact_lock_shared(hashtextextended('mnemosyne.source_guard:' || %s::text, 0))",
+                    (str(db_guard_tenant),),
+                )
+                cur.execute(
+                    "SELECT id FROM tenants WHERE id = %s FOR SHARE",
+                    (db_guard_tenant,),
                 )
             self._mental_model_guard_context.state = (tenant_id, conn)
             try:
@@ -3801,6 +3822,7 @@ class PostgresEngine:
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
+                self._acquire_tenant_source_write_lock(cur, db_tenant_id)
                 self._ensure_evidence_vector_schema(cur)
                 cur.execute(
                     """
@@ -3921,6 +3943,7 @@ class PostgresEngine:
         with self._source_connection(tenant_id, branch) as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
+                self._acquire_tenant_source_write_lock(cur, db_tenant_id)
                 # Serialize the read/merge/write with other evidence mutations.
                 # In READ COMMITTED, locking this read also refreshes a row that
                 # changed while waiting, so a concurrent privacy backfill is
@@ -3988,6 +4011,7 @@ class PostgresEngine:
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
+                self._acquire_tenant_source_write_lock(cur, db_tenant_id)
                 self._ensure_evidence_vector_schema(cur)
                 cur.execute(
                     """
@@ -6933,6 +6957,7 @@ class PostgresEngine:
         with self._source_connection(tenant_id, branch) as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
+                self._acquire_tenant_source_write_lock(cur, db_tenant_id)
                 self._lock_working_tenant(cur, tenant_id)
                 cur.execute(
                     """

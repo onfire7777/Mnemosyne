@@ -143,12 +143,30 @@ def _pytest_invocation(command, *, runner="pytest"):
                 tokens = tokens[1:]
         if tokens[:1] == ["--"]:
             tokens = tokens[1:]
+    if tokens and Path(tokens[0]).name == "npx":
+        tokens = tokens[1:]
+        while tokens and tokens[0] in {"--no-install", "--yes", "-y"}:
+            tokens = tokens[1:]
     if not tokens:
         return None
     executable = Path(tokens[0]).name
     if runner == "pytest" and executable in {"pytest", "pytest.exe"}:
         return tokens
+    if runner == "cargo_test" and executable in {"cargo", "cargo.exe"} and tokens[1:2] == ["test"]:
+        return tokens
+    if runner == "go_test" and executable in {"go", "go.exe"} and tokens[1:2] == ["test"]:
+        return tokens
+    if runner == "vitest" and executable in {"vitest", "jest"}:
+        return tokens
+    if runner == "vitest" and executable in {"npm", "pnpm", "yarn", "bun"} and tokens[1:2] == ["test"]:
+        return tokens
+    if runner == "ruff" and executable in {"ruff", "ruff.exe"} and tokens[1:2] == ["check"]:
+        return tokens
+    if runner == "mypy" and executable in {"mypy", "mypy.exe"}:
+        return tokens
     if re.fullmatch(r"python(?:\d+(?:\.\d+)?)?(?:\.exe)?", executable):
+        if runner == "ruff" and tokens[1:4] == ["-m", "ruff", "check"]:
+            return tokens
         return tokens if tokens[1:3] == ["-m", runner] else None
     return None
 
@@ -157,11 +175,19 @@ def _runs_pytest(command):
     return _pytest_invocation(command) is not None
 
 
+def _detected_runner(command):
+    for candidate in ("unittest", "pytest", "cargo_test", "go_test", "vitest", "ruff", "mypy"):
+        if _pytest_invocation(command, runner=candidate) is not None:
+            return candidate
+    return None
+
+
 def _test_counts(command, output, exit_code):
     if type(exit_code) is not int:
         return {}
     clean = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", output)
-    if _pytest_invocation(command, runner="unittest"):
+    runner = _detected_runner(command)
+    if runner == "unittest":
         totals = re.findall(r"(?m)^Ran (\d+) tests? in [0-9.]+s\s*$", clean)
         summaries = re.findall(r"(?m)^(OK|FAILED)(?: \(([^\n]*)\))?\s*$", clean)
         if not totals or not summaries:
@@ -175,8 +201,55 @@ def _test_counts(command, output, exit_code):
             return {}
         if verdict == "FAILED" and not failed:
             return {}
-        return {"passed": passed, "failed": failed}
-    if not _runs_pytest(command):
+        return {"passed": passed, "failed": failed, "_runner": "unittest"}
+    if runner == "cargo_test":
+        matches = re.findall(
+            r"(?m)^test result:\s*(ok|FAILED)\.\s*(\d+)\s+passed;\s*(\d+)\s+failed;",
+            clean,
+        )
+        if not matches:
+            return {}
+        passed = sum(int(m[1]) for m in matches)
+        failed = sum(int(m[2]) for m in matches)
+        any_failed = any(m[0] == "FAILED" for m in matches) or failed > 0
+        if (exit_code == 0) != (not any_failed) or (passed + failed) == 0:
+            return {}
+        return {"passed": passed, "failed": failed, "_runner": "cargo_test"}
+    if runner == "go_test":
+        oks = len(re.findall(r"(?m)^ok\s+\S+", clean))
+        fails = len(re.findall(r"(?m)^FAIL\s+\S+", clean))
+        if (oks + fails) == 0 or (exit_code == 0) != (fails == 0):
+            return {}
+        return {"passed": oks, "failed": fails, "_runner": "go_test"}
+    if runner == "vitest":
+        m = re.findall(
+            r"(?im)^\s*Tests:?\s+(?:(\d+)\s+failed[,\s|]+)?(?:(\d+)\s+skipped[,\s|]+)?(\d+)\s+passed",
+            clean,
+        )
+        if not m:
+            return {}
+        last = m[-1]
+        failed = int(last[0] or 0)
+        passed = int(last[2] or 0)
+        if (passed + failed) == 0 or (exit_code == 0) != (failed == 0):
+            return {}
+        return {"passed": passed, "failed": failed, "_runner": "vitest"}
+    if runner == "ruff":
+        if exit_code == 0 and re.search(r"(?m)^All checks passed!\s*$", clean):
+            return {"passed": 1, "failed": 0, "_runner": "ruff"}
+        m_err = re.search(r"(?m)^Found (\d+) errors?\.", clean)
+        if exit_code == 1 and m_err and int(m_err.group(1)) > 0:
+            return {"passed": 0, "failed": int(m_err.group(1)), "_runner": "ruff"}
+        return {}
+    if runner == "mypy":
+        m_ok = re.search(r"(?m)^Success: no issues found in (\d+) source files?\s*$", clean)
+        if exit_code == 0 and m_ok and int(m_ok.group(1)) > 0:
+            return {"passed": int(m_ok.group(1)), "failed": 0, "_runner": "mypy"}
+        m_fail = re.search(r"(?m)^Found (\d+) errors? in \d+ files?", clean)
+        if exit_code == 1 and m_fail and int(m_fail.group(1)) > 0:
+            return {"passed": 0, "failed": int(m_fail.group(1)), "_runner": "mypy"}
+        return {}
+    if runner != "pytest":
         return {}
     summaries = re.findall(
         r"(?m)^[= ]*((?:\d+ (?:passed|failed|errors?|skipped|xfailed|xpassed|deselected|warnings?)(?:, )?)+) in \d+(?:\.\d+)?s(?: \(\d+:\d{2}:\d{2}\))?[= ]*$",
@@ -192,7 +265,7 @@ def _test_counts(command, output, exit_code):
     failed = counts.get("failed", 0) + counts.get("error", 0) + counts.get("errors", 0)
     if exit_code not in {0, 1} or (exit_code == 1) != bool(failed):
         return {}
-    return {"passed": passed, "failed": failed}
+    return {"passed": passed, "failed": failed, "_runner": "pytest"}
 
 
 def _claim_references(value):
@@ -327,10 +400,13 @@ def _tool_event(name, response, *, tool_id=None, command=None, status=None,
         "failure",
     }:
         event["verdict"] = verdict
+    detected_runner = None
     if "passed" not in event or "failed" not in event:
-        event.update(_test_counts(command, output, event.get("exit_code")))
+        parsed_counts = _test_counts(command, output, event.get("exit_code"))
+        detected_runner = parsed_counts.pop("_runner", None)
+        event.update(parsed_counts)
     if command and "passed" in event and "failed" in event:
-        event["runner"] = "unittest" if _pytest_invocation(command, runner="unittest") else "pytest"
+        event["runner"] = detected_runner or ("unittest" if _pytest_invocation(command, runner="unittest") else "pytest")
         event["outcome_scope"] = "check"
         event["evidence"] = json.dumps({"runner": event["runner"], "call_id": tool_id,
                                         "exit_code": event["exit_code"],
@@ -566,6 +642,65 @@ class CodexAdapter:
             stream.flush()
             os.fsync(stream.fileno())
         temporary.replace(path)
+
+    def _append_spool(self, path: Path, entry: dict) -> None:
+        spool_path = path.with_suffix(".spool.jsonl")
+        with bounded_lock(path.with_suffix(".spool.lock"), timeout=2.0):
+            fd = os.open(str(spool_path), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            try:
+                os.write(fd, (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8"))
+            finally:
+                os.close(fd)
+
+    def _drain_spool(self, path: Path, state: dict) -> bool:
+        spool_path = path.with_suffix(".spool.jsonl")
+        if not spool_path.exists():
+            return False
+        with bounded_lock(path.with_suffix(".spool.lock"), timeout=2.0):
+            if not spool_path.exists():
+                return False
+            raw_lines = spool_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            spool_path.unlink(missing_ok=True)
+        changed = False
+        for line in raw_lines:
+            if not line.strip():
+                continue
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            if entry.get("turn_id") and entry["turn_id"] != state.get("turn_id"):
+                continue
+            if entry.get("skill_id"):
+                state.setdefault("used_skills", []).append(entry["skill_id"])
+                changed = True
+            if entry.get("used_item_id"):
+                served_delivery_ids = set(
+                    (state.get("delivery") or {}).get("delivered_item_ids", [])
+                )
+                if not served_delivery_ids or entry["used_item_id"] in served_delivery_ids:
+                    state.setdefault("used_items", []).append(entry["used_item_id"])
+                    if state.get("receipt_id") and state.get("turn_id"):
+                        usage = state.setdefault("memory_uses", {}).setdefault(
+                            state["turn_id"],
+                            {
+                                "receipt_id": state["receipt_id"],
+                                "used_lessons": list(state.get("used_lessons", [])),
+                                "used_items": [],
+                                "verification_reports": list(state.get("verification_reports", [])),
+                            },
+                        )
+                        if usage.get("receipt_id") == state["receipt_id"]:
+                            usage["used_items"] = list(
+                                dict.fromkeys(usage.get("used_items", []) + [entry["used_item_id"]])
+                            )
+                    changed = True
+            if isinstance(entry.get("tool_event"), dict) and state.get("prompt"):
+                state["tool_events"] = _merge_events(
+                    state.get("tool_events", []), [entry["tool_event"]]
+                )
+                changed = True
+        return changed
 
     def _transcript(self, payload, state, session, *, all_completed=False):
         path = payload.get("transcript_path") or state.get("transcript_path")
@@ -842,6 +977,238 @@ class CodexAdapter:
         path = self.state_dir / (
             "session-" + hashlib.sha256(session.encode()).hexdigest() + ".json"
         )
+        # Fast-path PostToolUse without opening the engine facade or blocking behind
+        # long-running UserPromptSubmit / Stop provider/database work.
+        if event == "PostToolUse":
+            name = str(payload.get("tool_name", "tool"))
+            arguments = payload.get("tool_input") or {}
+            spool_entry: dict = {}
+            if payload.get("turn_id"):
+                spool_entry["turn_id"] = payload["turn_id"]
+            if (
+                name.endswith("skill_get")
+                and isinstance(arguments, dict)
+                and arguments.get("skill_id")
+            ):
+                spool_entry["skill_id"] = str(arguments["skill_id"])
+            elif (
+                name.endswith(("knowledge_page_get", "observation_get"))
+                and isinstance(arguments, dict)
+                and (arguments.get("page_id") or arguments.get("observation_id"))
+            ):
+                spool_entry["used_item_id"] = str(
+                    arguments.get("page_id") or arguments.get("observation_id")
+                )
+            elif "mnemosyne" not in name:
+                command = (
+                    arguments.get("command", arguments.get("cmd"))
+                    if isinstance(arguments, dict)
+                    else None
+                )
+                cwd_arg = (
+                    arguments.get("cwd", arguments.get("workdir"))
+                    if isinstance(arguments, dict)
+                    else None
+                )
+                tool_event = _tool_event(
+                    name,
+                    payload.get("tool_response", {}),
+                    tool_id=payload.get("tool_use_id"),
+                    command=command,
+                    cwd=cwd_arg,
+                    arguments=arguments,
+                )
+                if tool_event.get("runner") == "pytest" and tool_event.get("failed", 0) > 0:
+                    ws_hint = normalize_workspace(cwd_arg or payload.get("cwd", payload.get("workspace")))
+                    if ws_hint is None and path.exists():
+                        try:
+                            ws_hint = json.loads(path.read_text()).get("workspace")
+                        except (OSError, ValueError):
+                            ws_hint = None
+                    from mnemosyne.experience.environment_capture import capture_failed_python_environment
+                    environment = capture_failed_python_environment(
+                        tool_event, workspace=ws_hint
+                    )
+                    if environment is not None:
+                        encoded = json.dumps(environment, ensure_ascii=False)
+                        if redact(encoded) == encoded:
+                            tool_event["experiment_environment"] = environment
+                spool_entry["tool_event"] = tool_event
+            if not spool_entry or set(spool_entry) == {"turn_id"}:
+                return {}
+            try:
+                with bounded_lock(path.with_suffix(".lock"), timeout=0.10):
+                    state = json.loads(path.read_text()) if path.exists() else {"tool_events": []}
+                    if state.get("session_id", session) != session:
+                        raise ValueError("Codex hook state belongs to another session")
+                    state["session_id"] = session
+                    self._drain_spool(path, state)
+                    if payload.get("turn_id") and payload["turn_id"] != state.get("turn_id"):
+                        return {}
+                    if spool_entry.get("skill_id"):
+                        state.setdefault("used_skills", []).append(spool_entry["skill_id"])
+                    if spool_entry.get("used_item_id"):
+                        state.setdefault("used_items", []).append(spool_entry["used_item_id"])
+                    if isinstance(spool_entry.get("tool_event"), dict) and state.get("prompt"):
+                        if (
+                            spool_entry["tool_event"].get("runner") == "pytest"
+                            and spool_entry["tool_event"].get("failed", 0) > 0
+                            and "experiment_environment" not in spool_entry["tool_event"]
+                            and state.get("workspace")
+                        ):
+                            from mnemosyne.experience.environment_capture import capture_failed_python_environment
+                            env_cap = capture_failed_python_environment(
+                                spool_entry["tool_event"], workspace=state.get("workspace")
+                            )
+                            if env_cap is not None:
+                                enc = json.dumps(env_cap, ensure_ascii=False)
+                                if redact(enc) == enc:
+                                    spool_entry["tool_event"]["experiment_environment"] = env_cap
+                        state["tool_events"] = _merge_events(
+                            state.get("tool_events", []), [spool_entry["tool_event"]]
+                        )
+                    self._save(path, state)
+            except TimeoutError:
+                # Session lock is currently held by UserPromptSubmit or Stop; durably spool
+                # the event in <1ms so no tool observation is ever dropped or fails the hook.
+                self._append_spool(path, spool_entry)
+            return {}
+
+        # UserPromptSubmit prepares local state quickly under the session lock, runs
+        # heavy facade/provider prepare_context OUTSIDE the session lock so concurrent
+        # hooks never time out, and commits the returned receipt atomically.
+        if event == "UserPromptSubmit":
+            with bounded_lock(path.with_suffix(".lock"), timeout=0.75):
+                state = json.loads(path.read_text()) if path.exists() else {"tool_events": []}
+                if state.get("session_id", session) != session:
+                    raise ValueError("Codex hook state belongs to another session")
+                state["session_id"] = session
+                self._drain_spool(path, state)
+                if state.get("turn_id") and state.get("receipt_id"):
+                    state.setdefault("prepared_turns", {}).setdefault(state["turn_id"], state["receipt_id"])
+                if state.get("pending_observation") and state.get("prompt"):
+                    state.setdefault("pending_observations", {}).setdefault(state["turn_id"], {
+                        "turn_id": state["turn_id"], "prompt": state["prompt"],
+                        "assistant_text": state.get("assistant_text", ""),
+                        "tool_events": state.get("tool_events", []),
+                        "used_skills": state.get("used_skills", []),
+                        "used_lessons": state.get("used_lessons", []),
+                        "used_items": state.get("used_items", []),
+                        "verification_reports": state.get("verification_reports", []),
+                        "receipt_id": state.get("receipt_id"),
+                    })
+                    state.pop("pending_observation", None)
+                if state.get("observed_turn"):
+                    state.setdefault("observed_turns", {}).setdefault(state["observed_turn"], None)
+                self._transcript(payload, state, session)
+                if state.get("unsupported_origin"):
+                    self._save(path, state)
+                    return {}
+                prompt = redact(payload.get("prompt", "")) or "Continue the current task"
+                turn_id = payload.get("turn_id") or (
+                    state.get("turn_id")
+                    if state.get("prompt") == prompt
+                    and state.get("observed_turn") != state.get("turn_id")
+                    and state.get("turn_id") not in state.get("observed_turns", {})
+                    else uuid4().hex
+                )
+                if state.get("turn_id") != turn_id or state.get("prompt") != prompt:
+                    state.update(
+                        turn_id=turn_id, prompt=prompt, tool_events=[], used_skills=[],
+                        used_lessons=[], used_items=[], verification_reports=[],
+                    )
+                    for key in ("receipt_id", "assistant_text", "complete", "ended_at", "correlation_id", "capabilities_refresh"):
+                        state.pop(key, None)
+                manifest = _tool_manifest(payload)
+                if manifest is not None:
+                    state["available_tools"] = manifest
+                    state["capabilities_status"] = "current_host_manifest"
+                else:
+                    state["available_tools"] = []
+                    state["capabilities_status"] = "unknown"
+                state["workspace"] = normalize_workspace(payload.get("cwd", payload.get("workspace")))
+                if state.get("receipt_id"):
+                    if (
+                        os.environ.get("MNEMOSYNE_LOCAL_RECALL") == "1"
+                        and self.require_delivery_confirmation
+                        and not self._delivery_confirmed(state, session, state["turn_id"], state["receipt_id"])
+                    ):
+                        state.pop("receipt_id")
+                    else:
+                        self._save(path, state)
+                        return {}
+                state.setdefault("correlation_id", uuid4().hex)
+                state["delivery_status"] = "preparing"
+                self._save(path, state)
+                prep_snapshot = {
+                    "turn_id": turn_id,
+                    "prompt": state["prompt"],
+                    "available_tools": list(state.get("available_tools", [])),
+                    "workspace": state.get("workspace"),
+                    "correlation_id": state["correlation_id"],
+                    "capabilities_status": state.get("capabilities_status", "unknown"),
+                }
+
+            reporting = {
+                "memory_use_reporting": {
+                    "command": self.report_command,
+                    "capabilities_command": (
+                        self.report_command[:-1] + ["--report-capabilities"]
+                        if self.report_command
+                        else None
+                    ),
+                    "session_id": session,
+                    "turn_id": prep_snapshot["turn_id"],
+                    "usage": (
+                        "Report actually used memory IDs in used_items and lessons in used_lessons via MemoryUse. "
+                        "Verification references identify real external checks; never report a success grade. "
+                        "If the current tool manifest is known, report it with receipt_id and turn_id before using memory."
+                    ),
+                },
+                "correlation_id": prep_snapshot["correlation_id"],
+                "capabilities_status": prep_snapshot["capabilities_status"],
+            }
+            with self.open_facade() as facade:
+                context = self.invoke(
+                    facade,
+                    "prepare_context",
+                    {
+                        "query": prep_snapshot["prompt"],
+                        "session_id": session,
+                        "available_tools": prep_snapshot["available_tools"],
+                        "workspace": prep_snapshot["workspace"],
+                        "delivery_envelope": reporting,
+                    },
+                    session,
+                )
+
+            with bounded_lock(path.with_suffix(".lock"), timeout=0.75):
+                state = json.loads(path.read_text()) if path.exists() else {"tool_events": []}
+                self._drain_spool(path, state)
+                if state.get("turn_id") == prep_snapshot["turn_id"]:
+                    state["receipt_id"] = context["receipt_id"]
+                    state.setdefault("prepared_turns", {})[prep_snapshot["turn_id"]] = context["receipt_id"]
+                    state["delivery_status"] = "prepared"
+                    state["prepared_at"] = datetime.now(UTC).isoformat()
+                    state["delivery"] = context.get("context_delivery", {})
+                    self._save(path, state)
+            return {
+                "_mnemosyne_delivery": {
+                    "correlation_id": prep_snapshot["correlation_id"],
+                    "session_id": session,
+                    "turn_id": prep_snapshot["turn_id"],
+                    "receipt_id": context["receipt_id"],
+                    "status": "prepared",
+                    "degraded": os.environ.get("MNEMOSYNE_LOCAL_RECALL") == "1",
+                },
+                "hookSpecificOutput": {
+                    "hookEventName": event,
+                    "additionalContext": context.get(
+                        "_context_text", json.dumps(context, ensure_ascii=False, default=str)
+                    ),
+                },
+            }
+
         # Session state cannot serialize unrelated hooks or background provider work.
         with bounded_lock(path.with_suffix(".lock"), timeout=0.75), self.open_facade() as facade:
             state = (
@@ -850,6 +1217,7 @@ class CodexAdapter:
             if state.get("session_id", session) != session:
                 raise ValueError("Codex hook state belongs to another session")
             state["session_id"] = session
+            self._drain_spool(path, state)
             if state.get("turn_id") and state.get("receipt_id"):
                 state.setdefault("prepared_turns", {}).setdefault(state["turn_id"], state["receipt_id"])
             if state.get("pending_observation") and state.get("prompt"):
@@ -868,11 +1236,10 @@ class CodexAdapter:
                 state.setdefault("observed_turns", {}).setdefault(
                     state["observed_turn"], None
                 )
-            if event in {"SessionStart", "UserPromptSubmit"}:
+            if event == "SessionStart":
                 self._transcript(payload, state, session)
                 if state.get("unsupported_origin"):
                     return {}
-            if event == "SessionStart":
                 self._save(path, state)
                 return {
                     "hookSpecificOutput": {
@@ -883,90 +1250,10 @@ class CodexAdapter:
                         f"Current session_id is {session}.",
                     }
                 }
-            if event == "UserPromptSubmit":
-                prompt = (
-                    redact(payload.get("prompt", "")) or "Continue the current task"
-                )
-                turn_id = payload.get("turn_id") or (
-                    state.get("turn_id")
-                    if state.get("prompt") == prompt
-                    and state.get("observed_turn") != state.get("turn_id")
-                    and state.get("turn_id") not in state.get("observed_turns", {})
-                    else uuid4().hex
-                )
-                if state.get("turn_id") != turn_id or state.get("prompt") != prompt:
-                    state.update(turn_id=turn_id, prompt=prompt, tool_events=[], used_skills=[],
-                                 used_lessons=[], used_items=[], verification_reports=[])
-                    for key in ("receipt_id", "assistant_text", "complete", "ended_at", "correlation_id", "capabilities_refresh"):
-                        state.pop(key, None)
-                manifest = _tool_manifest(payload)
-                if manifest is not None:
-                    state["available_tools"] = manifest
-                    state["capabilities_status"] = "current_host_manifest"
-                else:
-                    # Prior tool calls and another session's manifest are not current capabilities.
-                    state["available_tools"] = []
-                    state["capabilities_status"] = "unknown"
-                state["workspace"] = normalize_workspace(payload.get("cwd", payload.get("workspace")))
-                context = self._prepare(facade, state, path, session)
-                if context is None:
-                    return {}
-                return {
-                    "_mnemosyne_delivery": {"correlation_id": state["correlation_id"],
-                        "session_id": session, "turn_id": turn_id, "receipt_id": context["receipt_id"],
-                        "status": "prepared", "degraded": os.environ.get("MNEMOSYNE_LOCAL_RECALL") == "1"},
-                    "hookSpecificOutput": {
-                        "hookEventName": event,
-                        "additionalContext": context.get("_context_text", json.dumps(context, ensure_ascii=False, default=str)),
-                    }
-                }
             if event == "MemoryUse":
                 return self._report_use(facade, state, path, session, payload)
             if event == "HostCapabilities":
                 return self._report_capabilities(facade, state, path, session, payload)
-            if event == "PostToolUse":
-                if payload.get("turn_id") and payload["turn_id"] != state.get(
-                    "turn_id"
-                ):
-                    return {}
-                name = str(payload.get("tool_name", "tool"))
-                arguments = payload.get("tool_input") or {}
-                if (
-                    name.endswith("skill_get")
-                    and isinstance(arguments, dict)
-                    and arguments.get("skill_id")
-                ):
-                    state.setdefault("used_skills", []).append(arguments["skill_id"])
-                elif "mnemosyne" not in name and state.get("prompt"):
-                    command = (
-                        arguments.get("command", arguments.get("cmd"))
-                        if isinstance(arguments, dict)
-                        else None
-                    )
-                    tool_event = _tool_event(
-                        name,
-                        payload.get("tool_response", {}),
-                        tool_id=payload.get("tool_use_id"),
-                        command=command,
-                        cwd=arguments.get("cwd", arguments.get("workdir")) if isinstance(arguments, dict) else None,
-                        arguments=arguments,
-                    )
-                    if tool_event.get("runner") == "pytest" and tool_event.get("failed", 0) > 0:
-                        # Capture only while handling the current completion.
-                        # Retrospective transcript replay cannot reconstruct
-                        # the workspace that existed when a failure occurred.
-                        from mnemosyne.experience.environment_capture import capture_failed_python_environment
-                        environment = capture_failed_python_environment(
-                            tool_event, workspace=state.get("workspace"))
-                        if environment is not None:
-                            encoded = json.dumps(environment, ensure_ascii=False)
-                            if redact(encoded) == encoded:
-                                tool_event["experiment_environment"] = environment
-                    state["tool_events"] = _merge_events(
-                        state.get("tool_events", []), [tool_event]
-                    )
-                self._save(path, state)
-                return {}
             if event not in {"Stop", "SessionEnd"}:
                 return {}
             recovered = self._transcript(payload, state, session, all_completed=True)
@@ -1009,6 +1296,8 @@ class CodexAdapter:
                 if turn["turn_id"] == state.get("turn_id"):
                     turn["tool_events"] = _merge_events(state.get("tool_events", []), turn["tool_events"])
                     turn["used_skills"] = list(dict.fromkeys(state.get("used_skills", []) + turn.get("used_skills", [])))
+                    turn["used_items"] = list(dict.fromkeys(state.get("used_items", []) + turn.get("used_items", [])))
+                    turn["used_lessons"] = list(dict.fromkeys(state.get("used_lessons", []) + turn.get("used_lessons", [])))
                 queued.setdefault(turn["turn_id"], turn)
             waiting = [turn for turn in queued.values()
                        if turn["turn_id"] not in state.get("observed_turns", {})

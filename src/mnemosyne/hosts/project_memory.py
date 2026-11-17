@@ -60,8 +60,8 @@ def advance_project_memory(runtime, tenant_id, user_id, checkpoint_path, *, limi
     """
     if type(limit) is not int or not 1 <= limit <= 100:
         raise ValueError('projection limit must be between 1 and 100')
-    if type(provider_limit) is not int or not 0 <= provider_limit <= 2:
-        raise ValueError('provider limit must be between 0 and 2')
+    if type(provider_limit) is not int or not 0 <= provider_limit <= 32:
+        raise ValueError('provider limit must be between 0 and 32')
     path = Path(checkpoint_path)
     try:
         checkpoint = json.loads(path.read_text())
@@ -118,8 +118,12 @@ def advance_project_memory(runtime, tenant_id, user_id, checkpoint_path, *, limi
                 cid = result.get('source_cid')
                 if result.get('provider_pending') is not True or cid not in row.get('source_cids', []):
                     continue
+                if any(done.get('source_cid') == cid for done in provider_completed.values()):
+                    continue
                 key = digest([row['id'], cid])
-                if key not in provider_completed:
+                if key not in provider_completed and not any(
+                    queued.get('source_cid') == cid for queued in provider_queue.values()
+                ):
                     provider_queue.setdefault(key, {'episode_id': row['id'], 'source_cid': cid,
                         'fingerprint': fingerprint, 'enqueued_at': timestamp})
             if not _retryable(results):

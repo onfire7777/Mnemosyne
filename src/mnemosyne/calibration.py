@@ -600,3 +600,113 @@ def fuse_calibrated_confidence_from_hit(
     )
     return fuse_calibrated_confidence(**signals)
 
+
+@dataclass(slots=True)
+class IsotonicCalibrator:
+    """Pure-Python Pool-Adjacent-Violators (PAV) monotone probability calibrator.
+
+    Maps raw monotone confidence scores in ``[0, 1]`` to calibrated probabilities
+    with piecewise-linear interpolation between non-decreasing PAV knots.
+    """
+
+    knots_x: tuple[float, ...]
+    knots_y: tuple[float, ...]
+
+    @classmethod
+    def fit(cls, scores: list[float], outcomes: list[bool]) -> "IsotonicCalibrator":
+        if len(scores) != len(outcomes) or not scores:
+            return cls(knots_x=(0.0, 1.0), knots_y=(0.0, 1.0))
+        paired = sorted(
+            (max(0.0, min(1.0, float(s))), 1.0 if bool(y) else 0.0)
+            for s, y in zip(scores, outcomes, strict=True)
+        )
+        # Pool-Adjacent-Violators algorithm (blocks: [min_x, max_x, sum_y, count])
+        blocks: list[list[float]] = []
+        for x, y in paired:
+            blocks.append([x, x, y, 1.0])
+            while len(blocks) >= 2:
+                prev_mean = blocks[-2][2] / blocks[-2][3]
+                curr_mean = blocks[-1][2] / blocks[-1][3]
+                if prev_mean > curr_mean:
+                    merged = blocks.pop()
+                    blocks[-1][1] = merged[1]
+                    blocks[-1][2] += merged[2]
+                    blocks[-1][3] += merged[3]
+                else:
+                    break
+        xs: list[float] = []
+        ys: list[float] = []
+        for bx0, bx1, sum_y, cnt in blocks:
+            mid_x = 0.5 * (bx0 + bx1)
+            mean_y = max(0.0, min(1.0, sum_y / cnt))
+            xs.append(mid_x)
+            ys.append(mean_y)
+        return cls(knots_x=tuple(xs), knots_y=tuple(ys))
+
+    def predict(self, score: float) -> float:
+        x = _bounded_unit(score, default=0.0)
+        if not self.knots_x:
+            return x
+        if x <= self.knots_x[0]:
+            return self.knots_y[0]
+        if x >= self.knots_x[-1]:
+            return self.knots_y[-1]
+        for i in range(len(self.knots_x) - 1):
+            x0, x1 = self.knots_x[i], self.knots_x[i + 1]
+            y0, y1 = self.knots_y[i], self.knots_y[i + 1]
+            if x0 <= x <= x1:
+                if x1 <= x0 + 1e-12:
+                    return 0.5 * (y0 + y1)
+                t = (x - x0) / (x1 - x0)
+                return max(0.0, min(1.0, y0 + t * (y1 - y0)))
+        return self.knots_y[-1]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"knots_x": list(self.knots_x), "knots_y": list(self.knots_y)}
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "IsotonicCalibrator":
+        return cls(
+            knots_x=tuple(float(v) for v in data.get("knots_x", (0.0, 1.0))),
+            knots_y=tuple(float(v) for v in data.get("knots_y", (0.0, 1.0))),
+        )
+
+
+def calibrate_retrieval_decision_confidence(
+    evidence_quality: float,
+    query_support_score: float,
+    *,
+    support_threshold: float = 2.0 / 3.0,
+    top_score_strength: float = 1.0,
+) -> float:
+    """Return calibrated decision confidence for multi-hit retrieval packets.
+
+    Replaces the uncalibrated ``* 1.48`` heuristic cliff with a smooth, monotone
+    mapping aligned to empirical accuracy on supported answers and empirical
+    specificity/precision on low-support abstentions:
+    - Supported queries (``query_support_score >= support_threshold``): scales smoothly
+      with ``evidence_quality``, excess query-term coverage, and absolute top-hit score
+      strength without saturating weak matches at 0.96+.
+    - Low-support abstained queries (``query_support_score < support_threshold``):
+      confidence in the abstention decision increases monotonically as support drops
+      further below ``support_threshold`` (clearer out-of-domain signal), rather than
+      peaking right at the ambiguous boundary.
+    """
+    eq = _bounded_unit(evidence_quality, default=0.0)
+    qs = _bounded_unit(query_support_score, default=0.0)
+    strength = _bounded_unit(top_score_strength, default=1.0)
+    thresh = max(0.05, min(0.95, float(support_threshold)))
+
+    if qs < thresh:
+        # Decision = abstain. Clearer lack of support -> higher confidence in abstaining;
+        # borderline support near threshold -> lower confidence (~0.78-0.84).
+        abstain_clarity = 1.0 - (qs / thresh)
+        calibrated = eq * (1.28 + 0.14 * abstain_clarity)
+        return max(0.0, min(0.91, calibrated))
+
+    support_excess = (qs - thresh) / max(1.0 - thresh, 0.01)
+    # Smooth monotone scaling (replaces fixed 1.48x overconfidence multiplier)
+    multiplier = 1.21 + 0.10 * support_excess + 0.04 * strength
+    return max(0.0, min(0.91, eq * multiplier))
+
+

@@ -85,7 +85,7 @@ def test_dense_dry_run_rejects_before_opening_or_populating_cache(
 
 
 @pytest.mark.parametrize("mode", ["default", "passages"])
-@pytest.mark.parametrize("context", ["sessions", "rounds"])
+@pytest.mark.parametrize("context", ["sessions", "rounds", "compiled"])
 def test_supported_dry_runs_retrieve_without_model_calls(
     runner, monkeypatch, tmp_path, mode, context,
 ):

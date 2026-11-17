@@ -62,9 +62,14 @@ class PremiseVerificationResult:
 
 # Regular expressions for presupposition deconstruction
 _ROLE_TITLE_RE = re.compile(
-    r"\b(?:role|position|job|title|promotion|promoted\s+to|working\s+as|lead\s+as)\s+(?:as\s+)?(?P<title>[A-Za-z][A-Za-z\s]{2,40}?)"
-    r"(?:\?|,|\.|\s+how|\s+when|\s+where|\s+what|\s+in\s+my|\s+at|$)",
+    r"\b(?:role|position|job|title|promotion|promoted\s+to|working\s+as|hired\s+as|serving\s+as|lead\s+as)"
+    r"\s+(?:as\s+)?(?:a\s+|an\s+|the\s+)?"
+    r"(?P<title>[A-Za-z][A-Za-z0-9/&-]{1,25}(?:\s+[A-Za-z][A-Za-z0-9/&-]{1,25}){0,4}?)"
+    r"(?:\?|,|\.|;|\s+(?:how|when|where|what|who|which|in\s+my|at|for|since|after|before|recently|last|this|and|but)\b|$)",
     re.IGNORECASE,
+)
+_QUOTED_PREMISE_RE = re.compile(
+    r"""(?:\b(?:named|called|titled|entitled|book|movie|show|course|project|podcast|album|song|game|paper|article)\s+)?["“](?P<quoted>[A-Z0-9][^"”]{3,60})["”]"""
 )
 
 
@@ -98,6 +103,11 @@ class PremiseConsistencyVerifier:
         )
         if role_mismatch is not None:
             mismatches.append(role_mismatch)
+
+        # 3. Check explicit quoted proper-entity presuppositions when evidence is provided
+        quoted_mismatch = self._check_quoted_entity(query, all_evidence_texts)
+        if quoted_mismatch is not None:
+            mismatches.append(quoted_mismatch)
 
         if not mismatches:
             return PremiseVerificationResult(
@@ -206,8 +216,10 @@ class PremiseConsistencyVerifier:
         # Check evidence text for actual title if not yet found
         if not actual_title:
             title_pattern = re.compile(
-                r"\b(?:promoted\s+to|role\s+as|title\s+as|position\s+as|working\s+as)\s+(?:a\s+|an\s+|the\s+)?([A-Z][a-zA-Z\s]{2,30}?)(?:[.,;!\n]|\s+at|\s+in|\s+for|$)",
-                re.IGNORECASE,
+                r"\b(?:[Pp]romoted\s+to|[Ss]tarted\s+(?:a\s+|my\s+)?(?:new\s+)?(?:role|position|job)\s+as|[Rr]ole\s+as|[Tt]itle\s+as|[Pp]osition\s+as|[Ww]orking\s+as|[Hh]ired\s+as|[Ss]erving\s+as)"
+                r"\s+(?:a\s+|an\s+|the\s+)?"
+                r"([A-Z][a-zA-Z0-9/&-]+(?:\s+(?:of|and|for|[A-Z][a-zA-Z0-9/&-]+)){0,5})"
+                r"(?:[.,;!\n?]|\s+(?:at|in|for|since|recently|last|this|and|but|where|when)\b|$)"
             )
             for text in evidence_texts:
                 tm = title_pattern.search(text)
@@ -233,4 +245,32 @@ class PremiseConsistencyVerifier:
                     ),
                 )
 
+        return None
+
+    def _check_quoted_entity(
+        self,
+        query: str,
+        evidence_texts: list[str],
+    ) -> PremiseMismatch | None:
+        """Check whether an explicitly double-quoted proper title/name in the query is absent from evidence."""
+        if not evidence_texts:
+            return None
+        combined_lower = "\n".join(evidence_texts).lower()
+        for m in _QUOTED_PREMISE_RE.finditer(query):
+            quoted = _clean_str(m.group("quoted"))
+            words = [w for w in re.findall(r"[A-Za-z0-9]+", quoted.lower()) if len(w) >= 3]
+            if len(words) < 2:
+                continue
+            if quoted.lower() in combined_lower:
+                continue
+            if sum(1 for w in words if w in combined_lower) == 0:
+                return PremiseMismatch(
+                    mismatch_type="missing_entity",
+                    query_premise=f'"{quoted}"',
+                    factual_grounding=None,
+                    confidence=0.88,
+                    candidate_unanswerability_signal=(
+                        f'The chat history does not mention "{quoted}".'
+                    ),
+                )
         return None

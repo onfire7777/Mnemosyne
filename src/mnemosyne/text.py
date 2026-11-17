@@ -242,7 +242,48 @@ TAXONOMIC_EXPANSIONS: dict[str, tuple[str, ...]] = {
     # Kinship hypernyms -> hyponyms
     "parent": ("mother", "father", "mom", "dad"),
     "parents": ("mother", "father", "mom", "dad"),
+    # General creative/performer role hypernyms -> hyponyms
+    "artist": ("musician", "singer", "band", "songwriter", "composer", "rapper", "vocalist", "album", "song"),
+    "artists": ("musicians", "singers", "bands", "songwriters", "composers", "rappers", "vocalists"),
+    # Common lexical synonyms & category hypernyms
+    "bike": ("bicycle", "cycling", "biking"),
+    "bikes": ("bicycles", "bicycle", "bike"),
+    "pet": ("dog", "cat", "puppy", "kitten", "rabbit", "parrot", "hamster", "bird", "turtle"),
+    "pets": ("dogs", "cats", "dog", "cat", "puppies", "kittens", "rabbits", "parrots"),
 }
+
+
+def damerau_levenshtein_at_most_one(left: str, right: str) -> bool:
+    """Return True iff ``left`` and ``right`` are within optimal string alignment distance <= 1.
+
+    Used for conservative human spelling/transposition typo recovery on alphabetic words.
+    """
+    if left == right:
+        return True
+    la, lb = len(left), len(right)
+    if abs(la - lb) > 1:
+        return False
+    if la == lb:
+        diffs = [i for i in range(la) if left[i] != right[i]]
+        if len(diffs) == 1:
+            return True
+        if len(diffs) == 2 and diffs[1] == diffs[0] + 1:
+            i = diffs[0]
+            return left[i] == right[i + 1] and left[i + 1] == right[i]
+        return False
+    # Insertion / deletion of 1 character
+    shorter, longer = (left, right) if la < lb else (right, left)
+    i = j = edits = 0
+    while i < len(shorter) and j < len(longer):
+        if shorter[i] == longer[j]:
+            i += 1
+            j += 1
+        else:
+            edits += 1
+            if edits > 1:
+                return False
+            j += 1
+    return True
 
 
 def expand_taxonomic_concepts(terms: Iterable[str]) -> list[str]:

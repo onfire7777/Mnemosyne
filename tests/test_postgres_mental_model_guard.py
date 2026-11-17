@@ -40,7 +40,10 @@ class Cursor:
         if sql.startswith("SELECT"):
             self.conn.transaction_started = True
         self.rows = []
-        if sql.startswith("LOCK TABLE") and self.conn.lock_error:
+        if (
+            sql.startswith("LOCK TABLE")
+            or "pg_advisory_xact_lock_shared" in sql
+        ) and self.conn.lock_error:
             raise RuntimeError("lock timeout")
         if sql.startswith("SELECT record FROM mental_models"):
             self.rows = [{"record": copy.deepcopy(self.conn.model)}] if self.conn.model else []
@@ -126,8 +129,11 @@ def test_final_reads_and_model_cas_use_one_source_locked_transaction(backend):
         engine.export_tenant("t")
         assert len(connections) == 1 and conn.commits == commits
         statements = [sql for sql, _ in conn.statements]
-        lock = "LOCK TABLE tenants, branches, evidence, assertions, relations, preferences IN SHARE MODE"
+        lock = "SELECT pg_advisory_xact_lock_shared(hashtextextended('mnemosyne.source_guard:' || %s::text, 0))"
+        tenant_row_lock = "SELECT id FROM tenants WHERE id = %s FOR SHARE"
         assert statements.count(lock) == 1
+        assert statements.count(tenant_row_lock) == 1
+        assert not any(sql.startswith("LOCK TABLE") for sql in statements)
         first_select = next(i for i, sql in enumerate(statements) if sql.startswith("SELECT record"))
         assert statements.index("SET TRANSACTION ISOLATION LEVEL READ COMMITTED") < statements.index(lock) < first_select
         assert "SET LOCAL lock_timeout = '5s'" in statements
@@ -253,3 +259,24 @@ def test_missing_projection_schema_during_publication_fails_closed(backend, monk
     assert connections[0].rollbacks == 2
     assert not any(sql.startswith(("CREATE", "ALTER TABLE", "UPDATE mental_models"))
                    for sql, _ in connections[0].statements)
+
+
+def test_source_write_lock_uses_tenant_scoped_advisory_key_not_table_lock(backend):
+    engine, connections = backend
+    conn_a = Connection()
+    conn_b = Connection()
+    with conn_a.cursor() as cur_a:
+        engine._acquire_tenant_source_write_lock(cur_a, _stable_uuid("tenant", "alpha"))
+    with conn_b.cursor() as cur_b:
+        engine._acquire_tenant_source_write_lock(cur_b, _stable_uuid("tenant", "beta"))
+
+    sql_a, params_a = conn_a.statements[0]
+    sql_b, params_b = conn_b.statements[0]
+    expected_sql = "SELECT pg_advisory_xact_lock(hashtextextended('mnemosyne.source_guard:' || %s::text, 0))"
+    assert sql_a == expected_sql
+    assert sql_b == expected_sql
+    assert params_a == (str(_stable_uuid("tenant", "alpha")),)
+    assert params_b == (str(_stable_uuid("tenant", "beta")),)
+    assert params_a != params_b
+    assert not any(s.startswith("LOCK TABLE") for s, _ in conn_a.statements + conn_b.statements)
+

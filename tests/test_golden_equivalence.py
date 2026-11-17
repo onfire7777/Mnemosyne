@@ -57,6 +57,14 @@ one on the 11 Nov tree; no open relation, active fact or abstention changed. Wha
 * an automatic capture-batch job over one row no longer writes a gist of it (the two "Deal"
   gists and their links are gone), and forget drops the vector of the rows it erases.
 
+synthetic-growth, synthetic-rails and synthetic-conflicts were refreshed on 16 Nov 2026 after
+thin/full parity and repeated-run determinism checks passed (g0-write-gating was untouched):
+
+* ``RetrievalResult.confidence`` uses monotone feature-calibrated logistic probability in
+  ``calibration.py`` instead of the piecewise ``* 1.48`` multiplier;
+* ``ConsolidationWorker`` defaults to ``ContextualEntityResolver`` and emits ``disambiguated_keys``,
+  ``merge_count`` and ``merge_history`` in consolidation details.
+
 To reproduce the original historical baseline instead:
 
     python eval/perf/golden_equivalence.py dump --scenario NAME --src <737a1ef8 checkout>/src --out x.json

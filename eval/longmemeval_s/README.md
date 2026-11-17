@@ -49,13 +49,31 @@ before running `--split heldout`. Do not tune against held-out answers.
 
 ```sh
 uv run --locked python -m eval.longmemeval_recall \
-  --data _scratch/longmemeval --split dev --modes default,passages \
+  --data _scratch/longmemeval --split dev --modes default,passages,compiler \
   --out work/longmemeval-recall.json
 ```
 
 This measures source retrieval, not generated-answer accuracy. Abstention rows
 remain in the frozen split but are excluded from retrieval-only scoring and
 listed in the report. Conversation dates and the question clock use UTC.
+
+## Multi-Granularity Compiler Context (`--mode compiler --context compiled`)
+
+To evaluate Mnemosyne's multi-granularity hybrid retrieval + deterministic temporal-epistemic
+memory compiler (`MemoryContextCompiler` in `src/mnemosyne/compiler_context.py`) using the
+official unmodified LongMemEval Chain-of-Note reader and GPT-4o judge prompts:
+
+```sh
+uv run --locked python -m eval.longmemeval_s.run_bench_LongMemEval \
+  --data _scratch/longmemeval/longmemeval_s_cleaned.json \
+  --out-dir work/longmemeval-openrouter \
+  --reader anthropic/claude-haiku-5.5 \
+  --judge openai/gpt-4o-2024-08-06 \
+  --reasoning-effort xhigh \
+  --reader-tokens 32000 \
+  --mode compiler --context compiled --embed cloud --top-k 10 \
+  --split dev --workers 2 --run compiler-dev
+```
 
 The answer runner also supports `--dry-run` for `default` and `passages` modes.
 It builds prompts without calling a model. `dense` plus `--dry-run` is rejected

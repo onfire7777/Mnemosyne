@@ -236,3 +236,120 @@ def test_report_survives_a_missed_stop_and_the_next_prompt(tmp_path):
     episode = host.episodes()[-1]
     assert episode["used_lessons"] == [lesson]
     assert episode["target_outcomes"][lesson]["value"] == 1
+
+
+@pytest.mark.parametrize(
+    "cmd,exit_code,output,expected",
+    [
+        ("cargo test --quiet", 0, "test result: ok. 14 passed; 0 failed; 0 ignored;", ("cargo_test", 14, 0)),
+        ("cargo test", 101, "test result: FAILED. 12 passed; 2 failed; 0 ignored;", ("cargo_test", 12, 2)),
+        ("go test ./...", 0, "ok  \texample.com/pkg\t0.042s\nok  \texample.com/cmd\t0.015s", ("go_test", 2, 0)),
+        ("go test ./...", 1, "--- FAIL: TestHandler (0.01s)\nFAIL\texample.com/pkg\t0.020s", ("go_test", 0, 1)),
+        ("npx vitest run", 0, "Tests  9 passed (9)", ("vitest", 9, 0)),
+        ("jest --ci", 1, "Tests: 1 failed, 7 passed, 8 total", ("vitest", 7, 1)),
+        ("ruff check src", 0, "All checks passed!", ("ruff", 1, 0)),
+        ("ruff check src", 1, "Found 3 errors.", ("ruff", 0, 3)),
+        ("mypy src", 0, "Success: no issues found in 42 source files", ("mypy", 42, 0)),
+        ("mypy src", 1, "Found 2 errors in 1 file (checked 42 source files)", ("mypy", 0, 2)),
+    ],
+)
+def test_expanded_external_runners_are_identified(cmd, exit_code, output, expected):
+    event = _tool_event("shell", {"exit_code": exit_code, "output": output}, command=cmd, tool_id="ext")
+    assert (event["runner"], event["passed"], event["failed"]) == expected
+
+
+def test_post_tool_use_spools_under_held_session_lock_and_drains_on_stop(tmp_path):
+    fcntl = pytest.importorskip("fcntl")
+    import hashlib
+
+    host = LocalHost(tmp_path)
+    host.event("UserPromptSubmit", turn_id="turn", prompt="Run checks")
+    session_hash = hashlib.sha256(b"session").hexdigest()
+    state_path = host.adapter.state_dir / f"session-{session_hash}.json"
+    lock_path = state_path.with_suffix(".lock")
+    spool_path = state_path.with_suffix(".spool.jsonl")
+
+    facade_opens = 0
+    orig_open = host.adapter.open_facade
+
+    def tracked_open():
+        nonlocal facade_opens
+        facade_opens += 1
+        return orig_open()
+
+    host.adapter.open_facade = tracked_open
+    with lock_path.open("a+") as held_fd:
+        fcntl.flock(held_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            res = host.event(
+                "PostToolUse",
+                turn_id="turn",
+                tool_name="shell",
+                tool_use_id="spooled-ruff",
+                tool_input={"command": "ruff check src"},
+                tool_response={"exit_code": 0, "output": "All checks passed!"},
+            )
+            assert res == {}
+            assert facade_opens == 0
+            assert spool_path.exists()
+        finally:
+            fcntl.flock(held_fd.fileno(), fcntl.LOCK_UN)
+
+    host.event("Stop", last_assistant_message="Checks passed.")
+    assert not spool_path.exists()
+    events = host.episodes()[-1]["tool_events"]
+    assert any(ev.get("call_id") == "spooled-ruff" and ev.get("runner") == "ruff" and ev.get("passed") == 1 for ev in events)
+
+
+def test_probation_adaptive_neyman_deficit_balancing(tmp_path):
+    from mnemosyne.experience.runtime import stat_key
+
+    host = LocalHost(tmp_path)
+    old = host.runtime.observe_turn("t", "u", "s0", "Format the build summary", "Draft")
+    host.runtime.record_signal(
+        "t", episode_id=old["episode_id"], kind="correction", value=-1,
+        evidence="Use JSON for build summaries.", final=True,
+    )
+    host.runtime.consolidate("t")
+    state0 = host.runtime.writer.read("t")
+    artifact = next(iter(state0["artifacts"].values()))
+    skey = stat_key(artifact["kind"], artifact["id"], artifact["revision"], artifact["task_class"])
+
+    # Run paired probation episodes where ONLY served-arm episodes resolve (simulating
+    # real-world control chat turns left unresolved) until served_n - control_n >= 2.
+    for i in range(1, 7):
+        ctx = host.runtime.prepare_context("t", "u", f"sess-{i}", "Format the build summary")
+        rec = host.runtime.writer.read("t")["receipts"][ctx["receipt_id"]]
+        arm = rec["probation_trial"]["arm"]
+        if arm == "served":
+            ep = host.runtime.observe_turn(
+                "t", "u", f"sess-{i}", "Format the build summary", '{"ok":true}',
+                receipt_ids=[ctx["receipt_id"]],
+                used_lessons=[artifact["id"]],
+                tool_events=[{
+                    "name": "validator", "source": "tool", "verdict": True,
+                    "receipt_id": ctx["receipt_id"], "target_ids": [artifact["id"]],
+                    "call_id": f"c-{i}", "check_id": "json",
+                }],
+            )
+            host.runtime.record_signal("t", episode_id=ep["episode_id"], kind="verifier", value=1, final=True)
+        else:
+            # Leave control episode unresolved so control_n stays 0 while served_n grows
+            host.runtime.observe_turn(
+                "t", "u", f"sess-{i}", "Format the build summary", "ok",
+                receipt_ids=[ctx["receipt_id"]],
+            )
+        st = host.runtime.writer.read("t")["stats"].get(skey, {})
+        if int(st.get("served_n", 0)) - int(st.get("control_n", 0)) >= 2:
+            break
+
+    st_now = host.runtime.writer.read("t")["stats"][skey]
+    assert st_now["served_n"] - st_now["control_n"] >= 2
+    # Next two consecutive trials MUST deterministically select the starved 'control' arm
+    # rather than blindly flipping 50/50 hash pairs.
+    for j in (100, 101):
+        ctx_next = host.runtime.prepare_context("t", "u", f"sess-{j}", "Format the build summary")
+        rec_next = host.runtime.writer.read("t")["receipts"][ctx_next["receipt_id"]]
+        assert rec_next["probation_trial"]["arm"] == "control"
+
+

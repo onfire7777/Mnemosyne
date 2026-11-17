@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from mnemosyne.models import Hit, parse_dt
-from mnemosyne.text import TAXONOMIC_EXPANSIONS, tokenize
+from mnemosyne.text import TAXONOMIC_EXPANSIONS, damerau_levenshtein_at_most_one, tokenize
 
 
 def is_passage(hit: Hit) -> bool:
@@ -893,6 +893,26 @@ class PassageIndex:
                                 and syn_tok not in QUERY_SUPPORT_STOPWORDS
                             ):
                                 expanded_counts[syn_tok] = query_count * 0.80
+            # Conservative spelling/transposition typo recovery for unseen alphabetic terms
+            st_raw = _stem_passage_token(term)
+            if (
+                len(term) >= 6
+                and term.isalpha()
+                and term not in self.postings
+                and st_raw not in self.stem_postings
+            ):
+                first_ch = term[0]
+                tlen = len(term)
+                for vocab_term in self.postings:
+                    if (
+                        len(vocab_term) >= 6
+                        and vocab_term[0] == first_ch
+                        and abs(len(vocab_term) - tlen) <= 1
+                        and vocab_term.isalpha()
+                        and damerau_levenshtein_at_most_one(term, vocab_term)
+                    ):
+                        if vocab_term not in expanded_counts:
+                            expanded_counts[vocab_term] = query_count * 0.85
 
         stem_expanded: dict[str, float] = defaultdict(float)
         for term, qc in expanded_counts.items():

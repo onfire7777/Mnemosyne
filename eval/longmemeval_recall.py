@@ -24,6 +24,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from eval.datasets.longmemeval_loader import normalize
+from mnemosyne.compiler_context import MemoryContextCompiler, sanitize_sessions
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Evidence
 from mnemosyne.policy import OperatingPolicy
@@ -73,8 +74,8 @@ def main() -> None:
                     help="evaluate at most N answerable questions after fixing the split (0 means all)")
     args = ap.parse_args()
     modes = [mode.strip() for mode in args.modes.split(",") if mode.strip()]
-    if not modes or any(mode not in {"default", "passages"} for mode in modes):
-        ap.error("--modes must contain default and/or passages")
+    if not modes or any(mode not in {"default", "passages", "compiler"} for mode in modes):
+        ap.error("--modes must contain default, passages, and/or compiler")
     if args.limit < 0:
         ap.error("--limit must be non-negative")
 
@@ -92,7 +93,7 @@ def main() -> None:
     excluded = [qid for qid in partition if qid.endswith("_abs")]
     eligible = [qid for qid in partition if not qid.endswith("_abs")]
     selected = eligible[:args.limit] if args.limit else eligible
-    question_dates, session_dates = {}, {}
+    question_dates, session_dates, compiler_inputs = {}, {}, {}
     for qid in selected:
         row = cleaned[qid]
         question_dates[qid] = benchmark_timestamp(row.get("question_date"), f"{qid} question_date")
@@ -102,6 +103,11 @@ def main() -> None:
         session_dates[qid] = [
             benchmark_timestamp(date, f"{qid} haystack_dates[{index}]") for index, date in enumerate(dates)
         ]
+        if "compiler" in modes:
+            compiler_inputs[qid] = (
+                list(row.get("haystack_session_ids") or []),
+                sanitize_sessions(sessions, dates, session_dates[qid]),
+            )
     bench = normalize({"assets": {
         "longmemeval_s_cleaned.json": [cleaned[qid] for qid in selected],
         "longmemeval_oracle.json": [oracle[qid] for qid in selected],
@@ -117,18 +123,36 @@ def main() -> None:
         tenant = f"longmemeval:{qid}"
         engine = LocalMemoryEngine(policy=OperatingPolicy(top_k=24, token_budget=262_144))
         session_of: dict[str, str] = {}
-        for document, created_at in zip(by_question[qid], session_dates[qid], strict=True):
+        cid_to_idx: dict[str, int] = {}
+        for pos_idx, (document, created_at) in enumerate(zip(by_question[qid], session_dates[qid], strict=True)):
             cid = engine.append_evidence(Evidence(
                 tenant_id=tenant, user_id="longmemeval", actor="user",
                 source_type=f"longmemeval:{document['session_id']}", source_identity=document["session_id"],
                 content=document["content"], created_at=created_at, access_policy={"tenant": tenant},
             ))
             session_of[cid] = document["session_id"]
+            cid_to_idx.setdefault(cid, pos_idx)
         question_date = question_dates[qid].isoformat()
         row = {"question_id": qid, "split": splits[qid], "sessions": len(session_of),
                "question_date": question_date}
         gold = set(question["answer_session_ids"])
         for mode in modes:
+            if mode == "compiler":
+                sids_raw, clean_sess = compiler_inputs[qid]
+                ranked_idx, _, _ = MemoryContextCompiler().rank_sessions_and_rounds(
+                    question["query"],
+                    question_dates[qid],
+                    clean_sess,
+                    preloaded_engine=engine,
+                    preloaded_cid_to_index=cid_to_idx,
+                    tenant_id=tenant,
+                )
+                ranked = []
+                for idx in ranked_idx:
+                    if 0 <= idx < len(sids_raw) and sids_raw[idx] not in ranked:
+                        ranked.append(sids_raw[idx])
+                row[mode] = round(len(gold & set(ranked[:5])) / len(gold), 4)
+                continue
             filt = {"role": "reader", "evaluated_at": question_date, "query_timezone": "UTC"}
             if mode == "passages":
                 filt["query_mode"] = "passages"

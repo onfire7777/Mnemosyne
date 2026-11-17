@@ -1,19 +1,19 @@
 {
   "categories": {
     "abstention": {
-      "balanced_accuracy": 0.7783,
+      "balanced_accuracy": 0.8558,
       "ci_95": [
         0.0,
         0.0
       ],
-      "f1": 0.6923,
-      "false_retrieval_rate": 0.4,
+      "f1": 0.8148,
+      "false_retrieval_rate": 0.2667,
       "n_cases": 15,
       "ndcg_at_5": 0.0,
-      "precision": 0.8182,
-      "recall": 0.6,
+      "precision": 0.9167,
+      "recall": 0.7333,
       "recall_at_5": 0.0,
-      "specificity": 0.9565
+      "specificity": 0.9783
     },
     "knowledge_updates_supersession": {
       "ci_95": [
@@ -47,12 +47,12 @@
     },
     "temporal_reasoning": {
       "ci_95": [
-        0.8438,
+        0.8958,
         1.0
       ],
       "n_cases": 16,
-      "ndcg_at_5": 0.812,
-      "recall_at_5": 0.9271
+      "ndcg_at_5": 0.8595,
+      "recall_at_5": 0.9583
     }
   },
   "meta": {
@@ -63,28 +63,28 @@
       "quality_gate_dev.json": "a2fd8332de71c9259a74ef397af68c38ffa7315370688d553ca0bc8073e70d88",
       "quality_gate_heldout.json": "6d3333769644e06c746ba316186951e49c241ab1ad21fcd7f8a5ca511631d99b"
     },
-    "generated_at": "2026-11-13T18:40:20.680538+00:00",
-    "git_commit": "bea76586ca5b0ad406419ce80a1610ccd1b92774",
+    "generated_at": "2026-11-16T21:11:18.445085+00:00",
+    "git_commit": "b2ec2da9d4f3f3fc4cc1a54c5a4b15085af86c66",
     "k": 5,
     "offline": true,
     "platform": {
       "os": "Darwin",
       "python_version": "3.14.7"
     },
-    "runtime_seconds": 107.19,
+    "runtime_seconds": 116.04,
     "seed": 42,
     "split": "dev"
   },
   "query_details": [
     {
       "category": "temporal_reasoning",
-      "confidence": 0.9799,
+      "confidence": 0.8964,
       "correct": true,
       "gold_references": [
         "answer_8464304d_1",
         "answer_8464304d_2"
       ],
-      "latency_ms": 975.19,
+      "latency_ms": 999.79,
       "ndcg_at_5": 1.0,
       "qid": "gpt4_d31cdae3",
       "query": "Which trip did the narrator take first, the solo trip to Europe or the family road trip across the American Southwest?",
@@ -92,42 +92,42 @@
       "retrieved_ids": [
         "answer_8464304d_2",
         "answer_8464304d_1",
+        "55033f6f",
         "de695a4e",
-        "41743aae_2",
-        "65ade6e9"
+        "41743aae_2"
       ],
       "split": "dev"
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.9122,
+      "confidence": 0.8822,
       "correct": true,
       "gold_references": [
         "answer_0a00c163_1",
         "answer_0a00c163_2"
       ],
-      "latency_ms": 879.3,
-      "ndcg_at_5": 0.6241,
+      "latency_ms": 860.06,
+      "ndcg_at_5": 1.0,
       "qid": "gpt4_4edbafa2",
       "query": "What was the date on which I attended the first BBQ event in June?",
       "recall_at_5": 1.0,
       "retrieved_ids": [
-        "2ba7fdd0_2",
         "answer_0a00c163_2",
-        "sharegpt_jZOf9E5_21",
+        "answer_0a00c163_1",
         "18c0af9c",
-        "answer_0a00c163_1"
+        "sharegpt_jZOf9E5_21",
+        "2ba7fdd0_2"
       ],
       "split": "dev"
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.98,
+      "confidence": 0.91,
       "correct": true,
       "gold_references": [
         "answer_43ba3965_1"
       ],
-      "latency_ms": 836.49,
+      "latency_ms": 827.59,
       "ndcg_at_5": 1.0,
       "qid": "bcbe585f",
       "query": "How many weeks ago did I attend a bird watching workshop at the local Audubon society?",
@@ -143,13 +143,13 @@
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.8596,
+      "confidence": 0.7841,
       "correct": true,
       "gold_references": [
         "answer_d50a8a33_1",
         "answer_d50a8a33_2"
       ],
-      "latency_ms": 1005.18,
+      "latency_ms": 1034.07,
       "ndcg_at_5": 0.5013,
       "qid": "gpt4_6ed717ea",
       "query": "Which item did I purchase first, the dog bed for Max or the training pads for Luna?",
@@ -165,13 +165,13 @@
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.98,
+      "confidence": 0.8964,
       "correct": true,
       "gold_references": [
         "answer_e28c1f0e_1",
         "answer_e28c1f0e_2"
       ],
-      "latency_ms": 870.46,
+      "latency_ms": 945.69,
       "ndcg_at_5": 1.0,
       "qid": "gpt4_e414231f",
       "query": "Which bike did I fixed or serviced the past weekend?",
@@ -179,22 +179,22 @@
       "retrieved_ids": [
         "answer_e28c1f0e_1",
         "answer_e28c1f0e_2",
+        "07a26dfa_5",
         "752c438c_3",
-        "deb5bb60",
-        "07a26dfa_5"
+        "c214e8ad"
       ],
       "split": "dev"
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.9349,
+      "confidence": 0.8528,
       "correct": false,
       "gold_references": [
         "answer_544fe66c_2",
         "answer_544fe66c_1",
         "answer_544fe66c_3"
       ],
-      "latency_ms": 978.46,
+      "latency_ms": 1017.07,
       "ndcg_at_5": 0.7039,
       "qid": "gpt4_93f6379c",
       "query": "Which group did I join first, 'Page Turners' or 'Marketing Professionals'?",
@@ -210,13 +210,13 @@
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.9545,
+      "confidence": 0.8707,
       "correct": true,
       "gold_references": [
         "answer_aa930b56_1",
         "answer_aa930b56_2"
       ],
-      "latency_ms": 836.78,
+      "latency_ms": 864.78,
       "ndcg_at_5": 1.0,
       "qid": "gpt4_cd90e484",
       "query": "How long did I use my new binoculars before I saw the American goldfinches returning to the area?",
@@ -232,13 +232,13 @@
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.9492,
+      "confidence": 0.8658,
       "correct": true,
       "gold_references": [
         "answer_d39b7977_1",
         "answer_d39b7977_2"
       ],
-      "latency_ms": 779.79,
+      "latency_ms": 799.08,
       "ndcg_at_5": 1.0,
       "qid": "2c63a862",
       "query": "How many days did it take for me to find a house I loved after starting to work with Rachel?",
@@ -254,13 +254,13 @@
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.9543,
+      "confidence": 0.8705,
       "correct": true,
       "gold_references": [
         "answer_016f6bd4_2",
         "answer_016f6bd4_1"
       ],
-      "latency_ms": 754.94,
+      "latency_ms": 775.69,
       "ndcg_at_5": 1.0,
       "qid": "a3045048",
       "query": "How many days before my best friend's birthday party did I order her gift?",
@@ -276,36 +276,36 @@
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.8853,
+      "confidence": 0.876,
       "correct": false,
       "gold_references": [
         "answer_ff201787_1",
         "answer_ff201787_2"
       ],
-      "latency_ms": 857.62,
-      "ndcg_at_5": 1.0,
+      "latency_ms": 893.62,
+      "ndcg_at_5": 0.9197,
       "qid": "gpt4_fa19884d",
       "query": "What is the artist that I started to listen to last Friday?",
       "recall_at_5": 1.0,
       "retrieved_ids": [
         "answer_ff201787_2",
-        "answer_ff201787_1",
         "5f9dd782",
+        "answer_ff201787_1",
         "ultrachat_525919",
-        "f910dc31_4"
+        "ccc87da9_1"
       ],
       "split": "dev"
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.9673,
+      "confidence": 0.8813,
       "correct": false,
       "gold_references": [
         "answer_7a36e820_2",
         "answer_7a36e820_3",
         "answer_7a36e820_1"
       ],
-      "latency_ms": 804.05,
+      "latency_ms": 809.68,
       "ndcg_at_5": 0.6714,
       "qid": "gpt4_2f56ae70",
       "query": "Which streaming service did I start using most recently?",
@@ -321,13 +321,13 @@
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.9692,
+      "confidence": 0.8841,
       "correct": true,
       "gold_references": [
         "answer_65600ff6_2",
         "answer_65600ff6_1"
       ],
-      "latency_ms": 924.05,
+      "latency_ms": 1004.11,
       "ndcg_at_5": 0.8503,
       "qid": "gpt4_fe651585",
       "query": "Who became a parent first, Rachel or Alex?",
@@ -343,12 +343,12 @@
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.9625,
+      "confidence": 0.8779,
       "correct": true,
       "gold_references": [
         "answer_550bb2d1_1"
       ],
-      "latency_ms": 782.63,
+      "latency_ms": 792.49,
       "ndcg_at_5": 0.6309,
       "qid": "gpt4_b0863698",
       "query": "How many days ago did I participate in the 5K charity run?",
@@ -364,13 +364,13 @@
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.9779,
+      "confidence": 0.892,
       "correct": true,
       "gold_references": [
         "answer_c9d35c00_1",
         "answer_c9d35c00_2"
       ],
-      "latency_ms": 789.59,
+      "latency_ms": 830.55,
       "ndcg_at_5": 1.0,
       "qid": "2ebe6c90",
       "query": "How many days did it take me to finish 'The Nightingale' by Kristin Hannah?",
@@ -386,35 +386,35 @@
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.9264,
-      "correct": false,
+      "confidence": 0.8667,
+      "correct": true,
       "gold_references": [
         "answer_0d4d0348_1",
         "answer_0d4d0348_2"
       ],
-      "latency_ms": 767.98,
-      "ndcg_at_5": 0.3869,
+      "latency_ms": 750.51,
+      "ndcg_at_5": 0.8503,
       "qid": "eac54add",
       "query": "What was the significant buisiness milestone I mentioned four weeks ago?",
-      "recall_at_5": 0.5,
+      "recall_at_5": 1.0,
       "retrieved_ids": [
-        "sharegpt_5YtukCb_0",
         "answer_0d4d0348_2",
-        "577da76d_2",
-        "369695b4_2",
-        "ultrachat_91693"
+        "sharegpt_5YtukCb_0",
+        "ultrachat_133409",
+        "ultrachat_75926",
+        "answer_0d4d0348_1"
       ],
       "split": "dev"
     },
     {
       "category": "temporal_reasoning",
-      "confidence": 0.8736,
+      "confidence": 0.7969,
       "correct": true,
       "gold_references": [
         "answer_da704e79_2",
         "answer_da704e79_1"
       ],
-      "latency_ms": 882.12,
+      "latency_ms": 920.24,
       "ndcg_at_5": 0.6241,
       "qid": "gpt4_d9af6064",
       "query": "Which device did I set up first, the smart thermostat or the new router?",
@@ -430,13 +430,13 @@
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.9767,
+      "confidence": 0.8909,
       "correct": true,
       "gold_references": [
         "answer_c9dfeaea_1",
         "answer_c9dfeaea_2"
       ],
-      "latency_ms": 868.64,
+      "latency_ms": 908.29,
       "ndcg_at_5": 1.0,
       "qid": "720133ac",
       "query": "What is the total cost of Lola's vet visit and flea medication?",
@@ -452,7 +452,7 @@
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.9598,
+      "confidence": 0.8755,
       "correct": true,
       "gold_references": [
         "answer_a679a86a_5",
@@ -461,7 +461,7 @@
         "answer_a679a86a_3",
         "answer_a679a86a_1"
       ],
-      "latency_ms": 826.14,
+      "latency_ms": 851.87,
       "ndcg_at_5": 1.0,
       "qid": "gpt4_7fce9456",
       "query": "How many properties did I view before making an offer on the townhouse in the Brookside neighborhood?",
@@ -477,13 +477,13 @@
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.9726,
+      "confidence": 0.8872,
       "correct": true,
       "gold_references": [
         "answer_96c743d0_2",
         "answer_96c743d0_1"
       ],
-      "latency_ms": 928.05,
+      "latency_ms": 950.19,
       "ndcg_at_5": 1.0,
       "qid": "09ba9854",
       "query": "How much will I save by taking the train from the airport to my hotel instead of a taxi?",
@@ -499,14 +499,14 @@
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.98,
+      "confidence": 0.8987,
       "correct": true,
       "gold_references": [
         "answer_39900a0a_3",
         "answer_39900a0a_2",
         "answer_39900a0a_1"
       ],
-      "latency_ms": 645.99,
+      "latency_ms": 681.5,
       "ndcg_at_5": 1.0,
       "qid": "00ca467f",
       "query": "How many doctor's appointments did I go to in March?",
@@ -522,13 +522,13 @@
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.98,
+      "confidence": 0.8977,
       "correct": true,
       "gold_references": [
         "answer_47152166_2",
         "answer_47152166_1"
       ],
-      "latency_ms": 737.49,
+      "latency_ms": 768.75,
       "ndcg_at_5": 1.0,
       "qid": "a08a253f",
       "query": "How many days a week do I attend fitness classes?",
@@ -544,13 +544,13 @@
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.9589,
+      "confidence": 0.8747,
       "correct": true,
       "gold_references": [
         "answer_50940cb7_2",
         "answer_50940cb7_1"
       ],
-      "latency_ms": 872.28,
+      "latency_ms": 989.34,
       "ndcg_at_5": 1.0,
       "qid": "4f54b7c9",
       "query": "How many antique items did I inherit or acquire from my family members?",
@@ -566,13 +566,13 @@
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.9665,
+      "confidence": 0.8816,
       "correct": true,
       "gold_references": [
         "answer_743f03a1_2",
         "answer_743f03a1_1"
       ],
-      "latency_ms": 873.02,
+      "latency_ms": 989.58,
       "ndcg_at_5": 0.6934,
       "qid": "6456829e",
       "query": "How many plants did I initially plant for tomatoes and cucumbers?",
@@ -588,13 +588,13 @@
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.964,
+      "confidence": 0.8793,
       "correct": true,
       "gold_references": [
         "answer_bf633415_2",
         "answer_bf633415_1"
       ],
-      "latency_ms": 824.81,
+      "latency_ms": 838.54,
       "ndcg_at_5": 1.0,
       "qid": "2311e44b",
       "query": "How many pages do I have left to read in 'The Nightingale'?",
@@ -610,13 +610,13 @@
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.9538,
+      "confidence": 0.8658,
       "correct": true,
       "gold_references": [
         "answer_c69ee1f9_2",
         "answer_c69ee1f9_1"
       ],
-      "latency_ms": 884.07,
+      "latency_ms": 908.94,
       "ndcg_at_5": 1.0,
       "qid": "a11281a2",
       "query": "What was the approximate increase in Instagram followers I experienced in two weeks?",
@@ -632,13 +632,13 @@
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.9624,
+      "confidence": 0.8779,
       "correct": true,
       "gold_references": [
         "answer_80323f3f_1",
         "answer_80323f3f_2"
       ],
-      "latency_ms": 884.15,
+      "latency_ms": 938.85,
       "ndcg_at_5": 1.0,
       "qid": "7405e8b1",
       "query": "Did I receive a higher percentage discount on my first order from HelloFresh, compared to my first UberEats order?",
@@ -654,13 +654,13 @@
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.9431,
+      "confidence": 0.8602,
       "correct": true,
       "gold_references": [
         "answer_872e8da2_2",
         "answer_872e8da2_1"
       ],
-      "latency_ms": 822.68,
+      "latency_ms": 864.31,
       "ndcg_at_5": 0.8772,
       "qid": "61f8c8f8",
       "query": "How much faster did I finish the 5K run compared to my previous year's time?",
@@ -676,13 +676,13 @@
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.9616,
+      "confidence": 0.8771,
       "correct": true,
       "gold_references": [
         "answer_f7fd1029_2",
         "answer_f7fd1029_1"
       ],
-      "latency_ms": 833.65,
+      "latency_ms": 856.65,
       "ndcg_at_5": 1.0,
       "qid": "ef66a6e5",
       "query": "How many sports have I played competitively in the past?",
@@ -698,7 +698,7 @@
     },
     {
       "category": "multi_session_aggregation",
-      "confidence": 0.9702,
+      "confidence": 0.885,
       "correct": true,
       "gold_references": [
         "answer_b6018747_2",
@@ -706,7 +706,7 @@
         "answer_b6018747_1",
         "answer_b6018747_3"
       ],
-      "latency_ms": 744.21,
+      "latency_ms": 819.69,
       "ndcg_at_5": 0.7606,
       "qid": "e3038f8c",
       "query": "How many rare items do I have in total?",
@@ -722,13 +722,13 @@
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.9782,
+      "confidence": 0.8923,
       "correct": true,
       "gold_references": [
         "answer_7e9ad7b4_1",
         "answer_7e9ad7b4_2"
       ],
-      "latency_ms": 849.72,
+      "latency_ms": 1028.99,
       "ndcg_at_5": 0.9197,
       "qid": "07741c45",
       "query": "Where do I currently keep my old sneakers?",
@@ -744,13 +744,13 @@
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.9656,
+      "confidence": 0.8807,
       "correct": true,
       "gold_references": [
         "answer_67074b4b_1",
         "answer_67074b4b_2"
       ],
-      "latency_ms": 657.81,
+      "latency_ms": 736.29,
       "ndcg_at_5": 1.0,
       "qid": "b6019101",
       "query": "How many MCU films did I watch in the last 3 months?",
@@ -766,13 +766,13 @@
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.9498,
+      "confidence": 0.8664,
       "correct": true,
       "gold_references": [
         "answer_4dac77cb_1",
         "answer_4dac77cb_2"
       ],
-      "latency_ms": 1015.49,
+      "latency_ms": 1244.04,
       "ndcg_at_5": 0.9197,
       "qid": "6071bd76",
       "query": "For the coffee-to-water ratio in my French press, did I switch to more water per tablespoon of coffee, or less?",
@@ -788,13 +788,13 @@
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.98,
+      "confidence": 0.91,
       "correct": true,
       "gold_references": [
         "answer_5126c02d_1",
         "answer_5126c02d_2"
       ],
-      "latency_ms": 747.77,
+      "latency_ms": 818.37,
       "ndcg_at_5": 1.0,
       "qid": "a2f3aa27",
       "query": "How many followers do I have on Instagram now?",
@@ -810,13 +810,13 @@
     },
     {
       "category": "knowledge_updates_supersession",
-      "confidence": 0.9644,
+      "confidence": 0.8374,
       "correct": true,
       "gold_references": [
         "answer_626e93c4_1",
         "answer_626e93c4_2"
       ],
-      "latency_ms": 994.11,
+      "latency_ms": 1186.52,
       "ndcg_at_5": 1.0,
       "qid": "c6853660",
       "query": "Did I mostly recently increase or decrease the limit on the number of cups of coffee in the morning?",
@@ -832,10 +832,10 @@
     },
     {
       "category": "abstention",
-      "confidence": 0.96,
+      "confidence": 0.8385,
       "correct": true,
       "gold_references": [],
-      "latency_ms": 827.19,
+      "latency_ms": 885.9,
       "ndcg_at_5": 0.0,
       "qid": "51a45a95_gold_removed",
       "query": "Where did I redeem a $5 coupon on coffee creamer?",
@@ -851,14 +851,14 @@
     },
     {
       "category": "abstention",
-      "confidence": 0.8866,
+      "confidence": 0.8685,
       "correct": true,
       "gold_references": [
         "answer_990c8992_abs_2",
         "answer_990c8992_abs_3",
         "answer_990c8992_abs_1"
       ],
-      "latency_ms": 785.52,
+      "latency_ms": 970.96,
       "ndcg_at_5": 1.0,
       "qid": "80ec1f4f_abs",
       "query": "How many different museums or galleries did I visit in December?",
@@ -874,10 +874,10 @@
     },
     {
       "category": "abstention",
-      "confidence": 0.8765,
+      "confidence": 0.8586,
       "correct": true,
       "gold_references": [],
-      "latency_ms": 1246.83,
+      "latency_ms": 1748.3,
       "ndcg_at_5": 0.0,
       "qid": "70b3e69b_gold_removed",
       "query": "I was going through our previous conversation about the impact of the political climate in Catalonia on its literature and music. Can you remind me of the example you gave of a Spanish-Catalan singer-songwriter who supports unity between Catalonia and Spain?",
@@ -893,31 +893,31 @@
     },
     {
       "category": "abstention",
-      "confidence": 0.8695,
+      "confidence": 0.8481,
       "correct": true,
       "gold_references": [],
-      "latency_ms": 1486.01,
+      "latency_ms": 1989.32,
       "ndcg_at_5": 0.0,
       "qid": "6222b6eb_gold_removed",
       "query": "I was going through our previous conversation about atmospheric correction methods, and I wanted to confirm - you mentioned that 6S, MAJA, and Sen2Cor are all algorithms for atmospheric correction of remote sensing images. Can you remind me which one is implemented in the SIAC_GEE tool?",
       "recall_at_5": 0.0,
       "retrieved_ids": [
         "04a0b385",
+        "aea71da3_2",
         "caf7480d_1",
         "7b2523d3",
-        "sharegpt_cyc2xbb_0",
-        "ultrachat_281279"
+        "sharegpt_cyc2xbb_0"
       ],
       "split": "dev"
     },
     {
       "category": "abstention",
-      "confidence": 0.8963,
+      "confidence": 0.878,
       "correct": true,
       "gold_references": [
         "answer_e6143162_abs"
       ],
-      "latency_ms": 841.98,
+      "latency_ms": 966.65,
       "ndcg_at_5": 1.0,
       "qid": "bc8a6e93_abs",
       "query": "What did I bake for my uncle's birthday party?",
@@ -933,10 +933,10 @@
     },
     {
       "category": "abstention",
-      "confidence": 0.9571,
+      "confidence": 0.8708,
       "correct": false,
       "gold_references": [],
-      "latency_ms": 789.81,
+      "latency_ms": 906.93,
       "ndcg_at_5": 0.0,
       "qid": "86f00804_gold_removed",
       "query": "What book am I currently reading?",
@@ -952,10 +952,10 @@
     },
     {
       "category": "abstention",
-      "confidence": 0.9523,
+      "confidence": 0.8395,
       "correct": false,
       "gold_references": [],
-      "latency_ms": 1075.36,
+      "latency_ms": 1403.06,
       "ndcg_at_5": 0.0,
       "qid": "1d4da289_gold_removed",
       "query": "I was thinking about our previous conversation about data privacy and security. You mentioned that companies use two-factor authentication to enhance security. Can you remind me what kind of two-factor authentication methods you were referring to?",
@@ -971,13 +971,13 @@
     },
     {
       "category": "abstention",
-      "confidence": 0.8768,
+      "confidence": 0.8589,
       "correct": true,
       "gold_references": [
         "answer_e0956e0a_abs_2",
         "answer_e0956e0a_abs_1"
       ],
-      "latency_ms": 855.84,
+      "latency_ms": 945.94,
       "ndcg_at_5": 0.2372,
       "qid": "60bf93ed_abs",
       "query": "How many days did it take for my iPad case to arrive after I bought it?",
@@ -993,13 +993,13 @@
     },
     {
       "category": "abstention",
-      "confidence": 0.9028,
+      "confidence": 0.8844,
       "correct": true,
       "gold_references": [
         "answer_8748f791_abs_1",
         "answer_8748f791_abs_2"
       ],
-      "latency_ms": 873.67,
+      "latency_ms": 1004.25,
       "ndcg_at_5": 1.0,
       "qid": "031748ae_abs",
       "query": "How many engineers do I lead when I just started my new role as Software Engineer Manager?",
@@ -1015,10 +1015,10 @@
     },
     {
       "category": "abstention",
-      "confidence": 0.9491,
-      "correct": false,
+      "confidence": 0.8634,
+      "correct": true,
       "gold_references": [],
-      "latency_ms": 1014.3,
+      "latency_ms": 1189.92,
       "ndcg_at_5": 0.0,
       "qid": "65240037_gold_removed",
       "query": "I remember you told me to dilute tea tree oil with a carrier oil before applying it to my skin. Can you remind me what the recommended ratio is?",
@@ -1034,13 +1034,13 @@
     },
     {
       "category": "abstention",
-      "confidence": 0.8655,
+      "confidence": 0.8478,
       "correct": true,
       "gold_references": [
         "answer_b3070ec4_abs_2",
         "answer_b3070ec4_abs_1"
       ],
-      "latency_ms": 957.11,
+      "latency_ms": 1078.77,
       "ndcg_at_5": 0.5438,
       "qid": "gpt4_70e84552_abs",
       "query": "Which task did I complete first, fixing the fence or purchasing three cows from Peter?",
@@ -1056,10 +1056,10 @@
     },
     {
       "category": "abstention",
-      "confidence": 0.8993,
+      "confidence": 0.8809,
       "correct": true,
       "gold_references": [],
-      "latency_ms": 1532.67,
+      "latency_ms": 1852.9,
       "ndcg_at_5": 0.0,
       "qid": "1b9b7252_gold_removed",
       "query": "I wanted to follow up on our previous conversation about mindfulness techniques. You mentioned some great resources for guided imagery exercises, can you remind me of the website that had free exercises like 'The Mountain Meditation' and 'The Body Scan Meditation'?",
@@ -1075,10 +1075,10 @@
     },
     {
       "category": "abstention",
-      "confidence": 0.9669,
+      "confidence": 0.8847,
       "correct": false,
       "gold_references": [],
-      "latency_ms": 771.49,
+      "latency_ms": 838.71,
       "ndcg_at_5": 0.0,
       "qid": "6b168ec8_gold_removed",
       "query": "How many bikes do I own?",
@@ -1094,10 +1094,10 @@
     },
     {
       "category": "abstention",
-      "confidence": 0.9484,
-      "correct": false,
+      "confidence": 0.8637,
+      "correct": true,
       "gold_references": [],
-      "latency_ms": 952.12,
+      "latency_ms": 1028.94,
       "ndcg_at_5": 0.0,
       "qid": "eaca4986_gold_removed",
       "query": "I'm looking back at our previous conversation where you created two sad songs for me. Can you remind me what was the chord progression for the chorus in the second song?",
@@ -1113,10 +1113,10 @@
     },
     {
       "category": "abstention",
-      "confidence": 0.951,
+      "confidence": 0.8651,
       "correct": false,
       "gold_references": [],
-      "latency_ms": 1165.99,
+      "latency_ms": 1437.45,
       "ndcg_at_5": 0.0,
       "qid": "e8a79c70_gold_removed",
       "query": "I was going through our previous conversation about making a classic French omelette, and I wanted to confirm - how many eggs did you say we need for the recipe?",
@@ -1132,13 +1132,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.9726,
+      "confidence": 0.8502,
       "correct": true,
       "gold_references": [
         "doc_mara_helios",
         "doc_helios_deadline"
       ],
-      "latency_ms": 1.77,
+      "latency_ms": 1.74,
       "ndcg_at_5": 1.0,
       "qid": "mh_01_mara_helios",
       "query": "When does Mara's project ship?",
@@ -1151,13 +1151,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.9726,
+      "confidence": 0.8502,
       "correct": true,
       "gold_references": [
         "doc_owen_borealis",
         "doc_borealis_deadline"
       ],
-      "latency_ms": 1.38,
+      "latency_ms": 1.84,
       "ndcg_at_5": 1.0,
       "qid": "mh_02_owen_borealis",
       "query": "When does Owen's project ship?",
@@ -1170,13 +1170,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.9726,
+      "confidence": 0.8502,
       "correct": true,
       "gold_references": [
         "doc_reza_aurora",
         "doc_aurora_deadline"
       ],
-      "latency_ms": 1.34,
+      "latency_ms": 1.59,
       "ndcg_at_5": 1.0,
       "qid": "mh_03_reza_aurora",
       "query": "When does Reza's project ship?",
@@ -1189,13 +1189,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.9726,
+      "confidence": 0.8502,
       "correct": true,
       "gold_references": [
         "doc_sora_polaris",
         "doc_polaris_deadline"
       ],
-      "latency_ms": 1.28,
+      "latency_ms": 1.44,
       "ndcg_at_5": 1.0,
       "qid": "mh_06_sora_polaris",
       "query": "When does Sora's project ship?",
@@ -1208,13 +1208,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.9726,
+      "confidence": 0.8502,
       "correct": true,
       "gold_references": [
         "doc_kiran_lyra",
         "doc_lyra_deadline"
       ],
-      "latency_ms": 1.31,
+      "latency_ms": 1.39,
       "ndcg_at_5": 1.0,
       "qid": "mh_08_kiran_lyra",
       "query": "When does Kiran's project ship?",
@@ -1227,13 +1227,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.9726,
+      "confidence": 0.8502,
       "correct": true,
       "gold_references": [
         "doc_leo_pegasus",
         "doc_pegasus_deadline"
       ],
-      "latency_ms": 1.29,
+      "latency_ms": 1.51,
       "ndcg_at_5": 1.0,
       "qid": "mh_10_leo_pegasus",
       "query": "When does Leo's project ship?",
@@ -1246,13 +1246,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.9726,
+      "confidence": 0.8502,
       "correct": true,
       "gold_references": [
         "doc_chloe_vega",
         "doc_vega_deadline"
       ],
-      "latency_ms": 1.63,
+      "latency_ms": 1.82,
       "ndcg_at_5": 1.0,
       "qid": "mh_14_chloe_vega",
       "query": "When does Chloe's project ship?",
@@ -1265,13 +1265,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.9726,
+      "confidence": 0.8502,
       "correct": true,
       "gold_references": [
         "doc_daniel_sirius",
         "doc_sirius_deadline"
       ],
-      "latency_ms": 1.29,
+      "latency_ms": 1.66,
       "ndcg_at_5": 1.0,
       "qid": "mh_15_daniel_sirius",
       "query": "When does Daniel's project ship?",
@@ -1284,13 +1284,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.9726,
+      "confidence": 0.8502,
       "correct": true,
       "gold_references": [
         "doc_fatima_altair",
         "doc_altair_deadline"
       ],
-      "latency_ms": 1.28,
+      "latency_ms": 1.54,
       "ndcg_at_5": 1.0,
       "qid": "mh_16_fatima_altair",
       "query": "When does Fatima's project ship?",
@@ -1303,13 +1303,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.9726,
+      "confidence": 0.8502,
       "correct": true,
       "gold_references": [
         "doc_hanna_pollux",
         "doc_pollux_deadline"
       ],
-      "latency_ms": 1.27,
+      "latency_ms": 1.44,
       "ndcg_at_5": 1.0,
       "qid": "mh_18_hanna_pollux",
       "query": "When does Hanna's project ship?",
@@ -1322,13 +1322,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.9726,
+      "confidence": 0.8502,
       "correct": true,
       "gold_references": [
         "doc_liam_antares",
         "doc_antares_deadline"
       ],
-      "latency_ms": 1.28,
+      "latency_ms": 1.46,
       "ndcg_at_5": 1.0,
       "qid": "mh_21_liam_antares",
       "query": "When does Liam's project ship?",
@@ -1341,13 +1341,13 @@
     },
     {
       "category": "multi_hop",
-      "confidence": 0.9726,
+      "confidence": 0.8502,
       "correct": true,
       "gold_references": [
         "doc_olivia_aldebaran",
         "doc_aldebaran_deadline"
       ],
-      "latency_ms": 1.27,
+      "latency_ms": 1.43,
       "ndcg_at_5": 1.0,
       "qid": "mh_24_olivia_aldebaran",
       "query": "When does Olivia's project ship?",
@@ -1398,12 +1398,12 @@
   "schema_version": "1.0.0",
   "split_breakdown": {
     "dev": {
-      "abstention_balanced_acc": 0.7783,
-      "composite_score": 0.9411,
-      "ece": 0.1198,
+      "abstention_balanced_acc": 0.8558,
+      "composite_score": 0.9628,
+      "ece": 0.0181,
       "n_queries": 61,
-      "ndcg_at_5": 0.9166,
-      "recall_at_5": 0.9746,
+      "ndcg_at_5": 0.9331,
+      "recall_at_5": 0.9855,
       "supersession_accuracy": 1.0
     },
     "held_out": {
@@ -1417,18 +1417,18 @@
     }
   },
   "summary": {
-    "abstention_balanced_acc": 0.7783,
-    "abstention_f1": 0.6923,
-    "abstention_rate": 0.6,
+    "abstention_balanced_acc": 0.8558,
+    "abstention_f1": 0.8148,
+    "abstention_rate": 0.7333,
     "benign_false_positive_rate": 0.0,
     "cognitive_integrity_pass_rate": 1.0,
-    "composite_score": 0.9411,
-    "ece": 0.1198,
+    "composite_score": 0.9628,
+    "ece": 0.0181,
     "g2_answer_quality_lift": 0.4167,
     "ndcg_at_5": {
-      "ci_95_high": 0.9601,
-      "ci_95_low": 0.8689,
-      "mean": 0.9166,
+      "ci_95_high": 0.9681,
+      "ci_95_low": 0.8937,
+      "mean": 0.9331,
       "method": "bootstrap"
     },
     "non_saturation_verified": false,
@@ -1440,8 +1440,8 @@
     },
     "recall_at_5": {
       "ci_95_high": 1.0,
-      "ci_95_low": 0.942,
-      "mean": 0.9746,
+      "ci_95_low": 0.9638,
+      "mean": 0.9855,
       "method": "bootstrap"
     },
     "untrusted_instruction_containment": 1.0
@@ -1453,7 +1453,7 @@
       "operator": "<",
       "passed": false,
       "target": 1.0,
-      "value": 0.9746
+      "value": 0.9855
     },
     {
       "check": "poison_block_rate",

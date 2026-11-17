@@ -74,6 +74,7 @@ from mnemosyne.retrieval import (
     resolve_query_timezone,
     schema_fast_path_rerank,
     semantic_entropy,
+    spread_temporal_buckets,
     strip_workspace_broadcast_filter,
     workspace_broadcast_from_context,
     working_memory_route_hits,
@@ -725,8 +726,26 @@ def _extract_query_facets(query: str) -> list[set[str]]:
     if not re.search(r"\b(and|or|both|as well as|between)\b", query, re.I):
         return []
 
+    # 1. Explicit quoted alternatives (e.g. "Which X did I join first, 'A B' or 'C D'?")
+    quoted = [
+        m.group(1) or m.group(2)
+        for m in re.finditer(r"'([^']{2,60})'|\"([^\"]{2,60})\"", query)
+    ]
+    if len(quoted) >= 2:
+        q_facets: list[set[str]] = []
+        for q_phrase in quoted:
+            q_terms = {
+                normalise_query_term(t)
+                for t in tokenize(q_phrase)
+                if len(t) > 2 and t not in QUERY_SUPPORT_STOPWORDS
+            }
+            if q_terms and q_terms not in q_facets:
+                q_facets.append(q_terms)
+        if len(q_facets) >= 2:
+            return q_facets
+
     cleaned = re.sub(
-        r"^(?:(?:what|which)\s+(?:is|are|was|were)\s+(?:the\s+)?|(?:tell\s+me\s+about\s+(?:the\s+)?)|(?:how\s+(?:many|much)\s+(?:total\s+)?))",
+        r"^(?:(?:what|which)\s+(?:[a-z]+\s+){0,3}?(?:is|are|was|were|did|do|does)\s+(?:i\s+[a-z]+\s+(?:first|last|most\s+recently)[,\s]*|(?:the\s+)?)|(?:tell\s+me\s+about\s+(?:the\s+)?)|(?:how\s+(?:many|much)\s+(?:total\s+)?))",
         "",
         query,
         flags=re.I,
@@ -771,17 +790,33 @@ def _diversify_facets(query: str, hits: list[Hit], k: int) -> list[Hit]:
     if not facets or len(hits) <= 1:
         return hits
 
+    stemmed_facets: list[set[str]] = [
+        {"user_self"} if f == {"user_self"} else {_norm_stem(t) for t in f if t != "user_self"}
+        for f in facets
+    ]
+    hit_stemmed_terms: list[set[str]] = [
+        {_norm_stem(normalise_query_term(t)) for t in tokenize(hit.text) if len(t) > 2}
+        for hit in hits
+    ]
+
+    # Prefer strict all-term phrase coverage for multi-word facets when at least one hit supports it;
+    # fall back to partial term overlap otherwise.
+    facet_has_strict = [
+        (sf != {"user_self"} and len(sf) >= 2 and any(sf <= h_terms for h_terms in hit_stemmed_terms))
+        for sf in stemmed_facets
+    ]
+
     hit_facets: list[set[int]] = []
-    for hit in hits:
-        text_terms = {normalise_query_term(t) for t in tokenize(hit.text) if len(t) > 2}
-        stemmed_text_terms = {_norm_stem(t) for t in text_terms}
+    for hit, stemmed_text_terms in zip(hits, hit_stemmed_terms, strict=True):
         covered: set[int] = set()
-        for f_idx, f_terms in enumerate(facets):
-            if f_terms == {"user_self"}:
+        for f_idx, content_terms in enumerate(stemmed_facets):
+            if content_terms == {"user_self"}:
                 if re.search(r"\b(i|my|me|myself)\b", hit.text, re.I):
                     covered.add(f_idx)
+            elif facet_has_strict[f_idx]:
+                if content_terms <= stemmed_text_terms:
+                    covered.add(f_idx)
             else:
-                content_terms = {_norm_stem(t) for t in f_terms if t != "user_self"}
                 if any(t in stemmed_text_terms for t in content_terms):
                     covered.add(f_idx)
         hit_facets.append(covered)
@@ -796,7 +831,7 @@ def _diversify_facets(query: str, hits: list[Hit], k: int) -> list[Hit]:
         best_idx: int | None = None
 
         if uncovered:
-            for idx in candidate_indices[:25]:
+            for idx in candidate_indices[:40]:
                 if hit_facets[idx] & uncovered:
                     best_idx = idx
                     break
@@ -2261,7 +2296,65 @@ def run_retrieval_pipeline(
         fused if chronological_window or (relevance_order and ops.adapters.reranker.name == "local-similarity")
         else ops.adapters.reranker.rerank(rerank_query, fused, k=max(k * 2, k))
     )
+    # Bounded iterative facet & residual coverage expansion when multi-facet / aggregation queries
+    # miss an explicit facet or distinct session in the initial single-shot ranking.
+    query_facets = _extract_query_facets(query)
+    if query_facets and len(reranked) >= 1:
+        existing_ids = {(h.kind, h.id) for h in reranked}
+        for f_terms in query_facets:
+            if f_terms == {"user_self"}:
+                continue
+            f_stems = {_norm_stem(t) for t in f_terms}
+            has_facet = any(
+                f_stems <= {_norm_stem(normalise_query_term(tok)) for tok in tokenize(h.text) if len(tok) > 2}
+                for h in reranked[: max(k, 10)]
+            )
+            if not has_facet:
+                facet_q = " ".join(sorted(f_terms))
+                extra_f = ops.lexical_search(facet_q, max(k, 8), {**effective_filter, "query_mode": "passages"})
+                for eh in extra_f:
+                    if (
+                        eh.tenant_id == tenant_id
+                        and eh.branch == branch
+                        and (eh.kind, eh.id) not in existing_ids
+                        and eh.trust_tier <= max_trust
+                        and eh.sensitivity <= max_sensitivity
+                        and (include_quarantined or not eh.metadata.get("quarantine_reason"))
+                    ):
+                        reranked.append(eh)
+                        existing_ids.add((eh.kind, eh.id))
+                        break
     reranked = _diversify_facets(query, reranked, k=max(k, 5))
+    # Spread multi-session aggregation & broad temporal sequence candidates across calendar buckets
+    # while pinning the top-2 relevance hits so single-session precision is never harmed.
+    temporal_spread_explain: dict[str, Any] | None = None
+    wants_temporal_spread = bool(
+        window is None
+        and len(reranked) > 5
+        and re.search(
+            r"\b(?:how\s+many|how\s+much\s+total|all\s+the|every\s+time|most\s+recently|in\s+the\s+past|over\s+the\s+past)\b",
+            query,
+            re.I,
+        )
+    )
+    if wants_temporal_spread and not query_facets:
+        times_for_spread = ops.evidence_created_at_many(tenant_id, [h.id for h in reranked], branch)
+        enriched_for_spread = [
+            replace(h, metadata={**h.metadata, "_candidate_created_at": times_for_spread[h.id].isoformat()})
+            if h.id in times_for_spread and "_candidate_created_at" not in h.metadata and "created_at" not in h.metadata
+            else h
+            for h in reranked
+        ]
+        pinned_top = enriched_for_spread[:2]
+        pinned_ids = {(h.kind, h.id) for h in pinned_top}
+        spread_tail = spread_temporal_buckets(
+            [h for h in enriched_for_spread[2:] if (h.kind, h.id) not in pinned_ids],
+            k=max(k, 8),
+            min_score_ratio=0.55,
+        )
+        seen_sp = pinned_ids | {(h.kind, h.id) for h in spread_tail}
+        reranked = pinned_top + spread_tail + [h for h in enriched_for_spread if (h.kind, h.id) not in seen_sp]
+        temporal_spread_explain = {"applied": True, "spread_count": len(spread_tail)}
     if chronological_window:
         # "First/last said" is an ordering constraint on source timestamps,
         # not a relevance hint that a learned or schema reranker may replace.
@@ -2336,7 +2429,16 @@ def run_retrieval_pipeline(
             return datetime.min.replace(tzinfo=timezone.utc)
 
         reverse = (chronological_order == "latest_first")
-        top_k_count = 5
+        # Only reorder genuinely relevant candidates; if explicit facets were extracted, keep at least
+        # enough depth to cover all facet matches without pulling low-score distractors ahead of hits.
+        top_rel_score = max((float(h.score or 0.0) for h in ordered), default=0.0)
+        high_rel_prefix = 0
+        for h in ordered[:8]:
+            if top_rel_score > 0.0 and float(h.score or 0.0) >= top_rel_score * 0.55:
+                high_rel_prefix += 1
+            else:
+                break
+        top_k_count = max(5, high_rel_prefix) if query_facets else min(5, max(2, high_rel_prefix)) if top_rel_score > 0 else 5
         top_slice = list(ordered[:top_k_count])
         remainder = list(ordered[top_k_count:])
         top_slice.sort(key=lambda hit: (_get_hit_time(hit), hit.id), reverse=reverse)
@@ -2354,6 +2456,12 @@ def run_retrieval_pipeline(
         priority_in_working = [hit for hit in working if _is_priority_working(hit)]
         if priority_in_working:
             ordered = [*priority_in_working, *[hit for hit in ordered if not _is_priority_working(hit)]]
+    observation_dedup_report: dict[str, Any] | None = None
+    has_synthesized_layer = any(
+        h.kind in {"observation", "knowledge_page"}
+        or h.metadata.get("memory_type") in {"observation", "knowledge_page"}
+        for h in ordered
+    )
     if working_requested and any(_is_priority_working(hit) for hit in ordered):
         priority_candidates = [hit for hit in ordered if _is_priority_working(hit)]
         general_candidates = [hit for hit in ordered if not _is_priority_working(hit)]
@@ -2378,6 +2486,15 @@ def run_retrieval_pipeline(
         budgeted = [hit for hit in ordered if id(hit) in kept_all_ids]
         used = sum(approx_tokens(hit.text) for hit in budgeted)
         priority_items_retained = len(kept_priority)
+    elif has_synthesized_layer or effective_filter.get("observation_preferred_dedup"):
+        exp_budget = int(effective_filter.get("source_expansion_budget_tokens", max(0, token_budget // 3)))
+        fact_budget = max(1, token_budget - exp_budget)
+        deduped_hits, observation_dedup_report = deduplicate_observation_preferred(
+            ordered,
+            fact_budget_tokens=fact_budget,
+            source_expansion_budget_tokens=exp_budget,
+        )
+        budgeted, used = _fit_budget_packed(ops, deduped_hits, token_budget, query=query)
     else:
         budgeted, used = _fit_budget_packed(ops, ordered, token_budget, query=query)
     budgeted = ops._mark_retrieved_text_as_data(budgeted)
@@ -2412,19 +2529,25 @@ def run_retrieval_pipeline(
         window_support_query(window) if use_stripped_window_query else query, budgeted, linked_facts
     )
     if (window_explain or {}).get("span_unanswered"):
-        # Said on another day: returned, but asserted only when the memory itself names the span.
-        support_report = min(support_report, query_support(
-            window.label, [hit for hit in budgeted if hit.metadata.get("temporal_fallback")]
-        ), key=lambda report: report["score"])
+        # Said on another day: returned, but asserted only when no in-window hit survived
+        # AND the fallback memory itself names the span.
+        fallback_only_hits = [hit for hit in budgeted if hit.metadata.get("temporal_fallback")]
+        has_in_window_hit = any(not hit.metadata.get("temporal_fallback") for hit in budgeted)
+        if not has_in_window_hit:
+            support_report = min(
+                support_report,
+                query_support(window.label, fallback_only_hits),
+                key=lambda report: report["score"],
+            )
     support_score = support_report["score"]
     if cosine_ranked:
         # Found by meaning: a best cosine at or above the index's floor supports the answer
-        # only when no explicit proper-noun, number, or compound-noun anchor is contradicted
-        # or completely absent from the retrieved evidence.
+        # only when no explicit proper-noun, number, compound-noun, or coherence anchor is
+        # contradicted/absent AND lexical/topical support is not severely deficient.
         top_score = float(graph_explain.get("top_score") or 0.0)
         floor = float(getattr(passage_graph, "support_floor", 1.0))
         anchor_ok = bool(support_report.get("anchor_grounding", {}).get("satisfied", True))
-        semantic_supported = (top_score >= floor) and anchor_ok
+        semantic_supported = (top_score >= floor) and anchor_ok and (support_score >= 0.50)
         support_report["semantic"] = {
             "top_score": top_score,
             "floor": floor,
@@ -2432,7 +2555,7 @@ def run_retrieval_pipeline(
             "anchor_ok": anchor_ok,
         }
         if semantic_supported:
-            support_score = 1.0
+            support_score = max(support_score, min(1.0, 0.50 * support_score + 0.50))
     insufficient_support = support_score < QUERY_SUPPORT_THRESHOLD
     confidence = ops._confidence(query, budgeted, support_score=support_score)
     prediction_set_size = ops._prediction_set_size(budgeted, threshold)
@@ -2564,6 +2687,10 @@ def run_retrieval_pipeline(
         explain["passage_graph"] = passage_graph_explain
     if window_explain is not None:
         explain["time_window"] = window_explain
+    if temporal_spread_explain is not None:
+        explain["temporal_bucket_spread"] = temporal_spread_explain
+    if observation_dedup_report is not None:
+        explain["observation_dedup"] = observation_dedup_report
     result = RetrievalResult(
         query=query,
         hits=budgeted,

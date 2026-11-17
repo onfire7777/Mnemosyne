@@ -381,8 +381,16 @@ def _provider_claims(source, event, workspace, proposer, reviewer, *, synthesis=
     if proposer is None or not _independent_content(event):
         return [], [], {"provider_pending": False}
     output = _output(source, event)
-    if len(output.strip()) < 40:
+    stripped_out = output.strip()
+    if len(stripped_out) < 40:
         return [], [], {"provider_pending": False}
+    # Skip zero-claim operational boilerplate (clean git status, bare progress bars, hex-only dumps)
+    # so background provider queues do not burn LLM calls on non-semantic tool noise.
+    if re.fullmatch(
+        r"(?is)(?:on branch \S+\s+nothing to commit,\s+working tree clean\.?|all checks passed!?|[0-9a-f\s:.-]{40,})",
+        stripped_out,
+    ):
+        return [], [], {"provider_pending": False, "coverage_complete": True}
     # Never send credential-bearing lines to a semantic provider. Offsets stay
     # source-relative because each surviving window carries its original span.
     windows, block, block_start = [], "", source.content.find(output)

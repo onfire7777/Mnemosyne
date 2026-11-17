@@ -25,11 +25,22 @@ from mnemosyne.models import Assertion, Relation, parse_dt, utc_now
 from mnemosyne.security import TrustTier
 
 
+def _safe_astimezone_utc(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    try:
+        return dt.astimezone(UTC)
+    except OverflowError:
+        if dt.year >= 9999:
+            return datetime.max.replace(tzinfo=UTC)
+        return datetime.min.replace(tzinfo=UTC)
+
+
 class IsoDateTime(str):
     """Dual str/datetime representation for occurrence interval endpoints in qualifiers."""
 
     def __new__(cls, dt: datetime) -> "IsoDateTime":
-        aware = dt.astimezone(UTC) if dt.tzinfo else dt.replace(tzinfo=UTC)
+        aware = _safe_astimezone_utc(dt)
         obj = super().__new__(cls, aware.isoformat())
         obj._dt = aware  # type: ignore[attr-defined]
         return obj
@@ -233,18 +244,14 @@ def _to_utc(dt: datetime | None) -> datetime:
     """Normalize datetime to UTC. If None, returns datetime.min with UTC tzinfo. If naive, assumes UTC."""
     if dt is None:
         return datetime.min.replace(tzinfo=UTC)
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=UTC)
-    return dt.astimezone(UTC)
+    return _safe_astimezone_utc(dt)
 
 
 def _to_utc_opt(dt: datetime | None) -> datetime | None:
     """Normalize datetime to UTC, preserving None. If naive, assumes UTC."""
     if dt is None:
         return None
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=UTC)
-    return dt.astimezone(UTC)
+    return _safe_astimezone_utc(dt)
 
 
 @dataclass(frozen=True, slots=True)
@@ -582,46 +589,49 @@ def build_episodic_user_digest(
         ),
     )
 
+    _RESIDENCE_PREDS = {"residence", "lives_in", "lived_in", "resides_in", "moved_to"}
     latest_single_value: dict[tuple[str, str], Assertion] = {}
     for a in sorted_assertions:
         cat_key = a.predicate.lower()
-        if cat_key in {"residence", "lives_in"}:
-            latest_single_value[(a.subject.lower(), "residence")] = a
+        if cat_key in _RESIDENCE_PREDS:
+            if getattr(a, "status", "active") not in _INACTIVE_ASSERTION_STATUSES:
+                latest_single_value[(a.subject.lower(), "residence")] = a
 
+    _NEVER_VALID_AS_OF = {"retracted", "quarantined", "contested"}
     latest_single_value_as_of: dict[tuple[str, str], Assertion] = {}
     if as_of is not None:
         aware_as_of = _to_utc(as_of)
         for a in sorted_assertions:
             cat_key = a.predicate.lower()
-            if cat_key in {"residence", "lives_in"}:
+            if cat_key in _RESIDENCE_PREDS:
                 vf = _to_utc(a.valid_from)
                 vt = _to_utc_opt(a.valid_to)
+                a_stat = getattr(a, "status", "active") or "active"
                 if (
                     vf <= aware_as_of
                     and (vt is None or aware_as_of < vt)
-                    and (
-                        getattr(a, "status", "active")
-                        not in _INACTIVE_ASSERTION_STATUSES
-                        or (vt is not None and aware_as_of < vt)
-                    )
+                    and a_stat not in _NEVER_VALID_AS_OF
                 ):
                     latest_single_value_as_of[(a.subject.lower(), "residence")] = a
 
     distilled: list[DistilledFact] = []
     for a in sorted_assertions:
         pred_low = a.predicate.lower()
-        is_single = pred_low in {"residence", "lives_in"}
+        is_single = pred_low in _RESIDENCE_PREDS
         if as_of is not None:
             aware_as_of = _to_utc(as_of)
             vf = _to_utc(a.valid_from)
             vt = _to_utc_opt(a.valid_to)
+            a_stat = getattr(a, "status", "active") or "active"
             in_window = (
                 (vf <= aware_as_of)
                 and (vt is None or aware_as_of < vt)
                 and (
-                    getattr(a, "status", "active") not in _INACTIVE_ASSERTION_STATUSES
+                    a_stat not in _INACTIVE_ASSERTION_STATUSES
+                    or a_stat == "superseded"
                     or (vt is not None and aware_as_of < vt)
                 )
+                and a_stat not in _NEVER_VALID_AS_OF
             )
             if is_single:
                 latest = latest_single_value_as_of.get((a.subject.lower(), "residence"))
@@ -640,7 +650,7 @@ def build_episodic_user_digest(
                 getattr(a, "status", "active") not in _INACTIVE_ASSERTION_STATUSES
             ) and (a.valid_to is None)
 
-        if pred_low in {"residence", "lives_in"}:
+        if pred_low in _RESIDENCE_PREDS:
             cat = "residence"
         elif pred_low in {"has_family", "has_pet", "breed"} or pred_low.startswith(
             "has_"
@@ -1241,13 +1251,18 @@ def _strip_temporal_affixes(clause: str) -> str:
 
 
 _HYPOTHETICAL_PATTERN = re.compile(
-    r"(?i)\b(?:suppose|imagine|hypothetically|what if|let's say|assuming|consider a scenario)\b"
+    r"(?i)(?:\b(?:suppose|imagine|hypothetically|what\s+if|let's\s+say|assuming|consider\s+a\s+scenario|counterfactually|in\s+theory)\b"
+    r"|^\s*(?:if|unless)\s+(?:i|we|you|he|she|they|my|our)\b"
+    r"|\b(?:if|unless)\s+(?:i|we)\s+(?:were\s+to|had|moved|lived|bought|worked|went|took|got|started|quit)\b"
+    r"|\b(?:i|we)\s+(?:would|might|could)\s+(?:probably\s+|maybe\s+)?(?:move|live|buy|get|start|consider)\b"
+    r"|\b(?:i|we)\s+wish\s+(?:i|we)\s+(?:lived|worked|had|were)\b)"
 )
 _LEADING_HYPOTHETICAL_RE = re.compile(
     r"(?i)^\s*(?:suppose(?:\s+that|\s*,\s*|\s+)|"
     r"imagine(?:\s+that|\s*,\s*|\s+)|"
     r"hypothetically(?:\s*,\s*|\s+)|"
     r"what\s+if\s+|"
+    r"if\s+(?=(?:i|we)\s+(?:moved|lived|were|had|bought|worked|went)\b)|"
     r"let's\s+say\s+|"
     r"assuming(?:\s+that|\s*,\s*|\s+)|"
     r"consider\s+a\s+scenario(?:\s+where|\s*,\s*|\s+))\s*"

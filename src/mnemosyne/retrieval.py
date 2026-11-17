@@ -46,6 +46,7 @@ from mnemosyne.security import TrustTier, sanitize_retrieved_text, trust_weight
 from mnemosyne.text import (
     TAXONOMIC_EXPANSIONS,
     cosine,
+    damerau_levenshtein_at_most_one,
     hashing_embedding,
     lexical_score,
     tokenize,
@@ -994,6 +995,15 @@ def similar_query_terms(left: str, right: str) -> bool:
             return True
         if suffix.startswith(("-", "_")) and len(suffix) > 1:
             return True
+    if (
+        len(left) >= 6
+        and len(right) >= 6
+        and left[0] == right[0]
+        and left.isalpha()
+        and right.isalpha()
+        and damerau_levenshtein_at_most_one(left, right)
+    ):
+        return True
     return False
 
 
@@ -1495,7 +1505,6 @@ _LOW_WEIGHT_PREDICATES = frozenset(
         "dedicate",
         "dedicated",
         "booking",
-        "book",
         "booked",
         "attend",
         "attended",
@@ -1571,6 +1580,16 @@ _LOW_WEIGHT_PREDICATES = frozenset(
         "mention",
         "mentioned",
         "money",
+        "faster",
+        "slower",
+        "longer",
+        "shorter",
+        "older",
+        "newer",
+        "compare",
+        "compared",
+        "comparing",
+        "difference",
     }
 )
 
@@ -1695,6 +1714,114 @@ _COMMON_ADJECTIVES = frozenset(
         "great",
         "little",
         "average",
+    }
+)
+
+_CONVERSATIONAL_FRAMING_TERMS = frozenset(
+    {
+        "previous",
+        "conversation",
+        "conversations",
+        "chat",
+        "chats",
+        "session",
+        "sessions",
+        "think",
+        "thinking",
+        "thought",
+        "going",
+        "through",
+        "look",
+        "looking",
+        "back",
+        "remember",
+        "remind",
+        "want",
+        "wanted",
+        "confirm",
+        "refer",
+        "referring",
+        "discuss",
+        "discussed",
+        "talk",
+        "talking",
+        "talked",
+        "ask",
+        "asked",
+        "asking",
+        "earlier",
+        "tell",
+        "told",
+        "say",
+        "said",
+        "saying",
+        "mention",
+        "mentioned",
+        "create",
+        "created",
+        "enhance",
+        "recommend",
+        "recommended",
+        "apply",
+        "applying",
+        "need",
+        "needed",
+    }
+)
+
+_INTERROGATIVE_CLASSIFIERS = frozenset(
+    {
+        "piece",
+        "pieces",
+        "item",
+        "items",
+        "kind",
+        "kinds",
+        "type",
+        "types",
+        "pair",
+        "pairs",
+        "cup",
+        "cups",
+        "day",
+        "days",
+        "week",
+        "weeks",
+        "month",
+        "months",
+        "year",
+        "years",
+        "hour",
+        "hours",
+        "minute",
+        "minutes",
+        "second",
+        "seconds",
+        "time",
+        "times",
+        "dollar",
+        "dollars",
+        "percent",
+        "people",
+        "person",
+        "thing",
+        "things",
+        "way",
+        "ways",
+        "place",
+        "places",
+        "reason",
+        "reasons",
+        "step",
+        "steps",
+        "part",
+        "parts",
+        "member",
+        "members",
+        "group",
+        "groups",
+        "session",
+        "sessions",
     }
 )
 
@@ -1903,7 +2030,26 @@ def query_support(
             if not found:
                 missing_compounds.append(f"{w1} {w2}")
 
-    # B. Restrict compound anchors to verified semantic compounds (_RECOGNIZED_COMPOUND_ANCHORS)
+    # A2. Hyphenated technical/domain compounds (e.g., "two-factor", "open-source", "gluten-free")
+    for hm in re.finditer(r"\b([a-zA-Z]{2,})-([a-zA-Z]{3,})\b", q_lower):
+        hw1, hw2 = hm.group(1), hm.group(2)
+        if hw1 in {"non", "pre", "post", "sub", "anti", "re", "co", "ex", "self", "well", "up", "in", "on"}:
+            continue
+        ht1, ht2 = normalise_query_term(hw1), normalise_query_term(hw2)
+        if ht1 in QUERY_SUPPORT_STOPWORDS or ht2 in QUERY_SUPPORT_STOPWORDS:
+            continue
+        found_hyph = False
+        for text in hit_texts:
+            tokens = [normalise_query_term(t) for t in tokenize(text)]
+            p1 = [idx for idx, tok in enumerate(tokens) if similar_query_terms(ht1, tok)]
+            p2 = [idx for idx, tok in enumerate(tokens) if similar_query_terms(ht2, tok)]
+            if any(abs(i - j) <= 2 for i in p1 for j in p2):
+                found_hyph = True
+                break
+        if not found_hyph and f"{hw1}-{hw2}" not in missing_compounds:
+            missing_compounds.append(f"{hw1}-{hw2}")
+
+    # B. Restrict general open compound anchors to verified semantic compounds
     # to prevent false abstentions on multi-hop, temporal, and multi-session relational queries.
 
     # 4. Standalone numeric anchors (e.g. "$500 dinner", "session 42")
@@ -1933,6 +2079,32 @@ def query_support(
             if not found and norm not in missing_focal:
                 missing_focal.append(norm)
 
+    # 5b. Present-progressive personal activity grounding: "What <noun> am I (currently) <verb>ing?"
+    if not extra_texts:
+        prog_match = re.search(
+            r"\bwhat\s+([a-z]{3,})\s+(?:am|are)\s+(?:i|we)\s+(?:currently\s+|presently\s+|now\s+)?([a-z]{4,}ing)\b",
+            q_lower,
+        )
+        if prog_match:
+            obj_raw, act_raw = prog_match.group(1), prog_match.group(2)
+            obj_norm = normalise_query_term(obj_raw)
+            act_norm = normalise_query_term(act_raw)
+            if (
+                obj_norm not in _GENERIC_DESCRIPTORS
+                and obj_raw not in _INTERROGATIVE_CLASSIFIERS
+                and obj_norm not in QUERY_SUPPORT_STOPWORDS
+            ):
+                joint_prog = False
+                for text in user_hit_texts:
+                    tokens = [normalise_query_term(t) for t in tokenize(text)]
+                    has_obj = any(similar_query_terms(obj_norm, tok) for tok in tokens)
+                    has_act = any(similar_query_terms(act_norm, tok) for tok in tokens)
+                    if has_obj and has_act:
+                        joint_prog = True
+                        break
+                if not joint_prog and obj_norm not in missing_focal:
+                    missing_focal.append(obj_norm)
+
     # 6. Specificity-weighted unigram scoring with dynamic corpus IDF
     query_terms: list[str] = []
     term_weights: dict[str, float] = {}
@@ -1948,6 +2120,8 @@ def query_support(
             base_w = 3.5
         elif norm in _FOCAL_OBJECT_TERMS:
             base_w = 3.0
+        elif norm in _CONVERSATIONAL_FRAMING_TERMS:
+            base_w = 0.15
         elif norm in _LOW_WEIGHT_PREDICATES:
             base_w = 0.35
         else:
@@ -1965,7 +2139,7 @@ def query_support(
         corpus_idf = math.log((n_docs + 1.0) / (df + 0.5))
         if n_docs <= 2 or df > 0:
             dynamic_factor = 1.0
-        elif norm in _LOW_WEIGHT_PREDICATES:
+        elif norm in _LOW_WEIGHT_PREDICATES or norm in _CONVERSATIONAL_FRAMING_TERMS:
             dynamic_factor = 0.5
         else:
             dynamic_factor = max(1.0, min(2.0, corpus_idf / 1.5))
@@ -2104,6 +2278,51 @@ def query_support(
             missing_conjunctions.append(f"conjunction({c1} and {c2}) missing {c1}")
         elif not found_c2:
             missing_conjunctions.append(f"conjunction({c1} and {c2}) missing {c2}")
+
+    # 6c. Single-Hit Topical Coherence (preventing cross-session bag-of-words scatter):
+    # When a query references a specific past conversation or specifies >= 4 domain terms
+    # without multi-hop bridge context, at least one candidate hit must cover a coherent
+    # share of those domain terms rather than pooling isolated unigrams across 5 unrelated chats.
+    if not extra_texts and hit_texts:
+        domain_terms = [
+            t
+            for t in query_terms
+            if t not in _LOW_WEIGHT_PREDICATES
+            and t not in _CONVERSATIONAL_FRAMING_TERMS
+            and t not in _GENERIC_DESCRIPTORS
+        ]
+        single_conv_ref = bool(
+            re.search(
+                r"\b(?:our\s+(?:previous\s+|last\s+|earlier\s+)?conversation|previous\s+conversation|you\s+(?:told|mentioned|created|said|recommended|gave))\b",
+                q_lower,
+            )
+        )
+        is_multi_entity_or_agg = bool(
+            conjunction_pairs
+            or re.search(
+                r"\b(?:how\s+many|how\s+much\s+total|total|between|or\s+(?:the\s+)?['\"\w]+)\b",
+                q_lower,
+            )
+        )
+        if (single_conv_ref and len(domain_terms) >= 3) or (
+            not is_multi_entity_or_agg and len(domain_terms) >= 5
+        ):
+            coherence_pool = hit_texts if allow_assistant else user_hit_texts
+            domain_total_w = sum(term_weights.get(t, 1.5) for t in domain_terms)
+            best_single_cov = 0.0
+            for text in coherence_pool[:5]:
+                tok_norms = [normalise_query_term(tok) for tok in tokenize(text) if len(tok) > 2]
+                covered_w = sum(
+                    term_weights.get(t, 1.5)
+                    for t in domain_terms
+                    if any(similar_query_terms(t, cand) for cand in tok_norms)
+                )
+                best_single_cov = max(best_single_cov, covered_w / max(domain_total_w, 0.001))
+            req_cov = 0.55 if single_conv_ref else 0.45
+            if best_single_cov < req_cov:
+                missing_arguments.append(
+                    f"topical_coherence({best_single_cov:.2f}<{req_cov:.2f})"
+                )
 
     # 7. Enforce Anchor Grounding Gating Rule
     anchor_satisfied = not (
@@ -2274,12 +2493,23 @@ def spread_temporal_buckets(
     hits: Sequence[Hit],
     k: int = 5,
     bucket_granularity: str = "auto",
+    min_score_ratio: float = 0.0,
 ) -> list[Hit]:
     """Select temporal candidates spread across adaptive time buckets balanced by relevance."""
     if not hits or k <= 0:
         return []
     if len(hits) <= k:
         return list(hits)
+    top_score = max((float(h.score or 0.0) for h in hits), default=0.0)
+    eligible = (
+        [h for h in hits if float(h.score or 0.0) >= top_score * min_score_ratio]
+        if min_score_ratio > 0.0 and top_score > 0.0
+        else list(hits)
+    )
+    if len(eligible) <= k:
+        seen_e = {h.id for h in eligible}
+        return eligible + [h for h in hits if h.id not in seen_e][: max(0, k - len(eligible))]
+    hits = eligible
 
     def _hit_dt(h: Hit) -> datetime | None:
         for key in (
@@ -3636,6 +3866,12 @@ class HttpReranker:
                 raise ValueError(f"reranker response contains duplicate index {index}")
             seen.add(index)
             hit = hits[index]
+            raw_score = float(score)
+            if self.score_kind == "logit":
+                clamped = max(-40.0, min(40.0, raw_score))
+                effective_score = 1.0 / (1.0 + math.exp(-clamped))
+            else:
+                effective_score = raw_score
             ranked.append(
                 Hit(
                     id=hit.id,
@@ -3643,13 +3879,18 @@ class HttpReranker:
                     tenant_id=hit.tenant_id,
                     branch=hit.branch,
                     text=hit.text,
-                    score=float(score),
+                    score=effective_score,
                     channel=f"{hit.channel}+rerank",
                     provenance=shared_or_copy(hit.provenance),
                     trust_tier=hit.trust_tier,
                     sensitivity=hit.sensitivity,
-                    metadata={**hit.metadata, "reranker": self.name, "rerank_score": float(score),
-                              "rerank_score_kind": self.score_kind},
+                    metadata={
+                        **hit.metadata,
+                        "reranker": self.name,
+                        "rerank_score": effective_score,
+                        "rerank_raw_score": raw_score,
+                        "rerank_score_kind": self.score_kind,
+                    },
                 )
             )
         return sorted(ranked, key=lambda item: item.score, reverse=True)[:k]
@@ -3705,6 +3946,10 @@ def retrieval_adapters_from_env(prefix: str = "MNEMOSYNE") -> RetrievalAdapters:
             cache_ttl_seconds=embedding_cache_ttl_seconds,
             cache_scope=os.environ.get(f"{prefix}_EMBEDDING_CACHE_SCOPE", "default"),
         )
+    elif embedding_provider == "auto":
+        from mnemosyne.quantized_vectors import discover_local_embedding_provider
+
+        embedding = discover_local_embedding_provider(default_dims=dims)
     elif embedding_provider in {"local", "local-hashing", "hashing"}:
         embedding = HashingEmbeddingProvider(dims=dims)
     else:
@@ -3716,7 +3961,13 @@ def retrieval_adapters_from_env(prefix: str = "MNEMOSYNE") -> RetrievalAdapters:
             model=os.environ.get(f"{prefix}_RERANKER_MODEL"),
             api_key=os.environ.get(f"{prefix}_RERANKER_API_KEY"),
             timeout_seconds=timeout,
+            query_prefix=os.environ.get(f"{prefix}_RERANKER_QUERY_PREFIX", "query: "),
+            score_kind=os.environ.get(f"{prefix}_RERANKER_SCORE_KIND", "similarity"),
         )
+    elif reranker_provider == "auto":
+        from mnemosyne.quantized_vectors import discover_local_reranker
+
+        reranker = discover_local_reranker(fallback_embedding=embedding)
     elif reranker_provider in {"local", "local-similarity"}:
         reranker = LocalSimilarityReranker(embedding_provider=embedding)
     else:
@@ -5038,9 +5289,24 @@ def apply_activation_scores(
         outcome_count = _bounded_int(hit.metadata.get("demand_outcome_count", 0))
         demand_count = min(demand_count, outcome_count)
         demand_time = hit.metadata.get("demand_last_at") if demand_count else hit.metadata.get("created_at")
-        recency = _recency_score(
-            demand_time, moment, policy.decay
-        )
+        temporal_precision = str(
+            hit.metadata.get("temporal_precision")
+            or (hit.metadata.get("qualifiers") or {}).get("temporal_precision")
+            or ""
+        ).strip()
+        if temporal_precision and demand_time is not None and not demand_count:
+            age_days_coarse = _age_days(demand_time, moment)
+            span_days = _bounded_float(hit.metadata.get("temporal_span_days", 0.0), default=0.0)
+            recency = precision_aware_recency_score(
+                age_days_coarse,
+                precision=temporal_precision,
+                span_days=span_days,
+                halflife_days=max(1.0, 30.0 / max(policy.decay, 0.05)),
+            )
+        else:
+            recency = _recency_score(
+                demand_time, moment, policy.decay
+            )
         actr_d = max(float(getattr(policy, "actr_decay", 0.0)), 0.0)
         if actr_d > 0.0 and demand_count > 0:
             age_days = _age_days(demand_time, moment)

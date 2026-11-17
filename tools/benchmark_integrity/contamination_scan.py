@@ -145,7 +145,7 @@ def readable_text(path: Path) -> str:
             for value in node:
                 yield from strings(value)
     try:
-        docs = [json.loads(raw)] if path.suffix.lower() == ".json" else [json.loads(l) for l in raw.splitlines() if l.strip()]
+        docs = [json.loads(raw)] if path.suffix.lower() == ".json" else [json.loads(line) for line in raw.splitlines() if line.strip()]
     except ValueError:
         return raw
     return "\n".join(s for doc in docs for s in strings(doc))

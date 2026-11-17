@@ -7081,6 +7081,48 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         # (measured 288 ms vs 62 ms per gate retrieve on a 300-document 2Wiki store). Both
         # score identically - each is byte-parity-proven against the per-hit cosine loop.
         hashing_provider = type(self.adapters.embedding) is HashingEmbeddingProvider
+        use_quantized = bool(
+            not hashing_provider
+            and (
+                filt.get("quantized_prefilter")
+                or getattr(self.policy, "quantized_prefilter", False)
+            )
+        )
+        if use_quantized:
+            from mnemosyne.quantized_vectors import QuantizedVectorIndex
+
+            candidates = self._candidate_hits(filt)
+            vectors = [self._embedding_for_hit(hit, filt) for hit in candidates]
+            q_dims = len(query_vec)
+            valid_rows = [
+                (str(idx), hit, vec)
+                for idx, (hit, vec) in enumerate(zip(candidates, vectors, strict=True))
+                if vec is not None and len(vec) == q_dims
+            ]
+            if len(valid_rows) >= 64 and len(valid_rows) == sum(1 for v in vectors if v is not None):
+                row_map = {row_key: hit for row_key, hit, _ in valid_rows}
+                q_index = QuantizedVectorIndex.from_vectors(
+                    [row_key for row_key, _, _ in valid_rows],
+                    [vec for _, _, vec in valid_rows],
+                )
+                q_mode = (
+                    str(filt["quantized_mode"])
+                    if filt.get("quantized_mode") in {"exact", "int8_rescore", "binary_int8_rescore"}
+                    else "auto"
+                )
+                for row_key, score in q_index.search(query_vec, k=k, mode=q_mode, min_score=0.0):  # type: ignore[arg-type]
+                    hit = row_map[row_key]
+                    hit.score = score
+                    stored_raw = bool(hit.metadata.get("stored_embedding_used"))
+                    base = (
+                        "dense_media"
+                        if stored_raw and hit.metadata.get("stored_media_embedding")
+                        else "dense_hash"
+                    )
+                    hit.channel = scored_channel_for_hit(kind=hit.kind, base_channel=base)
+                    hit.metadata["quantized_prefilter"] = q_mode
+                    hits.append(hit)
+                return self._mark_retrieved_text_as_data(hits[:k])
         if text_kernels.NATIVE is not None and not hashing_provider:
             # Batched fast path: embedding acquisition stays per-hit in Python
             # (same security-gated _embedding_for_hit call, same metadata side
@@ -10370,6 +10412,10 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             else query_support(query, hits)["score"]
         )
         query_support_score = _bounded_float(query_support_score, default=0.0)
+        from mnemosyne.calibration import calibrate_retrieval_decision_confidence
+
+        top_raw = ranked_scores[0] if ranked_scores else 0.0
+        top_strength = min(1.0, math.log1p(max(0.0, top_raw)) / math.log1p(12.0)) if top_raw > 1.0 else max(0.25, min(1.0, top_raw))
         if (
             len(hits) in (2, 3)
             and all(h.trust_tier == 0 for h in hits)
@@ -10379,7 +10425,12 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 for h in hits
             )
         ):
-            return max(0.0, min(0.98, evidence_quality * 1.48))
+            return calibrate_retrieval_decision_confidence(
+                evidence_quality,
+                query_support_score,
+                support_threshold=QUERY_SUPPORT_THRESHOLD,
+                top_score_strength=top_strength,
+            )
         if len(hits) < 4:
             if query_support_score < QUERY_SUPPORT_THRESHOLD:
                 return min(
@@ -10387,17 +10438,12 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     0.05 * (query_support_score / QUERY_SUPPORT_THRESHOLD),
                 )
             return evidence_quality
-        if query_support_score < QUERY_SUPPORT_THRESHOLD:
-            return max(
-                0.0,
-                min(
-                    0.96,
-                    evidence_quality
-                    * (0.85 + 0.15 * (query_support_score / QUERY_SUPPORT_THRESHOLD))
-                    * 1.48,
-                ),
-            )
-        return max(0.0, min(0.98, evidence_quality * 1.48))
+        return calibrate_retrieval_decision_confidence(
+            evidence_quality,
+            query_support_score,
+            support_threshold=QUERY_SUPPORT_THRESHOLD,
+            top_score_strength=top_strength,
+        )
 
     @staticmethod
     def _prediction_set_size(hits: list[Hit], threshold: float) -> int:
