@@ -29,6 +29,8 @@ from mnemosyne.text import (  # noqa: E402
     _lexical_score_pure as lexical_score,
     _tokenize_pure as tokenize,
 )
+# Raw native.tokenize omits hyphen parts by design; the dispatcher adds them, so it is what must match.
+from mnemosyne.text import tokenize as dispatched_tokenize  # noqa: E402
 
 
 def bits(xs: list[float]) -> bytes:
@@ -76,7 +78,7 @@ def test_hashing_embedding_golden_examples_bit_identical():
 @given(texts)
 @settings(max_examples=200, deadline=None)
 def test_tokenize_identical(text):
-    assert native.tokenize(text) == tokenize(text)
+    assert dispatched_tokenize(text) == tokenize(text)
 
 
 def test_tokenize_golden_examples():
@@ -87,7 +89,7 @@ def test_tokenize_golden_examples():
         "MiXeD_Case:token+one/two.three-",
     ]
     for text in cases:
-        assert native.tokenize(text) == tokenize(text)
+        assert dispatched_tokenize(text) == tokenize(text)
 
 
 # --- Task 3: lexical_score / lexical_scan ----------------------------------

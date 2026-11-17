@@ -13,7 +13,7 @@
 use pyo3::prelude::*;
 use rayon::prelude::*;
 
-use crate::tokenize::for_each_token;
+use crate::tokenize::for_each_term;
 
 /// Query terms counted ONCE per call/scan: `terms` is first-occurrence-ordered
 /// (term, count) pairs — Python `Counter.items()` insertion order — and
@@ -27,7 +27,7 @@ impl QueryTerms {
     fn new(query: &str) -> Self {
         let mut terms: Vec<(String, u64)> = Vec::new();
         let mut index: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-        for_each_token(query, |tok| {
+        for_each_term(query, |tok| {
             if let Some(&i) = index.get(tok) {
                 terms[i].1 += 1;
             } else {
@@ -52,7 +52,7 @@ fn lexical_score_counted(q: &QueryTerms, tfs: &mut [u64], text: &str) -> f64 {
     }
     tfs.fill(0);
     let mut doc_len: u64 = 0;
-    for_each_token(text, |tok| {
+    for_each_term(text, |tok| {
         doc_len += 1;
         if let Some(&i) = q.index.get(tok) {
             tfs[i] += 1;

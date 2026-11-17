@@ -64,6 +64,24 @@ pub fn for_each_token(text: &str, mut f: impl FnMut(&str)) {
     }
 }
 
+/// The full pure `_tokenize_pure` term stream: each token, then (for a
+/// hyphenated token) its non-empty `-`-parts stripped of "./:+-" that differ
+/// from the token, in order. Scoring and hashing must use this; `tokenize`
+/// stays the raw stream because `mnemosyne.text.tokenize` adds the parts itself.
+pub fn for_each_term(text: &str, mut f: impl FnMut(&str)) {
+    for_each_token(text, |token| {
+        f(token);
+        if token.contains('-') {
+            for part in token.split('-') {
+                let cleaned = part.trim_matches(|c| matches!(c, '.' | '/' | ':' | '+' | '-'));
+                if !cleaned.is_empty() && cleaned != token {
+                    f(cleaned);
+                }
+            }
+        }
+    });
+}
+
 pub fn tokenize_str(text: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     for_each_token(text, |token| tokens.push(token.to_owned()));

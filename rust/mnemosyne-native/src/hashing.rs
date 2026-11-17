@@ -12,7 +12,7 @@ use blake2::Blake2bVar;
 use pyo3::prelude::*;
 
 use crate::dense::neumaier_sum;
-use crate::tokenize::for_each_token;
+use crate::tokenize::for_each_term;
 
 #[pyfunction]
 pub fn hashing_embedding(text: &str, dims: usize) -> Vec<f64> {
@@ -20,7 +20,7 @@ pub fn hashing_embedding(text: &str, dims: usize) -> Vec<f64> {
     // Tokens are only hashed, so the zero-alloc visitor feeds them straight
     // from its reusable buffer — same token stream as tokenize_str (parity
     // suite), no per-token String allocation.
-    for_each_token(text, |token| {
+    for_each_term(text, |token| {
         let mut hasher = Blake2bVar::new(8).expect("digest size 8 is valid");
         hasher.update(token.as_bytes());
         let mut digest = [0u8; 8];
