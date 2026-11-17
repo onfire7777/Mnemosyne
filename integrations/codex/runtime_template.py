@@ -30,6 +30,8 @@ from mnemosyne.providers.extractive_decomposer import extract_hop_zero_anchor  #
 
 TENANT = os.environ.get('MNEMOSYNE_TENANT', 'personal')
 USER = os.environ.get('MNEMOSYNE_USER', 'jake')
+# Which host is calling (codex, claude, ...); recorded as the session identity's agent.
+AGENT = os.environ.get('MNEMOSYNE_AGENT_ID', 'codex')
 CONFIG = dict(backend='sqlite', store_path=str(ROOT / 'codex-memory'),
               object_store=str(ROOT / 'objects'), object_store_encryption='aesgcm',
               object_key_store=str(ROOT / 'codex/object-keys.json'), queue_tenant=TENANT,
@@ -295,9 +297,9 @@ def configure_retrieval(facade):
 def invoke(facade, name, arguments, session_id=None):
     arguments = model_arguments(name, arguments)
     identity = SessionIdentity(
-        tenant_id=TENANT, user_id=USER, agent_id='codex', role='operator',
+        tenant_id=TENANT, user_id=USER, agent_id=AGENT, role='operator',
         source_trust_tier=claimed_trust(arguments),
-        session_id=session_id or arguments.get('session_id') or os.environ.get('CODEX_THREAD_ID') or f'codex-{os.getpid()}',
+        session_id=session_id or arguments.get('session_id') or os.environ.get('CODEX_THREAD_ID') or f'{AGENT}-{os.getpid()}',
         expires_at=int(time.time()) + 300,
         capabilities=('prospective:evaluate', 'prospective:read:tenant'),
     )
@@ -373,10 +375,10 @@ def serve():
 
     def prepare(name, params, arguments):
         # Only this local stdio transport can mint claims. No network listener exists.
-        session = arguments.get('session_id') or os.environ.get('CODEX_THREAD_ID') or f'codex-{os.getpid()}'
+        session = arguments.get('session_id') or os.environ.get('CODEX_THREAD_ID') or f'{AGENT}-{os.getpid()}'
         identity = SessionIdentity(TENANT, USER, 'operator',
             claimed_trust(arguments),
-            agent_id='codex', session_id=session, expires_at=int(time.time()) + 300,
+            agent_id=AGENT, session_id=session, expires_at=int(time.time()) + 300,
             capabilities=('prospective:evaluate', 'prospective:read:tenant'))
         params = dict(params or {}, session_token=SessionTokenVerifier(secret()).sign(identity))
         return original_prepare(name, params, arguments)
