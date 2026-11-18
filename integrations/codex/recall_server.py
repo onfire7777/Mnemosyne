@@ -17,8 +17,11 @@ Protocol: one JSON line {"tool", "arguments", "session_id"} in, one JSON line ou
 import json
 import os
 import socketserver
+import socket
 import sys
 import threading
+import time
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 
 os.environ.setdefault('MNEMOSYNE_INTERACTIVE_READ', '1')  # provider calls use the interactive (short) timeouts
@@ -32,6 +35,9 @@ SOCKET = STATE / 'recall.sock'
 # deadline the request is answered by local recall (lexical/graph/working memory, no vectors),
 # the same fallback the cold path's bounded read uses.
 EMBED_TIMEOUT = float(os.environ.get('MNEMOSYNE_RECALL_EMBED_TIMEOUT', '2.0'))
+# Slow provider replies are per request (most answer in <1 s); a second identical request
+# after this delay usually wins. Same provider, same vectors; the extra cost is one cheap call.
+EMBED_HEDGE_AFTER = float(os.environ.get('MNEMOSYNE_RECALL_EMBED_HEDGE_AFTER', '0.6'))
 READ_TOOLS = {'prepare_context', 'search', 'deep_search'}
 WATCHED = [ROOT / 'codex/runtime.py', ROOT / 'codex/active-release.json', Path(__file__).resolve()]
 MAX_REQUEST = 1 << 20
@@ -39,6 +45,54 @@ MAX_REQUEST = 1 << 20
 
 def fingerprint():
     return [path.stat().st_mtime_ns if path.exists() else None for path in WATCHED]
+
+
+class HedgedEmbedder:
+    """The query-embedding provider, with a hedged second request and an overall deadline."""
+
+    def __init__(self, inner, hedge_after, deadline):
+        self.inner, self.hedge_after, self.deadline = inner, hedge_after, deadline
+        self.pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix='embed')
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
+
+    def _hedged(self, method, text):
+        call = getattr(self.inner, method)
+        end = time.monotonic() + self.deadline
+        pending = {self.pool.submit(call, text)}
+        done, _ = wait(pending, timeout=min(self.hedge_after, self.deadline))
+        if not done:
+            pending.add(self.pool.submit(call, text))
+        error = None
+        while pending:
+            done, pending = wait(pending, timeout=max(0.0, end - time.monotonic()), return_when=FIRST_COMPLETED)
+            if not done:
+                break
+            for future in done:
+                if future.exception() is None:
+                    return future.result()
+                error = future.exception()
+        raise error or TimeoutError('query embedding exceeded its deadline')
+
+    def embed(self, text):
+        return self._hedged('embed', text)
+
+    def embed_sensitive(self, text):
+        return self._hedged('embed_sensitive', text)
+
+
+def client_gone(connection):
+    """True when the hook already gave up (closed its end), so its request is not worth running."""
+    try:
+        connection.setblocking(False)
+        return connection.recv(1, socket.MSG_PEEK) == b''
+    except BlockingIOError:
+        return False
+    except OSError:
+        return True
+    finally:
+        connection.setblocking(True)
 
 
 def local_invoke(facade, tool, arguments, session_id):
@@ -72,6 +126,10 @@ class Handler(socketserver.StreamRequestHandler):
             if tool not in READ_TOOLS:
                 raise PermissionError('recall server serves read tools only')
             with server.lock:
+                # Requests are served one at a time; one the client abandoned while queued
+                # would only delay the prompts behind it.
+                if client_gone(self.connection):
+                    return
                 result, mode = recall(server.facade, tool, request.get('arguments') or {}, request.get('session_id'))
             reply = {'result': result, 'mode': mode}
         except Exception as error:  # the error type only: messages can carry private query text
@@ -99,7 +157,8 @@ def main():
     started_with = fingerprint()
     with open_facade() as facade:
         scoped = facade.engine.adapters.embedding  # ScopedQueryEmbeddingProvider around the HTTP provider
-        scoped.provider = replace(scoped.provider, timeout_seconds=EMBED_TIMEOUT)
+        scoped.provider = HedgedEmbedder(replace(scoped.provider, timeout_seconds=EMBED_TIMEOUT),
+                                         EMBED_HEDGE_AFTER, EMBED_TIMEOUT)
         # Warm the retrieval caches before accepting requests. `search` records no learning receipt.
         # The time-window question builds the passage index once (~30 s on a large store);
         # without it the first dated question a user asks pays that build.
