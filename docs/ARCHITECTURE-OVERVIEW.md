@@ -25,7 +25,7 @@ validation. The older counts and milestone snapshot below describe their stated 
 > complete. Remaining ~18% = Tier-B *real-infrastructure operational evidence*, not code.
 
 - **Package:** `mnemosyne-memory` v1.7.0 · Python ≥3.12 · Apache-2.0
-- **Entry points:** `mneme` (CLI, 119 subcommands) · `mneme-mcp` (MCP server, 60 tools)
+- **Entry points:** `mneme` (CLI, 187 subcommands) · `mneme-mcp` (MCP server, 114 tools)
 - **Source:** ~71,822 lines across 73 `.py` files in `src/mnemosyne/` (including the `providers/` subpackage)
 - **Wiki:** [Home](https://github.com/onfire7777/Mnemosyne/wiki) ·
   [Data Model](https://github.com/onfire7777/Mnemosyne/wiki/Data-Model) ·
@@ -45,8 +45,8 @@ flowchart TB
 
     subgraph mneme["Mnemosyne (single process, local-first)"]
         direction TB
-        CLI["CLI · <b>mneme</b><br/>119 subcommands"]
-        MCP["MCP Server · <b>mneme-mcp</b><br/>60 tools · 4 transports"]
+        CLI["CLI · <b>mneme</b><br/>187 subcommands"]
+        MCP["MCP Server · <b>mneme-mcp</b><br/>114 tools · 4 transports"]
         ENGINE["<b>Memory Engine</b><br/>MemoryEngine Protocol<br/>Local ⟷ Postgres ⟷ Sqlite backend"]
         WORK["<b>Background Workers</b><br/>consolidation · lifecycle<br/>calibration · eval"]
         CLI --> ENGINE
@@ -84,9 +84,9 @@ pins no server version, so the engine is not restricted to PG16.
 ```mermaid
 flowchart TB
     subgraph IF["① Interface layer"]
-        cli["cli.py · mneme CLI (119 cmds)"]
+        cli["cli.py · mneme CLI (187 cmds)"]
         mcps["mcp_server.py · 4 transports<br/>(stdio shim · SDK stdio · SDK<br/>StreamableHTTP · hosted HTTP)"]
-        mcpt["mcp_tools.py · 60 MCP tools facade"]
+        mcpt["mcp_tools.py · 114 MCP tools facade"]
     end
 
     subgraph CORE["② Engine core"]
@@ -784,7 +784,7 @@ capture handoff.
 
 ## 12. MCP transport surface
 
-`mneme-mcp` exposes the same 60 tools over **four** transports (plus a legacy SSE shim):
+`mneme-mcp` exposes the same 114 tools over **four** transports (plus a legacy SSE shim):
 
 | Transport | Flag | Endpoints | Notes |
 |---|---|---|---|
@@ -811,7 +811,7 @@ Mnemosyne session (header `X-Mnemosyne-Session-Token`); `--require-session` enfo
 
 | Module | LOC | Role |
 |---|--:|---|
-| `cli.py` | 20.8K | `mneme` CLI — 119 subcommands across memory/graph/correction/branch/learning/parametric/profile/prospective/working/ops |
+| `cli.py` | 20.8K | `mneme` CLI — 187 subcommands across memory/graph/correction/branch/learning/parametric/profile/prospective/working/ops |
 | `postgres_engine.py` | 6.9K | PostgreSQL engine: RLS, FTS, pgvector, recursive PPR, bitemporal `as_of()`, prospective/working planes |
 | `engine.py` | 5.4K | `MemoryEngine` Protocol + `LocalMemoryEngine`; `route()` / `RoutePlan`; `Intention` + prospective/working planes; `assertion_id_map` merge; read-side sensitivity/access enforcement |
 | `sqlite_engine.py` | 4.5K | Per-tenant single-file engine: FTS5, `as_of()`, prospective/working planes |
@@ -842,4 +842,5 @@ Mnemosyne session (header `X-Mnemosyne-Session-Token`); `--require-session` enfo
 
 *Generated from a structural read of `/Users/admin/Mnemosyne` @ `main`; reconciled to the merged W3
 prospective-/working-memory planes + W2 signed deletion manifest (PR #39 @ `a60114a`). Counts computed from
-code: 119 CLI subcommands, 60 MCP tools, 28 schema tables.*
+code: 28 schema tables. CLI and MCP counts updated 2026-11-16 from the runtime parser and `MnemosyneMcpServer.tool_specs`
+(187 CLI subcommands, 114 MCP tools); `tests/test_docs_runtime_counts.py` keeps them in sync.*

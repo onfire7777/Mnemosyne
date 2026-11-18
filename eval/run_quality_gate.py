@@ -52,6 +52,11 @@ from eval.harness.metrics import (  # noqa: E402
     wilson_interval,
 )
 from eval.harness.test_classes import configure_backend, run_all_mandatory_classes  # noqa: E402
+from eval.source_provenance import (  # noqa: E402
+    capture_source_provenance,
+    compare_source_provenance,
+    validate_report_outputs,
+)
 from mnemosyne.engine import LocalMemoryEngine  # noqa: E402
 from mnemosyne.mcp_tools import MemoryTools  # noqa: E402
 from mnemosyne.models import Evidence  # noqa: E402
@@ -487,6 +492,22 @@ def _build_markdown_summary(
         f"- **Untrusted Instruction Confinement:** {safety['untrusted_instructions_contained'] * 100:.1f}% of injected instructions tagged as untrusted content; 0 executed.",
         "- **Cognitive Invariants:**",
     ]
+    provenance = meta.get("source_provenance")
+    provenance_lines = ["", "### Source Provenance", ""]
+    if provenance is None:
+        provenance_lines.append("Source provenance unrecorded (historical report); not release evidence.")
+    else:
+        provenance_lines.extend([
+            f"- **Source status:** `{provenance['status']}`",
+            f"- **Git dirty:** `{json.dumps(meta['git_dirty'])}` (null means unknown)",
+            f"- **Working-source SHA-256:** `{meta['source_fingerprint']}`",
+            f"- **Fingerprint scope:** `{provenance['start']['fingerprint_scope']}`",
+            f"- **Source changed during run:** `{json.dumps(provenance['source_changed'])}`",
+            "- **Revision evidence:** " + ("clean fixed source revision" if provenance['release_eligible']
+                                         else "diagnostic only; not release evidence"),
+            "- HEAD alone does not identify a dirty working tree. The content fingerprint identifies the source snapshot.",
+        ])
+    lines[10:10] = provenance_lines
     for c in safety["mandatory_cognitive_classes"]:
         lines.append(f"  - `{c['name']}`: {'PASS' if c['passed'] else 'FAIL'} ({c['detail'][:80]})")
 
@@ -508,7 +529,7 @@ def _build_markdown_summary(
         "    --backend local \\",
         "    --seed 42 \\",
         "    --report eval/reports/quality_gate_baseline.json \\",
-        "    --summary-md work/quality-baseline/BASELINE.md",
+        "    --summary-md eval/reports/quality_gate_baseline.md",
         "```",
         "",
         "### Frozen Dataset Checksums",
@@ -596,6 +617,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Exit with code 1 if any gate check fails",
     )
     parser.add_argument(
+        "--require-clean-revision",
+        action="store_true",
+        default=False,
+        help="Require verifiably clean Git/source state before evaluation and before reporting",
+    )
+    parser.add_argument(
         "--verbose",
         "-v",
         action="store_true",
@@ -604,14 +631,25 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    try:
+        validate_report_outputs(_REPO, args.report, args.summary_md)
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"Unsafe output destination: {exc}") from exc
+
     # Fail-closed baseline path validation
     if args.baseline is not None and not args.baseline.is_file():
         raise FileNotFoundError(f"Baseline file does not exist: {args.baseline}")
 
+    source_start = capture_source_provenance(_REPO)
+    if args.require_clean_revision and not compare_source_provenance(
+        source_start, source_start,
+    )["release_eligible"]:
+        raise SystemExit("A clean, verifiable source revision is required before evaluation")
+
     # 1. Determinism and manifest verification
     random.seed(args.seed)
     manifest_hashes = _verify_dataset_manifest()
-    git_commit = _get_git_commit()
+    git_commit = source_start["git_commit"]
     t_start = time.perf_counter()
 
     # 2. Load frozen dataset files
@@ -892,6 +930,8 @@ def main(argv: list[str] | None = None) -> int:
         "meta": {
             "generated_at": datetime.now(UTC).isoformat(),
             "git_commit": git_commit,
+            "git_dirty": source_start["git_dirty"],
+            "source_fingerprint": source_start["source_fingerprint"],
             "backend": args.backend,
             "split": args.split,
             "seed": args.seed,
@@ -967,6 +1007,18 @@ def main(argv: list[str] | None = None) -> int:
         ],
     }
 
+    try:
+        validate_report_outputs(_REPO, args.report, args.summary_md)
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"Unsafe output destination: {exc}") from exc
+    provenance = compare_source_provenance(source_start, capture_source_provenance(_REPO))
+    provenance["require_clean_revision"] = args.require_clean_revision
+    if provenance["source_changed"] is True:
+        raise SystemExit("Source or HEAD changed during evaluation; no report was published")
+    if args.require_clean_revision and not provenance["release_eligible"]:
+        raise SystemExit("A clean, verifiable source revision is required before reporting")
+    report["meta"]["source_provenance"] = provenance
+
     # Write JSON report
     if args.report is not None:
         args.report.parent.mkdir(parents=True, exist_ok=True)
@@ -985,6 +1037,9 @@ def main(argv: list[str] | None = None) -> int:
     # Console summary
     print("=" * 72)
     print(f"Mnemosyne Quality Gate Summary — Split: {args.split} ({runtime_seconds}s)")
+    evidence_label = "clean fixed source revision" if provenance["release_eligible"] else "diagnostic only; not release evidence"
+    print(f"Source provenance: {provenance['status']} ({evidence_label})")
+    print(f"Working-source SHA-256: {source_start['source_fingerprint']}")
     print("=" * 72)
     print(f"Composite Quality Score:        {composite_score:.4f}  (Non-saturated: {non_saturation_verified})")
     print(f"Overall Recall@5:               {mean_recall:.4f}  [95% CI: {rec_ci.low:.4f}, {rec_ci.high:.4f}]")

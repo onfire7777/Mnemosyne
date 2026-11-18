@@ -17,13 +17,13 @@ representation without calling external LLMs or accessing benchmark ground-truth
 2. **Tiered High-SNR Turn Window Selection** (``select_compiled_turn_windows``):
    - Tier 1 (Core ``core_top_k`` sessions, default 7): 100% verbatim user and assistant turns.
    - Tier 2 (Extended ``ranks core_top_k+1 .. total_k``, default up to 16 total sessions):
-     100% of all user turns in the session PLUS full verbatim assistant replies for the top
-     query-matching rounds (``±1`` neighbor round), expanding recall from 10 to 16 sessions while
-     reducing total prompt tokens vs. 10 raw full sessions.
+     All user turns PLUS assistant replies for query-matching rounds (``±1`` neighbor round)
+     when the extended budget permits. If necessary, retain only complete matching user
+     turns rather than dropping a useful session because of unrelated long turns.
 
 3. **Deterministic Temporal & Epistemic Memory Index** (``compile_memory``):
    - Exact session-to-query calendar deltas via ``compute_calendar_delta``
-   - Deterministic resolution of inline relative temporal phrases anchored to each session's date
+   - Deictic dates anchored to the session; event-relative dates require a local unambiguous antecedent
    - Chronological speaker-attributed ``[USER]`` self-report ledger separating user facts from
      assistant suggestions/estimates and highlighting ``[MOST RECENT USER STATEMENT IN INDEX]``
    - ``PremiseConsistencyVerifier`` presupposition checks.
@@ -273,7 +273,7 @@ _REL_AHEAD_RE = re.compile(
     r"\b(?:in\s+(?P<in_num>\d{1,3}|a\s+couple(?:\s+of)?|one|two|three|four|five|six|seven|eight|nine|ten|"
     r"eleven|twelve|fourteen|fifteen|twenty|thirty|a|an)\s+(?P<in_unit>days?|weeks?|months?|years?)"
     r"|(?P<lat_num>\d{1,3}|a\s+couple(?:\s+of)?|one|two|three|four|five|six|seven|eight|nine|ten)"
-    r"\s+(?P<lat_unit>days?|weeks?|months?)\s+(?:later|after(?:\s+that)?))\b",
+    r"\s+(?P<lat_unit>days?|weeks?|months?)\s+(?:later|afterwards?|after(?:\s+that)?))\b",
     re.IGNORECASE,
 )
 _YESTERDAY_TOMORROW_RE = re.compile(
@@ -295,14 +295,14 @@ _ON_WEEKDAY_RE = re.compile(
 )
 _MONTH_NAME_DATE_RE = re.compile(
     r"(?:\b(?P<full_month>January|February|March|April|May|June|July|August|September|October|November|December)\s+"
-    r"(?P<f_day>\d{1,2})(?:st|nd|rd|th)?(?:,\s*(?P<f_year>20\d{2}|19\d{2}))?\b"
+    r"(?P<f_day>\d{1,2})(?:st|nd|rd|th)?(?:(?:,\s*|\s+(?!(?:19|20)\d{2}\s+(?-i:[a-z])))(?P<f_year>(?:19|20)\d{2}))?\b"
     r"|\b(?:(?P<ab_prep>on|since|from|until|by|before|after|around)\s+)?(?P<ab_month>Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\.?\s+"
-    r"(?P<ab_day>\d{1,2})(?:(?P<ab_ord>st|nd|rd|th)|,\s*(?P<ab_year>20\d{2}|19\d{2}))?\b)",
+    r"(?P<ab_day>\d{1,2})(?P<ab_ord>st|nd|rd|th)?(?:(?:,\s*|\s+(?!(?:19|20)\d{2}\s+(?-i:[a-z])))(?P<ab_year>(?:19|20)\d{2}))?\b)",
     re.IGNORECASE,
 )
 _ISO_OR_SLASH_DATE_RE = re.compile(
-    r"(?:\b(?P<iso_y>20\d{2})-(?P<iso_m>0[1-9]|1[0-2])-(?P<iso_d>0[1-9]|[12]\d|3[01])\b"
-    r"|\b(?P<sl_pre>on\s+|since\s+|from\s+|around\s+|by\s+)(?P<sl_m>0?[1-9]|1[0-2])/(?P<sl_d>0?[1-9]|[12]\d|3[01])(?:/(?P<sl_y>20\d{2}|\d{2}))?\b)",
+    r"(?:(?<![\w/-])(?P<iso_y>\d{4})-(?P<iso_m>0[1-9]|1[0-2])-(?P<iso_d>0[1-9]|[12]\d|3[01])\b(?![/-]\d)"
+    r"|\b(?P<sl_pre>on\s+|since\s+|from\s+|around\s+|by\s+)(?P<sl_m>0?[1-9]|1[0-2])/(?P<sl_d>0?[1-9]|[12]\d|3[01])(?:/(?P<sl_y>\d{4}|\d{2}))?\b(?![\d/]))",
     re.IGNORECASE,
 )
 
@@ -329,6 +329,9 @@ class ResolvedTemporalAnchor:
     days_to_query_date: int
     note: str
     snippet: str
+    source_start: int = 0
+    source_end: int = 0
+    is_ambiguous: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -409,16 +412,27 @@ def resolve_inline_temporal_expressions(
     anchor_date: date,
     query_date: date,
 ) -> list[ResolvedTemporalAnchor]:
-    """Deterministically resolve relative and explicit calendar expressions inside a turn."""
+    """Resolve dates with source spans; ambiguous numeric candidates are not facts.
+
+    For compatibility, month/day numeric candidates remain inspectable with
+    ``is_ambiguous=True``. They must not be used as event dates or antecedents.
+    """
     if not text:
         return []
     if len(text) > 12000:
         text = text[:12000]
     found: list[ResolvedTemporalAnchor] = []
-    seen_keys: set[tuple[str, date]] = set()
+    seen_keys: set[tuple[int, int, date]] = set()
+    event_relative: list[tuple[re.Match[str], int, str]] = []
 
-    def _add(expr: str, res_d: date, note: str, span: tuple[int, int]) -> None:
-        key = (expr.lower().strip(), res_d)
+    def _add(expr: str, res_d: date, note: str, span: tuple[int, int], *, ambiguous: bool = False) -> None:
+        # A mentioned date in a negated clause is not an asserted event date.
+        boundary = r"[.!?;]|\b(?:but|and)\b"
+        prefix = re.split(boundary, text[:span[0]], flags=re.IGNORECASE)[-1]
+        suffix = re.split(boundary, text[span[1]:], flags=re.IGNORECASE)[0]
+        if re.search(r"\b(?:not|never|no longer|didn't|wasn't|weren't|haven't|hasn't|hadn't)\b", prefix + " " + suffix, re.IGNORECASE):
+            return
+        key = (*span, res_d)
         if key in seen_keys:
             return
         seen_keys.add(key)
@@ -432,6 +446,9 @@ def resolve_inline_temporal_expressions(
                 days_to_query_date=(query_date - res_d).days,
                 note=note,
                 snippet=_snippet_around(text, span[0], span[1]),
+                source_start=span[0],
+                source_end=span[1],
+                is_ambiguous=ambiguous,
             )
         )
 
@@ -452,6 +469,9 @@ def resolve_inline_temporal_expressions(
         if n is None or n <= 0 or n > 3650:
             continue
         unit = m.group("unit").lower()
+        if m.group("dir").lower() != "ago":
+            event_relative.append((m, -n, unit))
+            continue
         if unit.startswith("day"):
             d = anchor_date - timedelta(days=n)
         elif unit.startswith("week"):
@@ -467,6 +487,9 @@ def resolve_inline_temporal_expressions(
         unit = (m.group("in_unit") or m.group("lat_unit") or "").lower()
         n = _parse_num_word(raw_n)
         if n is None or n <= 0 or n > 3650 or not unit:
+            continue
+        if m.group("lat_num"):
+            event_relative.append((m, n, unit))
             continue
         if unit.startswith("day"):
             d = anchor_date + timedelta(days=n)
@@ -557,11 +580,13 @@ def resolve_inline_temporal_expressions(
         _add(m.group(0).strip(), d, "explicit calendar date", m.span())
 
     for m in _ISO_OR_SLASH_DATE_RE.finditer(text):
+        ambiguous = False
         if m.group("iso_y"):
             yr, mon, day_num = int(m.group("iso_y")), int(m.group("iso_m")), int(m.group("iso_d"))
             expr = m.group(0)
         else:
             mon, day_num = int(m.group("sl_m")), int(m.group("sl_d"))
+            ambiguous = mon != day_num and day_num <= 12
             raw_y = m.group("sl_y")
             yr = (int(raw_y) + (2000 if len(raw_y) == 2 else 0)) if raw_y else anchor_date.year
             expr = m.group(0).strip()
@@ -569,9 +594,46 @@ def resolve_inline_temporal_expressions(
             d = date(yr, mon, day_num)
         except ValueError:
             continue
-        _add(expr, d, "explicit date", m.span())
+        note = "ambiguous numeric date; month/day candidate, not established" if ambiguous else "explicit date"
+        _add(expr, d, note, m.span(), ambiguous=ambiguous)
 
-    return found
+    # Event-relative language is not deictic: "later" refers to a preceding
+    # event, never implicitly to the session date. Limit antecedents to the
+    # same or immediately previous sentence and require a single date.
+    for m, amount, unit in sorted(event_relative, key=lambda item: item[0].start()):
+        if m.group(0).lower().endswith("after") or re.match(r"\s+(?:to|than)\b", text[m.end():], re.IGNORECASE):
+            continue  # a named reference is not the preceding dated event
+        if re.search(r"\bthat$", m.group(0), re.IGNORECASE) and not re.match(
+            r"\s*(?:$|[,.;:!?])|\s+(?:I|you|he|she|it|we|they)\b",
+            text[m.end():],
+            re.IGNORECASE,
+        ):
+            # Only a bare demonstrative may inherit the local date. A noun
+            # phrase such as "that inspection" needs event-identity grounding,
+            # which a nearby date alone cannot supply. Require a clause/end
+            # boundary rather than enumerating possible event names.
+            continue
+        boundaries = [b.end() for b in re.finditer(r"[.!?]\s+", text[:m.start()])]
+        current_start = boundaries[-1] if boundaries else 0
+        previous_start = boundaries[-2] if len(boundaries) >= 2 else 0
+        candidates = [a for a in found if current_start <= a.source_start and a.source_end <= m.start()]
+        if not candidates:
+            candidates = [a for a in found if previous_start <= a.source_start and a.source_end <= m.start()]
+        if any(a.is_ambiguous for a in candidates):
+            continue
+        dates = {a.resolved_date for a in candidates}
+        if len(dates) != 1:
+            continue
+        base = next(iter(dates))
+        if unit.startswith("day"):
+            d = base + timedelta(days=amount)
+        elif unit.startswith("week"):
+            d = base + timedelta(days=7 * amount)
+        else:
+            d = _shift_months(base, amount * (12 if unit.startswith("year") else 1))
+        _add(m.group(0), d, f"event-relative to {_format_date_with_wd(base)}", m.span())
+
+    return sorted(found, key=lambda a: (a.source_start, a.source_end))
 
 
 def extract_query_temporal_windows(question: str, query_date: date) -> list[tuple[date, date]]:
@@ -586,6 +648,8 @@ def extract_query_temporal_windows(question: str, query_date: date) -> list[tupl
         query_date=query_date,
     )
     for a in anchors:
+        if a.is_ambiguous:
+            continue
         expr_low = a.expression.lower()
         if "week" in expr_low:
             windows.append((a.resolved_date - timedelta(days=3), a.resolved_date + timedelta(days=3)))
@@ -695,6 +759,9 @@ class MemoryContextCompiler:
         valid_sessions: list[SessionInput] = []
         full_texts: list[str] = []
         for sess in sessions:
+            timestamp = sess.timestamp.replace(tzinfo=UTC) if sess.timestamp.tzinfo is None else sess.timestamp.astimezone(UTC)
+            if timestamp > eval_utc:
+                continue
             full_text = "\n".join(f"{r}: {c}" for r, c in sess.turns)
             if not full_text:
                 continue
@@ -748,7 +815,7 @@ class MemoryContextCompiler:
             rank_p = 0
             for h in pipe_res.hits:
                 s_idx = cid_map.get(h.id)
-                if s_idx is not None and s_idx not in seen_s:
+                if s_idx in fused_scores and s_idx not in seen_s:
                     seen_s.add(s_idx)
                     rank_p += 1
                     fused_scores[s_idx] += 0.72 * (1.0 / (16.0 + rank_p)) + 0.015 * max(0.0, float(h.score))
@@ -896,6 +963,8 @@ class MemoryContextCompiler:
                         anchor_date=s_date,
                         query_date=query_d,
                     ):
+                        if anc.is_ambiguous:
+                            continue
                         for lo_d, hi_d in q_windows:
                             if lo_d <= anc.resolved_date <= hi_d:
                                 mid_d = lo_d + (hi_d - lo_d) // 2
@@ -958,7 +1027,11 @@ class MemoryContextCompiler:
         top_rounds_map: Mapping[int, Sequence[int]],
         fused_scores: Mapping[int, float],
     ) -> tuple[list[int], list[int], dict[int, list[int]]]:
-        """Select Tier-1 full core sessions + Tier-2 extended user+matched-round windows."""
+        """Select full core sessions and budgeted, verbatim extended turn windows.
+
+        The token budget bounds the extended tier's character-based estimate,
+        not the core transcripts or the subsequently rendered digest.
+        """
         sess_by_idx = {s.index: s for s in sessions}
         core = [idx for idx in ranked_indices[: self.core_top_k] if idx in sess_by_idx]
         chunks: dict[int, list[int]] = {
@@ -971,7 +1044,9 @@ class MemoryContextCompiler:
         top_score = max(fused_scores.get(ranked_indices[0], 0.0), 1e-6)
         is_broad = bool(_MULTI_OR_TEMPORAL_CUE_RE.search(question))
         score_floor = (0.28 if is_broad else 0.34) * top_score
-        max_extra = self.extended_max_extra if is_broad else max(5, self.extended_max_extra - 2)
+        max_extra = self.extended_max_extra if is_broad else min(
+            self.extended_max_extra, max(5, self.extended_max_extra - 2)
+        )
 
         extended: list[int] = []
         used_tokens = 0
@@ -1009,7 +1084,32 @@ class MemoryContextCompiler:
                     ordered_t = user_only_t
                     est_tokens = u_est
                 else:
-                    continue
+                    # A single long unrelated user turn must not evict every
+                    # useful turn from this session. Keep complete, attributed
+                    # turns from the matched rounds before lexical fallbacks.
+                    matched_users = {
+                        ti for ri in matched_r if 0 <= ri < len(r_groups)
+                        for ti in r_groups[ri] if sess.turns[ti][0] == "user"
+                    }
+                    q_stems = _query_content_stems(question)
+                    overlaps = {
+                        ti: len(q_stems & {_stem_passage_token(w) for w in tokenize(sess.turns[ti][1])})
+                        for ti in user_only_t
+                    }
+                    prioritized = sorted(
+                        (ti for ti in user_only_t if ti in matched_users or overlaps[ti] > 0),
+                        key=lambda ti: (ti not in matched_users, -overlaps[ti], ti),
+                    )
+                    ordered_t = []
+                    for ti in prioritized:
+                        trial = ordered_t + [ti]
+                        trial_tokens = sum(len(sess.turns[t][1]) + 28 for t in trial) // 4 + 24
+                        if used_tokens + trial_tokens <= self.extended_token_budget:
+                            ordered_t = trial
+                            est_tokens = trial_tokens
+                    if not ordered_t:
+                        continue
+                    ordered_t.sort()
             chunks[idx] = ordered_t
             extended.append(idx)
             used_tokens += est_tokens
@@ -1064,7 +1164,11 @@ class MemoryContextCompiler:
                 t_stems = {_stem_passage_token(w) for w in tokenize(content)}
                 overlap = len(q_stems & t_stems)
                 if role == "user":
-                    user_evidence_rows.append({"cid": f"s{disp_num}:t{ti}", "content": f"User: {content}"})
+                    user_evidence_rows.append({
+                        "cid": f"s{disp_num}:t{ti}", "content": content,
+                        "speaker_role": role, "subject": "user",
+                        "created_at": sess.timestamp.isoformat(),
+                    })
 
                 # Extract inline date anchors from top-ranked sessions or query-matching turns (capped at 4/session)
                 if (s_idx in top6_set or overlap >= 1) and len(sess_anchors) < 4:
@@ -1077,7 +1181,7 @@ class MemoryContextCompiler:
                         query_date=query_d,
                     )
                     for a in anchors:
-                        if len(sess_anchors) < 4:
+                        if not a.is_ambiguous and len(sess_anchors) < 4:
                             sess_anchors.append(a)
 
                 if role == "user":
@@ -1101,7 +1205,9 @@ class MemoryContextCompiler:
         else:
             user_excerpts = [(ts_u, dn, sc_u, txt_u) for ts_u, dn, _, sc_u, txt_u in raw_user_candidates]
 
-        premise_res = self._premise_verifier.verify(question, evidence_rows=user_evidence_rows)
+        premise_res = self._premise_verifier.verify(
+            question, evidence_rows=user_evidence_rows, evaluated_at=eval_utc
+        )
         premise_alert = (
             premise_res.clean_abstention_text
             if (not premise_res.is_consistent and premise_res.abstention_recommended)

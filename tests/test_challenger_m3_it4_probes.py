@@ -114,12 +114,13 @@ def run_it4_probes() -> dict[str, int]:
         ans = adaptive_synthesize(query, evidence_rows=unrelated_turns)
         cnt = ans.get("count")
         text = ans.get("answer", "")
-        if cnt != 0 or "No records found" not in text:
+        # Unrelated turns are missing evidence, not a measured zero: no count, abstain.
+        if cnt is not None or not ans.get("abstained"):
             zero_match_failures.append((query, cnt, text))
 
     if not zero_match_failures:
         print(
-            f"  [PASS] 2.1 All {len(count_test_cases)} category count queries returned count=0 and 'No records found' on unrelated turns."
+            f"  [PASS] 2.1 All {len(count_test_cases)} category count queries abstained without a count on unrelated turns."
         )
         results["passed"] += 1
     else:

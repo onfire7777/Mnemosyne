@@ -10,7 +10,7 @@ from mnemosyne.experience.environment_experiments import (
     MAX_MISSES, environment_retry_at, environment_retry_pending, run_environment_experiment,
 )
 from mnemosyne.experience.runtime import LearningRuntime
-from mnemosyne.experience.signals import reprocessed_episode, reward, tool_signals
+from mnemosyne.experience.signals import OUTCOME_VERSION, reprocessed_episode, reward, tool_signals
 from mnemosyne.experience.strategy_roles import abstract_score, trace_roles
 from mnemosyne.hosts.codex import _tool_event
 
@@ -42,7 +42,7 @@ def test_legacy_partial_success_is_replaced_not_retained_as_manual_feedback():
               "tool_events": [event], "signals": [old_signal], "prediction": .5,
               "reward": .8, "receipt_ids": []}
     after = reprocessed_episode(before, {}, {})
-    assert after["outcome_version"] == 3 and after["reward"] == -1
+    assert after["outcome_version"] == OUTCOME_VERSION and after["reward"] == -1
     assert len(after["signals"]) == 1
     assert after["signals"][0]["progress"] == .8
     assert before["reward"] == .8
@@ -136,7 +136,7 @@ def test_open_episode_from_an_older_runtime_is_repaired_before_it_earns_credit()
         row["signals"] = [{**row["signals"][0], "value": 0.8}]
     runtime.writer.apply("t", "capture", older)
     resolved = runtime.resolve("t", key)
-    assert resolved["reward"] == -1 and resolved["outcome_version"] == 3
+    assert resolved["reward"] == -1 and resolved["outcome_version"] == OUTCOME_VERSION
     assert [item["value"] for item in resolved["signals"]] == [-1]
 
 

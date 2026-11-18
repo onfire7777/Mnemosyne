@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
+from numbers import Real
 from typing import Any
 
 
@@ -47,7 +48,10 @@ class CalibrationExample:
             raise ValueError("calibration example requires confidence")
         if "correct" not in row:
             raise ValueError("calibration example requires correct")
-        confidence = max(0.0, min(1.0, float(row["confidence"])))
+        raw_confidence = row["confidence"]
+        if not _is_finite_number(raw_confidence):
+            raise ValueError("calibration confidence must be a finite number")
+        confidence = max(0.0, min(1.0, float(raw_confidence)))
         correct = row["correct"]
         if type(correct) is not bool:
             raise ValueError("calibration example correct must be a JSON boolean")
@@ -85,6 +89,26 @@ class CalibrationTuneResult:
         }
 
 
+def _is_finite_number(value: Any) -> bool:
+    """Reject booleans and nonnumeric/nonfinite values before any clipping."""
+    if isinstance(value, bool) or not isinstance(value, Real):
+        return False
+    try:
+        return math.isfinite(value)
+    except (OverflowError, TypeError, ValueError):
+        return False
+
+
+def _has_valid_calibration(calibration: CalibrationSet) -> bool:
+    return (
+        isinstance(calibration.scores, (list, tuple))
+        and bool(calibration.scores)
+        and _is_finite_number(calibration.target_coverage)
+        and 0.0 <= calibration.target_coverage <= 1.0
+        and all(_is_finite_number(score) for score in calibration.scores)
+    )
+
+
 def conformal_threshold(calibration: CalibrationSet) -> float:
     """Return the split-conformal accept threshold for a calibration set.
 
@@ -93,7 +117,7 @@ def conformal_threshold(calibration: CalibrationSet) -> float:
     answered memories clear the bar. An empty calibration set returns ``1.0``,
     which makes the system abstain on everything (fail-closed metacognition).
     """
-    if not calibration.scores:
+    if not _has_valid_calibration(calibration):
         return 1.0
     bounded = sorted(max(0.0, min(1.0, score)) for score in calibration.scores)
     alpha = 1.0 - calibration.target_coverage
@@ -108,7 +132,14 @@ def should_abstain(confidence: float, calibration: CalibrationSet, prediction_se
     ``max_set_size`` (the evidence is too thin or too ambiguous), or when the
     calibrated ``confidence`` falls below :func:`conformal_threshold`.
     """
-    if prediction_set_size == 0 or prediction_set_size > max_set_size:
+    if (
+        not _has_valid_calibration(calibration)
+        or not _is_finite_number(confidence)
+        or type(prediction_set_size) is not int
+        or type(max_set_size) is not int
+        or prediction_set_size <= 0
+        or prediction_set_size > max_set_size
+    ):
         return True
     return confidence < conformal_threshold(calibration)
 
@@ -135,11 +166,15 @@ def conformal_prediction_set(
     signals that no candidate is supported strongly enough, so the caller should
     abstain rather than guess.
     """
-    cutoff = nonconformity_score(conformal_threshold(calibration))
+    if not _has_valid_calibration(calibration):
+        return []
+    threshold = conformal_threshold(calibration)
+    # Compare confidences directly: subtracting them from 1 can round distinct
+    # values to the same nonconformity score and admit a below-threshold label.
     chosen = [
         (label, max(0.0, min(1.0, confidence)))
         for label, confidence in scored_labels
-        if nonconformity_score(confidence) <= cutoff
+        if _is_finite_number(confidence) and max(0.0, min(1.0, confidence)) >= threshold
     ]
     chosen.sort(key=lambda row: row[1], reverse=True)
     return [label for label, _ in chosen]
@@ -157,6 +192,8 @@ def conformal_should_abstain(
     :func:`conformal_prediction_set` and abstains when it is empty (evidence too
     thin) or larger than ``max_set_size`` (too ambiguous to answer).
     """
+    if type(max_set_size) is not int or max_set_size <= 0:
+        return True
     prediction_set = conformal_prediction_set(scored_labels, calibration)
     return not prediction_set or len(prediction_set) > max_set_size
 
@@ -243,7 +280,7 @@ def conformal_prediction_set_size_for_hits(
 
     * When at least one hit carries trusted ``metadata["confidence"]`` (assertion
       confidence / server-set field), size is the **per-example** count:
-      ``nonconformity_score(c) <= nonconformity_score(threshold)``.
+      ``confidence >= threshold`` after clipping to ``[0, 1]``.
     * When every hit is score-only (typical raw evidence retrieve), fall back to
       the historical **packet-relative** size
       ``count(score >= max_score * threshold)`` so RRF scores are not treated as
@@ -260,11 +297,10 @@ def conformal_prediction_set_size_for_hits(
         bar = max(0.0, min(1.0, float(threshold)))
     except (TypeError, ValueError):
         bar = 1.0
-    cutoff = nonconformity_score(bar)
     return sum(
         1
         for hit in hits
-        if nonconformity_score(example_confidence_from_hit(hit)) <= cutoff
+        if example_confidence_from_hit(hit) >= bar
     )
 
 
@@ -601,7 +637,7 @@ def fuse_calibrated_confidence_from_hit(
     return fuse_calibrated_confidence(**signals)
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, frozen=True)
 class IsotonicCalibrator:
     """Pure-Python Pool-Adjacent-Violators (PAV) monotone probability calibrator.
 
@@ -612,41 +648,71 @@ class IsotonicCalibrator:
     knots_x: tuple[float, ...]
     knots_y: tuple[float, ...]
 
+    def __post_init__(self) -> None:
+        if not self.knots_x or len(self.knots_x) != len(self.knots_y):
+            raise ValueError("isotonic knots must be nonempty and aligned")
+        if not all(_is_finite_number(v) and 0 <= v <= 1 for v in (*self.knots_x, *self.knots_y)):
+            raise ValueError("isotonic knots must be finite probabilities")
+        if any(a > b for a, b in zip(self.knots_y, self.knots_y[1:])):
+            raise ValueError("isotonic probability knots must be nondecreasing")
+        # Validate raw values before coercion; distinct real coordinates may
+        # collapse to the same float, so check ordering after normalization too.
+        xs = tuple(float(value) for value in self.knots_x)
+        ys = tuple(float(value) for value in self.knots_y)
+        if any(a >= b for a, b in zip(xs, xs[1:])):
+            raise ValueError("isotonic score knots must be strictly increasing")
+        if any(a > b for a, b in zip(ys, ys[1:])):
+            raise ValueError("isotonic probability knots must be nondecreasing")
+        object.__setattr__(self, "knots_x", xs)
+        object.__setattr__(self, "knots_y", ys)
+
     @classmethod
     def fit(cls, scores: list[float], outcomes: list[bool]) -> "IsotonicCalibrator":
         if len(scores) != len(outcomes) or not scores:
-            return cls(knots_x=(0.0, 1.0), knots_y=(0.0, 1.0))
+            raise ValueError("isotonic fitting requires nonempty aligned observations")
+        if not all(_is_finite_number(score) for score in scores):
+            raise ValueError("isotonic scores must be finite numbers")
+        if not all(type(outcome) is bool for outcome in outcomes):
+            raise ValueError("isotonic outcomes must be verified booleans")
         paired = sorted(
-            (max(0.0, min(1.0, float(s))), 1.0 if bool(y) else 0.0)
+            (max(0.0, min(1.0, float(s))), 1.0 if y else 0.0)
             for s, y in zip(scores, outcomes, strict=True)
         )
-        # Pool-Adjacent-Violators algorithm (blocks: [min_x, max_x, sum_y, count])
-        blocks: list[list[float]] = []
+        # Aggregate ties BEFORE PAV: the same score cannot acquire different
+        # probabilities just because sorting places failures before successes.
+        grouped: list[list[float]] = []
         for x, y in paired:
-            blocks.append([x, x, y, 1.0])
+            if grouped and grouped[-1][0] == x:
+                grouped[-1][1] += y
+                grouped[-1][2] += 1
+            else:
+                grouped.append([x, y, 1.0])
+        # Blocks contain [first group index, last group index, sum_y, count].
+        blocks: list[list[Any]] = []
+        for index, (_, sum_y, count) in enumerate(grouped):
+            blocks.append([index, index, sum_y, count])
             while len(blocks) >= 2:
-                prev_mean = blocks[-2][2] / blocks[-2][3]
-                curr_mean = blocks[-1][2] / blocks[-1][3]
-                if prev_mean > curr_mean:
-                    merged = blocks.pop()
-                    blocks[-1][1] = merged[1]
-                    blocks[-1][2] += merged[2]
-                    blocks[-1][3] += merged[3]
-                else:
+                previous, current = blocks[-2:]
+                if previous[2] / previous[3] <= current[2] / current[3]:
                     break
+                blocks.pop()
+                previous[1] = current[1]
+                previous[2] += current[2]
+                previous[3] += current[3]
         xs: list[float] = []
         ys: list[float] = []
-        for bx0, bx1, sum_y, cnt in blocks:
-            mid_x = 0.5 * (bx0 + bx1)
-            mean_y = max(0.0, min(1.0, sum_y / cnt))
-            xs.append(mid_x)
-            ys.append(mean_y)
+        for start, end, sum_y, count in blocks:
+            # Preserve both ends of a pooled interval. A midpoint-only knot
+            # would interpolate different fitted values inside the same block.
+            for index in range(start, end + 1):
+                xs.append(grouped[index][0])
+                ys.append(sum_y / count)
         return cls(knots_x=tuple(xs), knots_y=tuple(ys))
 
     def predict(self, score: float) -> float:
-        x = _bounded_unit(score, default=0.0)
-        if not self.knots_x:
-            return x
+        if not _is_finite_number(score):
+            raise ValueError("isotonic prediction requires a finite numeric score")
+        x = max(0.0, min(1.0, float(score)))
         if x <= self.knots_x[0]:
             return self.knots_y[0]
         if x >= self.knots_x[-1]:
@@ -655,8 +721,10 @@ class IsotonicCalibrator:
             x0, x1 = self.knots_x[i], self.knots_x[i + 1]
             y0, y1 = self.knots_y[i], self.knots_y[i + 1]
             if x0 <= x <= x1:
-                if x1 <= x0 + 1e-12:
-                    return 0.5 * (y0 + y1)
+                if x == x1:
+                    return y1
+                # Validated distinct knots can be arbitrarily close. Averaging
+                # near-equal coordinates changes exact fitted endpoint values.
                 t = (x - x0) / (x1 - x0)
                 return max(0.0, min(1.0, y0 + t * (y1 - y0)))
         return self.knots_y[-1]
@@ -666,10 +734,12 @@ class IsotonicCalibrator:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "IsotonicCalibrator":
-        return cls(
-            knots_x=tuple(float(v) for v in data.get("knots_x", (0.0, 1.0))),
-            knots_y=tuple(float(v) for v in data.get("knots_y", (0.0, 1.0))),
-        )
+        if not isinstance(data, Mapping):
+            raise ValueError("isotonic calibration must be an object")
+        xs, ys = data.get("knots_x"), data.get("knots_y")
+        if not isinstance(xs, (list, tuple)) or not isinstance(ys, (list, tuple)):
+            raise ValueError("isotonic calibration requires both knot arrays")
+        return cls(knots_x=tuple(xs), knots_y=tuple(ys))
 
 
 def calibrate_retrieval_decision_confidence(

@@ -9,17 +9,31 @@ from mnemosyne.experience.stats import Posterior
 from tests.test_learning_outcome_relevance import _lesson
 
 
-def legacy_proven_lesson():
+def legacy_proven_lesson(*, diagnostic_successes=False):
     runtime, lesson = _lesson()
     for success, count in [(False, 8), (True, 12)]:
         runtime.mode("t", "exploration", "active" if success else "off")
         for index in range(count):
             session = f"legacy-{success}-{index}"
             context = runtime.prepare_context("t", "u", session, lesson["goal"])
+            event = {
+                "name": "benchmark_verifier" if diagnostic_successes else "check",
+                "source": "tool", "verdict": success, "output": "Observed check",
+            }
+            if diagnostic_successes and success:
+                event["outcome_scope"] = "diagnostic"
             result = runtime.observe_turn("t", "u", session, lesson["goal"], "",
                 receipt_ids=[context["receipt_id"]],
-                tool_events=[{"name": "check", "verdict": success, "output": "Observed check"}])
-            runtime.writer.apply("t", "capture", lambda state: state["episodes"][result["episode_id"]].pop("outcome_version"))
+                tool_events=[event])
+            def legacy_outcome(state):
+                row = state["episodes"][result["episode_id"]]
+                row.pop("outcome_version")
+                if diagnostic_successes:
+                    # Older derived signals lost scope; retain the raw event so
+                    # audited migration can retract diagnostic-only successes.
+                    for signal in row["signals"]:
+                        signal.pop("outcome_scope", None)
+            runtime.writer.apply("t", "capture", legacy_outcome)
             runtime.resolve("t", result["episode_id"])
     runtime.consolidate("t")
     assert runtime.writer.read("t")["artifacts"][lesson["id"]]["state"] == "active"
@@ -48,20 +62,44 @@ def test_reprocessing_withdraws_unsupported_active_lesson(protection):
 
 
 def test_quarantined_protected_confidence_stays_a_historical_snapshot():
-    runtime, lesson = legacy_proven_lesson()
+    runtime, lesson = legacy_proven_lesson(diagnostic_successes=True)
     key = stat_key("lesson", lesson["id"], 1, lesson["task_class"])
     def retain_confidence(state):
         state["artifacts"][lesson["id"]]["confidence"] = Posterior.from_dict(state["stats"][key]).mean
     runtime.writer.apply("t", "capture", retain_confidence)
     runtime.lock("t", lesson["id"])
-    def corrected_statistics(state):
-        state["stats"][key].update(Posterior().to_dict(), verified_n=0, verified_successes=0)
-        state["policy"]["outcome_quarantine"] = {lesson["id"]: {"reason": "reprocessed_outcomes_require_verification"}}
-    runtime.writer.apply("t", "outcome_reprocess", corrected_statistics)
+    before = runtime.writer.read("t")
+    snapshot = deepcopy(before["artifacts"][lesson["id"]])
+    assert snapshot["locked"] is True
+    assert before["stats"][key]["n"] > 0
+    assert snapshot["confidence"] == Posterior.from_dict(before["stats"][key]).mean
+    assert runtime.reprocess_outcomes("t")["reprocessed"] == 20
+    state = runtime.writer.read("t")
+    assert state["receipts"] == before["receipts"]
+    diagnostic_ids = [
+        key for key, row in before["episodes"].items()
+        if any(event.get("outcome_scope") == "diagnostic" for event in row["tool_events"])
+    ]
+    assert len(diagnostic_ids) == 12
+    for episode_id in diagnostic_ids:
+        repaired = state["episodes"][episode_id]
+        assert repaired["tool_events"] == before["episodes"][episode_id]["tool_events"]
+        assert repaired["status"] == "unknown" and repaired["reward"] is None
+    assert state["stats"][key]["n"] == 0
+    assert state["stats"][key].get("verified_n", 0) == 0
+    assert state["artifacts"][lesson["id"]] == snapshot
+    assert snapshot["confidence"] != Posterior.from_dict(state["stats"][key]).mean
+    assert state["policy"]["outcome_quarantine"][lesson["id"]]["reason"] == "reprocessed_outcomes_require_verification"
+    assert state["defects"] == {}
     assert runtime.prepare_context("t", "u", "blocked", lesson["goal"])["lessons"] == []
+    assert runtime.writer.read("t")["artifacts"][lesson["id"]] == snapshot
     runtime.lock("t", lesson["id"], False)
-    saved = runtime.writer.read("t")["artifacts"][lesson["id"]]
+    state = runtime.writer.read("t")
+    saved = state["artifacts"][lesson["id"]]
     assert saved["state"] == "probation" and "confidence" not in saved
+    assert saved["locked"] is False
+    assert lesson["id"] not in state["policy"]["outcome_quarantine"]
+    assert state["defects"] == {}
 
 
 def test_skill_library_projects_targeted_failure_and_quarantine(tmp_path):

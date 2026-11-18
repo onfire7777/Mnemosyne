@@ -293,8 +293,17 @@ def test_honeytoken_cross_tenant_isolation_under_chaos(tmp_path: Path, seed: int
     mark_a = honeytoken("S3", tenant_a)
     mark_b = honeytoken("S3", tenant_b)
 
+    # Keep independent live controls outside the workload's evidence-index
+    # space: its random forget operations may correctly erase the first marked
+    # workload row. Seed before branching/projection/faults, not after them.
+    canary_a = engine.append_evidence(_ev(tenant_a, f"isolation control {mark_a}"))
+    canary_b = engine.append_evidence(_ev(tenant_b, f"isolation control {mark_b}"))
     H.apply_workload(engine, H.build_workload(seed, tenant=tenant_a, honeytoken_marker=mark_a))
     H.apply_workload(engine, H.build_workload(seed + 1000, tenant=tenant_b, honeytoken_marker=mark_b))
+    live_a = engine.get_evidence(tenant_a, canary_a)
+    live_b = engine.get_evidence(tenant_b, canary_b)
+    assert live_a is not None and mark_a in live_a.content
+    assert live_b is not None and mark_b in live_b.content
     engine.ensure_projections(tenant_a)
     engine.ensure_projections(tenant_b)
 
@@ -372,14 +381,18 @@ def test_lane_invariant_contested_item_never_improperly_closed(tmp_path: Path, s
     # valid_from + EQUAL trust => both assertions become "contested" (shipped
     # upsert contract). Give it a grounding cid so it is a real lifecycle citizen.
     t0 = parse_dt("2026-01-01T00:00:00Z")
-    cid = engine.append_evidence(_ev(tenant, f"contest-{seed} grounding about the beacon"))
+    # Reserve a subject outside the noisy generator's namespace. A newer or
+    # stronger workload assertion may legitimately supersede a beacon/is pair.
+    subject = f"reserved-contest-control-{seed}"
+    assert subject not in H._SUBJECTS
+    cid = engine.append_evidence(_ev(tenant, f"contest-{seed} grounding about {subject}"))
     engine.upsert_assertion(
-        Assertion(tenant_id=tenant, user_id="u", subject="beacon", predicate="is", object="topaz",
+        Assertion(tenant_id=tenant, user_id="u", subject=subject, predicate="is", object="topaz",
                   confidence=0.7, trust_tier=1, valid_from=t0, status="active",
                   source_evidence_cids=[cid], id=f"contest-{seed}-a")
     )
     engine.upsert_assertion(
-        Assertion(tenant_id=tenant, user_id="u", subject="beacon", predicate="is", object="onyx",
+        Assertion(tenant_id=tenant, user_id="u", subject=subject, predicate="is", object="onyx",
                   confidence=0.7, trust_tier=1, valid_from=t0, status="active",
                   source_evidence_cids=[cid], id=f"contest-{seed}-b")
     )

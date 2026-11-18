@@ -22,6 +22,8 @@ class ValidatedFetchUrl:
     origin: str
     resolved_addresses: tuple[str, ...]
     pinned_address: str
+    # Discovery's local-only policy must survive into the request opener.
+    loopback_only: bool = False
 
 
 class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -139,12 +141,15 @@ def validate_fetch_url(
     purpose: str,
     allow_internal_hosts: Iterable[str] = (),
     allow_insecure_internal_hosts: Iterable[str] = (),
+    loopback_only: bool = False,
 ) -> ValidatedFetchUrl:
     parsed = urlsplit(url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise ValueError(f"{purpose} must be http(s) with a hostname")
     if parsed.username or parsed.password:
         raise ValueError(f"{purpose} must not contain userinfo credentials")
+    if loopback_only and not is_loopback_host(parsed.hostname):
+        raise ValueError(f"{purpose} must use a loopback hostname")
     try:
         explicit_port = parsed.port
     except ValueError as exc:
@@ -163,8 +168,7 @@ def validate_fetch_url(
             "or the host is on the internal HTTP allowlist"
         )
     allow_loopback = (
-        parsed.scheme != "https"
-        and allow_insecure_localhost
+        (loopback_only or (parsed.scheme != "https" and allow_insecure_localhost))
         and is_loopback_host(parsed.hostname)
     )
     allow_internal = normalized_host in internal_hosts or allow_insecure_internal
@@ -175,6 +179,7 @@ def validate_fetch_url(
         allow_loopback=allow_loopback,
         allow_internal=allow_internal,
         purpose=purpose,
+        loopback_only=loopback_only,
     )
     return ValidatedFetchUrl(
         url=url,
@@ -184,6 +189,7 @@ def validate_fetch_url(
         origin=_origin(parsed.scheme, parsed.hostname, explicit_port),
         resolved_addresses=addresses,
         pinned_address=addresses[0],
+        loopback_only=loopback_only,
     )
 
 
@@ -195,7 +201,11 @@ def safe_urlopen(
     context: ssl.SSLContext | None = None,
 ):
     _validate_request_matches(request, validated)
+    # A per-request opener avoids changing explicit HTTP proxy behavior or
+    # mutating the process environment/global urllib opener.
+    proxy_handlers = [urllib.request.ProxyHandler({})] if validated.loopback_only else []
     opener = urllib.request.build_opener(
+        *proxy_handlers,
         NoRedirectHandler(),
         _PinnedHTTPHandler(validated),
         _PinnedHTTPSHandler(validated, context=context),
@@ -210,6 +220,7 @@ def _resolve_allowed_addresses(
     allow_loopback: bool,
     allow_internal: bool,
     purpose: str,
+    loopback_only: bool = False,
 ) -> tuple[str, ...]:
     try:
         infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
@@ -230,6 +241,8 @@ def _resolve_allowed_addresses(
             ip = ipaddress.ip_address(address)
         except ValueError as exc:
             raise ValueError(f"{purpose} hostname resolved to invalid address: {address}") from exc
+        if loopback_only and not ip.is_loopback:
+            raise ValueError(f"{purpose} hostname must resolve only to loopback addresses")
         if allow_loopback and ip.is_loopback:
             continue
         if allow_internal and _is_allowed_internal_address(ip):

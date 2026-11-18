@@ -111,7 +111,7 @@ def _passed(tool: str) -> dict[str, str | None]:
     return passed
 
 
-# --- structure: all 60 tools --------------------------------------------------
+# --- structure: every MCP tool --------------------------------------------------
 
 
 @pytest.mark.parametrize("tool", TOOL_NAMES)

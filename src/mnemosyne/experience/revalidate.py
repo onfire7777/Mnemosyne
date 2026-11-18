@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from mnemosyne.lifecycle import next_rehearsal_days
 from .candidates import verification_request_id, EXCLUDED_SOURCES
+from .signals import reward, tool_signals, verified_target_outcome
 
 
 def revalidate(
@@ -28,33 +29,48 @@ def revalidate(
             or episode["created_at"] <= artifact["created_at"]
         ):
             continue
-        if not any(
-            signal["kind"] in {"tests", "verifier"}
-            for signal in episode.get("signals", [])
-        ):
+        checks = [signal for signal in episode.get("signals", [])
+                  if signal["kind"] in {"tests", "verifier"}]
+        if not checks:
             continue
         served = [
             item
             for rid in episode["receipt_ids"]
             for item in state["receipts"].get(rid, {}).get("items", [])
         ]
-        requested_test = any(
-            event.get("source") not in EXCLUDED_SOURCES
+        # A request annotation is not a result. Grade only the external check
+        # carrying this exact request and tested revision, not a nearby verdict.
+        requested_checks = tool_signals([
+            event for event in episode.get("tool_events", [])
+            if event.get("source") not in EXCLUDED_SOURCES
             and event.get("revalidation_request_id")
             == verification_request_id(artifact)
             and event.get("tested_steps") == artifact["steps"]
-            for event in episode.get("tool_events", [])
+            and (not event.get("target_ids") or artifact["id"] in event["target_ids"])
+        ])
+        requested_value = reward(
+            [item for item in requested_checks if item["kind"] in {"tests", "verifier"}],
+            include_diagnostics=True,
         )
-        if requested_test or any(
+        values = [] if requested_value is None else [requested_value]
+        target = episode.get("target_outcomes", {}).get(artifact["id"])
+        if target is not None and any(
             item["item_id"] == artifact["id"]
             and item["revision"] == artifact["revision"]
             for item in served
         ):
-            tests.append(episode)
+            # Old attribution bugs and ratings accompanied by unrelated tests
+            # are not retention evidence. Require the retained target result
+            # to be independently reproducible for this exact served revision.
+            checked_value = verified_target_outcome(artifact, {**episode, "signals": checks})
+            if checked_value is not None and checked_value == target["value"]:
+                values.append(checked_value)
+        if values:
+            tests.append((episode["id"], min(values)))
     if not tests:
         artifact["revalidation_pending"] = True
         return
-    artifact["revalidation_episode_ids"] = sorted(seen | {row["id"] for row in tests})
+    artifact["revalidation_episode_ids"] = sorted(seen | {identifier for identifier, _ in tests})
     artifact["revalidation_pending"] = False
     explanation_ok = artifact.get("explanation_sources") == artifact.get(
         "source_episode_ids"
@@ -64,7 +80,7 @@ def revalidate(
         explanation_ok = (
             explanation_ok and source is not None and quote["quote"] in source.content
         )
-    if any(row["reward"] <= 0 for row in tests) or not explanation_ok:
+    if any(value <= 0 for _, value in tests) or not explanation_ok:
         artifact.update(
             state="demoted" if explanation_ok else "labile",
             revalidation_reason="external_test_failed"

@@ -8,26 +8,36 @@ Provides:
    - Deterministic binary serialization (``to_bytes`` / ``from_bytes``) and erasure-safe ``remove_ids``
 2. Local adapter auto-discovery (``discover_local_embedding_provider``,
    ``discover_local_reranker``, ``auto_local_retrieval_adapters``):
-   - Discovers in-process local models (``fastembed`` / ``sentence_transformers`` with ``local_files_only``)
+   - Discovers explicitly named cached ``fastembed`` models with ``local_files_only``
      or loopback-only local daemons (e.g. ``127.0.0.1:8766`` cross-encoder, ``127.0.0.1:8765`` embedding)
      and falls back deterministically to ``HashingEmbeddingProvider`` / ``LocalSimilarityReranker``.
 """
 
 from __future__ import annotations
 
+import http.client
 import json
 import math
 import os
 import struct
-import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
-import numpy as np
+if TYPE_CHECKING:
+    import numpy as np
+else:
+    try:
+        import numpy as np
+    except ImportError:  # Base installs may discover HTTP models without NumPy.
+        np = None
 
+from mnemosyne.network_safety import (
+    safe_urlopen,
+    validate_fetch_url,
+)
 from mnemosyne.retrieval import (
     EmbeddingProvider,
     HashingEmbeddingProvider,
@@ -41,7 +51,10 @@ from mnemosyne.retrieval import (
 QuantizedMode = Literal["auto", "exact", "int8_rescore", "binary_int8_rescore"]
 
 # Precomputed 8-bit popcount lookup table for fast vectorized Hamming distance.
-_POPCOUNT_LUT = np.array([bin(i).count("1") for i in range(256)], dtype=np.uint8)
+_POPCOUNT_LUT = (
+    np.array([bin(i).count("1") for i in range(256)], dtype=np.uint8)
+    if np is not None else None
+)
 _SERIAL_MAGIC = b"MNQ1"
 
 
@@ -98,6 +111,8 @@ class QuantizedVectorIndex:
         binary_oversample: int = 16,
         binary_min_candidates: int = 256,
     ) -> None:
+        if np is None:
+            raise ImportError("QuantizedVectorIndex requires the optional numpy dependency")
         if dims <= 0:
             raise ValueError("dims must be positive")
         self.dims = int(dims)
@@ -135,6 +150,8 @@ class QuantizedVectorIndex:
         vectors: Sequence[Sequence[float]] | np.ndarray,
         **kwargs: Any,
     ) -> QuantizedVectorIndex:
+        if np is None:
+            raise ImportError("QuantizedVectorIndex requires the optional numpy dependency")
         arr = np.asarray(vectors, dtype=np.float32)
         if arr.ndim != 2 or arr.shape[0] != len(ids):
             raise ValueError("vectors must be a 2D array aligned with ids")
@@ -429,29 +446,77 @@ class FastEmbedLocalProvider:
 
 
 def _is_loopback_url(url: str) -> bool:
+    # Validate the original endpoint before urljoin can discard unsafe parts.
+    if not url or any(ord(char) <= 32 or ord(char) == 127 for char in url):
+        return False
     try:
-        parsed = urllib.parse.urlparse(url)
+        parsed = urllib.parse.urlsplit(url)
+        return (
+            parsed.scheme in {"http", "https"}
+            and parsed.hostname in {"127.0.0.1", "localhost", "::1"}
+            and parsed.username is None
+            and parsed.password is None
+            and not parsed.fragment
+            and (parsed.port is None or 0 < parsed.port <= 65535)
+        )
     except ValueError:
         return False
-    return parsed.scheme in {"http", "https"} and parsed.hostname in {
-        "127.0.0.1",
-        "localhost",
-        "::1",
-    }
 
 
 def _probe_loopback_json(url: str, timeout_seconds: float = 0.25) -> dict[str, Any] | None:
-    if not _is_loopback_url(url):
+    if not _is_loopback_url(url) or not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
         return None
-    req = urllib.request.Request(url, method="GET", headers={"Accept": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:  # noqa: S310
-            if getattr(resp, "status", 200) != 200:
+        validated = validate_fetch_url(
+            url,
+            allow_insecure_localhost=True,
+            purpose="local retrieval discovery",
+            loopback_only=True,
+        )
+        req = urllib.request.Request(url, method="GET", headers={"Accept": "application/json"})
+        with safe_urlopen(req, validated=validated, timeout=timeout_seconds) as resp:
+            if resp.status != 200 or resp.headers.get_content_type() != "application/json":
                 return None
-            data = json.loads(resp.read().decode("utf-8"))
+            payload = resp.read(65537)
+            if len(payload) > 65536:
+                return None
+            data = json.loads(payload.decode("utf-8"))
             return data if isinstance(data, dict) else None
-    except (OSError, ValueError, urllib.error.URLError):
+    except (OSError, ValueError, http.client.HTTPException, RecursionError):
         return None
+
+
+def _probe_endpoint_health(endpoint: str, timeout_seconds: float) -> dict[str, Any] | None:
+    if not _is_loopback_url(endpoint):
+        return None
+    return _probe_loopback_json(urllib.parse.urljoin(endpoint, "/health"), timeout_seconds)
+
+
+def _semantic_health_metadata(
+    health: dict[str, Any] | None, capability: str, *, backends: set[str]
+) -> dict[str, Any] | None:
+    """A healthy web server is not evidence of a loaded semantic model."""
+    if not health or health.get("status") != "ok":
+        return None
+    metadata = health.get(capability)
+    if not isinstance(metadata, dict):
+        return None
+    model = metadata.get("model")
+    backend = metadata.get("backend")
+    if not isinstance(model, str) or not model.strip():
+        return None
+    if not isinstance(backend, str) or backend not in backends:
+        return None
+    return metadata
+
+
+def _embedding_health_dims(metadata: dict[str, Any]) -> int | None:
+    widths = [metadata[key] for key in ("dimensions", "dims") if key in metadata]
+    if not widths or any(type(width) is not int or width <= 0 for width in widths):
+        return None
+    if len(set(widths)) != 1:
+        return None
+    return widths[0]
 
 
 def discover_local_embedding_provider(
@@ -462,14 +527,16 @@ def discover_local_embedding_provider(
     allow_inprocess_onnx: bool = True,
 ) -> EmbeddingProvider:
     """Auto-discover a safe local dense embedding provider, falling back to hashing."""
-    if allow_inprocess_onnx:
+    if allow_inprocess_onnx and np is not None:
         model_name = os.environ.get("MNEMOSYNE_FASTEMBED_MODEL", "").strip()
         if model_name:
             try:
                 from fastembed import TextEmbedding  # type: ignore[import-not-found]
 
                 fe_model = TextEmbedding(model_name=model_name, local_files_only=True)
-                sample = list(fe_model.embed(["probe"]))[0]
+                sample = np.asarray(list(fe_model.embed(["probe"]))[0], dtype=np.float32)
+                if sample.ndim != 1 or not sample.size or not np.isfinite(sample).all() or not np.any(sample):
+                    raise ValueError("cached embedding model returned an invalid probe vector")
                 return FastEmbedLocalProvider(
                     _model=fe_model,
                     dims=int(len(sample)),
@@ -481,19 +548,20 @@ def discover_local_embedding_provider(
     if allow_loopback_http:
         explicit_url = os.environ.get(
             "MNEMOSYNE_LOCAL_EMBEDDING_URL", "http://127.0.0.1:8765/v1/embeddings"
-        ).strip()
-        health_url = urllib.parse.urljoin(explicit_url, "/health")
-        health = _probe_loopback_json(health_url, timeout_seconds=probe_timeout_seconds)
-        if health and health.get("status") == "ok":
-            emb_meta = health.get("embedding") if isinstance(health.get("embedding"), dict) else {}
-            detected_dims = int(emb_meta.get("dims") or os.environ.get("MNEMOSYNE_EMBEDDING_DIMS", "1024"))
-            detected_model = str(emb_meta.get("model") or os.environ.get("MNEMOSYNE_EMBEDDING_MODEL", "")).strip() or None
+        )
+        health = _probe_endpoint_health(explicit_url, probe_timeout_seconds)
+        emb_meta = _semantic_health_metadata(
+            health, "embedding", backends={"sentence-transformers", "fastembed"}
+        )
+        detected_dims = _embedding_health_dims(emb_meta) if emb_meta is not None else None
+        if emb_meta is not None and detected_dims is not None:
             return HttpEmbeddingProvider(
                 url=explicit_url,
-                model=detected_model,
+                model=emb_meta["model"],
                 dims=detected_dims,
                 timeout_seconds=10.0,
-                name="local-http-embedding",
+                name=f"local-http-embedding:{emb_meta['model']}",
+                loopback_only=True,
             )
 
     return HashingEmbeddingProvider(dims=default_dims)
@@ -509,21 +577,19 @@ def discover_local_reranker(
     if allow_loopback_http:
         rerank_url = os.environ.get(
             "MNEMOSYNE_LOCAL_RERANKER_URL", "http://127.0.0.1:8766/rerank"
-        ).strip()
-        health_url = urllib.parse.urljoin(rerank_url, "/health")
-        health = _probe_loopback_json(health_url, timeout_seconds=probe_timeout_seconds)
-        if health and health.get("status") == "ok":
-            rk_meta = health.get("reranker") if isinstance(health.get("reranker"), dict) else {}
-            model_name = str(rk_meta.get("model") or "").strip() or None
-            backend = str(rk_meta.get("backend") or "").strip().lower()
-            score_kind = "logit" if backend == "cross-encoder" else "similarity"
+        )
+        health = _probe_endpoint_health(rerank_url, probe_timeout_seconds)
+        rk_meta = _semantic_health_metadata(health, "reranker", backends={"cross-encoder"})
+        if rk_meta is not None:
+            model_name = rk_meta["model"]
             return HttpReranker(
                 url=rerank_url,
                 model=model_name,
                 timeout_seconds=10.0,
-                name=f"local-cross-encoder:{model_name or 'loopback'}",
+                name=f"local-cross-encoder:{model_name}",
                 query_prefix="",
-                score_kind=score_kind,
+                score_kind="logit",
+                loopback_only=True,
             )
 
     emb = fallback_embedding or HashingEmbeddingProvider()

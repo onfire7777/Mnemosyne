@@ -444,6 +444,21 @@ def load_retrieval_adapters(args: argparse.Namespace) -> RetrievalAdapters:
             cache_ttl_seconds=float(args.embedding_cache_ttl_seconds),
             cache_scope=args.embedding_cache_scope,
         )
+    elif args.embedding_provider == "auto":
+        from mnemosyne.quantized_vectors import discover_local_embedding_provider
+
+        embedding = discover_local_embedding_provider(default_dims=dims)
+        if isinstance(embedding, HttpEmbeddingProvider):
+            # Discovery chooses the model identity/width; caller-owned cache
+            # policy remains identical to the explicit HTTP path.
+            embedding = replace(
+                embedding,
+                timeout_seconds=timeout,
+                cache_size=0 if evaluation_read_only else int(args.embedding_cache_size),
+                cache_path=None if evaluation_read_only else args.embedding_cache_path,
+                cache_ttl_seconds=float(args.embedding_cache_ttl_seconds),
+                cache_scope=args.embedding_cache_scope,
+            )
     else:
         embedding = HashingEmbeddingProvider(dims=dims)
 
@@ -456,6 +471,12 @@ def load_retrieval_adapters(args: argparse.Namespace) -> RetrievalAdapters:
             api_key=args.reranker_api_key,
             timeout_seconds=timeout,
         )
+    elif args.reranker_provider == "auto":
+        from mnemosyne.quantized_vectors import discover_local_reranker
+
+        reranker = discover_local_reranker(fallback_embedding=embedding)
+        if isinstance(reranker, HttpReranker):
+            reranker = replace(reranker, timeout_seconds=timeout)
     else:
         reranker = LocalSimilarityReranker(embedding_provider=embedding)
 
@@ -20012,7 +20033,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=env_flag("MNEMOSYNE_REQUIRE_RUNTIME_RESIDENCY", default=False),
         help="Fail ingestion unless a runtime processing residency is configured or supplied in metadata",
     )
-    parser.add_argument("--embedding-provider", choices=["local", "http"], default=os.environ.get("MNEMOSYNE_EMBEDDING_PROVIDER", "local"))
+    parser.add_argument(
+        "--embedding-provider", choices=["local", "http", "auto"],
+        default=os.environ.get("MNEMOSYNE_EMBEDDING_PROVIDER", "local"),
+        help="local: offline hashing (default); auto: opt-in cached/loopback semantic discovery; http: explicit endpoint",
+    )
     parser.add_argument("--embedding-url", default=os.environ.get("MNEMOSYNE_EMBEDDING_URL"))
     parser.add_argument("--embedding-model", default=os.environ.get("MNEMOSYNE_EMBEDDING_MODEL"))
     parser.add_argument("--embedding-model-revision", default=os.environ.get("MNEMOSYNE_EMBEDDING_MODEL_REVISION"))
@@ -20030,7 +20055,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("MNEMOSYNE_EMBEDDING_CACHE_SCOPE", "default"),
         help="Privacy boundary label included in HTTP embedding cache keys",
     )
-    parser.add_argument("--reranker-provider", choices=["local", "http"], default=os.environ.get("MNEMOSYNE_RERANKER_PROVIDER", "local"))
+    parser.add_argument(
+        "--reranker-provider", choices=["local", "http", "auto"],
+        default=os.environ.get("MNEMOSYNE_RERANKER_PROVIDER", "local"),
+        help="local: similarity (default); auto: opt-in loopback cross-encoder discovery; http: explicit endpoint",
+    )
     parser.add_argument("--reranker-url", default=os.environ.get("MNEMOSYNE_RERANKER_URL"))
     parser.add_argument("--reranker-model", default=os.environ.get("MNEMOSYNE_RERANKER_MODEL"))
     parser.add_argument("--reranker-api-key", default=os.environ.get("MNEMOSYNE_RERANKER_API_KEY"))

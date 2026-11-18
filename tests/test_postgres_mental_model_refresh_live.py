@@ -21,7 +21,7 @@ from mnemosyne.answering import AnswerReadContext
 from mnemosyne.mental_model_refresh import MentalModelRefreshWorker
 from mnemosyne.mental_models import MentalModelService
 from mnemosyne.models import Evidence
-from mnemosyne.postgres_engine import PostgresEngine, _cid_to_bytes, _stable_uuid
+from mnemosyne.postgres_engine import PostgresEngine
 from mnemosyne.providers.extractive_decomposer import ExtractiveQueryDecomposer
 
 psycopg = pytest.importorskip("psycopg")
@@ -189,20 +189,94 @@ def test_live_rls_owner_and_pooled_tenant_isolation(live):
             assert cur.fetchone()[0] == 0
 
 
-def test_live_lock_wait_times_out_and_next_transaction_recovers(live):
-    engine, _, _, _, context, mid, cid = live
-    with psycopg.connect(engine.dsn) as blocking:
-        with blocking.cursor() as cur:
-            cur.execute("SELECT set_config('mnemosyne.tenant_id', %s, true)", (str(_stable_uuid("tenant", context.tenant_id)),))
-            cur.execute("UPDATE evidence SET sensitivity=sensitivity WHERE tenant_id=%s AND cid=%s",
-                        (_stable_uuid("tenant", context.tenant_id), _cid_to_bytes(cid)))
-            started = time.monotonic()
-            with pytest.raises(psycopg.errors.LockNotAvailable):
-                with engine.mental_model_guard(context.tenant_id):
-                    pytest.fail("entered guard while source writer held conflicting lock")
-            assert 4.5 <= time.monotonic() - started < 9
-    with engine.mental_model_guard(context.tenant_id):
-        assert engine.get_mental_model_record(context.tenant_id, mid)
+@pytest.mark.parametrize("conn_reuse", [True, False], ids=["pooled", "fresh"])
+def test_live_lock_wait_times_out_and_next_transaction_recovers(live, monkeypatch, conn_reuse):
+    engine, other, _, _, context, mid, cid = live
+    monkeypatch.setattr(engine, "_conn_reuse", conn_reuse)
+    attempted = Event()
+    guard_pids = []
+    set_tenant = engine._set_tenant
+
+    def identify_guard(cur, tenant):
+        set_tenant(cur, tenant)
+        guard_pids.append(cur.connection.info.backend_pid)
+        attempted.set()
+
+    monkeypatch.setattr(engine, "_set_tenant", identify_guard)
+
+    def wait_for_guard():
+        started = time.monotonic()
+        with pytest.raises(psycopg.errors.LockNotAvailable, match="lock timeout"):
+            with engine.mental_model_guard(context.tenant_id):
+                pytest.fail("entered guard while source writer held conflicting lock")
+        assert 4.5 <= time.monotonic() - started < 9
+        assert engine._active_mental_model_connection(context.tenant_id) is None
+
+    def recover():
+        # Reuse the same worker/thread-local context after the failed lease.
+        with engine.mental_model_guard(context.tenant_id):
+            assert engine.get_mental_model_record(context.tenant_id, mid)
+            assert engine.get_evidence(context.tenant_id, cid).metadata["timeout_probe"] is True
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        # Runtime writers take an exclusive tenant advisory lock; raw UPDATE
+        # alone does not conflict with the shared publication advisory lock.
+        # Exercise a real source mutation and keep its transaction uncommitted.
+        with other.source_transaction(context.tenant_id):
+            assert other.update_evidence_metadata(context.tenant_id, cid, {"timeout_probe": True})
+            blocking_pid = other._source_transaction_state()["connection"].info.backend_pid
+            future = pool.submit(wait_for_guard)
+            assert attempted.wait(3), "publication guard did not attempt its tenant lock"
+            deadline = time.monotonic() + 3
+            with psycopg.connect(engine.dsn, autocommit=True) as observer:
+                while True:
+                    blocked = observer.execute(
+                        "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE pid = %s "
+                        "AND locktype = 'advisory' AND mode = 'ShareLock' AND NOT granted "
+                        "AND %s = ANY(pg_blocking_pids(pid)))",
+                        (guard_pids[0], blocking_pid),
+                    ).fetchone()[0]
+                    if blocked:
+                        break
+                    assert not future.done(), "guard finished without the intended advisory conflict"
+                    assert time.monotonic() < deadline, "guard did not wait for the source writer"
+                    time.sleep(0.01)
+            future.result(timeout=9)
+        pool.submit(recover).result(timeout=10)
+    if conn_reuse:
+        assert guard_pids[-1] == guard_pids[0], "recovery must exercise the timed-out pooled connection"
+    assert other.get_evidence(context.tenant_id, cid).metadata["timeout_probe"] is True
+
+
+@pytest.mark.parametrize("held_guard", ["source_writer", "publication"])
+def test_live_tenant_guards_allow_unrelated_tenant_progress(live, held_guard):
+    engine, other, _, _, context, _, cid = live
+    unrelated = replace(context, tenant_id=f"model-live-unrelated-{uuid4().hex}")
+    service = MentalModelService(other, Provider)
+    mid = service.create(unrelated, "Unrelated", "What is the plan?")["model_id"]
+
+    def make_progress():
+        new_cid = other.append_evidence(Evidence(
+            tenant_id=unrelated.tenant_id, user_id="owner", actor="user", source_type="chat",
+            content="Unrelated tenant progress.", access_policy={"tenant": unrelated.tenant_id},
+        ))
+        assert other.get_evidence(unrelated.tenant_id, new_cid) is not None
+        with other.mental_model_guard(unrelated.tenant_id):
+            row = other.get_mental_model_record(unrelated.tenant_id, mid)
+            saved = other.save_mental_model_record(
+                unrelated.tenant_id, mid, row, expected_version=row["version"],
+            )
+            assert saved["version"] == row["version"] + 1
+        return new_cid, saved
+
+    guard = engine.source_transaction if held_guard == "source_writer" else engine.mental_model_guard
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with guard(context.tenant_id):
+            if held_guard == "source_writer":
+                assert engine.update_evidence_metadata(context.tenant_id, cid, {"progress_probe": True})
+            new_cid, saved = pool.submit(make_progress).result(timeout=3)
+    assert engine.get_evidence(unrelated.tenant_id, new_cid) is not None
+    assert engine.get_mental_model_record(unrelated.tenant_id, mid) == saved
 
 
 def test_live_app_role_model_delete_keeps_owner_and_evidence_boundaries(live):

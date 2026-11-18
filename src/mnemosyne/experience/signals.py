@@ -10,7 +10,7 @@ from collections import Counter
 from .receipts import digest
 
 VERIFIED_KINDS = frozenset({"verifier", "tests", "critic", "rating"})
-OUTCOME_VERSION = 3
+OUTCOME_VERSION = 4
 
 WEIGHTS = {
     "verifier": 1.0,
@@ -225,17 +225,21 @@ def verified_target_outcome(artifact: dict, episode: dict) -> float | None:
         observed_action, sequence_occurrence,
     )
     steps = artifact.get("steps", [])
-    expected = expected_steps(episode)
-    if expected:
-        matches = any(len(steps) == len(sequence)
-                      and sequence_occurrence(steps, sequence) is not None
-                      for sequence in expected)
-        return reward(general) if matches else -1.0
     occurrence = action_occurrence(artifact, episode)
     if occurrence is None:
         return None
     observed = compatible_observed_steps(steps, episode)
     if len(steps) == len(observed):
+        # Corrective steps describe what should have run, not what did run.
+        # They can grade a whole executed procedure, but cannot assign either
+        # credit or blame to an ignored memory or an unchecked embedded routine.
+        expected = expected_steps(episode)
+        if expected and not any(
+            len(steps) == len(sequence)
+            and sequence_occurrence(steps, sequence) is not None
+            for sequence in expected
+        ):
+            return -1.0
         return reward(general)
 
     # An embedded routine needs a checker associated with its actual calls.
@@ -392,15 +396,16 @@ def reprocessed_episode(episode: dict, artifacts: dict, receipts: dict, *,
     updated.update(reward=value, rpe=None if value is None else value - (2 * episode["prediction"] - 1),
                    status=("open" if episode.get("status") == "open" else "unknown") if value is None else "resolved",
                    target_outcomes={})
-    if value is not None:
-        for rid in episode.get("receipt_ids", []):
-            for item in receipts[rid]["items"]:
-                artifact = receipt_target(item, artifacts)
-                if not artifact:
-                    continue
-                target = verified_target_outcome(artifact, updated)
-                if target is not None:
-                    updated["target_outcomes"][artifact["id"]] = {
-                        "value": target, "rpe": target - (2 * episode["prediction"] - 1),
-                    }
+    # Exact-target diagnostics remain evidence even when the task is ungraded.
+    # Rebuild them independently, without manufacturing a task reward or credit.
+    for rid in episode.get("receipt_ids", []):
+        for item in receipts[rid]["items"]:
+            artifact = receipt_target(item, artifacts)
+            if not artifact:
+                continue
+            target = verified_target_outcome(artifact, updated)
+            if target is not None:
+                updated["target_outcomes"][artifact["id"]] = {
+                    "value": target, "rpe": target - (2 * episode["prediction"] - 1),
+                }
     return updated

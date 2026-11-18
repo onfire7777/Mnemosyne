@@ -14,6 +14,7 @@ from mnemosyne.experience.revisions import (
 )
 from mnemosyne.experience.schema import assimilate
 from mnemosyne.experience.revalidate import revalidate
+from mnemosyne.experience.signals import tool_signals
 from mnemosyne.experience.sleep import _candidate, _gate, _lifecycle, mine_chunks
 
 
@@ -113,18 +114,43 @@ def test_revalidation_needs_new_external_served_outcome():
         state="active",
         next_revalidation_at=(datetime.now(UTC) - timedelta(days=1)).isoformat(),
     )
-    state = {"episodes": {"e": episode()}, "receipts": {}}
+    row: dict = episode(tool_events=[], signals=[], target_outcomes={})
+    state = {"episodes": {"e": row}, "receipts": {}}
     runtime = SimpleNamespace(_sources_live=lambda *args: True)
     before = deepcopy(item)
     revalidate(runtime, "t", state, item, datetime.now(UTC))
     assert item["revalidation_step"] == before["revalidation_step"]
     receipt = {"items": [{"item_id": item["id"], "revision": 1}]}
     state["receipts"]["r"] = receipt
-    state["episodes"]["e"]["receipt_ids"] = ["r"]
+    row["receipt_ids"] = ["r"]
+    # Serving alone is not verification, even when the whole task succeeded.
+    revalidate(runtime, "t", state, item, datetime.now(UTC))
+    assert item["revalidation_step"] == before["revalidation_step"]
+    assert item["revalidation_pending"] is True
+    assert not item.get("revalidation_episode_ids")
+    row["tool_events"].append({
+        "name": "benchmark_verifier", "source": "tool", "verdict": True,
+        "target_ids": ["another-artifact"],
+    })
+    row["signals"] = tool_signals(row["tool_events"])
+    row["target_outcomes"]["another-artifact"] = {"value": 1}
+    revalidate(runtime, "t", state, item, datetime.now(UTC))
+    assert item["revalidation_step"] == before["revalidation_step"]
+    assert item["revalidation_pending"] is True
+    assert not item.get("revalidation_episode_ids")
+    row["tool_events"].append({
+        "name": "benchmark_verifier", "source": "tool", "verdict": True,
+        "target_ids": [item["id"]],
+    })
+    row["signals"] = tool_signals(row["tool_events"])
+    row["target_outcomes"][item["id"]] = {"value": 1}
     revalidate(runtime, "t", state, item, datetime.now(UTC))
     assert item["revalidation_step"] == 1
+    assert item["revalidation_pending"] is False
+    assert item["revalidation_episode_ids"] == ["e"]
     revalidate(runtime, "t", state, item, datetime.now(UTC) + timedelta(days=5))
     assert item["revalidation_step"] == 1
+    assert item["revalidation_episode_ids"] == ["e"]
 
 
 def test_idle_only_affects_unpinned_learned_items():
@@ -361,13 +387,44 @@ def test_revalidation_failure_demotes_and_never_consumes_again():
         state="active",
         next_revalidation_at=(datetime.now(UTC) - timedelta(days=1)).isoformat(),
     )
-    row = episode(id="failure", reward=-1, receipt_ids=["r"])
+    row: dict = episode(
+        id="failure", reward=-1, receipt_ids=["r"],
+        tool_events=[], signals=[], target_outcomes={},
+    )
     state = {
         "episodes": {"failure": row},
         "receipts": {"r": {"items": [{"item_id": item["id"], "revision": 1}]}},
     }
     runtime = SimpleNamespace(_sources_live=lambda *args: True)
+    # Neither passive exposure nor another artifact's failure blames this one.
     revalidate(runtime, "t", state, item, datetime.now(UTC))
+    assert item["state"] == "active"
+    assert item["revalidation_step"] == 0
+    assert item["revalidation_pending"] is True
+    assert not item.get("revalidation_episode_ids")
+    row["tool_events"].append({
+        "name": "benchmark_verifier", "source": "tool", "verdict": False,
+        "target_ids": ["another-artifact"],
+    })
+    row["signals"] = tool_signals(row["tool_events"])
+    row["target_outcomes"]["another-artifact"] = {"value": -1}
+    revalidate(runtime, "t", state, item, datetime.now(UTC))
+    assert item["state"] == "active"
+    assert item["revalidation_step"] == 0
+    assert item["revalidation_pending"] is True
+    assert not item.get("revalidation_episode_ids")
+    row["tool_events"].append({
+        "name": "benchmark_verifier", "source": "tool", "verdict": False,
+        "target_ids": [item["id"]],
+    })
+    row["signals"] = tool_signals(row["tool_events"])
+    row["target_outcomes"][item["id"]] = {"value": -1}
+    revalidate(runtime, "t", state, item, datetime.now(UTC))
+    assert item["state"] == "demoted"
+    assert item["revalidation_episode_ids"] == ["failure"]
+    assert item["revalidation_step"] == 0
+    assert item["revalidation_pending"] is False
+    revalidate(runtime, "t", state, item, datetime.now(UTC) + timedelta(days=5))
     assert item["state"] == "demoted"
     assert item["revalidation_episode_ids"] == ["failure"]
     assert item["revalidation_step"] == 0

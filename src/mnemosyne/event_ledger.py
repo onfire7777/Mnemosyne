@@ -76,6 +76,23 @@ _DATE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
 _YEAR_MONTH_RE = re.compile(r"\b(\d{4}-\d{2})\b")
 
 
+def canonical_speaker_spans(text: str, actor: str) -> tuple[tuple[str, int, int], ...]:
+    """Resolve source-relative turn ranges before any retrieval window is cut."""
+    actor = actor.strip().lower() or "unknown"
+    if actor not in {"user", "human", "unknown"}:
+        return ((actor, 0, len(text)),)
+    labels = list(re.finditer(
+        r"^(User|Assistant|Human|AI):\s*", text, re.MULTILINE | re.IGNORECASE
+    ))
+    if not labels:
+        return ((actor, 0, len(text)),)
+    return tuple(
+        (match.group(1).lower(), match.end(),
+         labels[i + 1].start() if i + 1 < len(labels) else len(text))
+        for i, match in enumerate(labels)
+    )
+
+
 def _normalize_text(text: str) -> str:
     """Normalize text for consistent canonical entity matching."""
     return " ".join(unicodedata.normalize("NFKC", text).split()).strip()
@@ -183,7 +200,7 @@ class EventLedger:
                 session_id = str(row.get("session_id") or "")
                 created_at = row.get("created_at") or row.get("valid_from") or ""
                 speaker = (
-                    str(row.get("speaker_role") or row.get("speaker") or "")
+                    str(row.get("actor") or row.get("speaker_role") or row.get("speaker") or "")
                     .strip()
                     .lower()
                 )
@@ -192,13 +209,37 @@ class EventLedger:
                 cid = str(getattr(row, "cid", "") or "")
                 session_id = str(getattr(row, "session_id", "") or "")
                 created_at = getattr(row, "created_at", "") or ""
-                speaker = str(getattr(row, "speaker_role", "") or "").strip().lower()
+                speaker = str(
+                    getattr(row, "actor", None) or getattr(row, "speaker_role", "") or ""
+                ).strip().lower()
 
             if not content.strip():
                 continue
 
-            # Identify speaker turns within content if conversational transcript
-            turns = self._split_turns(content, default_speaker=speaker or "user")
+            # Canonical non-user authorship cannot be overridden by a quoted
+            # "User:" label inside an assistant/tool message. Unattributed
+            # transcripts may still carry explicitly labelled user turns.
+            if speaker and speaker not in {"user", "human", "unknown"}:
+                continue
+
+            get = row.get if isinstance(row, Mapping) else lambda key, default=None: getattr(row, key, default)
+            source_spans = get("speaker_spans")
+            offset = get("content_start", 0)
+            if source_spans is not None:
+                # These ranges were resolved against the full canonical source.
+                # Never re-parse a clipped line as a new transcript speaker label.
+                turns = [
+                    (role, content[start - offset:end - offset])
+                    for role, start, end in source_spans
+                    if isinstance(start, int) and isinstance(end, int)
+                    and offset <= start < end <= offset + len(content)
+                ]
+            elif offset:
+                # A window without canonical speaker custody cannot inherit the
+                # container's actor; its omitted prefix may be an assistant turn.
+                turns = []
+            else:
+                turns = self._split_turns(content, default_speaker=speaker or "unknown")
 
             # Determine session date
             session_date = ""
@@ -207,7 +248,7 @@ class EventLedger:
                 session_date = date_m.group(1)
 
             for turn_speaker, turn_text in turns:
-                if turn_speaker in {"assistant", "agent", "bot", "ai", "model"}:
+                if turn_speaker not in {"user", "human"}:
                     continue  # strictly user events
 
                 turn_entries = self._extract_from_text(
@@ -225,22 +266,11 @@ class EventLedger:
 
     def _split_turns(self, text: str, default_speaker: str) -> list[tuple[str, str]]:
         """Split text into speaker turns (User: ... / Assistant: ...)."""
-        turn_pattern = re.compile(
-            r"^(User|Assistant|Human|AI):\s*", re.MULTILINE | re.IGNORECASE
-        )
-        splits = list(turn_pattern.finditer(text))
-        if not splits:
-            return [(default_speaker, text)]
-
-        results: list[tuple[str, str]] = []
-        for i, match in enumerate(splits):
-            spk = match.group(1).lower()
-            start = match.end()
-            end = splits[i + 1].start() if i + 1 < len(splits) else len(text)
-            body = text[start:end].strip()
-            if body:
-                results.append((spk, body))
-        return results
+        return [
+            (role, text[start:end].strip())
+            for role, start, end in canonical_speaker_spans(text, default_speaker)
+            if text[start:end].strip()
+        ]
 
     def _parse_currency_amount(self, text: str) -> float | None:
         """Parse currency number from string."""

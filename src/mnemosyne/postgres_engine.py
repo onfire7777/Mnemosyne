@@ -840,9 +840,13 @@ class PostgresEngine:
                     cur.execute("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
                     cur.execute("SET LOCAL lock_timeout = '5s'")
                     # Match forget/working-memory lock order before source rows
-                    # or schema migration locks are acquired.
+                    # or schema migration locks are acquired. In particular, a
+                    # source read must not hold an evidence SHARE lock while a
+                    # privacy writer owns the source guard needed by our append.
                     self._lock_working_tenant(cur, tenant_id)
-                    self._set_tenant(cur, _stable_uuid("tenant", tenant_id))
+                    db_tenant_id = _stable_uuid("tenant", tenant_id)
+                    self._set_tenant(cur, db_tenant_id)
+                    self._acquire_tenant_source_write_lock(cur, db_tenant_id)
                 state["connection"] = conn
                 self._source_transaction_context.state = state
                 try:
@@ -3077,6 +3081,10 @@ class PostgresEngine:
         cid_bytes = _cid_to_bytes(cid)
         with self._source_connection(ev.tenant_id, branch) as conn:
             with conn.cursor() as cur:
+                # Standalone tenant setup committed its lock already. Guard the
+                # actual source transaction before schema checks or source reads;
+                # a composed source_transaction already owns this same lock.
+                self._acquire_tenant_source_write_lock(cur, db_tenant_id)
                 if self._source_transaction_state() is not None:
                     self._ensure_tenant_and_branch_cursor(
                         cur, ev.tenant_id, branch, "protected"
@@ -4306,6 +4314,9 @@ class PostgresEngine:
         )
         with connection as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                # Tenant setup committed its own lock; guard this write transaction
+                # too (re-entrant when composed into a transaction that holds it).
+                self._acquire_tenant_source_write_lock(cur, db_tenant_id)
                 if not _schema_ready:
                     self._ensure_entity_registry_schema(cur)
                     self._ensure_evidence_vector_schema(cur)
@@ -4586,6 +4597,7 @@ class PostgresEngine:
         with self.connect() as conn:
             with conn.cursor() as cur:
                 self._set_tenant(cur, db_tenant_id)
+                self._acquire_tenant_source_write_lock(cur, db_tenant_id)
                 cur.execute(
                     """
                     INSERT INTO relations (
@@ -4815,6 +4827,7 @@ class PostgresEngine:
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
+                self._acquire_tenant_source_write_lock(cur, db_tenant_id)
                 # Serialize the replay probe with its insert across connections.
                 self._lock_working_tenant(
                     cur, "preference|" + "|".join([db_tenant_id, db_user_id, pref.category])
@@ -7521,8 +7534,31 @@ class PostgresEngine:
                     }
                     for row in cur.fetchall()
                 ]
+                # Non-UUID intention ids lived in diff, which erasure scrubs.
+                # Recover only an existing erased firing event's identity from
+                # its durable receipt, never its removed payload or a new event.
+                # UNION collapses legacy/v2 duplicates; conflicting ids fail closed.
                 cur.execute(
-                    "SELECT * FROM audit_log WHERE tenant_id = %s", (db_tenant_id,)
+                    """
+                    SELECT a.*,
+                           CASE WHEN a.op = 'fire_intention' AND a.target_id IS NULL
+                             AND a.diff->'source_payload_erased' = 'true'::jsonb
+                           THEN (
+                             SELECT min(receipts.intention_id)
+                             FROM (
+                               SELECT intention_id FROM intention_firing_receipts_v2
+                               WHERE tenant_id = a.tenant_id
+                                 AND canonical_event_id = a.event_id AND operation = 'fire'
+                               UNION
+                               SELECT intention_id FROM intention_firing_receipts
+                               WHERE tenant_id = a.tenant_id
+                                 AND canonical_event_id = a.event_id AND operation = 'fire'
+                             ) receipts
+                             HAVING count(*) = 1
+                           ) END AS firing_intention_id
+                    FROM audit_log a WHERE a.tenant_id = %s
+                    """,
+                    (db_tenant_id,),
                 )
                 audit = [_row_to_audit_log(row) for row in cur.fetchall()]
                 cur.execute(
@@ -10383,6 +10419,7 @@ def _json_safe(value: Any) -> Any:
 
 def _row_to_audit_log(row: Any) -> dict[str, Any]:
     data = _json_safe(dict(row))
+    firing_intention_id = data.pop("firing_intention_id", None)
     event_id = data.pop("event_id", None)
     if event_id is not None:
         data["id"] = event_id
@@ -10390,6 +10427,13 @@ def _row_to_audit_log(row: Any) -> dict[str, Any]:
     if isinstance(diff, dict):
         if not data.get("target_id") and diff.get("target_id"):
             data["target_id"] = diff["target_id"]
+        if (
+            not data.get("target_id")
+            and data.get("op") == "fire_intention"
+            and diff.get("source_payload_erased") is True
+            and firing_intention_id is not None
+        ):
+            data["target_id"] = firing_intention_id
         data["diff"] = {key: value for key, value in diff.items() if key != "target_id"}
         if "source" in diff:
             data.setdefault("source", diff["source"])

@@ -14,6 +14,7 @@ import re
 import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from mnemosyne.episodic_facts import (
@@ -77,6 +78,39 @@ def _clean_str(val: str) -> str:
     return " ".join(unicodedata.normalize("NFKC", val).split()).strip()
 
 
+def _utc(value: Any) -> datetime | None:
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if not isinstance(value, datetime):
+        return None
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _user_role_texts(rows: Sequence[Mapping[str, Any] | Any]) -> list[str]:
+    """Keep speaker and subject attribution when reading legacy text evidence."""
+    texts: list[str] = []
+    for row in rows:
+        get = row.get if isinstance(row, Mapping) else lambda key, default=None: getattr(row, key, default)
+        subject = str(get("subject") or "user").lower()
+        if subject not in {"user", "self", "i"}:
+            continue
+        # Canonical evidence actor wins over client-supplied role aliases or
+        # quoted transcript labels. AnswerEvidence preserves this field.
+        speaker = str(get("actor") or get("speaker_role") or get("role") or get("speaker") or "").lower()
+        if speaker and speaker != "user":
+            continue
+        content = str(get("content") or "")
+        parts = re.split(r"(?im)^\s*(user|assistant|system|tool)\s*:\s*", content)
+        if len(parts) > 1:
+            texts.extend(parts[i + 1] for i in range(1, len(parts), 2) if parts[i].lower() == "user")
+        elif speaker == "user":
+            texts.append(content)
+    return texts
+
+
 class PremiseConsistencyVerifier:
     """Verifies query presuppositions against episodic memory and trajectories."""
 
@@ -86,9 +120,21 @@ class PremiseConsistencyVerifier:
         facts: Sequence[Assertion | DistilledFact] | EpisodicUserDigest | None = None,
         evidence_rows: Sequence[Mapping[str, Any] | Any] | None = None,
         trajectories: Sequence[EntityAttributeTrajectory] | None = None,
+        *,
+        evaluated_at: datetime | None = None,
     ) -> PremiseVerificationResult:
         """Deconstruct and verify query premises, returning structured mismatches and clean abstention."""
         mismatches: list[PremiseMismatch] = []
+        at = _utc(evaluated_at)
+        if at is not None:
+            eligible_rows = []
+            for row in evidence_rows or []:
+                stamp = row.get("created_at") if isinstance(row, Mapping) else getattr(row, "created_at", None)
+                created_at = _utc(stamp)
+                if stamp is not None and (created_at is None or created_at > at):
+                    continue
+                eligible_rows.append(row)
+            evidence_rows = eligible_rows
 
         # 1. Gather all fact records and evidence text
         distilled_facts, raw_trajectories, all_evidence_texts = self._normalize_inputs(
@@ -99,7 +145,7 @@ class PremiseConsistencyVerifier:
 
         # 2. Check Role / Title presuppositions
         role_mismatch = self._check_role_title(
-            query, distilled_facts, raw_trajectories, all_evidence_texts
+            query, distilled_facts, raw_trajectories, _user_role_texts(evidence_rows or []), at
         )
         if role_mismatch is not None:
             mismatches.append(role_mismatch)
@@ -185,36 +231,53 @@ class PremiseConsistencyVerifier:
         facts: list[DistilledFact],
         trajectories: list[EntityAttributeTrajectory],
         evidence_texts: list[str],
+        evaluated_at: datetime | None,
     ) -> PremiseMismatch | None:
         """Check if query presupposes a role/title that contradicts episodic records."""
         m = _ROLE_TITLE_RE.search(query)
         if not m:
             return None
+        # "promoted to X" / "hired as X" presuppose a recorded event, which the
+        # user's own event reports can refute even in past tense.
+        event_premise = re.match(r"promot|hired", m.group(0), re.IGNORECASE) is not None
+        past_tense = re.search(
+            r"\b(?:did\s+I|was\s+I|when\s+I\s+was|former|previous|used\s+to)\b"
+            r"|\b(?:what|which|who|where|when|why|how)\b[^.!?;]*?\b(?:did|was|were|had)\b",
+            query,
+            re.IGNORECASE,
+        ) is not None
+        if past_tense and not event_premise:
+            # Past-tense questions need not put I after the auxiliary ("what
+            # were my duties", "which tasks were assigned to me", etc.). A
+            # query-time title cannot refute an unspecified historical role.
+            return None
 
         presupposed_title = _clean_str(m.group("title"))
         presupposed_norm = presupposed_title.lower()
 
-        # Find authoritative user roles in trajectories or facts
-        actual_title: str | None = None
+        # Collect eligible user titles, not the first role returned by retrieval.
+        titles: set[str] = set()
         for traj in trajectories:
-            if traj.attribute.lower() in {"title", "role", "position", "career"}:
-                curr = traj.current
+            if traj.entity.lower() in {"user", "self", "i"} and traj.attribute.lower() in {"title", "role", "position", "career"}:
+                if past_tense:  # a past event may match any recorded title, not only the current one
+                    titles.update(_clean_str(str(s.value)) for s in traj.steps if s.value)
+                    continue
+                curr = traj.as_of(evaluated_at) if evaluated_at else traj.current
                 if curr and curr.value:
-                    actual_title = str(curr.value)
-                    break
+                    titles.add(_clean_str(str(curr.value)))
 
-        if not actual_title:
-            for f in facts:
-                if (
-                    f.predicate.lower()
-                    in {"career_title", "job_title", "role", "position", "promoted_to"}
-                    and f.is_current
-                ):
-                    actual_title = str(f.value)
-                    break
+        for f in facts:
+            if f.speaker_role.lower() != "user" or f.subject.lower() not in {"user", "self", "i"}:
+                continue
+            start, end = _utc(f.valid_from), _utc(f.valid_to)
+            active = f.is_current if evaluated_at is None else (
+                (start is None or start <= evaluated_at) and (end is None or evaluated_at < end)
+            )
+            if f.predicate.lower() in {"career_title", "job_title", "role", "position", "promoted_to"} and (active or past_tense) and f.value:
+                titles.add(_clean_str(str(f.value)))
 
-        # Check evidence text for actual title if not yet found
-        if not actual_title:
+        # Raw self-reports can corroborate structured facts or expose ambiguity.
+        if evidence_texts:
             title_pattern = re.compile(
                 r"\b(?:[Pp]romoted\s+to|[Ss]tarted\s+(?:a\s+|my\s+)?(?:new\s+)?(?:role|position|job)\s+as|[Rr]ole\s+as|[Tt]itle\s+as|[Pp]osition\s+as|[Ww]orking\s+as|[Hh]ired\s+as|[Ss]erving\s+as)"
                 r"\s+(?:a\s+|an\s+|the\s+)?"
@@ -222,10 +285,25 @@ class PremiseConsistencyVerifier:
                 r"(?:[.,;!\n?]|\s+(?:at|in|for|since|recently|last|this|and|but|where|when)\b|$)"
             )
             for text in evidence_texts:
-                tm = title_pattern.search(text)
-                if tm:
-                    actual_title = _clean_str(tm.group(1))
-                    break
+                for sentence in re.split(r"[.!?;\n]+", text):
+                    for tm in title_pattern.finditer(sentence):
+                        prefix = sentence[:tm.start()].strip()
+                        # Only an affirmative self-report can refute a user premise.
+                        # Third-party, hypothetical, negated, and former roles are
+                        # not a current exclusive user title.
+                        if not re.fullmatch(
+                            r"(?:I(?:\s+(?:am|was|have|been|just|recently|currently|now|also))*|my)?",
+                            prefix, re.IGNORECASE,
+                        ):
+                            continue
+                        if re.search(r"\b(?:not|never|no longer|used to|formerly|if|would|might)\b", sentence, re.IGNORECASE):
+                            continue
+                        titles.add(_clean_str(tm.group(1)))
+        # Multiple roles can describe a promotion, history, or concurrent jobs.
+        # Retrieval order alone cannot establish a contradiction.
+        if any(presupposed_norm == title.lower() for title in titles):
+            return None
+        actual_title = next(iter(titles)) if len(titles) == 1 else None
 
         if actual_title:
             actual_norm = actual_title.lower()

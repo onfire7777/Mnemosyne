@@ -49,6 +49,37 @@ the promotion gate.
 
 ---
 
+## Quality-gate source provenance
+
+`python -m eval.run_quality_gate --split dev` permits dirty developer diagnostics.
+For clean-revision evidence, add `--require-clean-revision` (and `--assert-gate`
+when quality/safety verdicts must control the exit status). Clean-revision mode
+fails before dataset loading if Git/source state is dirty or unverifiable, and
+rechecks it before publishing either report. All runs reject detected source or
+HEAD drift; a rejected run does not overwrite an existing report.
+
+JSON keeps the existing schema/metric fields and adds `meta.git_dirty` (true,
+false, or null for unknown), `meta.source_fingerprint` (SHA-256), and
+`meta.source_provenance` with start/end snapshots, tri-state `source_changed`,
+status and `release_eligible`. Eligibility describes **source provenance only**,
+not a quality verdict, blind evaluation, or production-readiness claim. Historical
+reports without these fields remain readable but have unrecorded provenance.
+
+The versioned fingerprint covers relative paths, executable modes and working
+bytes in `src`, `eval` (including its harness), `tools`, `config`, `configs`,
+`scripts`, security-harness sources and native-extension sources, plus root Python
+dependency manifests/lockfiles. It includes untracked/ignored source and checks
+against HEAD blobs even when Git index flags hide changes. Dataset payloads,
+reports, generated output/cache/build/package-metadata directories are excluded;
+executable dataset judges/builders are included. Dataset hashes remain separate.
+Use `eval/reports/` or an external directory for outputs.
+
+Run from a quiescent checkout: these are boundary snapshots with in-snapshot
+change checks, not a filesystem lock or continuous monitor. Symlinked sources
+and unreadable state fail verification; installed dependencies, environment,
+and native binaries outside this source scope are not attested. Dirty or unknown
+runs are explicitly diagnostic, never evidence of an unchanged clean revision.
+
 ## What it measures (blueprint §33 measurement set / §16 SLOs)
 
 | Suite | Metric | Blueprint target | Module |

@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal, Mapping, Protocol, Sequence
 
 from mnemosyne.engine import MemoryEngine
-from mnemosyne.event_ledger import EventLedger, _TAXONOMY
+from mnemosyne.event_ledger import EventLedger, canonical_speaker_spans
 from mnemosyne.premise_verifier import PremiseConsistencyVerifier
 from mnemosyne.providers.deterministic_synthesis import DeterministicSynthesizer
 from mnemosyne.retrieval import QUERY_SUPPORT_STOPWORDS, normalise_query_term
@@ -592,6 +592,15 @@ class AnswerEvidence:
     session_id: str | None
     turn_index: int | None
     hop: int
+    actor: str | None = None
+    created_at: datetime | str | None = None
+    valid_from: datetime | str | None = None
+    valid_to: datetime | str | None = None
+    # Character offset in the authorized canonical source (not a model offset).
+    content_start: int = 0
+    # Canonically resolved (role, start, end) ranges in source coordinates.
+    # None means unwindowed legacy input; an empty tuple proves no user turns.
+    speaker_spans: tuple[tuple[str, int, int], ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -871,17 +880,7 @@ class GroundedAnswerOrchestrator:
             synth = adaptive_synthesize(
                 request.question, assembled.evidence, disposition=disp
             )
-            if synth.get("abstained") and synth.get("answer"):
-                proposal = {"claims": [], "unresolved": True}
-            else:
-                proposal = {
-                    "claims": [
-                        {"spans": c.get("spans", [])}
-                        for c in synth.get("claims", [])
-                        if c.get("spans")
-                    ],
-                    "unresolved": not bool(synth.get("claims")),
-                }
+            proposal = _adaptive_quote_proposal(synth)
         replayed = self.assemble(request)
         if replayed.failure_kind is not None:
             return self._abstain(
@@ -906,15 +905,7 @@ class GroundedAnswerOrchestrator:
                     request.question, replayed.evidence, disposition=disp
                 )
                 if not synth_fallback.get("abstained") and synth_fallback.get("claims"):
-                    fb_proposal = {
-                        "claims": [
-                            {"spans": c.get("spans", [])}
-                            for c in synth_fallback["claims"]
-                            if c.get("spans")
-                        ],
-                        "unresolved": False,
-                    }
-                    claims = self._claims(fb_proposal, replayed_map)
+                    claims = self._claims(_adaptive_quote_proposal(synth_fallback), replayed_map)
             if disp is not None and claims:
                 claims = _apply_disposition_to_claims(claims, disp, replayed.evidence)
             if not claims:
@@ -932,6 +923,21 @@ class GroundedAnswerOrchestrator:
                         public_reason="premise_mismatch",
                     )
                 return self._reader_abstain(replayed)
+            offsets = {row.cid: row.content_start for row in replayed.evidence}
+            claims = tuple(
+                replace(
+                    claim,
+                    spans=tuple(
+                        replace(
+                            span,
+                            start=span.start + offsets[span.cid],
+                            end=span.end + offsets[span.cid],
+                        )
+                        for span in claim.spans
+                    ),
+                )
+                for claim in claims
+            )
             return GroundedAnswer(
                 answer="\n".join(claim.text for claim in claims),
                 claims=claims,
@@ -981,12 +987,15 @@ class GroundedAnswerOrchestrator:
                 raise ValueError("query budget exceeded")
             seen_queries.update(_comparison(query) for query in fresh_queries)
             referenced: set[str] = set()
+            windows: dict[str, str] = {}
             channels: set[str] = set()
             for query in fresh_queries:
-                query_refs, query_channels = self._retrieve(query, request.context)
+                query_refs, query_channels = self._retrieve(
+                    query, request.context, windows=windows
+                )
                 referenced.update(query_refs)
                 channels.update(query_channels)
-            current = self._authorized_rows(request.context, referenced)
+            current = self._authorized_rows(request.context, referenced, windows=windows)
             hop_maps.append(current)
             for cid, row in current.items():
                 authorized.setdefault(cid, row)
@@ -1030,16 +1039,22 @@ class GroundedAnswerOrchestrator:
         try:
             for hop, original_hop_map in zip(hops, hop_maps, strict=True):
                 replayed_refs: set[str] = set()
+                replayed_windows: dict[str, str] = {}
                 for query in hop.queries:
-                    query_refs, _ = self._retrieve(query, request.context)
+                    query_refs, _ = self._retrieve(
+                        query, request.context, windows=replayed_windows
+                    )
                     replayed_refs.update(query_refs)
-                replayed_hop_map = self._authorized_rows(request.context, replayed_refs)
+                replayed_hop_map = self._authorized_rows(
+                    request.context, replayed_refs, windows=replayed_windows
+                )
                 if (
                     set(replayed_hop_map) != set(original_hop_map)
                     or _fingerprint(replayed_hop_map) != hop.evidence_fingerprint
                 ):
                     raise _EvidenceReplayDrift("authorized evidence changed")
-                replayed.update(replayed_hop_map)
+                for cid, row in replayed_hop_map.items():
+                    replayed.setdefault(cid, row)
             if (
                 set(replayed) != set(authorized)
                 or _fingerprint(replayed) != fingerprint
@@ -1068,7 +1083,8 @@ class GroundedAnswerOrchestrator:
         )
 
     def _authorized_rows(
-        self, context: AnswerReadContext, referenced: set[str] | None
+        self, context: AnswerReadContext, referenced: set[str] | None,
+        *, windows: Mapping[str, str] | None = None,
     ) -> dict[str, dict[str, Any]]:
         if referenced is not None and not referenced:
             return {}
@@ -1108,6 +1124,29 @@ class GroundedAnswerOrchestrator:
                         continue  # whole-scope scan: a row outside as_of is skipped, not drift
                     raise LookupError("authorized evidence is no longer active")
                 authorized = dict(row)
+                start, end = 0, len(content)
+                if windows is not None and cid in windows:
+                    try:
+                        start, end = _canonical_window(content, windows[cid])
+                    except ValueError:
+                        if not isinstance(windows[cid], _ProjectionWindow):
+                            raise
+                        # Generated projection text (e.g. "subject predicate
+                        # object") need not quote its source. Withhold that
+                        # source rather than disclose it whole or abort the answer.
+                        continue
+                    authorized["content"] = content[start:end]
+                    authorized["content_start"] = start
+                    authorized["_source_content_sha256"] = hashlib.sha256(
+                        content.encode("utf-8")
+                    ).hexdigest()
+                authorized["speaker_spans"] = tuple(
+                    (role, max(start, left), min(end, right))
+                    for role, left, right in canonical_speaker_spans(
+                        content, str(row.get("actor") or "unknown")
+                    )
+                    if max(start, left) < min(end, right)
+                )
                 authorized["_access_policy_sha256"] = hashlib.sha256(
                     json.dumps(
                         raw.access_policy,
@@ -1120,7 +1159,8 @@ class GroundedAnswerOrchestrator:
         return result
 
     def _retrieve(
-        self, query: str, context: AnswerReadContext
+        self, query: str, context: AnswerReadContext,
+        *, windows: dict[str, str] | None = None,
     ) -> tuple[set[str], set[str]]:
         if not query or len(query) > self.limits.max_query_characters:
             raise ValueError("query budget exceeded")
@@ -1154,6 +1194,14 @@ class GroundedAnswerOrchestrator:
                 if hit.provenance and set(hit.provenance) != {hit.id}:
                     raise ValueError("evidence hit has invalid provenance")
                 referenced.add(str(hit.id))
+                if windows is not None and (
+                    str(hit.id) not in windows
+                    or isinstance(windows[str(hit.id)], _ProjectionWindow)
+                ):
+                    # Retain the first selected passage per CID, not an unbounded
+                    # union of distant passages or a fresh whole-source hydration.
+                    # A real evidence passage outranks generated projection text.
+                    windows[str(hit.id)] = hit.text
                 continue
             if hit.kind not in {"assertion", "relation", "preference"}:
                 raise ValueError("retrieval returned an unknown hit kind")
@@ -1161,6 +1209,12 @@ class GroundedAnswerOrchestrator:
             if set(str(cid) for cid in hit.provenance) != set(source_cids):
                 raise ValueError("projection hit provenance is inconsistent")
             referenced.update(source_cids)
+            if windows is not None:
+                for cid in source_cids:
+                    # Projection provenance authorizes a lookup, not disclosure
+                    # of its entire source. Require the selected projection text
+                    # to resolve canonically just like a direct evidence hit.
+                    windows.setdefault(cid, _ProjectionWindow(hit.text))
         return referenced, channels
 
     def _queries(self, value: object, *, sources: tuple[str, ...]) -> tuple[str, ...]:
@@ -1323,6 +1377,12 @@ class GroundedAnswerOrchestrator:
             if isinstance(turn_index, int) and not isinstance(turn_index, bool)
             else None,
             hop=hop,
+            actor=row.get("actor") if isinstance(row.get("actor"), str) else None,
+            created_at=row.get("created_at"),
+            valid_from=row.get("valid_from"),
+            valid_to=row.get("valid_to"),
+            content_start=row.get("content_start", 0),
+            speaker_spans=row.get("speaker_spans"),
         )
 
     @staticmethod
@@ -1360,6 +1420,70 @@ def episode_metadata(
     }
 
 
+def _adaptive_quote_proposal(synth: Mapping[str, Any]) -> dict[str, Any]:
+    """Adapt internal rich spans without promoting generated text to proof.
+
+    A many-source aggregation is not a single bounded quotation. Keep every
+    support in its own strict claim; if all support cannot fit, abstain rather
+    than silently returning a partial total or comparison.
+    """
+    unresolved = {"claims": [], "unresolved": True}
+    if synth.get("abstained"):
+        return unresolved
+    claims: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for claim in synth.get("claims", []):
+        for span in claim.get("spans", []):
+            cid, quote = span["cid"], span["quote"]
+            if (cid, quote) in seen:
+                continue
+            seen.add((cid, quote))
+            # Split only at sentence boundaries. Cutting an arbitrary prefix can
+            # erase a qualification; an indivisible oversized sentence abstains.
+            remaining = quote.strip()
+            while len(remaining) > 2000:
+                boundaries = list(re.finditer(r"[.!?](?=\s|$)", remaining[:2001]))
+                boundaries = [m for m in boundaries if m.end() <= 2000]
+                if not boundaries:
+                    return unresolved
+                end = boundaries[-1].end()
+                claims.append({"spans": [{"cid": cid, "quote": remaining[:end]}]})
+                remaining = remaining[end:].lstrip()
+                if len(claims) >= 20:
+                    return unresolved
+            if remaining:
+                claims.append({"spans": [{"cid": cid, "quote": remaining}]})
+    if not claims or len(claims) > 20:
+        return unresolved
+    return {"claims": claims, "unresolved": False}
+
+
+class _ProjectionWindow(str):
+    """Window text taken from an assertion/relation/preference hit, not evidence."""
+
+
+def _canonical_window(content: str, selected: str) -> tuple[int, int]:
+    """Recover a selected passage from authorized text, never from raw evidence.
+
+    Retrieval may add budget markers and normalize whitespace. Those are selection
+    hints only: return the original canonical slice and its source-relative offset.
+    Any non-whitespace change fails closed instead of trusting a retrieval snippet.
+    """
+    if not isinstance(selected, str) or not selected:
+        raise ValueError("retrieval selected an empty evidence window")
+    start = content.find(selected)
+    if start >= 0:
+        return start, start + len(selected)
+    marker = "[... truncated for budget ...]"
+    candidate = selected.strip().removeprefix(marker).removesuffix(marker).strip()
+    if not candidate:
+        raise ValueError("retrieval selected an empty evidence window")
+    match = re.search(r"\s+".join(re.escape(token) for token in candidate.split()), content)
+    if match is None:
+        raise ValueError("retrieved window is outside authorized evidence")
+    return match.start(), match.end()
+
+
 def _fingerprint(rows: Mapping[str, Mapping[str, Any]]) -> str:
     payload = []
     for cid in sorted(rows):
@@ -1371,6 +1495,11 @@ def _fingerprint(rows: Mapping[str, Mapping[str, Any]]) -> str:
             {
                 "authorization": _authorization_metadata(row),
                 "access_policy_sha256": row.get("_access_policy_sha256"),
+                "actor": row.get("actor"),
+                "speaker_spans": row.get("speaker_spans"),
+                "created_at": row.get("created_at"),
+                "content_start": row.get("content_start", 0),
+                "source_content_sha256": row.get("_source_content_sha256"),
                 "branch": row.get("branch", "main"),
                 "cid": cid,
                 "content_sha256": hashlib.sha256(
@@ -2159,14 +2288,7 @@ def adaptive_synthesize(
     normalized_rows: list[dict[str, Any]] = []
     for idx, item in enumerate(evidence_rows):
         if isinstance(item, AnswerEvidence):
-            row_dict: dict[str, Any] = {
-                "cid": item.cid,
-                "content": item.content,
-                "source_identity": item.source_identity,
-                "session_id": item.session_id,
-                "turn_index": item.turn_index,
-                "hop": item.hop,
-            }
+            row_dict: dict[str, Any] = asdict(item)
         elif isinstance(item, Mapping):
             row_dict = dict(item)
         else:
@@ -2176,6 +2298,7 @@ def adaptive_synthesize(
                 "created_at": getattr(item, "created_at", None),
                 "turn_index": getattr(item, "turn_index", None),
                 "trust_tier": getattr(item, "trust_tier", None),
+                "actor": getattr(item, "actor", None),
             }
         cid = str(row_dict.get("cid") or "").strip()
         content = str(row_dict.get("content") or "")
@@ -2186,7 +2309,7 @@ def adaptive_synthesize(
             if isinstance(trust_tier, int) and trust_tier >= 4:
                 continue
         quote = content.strip()
-        start = content.find(quote)
+        start = content.find(quote) + row_dict.get("content_start", 0)
         end = start + len(quote)
         slice_sha256 = hashlib.sha256(quote.encode("utf-8")).hexdigest()
         span_dict = {
@@ -2227,7 +2350,7 @@ def adaptive_synthesize(
             "timeline_events": [],
             "state_transitions": [],
             "comparisons": [],
-            "count": 0,
+            "count": None,
             "cited_cids": [],
             "disposition": disp.to_dict() if disp is not None else None,
             "premise_verification": premise_check.to_dict(),
@@ -2293,7 +2416,14 @@ def adaptive_synthesize(
     if intent == "count":
         ledger = EventLedger()
         ledger.extract_from_evidence(normalized_rows)
-        agg = ledger.aggregate(question)
+        cost_target = re.search(
+            r"\bhow much\s+(?:did|does)\s+(?:the|a|an|my)\s+(.+?)\s+cost\b",
+            question,
+            re.IGNORECASE,
+        )
+        agg = ledger.aggregate(
+            question, target_category=cost_target.group(1) if cost_target else None
+        )
         if agg.total_entries_found > 0:
             count_value = agg.strict_count
             matched_cids = list(
@@ -2331,60 +2461,8 @@ def adaptive_synthesize(
                     },
                 }
             )
-        elif (
-            agg.target_category in _TAXONOMY
-            or agg.target_category != "items"
-            or bool(
-                re.search(
-                    r"\b(?:bought|buy|purchas\w*|spent|spend|cost|paid|order\w*)\b",
-                    question,
-                    re.IGNORECASE,
-                )
-            )
-        ):
-            count_value = 0
-            cids = list(dict.fromkeys(r["cid"] for r in normalized_rows[:16]))
-            spans = [r["span"] for r in normalized_rows[:16]]
-            text = (
-                " ".join(r["quote"] for r in normalized_rows[:3])
-                if is_literal
-                else agg.synthesis_text
-            )
-            claims.append(
-                {
-                    "text": _clean_hedging_headers(text),
-                    "evidence_cids": cids,
-                    "spans": spans,
-                    "derivation": {
-                        "schema_version": "mnemosyne.claim-derivation/v1",
-                        "kind": "quotation" if is_literal else "synthesis",
-                        "operation": None if is_literal else "count",
-                        "set_aggregation": agg.to_dict(),
-                    },
-                }
-            )
-        else:
-            count_value = len(normalized_rows)
-            if normalized_rows:
-                spans = [r["span"] for r in normalized_rows[:16]]
-                cids = list(dict.fromkeys(r["cid"] for r in normalized_rows[:16]))
-                text = (
-                    " ".join(r["quote"] for r in normalized_rows[:3])
-                    if is_literal
-                    else f"Count: {count_value} ({'; '.join(r['quote'] for r in normalized_rows[:5])})"
-                )
-                claims.append(
-                    {
-                        "text": _clean_hedging_headers(text),
-                        "evidence_cids": cids,
-                        "spans": spans,
-                        "derivation": {
-                            "schema_version": "mnemosyne.claim-derivation/v1",
-                            "kind": "quotation" if is_literal else "synthesis",
-                            "operation": None if is_literal else "count",
-                        },
-                    }
-                )
+        # No matching attributable events is missing evidence, not a measured
+        # zero and never a count of retrieved rows. Leave claims/count unresolved.
     elif intent == "timeline":
         for ev in timeline_events:
             prefix = (

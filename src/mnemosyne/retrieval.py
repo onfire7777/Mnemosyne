@@ -3186,6 +3186,8 @@ class HttpEmbeddingProvider:
     #: A JSON object merged into every request body: routing hints a gateway understands
     #: (OpenRouter's ``{"provider": {"order": [...]}}``), never part of the text embedded.
     extra_body_json: str | None = None
+    # Auto discovery opts in; explicit HTTP providers retain their policy.
+    loopback_only: bool = False
 
     def _payload(self, texts: object) -> dict[str, object]:
         payload: dict[str, object] = {"input": texts}
@@ -3225,7 +3227,8 @@ class HttpEmbeddingProvider:
         route private-partition content here.
         """
         response = _post_json(
-            self.url, self._payload(text), self.api_key, self.timeout_seconds
+            self.url, self._payload(text), self.api_key, self.timeout_seconds,
+            **({"loopback_only": True} if self.loopback_only else {}),
         )
         return _normalize_vector(_extract_embedding(response), self.dims)
 
@@ -3290,7 +3293,10 @@ class HttpEmbeddingProvider:
             return [vector for vector in results if vector is not None]
         payload = self._payload([text for _index, text, _cache_key in missing])
         try:
-            response = _post_json(self.url, payload, self.api_key, self.timeout_seconds)
+            response = _post_json(
+                self.url, payload, self.api_key, self.timeout_seconds,
+                **({"loopback_only": True} if self.loopback_only else {}),
+            )
         except _ProviderHttpError as exc:
             if 400 <= exc.code < 500:
                 for index, text, _cache_key in missing:
@@ -3843,6 +3849,7 @@ class HttpReranker:
     name: str = "http-reranker"
     query_prefix: str = "query: "
     score_kind: str = "similarity"
+    loopback_only: bool = False
 
     def rerank(self, query: str, hits: Sequence[Hit], k: int) -> list[Hit]:
         if k <= 0 or not hits:
@@ -3855,7 +3862,10 @@ class HttpReranker:
         }
         if self.model:
             payload["model"] = self.model
-        response = _post_json(self.url, payload, self.api_key, self.timeout_seconds)
+        response = _post_json(
+            self.url, payload, self.api_key, self.timeout_seconds,
+            **({"loopback_only": True} if self.loopback_only else {}),
+        )
         scored = _extract_rerank_scores(response)
         ranked: list[Hit] = []
         seen: set[int] = set()
@@ -6141,9 +6151,10 @@ class _ProviderHttpError(ValueError):
 
 
 def _post_json(
-    url: str, payload: dict[str, object], api_key: str | None, timeout: float
+    url: str, payload: dict[str, object], api_key: str | None, timeout: float,
+    *, loopback_only: bool = False,
 ) -> dict[str, object]:
-    validated_url = _validate_http_provider_config(url, timeout)
+    validated_url = _validate_http_provider_config(url, timeout, loopback_only=loopback_only)
     body = json.dumps(payload).encode("utf-8")
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
     if api_key:
@@ -6266,7 +6277,7 @@ def _retrieval_allowed_internal_hosts() -> tuple[str, ...]:
     return tuple(host.strip() for host in raw.split(",") if host.strip())
 
 
-def _validate_http_provider_config(url: str, timeout: float):
+def _validate_http_provider_config(url: str, timeout: float, *, loopback_only: bool = False):
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("retrieval provider timeout must be positive")
     try:
@@ -6275,6 +6286,7 @@ def _validate_http_provider_config(url: str, timeout: float):
             allow_insecure_localhost=True,
             allow_internal_hosts=_retrieval_allowed_internal_hosts(),
             purpose="retrieval provider URL",
+            loopback_only=loopback_only,
         )
     except ValueError as exc:
         raise ValueError(str(exc)) from exc
