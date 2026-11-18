@@ -14,9 +14,71 @@ from runtime import STATE, TENANT, USER, invoke, locked, open_facade
 from mnemosyne.hosts.codex import CodexAdapter, redact
 
 
+# The warm recall server (recall_server.py) answers prompt recall without the cold facade
+# open (~6 s). Its result is the same prepare_context call on the same store; when it is
+# missing or fails, the hook uses the cold path below unchanged.
+RECALL_SOCKET = STATE / "recall.sock"
+WARM_TIMEOUT = 6.5  # inside supervise()'s 8 s child deadline
+WARM_EMBED_DEADLINE = 4.0  # query embedding; past it the server answers by local recall
+
+
+class LazyFacade:
+    """open_facade() that opens only when something touches the facade."""
+
+    def __init__(self):
+        self._real = None
+
+    def _open(self):
+        if self._real is None:
+            self._context = open_facade()
+            self._real = self._context.__enter__()
+        return self._real
+
+    def __getattr__(self, name):
+        return getattr(self._open(), name)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return self._context.__exit__(*exc) if self._real is not None else None
+
+
+def warm_prepare(arguments, session_id):
+    """The server's reply, or None when it is unavailable. A slow reply raises TimeoutError
+    so supervise() moves on to its local retry instead of a cold open it cannot finish."""
+    import socket
+    request = {"tool": "prepare_context", "arguments": arguments, "session_id": session_id,
+               "agent_id": "codex", "embed_deadline": WARM_EMBED_DEADLINE}
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+        client.settimeout(WARM_TIMEOUT)
+        try:
+            client.connect(str(RECALL_SOCKET))
+            client.sendall((json.dumps(request, default=str) + "\n").encode())
+            reply = client.makefile("rb").readline()
+        except TimeoutError:
+            raise
+        except OSError:  # no server, refused, or closed by a restart
+            return None
+    reply = json.loads(reply) if reply else {}
+    return reply if "result" in reply else None
+
+
+def warm_invoke(facade, name, arguments, session_id=None):
+    if (name == "prepare_context" and isinstance(facade, LazyFacade) and facade._real is None
+            and os.environ.get("MNEMOSYNE_LOCAL_RECALL") != "1"):
+        reply = warm_prepare(arguments, session_id)
+        if reply is not None:
+            if reply.get("mode") == "local":
+                # The adapter reports a local-recall answer as a degraded delivery.
+                os.environ["MNEMOSYNE_LOCAL_RECALL"] = "1"
+            return reply["result"]
+    return invoke(facade, name, arguments, session_id)
+
+
 def adapter(stage_callback=None):
     return CodexAdapter(state_dir=STATE, tenant_id=TENANT, user_id=USER,
-        open_facade=open_facade, locked=locked, invoke=invoke, require_delivery_confirmation=True,
+        open_facade=LazyFacade, locked=locked, invoke=warm_invoke, require_delivery_confirmation=True,
         report_command=[sys.executable, str(Path(__file__).resolve()), "--report-use"],
         stage_callback=stage_callback)
 

@@ -294,12 +294,13 @@ def configure_retrieval(facade):
     facade.tools.ingestion.media_embedding_provider = CommandMediaEmbeddingProvider(command, dims=DIMENSIONS, timeout_seconds=60)
 
 
-def invoke(facade, name, arguments, session_id=None):
+def invoke(facade, name, arguments, session_id=None, agent_id=None):
     arguments = model_arguments(name, arguments)
+    agent = agent_id or AGENT  # the recall server answers for several local hosts
     identity = SessionIdentity(
-        tenant_id=TENANT, user_id=USER, agent_id=AGENT, role='operator',
+        tenant_id=TENANT, user_id=USER, agent_id=agent, role='operator',
         source_trust_tier=claimed_trust(arguments),
-        session_id=session_id or arguments.get('session_id') or os.environ.get('CODEX_THREAD_ID') or f'{AGENT}-{os.getpid()}',
+        session_id=session_id or arguments.get('session_id') or os.environ.get('CODEX_THREAD_ID') or f'{agent}-{os.getpid()}',
         expires_at=int(time.time()) + 300,
         capabilities=('prospective:evaluate', 'prospective:read:tenant'),
     )
