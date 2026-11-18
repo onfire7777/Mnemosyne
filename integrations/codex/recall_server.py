@@ -101,7 +101,13 @@ def main():
         scoped = facade.engine.adapters.embedding  # ScopedQueryEmbeddingProvider around the HTTP provider
         scoped.provider = replace(scoped.provider, timeout_seconds=EMBED_TIMEOUT)
         # Warm the retrieval caches before accepting requests. `search` records no learning receipt.
-        invoke(facade, 'search', {'tenant_id': 'personal', 'query': 'recent work'}, 'recall-server-warmup')
+        # The time-window question builds the passage index once (~30 s on a large store);
+        # without it the first dated question a user asks pays that build.
+        for query in ('recent work', 'what did we discuss yesterday about recent work'):
+            try:
+                invoke(facade, 'search', {'tenant_id': 'personal', 'query': query}, 'recall-server-warmup')
+            except Exception:  # a cold cache is slower, not broken; never crash-loop on warm-up
+                pass
         old_umask = os.umask(0o177)  # socket file is user-only (0600)
         try:
             server = Server(str(SOCKET), Handler)
