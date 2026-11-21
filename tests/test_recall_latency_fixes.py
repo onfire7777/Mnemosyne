@@ -9,11 +9,10 @@ from dataclasses import dataclass
 from mnemosyne.access_policy import may_read_item
 from mnemosyne.cid_lists import CidList
 from mnemosyne.engine import LocalMemoryEngine
-from mnemosyne.experience.store import LearningStore
 from mnemosyne.experience.writer import LearningWriter
 from mnemosyne.hosts.query_embedding import ScopedQueryEmbeddingProvider
 from mnemosyne.models import Evidence, Hit, Relation
-from mnemosyne.passages import PassageGraph, PassageIndex, PassageRecord
+from mnemosyne.passages import PassageGraph, PassageIndex
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.retrieval import _evidence_sources_readable
 from mnemosyne.sqlite_engine import SqliteEngine
