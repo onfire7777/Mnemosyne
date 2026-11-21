@@ -15,12 +15,35 @@ from mnemosyne.mental_models import MentalModelService
 from mnemosyne.queue import QueueWorker
 
 
+def _checkpoint_wal(engine, tenant_id):
+    """Best-effort WAL truncation at the end of a bounded worker tick."""
+    if not hasattr(engine, "_connect"):
+        return {"skipped": True}
+    try:
+        conn = engine._connect(tenant_id)
+        lock = getattr(engine, "_lock", None)
+        if lock is not None:
+            with lock:
+                row = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        else:
+            row = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        if row is None:
+            return {"ok": True}
+        return {"busy": int(row[0]), "log": int(row[1]), "checkpointed": int(row[2])}
+    except Exception as error:
+        return {"error": type(error).__name__}
+
+
 def main():
     report = {"checked_at": datetime.now(timezone.utc).isoformat(), "processed": []}
     try:
         report["stage"] = "completed_turns"
         report["completions"] = adapter().recover_completed(max_sessions=8)
         with open_facade() as facade:
+            report["stage"] = "working_memory_expiry"
+            if hasattr(facade.engine, "expire_working"):
+                expired = facade.engine.expire_working(TENANT, expired_at=datetime.now(timezone.utc))
+                report["working_memory_expired"] = len(expired)
             report["stage"] = "queued_work"
             handlers = RuntimeJobHandlers(
                 facade.engine, facade.queue, metrics=facade.tools.metrics,
@@ -43,7 +66,8 @@ def main():
             report["stage"] = "project_memory"
             from mnemosyne.hosts.project_memory import advance_project_memory
             report["project_memory"] = advance_project_memory(
-                facade.tools._learning_runtime(), TENANT, USER, STATE / "project-memory.json")
+                facade.tools._learning_runtime(), TENANT, USER, STATE / "project-memory.json",
+                provider_limit=8)
             report["stage"] = "automatic_learning"
             report["automatic_learning"] = advance(facade, TENANT, STATE / "automatic-learning.json")
             report["stage"] = "retrieval_index"
@@ -63,6 +87,8 @@ def main():
             report["maintained_answers"] = MentalModelRefreshWorker(
                 service, context, max_batch=1, check_changes=True,
             ).run_once()
+            report["stage"] = "wal_checkpoint"
+            report["wal_checkpoint"] = _checkpoint_wal(facade.engine, TENANT)
         report["stage"] = "complete"
     except Exception as error:
         report["error"] = type(error).__name__

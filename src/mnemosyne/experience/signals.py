@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
 import re
 from copy import deepcopy
@@ -22,7 +23,7 @@ WEIGHTS = {
     "acceptance": 0.3,
     "rating": 0.9,
 }
-FEEDBACK_PREFIX = r"(?:(?:no|actually)(?:[,!.]\s*|\s+))?"
+FEEDBACK_PREFIX = r"(?:(?:no|actually|wait|sorry)(?:[,!.]\s*|\s+))?"
 CORRECTIONS = (
     r"(?:wrong|incorrect)[.!]*$",
     FEEDBACK_PREFIX
@@ -38,11 +39,23 @@ CORRECTIONS = (
     + r"(?:please )?(?:correct|fix|revise) (?:it|that|your (?:answer|response|solution|code)|the (?:previous|last) (?:answer|response|solution|code))\b(?!\s*,?\s*(?:if|unless)\b)",
     r"(?:no[,!.]\s*|correction:\s*)i meant\b(?!\s+to\b)",
 )
+MID_TURN_CORRECTIONS = (
+    r"(?:(?:[,;.]\s*|\s+)but\s+|(?:[.!]\s+))(?:(?:that|this|it|your (?:answer|response|solution|code|result)) (?:is|was)|that's|it's) "
+    r"(?:(?:still|actually) )?(?:wrong|incorrect|mistaken|not (?:right|correct|what i (?:asked|meant)))\b",
+    r"(?:(?:[,;.]\s*|\s+)but\s+|(?:[.!]\s+))(?:this|that|it)(?: still)? (?:doesn't|does not|didn't|did not) work\b",
+    r"(?:(?:[,;.]\s*|\s+)but\s+|(?:[.!]\s+))(?:this|that|it)(?: still)? failed\b",
+)
 REASKS = (
     r"(?:please )?try again(?:[.!]|$|,\s*(?:(?:that|this|it) )?(?:failed|didn't work|did not work)\b)",
     r"you (?:didn't|did not|haven't|have not) answer (?:my|the|that|previous) question\b",
 )
-ACCEPTANCE = r"^(?:thanks|thank you|great|perfect|that works|correct)[.!\s]*$"
+ACCEPTANCE = r"^(?:thanks|thank you|great|perfect|awesome|looks good|that works|that worked|it worked|correct)[.!\s]*$"
+ACCEPTANCE_PREFIX = (
+    r"^(?:thanks|thank you|great|perfect|awesome|looks good|that works|that worked)"
+    r"(?:\s+(?:a lot|so much))?"
+    r"(?:[,!;.]\s+|\s*[-—]+\s*|\n+)"
+    r"(?!but\b|however\b|except\b|though\b|actually\b|wait\b|still\b|not\b|no\b)"
+)
 
 
 def signal(kind: str, value: float, evidence: str = "") -> dict:
@@ -159,14 +172,20 @@ def _current_checks(signals: list[dict]) -> list[dict]:
 
 def user_signals(text: str, previous_text: str = "") -> list[dict]:
     normalized = text.strip().lower().replace("’", "'")
-    # Quoted examples are data, not feedback about the prior response. The
-    # boundaries preserve apostrophes in contractions such as "doesn't".
+    # Fenced blocks, blockquotes and quoted strings are data, not feedback about
+    # the prior response. Boundaries preserve apostrophes in contractions.
+    unquoted = re.sub(r"```.*?```", "", normalized, flags=re.S)
+    unquoted = "\n".join(
+        line for line in unquoted.splitlines() if not line.lstrip().startswith(">")
+    )
     feedback = re.sub(
-        r""""[^"\n]*"|“[^”\n]*”|(?<!\w)'[^'\n]*'(?!\w)""", "", normalized
+        r""""[^"\n]*"|“[^”\n]*”|(?<!\w)'[^'\n]*'(?!\w)""", "", unquoted
     ).strip()
-    if any(re.match(pattern, feedback) for pattern in CORRECTIONS):
+    if any(re.match(pattern, feedback) for pattern in CORRECTIONS) or any(
+        re.search(pattern, feedback) for pattern in MID_TURN_CORRECTIONS
+    ):
         return [signal("correction", -1, text)]
-    if re.fullmatch(ACCEPTANCE, normalized):
+    if re.fullmatch(ACCEPTANCE, normalized) or re.match(ACCEPTANCE_PREFIX, feedback):
         return [signal("acceptance", 0.6, text)]
     if previous_text and any(re.match(pattern, feedback) for pattern in REASKS):
         return [signal("reask", -0.6, text)]
@@ -322,6 +341,79 @@ def current_signals(episode: dict) -> list[dict]:
     return _repaired_signals(episode, reparse_retained_events(episode.get("tool_events", [])))
 
 
+_COMPACT_RAW_OUTPUT_KEYS = frozenset({"output", "stdout", "stderr", "aggregated_output"})
+_COMPACT_META_KEYS = frozenset({"source_cid", "output_sha256", "excerpt_512"})
+
+
+def _raw_tool_output(event: dict) -> str | None:
+    for key in ("output", "stdout", "stderr", "aggregated_output"):
+        value = event.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def same_tool_event(retained: dict, incoming: dict) -> bool:
+    """Compare a retained (possibly compacted) tool event against an incoming call."""
+    if retained == incoming:
+        return True
+    if not isinstance(retained, dict) or not isinstance(incoming, dict):
+        return False
+    if "output_sha256" not in retained and "source_cid" not in retained:
+        return False
+    retained_base = {
+        k: v for k, v in retained.items()
+        if k not in _COMPACT_RAW_OUTPUT_KEYS and k not in _COMPACT_META_KEYS
+    }
+    incoming_base = {
+        k: v for k, v in incoming.items()
+        if k not in _COMPACT_RAW_OUTPUT_KEYS and k not in _COMPACT_META_KEYS
+    }
+    if retained_base != incoming_base:
+        return False
+    retained_sha = retained.get("output_sha256")
+    incoming_sha = incoming.get("output_sha256")
+    if incoming_sha is None:
+        raw = _raw_tool_output(incoming)
+        if raw is not None:
+            incoming_sha = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return retained_sha == incoming_sha
+
+
+def _hydrate_compacted_events(events: list[dict], source_lookup) -> list[dict]:
+    """Temporarily restore full output from live evidence for parser repair."""
+    if source_lookup is None:
+        return events
+    hydrated = []
+    for event in events:
+        if (
+            isinstance(event, dict)
+            and "output" not in event
+            and isinstance(event.get("source_cid"), str)
+            and event.get("source_cid")
+        ):
+            source = source_lookup(event["source_cid"])
+            if source is not None and not source.erased and isinstance(source.content, str):
+                span = (
+                    source.metadata.get("tool_observation", {}).get("output_span")
+                    if isinstance(source.metadata, dict)
+                    else None
+                )
+                if (
+                    isinstance(span, (list, tuple))
+                    and len(span) == 2
+                    and all(type(x) is int for x in span)
+                    and 0 <= span[0] <= span[1] <= len(source.content)
+                ):
+                    text = source.content[span[0]:span[1]]
+                else:
+                    text = source.content
+                hydrated.append({**event, "output": text})
+                continue
+        hydrated.append(event)
+    return hydrated
+
+
 def _append_host_evidence(episode: dict, amendment_cids: list[str], source_lookup, receipts: dict) -> dict:
     """Accept only retained, append-only observations owned by this exact episode."""
     import json
@@ -351,7 +443,7 @@ def _append_host_evidence(episode: dict, amendment_cids: list[str], source_looku
             raise ValueError("late evidence must retain the exact external call observation")
         previous = known.get(event["call_id"])
         if previous is not None:
-            if previous != event:
+            if not same_tool_event(previous, event):
                 raise ValueError("late evidence cannot replace a retained call")
             continue
         updated.setdefault("tool_events", []).append(deepcopy(event))
@@ -383,8 +475,9 @@ def reprocessed_episode(episode: dict, artifacts: dict, receipts: dict, *,
         return deepcopy(episode)
     from mnemosyne.hosts.codex import reparse_retained_events
     updated = _append_host_evidence(episode, amendment_cids, source_lookup, receipts) if amended else deepcopy(episode)
-    original_events = episode.get("tool_events", [])
-    events = reparse_retained_events(updated.get("tool_events", []))
+    original_events = _hydrate_compacted_events(episode.get("tool_events", []), source_lookup)
+    hydrated_updated = _hydrate_compacted_events(updated.get("tool_events", []), source_lookup)
+    events = reparse_retained_events(hydrated_updated)
     if not amended and episode.get("outcome_version", 1) >= OUTCOME_VERSION and (
         episode.get("event_parser_version", 0) >= 2 or events == original_events
     ):

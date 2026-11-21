@@ -68,18 +68,76 @@ def _tokenize_pure(text: str) -> list[str]:
     return tokens
 
 
+_ASCII_CHARS = frozenset(chr(i) for i in range(128))
+_UNICODE_SEP_FORBIDDEN_RE = re.compile(r"[\w:+./-]")
+_UNICODE_SEP_CACHE: dict[str, bool] = {}
+
+
+def _is_unicode_separator(ch: str) -> bool:
+    """True iff ``ch`` (ord >= 128) is strictly a token separator under ``_tokenize_pure``.
+
+    Combining marks (category M*) are always False because NFD/NFC or ``_ACCENT_RE``
+    can interact with adjacent ASCII letters. Any character whose raw, casefolded,
+    NFD, or accent-stripped NFC form matches ``[\\w:+./-]`` is also False.
+    """
+    cached = _UNICODE_SEP_CACHE.get(ch)
+    if cached is not None:
+        return cached
+    if unicodedata.category(ch).startswith("M") or _UNICODE_SEP_FORBIDDEN_RE.search(ch):
+        result = False
+    else:
+        folded = ch.casefold()
+        if _UNICODE_SEP_FORBIDDEN_RE.search(folded):
+            result = False
+        else:
+            nfd = unicodedata.normalize("NFD", folded)
+            if _UNICODE_SEP_FORBIDDEN_RE.search(nfd):
+                result = False
+            else:
+                nfc = unicodedata.normalize("NFC", _ACCENT_RE.sub("", nfd))
+                result = not _UNICODE_SEP_FORBIDDEN_RE.search(nfc)
+    if len(_UNICODE_SEP_CACHE) < 16_384:
+        _UNICODE_SEP_CACHE[ch] = result
+    return result
+
+
+def _project_ascii_separators(text: str) -> str | None:
+    """Project separator-only non-ASCII text to bit-equivalent ASCII, or return None.
+
+    When every non-ASCII code point in ``text`` is a pure separator (e.g. em-dashes,
+    curly quotes, arrows, box-drawing characters, emojis), replacing them with ASCII
+    space yields the exact same token stream as ``_tokenize_pure`` while allowing the
+    fast ASCII/native tokenizer to run.
+    """
+    if text.isascii():
+        return text
+    non_ascii = set(text) - _ASCII_CHARS
+    for ch in non_ascii:
+        if not _is_unicode_separator(ch):
+            return None
+    return text.translate({ord(ch): 32 for ch in non_ascii})
+
+
+def _tokenize_native_ascii(ascii_text: str) -> list[str]:
+    raw = NATIVE.tokenize(ascii_text)
+    tokens: list[str] = []
+    for t in raw:
+        tokens.append(t)
+        if "-" in t:
+            for part in t.split("-"):
+                cleaned = part.strip("./:+-")
+                if cleaned and cleaned != t:
+                    tokens.append(cleaned)
+    return tokens
+
+
 def tokenize(text: str) -> list[str]:
-    if NATIVE is not None and text.isascii():
-        raw = NATIVE.tokenize(text)
-        tokens: list[str] = []
-        for t in raw:
-            tokens.append(t)
-            if "-" in t:
-                for part in t.split("-"):
-                    cleaned = part.strip("./:+-")
-                    if cleaned and cleaned != t:
-                        tokens.append(cleaned)
-        return tokens
+    if NATIVE is not None:
+        if text.isascii():
+            return _tokenize_native_ascii(text)
+        projected = _project_ascii_separators(text)
+        if projected is not None:
+            return _tokenize_native_ascii(projected)
     return _tokenize_pure(text)
 
 
@@ -104,17 +162,19 @@ def _lexical_score_pure(query: str, text: str) -> float:
 
 
 def lexical_score(query: str, text: str) -> float:
-    return (
-        NATIVE.lexical_score(query, text)
-        if NATIVE is not None and query.isascii() and text.isascii()
-        else _lexical_score_pure(query, text)
-    )
+    if NATIVE is not None:
+        q_ascii = _project_ascii_separators(query)
+        if q_ascii is not None:
+            t_ascii = _project_ascii_separators(text)
+            if t_ascii is not None:
+                return NATIVE.lexical_score(q_ascii, t_ascii)
+    return _lexical_score_pure(query, text)
 
 
 @lru_cache(maxsize=131_072)
 def _document_term_stats(text: str) -> tuple[Counter[str], float]:
-    """A document's pure-token counts and sqrt(length), computed once per distinct text."""
-    doc = Counter(_tokenize_pure(text))
+    """A document's token counts and sqrt(length), computed once per distinct text."""
+    doc = Counter(tokenize(text))
     return doc, math.sqrt(max(sum(doc.values()), 1))
 
 
@@ -126,7 +186,7 @@ def lexical_scorer(query: str) -> Callable[[str], float]:
     same terms are visited in the same order and the same float operations run in the same
     order, so every score is identical (tests/test_text_fast_paths.py).
     """
-    q = Counter(_tokenize_pure(query))
+    q = Counter(tokenize(query))
     if not q:
         return lambda text: 0.0
     terms = list(q.items())
@@ -144,12 +204,288 @@ def lexical_scorer(query: str) -> Callable[[str], float]:
 
 
 def lexical_scan(query: str, texts: list[str]) -> list[float]:
-    """``NATIVE.lexical_scan``, with every non-ASCII query or text scored by the pure path."""
+    """``NATIVE.lexical_scan`` for ASCII texts, cached token-stat scorer for non-ASCII."""
+    if not texts:
+        return []
     score = lexical_scorer(query)
-    if not query.isascii():
+    if NATIVE is None:
         return [score(text) for text in texts]
-    scores = NATIVE.lexical_scan(query, texts)
-    return [s if t.isascii() else score(t) for s, t in zip(scores, texts, strict=True)]
+    q_ascii = _project_ascii_separators(query)
+    if q_ascii is None:
+        return [score(text) for text in texts]
+    # Only dispatch pure-ASCII texts to NATIVE.lexical_scan so non-ASCII texts
+    # are not scanned twice; non-ASCII texts use cached _document_term_stats
+    # (which itself projects separator-only non-ASCII into NATIVE.tokenize once).
+    ascii_indices: list[int] = []
+    ascii_texts: list[str] = []
+    results = [0.0] * len(texts)
+    for idx, text in enumerate(texts):
+        if text.isascii():
+            ascii_indices.append(idx)
+            ascii_texts.append(text)
+        else:
+            results[idx] = score(text)
+    if ascii_texts:
+        native_scores = NATIVE.lexical_scan(q_ascii, ascii_texts)
+        for idx, val in zip(ascii_indices, native_scores, strict=True):
+            results[idx] = val
+    return results
+
+
+_BM25_STOPWORDS: frozenset[str] = frozenset(
+    {
+        "a",
+        "about",
+        "actually",
+        "all",
+        "also",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "been",
+        "being",
+        "but",
+        "by",
+        "can",
+        "could",
+        "did",
+        "do",
+        "does",
+        "for",
+        "from",
+        "had",
+        "has",
+        "have",
+        "how",
+        "i",
+        "in",
+        "into",
+        "is",
+        "it",
+        "its",
+        "just",
+        "me",
+        "more",
+        "most",
+        "my",
+        "not",
+        "now",
+        "of",
+        "on",
+        "or",
+        "our",
+        "please",
+        "really",
+        "should",
+        "some",
+        "still",
+        "than",
+        "that",
+        "the",
+        "their",
+        "them",
+        "then",
+        "there",
+        "these",
+        "they",
+        "this",
+        "those",
+        "to",
+        "was",
+        "we",
+        "were",
+        "what",
+        "when",
+        "where",
+        "which",
+        "who",
+        "why",
+        "will",
+        "with",
+        "would",
+        "you",
+        "your",
+    }
+)
+
+_BM25_IRREGULAR_STEMS: dict[str, str] = {
+    "bought": "buy",
+    "built": "build",
+    "drove": "driv",
+    "driven": "driv",
+    "found": "find",
+    "gave": "giv",
+    "given": "giv",
+    "goes": "go",
+    "going": "go",
+    "went": "go",
+    "made": "mak",
+    "paid": "pay",
+    "ran": "run",
+    "said": "say",
+    "saw": "see",
+    "seen": "see",
+    "sent": "send",
+    "sold": "sell",
+    "spent": "spend",
+    "took": "tak",
+    "taken": "tak",
+    "told": "tell",
+    "written": "writ",
+    "wrote": "writ",
+}
+
+_BM25_STEM_IRREGULARS: dict[str, tuple[str, ...]] = {}
+for _irr_word, _irr_stem in _BM25_IRREGULAR_STEMS.items():
+    _BM25_STEM_IRREGULARS[_irr_stem] = _BM25_STEM_IRREGULARS.get(_irr_stem, ()) + (_irr_word,)
+
+
+@lru_cache(maxsize=65_536)
+def _bm25_stem(token: str) -> str:
+    """Conservative, deterministic ASCII suffix stemmer for corpus-IDF BM25."""
+    t = token.lower()
+    if t in _BM25_IRREGULAR_STEMS:
+        return _BM25_IRREGULAR_STEMS[t]
+    if len(t) < 4 or not (t.isascii() and t.isalpha()):
+        return t
+    if len(t) >= 5 and t.endswith(("ies", "ied")):
+        return t[:-3] + "y"
+    if len(t) >= 5 and t.endswith("es") and not t.endswith(("aes", "ees", "oes")):
+        if t.endswith(("ches", "shes", "sses", "xes", "zes")):
+            t = t[:-2]
+        else:
+            t = t[:-1]
+    elif len(t) >= 4 and t.endswith("s") and not t.endswith(("ss", "us", "is", "as", "os")):
+        t = t[:-1]
+    if len(t) >= 6 and t.endswith("ing"):
+        base = t[:-3]
+        if len(base) >= 3 and base[-1] == base[-2] and base[-1] not in "lsz":
+            base = base[:-1]
+        t = base
+    elif len(t) >= 5 and t.endswith("ed") and not t.endswith("eed"):
+        base = t[:-2]
+        if len(base) >= 3 and base[-1] == base[-2] and base[-1] not in "lsz":
+            base = base[:-1]
+        t = base
+    if len(t) >= 4 and t.endswith("e") and not t.endswith(("ee", "ie", "ye", "oe")):
+        t = t[:-1]
+    return t
+
+
+def bm25_fts_match_clauses(query: str) -> list[str]:
+    """FTS5 MATCH clauses forming a recall superset of ``bm25_query_terms(query)``."""
+    clauses: list[str] = []
+    seen: set[str] = set()
+    for stem, _ in bm25_query_terms(query):
+        if stem.isascii() and stem.isalpha() and len(stem) >= 3:
+            prefix = stem[:-1] if (stem.endswith("y") and len(stem) >= 4) else stem
+            clause = f'"{prefix}"*'
+            if clause not in seen:
+                seen.add(clause)
+                clauses.append(clause)
+        else:
+            clause = f'"{stem}"'
+            if clause not in seen:
+                seen.add(clause)
+                clauses.append(clause)
+        for irr in _BM25_STEM_IRREGULARS.get(stem, ()):
+            irr_clause = f'"{irr}"'
+            if irr_clause not in seen:
+                seen.add(irr_clause)
+                clauses.append(irr_clause)
+    return clauses
+
+
+def bm25_corpus_avg_doc_len(texts: Sequence[str]) -> float:
+    """Average tokenized document length across ``texts`` (uses cached doc stats)."""
+    if not texts:
+        return 1.0
+    total = sum(_bm25_doc_stats(text)[1] for text in texts)
+    return (total / len(texts)) if total > 0 else 1.0
+
+
+@lru_cache(maxsize=131_072)
+def _bm25_doc_stats(text: str) -> tuple[dict[str, int], int]:
+    """Cached stemmed term-frequency map and token length for one document."""
+    toks = tokenize(text)
+    counts: dict[str, int] = {}
+    for tok in toks:
+        st = _bm25_stem(tok)
+        counts[st] = counts.get(st, 0) + 1
+    return counts, len(toks)
+
+
+def bm25_query_terms(query: str) -> list[tuple[str, int]]:
+    """Ordered stemmed query terms with conversational stopwords stripped when content remains."""
+    raw = tokenize(query)
+    if not raw:
+        return []
+    filtered = [tok for tok in raw if tok not in _BM25_STOPWORDS]
+    chosen = filtered if filtered else raw
+    counts: dict[str, int] = {}
+    for tok in chosen:
+        st = _bm25_stem(tok)
+        counts[st] = counts.get(st, 0) + 1
+    return list(counts.items())
+
+
+def bm25_lexical_scan(
+    query: str,
+    texts: Sequence[str],
+    *,
+    k1: float = 1.2,
+    b: float = 0.75,
+    corpus_size: int | None = None,
+    avg_doc_len: float | None = None,
+) -> list[float]:
+    """Corpus-IDF Okapi BM25 over stemmed tokens with conversational stopword filtering.
+
+    Deterministic and backend-identical between LocalMemoryEngine and SqliteEngine.
+    """
+    n_texts = len(texts)
+    if n_texts == 0:
+        return []
+    q_terms = bm25_query_terms(query)
+    if not q_terms:
+        return [0.0] * n_texts
+    doc_stats = [_bm25_doc_stats(text) for text in texts]
+    n_corpus = max(int(corpus_size) if corpus_size is not None else n_texts, n_texts, 1)
+    if avg_doc_len is not None and avg_doc_len > 0.0:
+        avgdl = float(avg_doc_len)
+    else:
+        total_len = sum(dl for _, dl in doc_stats)
+        avgdl = (total_len / n_texts) if total_len > 0 else 1.0
+
+    k1_plus_1 = k1 + 1.0
+    one_minus_b = 1.0 - b
+    term_idfs: list[tuple[str, float]] = []
+    for term, q_tf in q_terms:
+        df = 0
+        for counts, _ in doc_stats:
+            if term in counts:
+                df += 1
+        if df == 0:
+            continue
+        idf = math.log(1.0 + (n_corpus - df + 0.5) / (df + 0.5))
+        term_idfs.append((term, idf * float(q_tf)))
+    if not term_idfs:
+        return [0.0] * n_texts
+
+    scores = [0.0] * n_texts
+    for idx, (counts, dl) in enumerate(doc_stats):
+        if dl == 0:
+            continue
+        norm = k1 * (one_minus_b + b * (dl / avgdl))
+        total = 0.0
+        for term, weight in term_idfs:
+            tf = counts.get(term, 0)
+            if tf:
+                total += weight * (tf * k1_plus_1) / (tf + norm)
+        scores[idx] = total
+    return scores
 
 
 def _hashing_embedding_pure(text: str, dims: int) -> tuple[float, ...]:
@@ -170,8 +506,10 @@ def _hashing_embedding_cached(text: str, dims: int) -> tuple[float, ...]:
     # The lru_cache wraps the DISPATCHING compute: it caches whichever backend
     # produced the value, and byte-parity makes the backends interchangeable,
     # so cache behavior (keys, hits, stored tuples) is identical in both modes.
-    if NATIVE is not None and text.isascii():
-        return tuple(NATIVE.hashing_embedding(text, dims))
+    if NATIVE is not None:
+        t_ascii = _project_ascii_separators(text)
+        if t_ascii is not None:
+            return tuple(NATIVE.hashing_embedding(t_ascii, dims))
     return _hashing_embedding_pure(text, dims)
 
 

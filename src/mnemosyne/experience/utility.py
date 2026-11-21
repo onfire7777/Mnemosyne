@@ -6,7 +6,104 @@ Exposure alone and an assistant's confidence never create utility.
 
 from __future__ import annotations
 
+import os
+import shlex
+
 from .receipts import digest
+
+_EXCLUDED_CITATION_SOURCES = frozenset({"assistant", "self_generated", "provider_self_grade"})
+_MEMORY_READ_TOOL_SUFFIXES = frozenset({
+    "skill_get",
+    "knowledge_page_get",
+    "observation_get",
+    "memory_retrieve",
+    "memory_retrieve_deep",
+    "prepare_context",
+})
+
+
+def _is_memory_read_tool(event: dict) -> bool:
+    name = str(event.get("name", "")).strip().lower()
+    if not name:
+        return False
+    leaf = name.rsplit(".", 1)[-1].rsplit("__", 1)[-1]
+    return leaf in _MEMORY_READ_TOOL_SUFFIXES or name.startswith("mnemosyne.")
+
+
+def _event_file_paths(event: dict, cwd: str | None) -> set[str]:
+    """Extract normalized file paths demonstrably targeted by an executed tool event."""
+    paths: set[str] = set()
+    candidates: list[str] = []
+    for key in ("path", "file_path"):
+        val = event.get(key)
+        if isinstance(val, str) and val.strip():
+            candidates.append(val.strip())
+    arguments = event.get("arguments")
+    if isinstance(arguments, dict):
+        for key in ("path", "file_path"):
+            val = arguments.get(key)
+            if isinstance(val, str) and val.strip():
+                candidates.append(val.strip())
+    argv = event.get("argv")
+    if not isinstance(argv, list):
+        cmd = event.get("command")
+        if isinstance(cmd, list):
+            argv = cmd
+        elif isinstance(cmd, str) and cmd.strip():
+            try:
+                argv = shlex.split(cmd)
+            except ValueError:
+                argv = []
+        else:
+            argv = []
+    for token in argv[1:] if isinstance(argv, list) and len(argv) > 1 else []:
+        if not isinstance(token, str) or not token or token.startswith("-") or "\0" in token:
+            continue
+        if "/" in token or "." in token:
+            candidates.append(token)
+    for raw in candidates:
+        if "\0" in raw or len(raw) > 1024:
+            continue
+        if os.path.isabs(raw):
+            paths.add(os.path.normpath(raw))
+        elif cwd:
+            paths.add(os.path.normpath(os.path.join(cwd, raw)))
+    return paths
+
+
+def _event_matches_contract(event: dict, contract: dict) -> bool:
+    """Return True only when an external tool execution matches a frozen contract."""
+    if event.get("source") != "tool" or event.get("evidence_rejected"):
+        return False
+    if _is_memory_read_tool(event):
+        return False
+    status = event.get("status")
+    if status not in {None, "ok", "completed", "complete", "success", "succeeded", "failed", "failure"}:
+        return False
+    from mnemosyne.hosts.memory_checks import _same_workspace, command_argv
+    from mnemosyne.local_paths import normalize_workspace
+
+    kind = contract.get("kind")
+    if kind == "command_observation":
+        expected_argv = contract.get("argv")
+        if not expected_argv:
+            return False
+        actual_argv = command_argv(event.get("argv") if event.get("argv") is not None else event.get("command"))
+        return bool(
+            actual_argv == expected_argv
+            and _same_workspace(event.get("cwd"), contract.get("cwd"))
+        )
+    if kind == "structured_observation":
+        expected_file = contract.get("file")
+        if not isinstance(expected_file, str) or not expected_file:
+            return False
+        workspace = contract.get("workspace")
+        if workspace and event.get("cwd") and not _same_workspace(event.get("cwd"), workspace):
+            return False
+        cwd = normalize_workspace(event.get("cwd")) or normalize_workspace(workspace)
+        target_paths = _event_file_paths(event, cwd)
+        return os.path.normpath(expected_file) in target_paths
+    return False
 
 
 def cited_memory_ids(events, receipts, source_is_live):
@@ -14,6 +111,9 @@ def cited_memory_ids(events, receipts, source_is_live):
 
     Hosts may report application without grading it. External checks still
     determine target outcomes independently in ``verified_target_outcome``.
+    Passive attribution admits served items only when executed tool calls
+    demonstrably match frozen command/file verification contracts or carry
+    structured item references (never assistant text or memory reads).
     A raw citation to another tenant, turn, or expired source proves nothing.
     """
     by_receipt = {receipt["id"]: {item["item_id"] for item in receipt.get("items", [])
@@ -22,19 +122,43 @@ def cited_memory_ids(events, receipts, source_is_live):
     served = set().union(*by_receipt.values()) if by_receipt else set()
     sources = {item: receipt.get("item_sources", {}).get(item, [item])
                for receipt in receipts for item in by_receipt[receipt["id"]]}
+    contracts_by_receipt = {
+        receipt["id"]: receipt.get("item_verification_contracts", {})
+        for receipt in receipts
+        if receipt.get("item_verification_contracts")
+    }
     cited = set()
     for event in events:
-        if event.get("source") in {"assistant", "self_generated", "provider_self_grade"}:
+        if not isinstance(event, dict) or event.get("source") in _EXCLUDED_CITATION_SOURCES:
             continue
         allowed = by_receipt.get(event["receipt_id"], set()) if "receipt_id" in event else served
-        claims = event.get("claims")
-        if not isinstance(claims, list):
+        if not allowed:
             continue
-        for claim in claims:
-            cids = claim.get("evidence_cids") if isinstance(claim, dict) else None
-            if not isinstance(cids, list):
-                continue
-            cited.update(cid for cid in cids if isinstance(cid, str) and cid in allowed)
+        claims = event.get("claims")
+        if isinstance(claims, list):
+            for claim in claims:
+                cids = claim.get("evidence_cids") if isinstance(claim, dict) else None
+                if not isinstance(cids, list):
+                    continue
+                cited.update(cid for cid in cids if isinstance(cid, str) and cid in allowed)
+        if event.get("source") == "tool" and not event.get("evidence_rejected") and not _is_memory_read_tool(event):
+            for field in ("referenced_cids", "cited_cids"):
+                refs = event.get(field)
+                if isinstance(refs, list):
+                    cited.update(cid for cid in refs if isinstance(cid, str) and cid in allowed)
+            if contracts_by_receipt:
+                candidate_receipts = (
+                    [contracts_by_receipt[event["receipt_id"]]]
+                    if "receipt_id" in event and event["receipt_id"] in contracts_by_receipt
+                    else ([] if "receipt_id" in event else list(contracts_by_receipt.values()))
+                )
+                for contract_map in candidate_receipts:
+                    for item_id, contracts in contract_map.items():
+                        if item_id not in allowed or item_id in cited or not isinstance(contracts, list):
+                            continue
+                        if any(isinstance(contract, dict) and _event_matches_contract(event, contract)
+                               for contract in contracts):
+                            cited.add(item_id)
     return sorted(cid for cid in cited if sources[cid] and source_is_live(sources[cid]))
 
 

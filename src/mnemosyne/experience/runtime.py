@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 import math
 import random
 from contextvars import copy_context
@@ -14,7 +16,7 @@ from mnemosyne.learning import Trajectory
 from .guards import require
 from .receipts import ContextReceipt, ROUTE_OF_CHANNEL, ServedItem, digest, source_segment_id
 from .signals import (
-    OUTCOME_VERSION, current_signals, reward, signal, tool_signals, user_signals,
+    OUTCOME_VERSION, current_signals, reward, same_tool_event, signal, tool_signals, user_signals,
     verified_target_outcome, receipt_target,
 )
 from .stats import Posterior, contingency_lower_bound, wilson_interval
@@ -51,6 +53,80 @@ COMPONENTS = (
 
 def now() -> datetime:
     return datetime.now(UTC)
+
+
+_TOOL_RAW_OUTPUT_KEYS = frozenset({"output", "stdout", "stderr", "aggregated_output"})
+_EPISODE_TOOL_EXCERPT_LIMIT = 512
+
+
+def _raw_tool_output(event: dict) -> str | None:
+    for key in ("output", "stdout", "stderr", "aggregated_output"):
+        value = event.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _compact_tool_observation(event: dict, source_content: str) -> dict:
+    """Retain all structured tool metadata while stripping duplicated raw outputs.
+
+    Raw tool output already lives verbatim in ``evidence.content``. Recording
+    ``output_span`` allows deterministic extractors (such as
+    ``project_observations._output``) to slice the exact raw output without
+    storing a second multi-KB copy inside ``evidence.metadata``.
+    """
+    compact = {
+        key: copy.deepcopy(value)
+        for key, value in event.items()
+        if key not in _TOOL_RAW_OUTPUT_KEYS
+    }
+    raw = _raw_tool_output(event)
+    if raw is not None and source_content:
+        start = source_content.find(raw)
+        if start >= 0:
+            compact["output_span"] = [start, start + len(raw)]
+    return compact
+
+
+def _compact_episode_tool_event(event: dict, source_cid: str | None) -> dict:
+    """Bound episode tool_event storage with content-addressed references.
+
+    Multi-KB outputs (>512 chars) are replaced by ``source_cid``,
+    ``output_sha256`` and ``excerpt_512`` while keeping short outputs intact
+    for lightweight trace replay and verification helpers.
+    """
+    compact = copy.deepcopy(event)
+    if source_cid is not None:
+        compact["source_cid"] = source_cid
+    raw = _raw_tool_output(event)
+    if raw is not None:
+        compact["output_sha256"] = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        compact["excerpt_512"] = raw[:_EPISODE_TOOL_EXCERPT_LIMIT]
+        if len(raw) > _EPISODE_TOOL_EXCERPT_LIMIT:
+            for key in _TOOL_RAW_OUTPUT_KEYS:
+                compact.pop(key, None)
+        else:
+            for key in ("stdout", "stderr", "aggregated_output"):
+                val = compact.get(key)
+                if isinstance(val, str) and (len(val) > _EPISODE_TOOL_EXCERPT_LIMIT or key != "output" and val == compact.get("output")):
+                    compact.pop(key, None)
+    return compact
+
+
+def _is_high_confidence_hit(hit: dict) -> bool:
+    """Identify high-confidence cross-encoder hits that must not be withheld."""
+    metadata = hit.get("metadata")
+    if not isinstance(metadata, dict) or metadata.get("reranker") != "http-reranker":
+        return False
+    kind = metadata.get("rerank_score_kind", "similarity")
+    if kind == "logit":
+        raw = metadata.get("rerank_raw_score")
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool) and math.isfinite(raw):
+            return float(raw) >= 0.85
+    score = metadata.get("rerank_score")
+    if isinstance(score, (int, float)) and not isinstance(score, bool) and math.isfinite(score):
+        return float(score) >= (0.85 if kind == "logit" else 0.70)
+    return False
 
 
 def _tool_source_content(event: dict) -> str:
@@ -531,7 +607,24 @@ class LearningRuntime:
         else:
             hits, eligible_hits = [], []
         selection_probabilities = {hit["id"]: 1.0 for hit in hits}
-        if not high_risk and self._enabled(state, "exploration"):
+        configured_rate = max(
+            getattr(self.engine.policy, "learning_exploration_floor", 0.02),
+            getattr(self.engine.policy, "learning_exploration_rate", 0.1),
+        )
+        has_memory_use_telemetry = any(
+            row.get("status") != "erased"
+            and (row.get("cited_cids") or row.get("used_lessons") or row.get("used_skills"))
+            for row in state["episodes"].values()
+        )
+        explicit_withholding = bool(
+            getattr(self.engine.policy, "learning_withhold_enabled", False)
+        )
+        explicit_trial_rate = configured_rate >= 0.5
+        if (
+            not high_risk
+            and self._enabled(state, "exploration")
+            and (has_memory_use_telemetry or explicit_withholding or explicit_trial_rate)
+        ):
             protected_cids = {
                 cid
                 for case in state["policy"].get("protected_cases", {}).values()
@@ -540,15 +633,34 @@ class LearningRuntime:
             }
             retained = []
             source_protection = {}
-            withholding_rate = max(
-                getattr(self.engine.policy, "learning_exploration_floor", 0.02),
-                getattr(self.engine.policy, "learning_exploration_rate", 0.1),
-            )
-            for hit in hits:
+            withholding_rate = configured_rate
+            meta_many = getattr(self.engine, "evidence_metadata_many", None)
+            if callable(meta_many):
+                by_branch: dict[str, set[str]] = {}
+                for hit in hits:
+                    b = hit.get("branch", "main")
+                    s = by_branch.setdefault(b, set())
+                    s.update(hit.get("provenance", []))
+                    if hit.get("kind") == "evidence":
+                        s.add(hit["id"])
+                for b, cids in by_branch.items():
+                    metas = meta_many(tenant_id, list(cids), branch=b)
+                    for cid in cids:
+                        metadata = metas.get(cid) or {}
+                        lifecycle = metadata.get("lifecycle")
+                        source_protection[(b, cid)] = bool(
+                            metadata.get("must_keep")
+                            or isinstance(lifecycle, dict) and lifecycle.get("must_keep")
+                        )
+            for rank, hit in enumerate(hits):
                 source_ids = list(hit.get("provenance", []))
                 if hit.get("kind") == "evidence":
                     source_ids.append(hit["id"])
-                protected = bool(protected_cids.intersection(source_ids))
+                protected = (
+                    bool(protected_cids.intersection(source_ids))
+                    or (not explicit_trial_rate and rank < 2)
+                    or _is_high_confidence_hit(hit)
+                )
                 for cid in source_ids:
                     key = (hit.get("branch", "main"), cid)
                     if key not in source_protection:
@@ -805,6 +917,21 @@ class LearningRuntime:
                 ServedItem(item["kind"], item["id"], (), rank, item["revision"])
                 for rank, item in enumerate(chosen, 1)
             ]
+            policy_hash = digest(effective_policy)
+            compact_effective_policy = {
+                "policy_hash": policy_hash,
+                "learning_enabled": effective_policy["learning_enabled"],
+                "learning_frozen": effective_policy["learning_frozen"],
+                "learning_modes": {
+                    name: mode
+                    for name, mode in effective_policy["learning_modes"].items()
+                    if mode != "active"
+                },
+                "learning_trace_lambda": effective_policy.get("learning_trace_lambda", 0.7),
+                "learning_trace_tau_minutes": effective_policy.get("learning_trace_tau_minutes", 30),
+                "applied_route_weights": effective_policy["applied_route_weights"],
+                "applied_policy_variant": effective_policy["applied_policy_variant"],
+            }
             receipt = ContextReceipt(
                 new_id(),
                 tenant_id,
@@ -812,7 +939,7 @@ class LearningRuntime:
                 session_id,
                 task,
                 prediction,
-                digest(effective_policy),
+                policy_hash,
                 now().isoformat(),
                 turn_index,
                 tuple(served + selected_items),
@@ -824,7 +951,8 @@ class LearningRuntime:
                 raw_prediction=raw_prediction,
                 baseline_prediction=baseline_prediction,
                 parametric_prediction=parametric_prediction,
-                effective_policy=effective_policy,
+                effective_policy_hash=policy_hash,
+                effective_policy=compact_effective_policy,
                 policy_variant_id=active_variant["id"]
                 if active_variant
                 else self._policy_variants(task)[0].id,
@@ -867,8 +995,12 @@ class LearningRuntime:
             extra = supplemental_context or {}
             profiles = {key: [row for row in extra.get("user_model", {}).get(key, []) if current_sources(row)]
                         for key in ("authoritative", "inferred", "support_strategies")}
+            observations = [row for row in extra.get("observations", []) if current_sources(row)]
+            mental_models = [row for row in extra.get("mental_models", []) if current_sources(row)]
             packet = {
                 "hits": current_hits,
+                "observations": observations,
+                "mental_models": mental_models,
                 "lessons": [a for a in chosen if a["kind"] == "lesson"],
                 "procedures": [a for a in chosen if a["kind"] == "procedure"],
                 "skills": [a for a in chosen if a["kind"] in {"skill", "chunk"}],
@@ -884,7 +1016,11 @@ class LearningRuntime:
                 packet["verification_requests"] = requests + [{"kind": "goal_comparison",
                     "receipt_id": receipt["id"], "query": query,
                     "artifact_ids": [item["id"] for item in chosen]}]
-            composed = compose_context(query, packet, self.engine.policy.token_budget,
+            delivery_budget = max(
+                int(self.engine.policy.token_budget),
+                int(getattr(self.engine.policy, "delivery_byte_budget", 16384)),
+            )
+            composed = compose_context(query, packet, delivery_budget,
                                        envelope=delivery_envelope)
             rendered = composed["packet"]
             delivered = {row["id"] for section in ("hits", "lessons", "procedures", "skills")
@@ -892,6 +1028,12 @@ class LearningRuntime:
             delivered_pages = {row.get("page_id", row.get("id")): row
                                for row in rendered.get("knowledge_pages", [])
                                if row.get("page_id") or row.get("id")}
+            delivered_synthesized = {
+                row.get("observation_id", row.get("model_id", row.get("id"))): row
+                for section in ("observations", "mental_models")
+                for row in rendered.get(section, [])
+                if row.get("observation_id") or row.get("model_id") or row.get("id")
+            }
             receipt["items"] = [item for item in receipt["items"] if item["item_id"] in delivered]
             for identifier, page in delivered_pages.items():
                 if identifier in delivered:
@@ -908,6 +1050,10 @@ class LearningRuntime:
             for identifier, page in delivered_pages.items():
                 receipt["item_sources"][identifier] = sorted(set(receipt["item_sources"].get(identifier, [])) |
                     set(page.get("source_evidence_cids", page.get("source_cids", []))))
+            for identifier, syn in delivered_synthesized.items():
+                syn_sources = set(syn.get("source_evidence_cids", syn.get("source_cids", [])))
+                if syn_sources:
+                    receipt["item_sources"][identifier] = sorted(set(receipt["item_sources"].get(identifier, [])) | syn_sources)
             from mnemosyne.hosts.memory_checks import freeze_contracts
             receipt["item_verification_contracts"] = freeze_contracts(
                 self.engine, tenant_id, current_hits, packet.get("knowledge_pages", []),
@@ -928,7 +1074,8 @@ class LearningRuntime:
             receipt["selection_version"] = 3
             receipt["context_delivery"] = {
                 "status": "prepared", "acknowledged": None, "applied": None,
-                "token_budget": self.engine.policy.token_budget,
+                "token_budget": delivery_budget,
+                "delivery_byte_budget": delivery_budget,
                 "used_tokens_upper_bound": composed["used_tokens_upper_bound"],
                 "omitted": composed["omitted"], "required_overflow": composed["required_overflow"],
                 "content_hash": digest(composed["text"]),
@@ -938,12 +1085,17 @@ class LearningRuntime:
                 {cid for cids in receipt["item_sources"].values() for cid in cids})
             current["receipts"][receipt["id"]] = receipt
             result = {key: rendered.get(key, []) for key in
-                      ("hits", "lessons", "procedures", "skills", "knowledge_pages", "verification_requests")}
+                      ("hits", "observations", "mental_models", "lessons", "procedures", "skills", "knowledge_pages", "verification_requests")}
             # Explicit API consumers retain diagnostic details for admitted
             # items; lifecycle injection uses only the bounded _context_text.
             for section in ("hits", "lessons", "procedures", "skills"):
                 identifiers = {row["id"] for row in result[section]}
                 result[section] = [row for row in packet[section] if row["id"] in identifiers]
+            # Keep internal policy_variant request on the structured API dict
+            # while keeping it out of the prompt-injected _context_text.
+            result["verification_requests"] = list(result["verification_requests"]) + [
+                {"kind": "policy_variant", **policy_request}
+            ]
             result["policy_verification_request"] = policy_request
             result.update({key: packet[key] for key in
                           ("receipt_id", "task_class", "prediction", "mode", "goal_checked", "exploration")})
@@ -959,6 +1111,102 @@ class LearningRuntime:
             return result
 
         return self.writer.apply(tenant_id, "capture", capture)
+
+    def _is_superseded_source(self, tenant_id: str, cid: str, branch: str = "main") -> bool:
+        """Return True if any superseded assertion (with valid_to) cites ``cid``."""
+        if getattr(getattr(self.writer, "store", None), "backend", None) == "sqlite":
+            with self.engine._lock:
+                conn = self.engine._connect(tenant_id)
+                row = conn.execute(
+                    "SELECT 1 FROM assertions "
+                    "WHERE tenant_id = ? AND branch = ? AND status = 'superseded' "
+                    "AND superseded_by IS NOT NULL AND valid_to IS NOT NULL "
+                    "AND instr(source_evidence_cids, ?) > 0 LIMIT 1",
+                    (tenant_id, branch, cid),
+                ).fetchone()
+                return row is not None
+        assertions = getattr(self.engine, "assertions", None)
+        if isinstance(assertions, dict):
+            return any(
+                a.tenant_id == tenant_id
+                and a.branch == branch
+                and a.status == "superseded"
+                and a.superseded_by
+                and a.valid_to
+                and cid in a.source_evidence_cids
+                for a in assertions.values()
+            )
+        rows = self.engine.export_tenant(tenant_id).get("assertions", [])
+        return any(
+            row.get("branch", "main") == branch
+            and row.get("status") == "superseded"
+            and row.get("superseded_by")
+            and row.get("valid_to")
+            and cid in row.get("source_evidence_cids", [])
+            for row in rows
+        )
+
+    def _find_existing_learning_turn(
+        self,
+        tenant_id: str,
+        user_id: str,
+        actor: str,
+        text: str,
+        trust_tier: int,
+        workspace: str | None,
+        *,
+        check_superseded: bool = False,
+    ) -> str | None:
+        """Deduplicate exact live learning_turn captures without losing restatements."""
+        expected_policy = {"tenant": tenant_id, "allow_principals": [user_id]}
+        candidates: list[str] = []
+        if getattr(getattr(self.writer, "store", None), "backend", None) == "sqlite":
+            with self.engine._lock:
+                conn = self.engine._connect(tenant_id)
+                rows = conn.execute(
+                    "SELECT cid, metadata, access_policy FROM evidence "
+                    "WHERE tenant_id = ? AND branch = 'main' AND user_id = ? "
+                    "AND actor = ? AND source_type = 'learning_turn' "
+                    "AND erased = 0 AND retired_at IS NULL AND trust_tier = ? "
+                    "AND content = ? ORDER BY created_at DESC LIMIT 8",
+                    (tenant_id, user_id, actor, trust_tier, text),
+                ).fetchall()
+            for cid, meta_raw, pol_raw in rows:
+                try:
+                    meta = json.loads(meta_raw) if isinstance(meta_raw, str) else (meta_raw or {})
+                    pol = json.loads(pol_raw) if isinstance(pol_raw, str) else (pol_raw or {})
+                except (ValueError, TypeError):
+                    continue
+                if meta.get("workspace") != workspace or pol != expected_policy:
+                    continue
+                candidates.append(cid)
+        else:
+            store = getattr(self.engine, "evidence", None)
+            if isinstance(store, dict):
+                matched = [
+                    ev
+                    for ev in store.values()
+                    if ev.tenant_id == tenant_id
+                    and ev.branch == "main"
+                    and ev.user_id == user_id
+                    and ev.actor == actor
+                    and ev.source_type == "learning_turn"
+                    and not ev.erased
+                    and ev.retired_at is None
+                    and ev.trust_tier == trust_tier
+                    and ev.content == text
+                    and (ev.metadata or {}).get("workspace") == workspace
+                    and ev.access_policy == expected_policy
+                ]
+                matched.sort(key=lambda ev: ev.created_at, reverse=True)
+                candidates = [ev.cid for ev in matched[:8]]
+        for cid in candidates:
+            if not self._sources_live(tenant_id, [cid], user_id):
+                continue
+            if check_superseded and self._is_superseded_source(tenant_id, cid):
+                continue
+            return cid
+        return None
 
     def observe_turn(
         self,
@@ -1065,6 +1313,8 @@ class LearningRuntime:
             if replies or episode.get("signals"):
                 self.resolve(tenant_id, episode["id"])
         cids = []
+        turn_workspace = receipts[-1].get("workspace") if receipts else None
+        from mnemosyne.memory_formation import direct_user_clauses, restated_segment_id
         for actor, text in [("user", user_text), ("assistant", assistant_text)]:
             if not text:
                 continue
@@ -1079,6 +1329,22 @@ class LearningRuntime:
             if existing is not None:
                 cids.append(existing.cid)
                 continue
+            trust_tier = 1 if actor == "user" else 5
+            has_direct_clauses = bool(
+                actor == "user" and direct_user_clauses(text, include_directives=True)
+            )
+            dedup_cid = self._find_existing_learning_turn(
+                tenant_id,
+                user_id,
+                actor,
+                text,
+                trust_tier,
+                turn_workspace,
+                check_superseded=has_direct_clauses,
+            )
+            if dedup_cid is not None:
+                cids.append(dedup_cid)
+                continue
             evidence = Evidence(
                         tenant_id=tenant_id,
                         user_id=user_id,
@@ -1087,13 +1353,12 @@ class LearningRuntime:
                         content=text,
                         document_segment_id=source_segment_id(tenant_id, user_id, session_id, actor),
                         session_id=session_id,
-                        trust_tier=1 if actor == "user" else 5,
+                        trust_tier=trust_tier,
                         metadata={
                             "reality_class": "grounded"
                             if actor == "user"
                             else "self_generated",
-                            **({"workspace": receipts[-1]["workspace"]}
-                               if receipts and receipts[-1].get("workspace") else {}),
+                            **({"workspace": turn_workspace} if turn_workspace else {}),
                             **({"source_timezone": self.engine._learning_configuration["source_timezone"]}
                                if getattr(self.engine, "_learning_configuration", {}).get("source_timezone") else {}),
                         },
@@ -1102,23 +1367,22 @@ class LearningRuntime:
                             "allow_principals": [user_id],
                         },
                     )
-            from mnemosyne.memory_formation import direct_user_clauses, restated_segment_id
             # Clause guard keeps chatter such as "continue" from paying for a tenant export.
-            if actor == "user" and direct_user_clauses(text, include_directives=True):
+            if has_direct_clauses:
                 evidence.document_segment_id = restated_segment_id(self.engine, evidence)
             cids.append(self.engine.append_evidence(evidence))
         correction_source_cid = cids[0] if user_text else None
+        compact_tool_events = []
         for event in tool_events or []:
-            if event.get("source") in {
+            event_cid = None
+            if event.get("source") not in {
                 "assistant",
                 "self_generated",
                 "provider_self_grade",
             }:
-                continue
-            content = _tool_source_content(event)
-            if content:
-                cids.append(
-                    self.engine.append_evidence(
+                content = _tool_source_content(event)
+                if content:
+                    event_cid = self.engine.append_evidence(
                         Evidence(
                             tenant_id=tenant_id,
                             user_id=user_id,
@@ -1128,16 +1392,20 @@ class LearningRuntime:
                             document_segment_id=source_segment_id(tenant_id, user_id, session_id, "tool"),
                             session_id=session_id,
                             trust_tier=1,
-                            metadata={"memory_role": "operational", "tool_observation": copy.deepcopy(event),
+                            metadata={
+                                "memory_role": "operational",
+                                "tool_observation": _compact_tool_observation(event, content),
                                 **({"experiment_environment": copy.deepcopy(event["experiment_environment"])}
-                                   if isinstance(event.get("experiment_environment"), dict) else {})},
+                                   if isinstance(event.get("experiment_environment"), dict) else {}),
+                            },
                             access_policy={
                                 "tenant": tenant_id,
                                 "allow_principals": [user_id],
                             },
                         )
                     )
-                )
+                    cids.append(event_cid)
+            compact_tool_events.append(_compact_episode_tool_event(event, event_cid))
         # An engine may return a deterministic CID while deferring storage at
         # its self-generation budget. Only retained evidence is provenance.
         cids = [
@@ -1195,7 +1463,7 @@ class LearningRuntime:
                 for cid in (receipt.get("task_match") or {}).get("source_cids", [])
             }),
             "signals": signals,
-            "tool_events": copy.deepcopy(tool_events or []),
+            "tool_events": compact_tool_events,
             "used_skills": normalized_skills,
             "used_lessons": normalized_lessons,
             "user_text": user_text,
@@ -1335,6 +1603,8 @@ class LearningRuntime:
         tool_cids = [source.cid for source in sources if source.actor == "tool"]
         for source in sources:
             if source.actor == "assistant" and tool_cids:
+                if provider_cids and source.cid not in provider_cids:
+                    continue
                 projections.append(project_grounded_synthesis(self.engine, tenant_id, source.cid, tool_cids,
                     proposer=config.get("project_observation_proposer") if provider_cids is None else None,
                     reviewer=config.get("semantic_reviewer") if provider_cids is None else None,
@@ -1594,7 +1864,7 @@ class LearningRuntime:
                 raise ValueError("late tool events require an original external call identity")
             previous = known.get(event["call_id"])
             if previous is not None:
-                if previous != event:
+                if not same_tool_event(previous, event):
                     raise ValueError("late evidence cannot replace a retained call")
                 continue
             known[event["call_id"]] = event
@@ -2066,7 +2336,7 @@ class LearningRuntime:
                 continue
             predicted = measured.get("predicted_lift")
             valid = (
-                bool(event.get("output") or event.get("evidence"))
+                bool(event.get("output") or event.get("evidence") or event.get("output_sha256") or event.get("source_cid"))
                 and measured.get("policy_fingerprint") == digest(candidate.to_dict())
                 and type(measured.get("baseline_success")) is bool
                 and type(measured.get("candidate_success")) is bool
@@ -2324,8 +2594,27 @@ class LearningRuntime:
             },
         }
 
+    def _open_episodes_sqlite(self, tenant_id: str) -> list[dict] | None:
+        """Fast open-episode lookup via ``learning_episodes_open_idx`` when SQLite cache is cold."""
+        if getattr(getattr(self.writer, "store", None), "backend", None) != "sqlite":
+            return None
+        cache = self.engine.__dict__.get("_learning_state_cache")
+        if cache and tenant_id in cache:
+            return None  # warm cache makes writer.read() instantaneous
+        import json as _json
+        with self.engine._lock:
+            conn = self.engine._connect(tenant_id)
+            rows = conn.execute(
+                "SELECT payload FROM learning_episodes "
+                "WHERE tenant_id = ? AND json_valid(payload) AND json_extract(payload, '$.status') = 'open'",
+                (tenant_id,),
+            ).fetchall()
+        return [_json.loads(row[0]) for row in rows]
+
     def expire(self, tenant_id: str) -> None:
-        for episode in self.writer.read(tenant_id)["episodes"].values():
+        open_rows = self._open_episodes_sqlite(tenant_id)
+        episodes = open_rows if open_rows is not None else self.writer.read(tenant_id)["episodes"].values()
+        for episode in episodes:
             if (
                 episode["status"] == "open"
                 and datetime.fromisoformat(episode["expires_at"]) <= now()
@@ -2333,7 +2622,9 @@ class LearningRuntime:
                 self.resolve(tenant_id, episode["id"], expired=True)
 
     def end_session(self, tenant_id: str, session_id: str) -> dict:
-        for episode in self.writer.read(tenant_id)["episodes"].values():
+        open_rows = self._open_episodes_sqlite(tenant_id)
+        episodes = open_rows if open_rows is not None else self.writer.read(tenant_id)["episodes"].values()
+        for episode in episodes:
             if episode["session_id"] == session_id and episode["status"] == "open":
                 self.resolve(tenant_id, episode["id"], expired=True)
         return self.status(tenant_id)

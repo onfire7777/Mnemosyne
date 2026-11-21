@@ -67,8 +67,11 @@ def migrate_legacy_learning(runtime, learning: LearningSystem, tenant_id: str) -
         for name, collection in (("episodes", learning.trajectories),
                                  ("artifacts", learning.lessons),
                                  ("artifacts", learning.procedures)):
+            unmodified_check = getattr(learning, "_item_unmodified_from_baseline", None)
             for item in collection.values():
                 if item.tenant_id != tenant_id:
+                    continue
+                if unmodified_check is not None and unmodified_check(tenant_id, name, item):
                     continue
                 row = item.to_record()
                 if name == "episodes" and item.id in learning.attributions:

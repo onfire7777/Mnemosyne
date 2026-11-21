@@ -23,8 +23,10 @@ import json
 import os
 import re
 import sqlite3
+import struct
 import threading
 import time
+import unicodedata
 from array import array
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -36,6 +38,7 @@ from math import log
 from pathlib import Path
 from typing import Any, Literal
 
+from mnemosyne import text as text_kernels
 from mnemosyne.models import Hit, parse_dt
 from mnemosyne.text import TAXONOMIC_EXPANSIONS, damerau_levenshtein_at_most_one, tokenize
 
@@ -344,8 +347,10 @@ def extract_session_subpassages(
 class PassageGraph:
     """Incremental O(1) amortized PassageGraph maintenance wrapper with live IDF and adaptive compaction."""
 
-    def __init__(self, index: PassageGraphIndex | None = None) -> None:
+    def __init__(self, index: PassageGraphIndex | None = None, *, lazy_stats: bool = False) -> None:
         self._index = index
+        self._lazy_stats = lazy_stats
+        self._pending_stats: dict[str, None] = {}
         self._passage_records: dict[str, PassageRecord] = {}
         self._branch_watermarks: dict[tuple[str, str], int] = {}
         self._doc_frequencies: Counter[str] = Counter()
@@ -354,32 +359,16 @@ class PassageGraph:
         self._cooccurrences: dict[str, Counter[str]] = defaultdict(Counter)
         self._bigrams: Counter[tuple[str, str]] = Counter()
 
-    def add_passage(self, passage: PassageRecord) -> None:
-        """Incrementally appends a passage into the active graph and updates live statistics."""
-        if passage.passage_id in self._passage_records:
-            self.remove_passage(passage.passage_id)
-
-        self._passage_records[passage.passage_id] = passage
-        key = (passage.tenant_id, passage.branch)
-        self._branch_watermarks[key] = self._branch_watermarks.get(key, 0) + 1
-
-        # Live DF/IDF tracking
+    def _index_passage_stats(self, passage: PassageRecord) -> None:
         ordered_toks = [t for t in tokenize(passage.text) if len(t) > 2]
-        toks = set(ordered_toks)
-        for t in toks:
+        for t in set(ordered_toks):
             self._doc_frequencies[t] += 1
-        self._total_passages += 1
-        self._mutations_since_compaction += 1
-
-        # Track contiguous bigrams (unique per passage) for dynamic compound PMI
         seen_bigrams: set[tuple[str, str]] = set()
         for i in range(len(ordered_toks) - 1):
             bg = (ordered_toks[i], ordered_toks[i + 1])
             if bg[0] != bg[1] and bg not in seen_bigrams:
                 seen_bigrams.add(bg)
                 self._bigrams[bg] += 1
-
-        # Track ordered window co-occurrences for dynamic concept induction
         seen_pairs: set[tuple[str, str]] = set()
         for i, t1 in enumerate(ordered_toks):
             for t2 in ordered_toks[i + 1 : i + 6]:
@@ -390,6 +379,32 @@ class PassageGraph:
                         self._cooccurrences[t1][t2] += 1
                         self._cooccurrences[t2][t1] += 1
 
+    def _flush_pending_stats(self) -> None:
+        if not self._pending_stats:
+            return
+        pending = list(self._pending_stats)
+        self._pending_stats.clear()
+        for pid in pending:
+            rec = self._passage_records.get(pid)
+            if rec is not None:
+                self._index_passage_stats(rec)
+
+    def add_passage(self, passage: PassageRecord) -> None:
+        """Incrementally appends a passage into the active graph and updates live statistics."""
+        if passage.passage_id in self._passage_records:
+            self.remove_passage(passage.passage_id)
+
+        self._passage_records[passage.passage_id] = passage
+        key = (passage.tenant_id, passage.branch)
+        self._branch_watermarks[key] = self._branch_watermarks.get(key, 0) + 1
+        self._total_passages += 1
+        self._mutations_since_compaction += 1
+
+        if self._lazy_stats:
+            self._pending_stats[passage.passage_id] = None
+        else:
+            self._index_passage_stats(passage)
+
         if self._index is not None:
             self._index.incremental_add_passage(passage)
 
@@ -399,42 +414,44 @@ class PassageGraph:
         if rec is not None:
             key = (rec.tenant_id, rec.branch)
             self._branch_watermarks[key] = self._branch_watermarks.get(key, 0) + 1
-            ordered_toks = [t for t in tokenize(rec.text) if len(t) > 2]
-            toks = set(ordered_toks)
-            for t in toks:
-                if self._doc_frequencies[t] > 1:
-                    self._doc_frequencies[t] -= 1
-                else:
-                    self._doc_frequencies.pop(t, None)
             if self._total_passages > 0:
                 self._total_passages -= 1
             self._mutations_since_compaction += 1
-
-            seen_bigrams: set[tuple[str, str]] = set()
-            for i in range(len(ordered_toks) - 1):
-                bg = (ordered_toks[i], ordered_toks[i + 1])
-                if bg[0] != bg[1] and bg not in seen_bigrams:
-                    seen_bigrams.add(bg)
-                    if self._bigrams[bg] > 1:
-                        self._bigrams[bg] -= 1
+            if passage_id in self._pending_stats:
+                self._pending_stats.pop(passage_id, None)
+            else:
+                ordered_toks = [t for t in tokenize(rec.text) if len(t) > 2]
+                for t in set(ordered_toks):
+                    if self._doc_frequencies[t] > 1:
+                        self._doc_frequencies[t] -= 1
                     else:
-                        self._bigrams.pop(bg, None)
+                        self._doc_frequencies.pop(t, None)
 
-            seen_pairs: set[tuple[str, str]] = set()
-            for i, t1 in enumerate(ordered_toks):
-                for t2 in ordered_toks[i + 1 : i + 6]:
-                    if t1 != t2:
-                        pair = (t1, t2) if t1 < t2 else (t2, t1)
-                        if pair not in seen_pairs:
-                            seen_pairs.add(pair)
-                            if self._cooccurrences[t1][t2] > 1:
-                                self._cooccurrences[t1][t2] -= 1
-                            else:
-                                self._cooccurrences[t1].pop(t2, None)
-                            if self._cooccurrences[t2][t1] > 1:
-                                self._cooccurrences[t2][t1] -= 1
-                            else:
-                                self._cooccurrences[t2].pop(t1, None)
+                seen_bigrams: set[tuple[str, str]] = set()
+                for i in range(len(ordered_toks) - 1):
+                    bg = (ordered_toks[i], ordered_toks[i + 1])
+                    if bg[0] != bg[1] and bg not in seen_bigrams:
+                        seen_bigrams.add(bg)
+                        if self._bigrams[bg] > 1:
+                            self._bigrams[bg] -= 1
+                        else:
+                            self._bigrams.pop(bg, None)
+
+                seen_pairs: set[tuple[str, str]] = set()
+                for i, t1 in enumerate(ordered_toks):
+                    for t2 in ordered_toks[i + 1 : i + 6]:
+                        if t1 != t2:
+                            pair = (t1, t2) if t1 < t2 else (t2, t1)
+                            if pair not in seen_pairs:
+                                seen_pairs.add(pair)
+                                if self._cooccurrences[t1][t2] > 1:
+                                    self._cooccurrences[t1][t2] -= 1
+                                else:
+                                    self._cooccurrences[t1].pop(t2, None)
+                                if self._cooccurrences[t2][t1] > 1:
+                                    self._cooccurrences[t2][t1] -= 1
+                                else:
+                                    self._cooccurrences[t2].pop(t1, None)
 
             if self._index is not None:
                 self._index.invalidate_for_mutation(rec.tenant_id, rec.branch)
@@ -448,12 +465,14 @@ class PassageGraph:
 
     def get_live_idf(self, term: str) -> float:
         """Dynamic corpus IDF log((N + 1) / (df + 0.5))."""
+        self._flush_pending_stats()
         df = self._doc_frequencies.get(term.lower(), 0)
         n = max(self._total_passages, 1)
         return log((n + 1.0) / (df + 0.5))
 
     def get_corpus_cooccurrences(self, term: str, top_n: int = 5) -> list[str]:
         """Corpus-learned co-occurring terms for dynamic concept induction."""
+        self._flush_pending_stats()
         counts = self._cooccurrences.get(term.lower())
         if not counts:
             return []
@@ -461,6 +480,7 @@ class PassageGraph:
 
     def compute_bigram_pmi(self, w1: str, w2: str) -> float:
         """Compute live Pointwise Mutual Information (PMI) for a two-word phrase in the corpus."""
+        self._flush_pending_stats()
         t1, t2 = w1.lower(), w2.lower()
         n = max(self._total_passages, 1) + 2.0
         c12 = self._bigrams.get((t1, t2), 0) or self._cooccurrences.get(t1, {}).get(
@@ -494,6 +514,7 @@ class PassageGraph:
         self, term: str, top_k: int = 5, min_pmi: float = 0.5
     ) -> list[tuple[str, float]]:
         """Discover domain-specific associated terms/synonyms via Positive PMI over live co-occurrences."""
+        self._flush_pending_stats()
         t = term.lower()
         neighbors = self._cooccurrences.get(t)
         if not neighbors:
@@ -513,6 +534,7 @@ class PassageGraph:
 
     def corpus_contextual_embedding(self, text: str, dims: int = 64) -> list[float]:
         """Compute a live co-occurrence smoothed contextual vector embedding in offline mode."""
+        self._flush_pending_stats()
         from mnemosyne.text import hashing_embedding
 
         base = hashing_embedding(text, dims=dims)
@@ -616,17 +638,129 @@ def _extract_user_lines(text: str) -> str:
     return extracted if extracted else text
 
 
+def _normalize_for_passage_index(text: str) -> str:
+    """Fold case + Latin accents only for non-ASCII text to match ``_tokenize_pure``."""
+    if text.isascii():
+        return text
+    return unicodedata.normalize(
+        "NFC",
+        text_kernels._ACCENT_RE.sub("", unicodedata.normalize("NFD", text.casefold())),
+    )
+
+
+_PASSAGE_SIDECAR_ENVELOPE_MAGIC = b"MNPS"
+
+
+def _owner_sidecar_info(
+    owner: object, passages: Sequence[Hit]
+) -> tuple[Path, int] | None:
+    """Resolve ``(sidecar_path, source_rev)`` for persistent Rust passage sidecars."""
+    if os.environ.get("MNEMOSYNE_PASSAGE_SIDECAR", "1") == "0":
+        return None
+    if not passages:
+        return None
+    tenant_id = passages[0].tenant_id
+    branch = passages[0].branch
+    if not tenant_id or not branch:
+        return None
+    for hit in passages:
+        if hit.tenant_id != tenant_id or hit.branch != branch:
+            return None
+    root_dir = getattr(owner, "root_dir", None)
+    if root_dir is not None:
+        base_dir = Path(root_dir)
+    else:
+        store_path = getattr(owner, "store_path", None)
+        if store_path is None:
+            return None
+        base_dir = Path(store_path).parent
+    if not base_dir.exists():
+        return None
+    source_rev: int | None = None
+    rev_fn = getattr(owner, "_source_revision_unlocked", None)
+    connect_fn = getattr(owner, "_connect", None)
+    owner_lock = getattr(owner, "_lock", None)
+    if callable(rev_fn) and callable(connect_fn):
+        try:
+            conn = connect_fn(tenant_id)
+            if owner_lock is not None:
+                with owner_lock:
+                    source_rev = int(rev_fn(conn, tenant_id))
+            else:
+                source_rev = int(rev_fn(conn, tenant_id))
+        except Exception:
+            return None
+    else:
+        sv = getattr(owner, "_store_version", None)
+        if isinstance(sv, int):
+            source_rev = sv
+    if source_rev is None:
+        return None
+    scope_tag = hashlib.sha256(f"{tenant_id}\0{branch}".encode("utf-8")).hexdigest()[:16]
+    return base_dir / f".passage_bm25_{scope_tag}.mnpb", source_rev
+
+
+def _load_passage_sidecar(
+    sidecar_path: Path,
+    expected_rev: int,
+    session_ids: Sequence[str],
+    texts: Sequence[str],
+) -> Any | None:
+    native_mod = text_kernels.NATIVE
+    native_cls = (
+        getattr(native_mod, "NativePassageIndex", None)
+        if native_mod is not None
+        else None
+    )
+    if native_cls is None or not sidecar_path.exists():
+        return None
+    try:
+        raw = sidecar_path.read_bytes()
+        if len(raw) < 12 or raw[:4] != _PASSAGE_SIDECAR_ENVELOPE_MAGIC:
+            return None
+        stored_rev = struct.unpack("<q", raw[4:12])[0]
+        if stored_rev != expected_rev:
+            return None
+        native_idx = native_cls.from_bytes(raw[12:])
+        if not native_idx.verify_passages(list(session_ids), list(texts)):
+            return None
+        return native_idx
+    except Exception:
+        return None
+
+
+def _save_passage_sidecar(
+    sidecar_path: Path, source_rev: int, native_idx: Any
+) -> None:
+    try:
+        payload = _PASSAGE_SIDECAR_ENVELOPE_MAGIC + struct.pack("<q", int(source_rev)) + native_idx.to_bytes()
+        tmp_path = sidecar_path.with_name(f"{sidecar_path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+        tmp_path.write_bytes(payload)
+        try:
+            os.chmod(tmp_path, 0o600)
+        except OSError:
+            pass
+        os.replace(tmp_path, sidecar_path)
+    except OSError:
+        pass
+
+
 class PassageIndex:
     """BM25 with positive IDF, scoped to the caller's readable corpus.
 
-    No global text cache: the owning engine retains at most its latest scope.
-    Candidates are reauthorized before every lookup, including cache hits.
+    Uses the rayon-parallel Rust ``NativePassageIndex`` when ``mnemosyne_native``
+    is available (with automatic pure-Python fallback under ``MNEMOSYNE_PURE=1``
+    or when the native symbol is absent). No global text cache: the owning engine
+    retains at most its latest scope, and candidates are reauthorized before
+    every lookup, including cache and binary sidecar hits.
     """
 
     def __init__(
         self,
         texts: Sequence[str] | tuple[str, ...],
         session_ids: Sequence[str] | None = None,
+        *,
+        _native_override: Any = None,
     ):
         self._texts: list[str] = list(texts)
         self._texts_tuple: tuple[str, ...] | None = (
@@ -637,25 +771,58 @@ class PassageIndex:
             if session_ids is not None
             else [str(i) for i in range(len(self._texts))]
         )
-        self.lengths: list[int] = []
-        self.user_lengths: list[int] = []
-        self.postings: dict[str, list[tuple[int, int]]] = defaultdict(list)
-        self.stem_postings: dict[str, list[tuple[int, int]]] = defaultdict(list)
-        self.user_stem_postings: dict[str, list[tuple[int, int]]] = defaultdict(list)
+        self._graph: PassageGraph | None = None
+        self._doc_subs_cache: dict[int, list[SubPassage]] = {}
+
+        native_mod = text_kernels.NATIVE
+        native_cls = (
+            getattr(native_mod, "NativePassageIndex", None)
+            if native_mod is not None
+            else None
+        )
+        if _native_override is not None:
+            self._native: Any = _native_override
+        elif native_cls is not None:
+            norm_texts = [
+                t if t.isascii() else _normalize_for_passage_index(t)
+                for t in self._texts
+            ]
+            self._native = native_cls(self._texts, norm_texts, self._session_ids)
+        else:
+            self._native = None
+
+        if self._native is not None:
+            self._py_lengths: list[int] | None = None
+            self._py_user_lengths: list[int] | None = None
+            self._py_postings: dict[str, list[tuple[int, int]]] | None = None
+            self._py_stem_postings: dict[str, list[tuple[int, int]]] | None = None
+            self._py_user_stem_postings: dict[str, list[tuple[int, int]]] | None = None
+            self._py_subpassages: list[SubPassage] | None = None
+            self._py_session_subpassages: list[list[SubPassage]] | None = None
+            self._py_round_postings: dict[str, list[tuple[int, int, int]]] | None = None
+            self._py_round_stem_postings: dict[str, list[tuple[int, int, int]]] | None = None
+            self._py_turn_postings: dict[str, list[tuple[int, int, int]]] | None = None
+            self._py_turn_stem_postings: dict[str, list[tuple[int, int, int]]] | None = None
+            self._py_round_lengths: list[list[int]] | None = None
+            self._py_turn_lengths: list[list[int]] | None = None
+            self._sync_native_stats()
+            return
+
+        self._py_lengths = []
+        self._py_user_lengths = []
+        self._py_postings = defaultdict(list)
+        self._py_stem_postings = defaultdict(list)
+        self._py_user_stem_postings = defaultdict(list)
 
         # Multi-granularity subpassage structures
-        self.subpassages: list[SubPassage] = []
-        self.session_subpassages: list[list[SubPassage]] = []
-        self.round_postings: dict[str, list[tuple[int, int, int]]] = defaultdict(list)
-        self.round_stem_postings: dict[str, list[tuple[int, int, int]]] = defaultdict(
-            list
-        )
-        self.turn_postings: dict[str, list[tuple[int, int, int]]] = defaultdict(list)
-        self.turn_stem_postings: dict[str, list[tuple[int, int, int]]] = defaultdict(
-            list
-        )
-        self.round_lengths: list[list[int]] = []
-        self.turn_lengths: list[list[int]] = []
+        self._py_subpassages = []
+        self._py_session_subpassages = []
+        self._py_round_postings = defaultdict(list)
+        self._py_round_stem_postings = defaultdict(list)
+        self._py_turn_postings = defaultdict(list)
+        self._py_turn_stem_postings = defaultdict(list)
+        self._py_round_lengths = []
+        self._py_turn_lengths = []
         self.total_round_length: int = 0
         self.total_rounds: int = 0
         self.total_turn_length: int = 0
@@ -669,9 +836,9 @@ class PassageIndex:
             )
             self._index_single_text(index, text, session_id=sess_id)
 
-        self.total_length = sum(self.lengths)
+        self.total_length = sum(self._py_lengths)
         self.average_length = self.total_length / max(len(self._texts), 1) or 1.0
-        self.total_user_length = sum(self.user_lengths)
+        self.total_user_length = sum(self._py_user_lengths)
         self.average_user_length = (
             self.total_user_length / max(len(self._texts), 1) or 1.0
         )
@@ -681,66 +848,231 @@ class PassageIndex:
         self.average_turn_length = (
             self.total_turn_length / max(self.total_turns, 1) or 1.0
         )
-        self._graph: PassageGraph | None = None
+
+    def _sync_native_stats(self) -> None:
+        (
+            self.total_length,
+            self.total_user_length,
+            self.total_round_length,
+            self.total_rounds,
+            self.total_turn_length,
+            self.total_turns,
+        ) = self._native.stats()
+        n = max(len(self._texts), 1)
+        self.average_length = self.total_length / n or 1.0
+        self.average_user_length = self.total_user_length / n or 1.0
+        self.average_round_length = (
+            self.total_round_length / max(self.total_rounds, 1) or 1.0
+        )
+        self.average_turn_length = (
+            self.total_turn_length / max(self.total_turns, 1) or 1.0
+        )
+
+    def _invalidate_py_caches(self) -> None:
+        if self._native is None:
+            return
+        self._py_lengths = None
+        self._py_user_lengths = None
+        self._py_postings = None
+        self._py_stem_postings = None
+        self._py_user_stem_postings = None
+        self._py_subpassages = None
+        self._py_session_subpassages = None
+        self._py_round_postings = None
+        self._py_round_stem_postings = None
+        self._py_turn_postings = None
+        self._py_turn_stem_postings = None
+        self._py_round_lengths = None
+        self._py_turn_lengths = None
+
+    def _session_subpassages_for(self, doc_idx: int) -> list[SubPassage]:
+        if self._py_session_subpassages is not None and doc_idx < len(self._py_session_subpassages):
+            return self._py_session_subpassages[doc_idx]
+        cached = self._doc_subs_cache.get(doc_idx)
+        if cached is None:
+            sess_id = (
+                self._session_ids[doc_idx]
+                if doc_idx < len(self._session_ids)
+                else str(doc_idx)
+            )
+            cached = extract_session_subpassages(sess_id, self._texts[doc_idx])
+            self._doc_subs_cache[doc_idx] = cached
+        return cached
+
+    @property
+    def lengths(self) -> list[int]:
+        if self._py_lengths is None and self._native is not None:
+            self._py_lengths = list(self._native.lengths())
+        return self._py_lengths if self._py_lengths is not None else []
+
+    @property
+    def user_lengths(self) -> list[int]:
+        if self._py_user_lengths is None and self._native is not None:
+            self._py_user_lengths = list(self._native.user_lengths())
+        return self._py_user_lengths if self._py_user_lengths is not None else []
+
+    @property
+    def round_lengths(self) -> list[list[int]]:
+        if self._py_round_lengths is None and self._native is not None:
+            self._py_round_lengths = [list(r) for r in self._native.round_lengths()]
+        return self._py_round_lengths if self._py_round_lengths is not None else []
+
+    @property
+    def turn_lengths(self) -> list[list[int]]:
+        if self._py_turn_lengths is None and self._native is not None:
+            self._py_turn_lengths = [list(t) for t in self._native.turn_lengths()]
+        return self._py_turn_lengths if self._py_turn_lengths is not None else []
+
+    @property
+    def postings(self) -> dict[str, list[tuple[int, int]]]:
+        if self._py_postings is None and self._native is not None:
+            self._py_postings = self._native.export_postings()
+        return self._py_postings if self._py_postings is not None else {}
+
+    @property
+    def stem_postings(self) -> dict[str, list[tuple[int, int]]]:
+        if self._py_stem_postings is None and self._native is not None:
+            self._py_stem_postings = self._native.export_stem_postings()
+        return self._py_stem_postings if self._py_stem_postings is not None else {}
+
+    @property
+    def user_stem_postings(self) -> dict[str, list[tuple[int, int]]]:
+        if self._py_user_stem_postings is None and self._native is not None:
+            self._py_user_stem_postings = self._native.export_user_stem_postings()
+        return self._py_user_stem_postings if self._py_user_stem_postings is not None else {}
+
+    @property
+    def round_postings(self) -> dict[str, list[tuple[int, int, int]]]:
+        if self._py_round_postings is None and self._native is not None:
+            self._py_round_postings = self._native.export_round_postings()
+        return self._py_round_postings if self._py_round_postings is not None else {}
+
+    @property
+    def round_stem_postings(self) -> dict[str, list[tuple[int, int, int]]]:
+        if self._py_round_stem_postings is None and self._native is not None:
+            self._py_round_stem_postings = self._native.export_round_stem_postings()
+        return self._py_round_stem_postings if self._py_round_stem_postings is not None else {}
+
+    @property
+    def turn_postings(self) -> dict[str, list[tuple[int, int, int]]]:
+        if self._py_turn_postings is None and self._native is not None:
+            self._py_turn_postings = self._native.export_turn_postings()
+        return self._py_turn_postings if self._py_turn_postings is not None else {}
+
+    @property
+    def turn_stem_postings(self) -> dict[str, list[tuple[int, int, int]]]:
+        if self._py_turn_stem_postings is None and self._native is not None:
+            self._py_turn_stem_postings = self._native.export_turn_stem_postings()
+        return self._py_turn_stem_postings if self._py_turn_stem_postings is not None else {}
+
+    @property
+    def session_subpassages(self) -> list[list[SubPassage]]:
+        if self._py_session_subpassages is None:
+            self._py_session_subpassages = [
+                self._session_subpassages_for(i) for i in range(len(self._texts))
+            ]
+        return self._py_session_subpassages
+
+    @property
+    def subpassages(self) -> list[SubPassage]:
+        if self._py_subpassages is None:
+            flat: list[SubPassage] = []
+            for subs in self.session_subpassages:
+                flat.extend(subs)
+            self._py_subpassages = flat
+        return self._py_subpassages
 
     def _index_single_text(
         self, index: int, text: str, session_id: str | None = None
     ) -> tuple[int, int]:
         if session_id is None:
             session_id = str(index)
-        tokens = tokenize(text)
-        counts = Counter(tokens)
-        t_len = sum(counts.values())
-        self.lengths.append(t_len)
-        for term, count in counts.items():
-            self.postings[term].append((index, count))
-        stem_counts = Counter(_stem_passage_token(t) for t in tokens)
-        for st, count in stem_counts.items():
-            self.stem_postings[st].append((index, count))
-        u_tokens = tokenize(_extract_user_lines(text))
-        u_stem_counts = Counter(_stem_passage_token(t) for t in u_tokens)
-        u_len = sum(u_stem_counts.values()) or 1
-        self.user_lengths.append(u_len)
-        for st, count in u_stem_counts.items():
-            self.user_stem_postings[st].append((index, count))
 
-        # Index multi-granularity subpassages
+        def _count_and_stem(src: str) -> tuple[Counter[str], Counter[str], int]:
+            toks = tokenize(src)
+            c = Counter(toks)
+            sc: Counter[str] = Counter()
+            for term, cnt in c.items():
+                sc[_stem_passage_token(term)] += cnt
+            return c, sc, len(toks)
+
+        assert self._py_lengths is not None
+        assert self._py_user_lengths is not None
+        assert self._py_postings is not None
+        assert self._py_stem_postings is not None
+        assert self._py_user_stem_postings is not None
+        assert self._py_subpassages is not None
+        assert self._py_session_subpassages is not None
+        assert self._py_round_postings is not None
+        assert self._py_round_stem_postings is not None
+        assert self._py_turn_postings is not None
+        assert self._py_turn_stem_postings is not None
+        assert self._py_round_lengths is not None
+        assert self._py_turn_lengths is not None
+
+        counts, stem_counts, t_len = _count_and_stem(text)
+        self._py_lengths.append(t_len)
+        for term, count in counts.items():
+            self._py_postings[term].append((index, count))
+        for st, count in stem_counts.items():
+            self._py_stem_postings[st].append((index, count))
+
+        user_text = _extract_user_lines(text)
+        if user_text is text or user_text == text:
+            u_stem_counts = stem_counts
+            u_len = t_len or 1
+        else:
+            _, u_stem_counts, u_raw_len = _count_and_stem(user_text)
+            u_len = u_raw_len or 1
+        self._py_user_lengths.append(u_len)
+        for st, count in u_stem_counts.items():
+            self._py_user_stem_postings[st].append((index, count))
+
+        # Index multi-granularity subpassages, reusing token/stem counts when
+        # round and turn share identical text (paragraphs, sentence windows, single-turn rounds).
         subs = extract_session_subpassages(session_id, text)
-        self.subpassages.extend(subs)
-        self.session_subpassages.append(subs)
+        self._py_subpassages.extend(subs)
+        self._py_session_subpassages.append(subs)
 
         rounds = [sp for sp in subs if sp.granularity == "round"]
         turns = [sp for sp in subs if sp.granularity == "turn"]
+        sub_cache: dict[str, tuple[Counter[str], Counter[str], int]] = {
+            text: (counts, stem_counts, t_len),
+        }
 
         sess_round_lens: list[int] = []
         for r_idx, r in enumerate(rounds):
-            r_toks = tokenize(r.text)
-            r_counts = Counter(r_toks)
-            r_len = sum(r_counts.values()) or 1
+            entry = sub_cache.get(r.text)
+            if entry is None:
+                entry = _count_and_stem(r.text)
+                sub_cache[r.text] = entry
+            r_counts, r_stem_counts, r_raw_len = entry
+            r_len = r_raw_len or 1
             sess_round_lens.append(r_len)
             self.total_round_length += r_len
             self.total_rounds += 1
             for term, count in r_counts.items():
-                self.round_postings[term].append((index, r_idx, count))
-            r_stem_counts = Counter(_stem_passage_token(t) for t in r_toks)
+                self._py_round_postings[term].append((index, r_idx, count))
             for st, count in r_stem_counts.items():
-                self.round_stem_postings[st].append((index, r_idx, count))
-        self.round_lengths.append(sess_round_lens)
+                self._py_round_stem_postings[st].append((index, r_idx, count))
+        self._py_round_lengths.append(sess_round_lens)
 
         sess_turn_lens: list[int] = []
         for t_idx, t in enumerate(turns):
-            t_toks = tokenize(t.text)
-            t_counts = Counter(t_toks)
-            tn_len = sum(t_counts.values()) or 1
+            entry = sub_cache.get(t.text)
+            if entry is None:
+                entry = _count_and_stem(t.text)
+                sub_cache[t.text] = entry
+            t_counts, t_stem_counts, tn_raw_len = entry
+            tn_len = tn_raw_len or 1
             sess_turn_lens.append(tn_len)
             self.total_turn_length += tn_len
             self.total_turns += 1
             for term, count in t_counts.items():
-                self.turn_postings[term].append((index, t_idx, count))
-            t_stem_counts = Counter(_stem_passage_token(tok) for tok in t_toks)
+                self._py_turn_postings[term].append((index, t_idx, count))
             for st, count in t_stem_counts.items():
-                self.turn_stem_postings[st].append((index, t_idx, count))
-        self.turn_lengths.append(sess_turn_lens)
+                self._py_turn_stem_postings[st].append((index, t_idx, count))
+        self._py_turn_lengths.append(sess_turn_lens)
 
         return t_len, u_len
 
@@ -761,7 +1093,7 @@ class PassageIndex:
     @property
     def passage_graph(self) -> PassageGraph:
         if self._graph is None:
-            self._graph = PassageGraph()
+            self._graph = PassageGraph(lazy_stats=True)
             for idx, txt in enumerate(self._texts):
                 self._graph.add_passage(
                     PassageRecord(
@@ -778,31 +1110,72 @@ class PassageIndex:
         if not hasattr(self, "_session_ids"):
             self._session_ids = [str(i) for i in range(len(self._texts))]
         self._session_ids.append(session_id)
-        t_len, u_len = self._index_single_text(index, text, session_id=session_id)
-        self.total_length = (
-            getattr(self, "total_length", sum(self.lengths[:-1])) + t_len
-        )
-        self.total_user_length = (
-            getattr(self, "total_user_length", sum(self.user_lengths[:-1])) + u_len
-        )
-        self._texts.append(text)
-        self._texts_tuple = None
-        self.average_length = self.total_length / len(self._texts) or 1.0
-        self.average_user_length = self.total_user_length / len(self._texts) or 1.0
-        self.average_round_length = (
-            getattr(self, "total_round_length", 1)
-            / max(getattr(self, "total_rounds", 1), 1)
-            or 1.0
-        )
-        self.average_turn_length = (
-            getattr(self, "total_turn_length", 1)
-            / max(getattr(self, "total_turns", 1), 1)
-            or 1.0
-        )
+        if self._native is not None:
+            norm_text = (
+                text if text.isascii() else _normalize_for_passage_index(text)
+            )
+            self._native.add_text(text, norm_text, session_id)
+            self._texts.append(text)
+            self._texts_tuple = None
+            self._invalidate_py_caches()
+            self._sync_native_stats()
+        else:
+            t_len, u_len = self._index_single_text(index, text, session_id=session_id)
+            self.total_length = (
+                getattr(self, "total_length", sum(self.lengths[:-1])) + t_len
+            )
+            self.total_user_length = (
+                getattr(self, "total_user_length", sum(self.user_lengths[:-1])) + u_len
+            )
+            self._texts.append(text)
+            self._texts_tuple = None
+            self.average_length = self.total_length / len(self._texts) or 1.0
+            self.average_user_length = self.total_user_length / len(self._texts) or 1.0
+            self.average_round_length = (
+                getattr(self, "total_round_length", 1)
+                / max(getattr(self, "total_rounds", 1), 1)
+                or 1.0
+            )
+            self.average_turn_length = (
+                getattr(self, "total_turn_length", 1)
+                / max(getattr(self, "total_turns", 1), 1)
+                or 1.0
+            )
         if self._graph is not None:
             self._graph.add_passage(
                 PassageRecord(passage_id=str(index), text=text, tenant_id="", branch="")
             )
+
+    def matches_passages(
+        self, session_ids: Sequence[str], texts: Sequence[str]
+    ) -> bool:
+        """Fast custody-safe equality check without 40 MB Python string comparison."""
+        n = len(self._texts)
+        if len(texts) != n or len(session_ids) != n:
+            return False
+        if self._session_ids != list(session_ids):
+            return False
+        # Fast O(N) pointer identity check (exact, zero collision risk).
+        if all(a is b for a, b in zip(self._texts, texts)):
+            return True
+        if self._native is not None:
+            return bool(self._native.verify_passages(list(session_ids), list(texts)))
+        return tuple(texts) == self.texts
+
+    def is_prefix_of_passages(
+        self, session_ids: Sequence[str], texts: Sequence[str]
+    ) -> bool:
+        """Fast prefix check for incremental append in ``rank_passages``."""
+        n = len(self._texts)
+        if n == 0 or len(texts) <= n or len(session_ids) <= n:
+            return False
+        if self._session_ids != list(session_ids[:n]):
+            return False
+        if all(a is b for a, b in zip(self._texts, texts[:n])):
+            return True
+        if self._native is not None:
+            return bool(self._native.verify_prefix(list(session_ids), list(texts)))
+        return tuple(texts[:n]) == self.texts
 
     def _prepare_query_weights(
         self, query: str
@@ -895,7 +1268,17 @@ class PassageIndex:
                                 expanded_counts[syn_tok] = query_count * 0.80
             # Conservative spelling/transposition typo recovery for unseen alphabetic terms
             st_raw = _stem_passage_token(term)
-            if (
+            if self._native is not None:
+                if (
+                    len(term) >= 6
+                    and term.isalpha()
+                    and not self._native.has_term(term)
+                    and not self._native.has_stem(st_raw)
+                ):
+                    for vocab_term in self._native.typo_candidates(term):
+                        if vocab_term not in expanded_counts:
+                            expanded_counts[vocab_term] = query_count * 0.85
+            elif (
                 len(term) >= 6
                 and term.isalpha()
                 and term not in self.postings
@@ -926,8 +1309,16 @@ class PassageIndex:
         if n_texts == 0:
             return {}
 
-        scores: dict[int, float] = defaultdict(float)
         expanded_counts, stem_expanded = self._prepare_query_weights(query)
+        if self._native is not None:
+            return dict(
+                self._native.score_docs(
+                    list(expanded_counts.items()),
+                    list(stem_expanded.items()),
+                )
+            )
+
+        scores: dict[int, float] = defaultdict(float)
 
         for term, query_count in expanded_counts.items():
             postings = self.postings.get(term, ())
@@ -969,6 +1360,99 @@ class PassageIndex:
 
         return dict(scores)
 
+    def _receipt_for_native_row(
+        self,
+        i: int,
+        fused_sc: float,
+        session_sc: float,
+        max_r_sc: float,
+        best_r_idx: int,
+        max_t_sc: float,
+        best_t_idx: int,
+    ) -> dict[str, Any]:
+        subs = self._session_subpassages_for(i)
+        rounds = [sp for sp in subs if sp.granularity == "round"]
+        turns = [sp for sp in subs if sp.granularity == "turn"]
+        best_r_text = (
+            rounds[best_r_idx].text if (rounds and best_r_idx < len(rounds)) else ""
+        )
+        best_r_id = (
+            rounds[best_r_idx].sub_id
+            if (rounds and best_r_idx < len(rounds))
+            else ""
+        )
+        best_t_text = (
+            turns[best_t_idx].text if (turns and best_t_idx < len(turns)) else ""
+        )
+        best_t_id = (
+            turns[best_t_idx].sub_id if (turns and best_t_idx < len(turns)) else ""
+        )
+        return {
+            "fused_score": fused_sc,
+            "session_score": session_sc,
+            "max_round_score": max_r_sc,
+            "max_turn_score": max_t_sc,
+            "best_round_index": best_r_idx,
+            "best_round_id": best_r_id,
+            "best_round_text": best_r_text,
+            "best_turn_index": best_t_idx,
+            "best_turn_id": best_t_id,
+            "best_turn_text": best_t_text,
+        }
+
+    def _build_native_multi_granularity_receipts(
+        self,
+        query: str,
+        *,
+        alpha: float = 0.5,
+        beta: float = 0.5,
+        include_zeros: bool = True,
+    ) -> dict[int, dict[str, Any]]:
+        n_texts = len(self._texts)
+        if n_texts == 0:
+            return {}
+        expanded_counts, stem_expanded = self._prepare_query_weights(query)
+        rows = self._native.score_multi_granularity(
+            list(expanded_counts.items()),
+            list(stem_expanded.items()),
+            float(alpha),
+            float(beta),
+        )
+        results: dict[int, dict[str, Any]] = {
+            row[0]: self._receipt_for_native_row(*row) for row in rows
+        }
+        if include_zeros:
+            for i in range(n_texts):
+                if i not in results:
+                    results[i] = {
+                        "fused_score": 0.0,
+                        "session_score": 0.0,
+                        "max_round_score": 0.0,
+                        "max_turn_score": 0.0,
+                        "best_round_index": 0,
+                        "best_round_id": "",
+                        "best_round_text": "",
+                        "best_turn_index": 0,
+                        "best_turn_id": "",
+                        "best_turn_text": "",
+                    }
+        return results
+
+    def multi_granularity_scores_nonzero(
+        self,
+        query: str,
+        *,
+        alpha: float = 0.5,
+        beta: float = 0.5,
+    ) -> dict[int, dict[str, Any]]:
+        """Fast variant returning only documents with positive fused score."""
+        if self._native is not None:
+            return self._build_native_multi_granularity_receipts(
+                query, alpha=alpha, beta=beta, include_zeros=False
+            )
+        all_receipts = self.multi_granularity_scores(query, alpha=alpha, beta=beta)
+        return {i: r for i, r in all_receipts.items() if r["fused_score"] > 0.0}
+
     def multi_granularity_scores(
         self,
         query: str,
@@ -983,6 +1467,10 @@ class PassageIndex:
         n_texts = len(self._texts)
         if n_texts == 0:
             return {}
+        if self._native is not None:
+            return self._build_native_multi_granularity_receipts(
+                query, alpha=alpha, beta=beta, include_zeros=True
+            )
 
         session_scores = self.scores(query)
         expanded_counts, stem_expanded = self._prepare_query_weights(query)
@@ -1159,44 +1647,77 @@ def rank_passages(
     passages = [hit for hit in candidates if is_passage(hit)]
     if not passages:
         return []
-    texts = tuple(hit.text for hit in passages)
-    session_ids = tuple(hit.id for hit in passages)
+    texts = [hit.text for hit in passages]
+    session_ids = [hit.id for hit in passages]
     index = getattr(owner, "_passage_bm25_index", None)
-    cached_session_ids = (
-        tuple(getattr(index, "_session_ids", ())) if index is not None else ()
+
+    texts_and_ids_match = index is not None and index.matches_passages(
+        session_ids, texts
+    )
+    can_append = (
+        not texts_and_ids_match
+        and index is not None
+        and index.is_prefix_of_passages(session_ids, texts)
     )
 
-    can_append = (
-        index is not None
-        and len(index.texts) < len(texts)
-        and texts[: len(index.texts)] == index.texts
-        and cached_session_ids == session_ids[: len(index.texts)]
-    )
-    texts_and_ids_match = (
-        index is not None and index.texts == texts and cached_session_ids == session_ids
+    sidecar_info = (
+        _owner_sidecar_info(owner, passages)
+        if (index is None or (not can_append and not texts_and_ids_match))
+        else None
     )
 
     if index is None or (not can_append and not texts_and_ids_match):
-        index = PassageIndex(texts, session_ids=session_ids)
+        loaded_native = (
+            _load_passage_sidecar(
+                sidecar_info[0], sidecar_info[1], session_ids, texts
+            )
+            if sidecar_info is not None
+            else None
+        )
+        if loaded_native is not None:
+            index = PassageIndex(
+                texts, session_ids=session_ids, _native_override=loaded_native
+            )
+        else:
+            index = PassageIndex(texts, session_ids=session_ids)
+            if sidecar_info is not None and index._native is not None:
+                _save_passage_sidecar(sidecar_info[0], sidecar_info[1], index._native)
         try:
             owner._passage_bm25_index = index
             owner._passage_graph = index.passage_graph
         except (AttributeError, TypeError):
             pass
     elif can_append:
-        for offset, t in enumerate(texts[len(index.texts) :]):
-            idx = len(index.texts)
+        start_len = len(index._texts)
+        for idx in range(start_len, len(texts)):
             s_id = session_ids[idx] if idx < len(session_ids) else str(idx)
-            index.add_text(t, session_id=s_id)
+            index.add_text(texts[idx], session_id=s_id)
+        if index._native is not None:
+            sc_info = _owner_sidecar_info(owner, passages)
+            if sc_info is not None:
+                _save_passage_sidecar(sc_info[0], sc_info[1], index._native)
 
-    multi_granularity_receipts = index.multi_granularity_scores(
-        query, alpha=alpha, beta=beta
-    )
-    scores = {
-        i: multi_granularity_receipts[i]["fused_score"]
-        for i in range(len(passages))
-        if multi_granularity_receipts[i]["fused_score"] > 0.0
-    }
+    native_mg_rows: dict[int, tuple[int, float, float, float, int, float, int]] | None = None
+    multi_granularity_receipts: dict[int, dict[str, Any]] = {}
+    if index._native is not None:
+        expanded_counts, stem_expanded = index._prepare_query_weights(query)
+        raw_mg = index._native.score_multi_granularity(
+            list(expanded_counts.items()),
+            list(stem_expanded.items()),
+            float(alpha),
+            float(beta),
+        )
+        native_mg_rows = {row[0]: row for row in raw_mg}
+        scores = {row[0]: row[1] for row in raw_mg if row[1] > 0.0}
+    else:
+        multi_granularity_receipts = index.multi_granularity_scores_nonzero(
+            query, alpha=alpha, beta=beta
+        )
+        scores = {
+            i: receipt["fused_score"]
+            for i, receipt in multi_granularity_receipts.items()
+            if receipt["fused_score"] > 0.0
+        }
 
     dts: dict[int, datetime] = {}
     for i, h in enumerate(passages):
@@ -1323,7 +1844,13 @@ def rank_passages(
     out_hits: list[Hit] = []
     for i in ranked:
         meta = dict(passages[i].metadata)
-        meta["multi_granularity"] = multi_granularity_receipts.get(i, {})
+        if native_mg_rows is not None:
+            row = native_mg_rows.get(i)
+            meta["multi_granularity"] = (
+                index._receipt_for_native_row(*row) if row is not None else {}
+            )
+        else:
+            meta["multi_granularity"] = multi_granularity_receipts.get(i, {})
         out_hits.append(
             replace(
                 passages[i],
@@ -2415,6 +2942,142 @@ class PassageGraphIndex:
                 link(n_passages + a, n_passages + b, float(count))
             for pair in synonym:
                 link(n_passages + pair[0], n_passages + pair[1], synonym_weight[pair])
+
+            # Temporal-proximity and causal/supersession edges strictly among
+            # already-authorized disclosable passages (never touching denied rows).
+            row_by_cid: dict[str, int] = {}
+            timed_rows: list[tuple[float, int, str | None]] = []
+            for row, (hit, (_cid, _sha, allowed)) in enumerate(
+                zip(passages, readable, strict=True)
+            ):
+                if not allowed:
+                    continue
+                if hit.id:
+                    row_by_cid[hit.id] = row
+                meta = hit.metadata if isinstance(hit.metadata, dict) else {}
+                raw_ts = (
+                    meta.get("_candidate_created_at")
+                    or meta.get("created_at")
+                    or meta.get("event_start")
+                )
+                dt_val = None
+                if raw_ts is not None:
+                    try:
+                        dt_val = raw_ts if isinstance(raw_ts, datetime) else parse_dt(raw_ts)
+                    except (ValueError, TypeError, OverflowError):
+                        dt_val = None
+                if dt_val is not None:
+                    if dt_val.tzinfo is None:
+                        dt_val = dt_val.replace(tzinfo=timezone.utc)
+                    sess_val = meta.get("session_id")
+                    timed_rows.append(
+                        (
+                            dt_val.timestamp(),
+                            row,
+                            str(sess_val) if sess_val else None,
+                        )
+                    )
+
+            temporal_pairs: set[tuple[int, int]] = set()
+            if len(timed_rows) >= 2:
+                timed_rows.sort(key=lambda item: (item[0], item[1]))
+                last_row_by_session: dict[str, int] = {}
+                for pos, (ts_a, row_a, sess_a) in enumerate(timed_rows):
+                    if sess_a is not None:
+                        prev_sess_row = last_row_by_session.get(sess_a)
+                        if prev_sess_row is not None and prev_sess_row != row_a:
+                            pair = (
+                                min(prev_sess_row, row_a),
+                                max(prev_sess_row, row_a),
+                            )
+                            if pair not in temporal_pairs:
+                                temporal_pairs.add(pair)
+                                link(pair[0], pair[1], 0.40)
+                        last_row_by_session[sess_a] = row_a
+                    for nxt in range(pos + 1, min(pos + 4, len(timed_rows))):
+                        ts_b, row_b, _ = timed_rows[nxt]
+                        dt_hours = (ts_b - ts_a) / 3600.0
+                        if dt_hours > 24.0:
+                            break
+                        if row_a == row_b:
+                            continue
+                        pair = (min(row_a, row_b), max(row_a, row_b))
+                        if pair not in temporal_pairs:
+                            temporal_pairs.add(pair)
+                            w_temp = 0.35 / (1.0 + max(0.0, dt_hours) / 4.0)
+                            link(pair[0], pair[1], w_temp)
+
+            causal_pairs: set[tuple[int, int]] = set()
+            _CAUSAL_META_KEYS = (
+                "supersedes",
+                "superseded_by",
+                "derived_from",
+                "parent_cid",
+                "caused_by",
+                "follows_cid",
+                "reply_to",
+                "source_evidence_cids",
+            )
+            for row, (hit, (_cid, _sha, allowed)) in enumerate(
+                zip(passages, readable, strict=True)
+            ):
+                if not allowed:
+                    continue
+                meta = hit.metadata if isinstance(hit.metadata, dict) else {}
+                ref_cids: list[str] = []
+                for mkey in _CAUSAL_META_KEYS:
+                    val = meta.get(mkey)
+                    if isinstance(val, str) and val:
+                        ref_cids.append(val)
+                    elif isinstance(val, (list, tuple)):
+                        ref_cids.extend(str(v) for v in val if v)
+                for target_cid in ref_cids:
+                    other = row_by_cid.get(target_cid)
+                    if other is not None and other != row:
+                        pair = (min(row, other), max(row, other))
+                        if pair not in causal_pairs:
+                            causal_pairs.add(pair)
+                            link(pair[0], pair[1], 0.85)
+
+            _CAUSAL_PREDICATE_MARKERS = (
+                "switch",
+                "migrat",
+                "move",
+                "replac",
+                "updat",
+                "chang",
+                "caus",
+                "led to",
+                "result",
+                "because",
+                "fix",
+                "resolv",
+                "supersed",
+            )
+            causal_entity_rows: dict[int, list[int]] = defaultdict(list)
+            for row, sha in enumerate(shas):
+                if not sha:
+                    continue
+                for subject, predicate, obj in triples_by_sha.get(sha, ()):
+                    pred_l = predicate.lower()
+                    if any(marker in pred_l for marker in _CAUSAL_PREDICATE_MARKERS):
+                        for phrase in (phrase_key(subject), phrase_key(obj)):
+                            ent_id = entities.get(phrase)
+                            if ent_id is not None:
+                                causal_entity_rows[ent_id].append(row)
+            row_ts_map = {r: ts for ts, r, _ in timed_rows}
+            for ent_rows in causal_entity_rows.values():
+                unique_rows = sorted(
+                    set(ent_rows), key=lambda r: (row_ts_map.get(r, float(r)), r)
+                )
+                for idx_r in range(len(unique_rows) - 1):
+                    r_a = unique_rows[idx_r]
+                    for r_b in unique_rows[idx_r + 1 : min(idx_r + 4, len(unique_rows))]:
+                        pair = (min(r_a, r_b), max(r_a, r_b))
+                        if pair not in causal_pairs:
+                            causal_pairs.add(pair)
+                            link(pair[0], pair[1], 0.60)
+
             size = n_passages + n_entities
             src_a = np.asarray(src, dtype=np.int64)
             dst_a = np.asarray(dst, dtype=np.int64)
@@ -2445,6 +3108,8 @@ class PassageGraphIndex:
                     "entities": n_entities,
                     "facts": len(fact_list),
                     "synonym_edges": len(synonym),
+                    "temporal_edges": len(temporal_pairs),
+                    "causal_edges": len(causal_pairs),
                     "build_seconds": round(time.perf_counter() - started, 3),
                 },
             )

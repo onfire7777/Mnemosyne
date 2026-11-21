@@ -19,6 +19,7 @@ from mnemosyne.consolidation import (
     EvidenceSummarizer,
     LessonDistiller,
     ProcedureInducer,
+    engine_unmerge_entity,
 )
 from mnemosyne.eval import run_seed_suite
 from mnemosyne.gate import RegressionCase
@@ -90,6 +91,23 @@ class RuntimeJobHandlers:
             # A queue job names the evidence to consolidate once; a cadence refusal burns its retries and kills it.
             consolidation_min_steps=0,
         )
+        self.entity_resolver = self.consolidator.entity_resolver
+
+    def unmerge_entity(
+        self,
+        tenant_id: str,
+        merged_entity_id: str,
+        *,
+        split_canonical_key: str | None = None,
+        branch: str = "main",
+    ) -> dict[str, Any]:
+        return engine_unmerge_entity(
+            self.engine,
+            tenant_id,
+            merged_entity_id,
+            split_canonical_key=split_canonical_key,
+            branch=branch,
+        )
 
     def handlers(self) -> dict[str, Any]:
         return {
@@ -157,6 +175,21 @@ class RuntimeJobHandlers:
                 )
                 queued_jobs.append(job.id)
         self._projection_recompute_memo.add(fingerprint)
+        if not memo_hit:
+            list_mm = getattr(self.engine, "list_mental_model_records", None)
+            if callable(list_mm):
+                try:
+                    if list_mm(tenant_id, branch):
+                        from mnemosyne.mental_model_refresh import trigger_on_consolidation
+                        trigger_on_consolidation(
+                            self.engine,
+                            new_evidence_cids=affected_cids,
+                            tenant_id=tenant_id,
+                            branch=branch,
+                            refresh_now=False,
+                        )
+                except Exception:
+                    pass
         self.metrics.increment("projection_recompute.completed")
         if memo_hit:
             self.metrics.increment("projection_recompute.memo_hit")
@@ -544,7 +577,7 @@ def _projection_recompute_fingerprint(
 def _projection_recompute_passes(projections: dict[str, list[str]]) -> list[str]:
     passes: list[str] = []
     if projections.get("assertions") or projections.get("entities"):
-        passes.extend(["extractor", "resolver", "belief_reviser"])
+        passes.extend(["extractor", "resolver", "belief_reviser", "observation_synthesizer"])
     if projections.get("relations"):
         passes.append("summarizer")
     if projections.get("preferences"):

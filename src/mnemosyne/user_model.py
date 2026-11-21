@@ -639,24 +639,122 @@ class UserModel:
         self._source_custody = resolver
 
     def add_entry(self, entry: UserModelEntry) -> str:
+        # Updating/reloading an existing entry by ID stores it verbatim without
+        # triggering duplicate corroboration or drift decay.
+        if entry.id in self.entries:
+            self.entries[entry.id] = entry
+            return entry.id
+
+        entry_scope = _user_scope(entry.scope)
+        normalized_stmt = entry.statement.strip().lower()
+        is_active_live = entry.status == "active" and entry.statement != ERASED_STATEMENT
+
+        if is_active_live:
+            # Corroborate an already-active identical preference/entry when new
+            # independent evidence or session provenance arrives, auto-graduating
+            # inferred/situational preferences after >=3 independent sources.
+            new_cids = [
+                cid.strip()
+                for cid in (entry.source_evidence_cids or [])
+                if isinstance(cid, str) and cid.strip()
+            ]
+            raw_sessions = (entry.scope or {}).get("independent_sessions", [])
+            new_sessions = (
+                [s.strip() for s in raw_sessions if isinstance(s, str) and s.strip()]
+                if isinstance(raw_sessions, (list, tuple, set))
+                else []
+            )
+            if new_cids or new_sessions:
+                for current in self.entries.values():
+                    if (
+                        current.tenant_id == entry.tenant_id
+                        and current.user_id == entry.user_id
+                        and _user_scope(current.scope) == entry_scope
+                        and current.exceptions == entry.exceptions
+                        and current.status == "active"
+                        and current.statement.strip().lower() == normalized_stmt
+                    ):
+                        existing_cids = set(current.source_evidence_cids or [])
+                        existing_sessions = set(
+                            (current.scope or {}).get("independent_sessions", [])
+                            if isinstance((current.scope or {}).get("independent_sessions"), (list, tuple, set))
+                            else []
+                        )
+                        unseen_cids = [c for c in new_cids if c not in existing_cids]
+                        unseen_sessions = [s for s in new_sessions if s not in existing_sessions]
+                        if unseen_cids or unseen_sessions:
+                            for idx in range(max(len(unseen_cids), len(unseen_sessions))):
+                                cid_arg = unseen_cids[idx] if idx < len(unseen_cids) else ""
+                                sess_arg = unseen_sessions[idx] if idx < len(unseen_sessions) else None
+                                corroborate_entry(
+                                    current,
+                                    evidence_cid=cid_arg,
+                                    session_id=sess_arg,
+                                    auto_graduate=True,
+                                )
+                            if entry.authority() > current.authority():
+                                current.kind = entry.kind
+                            current.confidence = max(current.confidence, entry.confidence)
+                            return current.id
+
+        preference_kinds = {
+            UserMemoryKind.INFERRED_PREFERENCE,
+            UserMemoryKind.SITUATIONAL_PREFERENCE,
+            UserMemoryKind.EXPLICIT_PREFERENCE,
+        }
+        drift_candidates: list[UserModelEntry] = []
+        new_evidence_cid = (
+            entry.source_evidence_cids[0]
+            if entry.source_evidence_cids and isinstance(entry.source_evidence_cids[0], str)
+            else None
+        )
         for current in self.entries.values():
             if (
                 current.tenant_id == entry.tenant_id
                 and current.user_id == entry.user_id
-                and _user_scope(current.scope) == _user_scope(entry.scope)
+                and _user_scope(current.scope) == entry_scope
                 and current.status == "active"
+            ):
                 # Only an INFERENCE yields to a higher-authority statement that
                 # merely differs from it. What the user stated outright - an
                 # identity, an instruction, a preference - is never retired
                 # because they also stated something else: 'Their name is
                 # Jordan' used to retire 'Prefers Celsius'. A stated entry is
                 # replaced by correcting it, or taken back, by id.
-                and current.kind is UserMemoryKind.INFERRED_PREFERENCE
-                and self._conflicts(current.statement, entry.statement)
-                and current.authority() < entry.authority()
-            ):
-                current.status = "superseded"
-                current.valid_to = entry.valid_from
+                if (
+                    current.kind is UserMemoryKind.INFERRED_PREFERENCE
+                    and self._conflicts(current.statement, entry.statement)
+                    and current.authority() < entry.authority()
+                ):
+                    current.status = "superseded"
+                    current.valid_to = entry.valid_from
+                    continue
+                # Wire preference drift detection for active same-scope preference
+                # entries of equal or lower authority (idempotent across reloads).
+                if (
+                    is_active_live
+                    and current.kind in preference_kinds
+                    and current.authority() <= entry.authority()
+                    and current.valid_from <= entry.valid_from
+                    and current.statement.strip().lower() != normalized_stmt
+                ):
+                    history = (current.scope or {}).get("drift_history", [])
+                    already_recorded = isinstance(history, list) and any(
+                        isinstance(rec, dict)
+                        and str(rec.get("new_statement", "")).strip().lower() == normalized_stmt
+                        and rec.get("new_evidence_cid") == new_evidence_cid
+                        for rec in history
+                    )
+                    if not already_recorded:
+                        drift_candidates.append(current)
+
+        if drift_candidates:
+            detect_preference_drift(
+                drift_candidates,
+                entry.statement,
+                new_evidence_cid=new_evidence_cid,
+            )
+
         self.entries[entry.id] = entry
         return entry.id
 

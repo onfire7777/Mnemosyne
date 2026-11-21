@@ -88,22 +88,33 @@ _PRIVATE_VECTOR_DATA_CLASSES = {
 }
 
 
+_EMPTY_MAP: dict[str, Any] = {}
+_ACTIVE_STATUSES = frozenset({"active", "candidate", "contested"})
+
+
 def role_for_context(context: Mapping[str, Any] | None) -> str:
-    role = str((context or {}).get("role") or (context or {}).get("mnemosyne_role") or "reader").strip().lower()
-    return role
+    if not context:
+        return "reader"
+    raw = context.get("role") or context.get("mnemosyne_role")
+    if not raw:
+        return "reader"
+    if type(raw) is str:
+        return raw.strip().lower()
+    return str(raw).strip().lower()
 
 
 def effective_max_sensitivity(context: Mapping[str, Any] | None, policy_max_sensitivity: int) -> int:
     """Return the caller's effective ceiling, never wider than role or policy."""
 
-    role = role_for_context(context)
+    ctx = context if context is not None else _EMPTY_MAP
+    role = role_for_context(ctx)
     role_ceiling = ROLE_SENSITIVITY_CEILINGS.get(role)
     if role_ceiling is None:
         return -1
-    if role == "operator" and bool((context or {}).get("break_glass")):
+    if role == "operator" and bool(ctx.get("break_glass")):
         role_ceiling = max(role_ceiling, 3)
     ceiling = min(int(policy_max_sensitivity), role_ceiling)
-    requested = (context or {}).get("max_sensitivity")
+    requested = ctx.get("max_sensitivity")
     if requested is not None:
         try:
             ceiling = min(ceiling, int(requested))
@@ -192,10 +203,19 @@ def vector_partition_for_item(
     a redacted projection.
     """
 
-    policy = dict(access_policy or {})
+    policy = access_policy if access_policy is not None else _EMPTY_MAP
+    if not policy:
+        if erased or status not in _ACTIVE_STATUSES:
+            return VECTOR_PARTITION_NONE
+        sens = int(sensitivity)
+        if sens >= 4:
+            return VECTOR_PARTITION_NONE
+        if sens >= 2:
+            return VECTOR_PARTITION_PRIVATE
+        return VECTOR_PARTITION_PUBLIC
     if unknown_access_policy_keys(policy):
         return VECTOR_PARTITION_NONE
-    if erased or status not in {"active", "candidate", "contested"}:
+    if erased or status not in _ACTIVE_STATUSES:
         return VECTOR_PARTITION_NONE
     if policy.get("embed_ok") is False:
         return VECTOR_PARTITION_NONE
@@ -248,18 +268,35 @@ def may_read_item(
     for local explain/test metadata and never includes raw sensitive values.
     """
 
-    ctx = dict(context or {})
-    policy = dict(access_policy or {})
+    ctx = context if context is not None else _EMPTY_MAP
+    policy = access_policy if access_policy is not None else _EMPTY_MAP
     role = role_for_context(ctx)
     ceiling = effective_max_sensitivity(ctx, policy_max_sensitivity)
     if role not in ROLE_RANK:
         return AccessDecision(False, "invalid_role", role, ceiling)
+    if not policy:
+        if erased:
+            return AccessDecision(False, "erased", role, ceiling)
+        if status not in _ACTIVE_STATUSES:
+            return AccessDecision(False, "inactive_status", role, ceiling)
+        ctx_tenant_raw = ctx.get("tenant_id") or ctx.get("tenant")
+        if ctx_tenant_raw:
+            ctx_tenant = ctx_tenant_raw if type(ctx_tenant_raw) is str else str(ctx_tenant_raw)
+            if ctx_tenant != item_tenant_id:
+                return AccessDecision(False, "tenant_mismatch", role, ceiling)
+        if sensitivity >= 4:
+            return AccessDecision(False, "s4_raw_not_retrievable", role, ceiling)
+        if role == "operator" and sensitivity >= 2:
+            return AccessDecision(False, "operator_break_glass_required", role, ceiling)
+        if sensitivity > ceiling:
+            return AccessDecision(False, "sensitivity_ceiling", role, ceiling)
+        return AccessDecision(True, "allowed", role, ceiling, redacted=False)
     unknown = unknown_access_policy_keys(policy)
     if unknown:
         return AccessDecision(False, "unknown_access_policy_key", role, ceiling, unknown_keys=unknown)
     if erased:
         return AccessDecision(False, "erased", role, ceiling)
-    if status not in {"active", "candidate", "contested"}:
+    if status not in _ACTIVE_STATUSES:
         return AccessDecision(False, "inactive_status", role, ceiling)
     ctx_tenant = str(ctx.get("tenant_id") or ctx.get("tenant") or "")
     policy_tenant = str(policy.get("tenant") or policy.get("tenant_id") or item_tenant_id)
@@ -296,9 +333,10 @@ def may_read_item(
     if allowed_roles and role not in allowed_roles:
         return AccessDecision(False, "role_not_allowed", role, ceiling)
     required_caps = _str_set(policy.get("require_capabilities"))
-    caller_caps = _str_set(ctx.get("capability_tags") or ctx.get("capabilities") or ctx.get("capability_set"))
-    if required_caps and not required_caps.issubset(caller_caps):
-        return AccessDecision(False, "missing_capability", role, ceiling)
+    if required_caps:
+        caller_caps = _str_set(ctx.get("capability_tags") or ctx.get("capabilities") or ctx.get("capability_set"))
+        if not required_caps.issubset(caller_caps):
+            return AccessDecision(False, "missing_capability", role, ceiling)
     principals = _str_set(policy.get("allow_principals"))
     if principals:
         caller_principals = _str_set(
@@ -333,10 +371,10 @@ def may_read_item(
 
 
 def apply_text_redactions(text: str, access_policy: Mapping[str, Any] | None, decision: AccessDecision) -> tuple[str, dict[str, Any]]:
-    fields = _str_list((access_policy or {}).get("redact_fields"))
     metadata = _redaction_metadata(decision)
     if not decision.redacted:
         return text, metadata
+    fields = _str_list((access_policy or _EMPTY_MAP).get("redact_fields"))
     if not fields:
         return _redaction_placeholder((), metadata)
 
@@ -924,10 +962,10 @@ def _apply_structured_record_redactions(
     access_policy: Mapping[str, Any] | None,
     decision: AccessDecision,
 ) -> tuple[str, dict[str, Any]] | None:
-    fields = _str_list((access_policy or {}).get("redact_fields"))
     metadata = _redaction_metadata(decision)
     if not decision.redacted:
         return " ".join(str(record[key]) for key in render_order), metadata
+    fields = _str_list((access_policy or _EMPTY_MAP).get("redact_fields"))
     if not fields:
         return _redaction_placeholder((), metadata)
 
@@ -1055,22 +1093,27 @@ def evidence_expiry_deadline(
     access-policy expiry, without modifying the stored record. A populated
     malformed expiry is already expired, so it cannot silently become durable.
     """
-    deadlines = []
-    for container, keys in (
-        (access_policy, ("expires_at",)),
-        (metadata, ("expires_at", "valid_until")),
-    ):
-        if not isinstance(container, Mapping):
-            continue
-        for key in keys:
-            value = container.get(key)
+    deadlines: list[datetime] | None = None
+    if access_policy is not None and (type(access_policy) is dict or isinstance(access_policy, Mapping)):
+        value = access_policy.get("expires_at")
+        if value is not None and value != "":
+            deadline = expiry_deadline(value)
+            if deadline is None:
+                return datetime.min.replace(tzinfo=UTC)
+            deadlines = [deadline]
+    if metadata is not None and (type(metadata) is dict or isinstance(metadata, Mapping)):
+        for key in ("expires_at", "valid_until"):
+            value = metadata.get(key)
             if value is None or value == "":
                 continue
             deadline = expiry_deadline(value)
             if deadline is None:
                 return datetime.min.replace(tzinfo=UTC)
-            deadlines.append(deadline)
-    return min(deadlines, default=None)
+            if deadlines is None:
+                deadlines = [deadline]
+            else:
+                deadlines.append(deadline)
+    return min(deadlines) if deadlines else None
 
 
 def _expired(value: Any) -> bool:
@@ -1083,16 +1126,32 @@ def _expired(value: Any) -> bool:
 
 
 def _str_set(value: Any) -> set[str]:
+    if value is None or value == "":
+        return set()
     return set(_str_list(value))
 
 
 def _str_list(value: Any) -> list[str]:
-    if value in (None, "", [], (), set()):
+    if value is None:
         return []
+    vtype = type(value)
+    if vtype is str:
+        stripped = value.strip().lower()
+        return [stripped] if stripped else []
+    if vtype is list or vtype is tuple or vtype is set:
+        if not value:
+            return []
+        return [s for item in value if (s := str(item).strip().lower())]
+    if vtype is dict:
+        if not value:
+            return []
+        return [s for key, enabled in value.items() if enabled and (s := str(key).strip().lower())]
     if isinstance(value, str):
-        return [value.strip().lower()] if value.strip() else []
+        stripped = value.strip().lower()
+        return [stripped] if stripped else []
     if isinstance(value, Mapping):
         return [str(key).strip().lower() for key, enabled in value.items() if enabled and str(key).strip()]
     if isinstance(value, Sequence):
         return [str(item).strip().lower() for item in value if str(item).strip()]
-    return [str(value).strip().lower()] if str(value).strip() else []
+    stripped = str(value).strip().lower()
+    return [stripped] if stripped else []

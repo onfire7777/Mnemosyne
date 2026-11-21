@@ -120,6 +120,9 @@ class MentalModelRefreshWorker:
     def __init__(self, service: MentalModelService, context: AnswerReadContext, *,
                  max_batch: int = 10, lease_seconds: int = 300,
                  check_changes: bool = False,
+                 auto_bootstrap: bool = False,
+                 bootstrap_max_models: int = 3,
+                 bootstrap_min_mentions: int = 3,
                  authorize: Callable[[], None] | None = None,
                  validate_authority: Callable[[], None] | None = None):
         self.service, self.context = service, context
@@ -127,7 +130,12 @@ class MentalModelRefreshWorker:
         self.lease_seconds = bounded_int(lease_seconds, "lease_seconds", 30, 3600)
         if type(check_changes) is not bool:
             raise ValueError("check_changes must be a boolean")
+        if type(auto_bootstrap) is not bool:
+            raise ValueError("auto_bootstrap must be a boolean")
         self.check_changes = check_changes
+        self.auto_bootstrap = auto_bootstrap
+        self.bootstrap_max_models = bounded_int(bootstrap_max_models, "bootstrap_max_models", 1, 20)
+        self.bootstrap_min_mentions = bounded_int(bootstrap_min_mentions, "bootstrap_min_mentions", 1, 100)
         self._authorize_callback = authorize
         if authorize is not None and validate_authority is None:
             raise ValueError("authorize requires a side-effect-free validate_authority callback")
@@ -219,9 +227,19 @@ class MentalModelRefreshWorker:
 
         self._authorize()
         scope = _scope(self.context)
+        bootstrapped = 0
+        if self.auto_bootstrap:
+            boot = self.service.bootstrap_recurring_models(
+                self.context,
+                max_models=self.bootstrap_max_models,
+                min_mentions=self.bootstrap_min_mentions,
+            )
+            bootstrapped = len(boot.get("created") or [])
         report: dict[str, Any] = {key: 0 for key in
                                  ("processed", "refreshed", "unchanged", "abstained", "retry", "lost", "invalid",
                                   "change_check_failed")}
+        if self.auto_bootstrap:
+            report["bootstrapped"] = bootstrapped
         report["models"] = []
         due = []
         change_candidates = []
@@ -357,14 +375,6 @@ def trigger_on_consolidation(
     if consolidated_evidence is not None:
         items.extend(consolidated_evidence)
 
-    if resolved_context is None and tenant_id and user_id:
-        resolved_context = AnswerReadContext(
-            tenant_id=tenant_id,
-            branch=branch,
-            user_id=user_id,
-            role="agent",
-        )
-
     records: list[dict[str, Any]] = []
     if resolved_context is not None:
         service._write(resolved_context)
@@ -376,10 +386,22 @@ def trigger_on_consolidation(
             )
             if rec.get("owner_id") == resolved_context.user_id and rec.get("scope") == scope
         ]
+    elif tenant_id and callable(getattr(service.engine, "list_mental_model_records", None)):
+        records = [
+            rec
+            for rec in service.engine.list_mental_model_records(tenant_id, branch)
+            if isinstance(rec, dict) and (user_id is None or rec.get("owner_id") == user_id)
+        ]
     else:
         mm_store = getattr(service.engine, "mental_models", None)
         if isinstance(mm_store, dict):
-            records = [rec for rec in mm_store.values() if isinstance(rec, dict)]
+            records = [
+                rec
+                for rec in mm_store.values()
+                if isinstance(rec, dict)
+                and (tenant_id is None or rec.get("tenant_id") == tenant_id)
+                and (user_id is None or rec.get("owner_id") == user_id)
+            ]
 
     report: dict[str, Any] = {
         "processed": 0,
@@ -437,3 +459,24 @@ def trigger_on_consolidation(
             "status": res.get("status"),
         })
     return report
+
+
+def bootstrap_recurring_models(
+    service: MentalModelService | Any,
+    context: AnswerReadContext,
+    *,
+    max_models: int = 3,
+    min_mentions: int = 3,
+    schedule_interval_seconds: int = 3600,
+) -> dict[str, Any]:
+    """Create and schedule scoped mental models for the top recurring topics."""
+    from mnemosyne.mental_models import MentalModelService
+
+    if not isinstance(service, MentalModelService):
+        service = MentalModelService(service)
+    return service.bootstrap_recurring_models(
+        context,
+        max_models=max_models,
+        min_mentions=min_mentions,
+        schedule_interval_seconds=schedule_interval_seconds,
+    )

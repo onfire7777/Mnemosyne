@@ -649,6 +649,97 @@ class MentalModelService:
                 self._get_cache().pop(key, None)
                 raise
 
+    def _record_change_is_affected(
+        self,
+        record: dict[str, Any],
+        context: AnswerReadContext,
+        snapshot_state: Any,
+        evidence: dict[str, dict[str, Any]],
+        changes: Sequence[tuple[str, str, str]],
+    ) -> bool:
+        """Return True unless every source change since publication is proven unrelated."""
+        if not changes:
+            return True
+        cited_cids = set(record.get("source_evidence_cids") or []) | set(record.get("dependent_cids") or [])
+        allowed_collections = {"evidence", "assertions", "relations", "preferences", "observations"}
+        for change in changes:
+            if not isinstance(change, (tuple, list)) or len(change) != 3:
+                return True
+            collection, ch_branch, item_id = str(change[0]), str(change[1]), str(change[2])
+            if collection == "*" or collection not in allowed_collections:
+                return True
+            if ch_branch not in {context.branch, "*"}:
+                continue
+            if item_id in cited_cids:
+                return True
+            if collection == "evidence":
+                ev_row = evidence.get(item_id)
+                if ev_row is not None:
+                    if is_affected_by_evidence(record, str(ev_row.get("content") or ""), new_evidence_cid=item_id):
+                        return True
+                continue
+            row = None
+            key = (collection, ch_branch, item_id)
+            if snapshot_state is not None:
+                row = snapshot_state.filtered.get(key) or snapshot_state.raw.get(key)
+            if row is None and callable(getattr(self.engine, "mental_model_source_rows", None)):
+                try:
+                    fetched = self.engine.mental_model_source_rows(context.tenant_id, [key])
+                    if fetched and isinstance(fetched[0], Mapping):
+                        row = fetched[0].get("record")
+                except Exception:
+                    return True
+            if not isinstance(row, Mapping):
+                if collection == "relations":
+                    continue
+                return True
+            row_cids = {str(cid) for cid in (row.get("source_evidence_cids") or []) if cid}
+            if row_cids & cited_cids:
+                return True
+            if collection == "assertions":
+                text_repr = f"{row.get('subject', '')} {row.get('predicate', '')} {row.get('object', '')}".strip()
+            elif collection == "relations":
+                text_repr = f"{row.get('source', '')} {row.get('predicate', '')} {row.get('target', '')}".strip()
+            elif collection == "preferences":
+                text_repr = str(row.get("statement") or "").strip()
+            else:
+                text_repr = f"{row.get('subject', '')} {row.get('topic', '')} {row.get('content', '')}".strip()
+            if text_repr and is_affected_by_evidence(record, text_repr):
+                return True
+        return False
+
+    def _dependency_fresh(
+        self,
+        record: dict[str, Any],
+        context: AnswerReadContext,
+        fingerprint: str,
+        evidence: dict[str, dict[str, Any]],
+    ) -> bool:
+        """True when corpus fingerprint matches or every change since saved revision is unrelated."""
+        if self._fingerprint_matches(context, fingerprint, record.get("corpus_fingerprint")):
+            return True
+        saved_rev = record.get("source_revision")
+        if type(saved_rev) is not int:
+            return False
+        rev_fn = getattr(self.engine, "mental_model_source_revision", None)
+        changes_fn = getattr(self.engine, "mental_model_source_changes", None)
+        if not (callable(rev_fn) and callable(changes_fn)):
+            return False
+        if record.get("policy_sha256") != _digest(self.engine.policy.to_dict()):
+            return False
+        current_rev = rev_fn(context.tenant_id)
+        if type(current_rev) is not int or current_rev <= saved_rev:
+            return False
+        changes = changes_fn(context.tenant_id, context.branch, saved_rev)
+        key = (
+            context.tenant_id,
+            context.branch,
+            _canonical(_scope(context)),
+            context.as_of.isoformat() if context.as_of is not None else None,
+        )
+        snapshot_state = getattr(self.engine, "_mental_model_source_cache", {}).get(key)
+        return not self._record_change_is_affected(record, context, snapshot_state, evidence, changes)
+
     def _get_ready_snapshot(
         self, context: AnswerReadContext, record: dict[str, Any]
     ) -> tuple[str, dict[str, dict[str, Any]]] | None:
@@ -675,7 +766,7 @@ class MentalModelService:
             cache.pop(cache_key, None)
             return None
 
-        if not self._fingerprint_matches(context, fingerprint, record.get("corpus_fingerprint")):
+        if not self._dependency_fresh(record, context, fingerprint, evidence):
             return None
 
         import mnemosyne.access_policy as access_policy_mod
@@ -769,7 +860,7 @@ class MentalModelService:
                     else:
                         fingerprint, evidence = self._snapshot(context)
                 clock = _question_clock(record["question"], context)
-                fresh = self._fingerprint_matches(context, fingerprint, record.get("corpus_fingerprint")) and record.get("time_fingerprint") == clock
+                fresh = self._dependency_fresh(record, context, fingerprint, evidence) and record.get("time_fingerprint") == clock
                 ready = fresh and record.get("status") == "ready" and self._answer_valid(record, evidence)
                 stale = not (ready or (fresh and record.get("status") == "abstained"))
             except Exception:
@@ -1069,7 +1160,14 @@ class MentalModelService:
                     and (record.get("status") == "abstained" or self._answer_valid(record, snapshot[1]))
                     and record.get("corpus_fingerprint") != snapshot[0]
                 ):
+                    rev_fn = getattr(self.engine, "mental_model_source_revision", None)
+                    current_rev = rev_fn(resolved_context.tenant_id) if callable(rev_fn) else None
                     record["corpus_fingerprint"] = snapshot[0]
+                    record["source_revision"] = current_rev if type(current_rev) is int else None
+                    record["policy_sha256"] = _digest(self.engine.policy.to_dict())
+                    record["dependent_entities"] = deps["dependent_entities"]
+                    record["dependent_predicates"] = deps["dependent_predicates"]
+                    record["dependent_cids"] = deps["dependent_cids"]
                     record = self.engine.save_mental_model_record(
                         resolved_context.tenant_id,
                         resolved_model_id,
@@ -1197,11 +1295,19 @@ class MentalModelService:
             if before[0] != after[0] or before_clock != after_clock:
                 payload, state, sources, error = None, "stale", set(), "source_changed_during_refresh"
                 refreshed_ok = False
+            rev_fn = getattr(self.engine, "mental_model_source_revision", None)
+            published_rev = rev_fn(context.tenant_id) if callable(rev_fn) else None
+            published_deps = extract_model_dependencies(record["question"], payload, sorted(sources))
             record.update(
                 answer=payload,
                 status=state,
                 source_evidence_cids=sorted(sources),
                 corpus_fingerprint=after[0] if state in {"ready", "abstained"} else None,
+                source_revision=published_rev if (state in {"ready", "abstained"} and type(published_rev) is int) else None,
+                policy_sha256=_digest(self.engine.policy.to_dict()) if state in {"ready", "abstained"} else None,
+                dependent_entities=published_deps["dependent_entities"],
+                dependent_predicates=published_deps["dependent_predicates"],
+                dependent_cids=published_deps["dependent_cids"],
                 time_fingerprint=after_clock,
                 updated_at=datetime.now(UTC).isoformat(),
                 refresh_error=error,
@@ -1211,6 +1317,8 @@ class MentalModelService:
                     answer=None,
                     status="stale",
                     corpus_fingerprint=None,
+                    source_revision=None,
+                    policy_sha256=None,
                     source_evidence_cids=[],
                     refresh_error="source_changed_during_refresh",
                 )
@@ -1349,12 +1457,21 @@ class MentalModelService:
             # boundary crossed during generation cannot publish the old answer.
             if before[0] != after[0] or before_clock != after_clock:
                 payload, state, sources, error = None, "stale", set(), "source_changed_during_refresh"
+            rev_fn = getattr(self.engine, "mental_model_source_revision", None)
+            published_rev = rev_fn(context.tenant_id) if callable(rev_fn) else None
+            published_deps = extract_model_dependencies(record["question"], payload, sorted(sources))
             record.update(answer=payload, status=state, source_evidence_cids=sorted(sources),
                           corpus_fingerprint=after[0] if state in {"ready", "abstained"} else None,
+                          source_revision=published_rev if (state in {"ready", "abstained"} and type(published_rev) is int) else None,
+                          policy_sha256=_digest(self.engine.policy.to_dict()) if state in {"ready", "abstained"} else None,
+                          dependent_entities=published_deps["dependent_entities"],
+                          dependent_predicates=published_deps["dependent_predicates"],
+                          dependent_cids=published_deps["dependent_cids"],
                           time_fingerprint=after_clock,
                           updated_at=datetime.now(UTC).isoformat(), refresh_error=error)
             if state == "ready" and not self._answer_valid(record, after[1]):
                 record.update(answer=None, status="stale", corpus_fingerprint=None,
+                              source_revision=None, policy_sha256=None,
                               source_evidence_cids=[], refresh_error="source_changed_during_refresh")
             self._revision(record, event)
             if lease_token is not None:
@@ -1367,3 +1484,97 @@ class MentalModelService:
             # Local/SQLite guards make publication atomic against their writers;
             # other engines still receive this fresh post-save read gate.
             return self._view(record, context, self._snapshot(context))
+
+    def bootstrap_recurring_models(
+        self,
+        context: AnswerReadContext,
+        *,
+        max_models: int = 3,
+        min_mentions: int = 3,
+        schedule_interval_seconds: int = 3600,
+    ) -> dict[str, Any]:
+        """Auto-create and schedule scoped mental models for top recurring topics."""
+        self._write(context)
+        scope = _scope(context)
+        existing_records = [
+            rec
+            for rec in self.engine.list_mental_model_records(context.tenant_id, context.branch)
+            if rec.get("owner_id") == context.user_id and rec.get("scope") == scope
+        ]
+        existing_tokens: set[str] = set()
+        for rec in existing_records:
+            name_norm = _normalize_dep_token(str(rec.get("name") or ""))
+            if name_norm:
+                existing_tokens.add(name_norm)
+            deps = extract_model_dependencies(str(rec.get("question") or ""), rec.get("answer"))
+            existing_tokens.update(deps.get("question_entities") or [])
+
+        skip_subjects = {
+            "user", "i", "we", "it", "this", "that", "they", "he", "she", "system",
+            "configuration snapshot", "unknown", "unknown-entity",
+        }
+        topic_cids: dict[str, set[str]] = {}
+        topic_labels: dict[str, str] = {}
+
+        batch_fn = getattr(self.engine, "knowledge_source_batch", None)
+        if callable(batch_fn):
+            after = ""
+            while True:
+                chunk = batch_fn(context.tenant_id, context.branch, collection="assertions", after=after, limit=4096)
+                for row in chunk:
+                    if row.get("user_id") != context.user_id or row.get("status") not in {"active", "contested"}:
+                        continue
+                    cids = [str(c) for c in (row.get("source_evidence_cids") or []) if c]
+                    if not cids:
+                        continue
+                    subject = str(row.get("subject") or "").strip()
+                    norm = _normalize_dep_token(subject)
+                    if not norm or len(norm) < 2 or norm in skip_subjects or norm in _DEP_STOPWORDS:
+                        continue
+                    topic_labels.setdefault(norm, subject)
+                    topic_cids.setdefault(norm, set()).update(cids)
+                if len(chunk) < 4096:
+                    break
+                after = chunk[-1]["id"]
+
+        list_obs = getattr(self.engine, "list_observation_records", None)
+        if callable(list_obs):
+            for obs in list_obs(context.tenant_id, branch=context.branch, status="active") or []:
+                if obs.get("user_id") != context.user_id:
+                    continue
+                cids = [str(c) for c in (obs.get("source_evidence_cids") or []) if c]
+                if not cids:
+                    continue
+                subject = str(obs.get("subject") or "").strip()
+                norm = _normalize_dep_token(subject)
+                if not norm or len(norm) < 2 or norm in skip_subjects or norm in _DEP_STOPWORDS:
+                    continue
+                topic_labels.setdefault(norm, subject)
+                topic_cids.setdefault(norm, set()).update(cids)
+
+        ranked = sorted(
+            (
+                (len(cids), norm, topic_labels[norm])
+                for norm, cids in topic_cids.items()
+                if len(cids) >= max(1, int(min_mentions)) and norm not in existing_tokens
+            ),
+            key=lambda item: (-item[0], item[1]),
+        )
+        created: list[dict[str, Any]] = []
+        for mentions, norm, label in ranked[: max(0, int(max_models))]:
+            name = f"{label} overview"[:200]
+            question = f"What are the current established facts, decisions, and status for {label}?"
+            model_view = self.create(context, name, question)
+            self.schedule(context, model_view["model_id"], interval_seconds=schedule_interval_seconds, enabled=True)
+            created.append({
+                "model_id": model_view["model_id"],
+                "topic": label,
+                "mentions": mentions,
+                "name": name,
+                "question": question,
+            })
+        return {
+            "created": created,
+            "existing": len(existing_records),
+            "candidates_evaluated": len(topic_cids),
+        }

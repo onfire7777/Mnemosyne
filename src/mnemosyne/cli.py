@@ -443,6 +443,7 @@ def load_retrieval_adapters(args: argparse.Namespace) -> RetrievalAdapters:
             cache_path=None if evaluation_read_only else args.embedding_cache_path,
             cache_ttl_seconds=float(args.embedding_cache_ttl_seconds),
             cache_scope=args.embedding_cache_scope,
+            extra_body_json=os.environ.get("MNEMOSYNE_EMBEDDING_EXTRA_BODY_JSON") or None,
         )
     elif args.embedding_provider == "auto":
         from mnemosyne.quantized_vectors import discover_local_embedding_provider
@@ -2585,7 +2586,21 @@ def cmd_reflect(args: argparse.Namespace) -> None:
             as_of=args.as_of,
             disposition=_json_object_arg(getattr(args, "disposition", None), "--disposition"),
             mission=getattr(args, "mission", None),
-            hierarchy_first=bool(getattr(args, "hierarchy_first", False)),
+            hierarchy_first=bool(getattr(args, "hierarchy_first", True)),
+        )
+    )
+
+
+def cmd_entity_unmerge(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(
+        tools.entity_unmerge(
+            tenant_id=args.tenant,
+            merged_entity_id=args.merged_entity_id,
+            split_canonical_key=args.split_canonical_key,
+            branch=args.branch,
+            role=args.role,
+            source_trust_tier=args.source_trust_tier,
         )
     )
 
@@ -19715,6 +19730,1113 @@ def cmd_capability(args: argparse.Namespace) -> None:
         print(f"export {key}={shlex.quote(value)}")
 
 
+_COMPACT_AUDIT_PROTECTED_TOKENS = (
+    "erasure",
+    "erase",
+    "delete",
+    "shred",
+    "retention",
+    "blocked",
+    "quarantine",
+    "break_glass",
+    "defect",
+    "rollback",
+    "privacy",
+    "revoke",
+)
+_COMPACT_TOOL_RAW_OUTPUT_KEYS = frozenset(
+    {"output", "stdout", "stderr", "aggregated_output"}
+)
+_COMPACT_EPISODE_EXCERPT_LIMIT = 512
+_SQLITE_FILE_HEADER = b"SQLite format 3\x00"
+
+
+def _is_sqlite_file(path: Path) -> bool:
+    try:
+        if not path.is_file():
+            return False
+        with path.open("rb") as handle:
+            return handle.read(16) == _SQLITE_FILE_HEADER
+    except OSError:
+        return False
+
+
+def _sqlite_bundle_bytes(path: Path) -> dict[str, int]:
+    db_bytes = path.stat().st_size if path.exists() else 0
+    wal = Path(f"{path}-wal")
+    shm = Path(f"{path}-shm")
+    wal_bytes = wal.stat().st_size if wal.exists() else 0
+    shm_bytes = shm.stat().st_size if shm.exists() else 0
+    return {
+        "db_bytes": db_bytes,
+        "wal_bytes": wal_bytes,
+        "shm_bytes": shm_bytes,
+        "total_bytes": db_bytes + wal_bytes + shm_bytes,
+    }
+
+
+def _backup_sqlite_file(src: Path, stamp: str) -> Path:
+    import sqlite3
+
+    backup_path = src.parent / f"{src.name}.bak-{stamp}"
+    src_conn = sqlite3.connect(str(src), timeout=30.0)
+    dst_conn = sqlite3.connect(str(backup_path), timeout=30.0)
+    try:
+        src_conn.backup(dst_conn)
+    finally:
+        dst_conn.close()
+        src_conn.close()
+    if not backup_path.exists() or backup_path.stat().st_size == 0:
+        raise RuntimeError(f"failed to create non-empty SQLite backup at {backup_path}")
+    return backup_path
+
+
+def _pack_cache_embedding_with_dtype(vector: Sequence[float], dtype: str) -> bytes:
+    import array
+    import struct
+
+    dims = len(vector)
+    if dtype == "f16":
+        return b"MN16" + struct.pack(f"<{dims}e", *(float(v) for v in vector))
+    if dtype == "f32":
+        buf = array.array("f", (float(v) for v in vector))
+        if sys.byteorder != "little":
+            buf.byteswap()
+        return b"MN32" + buf.tobytes()
+    if dtype == "f64":
+        buf64 = array.array("d", (float(v) for v in vector))
+        if sys.byteorder != "little":
+            buf64.byteswap()
+        return b"MN64" + buf64.tobytes()
+    raise ValueError(f"unsupported embedding cache dtype: {dtype!r}")
+
+
+def _compact_audit_record_envelope(
+    obj: dict[str, Any],
+    *,
+    raw_bytes: int,
+    raw_sha256: str,
+    archived: bool,
+) -> dict[str, Any]:
+    diff = obj.get("diff")
+    if str(obj.get("source") or "") == "experience" and isinstance(diff, dict):
+        raw_changes = diff.get("changes")
+        slim_changes: list[dict[str, Any]] = []
+        seen_keys: set[tuple[str, str]] = set()
+        total_changes = len(raw_changes) if isinstance(raw_changes, list) else 0
+        if isinstance(raw_changes, list):
+            for entry in raw_changes:
+                if not isinstance(entry, dict):
+                    continue
+                pair = (str(entry.get("collection") or ""), str(entry.get("key") or ""))
+                if pair in seen_keys:
+                    continue
+                seen_keys.add(pair)
+                if len(slim_changes) < 200:
+                    slim_changes.append(
+                        {
+                            "collection": pair[0],
+                            "key": pair[1],
+                            "before": None,
+                            "after": None,
+                            "compacted": True,
+                        }
+                    )
+        compact_diff: dict[str, Any] = {
+            "id": diff.get("id") or obj.get("target_id") or obj.get("id"),
+            "op": diff.get("op") or obj.get("op"),
+            "revision": diff.get("revision"),
+            "created_at": diff.get("created_at") or obj.get("at"),
+            "source": diff.get("source") or "experience",
+            "changes": slim_changes,
+            "compacted": True,
+            "compacted_original_bytes": raw_bytes,
+            "compacted_payload_sha256": raw_sha256,
+            "archived": archived,
+        }
+        if total_changes > len(slim_changes):
+            compact_diff["changes_total"] = total_changes
+    else:
+        compact_diff = {
+            "_compacted": True,
+            "original_bytes": raw_bytes,
+            "original_sha256": raw_sha256,
+            "diff_keys": sorted(str(k) for k in diff.keys()) if isinstance(diff, dict) else [],
+            "archived": archived,
+        }
+    return {**obj, "diff": compact_diff}
+
+
+def _compact_tool_obs_metadata(
+    meta_raw: str, source_content: str
+) -> tuple[str | None, int]:
+    try:
+        meta = json.loads(meta_raw)
+    except Exception:
+        return None, 0
+    if not isinstance(meta, dict):
+        return None, 0
+    tool_obs = meta.get("tool_observation")
+    if not isinstance(tool_obs, dict):
+        return None, 0
+    if not (_COMPACT_TOOL_RAW_OUTPUT_KEYS & tool_obs.keys()):
+        return None, 0
+    raw_output: str | None = None
+    for key in ("output", "stdout", "stderr", "aggregated_output"):
+        value = tool_obs.get(key)
+        if isinstance(value, str) and value:
+            raw_output = value
+            break
+    # Retain all structured tool metadata keys (name, argv, command, cwd,
+    # status, exit_code, call_id, arguments, path, file_path, truncated,
+    # output_truncated, is_truncated, partial, offset, limit, start_line,
+    # end_line, evidence_rejected, source, passed, failed, runner, etc.).
+    compact_obs = {
+        k: v for k, v in tool_obs.items() if k not in _COMPACT_TOOL_RAW_OUTPUT_KEYS
+    }
+    if raw_output is not None:
+        if source_content and "output_span" not in compact_obs:
+            start = source_content.find(raw_output)
+            if start >= 0:
+                compact_obs["output_span"] = [start, start + len(raw_output)]
+        compact_obs.setdefault(
+            "output_sha256", sha256(raw_output.encode("utf-8")).hexdigest()
+        )
+        compact_obs.setdefault("output_bytes", len(raw_output.encode("utf-8")))
+    new_meta = {**meta, "tool_observation": compact_obs}
+    serialized = json.dumps(new_meta, sort_keys=True)
+    saved = max(0, len(meta_raw.encode("utf-8")) - len(serialized.encode("utf-8")))
+    return serialized, saved
+
+
+def _compact_episode_payload(payload_raw: str) -> tuple[str | None, int]:
+    try:
+        payload = json.loads(payload_raw)
+    except Exception:
+        return None, 0
+    if not isinstance(payload, dict):
+        return None, 0
+    events = payload.get("tool_events")
+    if not isinstance(events, list) or not events:
+        return None, 0
+    changed = False
+    new_events: list[Any] = []
+    for event in events:
+        if not isinstance(event, dict):
+            new_events.append(event)
+            continue
+        raw: str | None = None
+        for key in ("output", "stdout", "stderr", "aggregated_output"):
+            val = event.get(key)
+            if isinstance(val, str) and val:
+                raw = val
+                break
+        if raw is None:
+            new_events.append(event)
+            continue
+        needs_strip = len(raw) > _COMPACT_EPISODE_EXCERPT_LIMIT or any(
+            isinstance(event.get(k), str)
+            and (
+                len(event.get(k) or "") > _COMPACT_EPISODE_EXCERPT_LIMIT
+                or (k != "output" and event.get(k) == event.get("output"))
+            )
+            for k in ("stdout", "stderr", "aggregated_output")
+        )
+        if not needs_strip:
+            new_events.append(event)
+            continue
+        changed = True
+        compact_ev = dict(event)
+        compact_ev["output_sha256"] = sha256(raw.encode("utf-8")).hexdigest()
+        compact_ev["excerpt_512"] = raw[:_COMPACT_EPISODE_EXCERPT_LIMIT]
+        if len(raw) > _COMPACT_EPISODE_EXCERPT_LIMIT:
+            for key in _COMPACT_TOOL_RAW_OUTPUT_KEYS:
+                compact_ev.pop(key, None)
+        else:
+            for key in ("stdout", "stderr", "aggregated_output"):
+                val = compact_ev.get(key)
+                if isinstance(val, str) and (
+                    len(val) > _COMPACT_EPISODE_EXCERPT_LIMIT
+                    or (key != "output" and val == compact_ev.get("output"))
+                ):
+                    compact_ev.pop(key, None)
+        new_events.append(compact_ev)
+    if not changed:
+        return None, 0
+    serialized = json.dumps({**payload, "tool_events": new_events}, sort_keys=True)
+    saved = max(0, len(payload_raw.encode("utf-8")) - len(serialized.encode("utf-8")))
+    return serialized, saved
+
+
+def compact_embedding_cache(
+    cache_path: Path,
+    *,
+    dtype: str = "f32",
+    dry_run: bool = False,
+    backup: bool = True,
+    vacuum: bool = True,
+    stamp: str | None = None,
+) -> dict[str, Any]:
+    """Migrate a local HTTP embedding cache SQLite DB from JSON strings to binary BLOBs."""
+    import sqlite3
+
+    cache_path = Path(cache_path)
+    if not _is_sqlite_file(cache_path):
+        raise ValueError(f"embedding cache is not a valid SQLite database: {cache_path}")
+    if dtype not in {"f16", "f32", "f64"}:
+        raise ValueError(f"unsupported embedding cache dtype: {dtype!r}")
+    run_stamp = stamp or datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    before_sizes = _sqlite_bundle_bytes(cache_path)
+
+    if dry_run:
+        conn = sqlite3.connect(f"file:{cache_path}?mode=ro", uri=True, timeout=30.0)
+        try:
+            cols = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(http_embedding_cache)")
+            }
+            if not cols:
+                return {
+                    "path": str(cache_path),
+                    "dry_run": True,
+                    "skipped": "missing http_embedding_cache table",
+                    "before": before_sizes,
+                }
+            has_blob = "vector_blob" in cols
+            where = "vector_blob IS NULL AND vector_json != ''" if has_blob else "vector_json != ''"
+            total_rows = int(
+                conn.execute("SELECT COUNT(*) FROM http_embedding_cache").fetchone()[0]
+            )
+            mig_row = conn.execute(
+                f"SELECT COUNT(*), COALESCE(SUM(length(vector_json)), 0), COALESCE(SUM(dims), 0) "
+                f"FROM http_embedding_cache WHERE {where}"
+            ).fetchone()
+            mig_rows = int(mig_row[0])
+            json_bytes = int(mig_row[1])
+            sum_dims = int(mig_row[2])
+            elem_bytes = {"f16": 2, "f32": 4, "f64": 8}[dtype]
+            blob_bytes = sum_dims * elem_bytes + mig_rows * 4
+            estimated_saved = max(0, json_bytes - blob_bytes)
+            return {
+                "path": str(cache_path),
+                "dry_run": True,
+                "dtype": dtype,
+                "before": before_sizes,
+                "total_rows": total_rows,
+                "rows_to_migrate": mig_rows,
+                "json_bytes_to_replace": json_bytes,
+                "estimated_blob_bytes": blob_bytes,
+                "estimated_reclaim_bytes": estimated_saved,
+                "estimated_after_bytes": max(
+                    blob_bytes, before_sizes["total_bytes"] - estimated_saved
+                ),
+            }
+        finally:
+            conn.close()
+
+    backup_path: Path | None = None
+    if backup:
+        backup_path = _backup_sqlite_file(cache_path, run_stamp)
+
+    conn = sqlite3.connect(str(cache_path), timeout=30.0)
+    migrated = 0
+    invalid = 0
+    bytes_replaced = 0
+    blob_bytes_written = 0
+    try:
+        conn.execute("PRAGMA busy_timeout=30000")
+        conn.execute("PRAGMA journal_mode=WAL")
+        cols = {
+            row[1] for row in conn.execute("PRAGMA table_info(http_embedding_cache)")
+        }
+        if not cols:
+            return {
+                "path": str(cache_path),
+                "dry_run": False,
+                "skipped": "missing http_embedding_cache table",
+                "before": before_sizes,
+                "backup_path": str(backup_path) if backup_path else None,
+            }
+        if "vector_blob" not in cols:
+            conn.execute("ALTER TABLE http_embedding_cache ADD COLUMN vector_blob BLOB")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS http_embedding_cache_lru_idx "
+            "ON http_embedding_cache(scope_sha256, last_access_at)"
+        )
+        total_rows = int(
+            conn.execute("SELECT COUNT(*) FROM http_embedding_cache").fetchone()[0]
+        )
+        batch: list[tuple[bytes, int]] = []
+        cursor = conn.execute(
+            "SELECT rowid, dims, vector_json FROM http_embedding_cache "
+            "WHERE vector_blob IS NULL AND vector_json != ''"
+        )
+        for rowid, dims, vec_json in cursor:
+            try:
+                values = json.loads(vec_json)
+                if not isinstance(values, list) or len(values) != int(dims):
+                    invalid += 1
+                    continue
+                blob = _pack_cache_embedding_with_dtype(values, dtype)
+            except Exception:
+                invalid += 1
+                continue
+            bytes_replaced += len(vec_json.encode("utf-8"))
+            blob_bytes_written += len(blob)
+            batch.append((blob, int(rowid)))
+            migrated += 1
+            if len(batch) >= 250:
+                with conn:
+                    conn.executemany(
+                        "UPDATE http_embedding_cache SET vector_blob = ?, vector_json = '' WHERE rowid = ?",
+                        batch,
+                    )
+                batch.clear()
+        if batch:
+            with conn:
+                conn.executemany(
+                    "UPDATE http_embedding_cache SET vector_blob = ?, vector_json = '' WHERE rowid = ?",
+                    batch,
+                )
+            batch.clear()
+        if vacuum:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            conn.execute("VACUUM")
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        quick_check = str(conn.execute("PRAGMA quick_check").fetchone()[0])
+    finally:
+        conn.close()
+
+    after_sizes = _sqlite_bundle_bytes(cache_path)
+    return {
+        "path": str(cache_path),
+        "dry_run": False,
+        "dtype": dtype,
+        "backup_path": str(backup_path) if backup_path else None,
+        "before": before_sizes,
+        "after": after_sizes,
+        "reclaimed_bytes": before_sizes["total_bytes"] - after_sizes["total_bytes"],
+        "total_rows": total_rows,
+        "rows_migrated": migrated,
+        "rows_skipped_invalid": invalid,
+        "json_bytes_replaced": bytes_replaced,
+        "blob_bytes_written": blob_bytes_written,
+        "quick_check": quick_check,
+    }
+
+
+def compact_local_store(
+    db_path: Path,
+    *,
+    dry_run: bool = False,
+    backup: bool = True,
+    archive_dir: Path | None = None,
+    keep_recent_audit_days: int = 7,
+    max_audit_record_bytes: int = 16384,
+    compact_fts: bool = True,
+    compact_tool_metadata: bool = True,
+    compact_learning: bool = True,
+    compact_knowledge_page_embeddings: bool = True,
+    compact_source_changes: bool = True,
+    expire_working: bool = True,
+    vacuum: bool = True,
+    stamp: str | None = None,
+) -> dict[str, Any]:
+    """Safely compact a local SQLite Mnemosyne store without losing real memory data."""
+    import gzip
+    import sqlite3
+    from datetime import timedelta
+    from mnemosyne.models import parse_dt
+    from mnemosyne.sqlite_schema import pack_embedding
+
+    db_path = Path(db_path)
+    if not _is_sqlite_file(db_path):
+        raise ValueError(f"target is not a valid SQLite database: {db_path}")
+    run_stamp = stamp or datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    now_dt = datetime.now(UTC)
+    cutoff_dt = (
+        now_dt - timedelta(days=int(keep_recent_audit_days))
+        if int(keep_recent_audit_days) >= 0
+        else None
+    )
+    before_sizes = _sqlite_bundle_bytes(db_path)
+
+    def _table_set(conn: sqlite3.Connection) -> set[str]:
+        return {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type IN ('table', 'view')"
+            )
+        }
+
+    def _core_counts(conn: sqlite3.Connection, tables: set[str]) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for tbl in (
+            "evidence",
+            "assertions",
+            "relations",
+            "observations",
+            "knowledge_pages",
+            "mental_models",
+            "preferences",
+        ):
+            if tbl in tables:
+                counts[tbl] = int(conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0])
+        return counts
+
+    if dry_run:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=30.0)
+        try:
+            tables = _table_set(conn)
+            core_before = _core_counts(conn, tables)
+            est: dict[str, Any] = {
+                "audit_log": {"rows_to_prune": 0, "rows_to_dedup": 0, "rows_to_compact": 0, "estimated_saved_bytes": 0},
+                "evidence_fts": {"rows_before": 0, "operational_rows_to_remove": 0},
+                "evidence_tool_metadata": {"rows_to_compact": 0, "estimated_saved_bytes": 0},
+                "learning_episodes": {"rows_to_compact": 0, "estimated_saved_bytes": 0},
+                "knowledge_pages_embeddings": {"rows_to_migrate": 0, "estimated_saved_bytes": 0},
+                "working_memory": {"expired_rows_to_delete": 0},
+                "memory_source_changes": {"rows_before": 0, "rows_to_prune": 0},
+                "wal_bytes_to_checkpoint": before_sizes["wal_bytes"],
+            }
+            if "audit_log" in tables:
+                seen_rel_keys: set[tuple[str, str, str]] = set()
+                for _seq, tid, rec in conn.execute(
+                    "SELECT seq, tenant_id, record FROM audit_log ORDER BY seq"
+                ):
+                    raw_len = len(rec.encode("utf-8"))
+                    try:
+                        obj = json.loads(rec)
+                    except Exception:
+                        continue
+                    if not isinstance(obj, dict):
+                        continue
+                    op = str(obj.get("op") or "")
+                    op_lower = op.lower()
+                    is_protected = any(tok in op_lower for tok in _COMPACT_AUDIT_PROTECTED_TOKENS)
+                    if op == "add_relation" and not is_protected:
+                        diff_hash = sha256(
+                            json.dumps(obj.get("diff"), sort_keys=True).encode("utf-8")
+                        ).hexdigest()
+                        dkey = (str(tid), str(obj.get("target_id") or ""), diff_hash)
+                        if dkey in seen_rel_keys:
+                            est["audit_log"]["rows_to_dedup"] += 1
+                            est["audit_log"]["estimated_saved_bytes"] += raw_len
+                            continue
+                        seen_rel_keys.add(dkey)
+                    source = str(obj.get("source") or "")
+                    if cutoff_dt is not None and not is_protected and source != "experience":
+                        at_dt = parse_dt(obj.get("at"))
+                        if at_dt is not None and at_dt < cutoff_dt:
+                            est["audit_log"]["rows_to_prune"] += 1
+                            est["audit_log"]["estimated_saved_bytes"] += raw_len
+                            continue
+                    if not is_protected and raw_len > int(max_audit_record_bytes):
+                        est["audit_log"]["rows_to_compact"] += 1
+                        est["audit_log"]["estimated_saved_bytes"] += max(0, raw_len - 512)
+            if compact_fts and "evidence_fts" in tables and "evidence" in tables:
+                est["evidence_fts"]["rows_before"] = int(
+                    conn.execute("SELECT COUNT(*) FROM evidence_fts").fetchone()[0]
+                )
+                est["evidence_fts"]["operational_rows_to_remove"] = int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM evidence_fts f JOIN evidence e ON e.rowid = f.rowid "
+                        "WHERE e.source_type = 'learning_tool_result'"
+                    ).fetchone()[0]
+                )
+            if compact_tool_metadata and "evidence" in tables:
+                for content, meta_raw in conn.execute(
+                    "SELECT content, metadata FROM evidence WHERE source_type = 'learning_tool_result'"
+                ):
+                    new_meta, saved = _compact_tool_obs_metadata(meta_raw or "", content or "")
+                    if new_meta is not None:
+                        est["evidence_tool_metadata"]["rows_to_compact"] += 1
+                        est["evidence_tool_metadata"]["estimated_saved_bytes"] += saved
+            if compact_learning and "learning_episodes" in tables:
+                for (payload_raw,) in conn.execute("SELECT payload FROM learning_episodes"):
+                    new_payload, saved = _compact_episode_payload(payload_raw or "")
+                    if new_payload is not None:
+                        est["learning_episodes"]["rows_to_compact"] += 1
+                        est["learning_episodes"]["estimated_saved_bytes"] += saved
+            if compact_knowledge_page_embeddings and "knowledge_pages" in tables:
+                for (maint_raw,) in conn.execute("SELECT maintenance FROM knowledge_pages"):
+                    try:
+                        maint = json.loads(maint_raw or "{}")
+                    except Exception:
+                        continue
+                    emb = maint.get("embedding") if isinstance(maint, dict) else None
+                    if isinstance(emb, list) and emb:
+                        est["knowledge_pages_embeddings"]["rows_to_migrate"] += 1
+                        json_len = len(json.dumps(emb).encode("utf-8"))
+                        est["knowledge_pages_embeddings"]["estimated_saved_bytes"] += max(
+                            0, json_len - len(emb) * 8
+                        )
+            if expire_working and "working_memory" in tables:
+                now_iso = now_dt.isoformat()
+                est["working_memory"]["expired_rows_to_delete"] = int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM working_memory WHERE status = 'expired' OR expires_at <= ?",
+                        (now_iso,),
+                    ).fetchone()[0]
+                )
+            if compact_source_changes and "memory_source_changes" in tables:
+                total_changes = int(
+                    conn.execute("SELECT COUNT(*) FROM memory_source_changes").fetchone()[0]
+                )
+                distinct_items = int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM (SELECT DISTINCT tenant_id, collection, branch, item_id FROM memory_source_changes)"
+                    ).fetchone()[0]
+                )
+                est["memory_source_changes"]["rows_before"] = total_changes
+                est["memory_source_changes"]["rows_to_prune"] = max(
+                    0, total_changes - distinct_items
+                )
+            total_est_saved = (
+                est["audit_log"]["estimated_saved_bytes"]
+                + est["evidence_tool_metadata"]["estimated_saved_bytes"]
+                + est["learning_episodes"]["estimated_saved_bytes"]
+                + est["knowledge_pages_embeddings"]["estimated_saved_bytes"]
+                + before_sizes["wal_bytes"]
+            )
+            return {
+                "path": str(db_path),
+                "dry_run": True,
+                "before": before_sizes,
+                "core_row_counts": core_before,
+                "estimates": est,
+                "estimated_reclaim_bytes_lower_bound": total_est_saved,
+            }
+        finally:
+            conn.close()
+
+    backup_path: Path | None = None
+    if backup:
+        backup_path = _backup_sqlite_file(db_path, run_stamp)
+
+    stats: dict[str, Any] = {
+        "audit_log": {"pruned_rows": 0, "deduped_rows": 0, "compacted_rows": 0, "saved_bytes": 0},
+        "evidence_fts": {"rows_before": 0, "rows_after": 0, "triggers_upgraded": False},
+        "evidence_tool_metadata": {"compacted_rows": 0, "saved_bytes": 0},
+        "learning_episodes": {"compacted_rows": 0, "saved_bytes": 0},
+        "knowledge_pages_embeddings": {"migrated_rows": 0, "saved_bytes": 0},
+        "working_memory": {"deleted_rows": 0},
+        "memory_source_changes": {"rows_before": 0, "rows_after": 0, "pruned_rows": 0},
+    }
+    archive_info: dict[str, Any] | None = None
+
+    conn = sqlite3.connect(str(db_path), timeout=30.0)
+    try:
+        conn.execute("PRAGMA busy_timeout=30000")
+        conn.execute("PRAGMA foreign_keys=ON")
+        tables = _table_set(conn)
+        core_before = _core_counts(conn, tables)
+
+        # 1. Drop old evidence_fts table and triggers up front so subsequent
+        # evidence updates never re-index learning_tool_result and VACUUM can
+        # reclaim FTS shadow pages cleanly before recreating a fresh, aligned index.
+        had_evidence_fts = compact_fts and "evidence_fts" in tables and "evidence" in tables
+        if had_evidence_fts:
+            stats["evidence_fts"]["rows_before"] = int(
+                conn.execute("SELECT COUNT(*) FROM evidence_fts").fetchone()[0]
+            )
+            with conn:
+                conn.execute("DROP TRIGGER IF EXISTS evidence_fts_ai")
+                conn.execute("DROP TRIGGER IF EXISTS evidence_fts_ad")
+                conn.execute("DROP TRIGGER IF EXISTS evidence_fts_au")
+                conn.execute("DROP TABLE IF EXISTS evidence_fts")
+
+        # 2. Compact duplicated raw output inside evidence.metadata['tool_observation'].
+        if compact_tool_metadata and "evidence" in tables:
+            updates: list[tuple[str, int]] = []
+            for rowid, content, meta_raw in conn.execute(
+                "SELECT rowid, content, metadata FROM evidence WHERE source_type = 'learning_tool_result'"
+            ):
+                new_meta, saved = _compact_tool_obs_metadata(meta_raw or "", content or "")
+                if new_meta is not None:
+                    updates.append((new_meta, int(rowid)))
+                    stats["evidence_tool_metadata"]["compacted_rows"] += 1
+                    stats["evidence_tool_metadata"]["saved_bytes"] += saved
+                    if len(updates) >= 250:
+                        with conn:
+                            conn.executemany(
+                                "UPDATE evidence SET metadata = ? WHERE rowid = ?", updates
+                            )
+                        updates.clear()
+            if updates:
+                with conn:
+                    conn.executemany(
+                        "UPDATE evidence SET metadata = ? WHERE rowid = ?", updates
+                    )
+                updates.clear()
+
+        # 3. Compact learning_episodes duplicated multi-KB tool_events output.
+        if compact_learning and "learning_episodes" in tables:
+            ep_updates: list[tuple[str, int]] = []
+            for rowid, payload_raw in conn.execute(
+                "SELECT rowid, payload FROM learning_episodes"
+            ):
+                new_payload, saved = _compact_episode_payload(payload_raw or "")
+                if new_payload is not None:
+                    ep_updates.append((new_payload, int(rowid)))
+                    stats["learning_episodes"]["compacted_rows"] += 1
+                    stats["learning_episodes"]["saved_bytes"] += saved
+                    if len(ep_updates) >= 50:
+                        with conn:
+                            conn.executemany(
+                                "UPDATE learning_episodes SET payload = ? WHERE rowid = ?",
+                                ep_updates,
+                            )
+                        ep_updates.clear()
+            if ep_updates:
+                with conn:
+                    conn.executemany(
+                        "UPDATE learning_episodes SET payload = ? WHERE rowid = ?",
+                        ep_updates,
+                    )
+                ep_updates.clear()
+
+        # 4. Migrate knowledge_pages JSON embeddings into knowledge_pages.embedding BLOB.
+        if compact_knowledge_page_embeddings and "knowledge_pages" in tables:
+            kp_cols = {
+                row[1] for row in conn.execute("PRAGMA table_info(knowledge_pages)")
+            }
+            if "embedding" not in kp_cols:
+                with conn:
+                    conn.execute("ALTER TABLE knowledge_pages ADD COLUMN embedding BLOB")
+            kp_updates: list[tuple[str, bytes, int]] = []
+            for rowid, maint_raw, existing_blob in conn.execute(
+                "SELECT rowid, maintenance, embedding FROM knowledge_pages"
+            ):
+                try:
+                    maint = json.loads(maint_raw or "{}")
+                except Exception:
+                    continue
+                if not isinstance(maint, dict):
+                    continue
+                emb = maint.get("embedding")
+                if not (isinstance(emb, list) and emb):
+                    continue
+                try:
+                    blob = existing_blob if existing_blob is not None else pack_embedding(
+                        [float(v) for v in emb]
+                    )
+                except (TypeError, ValueError):
+                    continue
+                if blob is None:
+                    continue
+                clean_maint = {k: v for k, v in maint.items() if k != "embedding"}
+                new_maint_raw = json.dumps(clean_maint, sort_keys=True)
+                saved = max(
+                    0,
+                    len((maint_raw or "").encode("utf-8"))
+                    - len(new_maint_raw.encode("utf-8"))
+                    - len(blob),
+                )
+                kp_updates.append((new_maint_raw, blob, int(rowid)))
+                stats["knowledge_pages_embeddings"]["migrated_rows"] += 1
+                stats["knowledge_pages_embeddings"]["saved_bytes"] += saved
+            if kp_updates:
+                with conn:
+                    conn.executemany(
+                        "UPDATE knowledge_pages SET maintenance = ?, embedding = ? WHERE rowid = ?",
+                        kp_updates,
+                    )
+
+        # 5. Stream audit_log: archive (hash-chained) -> deduplicate add_relation, prune old non-protected, compact oversized.
+        if "audit_log" in tables:
+            to_delete: list[int] = []
+            to_update: list[tuple[str, int]] = []
+            seen_rel_keys: set[tuple[str, str, str]] = set()
+            archive_gz_path: Path | None = None
+            archive_manifest_path: Path | None = None
+            gz_handle = None
+            archive_count = 0
+            archive_raw_bytes = 0
+            first_seq: int | None = None
+            last_seq: int | None = None
+            genesis_sha = sha256(
+                f"mnemosyne-audit-archive:{db_path.name}:{run_stamp}".encode("utf-8")
+            ).hexdigest()
+            chain_sha = genesis_sha
+            if archive_dir is not None:
+                archive_root = Path(archive_dir)
+                archive_root.mkdir(parents=True, exist_ok=True)
+                archive_gz_path = archive_root / f"{db_path.stem}-audit-{run_stamp}.jsonl.gz"
+                archive_manifest_path = (
+                    archive_root / f"{db_path.stem}-audit-{run_stamp}.manifest.json"
+                )
+                gz_handle = gzip.open(
+                    archive_gz_path, "wt", encoding="utf-8", compresslevel=1
+                )
+
+            try:
+                for seq, tid, rec in conn.execute(
+                    "SELECT seq, tenant_id, record FROM audit_log ORDER BY seq"
+                ):
+                    raw_encoded = rec.encode("utf-8")
+                    raw_len = len(raw_encoded)
+                    try:
+                        obj = json.loads(rec)
+                    except Exception:
+                        continue
+                    if not isinstance(obj, dict):
+                        continue
+                    op = str(obj.get("op") or "")
+                    op_lower = op.lower()
+                    is_protected = any(
+                        tok in op_lower for tok in _COMPACT_AUDIT_PROTECTED_TOKENS
+                    )
+                    action: str | None = None
+                    if op == "add_relation" and not is_protected:
+                        diff_hash = sha256(
+                            json.dumps(obj.get("diff"), sort_keys=True).encode("utf-8")
+                        ).hexdigest()
+                        dkey = (str(tid), str(obj.get("target_id") or ""), diff_hash)
+                        if dkey in seen_rel_keys:
+                            action = "deduped"
+                        else:
+                            seen_rel_keys.add(dkey)
+                    source = str(obj.get("source") or "")
+                    if (
+                        action is None
+                        and cutoff_dt is not None
+                        and not is_protected
+                        and source != "experience"
+                    ):
+                        at_dt = parse_dt(obj.get("at"))
+                        if at_dt is not None and at_dt < cutoff_dt:
+                            action = "pruned"
+                    if action is None and not is_protected and raw_len > int(max_audit_record_bytes):
+                        action = "compacted"
+                    if action is None:
+                        continue
+
+                    rec_sha = sha256(raw_encoded).hexdigest()
+                    if gz_handle is not None:
+                        prev_sha = chain_sha
+                        chain_sha = sha256(
+                            f"{prev_sha}:{seq}:{rec_sha}".encode("utf-8")
+                        ).hexdigest()
+                        gz_handle.write(
+                            json.dumps(
+                                {
+                                    "seq": int(seq),
+                                    "tenant_id": str(tid),
+                                    "action": action,
+                                    "record_sha256": rec_sha,
+                                    "prev_chain_sha256": prev_sha,
+                                    "chain_sha256": chain_sha,
+                                    "record": rec,
+                                },
+                                sort_keys=True,
+                            )
+                            + "\n"
+                        )
+                        archive_count += 1
+                        archive_raw_bytes += raw_len
+                        if first_seq is None:
+                            first_seq = int(seq)
+                        last_seq = int(seq)
+
+                    if action in {"deduped", "pruned"}:
+                        to_delete.append(int(seq))
+                        if action == "deduped":
+                            stats["audit_log"]["deduped_rows"] += 1
+                        else:
+                            stats["audit_log"]["pruned_rows"] += 1
+                        stats["audit_log"]["saved_bytes"] += raw_len
+                    else:
+                        compact_obj = _compact_audit_record_envelope(
+                            obj,
+                            raw_bytes=raw_len,
+                            raw_sha256=rec_sha,
+                            archived=gz_handle is not None,
+                        )
+                        compact_rec = json.dumps(compact_obj, sort_keys=True)
+                        to_update.append((compact_rec, int(seq)))
+                        stats["audit_log"]["compacted_rows"] += 1
+                        stats["audit_log"]["saved_bytes"] += max(
+                            0, raw_len - len(compact_rec.encode("utf-8"))
+                        )
+            finally:
+                if gz_handle is not None:
+                    gz_handle.close()
+
+            if archive_gz_path is not None and archive_manifest_path is not None:
+                if archive_count == 0:
+                    archive_gz_path.unlink(missing_ok=True)
+                else:
+                    file_hash = sha256(archive_gz_path.read_bytes()).hexdigest()
+                    manifest = {
+                        "version": 1,
+                        "db_name": db_path.name,
+                        "created_at": now_dt.isoformat(),
+                        "archive_file": archive_gz_path.name,
+                        "archive_file_sha256": file_hash,
+                        "archived_rows": archive_count,
+                        "archived_raw_bytes": archive_raw_bytes,
+                        "first_seq": first_seq,
+                        "last_seq": last_seq,
+                        "genesis_sha256": genesis_sha,
+                        "head_chain_sha256": chain_sha,
+                    }
+                    archive_manifest_path.write_text(
+                        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+                        encoding="utf-8",
+                    )
+                    archive_info = {
+                        "archive_path": str(archive_gz_path),
+                        "manifest_path": str(archive_manifest_path),
+                        "archived_rows": archive_count,
+                        "head_chain_sha256": chain_sha,
+                    }
+
+            if to_delete or to_update:
+                with conn:
+                    for offset in range(0, len(to_delete), 500):
+                        chunk = to_delete[offset : offset + 500]
+                        placeholders = ",".join("?" for _ in chunk)
+                        conn.execute(
+                            f"DELETE FROM audit_log WHERE seq IN ({placeholders})", chunk
+                        )
+                    for offset in range(0, len(to_update), 250):
+                        conn.executemany(
+                            "UPDATE audit_log SET record = ? WHERE seq = ?",
+                            to_update[offset : offset + 250],
+                        )
+
+        # 6. Expire stale working_memory rows.
+        if expire_working and "working_memory" in tables:
+            now_iso = now_dt.isoformat()
+            with conn:
+                cur = conn.execute(
+                    "DELETE FROM working_memory WHERE status = 'expired' OR expires_at <= ?",
+                    (now_iso,),
+                )
+                stats["working_memory"]["deleted_rows"] = int(cur.rowcount or 0)
+
+        # 7. Compact superseded memory_source_changes history while preserving max revision watermark per tenant.
+        if compact_source_changes and "memory_source_changes" in tables:
+            before_changes = int(
+                conn.execute("SELECT COUNT(*) FROM memory_source_changes").fetchone()[0]
+            )
+            with conn:
+                conn.execute(
+                    """
+                    DELETE FROM memory_source_changes
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM (
+                            SELECT tenant_id, MAX(revision) AS keep_rev
+                            FROM memory_source_changes
+                            GROUP BY tenant_id, collection, branch, item_id
+                            UNION
+                            SELECT tenant_id, MAX(revision) AS keep_rev
+                            FROM memory_source_changes
+                            GROUP BY tenant_id
+                        ) AS kept
+                        WHERE kept.tenant_id = memory_source_changes.tenant_id
+                          AND kept.keep_rev = memory_source_changes.revision
+                    )
+                    """
+                )
+            after_changes = int(
+                conn.execute("SELECT COUNT(*) FROM memory_source_changes").fetchone()[0]
+            )
+            stats["memory_source_changes"] = {
+                "rows_before": before_changes,
+                "rows_after": after_changes,
+                "pruned_rows": max(0, before_changes - after_changes),
+            }
+
+        core_after = _core_counts(conn, tables)
+        if core_after != core_before:
+            raise RuntimeError(
+                f"compaction invariant violated: core row counts changed ({core_before} -> {core_after})"
+            )
+
+        # 8. Checkpoint WAL and VACUUM before recreating evidence_fts so implicit
+        # evidence rowids are final and FTS5 shadow tables remain checksum-valid.
+        if vacuum:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            conn.execute("VACUUM")
+
+        # 9. Recreate slim evidence_fts + triggers excluding learning_tool_result
+        # and verify FTS5 internal integrity.
+        if had_evidence_fts:
+            with conn:
+                conn.execute(
+                    """
+                    CREATE VIRTUAL TABLE evidence_fts USING fts5(
+                        cid UNINDEXED,
+                        tenant_id UNINDEXED,
+                        branch UNINDEXED,
+                        content,
+                        tokenize = "unicode61 tokenchars '_'"
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TRIGGER evidence_fts_ai AFTER INSERT ON evidence
+                    WHEN new.source_type != 'learning_tool_result'
+                    BEGIN
+                        INSERT INTO evidence_fts(rowid, cid, tenant_id, branch, content)
+                        VALUES (new.rowid, new.cid, new.tenant_id, new.branch, new.content);
+                    END
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TRIGGER evidence_fts_ad AFTER DELETE ON evidence
+                    WHEN old.source_type != 'learning_tool_result'
+                    BEGIN
+                        DELETE FROM evidence_fts WHERE rowid = old.rowid;
+                    END
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TRIGGER evidence_fts_au
+                    AFTER UPDATE OF cid, tenant_id, branch, content, source_type ON evidence
+                    BEGIN
+                        DELETE FROM evidence_fts WHERE rowid = old.rowid;
+                        INSERT INTO evidence_fts(rowid, cid, tenant_id, branch, content)
+                        SELECT new.rowid, new.cid, new.tenant_id, new.branch, new.content
+                        WHERE new.source_type != 'learning_tool_result';
+                    END
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO evidence_fts(rowid, cid, tenant_id, branch, content)
+                    SELECT rowid, cid, tenant_id, branch, content
+                    FROM evidence
+                    WHERE source_type != 'learning_tool_result'
+                    """
+                )
+                conn.execute("INSERT INTO evidence_fts(evidence_fts) VALUES('optimize')")
+                conn.execute(
+                    "INSERT INTO evidence_fts(evidence_fts) VALUES('integrity-check')"
+                )
+            stats["evidence_fts"]["triggers_upgraded"] = True
+            stats["evidence_fts"]["rows_after"] = int(
+                conn.execute("SELECT COUNT(*) FROM evidence_fts").fetchone()[0]
+            )
+
+        # 10. Final WAL checkpoint and integrity check.
+        if vacuum:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        quick_check = str(conn.execute("PRAGMA quick_check").fetchone()[0])
+        if quick_check != "ok":
+            raise RuntimeError(f"SQLite quick_check failed after compaction: {quick_check}")
+    finally:
+        conn.close()
+
+    after_sizes = _sqlite_bundle_bytes(db_path)
+    return {
+        "path": str(db_path),
+        "dry_run": False,
+        "backup_path": str(backup_path) if backup_path else None,
+        "archive": archive_info,
+        "before": before_sizes,
+        "after": after_sizes,
+        "reclaimed_bytes": before_sizes["total_bytes"] - after_sizes["total_bytes"],
+        "core_row_counts_preserved": core_after,
+        "stats": stats,
+        "quick_check": quick_check,
+    }
+
+
+def cmd_compact_local(args: argparse.Namespace) -> None:
+    if getattr(args, "backend", None) == "postgres":
+        raise SystemExit(
+            "compact-local is restricted to local SQLite stores; PostgreSQL append-only audit logs are never mutated."
+        )
+    raw_target = getattr(args, "db", None) or getattr(args, "store", None)
+    if not raw_target:
+        raise SystemExit("compact-local requires --db <sqlite-file-or-dir> or --store <path>.")
+    target_str = str(raw_target)
+    if target_str.startswith(("postgresql://", "postgres://")):
+        raise SystemExit(
+            "compact-local is restricted to local SQLite stores; PostgreSQL URIs are refused."
+        )
+    target = Path(target_str)
+    if not target.exists():
+        raise SystemExit(f"compact-local target does not exist: {target}")
+    if target.is_dir():
+        db_files = sorted(
+            p
+            for p in target.iterdir()
+            if p.is_file()
+            and ".bak-" not in p.name
+            and not p.name.endswith(("-wal", "-shm", "-journal"))
+            and _is_sqlite_file(p)
+        )
+        if not db_files:
+            raise SystemExit(f"no SQLite databases found in directory: {target}")
+    else:
+        if not _is_sqlite_file(target):
+            raise SystemExit(
+                f"compact-local requires a SQLite database file (got non-SQLite file: {target})"
+            )
+        db_files = [target]
+
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    archive_dir = Path(args.archive_dir) if getattr(args, "archive_dir", None) else None
+    db_reports = [
+        compact_local_store(
+            db_file,
+            dry_run=bool(args.dry_run),
+            backup=bool(args.backup),
+            archive_dir=archive_dir,
+            keep_recent_audit_days=int(args.keep_recent_audit_days),
+            max_audit_record_bytes=int(args.max_audit_record_bytes),
+            compact_fts=bool(args.compact_fts),
+            compact_tool_metadata=bool(args.compact_tool_metadata),
+            compact_learning=bool(args.compact_learning),
+            compact_knowledge_page_embeddings=bool(args.compact_knowledge_page_embeddings),
+            compact_source_changes=bool(args.compact_source_changes),
+            expire_working=bool(args.expire_working),
+            vacuum=bool(args.vacuum),
+            stamp=stamp,
+        )
+        for db_file in db_files
+    ]
+
+    cache_report: dict[str, Any] | None = None
+    emb_cache = getattr(args, "embedding_cache", None)
+    if emb_cache:
+        cache_report = compact_embedding_cache(
+            Path(emb_cache),
+            dtype=str(args.embedding_cache_dtype),
+            dry_run=bool(args.dry_run),
+            backup=bool(args.backup),
+            vacuum=bool(args.vacuum),
+            stamp=stamp,
+        )
+
+    total_before = sum(r["before"]["total_bytes"] for r in db_reports) + (
+        cache_report["before"]["total_bytes"] if cache_report else 0
+    )
+    payload: dict[str, Any] = {
+        "ok": True,
+        "dry_run": bool(args.dry_run),
+        "databases": db_reports,
+        "embedding_cache": cache_report,
+        "total_before_bytes": total_before,
+    }
+    if not args.dry_run:
+        total_after = sum(r["after"]["total_bytes"] for r in db_reports) + (
+            cache_report["after"]["total_bytes"]
+            if cache_report and "after" in cache_report
+            else (cache_report["before"]["total_bytes"] if cache_report else 0)
+        )
+        payload["total_after_bytes"] = total_after
+        payload["total_reclaimed_bytes"] = total_before - total_after
+    emit(payload)
+
+
 #: CLI commands whose name differs from the MCP tool they run, mapped to that
 #: tool's own hyphenated name, which is accepted as an alias. With these, every
 #: tool in ``mcp_tools.TOOL_SPEC`` is reachable as ``mneme <tool-name>``.
@@ -20836,8 +21958,29 @@ def build_parser() -> argparse.ArgumentParser:
     reflect.add_argument("--as-of", help="Only use evidence visible at this timezone-aware ISO 8601 instant")
     reflect.add_argument("--disposition", help="JSON object of reflect disposition traits")
     reflect.add_argument("--mission", help="Advisory mission string for reflection prioritization")
-    reflect.add_argument("--hierarchy-first", action="store_true", help="Prioritize hierarchical knowledge pages and observations before raw evidence")
+    reflect.add_argument(
+        "--hierarchy-first",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Prioritize hierarchical knowledge pages and observations before raw evidence",
+    )
     reflect.set_defaults(func=cmd_reflect)
+
+    entity_unmerge = sub.add_parser(
+        "entity-unmerge",
+        help="Split a previously merged entity back into separate canonical identities",
+    )
+    entity_unmerge.add_argument("--tenant", required=True)
+    entity_unmerge.add_argument("--merged-entity-id", required=True)
+    entity_unmerge.add_argument("--split-canonical-key")
+    entity_unmerge.add_argument("--branch", default="main")
+    entity_unmerge.add_argument(
+        "--role",
+        default="operator",
+        choices=["reader", "agent", "consolidator", "operator"],
+    )
+    entity_unmerge.add_argument("--source-trust-tier", type=int, default=1)
+    entity_unmerge.set_defaults(func=cmd_entity_unmerge)
 
     mental_model = sub.add_parser("mental-model", help="Manage private saved grounded answers")
     mental_model.set_defaults(func=cmd_mental_model)
@@ -22530,6 +23673,95 @@ def build_parser() -> argparse.ArgumentParser:
         help="Emit the capability report as JSON instead of shell-exportable lines",
     )
     capability.set_defaults(func=cmd_capability)
+
+    compact_local = sub.add_parser(
+        "compact-local",
+        help="Safely compact local SQLite memory store and optional embedding cache (never mutates Postgres)",
+    )
+    compact_local.add_argument(
+        "--db",
+        help="Path to a local SQLite database file or directory of per-tenant SQLite DBs (defaults to --store)",
+    )
+    compact_local.add_argument(
+        "--embedding-cache",
+        help="Optional path to HTTP embedding cache SQLite database to migrate to binary BLOB storage",
+    )
+    compact_local.add_argument(
+        "--embedding-cache-dtype",
+        default="f32",
+        choices=["f32", "f16", "f64"],
+        help="Binary storage dtype for migrated embedding cache vectors (default: f32)",
+    )
+    compact_local.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Inspect and report estimated savings without mutating any file",
+    )
+    compact_local.add_argument(
+        "--backup",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Create a verified SQLite backup before mutating files (default: enabled)",
+    )
+    compact_local.add_argument(
+        "--archive-dir",
+        help="Directory for SHA-256 hash-chained gzip archives of pruned/compacted audit_log records",
+    )
+    compact_local.add_argument(
+        "--keep-recent-audit-days",
+        type=int,
+        default=7,
+        help="Retain non-security audit_log rows newer than N days; pass -1 to disable age pruning",
+    )
+    compact_local.add_argument(
+        "--max-audit-record-bytes",
+        type=int,
+        default=16384,
+        help="Compact oversized non-security audit_log diff payloads larger than this threshold",
+    )
+    compact_local.add_argument(
+        "--compact-fts",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Upgrade evidence_fts triggers and rebuild slim FTS excluding learning_tool_result",
+    )
+    compact_local.add_argument(
+        "--compact-tool-metadata",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Strip duplicated raw tool output from evidence.metadata['tool_observation'] while preserving structured keys",
+    )
+    compact_local.add_argument(
+        "--compact-learning",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Compact multi-KB raw tool outputs in learning_episodes tool_events",
+    )
+    compact_local.add_argument(
+        "--compact-knowledge-page-embeddings",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Migrate knowledge_pages.maintenance JSON embeddings into knowledge_pages.embedding BLOB",
+    )
+    compact_local.add_argument(
+        "--compact-source-changes",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Deduplicate superseded memory_source_changes history while preserving max revision watermarks",
+    )
+    compact_local.add_argument(
+        "--expire-working",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Delete expired rows from working_memory",
+    )
+    compact_local.add_argument(
+        "--vacuum",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Checkpoint WAL, VACUUM, and run PRAGMA quick_check after compaction",
+    )
+    compact_local.set_defaults(func=cmd_compact_local)
     _add_learning_commands(sub)
     return parser
 

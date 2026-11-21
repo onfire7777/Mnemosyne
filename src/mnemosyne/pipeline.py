@@ -30,8 +30,11 @@ engine-specific storage access stays behind the ops members.
 
 from __future__ import annotations
 
+import atexit
 import copy
+import inspect
 import json
+import math
 import os
 import re
 import threading
@@ -41,6 +44,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
+from mnemosyne.algorithms import normalized_mmr_context
 from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
 from mnemosyne.cid_lists import shared_or_copy
 from mnemosyne.models import Hit, RetrievalResult, parse_dt, utc_now
@@ -100,6 +104,108 @@ _RESULT_CACHE_SIZE_ENV = "MNEMOSYNE_RETRIEVAL_RESULT_CACHE_SIZE"
 _RESULT_CACHE: OrderedDict[tuple[Any, ...], RetrievalResult] = OrderedDict()
 _RESULT_CACHE_LOCK = threading.Lock()
 _RESULT_CACHE_EXPLAIN_KEY = "retrieval_result_cache"
+
+_CHANNEL_EXECUTOR: ThreadPoolExecutor | None = None
+_CHANNEL_EXECUTOR_LOCK = threading.Lock()
+_IN_CHANNEL_EXECUTOR = threading.local()
+_KWARG_SUPPORT_CACHE: dict[tuple[Any, str], bool] = {}
+
+_INTENT_TEMPORAL_RE = re.compile(
+    r"\b(?:when|yesterday|today|tonight|last\s+(?:night|week|month|year)|this\s+(?:week|month|year)|"
+    r"\d+\s+(?:days?|weeks?|months?|years?)\s+ago|before|after|since|earliest|latest|recently|"
+    r"most\s+recent|chronological|timeline)\b",
+    re.IGNORECASE,
+)
+_INTENT_MULTIHOP_RE = re.compile(
+    r"(?:\b[A-Z]\w*(?:'s|’s)\b|\b(?:reports?\s+to|assigned\s+to|led\s+by|managed\s+by|"
+    r"depends?\s+on|connected\s+to|linked\s+to|works?\s+(?:for|with)|belongs?\s+to)\b)",
+)
+_INTENT_PREFERENCE_RE = re.compile(
+    r"\b(?:prefer|prefers|preferred|preference|preferences|favorite|favourite|dislike|"
+    r"always\s+use|never\s+use|usually|habit|habits|avoid|instead\s+of|workflow\s+style)\b",
+    re.IGNORECASE,
+)
+
+
+def _get_channel_executor() -> ThreadPoolExecutor:
+    """Return a shared module-level pool so retrieve() avoids per-call thread churn."""
+    global _CHANNEL_EXECUTOR
+    if _CHANNEL_EXECUTOR is None:
+        with _CHANNEL_EXECUTOR_LOCK:
+            if _CHANNEL_EXECUTOR is None:
+                pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="mnemosyne-ch")
+                atexit.register(pool.shutdown, wait=False)
+                _CHANNEL_EXECUTOR = pool
+    return _CHANNEL_EXECUTOR
+
+
+def _submit_in_channel_pool(
+    pool: ThreadPoolExecutor, fn: Callable[..., Any], *args: Any, **kwargs: Any
+) -> Any:
+    def _runner() -> Any:
+        prev = getattr(_IN_CHANNEL_EXECUTOR, "active", False)
+        _IN_CHANNEL_EXECUTOR.active = True
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            _IN_CHANNEL_EXECUTOR.active = prev
+
+    return pool.submit(_runner)
+
+
+def _accepts_kwarg(fn: Callable[..., Any], kwarg: str) -> bool:
+    """Check once per underlying callable whether it accepts ``kwarg`` (or ``**kwargs``)."""
+    func = getattr(fn, "__func__", fn)
+    key = (func, kwarg)
+    cached = _KWARG_SUPPORT_CACHE.get(key)
+    if cached is not None:
+        return cached
+    try:
+        sig = inspect.signature(fn)
+        supported = kwarg in sig.parameters or any(
+            param.kind == inspect.Parameter.VAR_KEYWORD
+            for param in sig.parameters.values()
+        )
+    except (TypeError, ValueError):
+        supported = False
+    if len(_KWARG_SUPPORT_CACHE) < 1024:
+        _KWARG_SUPPORT_CACHE[key] = supported
+    return supported
+
+
+def _query_intent_route_weights(
+    query: str, *, has_window: bool
+) -> dict[str, float] | None:
+    """Query-intent-conditioned RRF priors within immutable [0.05, 0.65] bounds.
+
+    Returns ``None`` for generic factual queries so flat RRF (and legacy
+    characterization goldens) stay unchanged.
+    """
+    if has_window or _INTENT_TEMPORAL_RE.search(query):
+        return {
+            "vector": 0.40,
+            "lexical": 0.35,
+            "graph": 0.15,
+            "working": 0.35,
+            "prospective": 0.20,
+        }
+    if _INTENT_MULTIHOP_RE.search(query):
+        return {
+            "vector": 0.35,
+            "lexical": 0.25,
+            "graph": 0.45,
+            "working": 0.25,
+            "prospective": 0.15,
+        }
+    if _INTENT_PREFERENCE_RE.search(query):
+        return {
+            "vector": 0.45,
+            "lexical": 0.35,
+            "graph": 0.15,
+            "working": 0.30,
+            "prospective": 0.20,
+        }
+    return None
 
 
 def _parallel_channels_default_enabled() -> bool:
@@ -848,6 +954,169 @@ def _diversify_facets(query: str, hits: list[Hit], k: int) -> list[Hit]:
     return selected + remaining_hits
 
 
+def _parse_utc_dt(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc) if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = parse_dt(value)
+        except (ValueError, TypeError, OverflowError):
+            return None
+        if parsed is not None:
+            return parsed.astimezone(timezone.utc) if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+    return None
+
+
+def _resolve_candidate_times(
+    ops: RetrievalPipelineOps,
+    hits: Sequence[Hit],
+    tenant_id: str,
+    branch: str,
+) -> dict[str, datetime]:
+    """Reuse ``_candidate_created_at`` / ``created_at`` before querying SQLite."""
+    times: dict[str, datetime] = {}
+    missing_ev: list[str] = []
+    missing_prov: dict[str, list[str]] = {}
+    for hit in hits:
+        dt = _parse_utc_dt(hit.metadata.get("_candidate_created_at")) or _parse_utc_dt(hit.metadata.get("created_at"))
+        if dt is None and hit.kind == "working":
+            wm = hit.metadata.get("working_memory")
+            if isinstance(wm, Mapping):
+                dt = _parse_utc_dt(wm.get("created_at"))
+        if dt is not None:
+            times[hit.id] = dt
+        elif hit.kind == "evidence":
+            missing_ev.append(hit.id)
+        else:
+            cids = [str(cid) for cid in hit.provenance if cid]
+            if cids:
+                missing_prov[hit.id] = cids
+    wanted = list(dict.fromkeys(missing_ev + [cid for cids in missing_prov.values() for cid in cids]))
+    if wanted:
+        lookup_many = getattr(ops, "evidence_created_at_many", None)
+        if callable(lookup_many):
+            try:
+                fetched = lookup_many(tenant_id, wanted, branch) or {}
+            except Exception:
+                fetched = {}
+            fetched_utc = {
+                str(cid): dt
+                for cid, val in fetched.items()
+                if (dt := _parse_utc_dt(val)) is not None
+            }
+            for cid in missing_ev:
+                if cid in fetched_utc:
+                    times[cid] = fetched_utc[cid]
+            for hit_id, cids in missing_prov.items():
+                for cid in cids:
+                    if cid in fetched_utc:
+                        times[hit_id] = fetched_utc[cid]
+                        break
+    return times
+
+
+def _hit_window_bounds(
+    hit: Hit,
+    window: TimeWindow,
+    times: Mapping[str, datetime],
+    *,
+    bare_happen: bool,
+) -> tuple[datetime, datetime] | None:
+    if window.axis == "event":
+        interval = _event_time_interval(hit)
+        if interval is None:
+            source_created = times.get(hit.id) if not bare_happen else None
+            if source_created is not None:
+                interval = (source_created, source_created)
+            else:
+                return None
+        moment, until = interval
+    else:
+        moment = times.get(hit.id)
+        if moment is None:
+            return None
+        until = moment
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    if until.tzinfo is None:
+        until = until.replace(tzinfo=timezone.utc)
+    return moment.astimezone(timezone.utc), until.astimezone(timezone.utc)
+
+
+def _filter_aux_hits_for_window(
+    ops: RetrievalPipelineOps,
+    hits: Sequence[Hit],
+    window: TimeWindow,
+    *,
+    tenant_id: str,
+    branch: str,
+    bare_happen: bool,
+    allow_fallback: bool,
+) -> list[Hit]:
+    """Scope auxiliary TEMPR channel hits to ``window`` and stamp ``temporal_match``."""
+    if not hits:
+        return []
+    start, end = window.start.astimezone(timezone.utc), window.end.astimezone(timezone.utc)
+    times = _resolve_candidate_times(ops, hits, tenant_id, branch)
+    scoped: list[Hit] = []
+    for hit in hits:
+        bounds = _hit_window_bounds(hit, window, times, bare_happen=bare_happen)
+        if bounds is None:
+            if not allow_fallback or bare_happen:
+                continue
+            proximity = 0.5
+            scoped.append(
+                replace(
+                    hit,
+                    metadata={
+                        **hit.metadata,
+                        "temporal_fallback": True,
+                        "temporal_proximity": proximity,
+                        "temporal_match": {
+                            "axis": window.axis,
+                            "start": start.isoformat(),
+                            "end": end.isoformat(),
+                        },
+                    },
+                )
+            )
+            continue
+        moment, until = bounds
+        matches = start <= moment < end if moment == until else moment < end and until > start
+        if matches:
+            meta: dict[str, Any] = {
+                **hit.metadata,
+                "temporal_match": {
+                    "axis": window.axis,
+                    "start": moment.isoformat(),
+                    "end": until.isoformat(),
+                },
+            }
+            if allow_fallback:
+                meta["temporal_fallback"] = False
+                meta["temporal_proximity"] = 1.0
+            scoped.append(replace(hit, metadata=meta))
+        elif allow_fallback:
+            dist_sec = (start - moment).total_seconds() if moment < start else max(0.0, (moment - end).total_seconds())
+            proximity = 1.0 / (1.0 + dist_sec / (7.0 * 86400.0))
+            scoped.append(
+                replace(
+                    hit,
+                    metadata={
+                        **hit.metadata,
+                        "temporal_fallback": True,
+                        "temporal_proximity": proximity,
+                        "temporal_match": {
+                            "axis": window.axis,
+                            "start": moment.isoformat(),
+                            "end": until.isoformat(),
+                        },
+                    },
+                )
+            )
+    return scoped
+
+
 def _time_window_route(
     ops: RetrievalPipelineOps,
     window: TimeWindow,
@@ -868,7 +1137,15 @@ def _time_window_route(
 
     from mnemosyne.passages import rank_passages
 
-    candidates = ops.passage_candidates(effective_filter)
+    include_operational = bool(effective_filter.get("include_operational"))
+    candidate_filter = (
+        effective_filter
+        if include_operational
+        else {**effective_filter, "_exclude_operational_evidence": True}
+    )
+    candidates = ops.passage_candidates(candidate_filter)
+    if not include_operational:
+        candidates = _relevant_memory_hits(candidates, False)
     question = window.rest or "what happened"
     date_only = not query_support(window_support_query(window), [])["query_terms"]
     speaker = _asked_speaker(question)
@@ -876,57 +1153,63 @@ def _time_window_route(
         "label": window.label, "start": window.start.isoformat(), "end": window.end.isoformat(),
         "axis": window.axis, "date_only": date_only,
     }
-    ranked: list[Hit] | None = list(candidates) if date_only else None
-    if passage_graph is not None and not date_only:
-        try:
-            ranked, _graph_explain = passage_graph.rank(question, candidates, ops.adapters.embedding, len(candidates))
-        except (ValueError, OSError) as exc:
-            explain["fallback"] = f"bm25 ({type(exc).__name__})"
-    if ranked is None:
-        ranked = rank_passages(ops, question, candidates, len(candidates))
-    seen = {hit.id for hit in ranked}
-    # Passages the ranking did not score still belong to the window, in stored order.
-    ranked = list(ranked) + [replace(hit, metadata=dict(hit.metadata)) for hit in candidates if hit.id not in seen]
-    times = ops.evidence_created_at_many(tenant_id, [hit.id for hit in ranked], branch)
-    inside: list[tuple[datetime, Hit]] = []
+    times = _resolve_candidate_times(ops, candidates, tenant_id, branch)
     start, end = window.start.astimezone(timezone.utc), window.end.astimezone(timezone.utc)
     unknown = 0
     is_happen_to = bool(re.search(r"\bhappen(?:ed|s)?\s+(?:to|with)\b", question, re.I))
     bare_happen = bool(re.search(r"\bhappen(?:ed|s)?\b", question, re.I)) and not is_happen_to
-    for hit in ranked:
-        if window.axis == "event":
-            interval = _event_time_interval(hit)
-            if interval is None:
-                source_created = times.get(hit.id) if not bare_happen else None
-                if source_created is not None:
-                    interval = (source_created, source_created)
-                else:
-                    unknown += 1
-                    continue
-            moment, until = interval
-        else:
-            moment = times.get(hit.id)
-            if moment is None:
-                continue
-            until = moment
-        if moment.tzinfo is None:
-            moment = moment.replace(tzinfo=timezone.utc)
-        if until.tzinfo is None:
-            until = until.replace(tzinfo=timezone.utc)
-        # Python compares wall times when datetimes share a ZoneInfo instance;
-        # converting to UTC keeps both occurrences of a DST hour distinct.
-        moment = moment.astimezone(timezone.utc)
-        until = until.astimezone(timezone.utc)
+
+    # Prefilter hard-window candidates BEFORE building/scoring BM25 so dated queries
+    # only score the full corpus if soft temporal fallback is genuinely needed.
+    in_window_candidates: list[Hit] = []
+    in_window_bounds: dict[str, tuple[datetime, datetime]] = {}
+    for hit in candidates:
+        bounds = _hit_window_bounds(hit, window, times, bare_happen=bare_happen)
+        if bounds is None:
+            if window.axis == "event":
+                unknown += 1
+            continue
+        moment, until = bounds
         matches = start <= moment < end if moment == until else moment < end and until > start
         if matches:
-            hit = replace(hit, metadata={**hit.metadata, "temporal_match": {
-                "axis": window.axis, "start": moment.isoformat(), "end": until.isoformat(),
-            }})
-            if date_only and (speaker is None or hit.metadata.get("actor") == speaker):
-                # A known authorized time match is the retrieval signal for a date-only
-                # question. Topic questions still need their own lexical/semantic support.
-                hit = replace(hit, score=1.0, channel=hit.channel + "+time-window")
-            inside.append((moment, hit))
+            in_window_candidates.append(hit)
+            in_window_bounds[hit.id] = (moment, until)
+
+    def _rank_subset(subset: list[Hit]) -> list[Hit]:
+        if not subset:
+            return []
+        ranked_sub: list[Hit] | None = None
+        if passage_graph is not None:
+            try:
+                ranked_sub, _graph_explain = passage_graph.rank(
+                    question, subset, ops.adapters.embedding, len(subset)
+                )
+            except (ValueError, OSError) as exc:
+                explain["fallback"] = f"bm25 ({type(exc).__name__})"
+        if ranked_sub is None:
+            ranked_sub = rank_passages(ops, question, subset, len(subset))
+        seen_sub = {h.id for h in ranked_sub}
+        return list(ranked_sub) + [
+            replace(h, metadata=dict(h.metadata)) for h in subset if h.id not in seen_sub
+        ]
+
+    if date_only:
+        ranked_inside_hits = [replace(h, metadata=dict(h.metadata)) for h in in_window_candidates]
+    else:
+        ranked_inside_hits = _rank_subset(in_window_candidates)
+
+    inside: list[tuple[datetime, Hit]] = []
+    for hit in ranked_inside_hits:
+        moment, until = in_window_bounds[hit.id]
+        hit = replace(hit, metadata={**hit.metadata, "temporal_match": {
+            "axis": window.axis, "start": moment.isoformat(), "end": until.isoformat(),
+        }})
+        if date_only and (speaker is None or hit.metadata.get("actor") == speaker):
+            # A known authorized time match is the retrieval signal for a date-only
+            # question. Topic questions still need their own lexical/semantic support.
+            hit = replace(hit, score=1.0, channel=hit.channel + "+time-window")
+        inside.append((moment, hit))
+
     if re.search(r"\b(first|earliest)\b", question):
         if not date_only and inside:
             ranked_inside = sorted(inside, key=lambda it: it[1].score, reverse=True)
@@ -951,9 +1234,9 @@ def _time_window_route(
     )["score"] >= QUERY_SUPPORT_THRESHOLD
     if not date_only and not bare_happen and (is_relative_ago or not answered):
         # Soft Temporal Fallback / Relative-Ago Proximity Ranking: when 0 hits match the hard window,
-        # or when a conversational "X days/weeks ago" query includes a topic, score all candidates
-        # by lexical/semantic relevance weighted by temporal proximity (giving exact-window matches
-        # a 1.35x multiplier while retaining strong topical matches from adjacent days).
+        # or when a conversational "X days/weeks ago" query includes a topic, score all non-operational
+        # candidates by lexical/semantic relevance weighted by temporal proximity (giving exact-window
+        # matches a 1.35x multiplier while retaining strong topical matches from adjacent days).
         if not inside or not is_relative_ago:
             explain["fallback"] = "soft_temporal_proximity"
             # Beyond the old empty-span fallback, a hit from another day must name the span to count.
@@ -961,6 +1244,7 @@ def _time_window_route(
                 explain["span_unanswered"] = True
         else:
             explain["relative_backfill"] = True
+        ranked = _rank_subset(candidates)
         inside_ids = {hit.id for _m, hit in inside}
         fallback_scored: list[tuple[float, Hit]] = []
         for hit in ranked:
@@ -973,14 +1257,7 @@ def _time_window_route(
             else:
                 cand_time = times.get(hit.id)
             if cand_time is None and (window.axis != "event" or not bare_happen):
-                cand_val = hit.metadata.get("_candidate_created_at") or hit.metadata.get("created_at")
-                if isinstance(cand_val, datetime):
-                    cand_time = cand_val
-                elif isinstance(cand_val, str):
-                    try:
-                        cand_time = parse_dt(cand_val)
-                    except Exception:
-                        pass
+                cand_time = _parse_utc_dt(hit.metadata.get("_candidate_created_at")) or _parse_utc_dt(hit.metadata.get("created_at"))
             if cand_time is not None:
                 if cand_time.tzinfo is None:
                     cand_time = cand_time.replace(tzinfo=timezone.utc)
@@ -1045,12 +1322,15 @@ def deduplicate_observation_preferred(
     *,
     fact_budget_tokens: int = 2048,
     source_expansion_budget_tokens: int = 1024,
+    query: str = "",
 ) -> tuple[list[Hit], dict[str, Any]]:
     """Observation-preferred deduplication with an independent source expansion token budget.
 
     When corroborated Observations or KnowledgePages cover a raw source Evidence CID,
     retains the synthesized Observation/KnowledgePage in the primary fact budget and
     allocates redundant raw source chunks to the independent ``source_expansion_budget_tokens``.
+    Oversized uncovered evidence hits are trimmed to their highest-scoring query window
+    rather than dropped or allowed to exhaust the entire budget on one transcript.
     """
     primary_hits: list[Hit] = []
     covered_source_cids: set[str] = set()
@@ -1068,23 +1348,36 @@ def deduplicate_observation_preferred(
             for cid in h.metadata.get("source_evidence_cids", ()):
                 covered_source_cids.add(str(cid))
 
+    effective_fact_budget = max(1, fact_budget_tokens)
     fact_tokens_used = 0
     for h in hits:
         if h.kind == "evidence" and h.id in covered_source_cids:
             deferred_sources.append(h)
             continue
-        t_cost = approx_tokens(h.text)
-        if fact_tokens_used + t_cost <= max(1, fact_budget_tokens) or not primary_hits:
-            primary_hits.append(h)
+        candidate = h
+        t_cost = approx_tokens(candidate.text)
+        remaining = effective_fact_budget - fact_tokens_used
+        if t_cost > remaining and candidate.kind == "evidence":
+            trim_limit = remaining if primary_hits else effective_fact_budget
+            if trim_limit >= 120:
+                candidate = _trim_hit_window(candidate, query=query, max_tokens=trim_limit)
+                t_cost = approx_tokens(candidate.text)
+        if fact_tokens_used + t_cost <= effective_fact_budget or not primary_hits:
+            primary_hits.append(candidate)
             fact_tokens_used += t_cost
 
     expanded_sources: list[Hit] = []
     expansion_tokens_used = 0
     if source_expansion_budget_tokens > 0:
         for src_hit in deferred_sources:
-            t_cost = approx_tokens(src_hit.text)
+            candidate = src_hit
+            t_cost = approx_tokens(candidate.text)
+            remaining_exp = source_expansion_budget_tokens - expansion_tokens_used
+            if t_cost > remaining_exp and remaining_exp >= 120 and candidate.kind == "evidence":
+                candidate = _trim_hit_window(candidate, query=query, max_tokens=remaining_exp)
+                t_cost = approx_tokens(candidate.text)
             if expansion_tokens_used + t_cost <= source_expansion_budget_tokens:
-                expanded_sources.append(src_hit)
+                expanded_sources.append(candidate)
                 expansion_tokens_used += t_cost
 
     combined = primary_hits + expanded_sources
@@ -1185,16 +1478,7 @@ _FUNCTION_WORDS = frozenset(
 )
 
 
-def _source_only_local_routes(adapters: RetrievalAdapters, routes: list[list[Hit]]) -> bool:
-    """Whether ordinary local search has only raw sources to rank.
-
-    Hash vectors and the local reranker repeat term overlap without corpus IDF.
-    They must not erase BM25's rare-term signal in source-only search. Keep
-    provider-backed, customized, and mixed-memory rankings on their existing path.
-    """
-    from mnemosyne.passages import is_passage
-
-    dense, lexical, graph, prospective, working = routes
+def _is_default_local_adapters(adapters: RetrievalAdapters) -> bool:
     return (
         type(adapters.embedding) is HashingEmbeddingProvider
         and type(adapters.reranker) is LocalSimilarityReranker
@@ -1207,6 +1491,21 @@ def _source_only_local_routes(adapters: RetrievalAdapters, routes: list[list[Hit
         }
         and adapters.lexical_retriever is None
         and adapters.graph_retriever is None
+    )
+
+
+def _source_only_local_routes(adapters: RetrievalAdapters, routes: list[list[Hit]]) -> bool:
+    """Whether ordinary local search has only raw sources to rank.
+
+    Hash vectors and the local reranker repeat term overlap without corpus IDF.
+    They must not erase BM25's rare-term signal in source-only search. Keep
+    provider-backed, customized, and mixed-memory rankings on their existing path.
+    """
+    from mnemosyne.passages import is_passage
+
+    dense, lexical, graph, prospective, working = routes
+    return (
+        _is_default_local_adapters(adapters)
         and not (graph or prospective or working)
         and bool(dense or lexical)
         and all(
@@ -1498,7 +1797,14 @@ class RetrievalPipelineOps(Protocol):
     # -- fusion / ordering / budget helpers ------------------------------------
     def _rrf(self, ranked_lists: list[list[Hit]], k: int) -> list[Hit]: ...
 
-    def _mmr(self, query: str, hits: list[Hit], k: int) -> list[Hit]: ...
+    def _mmr(
+        self,
+        query: str,
+        hits: list[Hit],
+        k: int,
+        *,
+        filt: dict[str, Any] | None = None,
+    ) -> list[Hit]: ...
 
     def _apply_standing_scores(self, hits: list[Hit]) -> list[Hit]: ...
 
@@ -1753,64 +2059,212 @@ def _run_global_sensemaking(
 def _lift_current_over_superseded(
     ops: RetrievalPipelineOps, ordered: list[Hit], filt: dict[str, Any], limit: int
 ) -> list[Hit]:
-    """Rank the statement that replaced a superseded one directly above it and label both.
+    """Rank current statements directly above superseded ones and surface active conflicts.
 
-    A source counts as superseded only when no live assertion still cites it and the
-    ``superseded_by`` chain of one that did ends at a live assertion.
+    * Evidence hits: a source counts as superseded when no live assertion still cites it
+      and the ``superseded_by`` chain of one that did ends at a live assertion.
+    * Assertion hits: a superseded assertion hit lifts its live ``superseded_by`` successor
+      directly above it (through authorized read gates).
+    * Contested assertions: marks ``contested=True`` and cross-links / pairs authorized
+      conflicting sibling assertions sharing ``(subject, predicate)`` with distinct objects.
     """
-
-    lookup = getattr(ops, "assertions_citing", None)
-    wanted = {hit.id for hit in ordered if hit.kind == "evidence"}
-    if lookup is None or not wanted:
+    if not ordered:
         return ordered
     tenant_id, branch = filt["tenant_id"], filt["branch"]
-    citing = lookup(tenant_id, sorted(wanted), branch)
-    by_id = {item.id: item for item in citing}
+    lookup = getattr(ops, "assertions_citing", None)
+    get_proj = getattr(ops, "_get_projection_for_adapter", None)
+    wanted_evidence = {hit.id for hit in ordered if hit.kind == "evidence"}
+    assertion_hits = [hit for hit in ordered if hit.kind == "assertion"]
     live = {"active", "contested"}
+
+    citing: list[Any] = (
+        list(lookup(tenant_id, sorted(wanted_evidence), branch))
+        if (lookup is not None and wanted_evidence)
+        else []
+    )
+    by_id: dict[str, Any] = {item.id: item for item in citing}
+
+    def _resolve_assertion(aid: str) -> Any | None:
+        found = by_id.get(aid)
+        if found is None and callable(get_proj):
+            found = get_proj(tenant_id, branch, "assertion", aid)
+            if found is not None:
+                by_id[aid] = found
+        return found
+
+    def _walk_to_live_successor(old: Any) -> Any | None:
+        item, seen = old, {old.id}
+        while (
+            item is not None
+            and item.status == "superseded"
+            and item.superseded_by
+            and item.superseded_by not in seen
+        ):
+            seen.add(item.superseded_by)
+            item = _resolve_assertion(item.superseded_by)
+        return item if (item is not None and item.status in live) else None
+
+    # 1. Evidence supersession mapping
     current = {cid for item in citing if item.status in live for cid in item.source_evidence_cids}
-    stale: dict[str, list[str]] = {}
+    stale_evidence: dict[str, list[str]] = {}
     for old in citing:
         if old.status != "superseded":
             continue
-        item, seen = old, {old.id}
-        # shortcut: one read per hop of the chain; resolve it inside the store if chains get long
-        while item is not None and item.status == "superseded" and item.superseded_by and item.superseded_by not in seen:
-            seen.add(item.superseded_by)
-            item = by_id.get(item.superseded_by) or ops._get_projection_for_adapter(
-                tenant_id, branch, "assertion", item.superseded_by
-            )
-        if item is None or item.status not in live:
+        item = _walk_to_live_successor(old)
+        if item is None:
             continue
-        for cid in wanted.intersection(old.source_evidence_cids).difference(current):
-            successors = stale.setdefault(cid, [])
+        for cid in wanted_evidence.intersection(old.source_evidence_cids).difference(current):
+            successors = stale_evidence.setdefault(cid, [])
             successors.extend(c for c in item.source_evidence_cids if c not in successors)
-    if not stale:
+
+    # 2. Assertion supersession mapping & contested-assertion conflict pairing
+    stale_assertions: dict[str, str] = {}
+    contested_assertion_ids: set[str] = set()
+    contested_evidence_ids: set[str] = {
+        cid
+        for item in citing
+        if item.status == "contested"
+        for cid in item.source_evidence_cids
+        if cid in wanted_evidence
+    }
+    key_to_assertions: dict[tuple[str, str], list[Any]] = {}
+    for item in citing:
+        if item.status in live:
+            sp_key = (str(item.subject).strip().casefold(), str(item.predicate).strip().casefold())
+            key_to_assertions.setdefault(sp_key, []).append(item)
+
+    for hit in assertion_hits:
+        status = hit.metadata.get("status")
+        if status == "contested":
+            contested_assertion_ids.add(hit.id)
+        proj = _resolve_assertion(hit.id)
+        if proj is not None:
+            if proj.status == "superseded":
+                succ = _walk_to_live_successor(proj)
+                if succ is not None:
+                    stale_assertions[hit.id] = succ.id
+            elif proj.status in live:
+                if proj.status == "contested":
+                    contested_assertion_ids.add(hit.id)
+                sp_key = (str(proj.subject).strip().casefold(), str(proj.predicate).strip().casefold())
+                bucket = key_to_assertions.setdefault(sp_key, [])
+                if not any(a.id == proj.id for a in bucket):
+                    bucket.append(proj)
+
+    # For contested assertions, inspect conflicting siblings sharing (subject, predicate)
+    # with a distinct object so both sides are cross-linked and paired adjacently.
+    conflicting_pairs: dict[str, list[str]] = {}
+    if contested_assertion_ids:
+        for group in key_to_assertions.values():
+            if len(group) < 2:
+                continue
+            for item in group:
+                if item.id not in contested_assertion_ids and item.status != "contested":
+                    continue
+                obj_norm = str(item.object).strip().casefold()
+                siblings = [
+                    other.id
+                    for other in group
+                    if other.id != item.id
+                    and str(other.object).strip().casefold() != obj_norm
+                ]
+                if siblings:
+                    conflicting_pairs[item.id] = sorted(set(siblings))
+                    for sib_id in siblings:
+                        existing = conflicting_pairs.setdefault(sib_id, [])
+                        if item.id not in existing:
+                            existing.append(item.id)
+
+    if not stale_evidence and not stale_assertions and not contested_assertion_ids and not contested_evidence_ids:
         return ordered
-    ranked = {hit.id: hit for hit in ordered if hit.kind == "evidence"}
-    above: set[str] = set()
-    moved: set[str] = set()
+
+    ranked_evidence = {hit.id: hit for hit in ordered if hit.kind == "evidence"}
+    ranked_assertions = {hit.id: hit for hit in ordered if hit.kind == "assertion"}
+    above_ev: set[str] = set()
+    moved_ev: set[str] = set()
+    above_as: set[str] = set()
+    moved_as: set[str] = set()
     lifted: list[Hit] = []
     for hit in ordered:
-        if hit.kind == "evidence" and hit.id in moved:
+        if hit.kind == "evidence" and hit.id in moved_ev:
             continue
-        if hit.kind == "evidence" and hit.id in stale:
-            for cid in stale[hit.id]:
-                if cid in above:
+        if hit.kind == "assertion" and hit.id in moved_as:
+            continue
+        if hit.kind == "evidence" and hit.id in stale_evidence:
+            for cid in stale_evidence[hit.id]:
+                if cid in above_ev:
                     continue
                 # A successor the ranking did not return is read by id through the authorised reader.
-                found = [ranked[cid]] if cid in ranked else filter_derived_adapter_hits(ops, [replace(hit, id=cid)], filt)
+                found = [ranked_evidence[cid]] if cid in ranked_evidence else filter_derived_adapter_hits(ops, [replace(hit, id=cid)], filt)
                 for successor in found:
-                    above.add(cid)
-                    moved.add(cid)
+                    above_ev.add(cid)
+                    moved_ev.add(cid)
                     lifted.append(replace(
                         successor, score=hit.score, metadata={**successor.metadata, "supersedes": hit.id}
                     ))
             # Name only successors the caller was shown: an unreadable one stays unnamed.
-            shown = [cid for cid in stale[hit.id] if cid in above]
+            shown = [cid for cid in stale_evidence[hit.id] if cid in above_ev]
             if shown:
                 hit = replace(hit, metadata={**hit.metadata, "superseded_by": shown})
-        above.add(hit.id)
+        elif hit.kind == "assertion" and hit.id in stale_assertions:
+            succ_id = stale_assertions[hit.id]
+            if succ_id not in above_as:
+                found = (
+                    [ranked_assertions[succ_id]]
+                    if succ_id in ranked_assertions
+                    else filter_derived_adapter_hits(ops, [replace(hit, id=succ_id)], filt)
+                )
+                for successor in found:
+                    above_as.add(succ_id)
+                    moved_as.add(succ_id)
+                    lifted.append(replace(
+                        successor, score=hit.score, metadata={**successor.metadata, "supersedes": hit.id}
+                    ))
+            if succ_id in above_as:
+                hit = replace(hit, metadata={**hit.metadata, "superseded_by": [succ_id]})
+
+        if hit.kind == "evidence" and hit.id in contested_evidence_ids:
+            hit = replace(hit, metadata={**hit.metadata, "contested": True})
+        elif hit.kind == "assertion" and (hit.id in contested_assertion_ids or hit.id in conflicting_pairs):
+            patch: dict[str, Any] = {}
+            if hit.id in contested_assertion_ids:
+                patch["contested"] = True
+            visible_conflicts = [
+                cid for cid in conflicting_pairs.get(hit.id, [])
+                if cid in ranked_assertions
+            ]
+            if visible_conflicts:
+                patch["contested"] = True
+                patch["conflicting_assertion_ids"] = visible_conflicts
+            if patch:
+                hit = replace(hit, metadata={**hit.metadata, **patch})
+
+        if hit.kind == "evidence":
+            above_ev.add(hit.id)
+        elif hit.kind == "assertion":
+            above_as.add(hit.id)
         lifted.append(hit)
+
+        # Pair authorized conflicting sibling assertions immediately after a contested hit
+        if hit.kind == "assertion" and hit.id in contested_assertion_ids:
+            for sib_id in conflicting_pairs.get(hit.id, []):
+                if sib_id in ranked_assertions and sib_id not in above_as and sib_id not in moved_as:
+                    sib = ranked_assertions[sib_id]
+                    sib_conflicts = [
+                        cid for cid in conflicting_pairs.get(sib_id, [])
+                        if cid in ranked_assertions
+                    ]
+                    sib = replace(
+                        sib,
+                        metadata={
+                            **sib.metadata,
+                            "contested": True,
+                            "conflicting_assertion_ids": sib_conflicts,
+                        },
+                    )
+                    above_as.add(sib_id)
+                    moved_as.add(sib_id)
+                    lifted.append(sib)
     return lifted[: max(limit, len(ordered))]
 
 
@@ -1869,6 +2323,12 @@ def run_retrieval_pipeline(
     k = policy.deep_top_k if deep else policy.top_k
     graph_k = max(k, policy.rerank_width)
     token_budget = requested_token_budget(effective_filter, policy)
+    from mnemosyne.access_policy import effective_max_sensitivity
+
+    include_quarantined = bool(effective_filter.get("include_quarantined", False))
+    include_operational = bool(effective_filter.get("include_operational", False))
+    max_trust = _requested_max_trust_tier(effective_filter, policy)
+    max_sensitivity = effective_max_sensitivity(effective_filter, policy.max_sensitivity)
     cache_key = (
         None
         if query_mode == GLOBAL_SENSEMAKING_MODE
@@ -1955,15 +2415,31 @@ def run_retrieval_pipeline(
     def source_scope(hit):
         key = (hit.tenant_id, hit.branch, hit.id)
         if key not in source_scopes:
-            source = ops.get_evidence(hit.tenant_id, hit.id, branch=hit.branch)
-            # Owner identity stays private and is read only after a collision.
-            # Missing or non-text sources retain their individual hit identity.
-            source_scopes[key] = (
-                ("owner", source.user_id, source.actor, source.content_pointer)
-                if source is not None and source.user_id
-                and source.source_type == "learning_turn" and source.modality == "text"
-                else ("item", *key)
-            )
+            if (
+                hit.kind != "evidence"
+                or hit.metadata.get("source_type") != "learning_turn"
+                or hit.metadata.get("modality") != "text"
+            ):
+                source_scopes[key] = ("item", *key)
+            else:
+                turn_scope = getattr(ops, "evidence_turn_scope", None)
+                if callable(turn_scope):
+                    row = turn_scope(hit.tenant_id, hit.id, hit.branch)
+                    source_scopes[key] = (
+                        ("owner", row[0], row[1], row[2])
+                        if row is not None and row[0] and row[3] == "learning_turn" and row[4] == "text"
+                        else ("item", *key)
+                    )
+                else:
+                    source = ops.get_evidence(hit.tenant_id, hit.id, branch=hit.branch)
+                    # Owner identity stays private and is read only after a collision.
+                    # Missing or non-text sources retain their individual hit identity.
+                    source_scopes[key] = (
+                        ("owner", source.user_id, source.actor, source.content_pointer)
+                        if source is not None and source.user_id
+                        and source.source_type == "learning_turn" and source.modality == "text"
+                        else ("item", *key)
+                    )
         return source_scopes[key]
 
     # The local channels score term overlap without IDF: function words would outvote the one
@@ -2007,9 +2483,130 @@ def run_retrieval_pipeline(
                 # if none were configured, so the scores stay on the scale callers know.
                 semantic = False
                 passage_graph_explain["fallback"] = "default"
+    window_dense_aux: list[Hit] = []
     if window is not None:
         dense = ops._mark_retrieved_text_as_data(window_hits)
-        lexical, graph, prospective, working, working_explain = [], [], [], [], {}
+        date_only_win = bool((window_explain or {}).get("date_only"))
+        win_q = window.rest or "what happened"
+        is_happen_to_win = bool(re.search(r"\bhappen(?:ed|s)?\s+(?:to|with)\b", win_q, re.I))
+        bare_happen_win = bool(re.search(r"\bhappen(?:ed|s)?\b", win_q, re.I)) and not is_happen_to_win
+        win_soft_fallback = bool(
+            (window_explain or {}).get("fallback") == "soft_temporal_proximity"
+            or (window_explain or {}).get("relative_backfill")
+        )
+        if date_only_win or passage_mode or bare_happen_win:
+            lexical, graph, prospective, working, working_explain = [], [], [], [], {}
+        else:
+            win_content_q = " ".join(
+                w for w in win_q.split()
+                if re.split("['’]", w.strip("?!.,;:\"'()").lower())[0] not in _FUNCTION_WORDS
+            ) or win_q
+            win_filt = (
+                effective_filter
+                if include_operational
+                else {**effective_filter, "_exclude_operational_evidence": True}
+            )
+            use_dense_win = ops.adapters.embedding.name != "local-hashing"
+
+            def _win_vector() -> list[Hit]:
+                if not use_dense_win:
+                    return []
+                try:
+                    raw = ops.vector_search(win_q, policy.rerank_width, win_filt)
+                except (ValueError, OSError, TimeoutError):
+                    return []
+                if not include_operational:
+                    raw = _relevant_memory_hits(raw, False)
+                return _filter_aux_hits_for_window(
+                    ops, raw, window, tenant_id=tenant_id, branch=branch,
+                    bare_happen=bare_happen_win, allow_fallback=win_soft_fallback,
+                )
+
+            def _win_lexical() -> list[Hit]:
+                raw = ops.lexical_search(win_content_q, policy.rerank_width, win_filt)
+                if not include_operational:
+                    raw = _relevant_memory_hits(raw, False)
+                return _filter_aux_hits_for_window(
+                    ops, raw, window, tenant_id=tenant_id, branch=branch,
+                    bare_happen=bare_happen_win, allow_fallback=win_soft_fallback,
+                )
+
+            def _win_graph() -> list[Hit]:
+                raw = _fast_graph_hits(
+                    ops.graph_ppr(
+                        tokenize(win_content_q),
+                        graph_k,
+                        as_of=effective_filter.get("as_of"),
+                        tenant_id=tenant_id,
+                        branch=branch,
+                        use_cache=not deep,
+                        filt=effective_filter,
+                    ),
+                    deep=deep,
+                )
+                return _filter_aux_hits_for_window(
+                    ops, raw, window, tenant_id=tenant_id, branch=branch,
+                    bare_happen=bare_happen_win, allow_fallback=win_soft_fallback,
+                )
+
+            def _win_prospective() -> list[Hit]:
+                if not prospective_requested:
+                    return []
+                raw = prospective_memory_hits(
+                    ops, query, policy.rerank_width, effective_filter, as_of=retrieval_instant
+                )
+                return [
+                    replace(
+                        hit,
+                        metadata={
+                            **hit.metadata,
+                            "temporal_match": {
+                                "axis": window.axis,
+                                "start": window.start.astimezone(timezone.utc).isoformat(),
+                                "end": window.end.astimezone(timezone.utc).isoformat(),
+                            },
+                        },
+                    )
+                    for hit in raw
+                ]
+
+            def _win_working() -> tuple[list[Hit], dict[str, Any]]:
+                if not working_requested:
+                    return [], {}
+                raw, report = _working_memory_route(
+                    ops,
+                    query=query,
+                    tenant_id=tenant_id,
+                    branch=branch,
+                    k=policy.rerank_width,
+                    effective_filter=effective_filter,
+                    policy=policy,
+                    evaluated_at=retrieval_instant,
+                )
+                scoped = _filter_aux_hits_for_window(
+                    ops, raw, window, tenant_id=tenant_id, branch=branch,
+                    bare_happen=bare_happen_win, allow_fallback=win_soft_fallback,
+                )
+                return scoped, report
+
+            if parallel_channels_enabled() and not getattr(_IN_CHANNEL_EXECUTOR, "active", False):
+                pool = _get_channel_executor()
+                f_vec = _submit_in_channel_pool(pool, _win_vector)
+                f_lex = _submit_in_channel_pool(pool, _win_lexical)
+                f_graph = _submit_in_channel_pool(pool, _win_graph)
+                f_prosp = _submit_in_channel_pool(pool, _win_prospective)
+                f_work = _submit_in_channel_pool(pool, _win_working)
+                window_dense_aux = f_vec.result()
+                lexical = f_lex.result()
+                graph = f_graph.result()
+                prospective = f_prosp.result()
+                working, working_explain = f_work.result()
+            else:
+                window_dense_aux = _win_vector()
+                lexical = _win_lexical()
+                graph = _win_graph()
+                prospective = _win_prospective()
+                working, working_explain = _win_working()
     elif semantic:
         from mnemosyne.passages import is_passage
 
@@ -2018,12 +2615,24 @@ def run_retrieval_pipeline(
             if graph_ranked is not None
             else ops.lexical_search(query, width, {**effective_filter, "query_mode": "passages"})
         )
-        # Passages come from the graph; lexical keeps facts, preferences and summaries.
+        # Passages come from the graph; lexical keeps facts, preferences and summaries,
+        # and graph_ppr preserves structured relation traversal alongside the passage graph.
         lexical = [
             hit for hit in ops.lexical_search(query, policy.rerank_width, effective_filter)
             if not is_passage(hit)
         ]
-        graph = []
+        graph = _fast_graph_hits(
+            ops.graph_ppr(
+                tokenize(content_query),
+                graph_k,
+                as_of=effective_filter.get("as_of"),
+                tenant_id=tenant_id,
+                branch=branch,
+                use_cache=not deep,
+                filt=effective_filter,
+            ),
+            deep=deep,
+        )
         prospective = prospective_memory_hits(
             ops, query, policy.rerank_width, effective_filter, as_of=retrieval_instant
         )
@@ -2059,29 +2668,37 @@ def run_retrieval_pipeline(
             lexical = [hit for hit in lexical if is_passage(hit)]
             dense = [hit for hit in dense if is_passage(hit)]
         graph, prospective, working, working_explain = [], [], [], {}
-    elif parallel_channels_enabled():
-        with ThreadPoolExecutor(max_workers=5) as pool:
-            dense_future = pool.submit(search_relevance, ops.vector_search, policy.rerank_width, effective_filter, hash_query)
-            lexical_future = pool.submit(search_relevance, ops.lexical_search, policy.rerank_width, effective_filter, content_query)
-            graph_future = pool.submit(
-                ops.graph_ppr,
-                tokenize(content_query),
-                graph_k,
-                as_of=effective_filter.get("as_of"),
-                tenant_id=tenant_id,
-                branch=branch,
-                use_cache=not deep,
-                filt=effective_filter,
-            )
-            prospective_future = pool.submit(
-                prospective_memory_hits,
-                ops,
-                query,
-                policy.rerank_width,
-                effective_filter,
-                as_of=retrieval_instant,
-            )
-            working_future = pool.submit(
+    elif parallel_channels_enabled() and not getattr(_IN_CHANNEL_EXECUTOR, "active", False):
+        pool = _get_channel_executor()
+        dense_future = _submit_in_channel_pool(
+            pool, search_relevance, ops.vector_search, policy.rerank_width, effective_filter, hash_query
+        )
+        lexical_future = _submit_in_channel_pool(
+            pool, search_relevance, ops.lexical_search, policy.rerank_width, effective_filter, content_query
+        )
+        graph_future = _submit_in_channel_pool(
+            pool,
+            ops.graph_ppr,
+            tokenize(content_query),
+            graph_k,
+            as_of=effective_filter.get("as_of"),
+            tenant_id=tenant_id,
+            branch=branch,
+            use_cache=not deep,
+            filt=effective_filter,
+        )
+        prospective_future = _submit_in_channel_pool(
+            pool,
+            prospective_memory_hits,
+            ops,
+            query,
+            policy.rerank_width,
+            effective_filter,
+            as_of=retrieval_instant,
+        )
+        working_future = (
+            _submit_in_channel_pool(
+                pool,
                 _working_memory_route,
                 ops,
                 query=query,
@@ -2091,12 +2708,15 @@ def run_retrieval_pipeline(
                 effective_filter=effective_filter,
                 policy=policy,
                 evaluated_at=retrieval_instant,
-            ) if working_requested else None
-            dense = dense_future.result()
-            lexical = lexical_future.result()
-            graph = _fast_graph_hits(graph_future.result(), deep=deep)
-            prospective = prospective_future.result()
-            working, working_explain = working_future.result() if working_future is not None else ([], {})
+            )
+            if working_requested
+            else None
+        )
+        dense = dense_future.result()
+        lexical = lexical_future.result()
+        graph = _fast_graph_hits(graph_future.result(), deep=deep)
+        prospective = prospective_future.result()
+        working, working_explain = working_future.result() if working_future is not None else ([], {})
     else:
         dense = search_relevance(ops.vector_search, policy.rerank_width, effective_filter, hash_query)
         lexical = search_relevance(ops.lexical_search, policy.rerank_width, effective_filter, content_query)
@@ -2129,21 +2749,37 @@ def run_retrieval_pipeline(
             if working_requested
             else ([], {})
         )
+    dense_cosines: dict[tuple[str, str], float] = (
+        {
+            (hit.kind, hit.id): float(hit.score)
+            for hit in (window_dense_aux if window is not None else dense)
+            if hit.metadata.get("stored_embedding_used") and math.isfinite(float(hit.score))
+        }
+        if ops.adapters.embedding.name != "local-hashing"
+        else {}
+    )
     ranked_routes = [dense, lexical, graph, prospective, working]
     source_ranked: list[Hit] | None = None
     bridge_report: dict[str, Any] | None = None
+    empty_local_passage_probe = False
+    if not any(ranked_routes) and _is_default_local_adapters(ops.adapters):
+        from mnemosyne.passages import TAXONOMIC_EXPANSIONS, _stem_passage_token
+
+        empty_local_passage_probe = bool(
+            re.search(r"\b(?:how\s+many|how\s+much)\b", query, re.I)
+            or any(
+                term in TAXONOMIC_EXPANSIONS or _stem_passage_token(term) in TAXONOMIC_EXPANSIONS
+                for term in tokenize(query)
+            )
+        )
     if (
         window is None and query_mode is None and not deep and not effective_filter.get("as_of")
-        and passage_graph is None and _source_only_local_routes(ops.adapters, ranked_routes)
+        and passage_graph is None
+        and (_source_only_local_routes(ops.adapters, ranked_routes) or empty_local_passage_probe)
     ):
         # Reauthorize the complete source corpus, not only the first channel's top
         # hits. The passage route builds BM25 solely from readable, redacted text.
         sources = search_relevance(ops.lexical_search, width, {**effective_filter, "query_mode": "passages"})
-        include_quarantined = bool(effective_filter.get("include_quarantined", False))
-        default_max_trust = int(TrustTier.UNTRUSTED_EXTERNAL) if include_quarantined else policy.max_trust_tier
-        max_trust = int(effective_filter.get("max_trust_tier", effective_filter.get("min_trust_tier", default_max_trust)))
-        from mnemosyne.access_policy import effective_max_sensitivity
-        max_sensitivity = effective_max_sensitivity(effective_filter, policy.max_sensitivity)
         sources = [
             hit for hit in sources
             if hit.trust_tier <= max_trust
@@ -2246,7 +2882,9 @@ def run_retrieval_pipeline(
         # Explicit confidence switches the legacy conformal set to per-example
         # probabilities. Do not feed unbounded BM25 siblings into that path,
         # including sources found beyond the original channels' cutoff.
-        if (bridge_report and bridge_report["applied"]) or not any("confidence" in hit.metadata for hit in sources):
+        if empty_local_passage_probe and not sources:
+            pass
+        elif (bridge_report and bridge_report["applied"]) or not any("confidence" in hit.metadata for hit in sources):
             source_ranked = sources
             for hit in source_ranked:
                 hit.metadata.setdefault("score_scale", "bm25")
@@ -2257,20 +2895,54 @@ def run_retrieval_pipeline(
     )
     def fuse(ranked_lists, k):
         weights = effective_filter.get("_learning_route_weights")
+        explicit_weights = weights is not None
+        if weights is None and _accepts_kwarg(ops._rrf, "channel_weights"):
+            weights = _query_intent_route_weights(query, has_window=window is not None)
         if weights is None:
             return ops._rrf(ranked_lists, k=k)
-        if not isinstance(weights, dict) or any(not .05 <= value <= .65 for value in weights.values()):
+        if explicit_weights and (
+            not isinstance(weights, dict) or any(not .05 <= value <= .65 for value in weights.values())
+        ):
             raise ValueError("learning route weights must be within immutable bounds")
         return ops._rrf(ranked_lists, k=k, channel_weights=weights)
 
     if source_ranked is not None:
         fused = source_ranked
-    elif window is not None or (passage_mode and graph_ranked is not None):
+    elif passage_mode and graph_ranked is not None:
         fused = dense
+    elif window is not None:
+        has_window_aux = bool(window_dense_aux or lexical or graph or prospective or working)
+        if (
+            not has_window_aux
+            or bool((window_explain or {}).get("date_only"))
+            or bool((window_explain or {}).get("order"))
+        ):
+            fused = dense
+        else:
+            window_meta = {
+                (hit.kind, hit.id): {
+                    key: hit.metadata[key]
+                    for key in ("temporal_match", "temporal_fallback", "temporal_proximity")
+                    if key in hit.metadata
+                }
+                for hit in dense
+            }
+            window_routes = [
+                route
+                for route in (dense, window_dense_aux, lexical, graph, prospective, working)
+                if route
+            ]
+            fused_win = fuse(window_routes, k=max(k * 2, policy.rerank_width))
+            fused = [
+                replace(hit, metadata={**hit.metadata, **window_meta[(hit.kind, hit.id)]})
+                if (hit.kind, hit.id) in window_meta
+                else hit
+                for hit in fused_win
+            ]
     elif cosine_ranked:
         found = {(hit.kind, hit.id) for hit in dense}
         fused = dense + [
-            hit for hit in fuse([lexical, prospective, working], k=max(k * 2, policy.rerank_width))
+            hit for hit in fuse([lexical, graph, prospective, working], k=max(k * 2, policy.rerank_width))
             if (hit.kind, hit.id) not in found
         ]
     else:
@@ -2281,9 +2953,98 @@ def run_retrieval_pipeline(
     collapsed_turns = 0
     if diversify_learning:
         fused = _distinct_learning_turns(
-            _relevant_memory_hits(fused, bool(effective_filter.get("include_operational"))), source_scope)
+            _relevant_memory_hits(fused, include_operational), source_scope)
     if working:
         fused, collapsed_turns = _collapse_session_duplicates(fused)
+    # Bounded 2-hop entity bridge for provider-backed / mixed-memory retrieval
+    # (previously gated exclusively behind _source_only_local_routes).
+    if (
+        source_ranked is None
+        and window is None
+        and query_mode is None
+        and not deep
+        and not effective_filter.get("as_of")
+        and passage_graph is None
+        and k > 1
+        and fused
+    ):
+        explicit_bridge_p = effective_filter.get("multi_hop") is True
+        relational_query_p = bool(re.search(
+            r"\b([A-Z]\w*('s|’s)|of the|assigned to|reports to|led by)\b", query
+        ))
+        is_phrase_or_agg_p = bool(re.search(
+            r"\b(total|average|how many|how much|sum of|cost of|price of|different|all the|order of|what time|on the day before)\b",
+            query,
+            re.I,
+        ))
+        if not explicit_bridge_p and is_phrase_or_agg_p:
+            relational_query_p = False
+        salient_p = {t for t in tokenize(query) if t not in QUERY_SUPPORT_STOPWORDS and len(t) > 2}
+        uncovered_p = bool(salient_p - set(tokenize(fused[0].text)))
+        if explicit_bridge_p or (relational_query_p and uncovered_p):
+            from mnemosyne.consolidation import _SALIENT_ENTITY, _entity_span
+
+            query_tokens_p = set(tokenize(query))
+            bridges_p: dict[str, tuple[str, Hit]] = {}
+            for seed in fused[:2]:
+                for match in _SALIENT_ENTITY.finditer(seed.text):
+                    entity = _entity_span(match.group())
+                    entity_tokens = set(tokenize(entity)) - QUERY_SUPPORT_STOPWORDS
+                    if entity_tokens and not entity_tokens.issubset(query_tokens_p):
+                        bridges_p.setdefault(entity.casefold(), (entity, seed))
+                    if len(bridges_p) >= 2:
+                        break
+                if len(bridges_p) >= 2:
+                    break
+            bridge_filt = (
+                effective_filter
+                if include_operational
+                else {**effective_filter, "_exclude_operational_evidence": True}
+            )
+            existing_bridge_ids = {(h.kind, h.id) for h in fused}
+            bridge_added: list[Hit] = []
+            use_dense_bridge = ops.adapters.embedding.name != "local-hashing"
+            for entity, seed in bridges_p.values():
+                terms = set(tokenize(entity))
+                uncovered_for_seed = salient_p - set(tokenize(seed.text))
+                cand_hits: list[Hit] = list(
+                    ops.lexical_search(entity, max(k, 8), {**bridge_filt, "query_mode": "passages"})
+                )
+                if use_dense_bridge:
+                    try:
+                        cand_hits.extend(ops.vector_search(entity, max(k, 8), bridge_filt))
+                    except (ValueError, OSError, TimeoutError):
+                        pass
+                if not include_operational:
+                    cand_hits = _relevant_memory_hits(cand_hits, False)
+                filtered_bridge = [
+                    hit for hit in cand_hits
+                    if hit.tenant_id == tenant_id
+                    and hit.branch == branch
+                    and hit.id != seed.id
+                    and (hit.kind, hit.id) not in existing_bridge_ids
+                    and hit.trust_tier <= max_trust
+                    and hit.sensitivity <= max_sensitivity
+                    and (include_quarantined or not hit.metadata.get("quarantine_reason"))
+                    and (terms.issubset(set(tokenize(hit.text))) or use_dense_bridge)
+                ]
+                if uncovered_for_seed and len(filtered_bridge) > 1:
+                    filtered_bridge.sort(
+                        key=lambda h: (-len(uncovered_for_seed & set(tokenize(h.text))), -float(h.score or 0.0))
+                    )
+                for bh in filtered_bridge[: max(2, k // 2)]:
+                    key_bh = (bh.kind, bh.id)
+                    if key_bh not in existing_bridge_ids:
+                        existing_bridge_ids.add(key_bh)
+                        bridge_added.append(bh)
+            if bridges_p:
+                bridge_report = {
+                    "applied": bool(bridge_added),
+                    "entity_count": len(bridges_p),
+                    "candidate_count": len(bridge_added),
+                }
+                if bridge_added:
+                    fused = fused + bridge_added
     # Passage and graph-ranked search keep their relevance order: the local hashing
     # reranker and MMR would re-sort it by surface tokens.
     relevance_order = passage_mode or semantic or window is not None or source_ranked is not None
@@ -2297,15 +3058,31 @@ def run_retrieval_pipeline(
         else:
             chronological_order = "earliest_first"
     chronological_window = bool(chronological_order)
+    rerank_input = (
+        fused[: max(k * 2, policy.rerank_width)]
+        if window is not None and len(fused) > max(k * 2, policy.rerank_width)
+        else fused
+    )
     reranked = (
         fused if chronological_window or (relevance_order and ops.adapters.reranker.name == "local-similarity")
-        else ops.adapters.reranker.rerank(rerank_query, fused, k=max(k * 2, k))
+        else ops.adapters.reranker.rerank(rerank_query, rerank_input, k=max(k * 2, k))
     )
     # Bounded iterative facet & residual coverage expansion when multi-facet / aggregation queries
     # miss an explicit facet or distinct session in the initial single-shot ranking.
     query_facets = _extract_query_facets(query)
     if query_facets and len(reranked) >= 1:
         existing_ids = {(h.kind, h.id) for h in reranked}
+        raw_query_tokens = [tok for tok in tokenize(query) if len(tok) > 2]
+        facet_base_filt = (
+            effective_filter
+            if include_operational
+            else {**effective_filter, "_exclude_operational_evidence": True}
+        )
+        use_dense_facet = (
+            ops.adapters.embedding.name != "local-hashing"
+            and not passage_mode
+            and window is None
+        )
         for f_terms in query_facets:
             if f_terms == {"user_self"}:
                 continue
@@ -2315,8 +3092,21 @@ def run_retrieval_pipeline(
                 for h in reranked[: max(k, 10)]
             )
             if not has_facet:
-                facet_q = " ".join(sorted(f_terms))
-                extra_f = ops.lexical_search(facet_q, max(k, 8), {**effective_filter, "query_mode": "passages"})
+                raw_facet_tokens = [
+                    tok for tok in raw_query_tokens
+                    if normalise_query_term(tok) in f_terms
+                ]
+                facet_q = " ".join(dict.fromkeys(raw_facet_tokens)) or " ".join(sorted(f_terms))
+                extra_f: list[Hit] = list(
+                    ops.lexical_search(facet_q, max(k, 8), {**facet_base_filt, "query_mode": "passages"})
+                )
+                if use_dense_facet:
+                    try:
+                        extra_f.extend(ops.vector_search(facet_q, max(k, 8), facet_base_filt))
+                    except (ValueError, OSError, TimeoutError):
+                        pass
+                if not include_operational:
+                    extra_f = _relevant_memory_hits(extra_f, False)
                 for eh in extra_f:
                     if (
                         eh.tenant_id == tenant_id
@@ -2331,7 +3121,7 @@ def run_retrieval_pipeline(
                         break
     reranked = _diversify_facets(query, reranked, k=max(k, 5))
     # Spread multi-session aggregation & broad temporal sequence candidates across calendar buckets
-    # while pinning the top-2 relevance hits so single-session precision is never harmed.
+    # while pinning the top-2 relevance hits (or top-1 per covered facet) so precision is preserved.
     temporal_spread_explain: dict[str, Any] | None = None
     wants_temporal_spread = bool(
         window is None
@@ -2342,39 +3132,128 @@ def run_retrieval_pipeline(
             re.I,
         )
     )
-    if wants_temporal_spread and not query_facets:
-        times_for_spread = ops.evidence_created_at_many(tenant_id, [h.id for h in reranked], branch)
+    if wants_temporal_spread:
+        times_for_spread = _resolve_candidate_times(ops, reranked, tenant_id, branch)
         enriched_for_spread = [
             replace(h, metadata={**h.metadata, "_candidate_created_at": times_for_spread[h.id].isoformat()})
             if h.id in times_for_spread and "_candidate_created_at" not in h.metadata and "created_at" not in h.metadata
             else h
             for h in reranked
         ]
-        pinned_top = enriched_for_spread[:2]
-        pinned_ids = {(h.kind, h.id) for h in pinned_top}
-        spread_tail = spread_temporal_buckets(
-            [h for h in enriched_for_spread[2:] if (h.kind, h.id) not in pinned_ids],
-            k=max(k, 8),
-            min_score_ratio=0.55,
-        )
-        seen_sp = pinned_ids | {(h.kind, h.id) for h in spread_tail}
-        reranked = pinned_top + spread_tail + [h for h in enriched_for_spread if (h.kind, h.id) not in seen_sp]
-        temporal_spread_explain = {"applied": True, "spread_count": len(spread_tail)}
+        if not query_facets:
+            pinned_top = enriched_for_spread[:2]
+            pinned_ids = {(h.kind, h.id) for h in pinned_top}
+            spread_tail = spread_temporal_buckets(
+                [h for h in enriched_for_spread[2:] if (h.kind, h.id) not in pinned_ids],
+                k=max(k, 8),
+                min_score_ratio=0.55,
+            )
+            seen_sp = pinned_ids | {(h.kind, h.id) for h in spread_tail}
+            reranked = pinned_top + spread_tail + [h for h in enriched_for_spread if (h.kind, h.id) not in seen_sp]
+            temporal_spread_explain = {"applied": True, "spread_count": len(spread_tail)}
+        else:
+            # Per-facet temporal bucket spread: pin top-1 hit per covered facet, then spread
+            # each facet's remaining hits across calendar buckets and interleave cleanly.
+            stemmed_facets_sp = [
+                {"user_self"} if f == {"user_self"} else {_norm_stem(t) for t in f if t != "user_self"}
+                for f in query_facets
+            ]
+            facet_buckets: list[list[Hit]] = [[] for _ in stemmed_facets_sp]
+            unassigned: list[Hit] = []
+            for h in enriched_for_spread:
+                h_stems = {_norm_stem(normalise_query_term(tok)) for tok in tokenize(h.text) if len(tok) > 2}
+                matched_idx = None
+                for f_idx, sf in enumerate(stemmed_facets_sp):
+                    if sf == {"user_self"}:
+                        if re.search(r"\b(i|my|me|myself)\b", h.text, re.I):
+                            matched_idx = f_idx
+                            break
+                    elif any(t in h_stems for t in sf):
+                        matched_idx = f_idx
+                        break
+                if matched_idx is not None:
+                    facet_buckets[matched_idx].append(h)
+                else:
+                    unassigned.append(h)
+            pinned_top = []
+            pinned_ids = set()
+            per_facet_spread: list[list[Hit]] = []
+            per_facet_k = max(2, (max(k, 8) + len(facet_buckets) - 1) // max(1, len(facet_buckets)))
+            for bucket in facet_buckets:
+                if not bucket:
+                    continue
+                first_hit = bucket[0]
+                if (first_hit.kind, first_hit.id) not in pinned_ids:
+                    pinned_top.append(first_hit)
+                    pinned_ids.add((first_hit.kind, first_hit.id))
+                tail_b = [h for h in bucket[1:] if (h.kind, h.id) not in pinned_ids]
+                if tail_b:
+                    per_facet_spread.append(
+                        spread_temporal_buckets(tail_b, k=per_facet_k, min_score_ratio=0.55)
+                    )
+            if unassigned:
+                tail_u = [h for h in unassigned if (h.kind, h.id) not in pinned_ids]
+                if tail_u:
+                    per_facet_spread.append(
+                        spread_temporal_buckets(tail_u, k=per_facet_k, min_score_ratio=0.55)
+                    )
+            spread_tail = []
+            seen_sp = set(pinned_ids)
+            max_len = max((len(lst) for lst in per_facet_spread), default=0)
+            for idx_round in range(max_len):
+                for lst in per_facet_spread:
+                    if idx_round < len(lst):
+                        cand = lst[idx_round]
+                        key_c = (cand.kind, cand.id)
+                        if key_c not in seen_sp:
+                            spread_tail.append(cand)
+                            seen_sp.add(key_c)
+            reranked = pinned_top + spread_tail + [h for h in enriched_for_spread if (h.kind, h.id) not in seen_sp]
+            temporal_spread_explain = {
+                "applied": True,
+                "per_facet": True,
+                "spread_count": len(spread_tail),
+            }
     if chronological_window:
         # "First/last said" is an ordering constraint on source timestamps,
         # not a relevance hint that a learned or schema reranker may replace.
         schema_fast_path = {"applied": False, "reason": "explicit_temporal_order", "boosted_hit_ids": []}
     elif window is not None:
         schema_fast_path = {"applied": False, "reason": "time_window_route", "boosted_hit_ids": []}
+        # Preserve temporal proximity preference AFTER cross-encoder reranking so
+        # soft-fallback reranking never wipes out the 1.35x in-window preference.
+        adjusted_win: list[Hit] = []
+        for hit in reranked:
+            if hit.metadata.get("reranker") and "temporal_proximity" in hit.metadata:
+                prox = float(hit.metadata.get("temporal_proximity", 0.5))
+                if hit.metadata.get("temporal_fallback"):
+                    adj_score = float(hit.score or 0.0) * (0.65 + 0.35 * prox)
+                else:
+                    adj_score = max(float(hit.score or 0.0) * 1.35, 0.01)
+                adjusted_win.append(replace(hit, score=adj_score))
+            else:
+                adjusted_win.append(hit)
+        reranked = adjusted_win
         # Within the requested interval, freshness only breaks relevance ties.
         # It must not make an unrelated recent item outrank an older exact match.
         asked_speaker = (window_explain or {}).get("speaker")
         def speaker_priority(hit: Hit) -> int:
             actor = hit.metadata.get("actor")
             return int(actor != asked_speaker) if asked_speaker else int(actor == "tool")
+
+        fallback_start_ts = window.start.astimezone(timezone.utc).timestamp()
+
+        def _window_start_ts(hit: Hit) -> float:
+            tm = hit.metadata.get("temporal_match")
+            if isinstance(tm, Mapping) and tm.get("start"):
+                parsed = _parse_utc_dt(tm["start"])
+                if parsed is not None:
+                    return parsed.timestamp()
+            return fallback_start_ts
+
         reranked.sort(key=lambda hit: (
             speaker_priority(hit), -hit.score,
-            -parse_dt(hit.metadata["temporal_match"]["start"]).timestamp(),
+            -_window_start_ts(hit),
         ))
     else:
         reranked, schema_fast_path = schema_fast_path_rerank(query, reranked, policy)
@@ -2383,7 +3262,22 @@ def run_retrieval_pipeline(
     elif window is not None or passage_mode or source_ranked is not None:
         diversified = reranked[:k]
     else:
-        diversified = ops._mmr(hash_query, reranked, k=max(k, 1))
+        is_provider_backed = (
+            ops.adapters.embedding.name != "local-hashing"
+            or ops.adapters.reranker.name != "local-similarity"
+        )
+        with normalized_mmr_context(is_provider_backed):
+            if _accepts_kwarg(ops._mmr, "filt"):
+                diversified = ops._mmr(hash_query, reranked, k=max(k, 1), filt=effective_filter)
+            else:
+                diversified = ops._mmr(hash_query, reranked, k=max(k, 1))
+        if query_facets and len(reranked) > len(diversified):
+            div_ids = {(h.kind, h.id) for h in diversified}
+            diversified = _diversify_facets(
+                query,
+                diversified + [h for h in reranked if (h.kind, h.id) not in div_ids],
+                k=max(k, 1),
+            )[:k]
     activated = (
         diversified if relevance_order else ops._apply_standing_scores(
             apply_activation_scores(diversified, policy, now=retrieval_instant)
@@ -2498,6 +3392,7 @@ def run_retrieval_pipeline(
             ordered,
             fact_budget_tokens=fact_budget,
             source_expansion_budget_tokens=exp_budget,
+            query=query,
         )
         budgeted, used = _fit_budget_packed(ops, deduped_hits, token_budget, query=query)
     else:
@@ -2547,12 +3442,11 @@ def run_retrieval_pipeline(
     support_score = support_report["score"]
     if cosine_ranked:
         # Found by meaning: a best cosine at or above the index's floor supports the answer
-        # only when no explicit proper-noun, number, compound-noun, or coherence anchor is
-        # contradicted/absent AND lexical/topical support is not severely deficient.
+        # whenever no explicit proper-noun, number, compound-noun, or focal anchor is missing.
         top_score = float(graph_explain.get("top_score") or 0.0)
         floor = float(getattr(passage_graph, "support_floor", 1.0))
         anchor_ok = bool(support_report.get("anchor_grounding", {}).get("satisfied", True))
-        semantic_supported = (top_score >= floor) and anchor_ok and (support_score >= 0.50)
+        semantic_supported = (top_score >= floor) and anchor_ok
         support_report["semantic"] = {
             "top_score": top_score,
             "floor": floor,
@@ -2560,7 +3454,68 @@ def run_retrieval_pipeline(
             "anchor_ok": anchor_ok,
         }
         if semantic_supported:
-            support_score = max(support_score, min(1.0, 0.50 * support_score + 0.50))
+            support_score = max(support_score, min(1.0, max(top_score, QUERY_SUPPORT_THRESHOLD)))
+    elif budgeted and not (window_explain or {}).get("span_unanswered"):
+        # Live dense / cross-encoder semantic support rescue for paraphrase queries when
+        # no passage_graph cosine index is configured and anchor grounding holds.
+        anchor_ok = bool(support_report.get("anchor_grounding", {}).get("satisfied", True))
+        if anchor_ok and support_score < QUERY_SUPPORT_THRESHOLD:
+            sem_source: str | None = None
+            sem_top = 0.0
+            sem_floor = 0.0
+            # 1. Cross-encoder logit / probability rescue (calibrated margin)
+            ce_logits = [
+                float(h.metadata["rerank_raw_score"])
+                for h in budgeted
+                if h.metadata.get("reranker") == "http-reranker"
+                and h.metadata.get("rerank_score_kind") == "logit"
+                and isinstance(h.metadata.get("rerank_raw_score"), (int, float))
+                and math.isfinite(float(h.metadata["rerank_raw_score"]))
+            ]
+            if ce_logits:
+                top_logit = max(ce_logits[:3])
+                tail_logit = ce_logits[4] if len(ce_logits) >= 5 else (min(ce_logits) if len(ce_logits) >= 2 else 0.0)
+                if top_logit >= 3.0 or (top_logit >= 2.0 and (len(ce_logits) < 5 or top_logit - tail_logit >= 1.5)):
+                    sem_source = "cross_encoder_logit"
+                    sem_top = top_logit
+                    sem_floor = 2.0
+            else:
+                ce_sims = [
+                    float(h.metadata["rerank_score"])
+                    for h in budgeted[:3]
+                    if h.metadata.get("reranker") == "http-reranker"
+                    and h.metadata.get("rerank_score_kind", "similarity") != "logit"
+                    and isinstance(h.metadata.get("rerank_score"), (int, float))
+                    and math.isfinite(float(h.metadata["rerank_score"]))
+                ]
+                if ce_sims and max(ce_sims) >= 0.85:
+                    sem_source = "cross_encoder_similarity"
+                    sem_top = max(ce_sims)
+                    sem_floor = 0.85
+            # 2. Non-hashing dense cosine rescue (with background margin when >= 3 hits)
+            if sem_source is None and dense_cosines:
+                top_dense_scores = [
+                    dense_cosines[(h.kind, h.id)]
+                    for h in budgeted[:3]
+                    if (h.kind, h.id) in dense_cosines
+                ]
+                if top_dense_scores:
+                    best_cos = max(top_dense_scores)
+                    all_cos = sorted(dense_cosines.values())
+                    med_cos = all_cos[len(all_cos) // 2]
+                    if best_cos >= 0.65 and (len(all_cos) < 3 or best_cos - med_cos >= 0.10):
+                        sem_source = "dense_cosine"
+                        sem_top = best_cos
+                        sem_floor = 0.65
+            if sem_source is not None:
+                support_report["semantic"] = {
+                    "source": sem_source,
+                    "top_score": sem_top,
+                    "floor": sem_floor,
+                    "supported": True,
+                    "anchor_ok": True,
+                }
+                support_score = max(support_score, QUERY_SUPPORT_THRESHOLD)
     insufficient_support = support_score < QUERY_SUPPORT_THRESHOLD
     confidence = ops._confidence(query, budgeted, support_score=support_score)
     prediction_set_size = ops._prediction_set_size(budgeted, threshold)

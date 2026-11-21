@@ -273,6 +273,20 @@ def _commitment_readable(engine, source, row) -> bool:
     )
 
 
+def _scoped_main_assertions(engine, tenant_id: str) -> list[dict]:
+    """Read main-branch assertions via keyset scan without exporting raw evidence."""
+    batch_fn = getattr(engine, "knowledge_source_batch", None)
+    if callable(batch_fn):
+        rows, after = [], ""
+        while True:
+            chunk = batch_fn(tenant_id, "main", collection="assertions", after=after, limit=4096)
+            rows.extend(chunk)
+            if len(chunk) < 4096:
+                return rows
+            after = chunk[-1]["id"]
+    return [row for row in engine.export_tenant(tenant_id).get("assertions", []) if row.get("branch", "main") == "main"]
+
+
 def project_commitment_memory(engine, source, policy: dict, clauses: list[str], *, timezone=None, agent_id="codex", session_id=None) -> dict:
     """Project state through ordinary assertion/intention writers, idempotently.
 
@@ -303,18 +317,18 @@ def project_commitment_memory(engine, source, policy: dict, clauses: list[str], 
     for change in changes:
         span = change["span"]
         identifier = str(uuid5(NAMESPACE_URL, json.dumps(["commitment-state-v1", source.tenant_id, source.user_id, source.cid, span.start, change["state"]])))
-        snapshot = engine.export_tenant(source.tenant_id)
-        prior = next((row for row in snapshot["assertions"] if row["id"] == identifier), None)
+        assertions = _scoped_main_assertions(engine, source.tenant_id)
+        prior = next((row for row in assertions if row["id"] == identifier), None)
         if prior is not None:
             previous_id = prior.get("calibration", {}).get("previous_assertion_id")
-            previous = next((row for row in snapshot["assertions"] if row["id"] == previous_id), None)
+            previous = next((row for row in assertions if row["id"] == previous_id), None)
             # A retry completes an interrupted state-write/cancel sequence.
             cancel_predecessor(previous, identifier)
             report["assertion_ids"].append(identifier)
             if prior.get("calibration", {}).get("intention_id"):
                 report["intention_ids"].append(prior["calibration"]["intention_id"])
             continue
-        candidates = [row for row in snapshot["assertions"] if row.get("user_id") == source.user_id
+        candidates = [row for row in assertions if row.get("user_id") == source.user_id
                       and row.get("branch", "main") == "main" and row["status"] == "active"
                       and row["predicate"] == "commitment_state"
                       and row.get("calibration", {}).get("commitment_state") == "pending"

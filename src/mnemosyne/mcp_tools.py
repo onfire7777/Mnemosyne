@@ -791,6 +791,7 @@ TOOL_SPEC.extend([
     {'name': 'document_reconcile_branch', 'description': 'Reconcile branch-level document manifests from a source branch into a target branch.', 'arguments': ['tenant_id', 'user_id', 'source_branch', 'target_branch']},
     {'name': 'learning_export_training', 'description': 'Export eligible externally verified procedures for explicitly configured shadow training.', 'arguments': ['tenant_id']},
     {'name': 'learning_reflect', 'description': 'Run outcome-grounded learning consolidation as operator.', 'arguments': ['tenant_id']},
+    {'name': 'entity_unmerge', 'description': 'Split a previously merged entity back into separate entities, restoring original provenance CIDs and recording a split override.', 'arguments': ['tenant_id', 'merged_entity_id']},
 ])
 
 class MemoryTools:
@@ -1398,10 +1399,18 @@ class MemoryTools:
         if (stored and same_cid and
                 self.engine.get_evidence(tenant_id, cid, branch).user_id == user_id):
             from mnemosyne.memory_formation import project_direct_user_memory
-            formation = project_direct_user_memory(self.engine, tenant_id, cid, branch,
-                semantic_proposer=getattr(self.engine, "_learning_configuration", {}).get("semantic_proposer"),
-                timezone=getattr(self.engine, "_learning_configuration", {}).get("source_timezone"),
-                agent_id=session_identity.agent_id if session_identity else "codex", session_id=session_id)
+            learning_cfg = getattr(self.engine, "_learning_configuration", {}) or {}
+            formation = project_direct_user_memory(
+                self.engine,
+                tenant_id,
+                cid,
+                branch,
+                semantic_proposer=learning_cfg.get("semantic_proposer"),
+                semantic_reviewer=learning_cfg.get("semantic_reviewer"),
+                timezone=learning_cfg.get("source_timezone"),
+                agent_id=session_identity.agent_id if session_identity else "codex",
+                session_id=session_id,
+            )
 
         working_item_id: str | None = None
         if mirror_turn:
@@ -1977,10 +1986,11 @@ class MemoryTools:
         as_of: str | None = None,
         disposition: dict[str, Any] | None = None,
         mission: str | None = None,
-        hierarchy_first: bool = False,
+        hierarchy_first: bool = True,
     ) -> dict[str, Any]:
         """Produce an ephemeral, source-grounded answer within the caller's scope."""
         from mnemosyne.answering import (
+            AgenticReflectController,
             AnswerLimits,
             AnswerReadContext,
             AnswerRequest,
@@ -2020,13 +2030,27 @@ class MemoryTools:
                 raise TypeError("grounded provider must support decomposition and reading")
         except Exception as exc:
             raise ValueError("reflect grounded provider is not configured or is invalid") from exc
-        result = GroundedAnswerOrchestrator(self.engine, provider, limits=limits).answer(
-            AnswerRequest(question=question, context=context),
-            provider,
-            disposition=resolved_disposition,
-            mission=mission,
-            hierarchy_first=hierarchy_first,
-        )
+        if callable(getattr(provider, "reflect_step", None)) or callable(getattr(provider, "tool_step", None)):
+            agentic_result = AgenticReflectController(
+                self.engine,
+                decomposer=provider,
+                reader=provider,
+                limits=limits,
+                max_iterations=6,
+            ).reflect(
+                AnswerRequest(question=question, context=context),
+                disposition=resolved_disposition,
+                mission=mission,
+            )
+            result = agentic_result.answer
+        else:
+            result = GroundedAnswerOrchestrator(self.engine, provider, limits=limits).answer(
+                AnswerRequest(question=question, context=context),
+                provider,
+                disposition=resolved_disposition,
+                mission=mission,
+                hierarchy_first=hierarchy_first,
+            )
         try:
             disclosure = provider.disclosure
         except Exception:
@@ -2681,6 +2705,8 @@ class MemoryTools:
             if parse_dt(evaluated_at) is None:
                 raise ValueError("evaluated_at must be an ISO 8601 timestamp")
             filt["evaluated_at"] = evaluated_at
+        if query_mode != "passages":
+            filt.setdefault("include_synthesized", True)
         start = perf_counter()
         result = self.engine.retrieve(query=query, tenant_id=tenant_id, branch=branch, filt=filt)
         payload = result.to_dict()
@@ -2761,6 +2787,7 @@ class MemoryTools:
         )
         if token_budget is not None:
             filt["token_budget"] = token_budget
+        filt.setdefault("include_synthesized", True)
         result = self.engine.deep_search(query=query, tenant_id=tenant_id, branch=branch, filt=filt)
         payload = result.to_dict()
         self._record_retrieval(payload, start)
@@ -3845,12 +3872,13 @@ class MemoryTools:
             hit.to_dict()
             for hit in self.engine.graph_ppr(seeds, pool, tenant_id=tenant_id, branch=branch)
         ]
-        limited = [hit for hit in hits if str(hit.get("id", "")) in allowed_ids]
+        relation_hits = [hit for hit in hits if hit.get("kind", "relation") == "relation"]
+        limited = [hit for hit in relation_hits if str(hit.get("id", "")) in allowed_ids]
         return {
             "hits": limited[:k],
             "hops": hops,
             "k": k,
-            "beyond_hop_limit": len(hits) - len(limited),
+            "beyond_hop_limit": len(relation_hits) - len(limited),
         }
 
     def graph_timeline(
@@ -3973,6 +4001,222 @@ class MemoryTools:
         ):
             raise PermissionError("learning session identity mismatch")
 
+    @staticmethod
+    def _read_synthesized_context(
+        engine: Any, read_ctx: Any, query: str, *, limit: int = 6
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Collect custody-checked active Observations and ready MentalModels for prepare_context."""
+        from mnemosyne.answering import (
+            _finite_vector,
+            _hybrid_layer_scores,
+            _query_embedding_if_semantic,
+            _query_substantive_terms,
+            _stored_item_embedding,
+        )
+        from mnemosyne.retrieval import projection_sources_readable
+
+        q_terms = _query_substantive_terms(query)
+        filt = read_ctx.to_filter()
+        q_vec_cache: list[float] | None = None
+        q_vec_loaded = False
+
+        def _q_vec() -> list[float] | None:
+            nonlocal q_vec_cache, q_vec_loaded
+            if not q_vec_loaded:
+                q_vec_cache = _query_embedding_if_semantic(engine, query)
+                q_vec_loaded = True
+            return q_vec_cache
+
+        observations_out: list[dict[str, Any]] = []
+        raw_obs: list[Any] = []
+        for method_name in ("list_observations", "observation_list"):
+            fn = getattr(engine, method_name, None)
+            if callable(fn):
+                try:
+                    raw_obs = list(
+                        fn(
+                            read_ctx.tenant_id,
+                            branch=read_ctx.branch,
+                            user_id=read_ctx.user_id,
+                            status="active",
+                        )
+                    )
+                    break
+                except TypeError:
+                    try:
+                        raw_obs = list(fn(read_ctx.tenant_id, branch=read_ctx.branch))
+                        break
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+        if raw_obs:
+            cand_obs: list[dict[str, Any]] = []
+            obs_texts: list[str] = []
+            obs_vecs: list[list[float] | None] = []
+            for item in raw_obs:
+                obs_dict = (
+                    item.to_dict()
+                    if hasattr(item, "to_dict")
+                    else (dict(item) if isinstance(item, dict) else None)
+                )
+                if not isinstance(obs_dict, dict):
+                    continue
+                if obs_dict.get("status", "active") != "active":
+                    continue
+                if (
+                    read_ctx.user_id
+                    and obs_dict.get("user_id")
+                    and obs_dict.get("user_id") != read_ctx.user_id
+                ):
+                    continue
+                cids = list(dict.fromkeys(obs_dict.get("source_evidence_cids") or []))
+                if not cids or not projection_sources_readable(
+                    engine,
+                    cids,
+                    tenant_id=read_ctx.tenant_id,
+                    branch=read_ctx.branch,
+                    filt=filt,
+                    policy=engine.policy,
+                ):
+                    continue
+                obs_id = str(obs_dict.get("observation_id") or obs_dict.get("id") or "")
+                cand_obs.append(obs_dict)
+                obs_texts.append(
+                    f"{obs_dict.get('subject', '')} {obs_dict.get('topic', '')} {obs_dict.get('content', '')}"
+                )
+                obs_vecs.append(
+                    _stored_item_embedding(
+                        engine,
+                        read_ctx.tenant_id,
+                        read_ctx.branch,
+                        "observation",
+                        obs_id,
+                        obs_dict,
+                        filt=filt,
+                    )
+                )
+            if cand_obs:
+                q_vec = _q_vec() if any(v is not None for v in obs_vecs) else None
+                scores = _hybrid_layer_scores(
+                    query,
+                    obs_texts,
+                    obs_vecs,
+                    q_terms=q_terms,
+                    mission_terms=set(),
+                    query_vec=q_vec,
+                )
+                ranked_obs = []
+                for obs_dict, (overlap, bm25, dense_cos, hybrid_sc) in zip(
+                    cand_obs, scores, strict=True
+                ):
+                    if q_terms and overlap == 0 and bm25 <= 0.0 and dense_cos < 0.45:
+                        continue
+                    row = {
+                        "id": str(obs_dict.get("observation_id") or obs_dict.get("id") or ""),
+                        "observation_id": str(obs_dict.get("observation_id") or obs_dict.get("id") or ""),
+                        "kind": "observation",
+                        "subject": obs_dict.get("subject", ""),
+                        "topic": obs_dict.get("topic", ""),
+                        "content": obs_dict.get("content", ""),
+                        "text": obs_dict.get("content", ""),
+                        "standing": float(obs_dict.get("standing", 0.51) or 0.51),
+                        "salience": float(obs_dict.get("salience", 0.5) or 0.5),
+                        "version": int(obs_dict.get("version", 1) or 1),
+                        "status": "active",
+                        "branch": read_ctx.branch,
+                        "source_evidence_cids": list(obs_dict.get("source_evidence_cids") or []),
+                        "source_cids": list(obs_dict.get("source_evidence_cids") or []),
+                        "independent_source_count": int(obs_dict.get("independent_source_count", 1) or 1),
+                        "created_at": obs_dict.get("created_at"),
+                        "metadata": (
+                            {"reranker": "http-reranker", "rerank_score_kind": "similarity", "rerank_score": min(1.0, dense_cos)}
+                            if dense_cos >= 0.45
+                            else {}
+                        ),
+                    }
+                    ranked_obs.append((-hybrid_sc, -row["standing"], row))
+                ranked_obs.sort(key=lambda item: (item[0], item[1]))
+                observations_out = [item[2] for item in ranked_obs[:limit]]
+
+        models_out: list[dict[str, Any]] = []
+        if read_ctx.user_id and not read_ctx.break_glass:
+            try:
+                from mnemosyne.mental_models import MentalModelService
+
+                raw_models = MentalModelService(engine).list(read_ctx)
+            except Exception:
+                raw_models = []
+            cand_models: list[dict[str, Any]] = []
+            model_texts: list[str] = []
+            model_vecs: list[list[float] | None] = []
+            for item in raw_models:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("status") != "ready" or bool(item.get("stale", False)):
+                    continue
+                cids = list(dict.fromkeys(item.get("source_evidence_cids") or []))
+                if not cids or not projection_sources_readable(
+                    engine,
+                    cids,
+                    tenant_id=read_ctx.tenant_id,
+                    branch=read_ctx.branch,
+                    filt=filt,
+                    policy=engine.policy,
+                ):
+                    continue
+                ans = item.get("answer")
+                ans_text = ans.get("answer", "") if isinstance(ans, dict) else str(ans or "")
+                if not ans_text.strip():
+                    continue
+                cand_models.append({**item, "_answer_text": ans_text.strip()})
+                model_texts.append(
+                    f"{item.get('name', '')} {item.get('question', '')} {ans_text}"
+                )
+                model_vecs.append(_finite_vector(item.get("embedding")))
+            if cand_models:
+                q_vec = _q_vec() if any(v is not None for v in model_vecs) else None
+                m_scores = _hybrid_layer_scores(
+                    query,
+                    model_texts,
+                    model_vecs,
+                    q_terms=q_terms,
+                    mission_terms=set(),
+                    query_vec=q_vec,
+                )
+                ranked_models = []
+                for m_dict, (overlap, bm25, dense_cos, hybrid_sc) in zip(
+                    cand_models, m_scores, strict=True
+                ):
+                    if q_terms and overlap == 0 and bm25 <= 0.0 and dense_cos < 0.45:
+                        continue
+                    cids = list(dict.fromkeys(m_dict.get("source_evidence_cids") or []))
+                    row = {
+                        "id": str(m_dict.get("model_id") or m_dict.get("id") or ""),
+                        "model_id": str(m_dict.get("model_id") or m_dict.get("id") or ""),
+                        "kind": "mental_model",
+                        "name": str(m_dict.get("name") or ""),
+                        "question": str(m_dict.get("question") or ""),
+                        "answer": m_dict["_answer_text"],
+                        "text": m_dict["_answer_text"],
+                        "status": "ready",
+                        "version": int(m_dict.get("version", 1) or 1),
+                        "branch": read_ctx.branch,
+                        "source_evidence_cids": cids,
+                        "source_cids": cids,
+                        "updated_at": m_dict.get("updated_at"),
+                        "metadata": (
+                            {"reranker": "http-reranker", "rerank_score_kind": "similarity", "rerank_score": min(1.0, dense_cos)}
+                            if dense_cos >= 0.45
+                            else {}
+                        ),
+                    }
+                    ranked_models.append((-hybrid_sc, row))
+                ranked_models.sort(key=lambda item: item[0])
+                models_out = [item[1] for item in ranked_models[:limit]]
+
+        return observations_out, models_out
+
     def prepare_context(self, tenant_id: str, user_id: str, session_id: str, query: str,
                         available_tools: list[str] | None = None, task_type: str | None = None,
                         risk_level: str | None = None,
@@ -3981,10 +4225,15 @@ class MemoryTools:
                         session_identity: SessionIdentity | None = None) -> dict[str, Any]:
         self._learning_session(tenant_id, user_id, session_id, session_identity)
         self._learning_access("prepare_context", role, source_trust_tier)
+        clean_query = _require_text(query, field="query")
+        prefetch = getattr(getattr(self.engine, "adapters", None), "embedding", None)
+        prefetch_fn = getattr(prefetch, "prefetch_query", None)
+        if callable(prefetch_fn):
+            prefetch_fn(clean_query)
         runtime = self._learning_runtime()
         from mnemosyne.runtime_state import migrate_legacy_learning
         migrate_legacy_learning(runtime, self.learning, tenant_id)
-        read_scope = {}
+        read_scope: dict[str, Any] = {"include_synthesized": True}
         if session_identity is not None:
             self._session_read_scope(read_scope, tenant_id=tenant_id, user_id=user_id,
                                      session_id=session_id, session_identity=session_identity)
@@ -3993,19 +4242,44 @@ class MemoryTools:
         scope = {"session_id": session_id}
         if workspace:
             scope["workspace"] = workspace
-        supplemental = {"user_model": self.profile_context(tenant_id, user_id, scope)}
+        supplemental: dict[str, Any] = {"user_model": self.profile_context(tenant_id, user_id, scope)}
         from mnemosyne.answering import AnswerReadContext
         from mnemosyne.knowledge_maintenance import read_knowledge_context
+        read_ctx = AnswerReadContext(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            # source_trust_tier authenticates this request's write provenance;
+            # it is not the least-trusted source this reader may inspect.
+            # The normal policy and per-source ACL checks still govern reads.
+            role="reader",
+            max_trust_tier=self.engine.policy.max_trust_tier,
+        )
         supplemental["knowledge_pages"] = read_knowledge_context(
-            self.engine, AnswerReadContext(tenant_id=tenant_id, user_id=user_id,
-                # source_trust_tier authenticates this request's write provenance;
-                # it is not the least-trusted source this reader may inspect.
-                # The normal policy and per-source ACL checks still govern reads.
-                role="reader", max_trust_tier=self.engine.policy.max_trust_tier), query)
-        return runtime.prepare_context(tenant_id, user_id, session_id,
-            _require_text(query, field="query"), available_tools, task_type, risk_level,
+            self.engine, read_ctx, clean_query
+        )
+        obs_ctx, mm_ctx = self._read_synthesized_context(self.engine, read_ctx, clean_query)
+        if obs_ctx:
+            supplemental["observations"] = obs_ctx
+        if mm_ctx:
+            supplemental["mental_models"] = mm_ctx
+        prepared = runtime.prepare_context(tenant_id, user_id, session_id,
+            clean_query, available_tools, task_type, risk_level,
             workspace=workspace, read_scope=read_scope, supplemental_context=supplemental,
             delivery_envelope=delivery_envelope)
+        try:
+            from mnemosyne.compiler_context import compile_retrieved_context
+
+            prepared["compiled_context"] = compile_retrieved_context(
+                clean_query,
+                hits=prepared.get("hits", ()),
+                observations=prepared.get("observations", ()),
+                mental_models=prepared.get("mental_models", ()),
+                knowledge_pages=prepared.get("knowledge_pages", ()),
+                evaluated_at=datetime.now(UTC),
+            )
+        except Exception:
+            pass
+        return prepared
 
     @staticmethod
     def _erase_profile_model(user_model, runtime_state, tenant_id: str, cid: str,
@@ -4096,6 +4370,7 @@ class MemoryTools:
             return
         episode = state["episodes"][episode_id]
         from mnemosyne.memory_formation import direct_user_clauses, directive_body
+        from mnemosyne.user_model import detect_preference_drift
         sources = [source for cid in episode.get("source_cids", [])
                    if (source := self.engine.get_evidence(tenant_id, cid)) is not None
                    and source.actor == "user" and source.user_id == user_id
@@ -4104,21 +4379,122 @@ class MemoryTools:
         if not sources:
             return
         source_cids = [source.cid for source in sources]
+        self._refresh_user_model()
+        active_user_entries = [
+            entry
+            for entry in self.user_model.entries.values()
+            if entry.tenant_id == tenant_id
+            and entry.user_id == user_id
+            and entry.status == "active"
+        ]
+        drifted = False
+        if active_user_entries:
+            try:
+                drifts = detect_preference_drift(
+                    active_user_entries,
+                    user_text,
+                    new_evidence_cid=source_cids[0],
+                )
+                drifted = bool(drifts)
+            except Exception:
+                drifted = False
+
+        durable_pref_re = re.compile(
+            r"(?:i (?:would )?prefer|from now on|always\b|never\b|"
+            r"i (?:really )?(?:like|love|hate|dislike)\b|"
+            r"my preferred\b|default to\b|i switched to\b)",
+            re.IGNORECASE,
+        )
+        session_pref_re = re.compile(
+            r"(?:please (?:use|keep|respond|avoid|format)\b|"
+            r"(?:use|write|respond)\b.{0,100}\binstead\b|"
+            r"(?:don't|do not|avoid)\s+(?:use|include|add|write|put|modify|touch)\b)",
+            re.IGNORECASE,
+        )
         for clause in direct_user_clauses(sources[0], include_directives=True):
+            if clause.rstrip().endswith("?"):
+                continue
             # "No, use bullets instead." is matched past its opener; the profile
             # keeps the user's exact clause.
             body = directive_body(clause)
-            scope = {} if re.match(r"(?:i (?:would )?prefer|from now on|always)\b", body, re.IGNORECASE) else {"session_id": session_id}
+            is_durable = bool(durable_pref_re.match(body))
+            is_session_pref = bool(session_pref_re.match(body))
+            scope: dict[str, Any] = {} if is_durable else {"session_id": session_id}
             scope["_learning_source_cids"] = source_cids
-            preference = re.match(
-                r"(?:i (?:would )?prefer|from now on|please (?:use|keep|respond)|(?:use|write|respond)\b.{0,100}\binstead)\b",
-                body, re.IGNORECASE,
-            )
-            if preference and not any(entry.tenant_id == tenant_id and entry.user_id == user_id
-                                      and entry.statement == clause and entry.scope == scope
-                                      for entry in self.user_model.entries.values()):
-                self.profile_record_explicit(tenant_id, user_id, clause, scope=scope,
-                                             source_evidence_cids=source_cids)
+            if is_durable or is_session_pref:
+                already_recorded_from_same_sources = any(
+                    entry.tenant_id == tenant_id
+                    and entry.user_id == user_id
+                    and entry.status == "active"
+                    and entry.statement == clause
+                    and set(source_cids).issubset(set(entry.source_evidence_cids))
+                    for entry in self.user_model.entries.values()
+                )
+                if not already_recorded_from_same_sources:
+                    self.profile_record_explicit(
+                        tenant_id,
+                        user_id,
+                        clause,
+                        scope=scope,
+                        source_evidence_cids=source_cids,
+                    )
+                if is_durable and hasattr(self.engine, "add_preference"):
+                    try:
+                        from mnemosyne.access_policy import merge_access_policies
+
+                        pref_policy = merge_access_policies(
+                            [
+                                *(s.access_policy or {} for s in sources),
+                                {"tenant": tenant_id, "allow_principals": [user_id]},
+                            ],
+                            tenant_id=tenant_id,
+                        )
+                        norm_clause = clause.strip().casefold()
+                        dup_pref = False
+                        if hasattr(self.engine, "_connect") and hasattr(self.engine, "_lock"):
+                            with self.engine._lock:
+                                conn = self.engine._connect(tenant_id)
+                                dup_pref = (
+                                    conn.execute(
+                                        "SELECT 1 FROM preferences "
+                                        "WHERE tenant_id = ? AND user_id = ? AND status = 'active' "
+                                        "AND lower(trim(statement)) = ? LIMIT 1",
+                                        (tenant_id, user_id, norm_clause),
+                                    ).fetchone()
+                                    is not None
+                                )
+                        elif isinstance(getattr(self.engine, "preferences", None), dict):
+                            dup_pref = any(
+                                p.tenant_id == tenant_id
+                                and p.user_id == user_id
+                                and getattr(p, "status", "active") == "active"
+                                and str(p.statement or "").strip().casefold() == norm_clause
+                                for p in self.engine.preferences.values()
+                            )
+                        if not dup_pref:
+                            low_clause = clause.casefold()
+                            if re.search(r"\b(?:bullet|concise|brief|markdown|json|yaml|summary|summaries|table|format|short|verbose|terse)\b", low_clause):
+                                pref_category = "format"
+                            elif re.search(r"\b(?:never|don't|do not|must not|avoid)\b", low_clause):
+                                pref_category = "constraint"
+                            elif re.search(r"\b(?:pytest|uv|pip|ripgrep|git|vim|neovim|rust|python|docker|postgres|redis|sqlite|editor|cli)\b", low_clause):
+                                pref_category = "tooling"
+                            else:
+                                pref_category = "workflow"
+                            self.engine.add_preference(
+                                Preference(
+                                    tenant_id=tenant_id,
+                                    user_id=user_id,
+                                    category=pref_category,
+                                    statement=clause,
+                                    confidence=0.9,
+                                    explicit=True,
+                                    source_evidence_cids=source_cids,
+                                    access_policy=pref_policy,
+                                )
+                            )
+                    except Exception:
+                        pass
             if re.match(r"(?:i (?:made (?:a|the) mistake|forgot|keep forgetting|missed|misread)|my mistake)\b",
                         body, re.IGNORECASE) and not any(
                     event.tenant_id == tenant_id and event.user_id == user_id
@@ -4127,6 +4503,60 @@ class MemoryTools:
                 self.profile_record_mistake(tenant_id, user_id, pattern=clause,
                     description=clause, scope=scope, role=role,
                     source_trust_tier=int(TrustTier.USER_AUTHORED))
+        if drifted:
+            self._save_user_model()
+
+    def entity_unmerge(
+        self,
+        tenant_id: str,
+        merged_entity_id: str,
+        split_canonical_key: str | None = None,
+        branch: str = "main",
+        role: WriteRole = "operator",
+        source_trust_tier: int = 1,
+        session_identity: SessionIdentity | None = None,
+    ) -> dict[str, Any]:
+        """Reverse a prior entity merge and restore separate entities with original provenance."""
+        _require_text(tenant_id, field="tenant_id")
+        _require_text(merged_entity_id, field="merged_entity_id")
+        _require_text(branch, field="branch")
+        if split_canonical_key is not None:
+            _require_text(split_canonical_key, field="split_canonical_key")
+        effective_role = role
+        effective_trust = source_trust_tier
+        if session_identity is not None:
+            if session_identity.tenant_id != tenant_id:
+                raise PermissionError("entity_unmerge tenant mismatch")
+            effective_role = session_identity.role
+            effective_trust = session_identity.source_trust_tier
+        _require_trust_tier(effective_trust, field="source_trust_tier")
+        decision = self._authorize(
+            "entity_unmerge",
+            role=effective_role,
+            source_trust_tier=effective_trust,
+            target_sink="belief",
+        )
+        from mnemosyne import consolidation as consolidation_mod
+
+        unmerge_fn = getattr(consolidation_mod, "engine_unmerge_entity", None)
+        if callable(unmerge_fn):
+            result = unmerge_fn(
+                self.engine,
+                tenant_id,
+                merged_entity_id,
+                split_canonical_key=split_canonical_key,
+                branch=branch,
+            )
+            return {**result, "security": decision}
+        # Fallback if consolidation helper is unavailable on an older checkout
+        resolver_fn = getattr(consolidation_mod, "get_engine_entity_resolver", None)
+        resolver = resolver_fn(self.engine) if callable(resolver_fn) else getattr(self.engine, "_entity_resolver", None)
+        if resolver is None:
+            raise KeyError(f"No merged entity record found for {merged_entity_id!r}")
+        result = consolidation_mod.unmerge_entity(
+            resolver, merged_entity_id, split_canonical_key=split_canonical_key
+        )
+        return {**result, "tenant_id": tenant_id, "branch": branch, "security": decision}
 
     def observe_turn(self, tenant_id: str, user_id: str, session_id: str,
                      user_text: str, assistant_text: str,

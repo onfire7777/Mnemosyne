@@ -34,6 +34,7 @@ else:
     except ImportError:  # Base installs may discover HTTP models without NumPy.
         np = None
 
+from mnemosyne import text as text_kernels
 from mnemosyne.network_safety import (
     safe_urlopen,
     validate_fetch_url,
@@ -127,6 +128,29 @@ class QuantizedVectorIndex:
         self._int8 = np.empty((0, self.dims), dtype=np.int8)
         self._scales = np.empty((0,), dtype=np.float32)
         self._binary = np.empty((0, (self.dims + 7) // 8), dtype=np.uint8)
+        self._native: Any = None
+        self._native_dirty: bool = True
+
+    def _ensure_native(self) -> Any:
+        native_mod = text_kernels.NATIVE
+        native_cls = (
+            getattr(native_mod, "NativeQuantizedIndex", None)
+            if native_mod is not None
+            else None
+        )
+        if native_cls is None or not self._ids:
+            return None
+        if self._native is None or self._native_dirty:
+            self._native = native_cls.from_packed_buffers(
+                self.dims,
+                len(self._ids),
+                np.ascontiguousarray(self._binary, dtype=np.uint8).tobytes(),
+                np.ascontiguousarray(self._int8, dtype=np.int8).tobytes(),
+                np.ascontiguousarray(self._scales, dtype="<f4").tobytes(),
+                np.ascontiguousarray(self._f32, dtype="<f4").tobytes(),
+            )
+            self._native_dirty = False
+        return self._native
 
     def __len__(self) -> int:
         return len(self._ids)
@@ -220,6 +244,7 @@ class QuantizedVectorIndex:
                 if self._binary.shape[0] == 0
                 else np.vstack([self._binary, b_u8[sel]])
             )
+        self._native_dirty = True
 
     def remove_ids(self, ids_to_remove: Sequence[str] | set[str]) -> int:
         """Physically purge vector rows for erased/redacted items."""
@@ -235,6 +260,7 @@ class QuantizedVectorIndex:
         self._int8 = self._int8[keep_mask]
         self._scales = self._scales[keep_mask]
         self._binary = self._binary[keep_mask]
+        self._native_dirty = True
         return len(remove_set)
 
     def search(
@@ -278,6 +304,23 @@ class QuantizedVectorIndex:
                 chosen_mode = "int8_rescore"
             else:
                 chosen_mode = "exact"
+
+        native_idx = self._ensure_native()
+        if native_idx is not None:
+            bin_budget = max(self.binary_oversample * k, self.binary_min_candidates)
+            i8_budget = max(self.int8_oversample * k, self.int8_min_candidates)
+            raw_pairs = native_idx.search(
+                np.ascontiguousarray(q_f32, dtype="<f4").tobytes(),
+                int(k),
+                str(chosen_mode),
+                candidate_idx.tolist() if candidate_idx is not None else None,
+                float(min_score),
+                int(bin_budget),
+                int(i8_budget),
+            )
+            scored_pairs = [(self._ids[pos], float(val)) for pos, val in raw_pairs]
+            scored_pairs.sort(key=lambda pair: (-pair[1], pair[0]))
+            return scored_pairs[:k]
 
         pool_idx = candidate_idx
 
@@ -421,7 +464,69 @@ class QuantizedVectorIndex:
             # Reconstruct L2-normalized float32 approximation from int8 + scales
             dequant = idx._int8.astype(np.float32) * idx._scales[:, None]
             idx._f32 = _l2_normalize_rows(dequant)
+        idx._native = None
+        idx._native_dirty = True
         return idx
+
+
+def dense_scan_f32_packed(
+    query_vec: Sequence[float] | np.ndarray,
+    rows_f32: bytes,
+    dims: int,
+    row_mask: bytes,
+) -> list[float | None]:
+    """SIMD/NEON packed float32 dot-product scan with pure-NumPy fallback."""
+    native_mod = text_kernels.NATIVE
+    native_fn = (
+        getattr(native_mod, "dense_scan_f32_packed", None)
+        if native_mod is not None
+        else None
+    )
+    if np is not None:
+        q_bytes = np.ascontiguousarray(query_vec, dtype="<f4").tobytes()
+    else:
+        q_bytes = struct.pack(f"<{dims}f", *(float(v) for v in query_vec))
+    if native_fn is not None:
+        return list(native_fn(q_bytes, rows_f32, int(dims), row_mask))
+    if np is None:
+        raise ImportError("dense_scan_f32_packed requires mnemosyne_native or numpy")
+    q_arr = np.frombuffer(q_bytes, dtype="<f4")
+    n = len(row_mask)
+    if n == 0:
+        return []
+    mat = np.frombuffer(rows_f32, dtype="<f4").reshape((n, int(dims)))
+    dots = (mat @ q_arr).tolist()
+    return [float(dots[i]) if row_mask[i] else None for i in range(n)]
+
+
+def dense_scan_f16_packed(
+    query_vec: Sequence[float] | np.ndarray,
+    rows_f16: bytes,
+    dims: int,
+    row_mask: bytes,
+) -> list[float | None]:
+    """SIMD/NEON packed float16 dot-product scan with pure-NumPy fallback."""
+    native_mod = text_kernels.NATIVE
+    native_fn = (
+        getattr(native_mod, "dense_scan_f16_packed", None)
+        if native_mod is not None
+        else None
+    )
+    if np is not None:
+        q_bytes = np.ascontiguousarray(query_vec, dtype="<f4").tobytes()
+    else:
+        q_bytes = struct.pack(f"<{dims}f", *(float(v) for v in query_vec))
+    if native_fn is not None:
+        return list(native_fn(q_bytes, rows_f16, int(dims), row_mask))
+    if np is None:
+        raise ImportError("dense_scan_f16_packed requires mnemosyne_native or numpy")
+    q_arr = np.frombuffer(q_bytes, dtype="<f4")
+    n = len(row_mask)
+    if n == 0:
+        return []
+    mat = np.frombuffer(rows_f16, dtype="<f2").reshape((n, int(dims))).astype(np.float32)
+    dots = (mat @ q_arr).tolist()
+    return [float(dots[i]) if row_mask[i] else None for i in range(n)]
 
 
 @dataclass(frozen=True, slots=True)

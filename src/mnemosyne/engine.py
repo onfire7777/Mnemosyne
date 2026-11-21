@@ -165,7 +165,7 @@ from mnemosyne.standing import (
     standing_erasure_cascade_report,
     standing_observability_record,
 )
-from mnemosyne.text import SparseCosine, cosine, lexical_scorer, tokenize
+from mnemosyne.text import SparseCosine, cosine, tokenize
 from mnemosyne.workspace import self_generation_budget_report, source_backed_summary
 
 
@@ -3309,6 +3309,16 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         self.working_memory: dict[tuple[str, str, str], WorkingMemoryItem] = {}
         self.observations: dict[tuple[str, str, str], dict[str, Any]] = {}
         self.knowledge_pages: dict[tuple[str, str, str], dict[str, Any]] = {}
+        # Stored dense embeddings for non-evidence records (assertions, observations,
+        # preferences, knowledge_pages), keyed by (kind, tenant_id, branch, item_id).
+        # Preferences are tenant-scoped and use branch="*".
+        self._item_embeddings: dict[tuple[str, str, str, str], list[float]] = {}
+        self._graph_ppr_auth_memo: OrderedDict[
+            tuple[Any, ...], tuple[Any, ...]
+        ] = OrderedDict()
+        self._quantized_index_memo: OrderedDict[
+            tuple[Any, ...], tuple[Any, ...]
+        ] = OrderedDict()
         self.audit_log: list[dict[str, Any]] = []
         self.deletion_log: list[dict[str, Any]] = []
         self.merge_log: list[dict[str, Any]] = []
@@ -3328,6 +3338,9 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             tuple[Any, ...], tuple[datetime | None, list[Hit]]
         ] = OrderedDict()
         self._candidate_memo_lock = threading.Lock()
+        self._candidate_memo_inflight: dict[
+            tuple[Any, ...], tuple[threading.Event, int]
+        ] = {}
         self._claim_store_writer()
         try:
             if self.store_path and self.store_path.exists():
@@ -5432,6 +5445,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             obs.status = "retracted"
             obs.updated_at = utc_now()
             self.observations[key] = obs.to_dict()
+            self._item_embeddings.pop(("observation", tenant_id, branch, observation_id), None)
             self.audit_log.append(
                 {
                     "op": "observation_retract",
@@ -5520,6 +5534,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         records = [r for (t, _, b), r in self.knowledge_pages.items() if t == tenant_id and b == branch]
         for row in scrub_automatic_pages(records, affected_cids):
             self.knowledge_pages[(tenant_id, row["page_id"], branch)] = row
+            self._item_embeddings.pop(("knowledge_page", tenant_id, branch, row["page_id"]), None)
 
     def knowledge_source_batch(self, tenant_id: str, branch: str = "main", *,
                                collection: str = "assertions", after: str = "",
@@ -5584,7 +5599,15 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     tenant_id, cid, branch=branch
                 ),
             )
-            self.knowledge_pages[key] = kp.to_dict()
+            kp_dict = kp.to_dict()
+            self.knowledge_pages[key] = kp_dict
+            maint_emb = (kp_dict.get("maintenance") or {}).get("embedding")
+            if isinstance(maint_emb, list) and maint_emb:
+                self._item_embeddings[("knowledge_page", tenant_id, branch, kp.page_id)] = [
+                    float(v) for v in maint_emb
+                ]
+            else:
+                self._item_embeddings.pop(("knowledge_page", tenant_id, branch, kp.page_id), None)
             self.audit_log.append(
                 {
                     "op": "knowledge_page_create",
@@ -5659,7 +5682,15 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             )
             kp.version = current.get("version", 1) + 1
             kp.updated_at = utc_now()
-            self.knowledge_pages[key] = kp.to_dict()
+            kp_dict = kp.to_dict()
+            self.knowledge_pages[key] = kp_dict
+            maint_emb = (kp_dict.get("maintenance") or {}).get("embedding")
+            if isinstance(maint_emb, list) and maint_emb:
+                self._item_embeddings[("knowledge_page", tenant_id, branch, kp.page_id)] = [
+                    float(v) for v in maint_emb
+                ]
+            else:
+                self._item_embeddings.pop(("knowledge_page", tenant_id, branch, kp.page_id), None)
             self.audit_log.append(
                 {
                     "op": "knowledge_page_update",
@@ -5843,7 +5874,15 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             archived_kp.status = "archived"
             archived_kp.version = archived_kp.version + 1
             archived_kp.updated_at = utc_now()
+            if isinstance(archived_kp.maintenance, dict) and "embedding" in archived_kp.maintenance:
+                archived_kp.maintenance = {
+                    **archived_kp.maintenance,
+                    "embedding": [],
+                } if archived_kp.maintenance.get("schema") == "mnemosyne.automatic-knowledge/v1" else {
+                    k: v for k, v in archived_kp.maintenance.items() if k != "embedding"
+                }
             self.knowledge_pages[key] = archived_kp.to_dict()
+            self._item_embeddings.pop(("knowledge_page", tenant_id, branch, archived_kp.page_id), None)
             self.audit_log.append(
                 {
                     "op": "knowledge_page_archive",
@@ -6206,6 +6245,22 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 return clone
             return None
 
+    _get_evidence_orig = get_evidence
+
+    def _get_evidence_readonly(
+        self, tenant_id: str, cid: str, branch: str = "main"
+    ) -> Evidence | None:
+        """Read-only view of an evidence row for internal custody checks (no deep copy)."""
+        with self._source_operation(tenant_id, branch):
+            ev = self._evidence_row(tenant_id, branch, cid)
+            if ev and not ev.erased:
+                if ev.branch == branch:
+                    return ev
+                clone = copy.copy(ev)
+                clone.branch = branch
+                return clone
+            return None
+
     def get_evidence_for_read(
         self,
         tenant_id: str,
@@ -6368,6 +6423,416 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             )
             self._persist_source_change((tenant_id, "evidence", branch, cid))
             return True
+
+    def _sources_allow_embedding(
+        self, tenant_id: str, branch: str, source_cids: list[str]
+    ) -> bool:
+        for cid in source_cids:
+            ev = self.evidence.get(self._evidence_key(tenant_id, branch, cid))
+            if ev is None:
+                continue
+            if ev.erased or not may_embed_item(
+                sensitivity=int(ev.sensitivity),
+                access_policy=ev.access_policy,
+                erased=ev.erased,
+            ):
+                return False
+        return True
+
+    def set_assertion_embedding(
+        self,
+        tenant_id: str,
+        assertion_id: str,
+        embedding: list[float] | None,
+        branch: str = "main",
+        *,
+        actor: str = "consolidation",
+        source: str = "embedder",
+        only_if_missing: bool = False,
+    ) -> bool:
+        with self._lock:
+            if self._read_only:
+                raise PermissionError("assertion embedding storage is read-only")
+            assertion = self.assertions.get(
+                self._branch_key(tenant_id, branch, assertion_id)
+            )
+            if (
+                assertion is None
+                or assertion.tenant_id != tenant_id
+                or assertion.branch != branch
+            ):
+                return False
+            emb_key = ("assertion", tenant_id, branch, assertion_id)
+            if embedding is None:
+                self._item_embeddings.pop(emb_key, None)
+                self._persist_source_change((tenant_id, "assertions", branch, assertion_id))
+                return True
+            if assertion.status not in {"active", "contested"}:
+                return False
+            if only_if_missing and self._item_embeddings.get(emb_key):
+                return False
+            if not may_embed_item(
+                sensitivity=int(assertion.sensitivity),
+                access_policy=assertion.access_policy,
+                status=assertion.status,
+            ) or not self._sources_allow_embedding(
+                tenant_id, branch, list(assertion.source_evidence_cids)
+            ):
+                self._audit(
+                    tenant_id,
+                    actor,
+                    "set_assertion_embedding.blocked_policy",
+                    assertion_id,
+                    {"branch": branch, "reason": "embedding_not_allowed"},
+                    source=source,
+                    trust_tier=assertion.trust_tier,
+                )
+                return False
+            self._item_embeddings[emb_key] = [float(v) for v in embedding]
+            self._persist_source_change((tenant_id, "assertions", branch, assertion_id))
+            return True
+
+    def set_observation_embedding(
+        self,
+        tenant_id: str,
+        observation_id: str,
+        embedding: list[float] | None,
+        branch: str = "main",
+        *,
+        actor: str = "consolidation",
+        source: str = "embedder",
+        only_if_missing: bool = False,
+    ) -> bool:
+        with self._lock:
+            if self._read_only:
+                raise PermissionError("observation embedding storage is read-only")
+            row = self.observations.get((tenant_id, observation_id, branch))
+            if row is None:
+                return False
+            emb_key = ("observation", tenant_id, branch, observation_id)
+            if embedding is None:
+                self._item_embeddings.pop(emb_key, None)
+                self._persist_source_change((tenant_id, "observations", branch, observation_id))
+                return True
+            status = str(row.get("status", "active"))
+            if status != "active":
+                return False
+            if only_if_missing and self._item_embeddings.get(emb_key):
+                return False
+            sensitivity = int(row.get("sensitivity", 0) or 0)
+            access_policy = row.get("access_policy")
+            if not may_embed_item(
+                sensitivity=sensitivity,
+                access_policy=access_policy,
+                status=status,
+            ) or not self._sources_allow_embedding(
+                tenant_id, branch, list(row.get("source_evidence_cids") or [])
+            ):
+                self._audit(
+                    tenant_id,
+                    actor,
+                    "set_observation_embedding.blocked_policy",
+                    observation_id,
+                    {"branch": branch, "reason": "embedding_not_allowed"},
+                    source=source,
+                )
+                return False
+            self._item_embeddings[emb_key] = [float(v) for v in embedding]
+            self._persist_source_change((tenant_id, "observations", branch, observation_id))
+            return True
+
+    def set_preference_embedding(
+        self,
+        tenant_id: str,
+        pref_id: str,
+        embedding: list[float] | None,
+        *,
+        actor: str = "consolidation",
+        source: str = "embedder",
+        only_if_missing: bool = False,
+    ) -> bool:
+        with self._lock:
+            if self._read_only:
+                raise PermissionError("preference embedding storage is read-only")
+            pref = self.preferences.get(pref_id)
+            if pref is None or pref.tenant_id != tenant_id:
+                return False
+            emb_key = ("preference", tenant_id, "*", pref_id)
+            if embedding is None:
+                self._item_embeddings.pop(emb_key, None)
+                self._persist_source_change((tenant_id, "preferences", "*", pref_id))
+                return True
+            if pref.status != "active":
+                return False
+            if only_if_missing and self._item_embeddings.get(emb_key):
+                return False
+            if not may_embed_item(
+                sensitivity=0,
+                access_policy=pref.access_policy,
+                status=pref.status,
+            ):
+                self._audit(
+                    tenant_id,
+                    actor,
+                    "set_preference_embedding.blocked_policy",
+                    pref_id,
+                    {"reason": "embedding_not_allowed"},
+                    source=source,
+                )
+                return False
+            self._item_embeddings[emb_key] = [float(v) for v in embedding]
+            self._persist_source_change((tenant_id, "preferences", "*", pref_id))
+            return True
+
+    def set_knowledge_page_embedding(
+        self,
+        tenant_id: str,
+        page_id: str,
+        embedding: list[float] | None,
+        branch: str = "main",
+        *,
+        actor: str = "consolidation",
+        source: str = "embedder",
+        only_if_missing: bool = False,
+    ) -> bool:
+        with self._lock:
+            if self._read_only:
+                raise PermissionError("knowledge page embedding storage is read-only")
+            key = (tenant_id, page_id, branch)
+            row = self.knowledge_pages.get(key)
+            if row is None:
+                return False
+            emb_key = ("knowledge_page", tenant_id, branch, page_id)
+            maint = dict(row.get("maintenance") or {})
+            if embedding is None:
+                self._item_embeddings.pop(emb_key, None)
+                if "embedding" in maint:
+                    if maint.get("schema") == "mnemosyne.automatic-knowledge/v1":
+                        maint["embedding"] = []
+                    else:
+                        maint.pop("embedding", None)
+                    updated_row = dict(row)
+                    updated_row["maintenance"] = maint
+                    self.knowledge_pages[key] = updated_row
+                self._persist_source_change((tenant_id, "knowledge_pages", branch, page_id))
+                return True
+            status = str(row.get("status", "active"))
+            if status in {"archived", "retired"}:
+                return False
+            existing = self._item_embeddings.get(emb_key) or (
+                maint.get("embedding") if isinstance(maint.get("embedding"), list) else None
+            )
+            if only_if_missing and existing:
+                return False
+            sensitivity = int(row.get("sensitivity", 0) or 0)
+            access_policy = row.get("access_policy")
+            if not may_embed_item(
+                sensitivity=sensitivity,
+                access_policy=access_policy,
+                status=status,
+            ) or not self._sources_allow_embedding(
+                tenant_id, branch, list(row.get("source_evidence_cids") or [])
+            ):
+                self._audit(
+                    tenant_id,
+                    actor,
+                    "set_knowledge_page_embedding.blocked_policy",
+                    page_id,
+                    {"branch": branch, "reason": "embedding_not_allowed"},
+                    source=source,
+                )
+                return False
+            vec = [float(v) for v in embedding]
+            self._item_embeddings[emb_key] = vec
+            maint["embedding"] = list(vec)
+            updated_row = dict(row)
+            updated_row["maintenance"] = maint
+            self.knowledge_pages[key] = updated_row
+            self._persist_source_change((tenant_id, "knowledge_pages", branch, page_id))
+            return True
+
+    def list_unembedded_targets(
+        self,
+        tenant_id: str,
+        branch: str = "main",
+        *,
+        limit: int = 128,
+    ) -> dict[str, list[dict[str, Any]]]:
+        cap = max(0, int(limit))
+        with self._lock:
+            ev_targets: list[dict[str, Any]] = []
+            for ev in sorted(
+                self.evidence.in_branch(tenant_id, branch).values(),
+                key=lambda item: item.cid or "",
+            ):
+                if len(ev_targets) >= cap:
+                    break
+                if (
+                    ev.tenant_id != tenant_id
+                    or ev.branch != branch
+                    or ev.erased
+                    or ev.retired_at is not None
+                    or ev.embedding
+                    or ev.source_type == "learning_tool_result"
+                    or is_retired_summary_metadata(ev.metadata)
+                    or not may_embed_item(
+                        sensitivity=int(ev.sensitivity),
+                        access_policy=ev.access_policy,
+                        erased=ev.erased,
+                    )
+                ):
+                    continue
+                ev_targets.append(
+                    {
+                        "cid": ev.cid,
+                        "user_id": ev.user_id,
+                        "content": ev.content,
+                        "text": ev.content,
+                        "source_type": ev.source_type,
+                        "sensitivity": int(ev.sensitivity),
+                        "access_policy": dict(ev.access_policy or {}),
+                    }
+                )
+
+            as_targets: list[dict[str, Any]] = []
+            for assertion in sorted(
+                self.assertions.in_branch(tenant_id, branch).values(),
+                key=lambda item: item.id,
+            ):
+                if len(as_targets) >= cap:
+                    break
+                if (
+                    assertion.tenant_id != tenant_id
+                    or assertion.branch != branch
+                    or assertion.status not in {"active", "contested"}
+                    or self._item_embeddings.get(
+                        ("assertion", tenant_id, branch, assertion.id)
+                    )
+                    or not may_embed_item(
+                        sensitivity=int(assertion.sensitivity),
+                        access_policy=assertion.access_policy,
+                        status=assertion.status,
+                    )
+                ):
+                    continue
+                as_targets.append(
+                    {
+                        "id": assertion.id,
+                        "user_id": assertion.user_id,
+                        "subject": assertion.subject,
+                        "predicate": assertion.predicate,
+                        "object": assertion.object,
+                        "text": f"{assertion.subject} {assertion.predicate} {assertion.object}".strip(),
+                        "source_evidence_cids": list(assertion.source_evidence_cids),
+                        "sensitivity": int(assertion.sensitivity),
+                        "access_policy": dict(assertion.access_policy or {}),
+                    }
+                )
+
+            obs_targets: list[dict[str, Any]] = []
+            for (t, oid, b), row in sorted(self.observations.items()):
+                if len(obs_targets) >= cap:
+                    break
+                if t != tenant_id or b != branch:
+                    continue
+                status = str(row.get("status", "active"))
+                if (
+                    status != "active"
+                    or self._item_embeddings.get(("observation", tenant_id, branch, oid))
+                    or not may_embed_item(
+                        sensitivity=int(row.get("sensitivity", 0) or 0),
+                        access_policy=row.get("access_policy"),
+                        status=status,
+                    )
+                ):
+                    continue
+                content = str(row.get("content") or "")
+                obs_targets.append(
+                    {
+                        "observation_id": oid,
+                        "user_id": str(row.get("user_id") or ""),
+                        "subject": str(row.get("subject") or ""),
+                        "topic": str(row.get("topic") or ""),
+                        "statement": content,
+                        "content": content,
+                        "text": content,
+                        "source_evidence_cids": list(row.get("source_evidence_cids") or []),
+                        "status": status,
+                    }
+                )
+
+            pref_targets: list[dict[str, Any]] = []
+            for pref in sorted(self.preferences.values(), key=lambda item: item.id):
+                if len(pref_targets) >= cap:
+                    break
+                if (
+                    pref.tenant_id != tenant_id
+                    or pref.status != "active"
+                    or self._item_embeddings.get(("preference", tenant_id, "*", pref.id))
+                    or not may_embed_item(
+                        sensitivity=0,
+                        access_policy=pref.access_policy,
+                        status=pref.status,
+                    )
+                ):
+                    continue
+                pref_targets.append(
+                    {
+                        "id": pref.id,
+                        "user_id": pref.user_id,
+                        "category": pref.category,
+                        "statement": pref.statement,
+                        "text": pref.statement,
+                        "source_evidence_cids": list(pref.source_evidence_cids),
+                        "access_policy": dict(pref.access_policy or {}),
+                    }
+                )
+
+            kp_targets: list[dict[str, Any]] = []
+            for (t, pid, b), row in sorted(self.knowledge_pages.items()):
+                if len(kp_targets) >= cap:
+                    break
+                if t != tenant_id or b != branch:
+                    continue
+                status = str(row.get("status", "active"))
+                maint = row.get("maintenance") or {}
+                maint_emb = maint.get("embedding") if isinstance(maint, dict) else None
+                if (
+                    status != "active"
+                    or self._item_embeddings.get(("knowledge_page", tenant_id, branch, pid))
+                    or (isinstance(maint_emb, list) and bool(maint_emb))
+                    or not may_embed_item(
+                        sensitivity=int(row.get("sensitivity", 0) or 0),
+                        access_policy=row.get("access_policy"),
+                        status=status,
+                    )
+                ):
+                    continue
+                title = str(row.get("title") or "")
+                body = str(row.get("content_markdown") or "")
+                page_text = f"{title}\n{body}".strip() if title and body else (title or body)
+                kp_targets.append(
+                    {
+                        "page_id": pid,
+                        "user_id": str(row.get("user_id") or ""),
+                        "path": str(row.get("path") or ""),
+                        "title": title,
+                        "summary": str(maint.get("summary") or title),
+                        "body": body,
+                        "content_markdown": body,
+                        "text": page_text,
+                        "source_evidence_cids": list(row.get("source_evidence_cids") or []),
+                        "status": status,
+                    }
+                )
+
+            return {
+                "evidence": ev_targets,
+                "assertions": as_targets,
+                "observations": obs_targets,
+                "preferences": pref_targets,
+                "knowledge_pages": kp_targets,
+            }
 
     def update_evidence_metadata(
         self,
@@ -6966,6 +7431,21 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             item.access_policy = access_policy
             item.branch = branch
             key = self._branch_key(item.tenant_id, branch, item.id)
+            existing = self.relations.get(key)
+            if (
+                existing is not None
+                and existing.tenant_id == item.tenant_id
+                and existing.branch == item.branch
+                and existing.source == item.source
+                and existing.predicate == item.predicate
+                and existing.target == item.target
+                and float(existing.confidence) == float(item.confidence)
+                and dt_to_json(existing.valid_from) == dt_to_json(item.valid_from)
+                and dt_to_json(existing.valid_to) == dt_to_json(item.valid_to)
+                and list(existing.source_evidence_cids) == list(item.source_evidence_cids)
+                and (existing.access_policy or {}) == (item.access_policy or {})
+            ):
+                return item.id
             self.relations[key] = item
             self._audit(
                 item.tenant_id,
@@ -7091,29 +7571,79 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         if use_quantized:
             from mnemosyne.quantized_vectors import QuantizedVectorIndex
 
-            candidates = self._candidate_hits(filt)
-            vectors = [self._embedding_for_hit(hit, filt) for hit in candidates]
             q_dims = len(query_vec)
-            valid_rows = [
-                (str(idx), hit, vec)
-                for idx, (hit, vec) in enumerate(zip(candidates, vectors, strict=True))
-                if vec is not None and len(vec) == q_dims
-            ]
-            if len(valid_rows) >= 64 and len(valid_rows) == sum(1 for v in vectors if v is not None):
-                row_map = {row_key: hit for row_key, hit, _ in valid_rows}
-                q_index = QuantizedVectorIndex.from_vectors(
-                    [row_key for row_key, _, _ in valid_rows],
-                    [vec for _, _, vec in valid_rows],
-                )
+            q_memo = getattr(self, "_quantized_index_memo", None)
+            item_embs = getattr(self, "_item_embeddings", None)
+            q_memo_key = (
+                getattr(self, "_store_version", 0),
+                len(self.evidence),
+                len(self.assertions),
+                len(self.preferences),
+                len(item_embs) if item_embs is not None else 0,
+                q_dims,
+                id(self.adapters.embedding),
+                repr(sorted(filt.items())),
+            )
+            now_q = utc_now()
+            cached_q = q_memo.get(q_memo_key) if q_memo is not None else None
+            if cached_q is not None:
+                q_deadline, q_index, q_templates, q_stored_flags = cached_q
+                if q_deadline is not None and now_q >= q_deadline:
+                    q_memo.pop(q_memo_key, None)
+                    cached_q = None
+                else:
+                    q_memo.move_to_end(q_memo_key)
+            if cached_q is None:
+                templates = self._candidate_templates(filt)
+                finish = getattr(templates, "finish", None)
+                row_templates: dict[str, tuple[Hit, Any, bool]] = {}
+                row_keys: list[str] = []
+                row_vecs: list[list[float]] = []
+                non_null_count = 0
+                for idx, template in enumerate(templates):
+                    probe = _clone_candidate_hit(template)
+                    if finish is not None:
+                        probe = finish(probe, template)
+                    vec = self._embedding_for_hit(probe, filt)
+                    if vec is not None:
+                        non_null_count += 1
+                        if len(vec) == q_dims:
+                            rkey = str(idx)
+                            row_keys.append(rkey)
+                            row_vecs.append(vec)
+                            row_templates[rkey] = (
+                                template,
+                                finish,
+                                bool(probe.metadata.get("stored_embedding_used")),
+                            )
+                if len(row_keys) >= 64 and len(row_keys) == non_null_count:
+                    q_index = QuantizedVectorIndex.from_vectors(row_keys, row_vecs)
+                    q_deadline = self._candidate_memo_deadline(
+                        filt.get("tenant_id"), filt.get("branch", "main"), now_q
+                    )
+                    cached_q = (q_deadline, q_index, row_templates, True)
+                    if q_memo is not None:
+                        q_memo[q_memo_key] = cached_q
+                        q_memo.move_to_end(q_memo_key)
+                        while len(q_memo) > 8:
+                            q_memo.popitem(last=False)
+            if cached_q is not None:
+                _, q_index, row_templates, _ = cached_q
                 q_mode = (
                     str(filt["quantized_mode"])
-                    if filt.get("quantized_mode") in {"exact", "int8_rescore", "binary_int8_rescore"}
+                    if filt.get("quantized_mode")
+                    in {"exact", "int8_rescore", "binary_int8_rescore"}
                     else "auto"
                 )
-                for row_key, score in q_index.search(query_vec, k=k, mode=q_mode, min_score=0.0):  # type: ignore[arg-type]
-                    hit = row_map[row_key]
+                for row_key, score in q_index.search(
+                    query_vec, k=k, mode=q_mode, min_score=0.0  # type: ignore[arg-type]
+                ):
+                    template, finish, stored_raw = row_templates[row_key]
+                    hit = _clone_candidate_hit(template)
+                    if finish is not None:
+                        hit = finish(hit, template)
+                    hit.metadata["stored_embedding_used"] = stored_raw
                     hit.score = score
-                    stored_raw = bool(hit.metadata.get("stored_embedding_used"))
                     base = (
                         "dense_media"
                         if stored_raw and hit.metadata.get("stored_media_embedding")
@@ -7193,7 +7723,9 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                         hits.append(hit)
                 if not self.adapters.embed_missing_on_read:
                     from .dense_projection import expand_source_vectors
-                    hits = expand_source_vectors(self, query, hits, self._candidate_hits(filt), k, filt)
+                    hits = self._dedup_expanded_hits(
+                        expand_source_vectors(self, query, hits, self._candidate_hits(filt), k, filt)
+                    )
                 return self._mark_retrieved_text_as_data(
                     sorted(hits, key=lambda item: item.score, reverse=True)[:k]
                 )
@@ -7216,10 +7748,34 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     hits.append(hit)
         if not self.adapters.embed_missing_on_read:
             from .dense_projection import expand_source_vectors
-            hits = expand_source_vectors(self, query, hits, self._candidate_hits(filt), k, filt)
+            hits = self._dedup_expanded_hits(
+                expand_source_vectors(self, query, hits, self._candidate_hits(filt), k, filt)
+            )
         return self._mark_retrieved_text_as_data(
             sorted(hits, key=lambda item: item.score, reverse=True)[:k]
         )
+
+    @staticmethod
+    def _dedup_expanded_hits(hits: list[Hit]) -> list[Hit]:
+        """Avoid duplicate (kind, id) when a derived item already has a stored embedding."""
+        best: dict[tuple[str, str], Hit] = {}
+        order: list[tuple[str, str]] = []
+        for hit in hits:
+            key = (hit.kind, hit.id)
+            prev = best.get(key)
+            if prev is None:
+                best[key] = hit
+                order.append(key)
+            elif (
+                bool(hit.metadata.get("stored_embedding_used"))
+                and not bool(prev.metadata.get("stored_embedding_used"))
+            ) or (
+                bool(hit.metadata.get("stored_embedding_used"))
+                == bool(prev.metadata.get("stored_embedding_used"))
+                and hit.score > prev.score
+            ):
+                best[key] = hit
+        return [best[key] for key in order]
 
     def passage_candidates(self, filt: dict[str, Any]) -> list[Hit]:
         """Every source passage ``filt`` may read, as memoized read-only rows - clone to change."""
@@ -7287,38 +7843,21 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             hits = filter_derived_adapter_hits(self, hits, filt)
             return self._mark_retrieved_text_as_data(hits)
         hits: list[Hit] = []
-        if text_kernels.NATIVE is not None:
-            # Batched fast path (adapterless fallback only): ONE lexical_scan
-            # FFI crossing scores every candidate text; byte-parity-proven
-            # against the per-hit lexical_score loop (tests/test_native_parity.py).
-            candidates = self._candidate_hits(filt)
-            scores = text_kernels.lexical_scan(
-                query, [hit.text for hit in candidates]
-            )
-            for hit, score in zip(candidates, scores, strict=True):
-                if score > 0:
-                    hit.score = score
-                    hit.channel = scored_channel_for_hit(
-                        kind=hit.kind, base_channel="lexical"
-                    )
-                    hits.append(hit)
-        else:
-            # One query against many texts: tokenize the query once and reuse each text's cached
-            # counts - the identical score (text.lexical_scorer).
-            score_text = lexical_scorer(query)
-            templates = self._candidate_templates(filt)
-            finish = getattr(templates, "finish", None)
-            for template in templates:
-                score = score_text(template.text)
-                if score > 0:
-                    hit = _clone_candidate_hit(template)
-                    if finish is not None:
-                        hit = finish(hit, template)
-                    hit.score = score
-                    hit.channel = scored_channel_for_hit(
-                        kind=hit.kind, base_channel="lexical"
-                    )
-                    hits.append(hit)
+        templates = self._candidate_templates(filt)
+        finish = getattr(templates, "finish", None)
+        scores = text_kernels.bm25_lexical_scan(
+            query, [template.text for template in templates]
+        )
+        for template, score in zip(templates, scores, strict=True):
+            if score > 0:
+                hit = _clone_candidate_hit(template)
+                if finish is not None:
+                    hit = finish(hit, template)
+                hit.score = score
+                hit.channel = scored_channel_for_hit(
+                    kind=hit.kind, base_channel="lexical"
+                )
+                hits.append(hit)
         return self._mark_retrieved_text_as_data(
             sorted(hits, key=lambda item: item.score, reverse=True)[:k]
         )
@@ -7397,56 +7936,138 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 seed_matches[node] = found
             return found
 
-        adjacency: dict[str, set[str]] = defaultdict(set)
-        relation_by_pair: dict[
-            tuple[str, str], tuple[Relation, dict[str, Any], Any, Any]
-        ] = {}
         security_context_key = _access_context_key(graph_filter)
-        # (relation, its branch): a thin canary lists its parent's relations as its own.
-        for rel, rel_branch in self._graph_relation_rows(tenant_id, branch):
-            if tenant_id is not None and rel.tenant_id != tenant_id:
-                continue
-            if branch is not None and rel_branch != branch:
-                continue
-            if not self._valid_at(rel.valid_from, rel.valid_to, moment):
-                continue
-            # (trust_tier, sensitivity) or None: all the graph needs. The full security dict -
-            # the same function of the same rows - is built only for relations that become hits.
-            verdict = self._relation_security_verdict(
-                rel,
-                branch=rel_branch,
-                include_quarantined=include_quarantined,
-                max_trust=max_trust,
-                max_sensitivity=max_sensitivity,
-                access_context=graph_filter,
-                context_key=security_context_key,
-            )
-            if verdict is None:
-                continue
-            relation_decision = may_read_item(
-                item_tenant_id=rel.tenant_id,
-                sensitivity=int(verdict[1]),
-                access_policy=rel.access_policy,
-                context=graph_filter,
-                policy_max_sensitivity=self.policy.max_sensitivity,
-                status="active",
-            )
-            if not relation_decision.allowed:
-                continue
-            adjacency[rel.source.lower()].add(rel.target.lower())
-            adjacency[rel.target.lower()].add(rel.source.lower())
-            relation_by_pair[(rel.source.lower(), rel.target.lower())] = (
-                rel,
-                verdict,
-                relation_decision,
-                rel_branch,
-            )
-            relation_by_pair[(rel.target.lower(), rel.source.lower())] = (
-                rel,
-                verdict,
-                relation_decision,
-                rel_branch,
-            )
+        graph_memo = (
+            None
+            if getattr(self, "_overlays", None)
+            else getattr(self, "_graph_ppr_auth_memo", None)
+        )
+        graph_memo_key = (
+            getattr(self, "_store_version", 0),
+            evidence_epoch(),
+            len(self.relations),
+            len(self.evidence),
+            tenant_id,
+            branch,
+            include_quarantined,
+            max_trust,
+            max_sensitivity,
+            int(self.policy.max_sensitivity),
+            security_context_key,
+        )
+        cached_graph = graph_memo.get(graph_memo_key) if graph_memo is not None else None
+        if cached_graph is not None:
+            valid_since, valid_until, cached_adj, cached_pairs = cached_graph
+            if (valid_since is None or moment >= valid_since) and (
+                valid_until is None or moment < valid_until
+            ):
+                graph_memo.move_to_end(graph_memo_key)
+                adjacency: dict[str, set[str]] = defaultdict(
+                    set, {node: set(neighbors) for node, neighbors in cached_adj.items()}
+                )
+                relation_by_pair: dict[
+                    tuple[str, str], list[tuple[Relation, Any, Any, str]]
+                ] = cached_pairs
+            else:
+                graph_memo.pop(graph_memo_key, None)
+                cached_graph = None
+
+        if cached_graph is None:
+            adjacency = defaultdict(set)
+            relation_by_pair = defaultdict(list)
+            valid_since: datetime | None = None
+            valid_until: datetime | None = None
+            # (relation, its branch): a thin canary lists its parent's relations as its own.
+            for rel, rel_branch in self._graph_relation_rows(tenant_id, branch):
+                if tenant_id is not None and rel.tenant_id != tenant_id:
+                    continue
+                if branch is not None and rel_branch != branch:
+                    continue
+                rel_start = (
+                    rel.valid_from.astimezone(UTC)
+                    if rel.valid_from.tzinfo
+                    else rel.valid_from.replace(tzinfo=UTC)
+                )
+                rel_end = (
+                    rel.valid_to.astimezone(UTC)
+                    if rel.valid_to and rel.valid_to.tzinfo
+                    else (rel.valid_to.replace(tzinfo=UTC) if rel.valid_to else None)
+                )
+                if rel_start <= moment:
+                    if valid_since is None or rel_start > valid_since:
+                        valid_since = rel_start
+                elif valid_until is None or rel_start < valid_until:
+                    valid_until = rel_start
+                if rel_end is not None:
+                    if rel_end <= moment:
+                        if valid_since is None or rel_end > valid_since:
+                            valid_since = rel_end
+                    elif valid_until is None or rel_end < valid_until:
+                        valid_until = rel_end
+                if not (rel_start <= moment and (rel_end is None or moment < rel_end)):
+                    continue
+                rel_deadline = evidence_expiry_deadline(rel.access_policy, None)
+                if rel_deadline is not None:
+                    if rel_deadline <= moment:
+                        if valid_since is None or rel_deadline > valid_since:
+                            valid_since = rel_deadline
+                    elif valid_until is None or rel_deadline < valid_until:
+                        valid_until = rel_deadline
+                for cid in rel.source_evidence_cids:
+                    ev_row = self._evidence_row(rel.tenant_id, rel_branch, cid)
+                    if ev_row is not None:
+                        ev_deadline = evidence_expiry_deadline(
+                            ev_row.access_policy, ev_row.metadata
+                        )
+                        if ev_deadline is not None:
+                            if ev_deadline <= moment:
+                                if valid_since is None or ev_deadline > valid_since:
+                                    valid_since = ev_deadline
+                            elif valid_until is None or ev_deadline < valid_until:
+                                valid_until = ev_deadline
+                # (trust_tier, sensitivity) or None: all the graph needs. The full security dict -
+                # the same function of the same rows - is built only for relations that become hits.
+                verdict = self._relation_security_verdict(
+                    rel,
+                    branch=rel_branch,
+                    include_quarantined=include_quarantined,
+                    max_trust=max_trust,
+                    max_sensitivity=max_sensitivity,
+                    access_context=graph_filter,
+                    context_key=security_context_key,
+                )
+                if verdict is None:
+                    continue
+                relation_decision = may_read_item(
+                    item_tenant_id=rel.tenant_id,
+                    sensitivity=int(verdict[1]),
+                    access_policy=rel.access_policy,
+                    context=graph_filter,
+                    policy_max_sensitivity=self.policy.max_sensitivity,
+                    status="active",
+                )
+                if not relation_decision.allowed:
+                    continue
+                src_l = rel.source.lower()
+                tgt_l = rel.target.lower()
+                adjacency[src_l].add(tgt_l)
+                adjacency[tgt_l].add(src_l)
+                entry = (rel, verdict, relation_decision, rel_branch)
+                relation_by_pair[(src_l, tgt_l)].append(entry)
+                if src_l != tgt_l:
+                    relation_by_pair[(tgt_l, src_l)].append(entry)
+            if graph_memo is not None:
+                frozen_adj = {node: frozenset(neighbors) for node, neighbors in adjacency.items()}
+                frozen_pairs = dict(relation_by_pair)
+                graph_memo[graph_memo_key] = (
+                    valid_since,
+                    valid_until,
+                    frozen_adj,
+                    frozen_pairs,
+                )
+                graph_memo.move_to_end(graph_memo_key)
+                while len(graph_memo) > 16:
+                    graph_memo.popitem(last=False)
 
         def hit_security(rel: Relation, rel_branch: str) -> dict[str, Any]:
             security = self._relation_hit_security(
@@ -7463,9 +8084,12 @@ class LocalMemoryEngine(CanaryOverlayMixin):
 
         hits: list[Hit] = []
         seen_relation_ids: set[str] = set()
-        for rel, _verdict, relation_decision, rel_branch in {
-            row[0].id: row for row in relation_by_pair.values()
-        }.values():
+        emitted_relations: list[tuple[Relation, str, float]] = []
+        unique_relations: dict[str, tuple[Relation, Any, Any, str]] = {}
+        for rows in relation_by_pair.values():
+            for row in rows:
+                unique_relations.setdefault(row[0].id, row)
+        for rel, _verdict, relation_decision, rel_branch in unique_relations.values():
             if not (matches_seed(rel.source) and matches_seed(rel.target)):
                 continue
             security = hit_security(rel, rel_branch)
@@ -7484,6 +8108,8 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     "target": rel.target,
                 }
             seen_relation_ids.add(rel.id)
+            rel_score = float(rel.confidence)
+            emitted_relations.append((rel, rel_branch, rel_score))
             hits.append(
                 Hit(
                     id=rel.id,
@@ -7491,7 +8117,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     tenant_id=rel.tenant_id,
                     branch=rel_branch,
                     text=text,
-                    score=float(rel.confidence),
+                    score=rel_score,
                     channel="graph_ppr",
                     provenance=rel.source_evidence_cids,
                     trust_tier=security["trust_tier"],
@@ -7518,21 +8144,21 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             if len(hits) >= k:
                 return self._mark_retrieved_text_as_data(hits)
         for seed in seed_set:
-            adjacency.setdefault(seed, [])
+            adjacency.setdefault(seed, set())
         # Every edge was added in both directions and every seed is a key: the graph is closed.
         ranks = ppr_power_iteration(adjacency, matches_seed, closed=True)
         # node -> relation rows, built once (was an O(V*E) per-node linear scan):
         # the node's edges to a seed (the fact asked about), else its oldest edge.
         relation_by_node: dict[
-            str, list[tuple[Relation, dict[str, Any], Any, Any]]
+            str, list[tuple[Relation, Any, Any, str]]
         ] = {}
-        for (pair_node, other), row in relation_by_pair.items():
+        for (pair_node, other), rows in relation_by_pair.items():
             if matches_seed(other):
-                relation_by_node.setdefault(pair_node, []).append(row)
-        for pair, row in relation_by_pair.items():
+                relation_by_node.setdefault(pair_node, []).extend(rows)
+        for pair, rows in relation_by_pair.items():
             for pair_node in pair:
                 if pair_node not in relation_by_node:
-                    relation_by_node[pair_node] = [row]
+                    relation_by_node[pair_node] = list(rows)
         for node, score in sorted(
             ranks.items(), key=lambda item: item[1], reverse=True
         ):
@@ -7558,6 +8184,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                         "target": rel.target,
                     }
                 seen_relation_ids.add(rel.id)
+                emitted_relations.append((rel, rel_branch, float(score)))
                 hits.append(
                     Hit(
                         id=rel.id,
@@ -7594,6 +8221,92 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     break
             if len(hits) >= k:
                 break
+        # Live-only supporting-evidence lifting: when remaining slots < k exist, lift
+        # readable citing evidence from emitted relations so multi-hop graph hits carry
+        # full evidence context into RRF/reranking (skipped when as_of is pinned to avoid
+        # leaking post-change evidence into historical queries).
+        if as_of is None and len(hits) < k and emitted_relations:
+            seen_evidence_cids: set[str] = set()
+            include_operational = bool(graph_filter.get("include_operational", False))
+            for rel, rel_branch, rel_score in emitted_relations:
+                for cid in rel.source_evidence_cids:
+                    if not cid or cid in seen_evidence_cids:
+                        continue
+                    ev = self._evidence_row(rel.tenant_id, rel_branch, cid)
+                    if (
+                        ev is None
+                        or ev.erased
+                        or ev.tenant_id != rel.tenant_id
+                        or ev.branch != rel_branch
+                    ):
+                        continue
+                    if not include_operational and ev.source_type == "learning_tool_result":
+                        continue
+                    if not evidence_current_for_context(ev, graph_filter):
+                        continue
+                    if ev.trust_tier > max_trust or ev.sensitivity > max_sensitivity:
+                        continue
+                    if not include_quarantined and ev.metadata.get("quarantine_reason"):
+                        continue
+                    if is_retired_summary_metadata(ev.metadata):
+                        continue
+                    ev_decision = may_read_item(
+                        item_tenant_id=ev.tenant_id,
+                        sensitivity=int(ev.sensitivity),
+                        access_policy=ev.access_policy,
+                        context=graph_filter,
+                        policy_max_sensitivity=self.policy.max_sensitivity,
+                        status="active",
+                        erased=ev.erased,
+                    )
+                    if not ev_decision.allowed:
+                        continue
+                    if not derived_evidence_readable(
+                        self,
+                        ev,
+                        tenant_id=rel.tenant_id,
+                        branch=rel_branch,
+                        filt=graph_filter,
+                        policy=self.policy,
+                    ):
+                        continue
+                    ev_text, ev_privacy = apply_text_redactions(
+                        ev.content or ev.content_pointer or f"{ev.modality} evidence",
+                        ev.access_policy,
+                        ev_decision,
+                    )
+                    ev_meta: dict[str, Any] = {
+                        "actor": ev.actor,
+                        "source_type": ev.source_type,
+                        "modality": ev.modality,
+                        "content_pointer": ev.content_pointer,
+                        "reality_class": self._classify_evidence_reality(ev),
+                        "graph_lifted_from_relation": rel.id,
+                        "privacy": ev_privacy,
+                        **_candidate_time_metadata(
+                            ev.created_at, ev.metadata, redacted=ev_decision.redacted
+                        ),
+                    }
+                    seen_evidence_cids.add(cid)
+                    hits.append(
+                        Hit(
+                            id=ev.cid or cid,
+                            kind="evidence",
+                            tenant_id=ev.tenant_id,
+                            branch=ev.branch,
+                            text=ev_text,
+                            score=float(rel_score) * 0.90,
+                            channel="graph_ppr",
+                            provenance=[ev.cid] if ev.cid else [cid],
+                            trust_tier=ev.trust_tier,
+                            sensitivity=ev.sensitivity,
+                            metadata=ev_meta,
+                        )
+                    )
+                    if len(hits) >= k:
+                        break
+                if len(hits) >= k:
+                    break
         return self._mark_retrieved_text_as_data(hits)
 
     #: explain["channels"] key names consumed by the shared pipeline.
@@ -9158,6 +9871,11 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 if model_key_value[:2] == (tenant_id, branch):
                     self.mental_models[model_key_value] = invalidate_model_record(model)
             self._scrub_automatic_knowledge(tenant_id, branch, affected_cids)
+            for (obs_tenant, obs_id, obs_branch), obs_row in list(self.observations.items()):
+                if obs_tenant != tenant_id or obs_branch != branch:
+                    continue
+                if affected_cids.intersection(obs_row.get("source_evidence_cids") or []):
+                    self._item_embeddings.pop(("observation", tenant_id, branch, obs_id), None)
             retained_cascade_metadata = {
                 retained_cid: {
                     **dict(metadata),
@@ -9251,6 +9969,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     assertion.scope = {}
                     assertion.calibration = {"dependency_erased": True}
                     self.assertions[key] = assertion  # re-index under the scrubbed subject/predicate
+                    self._item_embeddings.pop(("assertion", tenant_id, branch, assertion.id), None)
                     propagated["retracted_assertions"].append(assertion.id)
                 else:
                     assertion.source_evidence_cids = surviving_sources
@@ -9279,6 +9998,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     preference.statement = "[erased]"
                     preference.scope = {}
                     preference.exceptions = {}
+                    self._item_embeddings.pop(("preference", tenant_id, "*", preference.id), None)
                     propagated["retracted_preferences"].append(preference.id)
                 else:
                     preference.source_evidence_cids = surviving_sources
@@ -9920,6 +10640,8 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     return templates
         if not _candidate_memo_enabled():
             return self._candidate_hits_uncached(filt)
+        obs_store = getattr(self, "observations", None)
+        kp_store = getattr(self, "knowledge_pages", None)
         key = (
             filt.get("tenant_id"),
             filt.get("branch", "main"),
@@ -9927,6 +10649,8 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             len(self.evidence),
             len(self.assertions),
             len(self.preferences),
+            len(obs_store) if obs_store is not None else 0,
+            len(kp_store) if kp_store is not None else 0,
             int(self.policy.max_trust_tier),
             int(self.policy.max_sensitivity),
             # Access-context fingerprint: may_read_item / redactions read
@@ -9936,31 +10660,54 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         )
         now = utc_now()
         cached: list[Hit] | None = None
-        with self._candidate_memo_lock:
-            entry = self._candidate_memo.get(key)
-            if entry is not None:
-                deadline, cached = entry
-                if deadline is not None and now >= deadline:
-                    # A source or access-policy expiry in scope has passed:
-                    # the scan's read decisions changed with NO write, so
-                    # the entry is stale despite the unchanged version key.
-                    del self._candidate_memo[key]
-                    cached = None
-                else:
-                    self._candidate_memo.move_to_end(key)
-        if cached is None:
-            cached = self._candidate_hits_uncached(filt)
-            # Cutoff at the pre-scan `now`: an expiry crossing during the scan
-            # lands <= a later lookup's clock, forcing a rescan (never a stale
-            # serve). Expiries already past never flip back — no deadline.
-            deadline = self._candidate_memo_deadline(
-                filt.get("tenant_id"), filt.get("branch", "main"), now
-            )
+        tid = threading.get_ident()
+        owner_event: threading.Event | None = None
+        while True:
+            wait_event: threading.Event | None = None
             with self._candidate_memo_lock:
-                self._candidate_memo[key] = (deadline, cached)
-                self._candidate_memo.move_to_end(key)
-                while len(self._candidate_memo) > _CANDIDATE_MEMO_SIZE:
-                    self._candidate_memo.popitem(last=False)
+                entry = self._candidate_memo.get(key)
+                if entry is not None:
+                    deadline, cached = entry
+                    if deadline is not None and now >= deadline:
+                        # A source or access-policy expiry in scope has passed:
+                        # the scan's read decisions changed with NO write, so
+                        # the entry is stale despite the unchanged version key.
+                        del self._candidate_memo[key]
+                        cached = None
+                    else:
+                        self._candidate_memo.move_to_end(key)
+                        break
+                inflight = self._candidate_memo_inflight.get(key)
+                if inflight is not None and inflight[1] != tid:
+                    wait_event = inflight[0]
+                else:
+                    if inflight is None:
+                        owner_event = threading.Event()
+                        self._candidate_memo_inflight[key] = (owner_event, tid)
+                    break
+            if wait_event is not None:
+                wait_event.wait()
+                now = utc_now()
+        if cached is None:
+            try:
+                cached = self._candidate_hits_uncached(filt)
+                # Cutoff at the pre-scan `now`: an expiry crossing during the scan
+                # lands <= a later lookup's clock, forcing a rescan (never a stale
+                # serve). Expiries already past never flip back — no deadline.
+                deadline = self._candidate_memo_deadline(
+                    filt.get("tenant_id"), filt.get("branch", "main"), now
+                )
+                with self._candidate_memo_lock:
+                    self._candidate_memo[key] = (deadline, cached)
+                    self._candidate_memo.move_to_end(key)
+                    while len(self._candidate_memo) > _CANDIDATE_MEMO_SIZE:
+                        self._candidate_memo.popitem(last=False)
+            finally:
+                if owner_event is not None:
+                    with self._candidate_memo_lock:
+                        if self._candidate_memo_inflight.get(key) == (owner_event, tid):
+                            del self._candidate_memo_inflight[key]
+                    owner_event.set()
         return cached
 
     def _candidate_memo_deadline(
@@ -10002,6 +10749,22 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                 and (deadline is None or candidate < deadline)
             ):
                 deadline = candidate
+        for store in (
+            getattr(self, "observations", None),
+            getattr(self, "knowledge_pages", None),
+        ):
+            if not store:
+                continue
+            for (rec_tenant, _, rec_branch), row in store.items():
+                if rec_tenant != tenant_id or rec_branch != branch:
+                    continue
+                candidate = evidence_expiry_deadline(row.get("access_policy"), None)
+                if (
+                    candidate is not None
+                    and candidate > now
+                    and (deadline is None or candidate < deadline)
+                ):
+                    deadline = candidate
         return deadline
 
     def _candidate_hits_uncached(
@@ -10130,10 +10893,24 @@ class LocalMemoryEngine(CanaryOverlayMixin):
             source_custody = {}
 
         def readable_sources(cids: Any) -> bool:
-            key = (tenant_id, branch, id(cids))
-            cached = source_custody.get(key)
-            if cached is not None and cached[0] is cids:
-                return cached[1]
+            if type(cids) is CidList:
+                key: Any = (tenant_id, branch, id(cids))
+                cached = source_custody.get(key)
+                if cached is not None and cached[0] is cids:
+                    return cached[1]
+            elif isinstance(cids, (list, tuple)):
+                try:
+                    key = (tenant_id, branch, tuple(cids))
+                except TypeError:
+                    key = (tenant_id, branch, id(cids))
+                cached = source_custody.get(key)
+                if cached is not None and (cached[0] is cids or cached[0] == cids):
+                    return cached[1]
+            else:
+                key = (tenant_id, branch, id(cids))
+                cached = source_custody.get(key)
+                if cached is not None and cached[0] is cids:
+                    return cached[1]
             allowed = projection_sources_readable(
                 self,
                 cids,
@@ -10249,6 +11026,136 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     },
                 )
             )
+        if bool(filt.get("include_synthesized", False)):
+            obs_store = getattr(self, "observations", None) or {}
+            for (obs_tenant, obs_id, obs_branch), obs_row in obs_store.items():
+                if obs_tenant != tenant_id or obs_branch != branch:
+                    continue
+                status = str(obs_row.get("status", "active"))
+                if status != "active":
+                    continue
+                obs_trust = int(obs_row.get("trust_tier", 0) or 0)
+                obs_sens = int(obs_row.get("sensitivity", 0) or 0)
+                if obs_trust > max_trust or obs_sens > max_sensitivity:
+                    continue
+                obs_cids = list(obs_row.get("source_evidence_cids") or [])
+                if not readable_sources(obs_cids):
+                    continue
+                obs_policy = obs_row.get("access_policy")
+                decision = may_read_item(
+                    item_tenant_id=obs_tenant,
+                    sensitivity=obs_sens,
+                    access_policy=obs_policy,
+                    context=filt,
+                    policy_max_sensitivity=self.policy.max_sensitivity,
+                    status=status,
+                    erased=False,
+                )
+                if not decision.allowed:
+                    continue
+                raw_text = str(
+                    obs_row.get("content")
+                    or f"{obs_row.get('subject', '')} {obs_row.get('topic', '')}".strip()
+                )
+                text, privacy_metadata = apply_text_redactions(
+                    raw_text, obs_policy, decision
+                )
+                hits.append(
+                    Hit(
+                        id=str(obs_row.get("observation_id") or obs_id),
+                        kind="observation",
+                        tenant_id=obs_tenant,
+                        branch=obs_branch,
+                        text=text,
+                        score=0.0,
+                        channel="candidate",
+                        provenance=obs_cids,
+                        trust_tier=obs_trust,
+                        sensitivity=obs_sens,
+                        metadata={
+                            "subject": str(obs_row.get("subject") or ""),
+                            "topic": str(obs_row.get("topic") or ""),
+                            "status": status,
+                            "standing": float(obs_row.get("standing", 0.51) or 0.51),
+                            "salience": float(obs_row.get("salience", 0.5) or 0.5),
+                            "memory_type": "observation",
+                            "contradiction_history": list(
+                                obs_row.get("contradiction_history") or []
+                            ),
+                            "created_at": str(obs_row.get("created_at") or ""),
+                            "updated_at": str(obs_row.get("updated_at") or ""),
+                            "embedding_partition": vector_partition_for_item(
+                                sensitivity=obs_sens,
+                                access_policy=obs_policy,
+                                status=status,
+                            ),
+                            "privacy": privacy_metadata,
+                        },
+                    )
+                )
+            kp_store = getattr(self, "knowledge_pages", None) or {}
+            for (kp_tenant, kp_id, kp_branch), kp_row in kp_store.items():
+                if kp_tenant != tenant_id or kp_branch != branch:
+                    continue
+                status = str(kp_row.get("status", "active"))
+                if status != "active":
+                    continue
+                kp_trust = int(kp_row.get("trust_tier", 0) or 0)
+                kp_sens = int(kp_row.get("sensitivity", 0) or 0)
+                if kp_trust > max_trust or kp_sens > max_sensitivity:
+                    continue
+                kp_cids = list(kp_row.get("source_evidence_cids") or [])
+                if not readable_sources(kp_cids):
+                    continue
+                kp_policy = kp_row.get("access_policy")
+                decision = may_read_item(
+                    item_tenant_id=kp_tenant,
+                    sensitivity=kp_sens,
+                    access_policy=kp_policy,
+                    context=filt,
+                    policy_max_sensitivity=self.policy.max_sensitivity,
+                    status=status,
+                    erased=False,
+                )
+                if not decision.allowed:
+                    continue
+                title = str(kp_row.get("title") or "")
+                body = str(kp_row.get("content_markdown") or "")
+                raw_text = f"{title}\n{body}".strip() if title and body else (title or body)
+                text, privacy_metadata = apply_text_redactions(
+                    raw_text, kp_policy, decision
+                )
+                hits.append(
+                    Hit(
+                        id=str(kp_row.get("page_id") or kp_id),
+                        kind="knowledge_page",
+                        tenant_id=kp_tenant,
+                        branch=kp_branch,
+                        text=text,
+                        score=0.0,
+                        channel="candidate",
+                        provenance=kp_cids,
+                        trust_tier=kp_trust,
+                        sensitivity=kp_sens,
+                        metadata={
+                            "page_id": str(kp_row.get("page_id") or kp_id),
+                            "path": str(kp_row.get("path") or ""),
+                            "title": title,
+                            "version": int(kp_row.get("version", 1) or 1),
+                            "status": status,
+                            "memory_type": "knowledge_page",
+                            "tags": list(kp_row.get("tags") or []),
+                            "created_at": str(kp_row.get("created_at") or ""),
+                            "updated_at": str(kp_row.get("updated_at") or ""),
+                            "embedding_partition": vector_partition_for_item(
+                                sensitivity=kp_sens,
+                                access_policy=kp_policy,
+                                status=status,
+                            ),
+                            "privacy": privacy_metadata,
+                        },
+                    )
+                )
         return hits
 
     @staticmethod
@@ -10293,6 +11200,7 @@ class LocalMemoryEngine(CanaryOverlayMixin):
         self, hit: Hit, filt: dict[str, Any] | None = None
     ) -> list[float] | None:
         """``_stored_embedding_for_hit`` without writing ``stored_embedding_used`` into the hit."""
+        embedder = self.adapters.embedding
         if hit.kind == "evidence":
             ev = self._evidence_row(hit.tenant_id, hit.branch, hit.id)
             if ev and ev.embedding and evidence_current_for_context(ev, filt):
@@ -10311,7 +11219,6 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                     access_policy=ev.access_policy,
                     embedding_partition=ev.metadata.get("embedding_partition"),
                 ):
-                    embedder = self.adapters.embedding
                     if (
                         type(embedder) is HashingEmbeddingProvider
                         and len(ev.embedding) != embedder.dims
@@ -10320,6 +11227,138 @@ class LocalMemoryEngine(CanaryOverlayMixin):
                         # A text vector hashed at another width cannot be compared; re-hash the text instead.
                         return None
                     return ev.embedding
+            return None
+        item_embs = getattr(self, "_item_embeddings", None)
+        if hit.kind == "assertion":
+            vec = (
+                item_embs.get(("assertion", hit.tenant_id, hit.branch, hit.id))
+                if item_embs
+                else None
+            )
+            if not vec:
+                return None
+            assertion = self.assertions.get(
+                self._branch_key(hit.tenant_id, hit.branch, hit.id)
+            )
+            if assertion is None or assertion.status not in {"active", "contested"}:
+                return None
+            decision = may_read_item(
+                item_tenant_id=assertion.tenant_id,
+                sensitivity=int(assertion.sensitivity),
+                access_policy=assertion.access_policy,
+                context=filt,
+                policy_max_sensitivity=self.policy.max_sensitivity,
+                status=assertion.status,
+                erased=False,
+            )
+            if not may_use_stored_embedding(
+                decision=decision,
+                sensitivity=int(assertion.sensitivity),
+                access_policy=assertion.access_policy,
+            ):
+                return None
+            if type(embedder) is HashingEmbeddingProvider and len(vec) != embedder.dims:
+                return None
+            return vec
+        if hit.kind == "preference":
+            vec = (
+                item_embs.get(("preference", hit.tenant_id, "*", hit.id))
+                if item_embs
+                else None
+            )
+            if not vec:
+                return None
+            pref = self.preferences.get(hit.id)
+            if pref is None or pref.tenant_id != hit.tenant_id or pref.status != "active":
+                return None
+            decision = may_read_item(
+                item_tenant_id=pref.tenant_id,
+                sensitivity=0,
+                access_policy=pref.access_policy,
+                context=filt,
+                policy_max_sensitivity=self.policy.max_sensitivity,
+                status=pref.status,
+                erased=False,
+            )
+            if not may_use_stored_embedding(
+                decision=decision,
+                sensitivity=0,
+                access_policy=pref.access_policy,
+            ):
+                return None
+            if type(embedder) is HashingEmbeddingProvider and len(vec) != embedder.dims:
+                return None
+            return vec
+        if hit.kind == "observation":
+            vec = (
+                item_embs.get(("observation", hit.tenant_id, hit.branch, hit.id))
+                if item_embs
+                else None
+            )
+            if not vec:
+                return None
+            obs = (getattr(self, "observations", None) or {}).get(
+                (hit.tenant_id, hit.id, hit.branch)
+            )
+            if obs is None or str(obs.get("status", "active")) != "active":
+                return None
+            obs_sens = int(obs.get("sensitivity", 0) or 0)
+            obs_policy = obs.get("access_policy")
+            decision = may_read_item(
+                item_tenant_id=hit.tenant_id,
+                sensitivity=obs_sens,
+                access_policy=obs_policy,
+                context=filt,
+                policy_max_sensitivity=self.policy.max_sensitivity,
+                status="active",
+                erased=False,
+            )
+            if not may_use_stored_embedding(
+                decision=decision,
+                sensitivity=obs_sens,
+                access_policy=obs_policy,
+            ):
+                return None
+            if type(embedder) is HashingEmbeddingProvider and len(vec) != embedder.dims:
+                return None
+            return vec
+        if hit.kind == "knowledge_page":
+            kp = (getattr(self, "knowledge_pages", None) or {}).get(
+                (hit.tenant_id, hit.id, hit.branch)
+            )
+            if kp is None or str(kp.get("status", "active")) != "active":
+                return None
+            vec = (
+                item_embs.get(("knowledge_page", hit.tenant_id, hit.branch, hit.id))
+                if item_embs
+                else None
+            )
+            if not vec:
+                maint = kp.get("maintenance")
+                if isinstance(maint, dict) and isinstance(maint.get("embedding"), list) and maint["embedding"]:
+                    vec = maint["embedding"]
+            if not vec:
+                return None
+            kp_sens = int(kp.get("sensitivity", 0) or 0)
+            kp_policy = kp.get("access_policy")
+            decision = may_read_item(
+                item_tenant_id=hit.tenant_id,
+                sensitivity=kp_sens,
+                access_policy=kp_policy,
+                context=filt,
+                policy_max_sensitivity=self.policy.max_sensitivity,
+                status="active",
+                erased=False,
+            )
+            if not may_use_stored_embedding(
+                decision=decision,
+                sensitivity=kp_sens,
+                access_policy=kp_policy,
+            ):
+                return None
+            if type(embedder) is HashingEmbeddingProvider and len(vec) != embedder.dims:
+                return None
+            return vec
         return None
 
     def stored_embedding_dims(self) -> int | None:
@@ -10339,14 +11378,22 @@ class LocalMemoryEngine(CanaryOverlayMixin):
     def _rrf(self, ranked_lists: list[list[Hit]], k: int, *, channel_weights=None) -> list[Hit]:
         return rrf_fuse(ranked_lists, k, rrf_k=self.policy.rrf_k, channel_weights=channel_weights)
 
-    def _mmr(self, query: str, hits: list[Hit], k: int) -> list[Hit]:
+    def _mmr(
+        self,
+        query: str,
+        hits: list[Hit],
+        k: int,
+        filt: dict[str, Any] | None = None,
+    ) -> list[Hit]:
         # Embedding sourcing stays security-gated via _embedding_for_hit
         # (deliberately divergent from PostgresEngine, spec §4.0).
         return mmr_select(
             hits,
             k,
             query_vec=embed_query(self.adapters.embedding, query),
-            embed_hit=lambda hit: self._embedding_for_hit(hit, allow_fallback=True),
+            embed_hit=lambda hit: self._embedding_for_hit(
+                hit, filt, allow_fallback=True
+            ),
             mmr_lambda=self.policy.mmr_lambda,
             # The built-in hashing embedder is pure and _embedding_for_hit only re-writes the
             # same stored_embedding_used flag, so each hit may be embedded once (exact).

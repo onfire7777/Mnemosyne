@@ -177,6 +177,21 @@ def _source_rows(engine: Any, context: AnswerReadContext, ids: list[str]) -> lis
                                          ids=ids, limit=min(4096, max(1, len(ids))))
 
 
+_VOLATILE_SOURCE_METADATA_KEYS = frozenset({
+    "lifecycle",
+    "retrieval_index_retry",
+    "last_accessed",
+    "access_count",
+})
+
+
+def _stable_source_metadata(metadata: Any) -> dict[str, Any]:
+    """Exclude volatile retrieval telemetry so page validity survives read accesses."""
+    if not isinstance(metadata, dict):
+        return {}
+    return {key: value for key, value in metadata.items() if key not in _VOLATILE_SOURCE_METADATA_KEYS}
+
+
 def _claim(engine: Any, context: AnswerReadContext, row: dict[str, Any]) -> dict[str, Any] | None:
     """Admit an existing assertion, preserving its exact evidence and epistemic class."""
     now = utc_now()
@@ -254,7 +269,8 @@ def _claim(engine: Any, context: AnswerReadContext, row: dict[str, Any]) -> dict
     else:
         section = "Established facts"
     stable = {key: value for key, value in row.items() if key not in {"last_accessed", "access_count"}}
-    source_state = [{"cid": cid, "content": _digest(source.content), "metadata": source.metadata,
+    source_state = [{"cid": cid, "content": _digest(source.content),
+                     "metadata": _stable_source_metadata(source.metadata),
                      "access_policy": source.access_policy, "trust_tier": source.trust_tier,
                      "sensitivity": source.sensitivity} for cid, source in sources.items()]
     access = merge_access_policies([row.get("access_policy") or {}, *[s.access_policy for s in sources.values()]],
@@ -352,6 +368,43 @@ def _render(title: str, claims: list[dict[str, Any]], links: list[dict[str, Any]
     return "\n".join(lines)
 
 
+def _cached_knowledge_pages(engine: Any, tenant_id: str, branch: str) -> list[tuple[Any, set[str], set[str]]]:
+    """Return ``(page, content_and_title_terms, title_terms)`` with a SQLite watermark cache."""
+    watermark = None
+    if hasattr(engine, "_connect") and hasattr(engine, "_lock"):
+        try:
+            with engine._lock:
+                conn = engine._connect(tenant_id)
+                row = conn.execute(
+                    "SELECT COUNT(*), COALESCE(SUM(version), 0), "
+                    "COALESCE(SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END), 0), "
+                    "COALESCE(MAX(updated_at), '') "
+                    "FROM knowledge_pages WHERE tenant_id = ? AND branch = ?",
+                    (tenant_id, branch),
+                ).fetchone()
+                watermark = (id(conn), tuple(row) if row is not None else ())
+        except Exception:
+            watermark = None
+    cache = engine.__dict__.get("_knowledge_context_cache") if hasattr(engine, "__dict__") else None
+    cache_key = (tenant_id, branch)
+    if watermark is not None and cache is not None:
+        entry = cache.get(cache_key)
+        if entry is not None and entry[0] == watermark:
+            return entry[1]
+    pages = engine.knowledge_page_list(tenant_id, branch, tags=[_TAG], status="all", limit=1000)
+    prepared: list[tuple[Any, set[str], set[str]]] = []
+    for page in pages:
+        content = " ".join(str(c.get(key, "")) for c in page.maintenance.get("claims", [])
+                           for key in ("subject", "predicate", "object", "text"))
+        prepared.append((page, _terms(content + " " + page.title), _terms(page.title)))
+    if watermark is not None and hasattr(engine, "__dict__"):
+        if cache is None:
+            cache = {}
+            engine.__dict__["_knowledge_context_cache"] = cache
+        cache[cache_key] = (watermark, prepared)
+    return prepared
+
+
 def read_knowledge_context(engine: Any, context: AnswerReadContext, query: str, *,
                            max_pages: int = 3, max_tokens: int = 1200) -> list[dict[str, Any]]:
     """Return bounded useful topic views with fresh exact-span provenance."""
@@ -360,20 +413,26 @@ def read_knowledge_context(engine: Any, context: AnswerReadContext, query: str, 
     terms = _terms(query)
     if not terms:
         return []
-    pages = engine.knowledge_page_list(context.tenant_id, context.branch, tags=[_TAG], status="all", limit=1000)
+    prepared = _cached_knowledge_pages(engine, context.tenant_id, context.branch)
     identity = _embedding_identity(engine)
     vector = _embedding(engine, query, query=True) if any(p.maintenance.get("embedding_identity") == identity
-             and p.maintenance.get("embedding") and p.user_id == context.user_id for p in pages) else []
+             and p.maintenance.get("embedding") and p.user_id == context.user_id for p, _, _ in prepared) else []
     scored = []
-    for page in pages:
+    for page, page_terms, title_terms in prepared:
         if page.user_id != context.user_id or page.status != "active":
             continue
-        content = " ".join(str(c.get(key, "")) for c in page.maintenance.get("claims", [])
-                           for key in ("subject", "predicate", "object", "text"))
-        overlap = len(terms & _terms(content + " " + page.title)) / len(terms)
-        title_overlap = len(terms & _terms(page.title)) / len(terms)
+        matched_terms = len(terms & page_terms)
+        title_matched = len(terms & title_terms)
+        overlap = matched_terms / len(terms)
+        title_overlap = title_matched / len(terms)
         semantic = _cosine(vector, page.maintenance.get("embedding")) if page.maintenance.get("embedding_identity") == identity else 0.0
-        if overlap or semantic >= 0.35:
+        relevant = (
+            title_matched > 0
+            or (len(terms) <= 2 and matched_terms >= 1)
+            or (matched_terms >= 2 and overlap >= 0.25)
+            or semantic >= 0.35
+        )
+        if relevant:
             scored.append((-(overlap + 0.5 * title_overlap + max(0.0, semantic)), page.path, page))
     output = []
     remaining = max_tokens * 4
@@ -522,6 +581,7 @@ class KnowledgeMaintenanceWorker:
                         if found:
                             self._discovering[row["id"]] = {_digest(key): "" for key in found}
                     elif (self._collection == "evidence" and row.get("actor") == "user"
+                          and row.get("source_type") != "learning_tool_result"
                           and int(row.get("trust_tier", 5)) <= 1 and not row.get("erased")
                           and "?" in str(row.get("content", "")) and projection_sources_readable(
                               self.engine, [row["cid"]], tenant_id=self.context.tenant_id,

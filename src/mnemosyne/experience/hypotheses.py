@@ -13,8 +13,10 @@ import json
 from .receipts import digest
 
 VERSION = 1
+MAX_REVIEW_ATTEMPTS = 3
 KINDS = {"factual", "contradiction", "procedural", "knowledge_maintenance"}
 STATES = {"proposed", "queued", "running", "verified", "rejected", "inconclusive"}
+_VOLATILE_SOURCE_METADATA_KEYS = frozenset({"lifecycle", "retrieval_index_retry"})
 
 
 def _projection_options(runtime):
@@ -25,7 +27,16 @@ def _projection_options(runtime):
 
 
 def fingerprint_source(source):
-    return digest([source.content, source.created_at.isoformat(), source.metadata,
+    metadata = (
+        {
+            k: v
+            for k, v in source.metadata.items()
+            if k not in _VOLATILE_SOURCE_METADATA_KEYS
+        }
+        if isinstance(source.metadata, dict)
+        else source.metadata
+    )
+    return digest([source.content, source.created_at.isoformat(), metadata,
                    source.access_policy, source.actor, source.source_type, source.trust_tier])
 
 
@@ -248,7 +259,8 @@ def _review(runtime, tenant, row, state):
             if (event.get("source") == "tool" and event.get("hypothesis_id") == row["id"]
                     and review.get("contract_hash") == row["contract_hash"]
                     and review.get("source_versions") == row["source_versions"]
-                    and review.get("verdict") == "rejected" and event.get("output")):
+                    and review.get("verdict") == "rejected"
+                    and (event.get("output") or event.get("output_sha256") or event.get("source_cid"))):
                 for evidence in review.get("support", []):
                     cid, quote = evidence.get("source_cid"), evidence.get("quote")
                     if cid in row["source_cids"] and quote and quote in runtime.engine.get_evidence(tenant, cid).content:
@@ -289,6 +301,9 @@ def process_reviews(runtime, tenant, *, limit=8, now=None):
             continue
         if old.get("review_complete") and not changed:
             continue
+        version_attempts = old.get("review_attempts_for_version", old.get("review_attempts", 0))
+        if not changed and version_attempts >= MAX_REVIEW_ATTEMPTS:
+            continue
         next_review = old.get("next_review_at")
         if next_review and not changed and datetime.fromisoformat(next_review) > timestamp:
             continue
@@ -300,8 +315,11 @@ def process_reviews(runtime, tenant, *, limit=8, now=None):
             history = list(stored.get("review_history", []))[-15:]
             if changed:
                 history.append({"status": "queued", "reason": "source_version_changed", "at": timestamp.isoformat()})
+            next_version_attempts = 1 if changed else old.get("review_attempts_for_version", old.get("review_attempts", 0)) + 1
             stored.update(row, source_versions=versions, status="running", review_token=token,
                           review_attempts=old.get("review_attempts", 0) + 1,
+                          review_attempts_for_version=next_version_attempts,
+                          review_complete=False if changed else stored.get("review_complete", False),
                           lease_until=(timestamp + timedelta(minutes=5)).isoformat(), review_history=history)
             return True
         if not runtime.writer.apply(tenant, "hypothesis_review_claim", claim):
@@ -328,10 +346,25 @@ def process_reviews(runtime, tenant, *, limit=8, now=None):
             stored = current["policy"].get("hypotheses", {}).get(key)
             if not stored or stored.get("review_token") != token:
                 return False
-            stored.update(result, reviewed_at=timestamp.isoformat(), lease_until=None,
-                          next_review_at=(timestamp + timedelta(minutes=min(1440, 5 * 2 ** min(stored["review_attempts"], 8)))).isoformat())
-            stored.setdefault("review_history", []).append({"status": result["status"], "reason": result["reason"],
-                                                            "at": timestamp.isoformat(), "verifier": result["verifier"]})
+            final_result = dict(result)
+            attempts_for_version = stored.get("review_attempts_for_version", stored.get("review_attempts", 0))
+            exhausted = (
+                final_result.get("status") == "inconclusive"
+                and not final_result.get("review_complete")
+                and attempts_for_version >= MAX_REVIEW_ATTEMPTS
+            )
+            if exhausted:
+                final_result["review_complete"] = True
+                final_result["review_exhausted"] = True
+                next_at = None
+            elif final_result.get("review_complete") or final_result.get("status") in {"verified", "rejected"}:
+                next_at = None
+            else:
+                next_at = (timestamp + timedelta(minutes=min(1440, 5 * 2 ** min(stored["review_attempts"], 8)))).isoformat()
+            stored.update(final_result, reviewed_at=timestamp.isoformat(), lease_until=None,
+                          next_review_at=next_at)
+            stored.setdefault("review_history", []).append({"status": final_result["status"], "reason": final_result["reason"],
+                                                            "at": timestamp.isoformat(), "verifier": final_result["verifier"]})
             return True
         reviewed += bool(runtime.writer.apply(tenant, "hypothesis_review_finish", finish))
     return {"reviewed": reviewed}

@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import array
 import json
+import struct
 import sys
 from typing import Any
 
@@ -57,6 +58,10 @@ PRAGMA_STATEMENTS: tuple[str, ...] = (
     "PRAGMA busy_timeout=5000",
     # Zero freed cells so forgotten text does not stay readable in free pages.
     "PRAGMA secure_delete=ON",
+    # Safe read/memory performance tuning (64 MiB page cache, 256 MiB mmap, RAM temps).
+    "PRAGMA cache_size=-65536",
+    "PRAGMA mmap_size=268435456",
+    "PRAGMA temp_store=MEMORY",
 )
 
 ENSURE_STATEMENTS: list[str] = [
@@ -104,6 +109,8 @@ ENSURE_STATEMENTS: list[str] = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS evidence_erased_idx ON evidence(tenant_id, branch) WHERE erased = 1",
+    "CREATE INDEX IF NOT EXISTS evidence_scope_source_idx ON evidence(tenant_id, branch, erased, source_type, trust_tier, sensitivity)",
+    "CREATE INDEX IF NOT EXISTS evidence_scope_created_idx ON evidence(tenant_id, branch, erased, source_type, created_at)",
     # assertions — UNIQUE(tenant_id, branch, id); columns mirror the Assertion
     # model (datetimes as dt_to_json TEXT for lexicographic as-of windows).
     """
@@ -134,6 +141,7 @@ ENSURE_STATEMENTS: list[str] = [
         access_policy TEXT NOT NULL DEFAULT '{}',
         last_accessed TEXT,
         access_count INTEGER NOT NULL DEFAULT 0,
+        embedding BLOB,
         PRIMARY KEY (tenant_id, branch, id),
         FOREIGN KEY (tenant_id, branch) REFERENCES branches(tenant_id, name)
     )
@@ -188,7 +196,8 @@ ENSURE_STATEMENTS: list[str] = [
     CREATE TABLE IF NOT EXISTS preferences (
         id TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL,
-        record TEXT NOT NULL
+        record TEXT NOT NULL,
+        embedding BLOB
     )
     """,
     """
@@ -449,6 +458,7 @@ ENSURE_STATEMENTS: list[str] = [
         access_policy TEXT NOT NULL DEFAULT '{}',
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
+        embedding BLOB,
         PRIMARY KEY (tenant_id, branch, observation_id),
         FOREIGN KEY (tenant_id, branch) REFERENCES branches(tenant_id, name)
     )
@@ -485,6 +495,7 @@ ENSURE_STATEMENTS: list[str] = [
         maintenance TEXT NOT NULL DEFAULT '{}',
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
+        embedding BLOB,
         PRIMARY KEY (tenant_id, branch, page_id),
         FOREIGN KEY (tenant_id, branch) REFERENCES branches(tenant_id, name)
     )
@@ -516,24 +527,33 @@ ENSURE_STATEMENTS: list[str] = [
         tokenize = "unicode61 tokenchars '_'"
     )
     """,
-    # Keep evidence_fts in lockstep with the evidence table (standard external
-    # trigger pattern). rowid mirrors evidence.rowid so lookups can join back.
+    # Keep evidence_fts in lockstep with non-operational evidence rows (standard
+    # external trigger pattern). Operational learning_tool_result rows are skipped
+    # so raw tool stdout never bloats the lexical index; include_operational reads
+    # scan evidence directly.
     """
-    CREATE TRIGGER IF NOT EXISTS evidence_fts_ai AFTER INSERT ON evidence BEGIN
+    CREATE TRIGGER IF NOT EXISTS evidence_fts_ai AFTER INSERT ON evidence
+    WHEN new.source_type != 'learning_tool_result'
+    BEGIN
         INSERT INTO evidence_fts(rowid, cid, tenant_id, branch, content)
         VALUES (new.rowid, new.cid, new.tenant_id, new.branch, new.content);
     END
     """,
     """
-    CREATE TRIGGER IF NOT EXISTS evidence_fts_ad AFTER DELETE ON evidence BEGIN
+    CREATE TRIGGER IF NOT EXISTS evidence_fts_ad AFTER DELETE ON evidence
+    WHEN old.source_type != 'learning_tool_result'
+    BEGIN
         DELETE FROM evidence_fts WHERE rowid = old.rowid;
     END
     """,
     """
-    CREATE TRIGGER IF NOT EXISTS evidence_fts_au AFTER UPDATE ON evidence BEGIN
+    CREATE TRIGGER IF NOT EXISTS evidence_fts_au
+    AFTER UPDATE OF cid, tenant_id, branch, content, source_type ON evidence
+    BEGIN
         DELETE FROM evidence_fts WHERE rowid = old.rowid;
         INSERT INTO evidence_fts(rowid, cid, tenant_id, branch, content)
-        VALUES (new.rowid, new.cid, new.tenant_id, new.branch, new.content);
+        SELECT new.rowid, new.cid, new.tenant_id, new.branch, new.content
+        WHERE new.source_type != 'learning_tool_result';
     END
     """,
 ]
@@ -544,25 +564,75 @@ def json_text(value: Any) -> str:
     return json.dumps(value, sort_keys=True)
 
 
-def pack_embedding(embedding: list[float] | None) -> bytes | None:
-    """Pack an embedding as a little-endian f64 BLOB (Phase-1 dense-scan seam)."""
+_EMBEDDING_MAGIC_F32 = b"MNEMF32\x00"
+_EMBEDDING_MAGIC_F16 = b"MNEMF16\x00"
+
+
+def pack_embedding(
+    embedding: list[float] | None, *, dtype: str = "f64"
+) -> bytes | None:
+    """Pack an embedding as a little-endian BLOB.
+
+    Default ``dtype="f64"`` emits raw little-endian IEEE-754 float64 bytes for
+    zero-copy ``dense_scan_packed`` parity. Opt-in ``dtype="f32"`` and
+    ``dtype="f16"`` prepend an 8-byte aligned magic header (``MNEMF32\\x00`` /
+    ``MNEMF16\\x00``) so :func:`unpack_embedding` decodes all formats seamlessly.
+    """
     if embedding is None:
         return None
-    packed = array.array("d", (float(value) for value in embedding))
-    if sys.byteorder == "big":  # pragma: no cover — no supported big-endian target
-        packed.byteswap()
-    return packed.tobytes()
+    if dtype == "f64":
+        packed = array.array("d", (float(value) for value in embedding))
+        if sys.byteorder == "big":  # pragma: no cover — no supported big-endian target
+            packed.byteswap()
+        return packed.tobytes()
+    if dtype == "f32":
+        packed_f32 = array.array("f", (float(value) for value in embedding))
+        if sys.byteorder == "big":  # pragma: no cover — no supported big-endian target
+            packed_f32.byteswap()
+        return _EMBEDDING_MAGIC_F32 + packed_f32.tobytes()
+    if dtype == "f16":
+        n = len(embedding)
+        if n == 0:
+            return _EMBEDDING_MAGIC_F16
+        return _EMBEDDING_MAGIC_F16 + struct.pack(
+            f"<{n}e", *(float(value) for value in embedding)
+        )
+    raise ValueError(f"unsupported embedding pack dtype: {dtype!r}")
 
 
 def unpack_embedding(blob: bytes | None) -> list[float] | None:
-    """Inverse of :func:`pack_embedding`; exact f64 round-trip."""
+    """Inverse of :func:`pack_embedding`; supports raw f64 and tagged f32/f16 BLOBs."""
     if blob is None:
         return None
+    if blob.startswith(_EMBEDDING_MAGIC_F32):
+        payload = blob[len(_EMBEDDING_MAGIC_F32) :]
+        unpacked_f32 = array.array("f")
+        unpacked_f32.frombytes(payload)
+        if sys.byteorder == "big":  # pragma: no cover — no supported big-endian target
+            unpacked_f32.byteswap()
+        return list(unpacked_f32)
+    if blob.startswith(_EMBEDDING_MAGIC_F16):
+        payload = blob[len(_EMBEDDING_MAGIC_F16) :]
+        if not payload:
+            return []
+        if len(payload) % 2 != 0:
+            raise ValueError("truncated f16 embedding blob")
+        return list(struct.unpack(f"<{len(payload) // 2}e", payload))
     unpacked = array.array("d")
     unpacked.frombytes(blob)
     if sys.byteorder == "big":  # pragma: no cover — no supported big-endian target
         unpacked.byteswap()
     return list(unpacked)
+
+
+def embedding_blob_to_f64_bytes(blob: bytes | None) -> bytes | None:
+    """Return raw little-endian f64 bytes for ``dense_scan_packed`` without copying f64 blobs."""
+    if blob is None:
+        return None
+    if blob.startswith(_EMBEDDING_MAGIC_F32) or blob.startswith(_EMBEDDING_MAGIC_F16):
+        values = unpack_embedding(blob)
+        return pack_embedding(values, dtype="f64")
+    return bytes(blob)
 
 # Experience records use the engine transaction and tenant database.
 LEARNING_TABLES = ("learning_receipts", "learning_episodes", "learning_credit",
@@ -572,6 +642,22 @@ ENSURE_STATEMENTS.extend(
     "payload TEXT NOT NULL, PRIMARY KEY (tenant_id, record_key))"
     for table in LEARNING_TABLES
 )
+ENSURE_STATEMENTS.append(
+    "CREATE INDEX IF NOT EXISTS learning_episodes_open_idx "
+    "ON learning_episodes(tenant_id, record_key) "
+    "WHERE json_valid(payload) AND json_extract(payload, '$.status') = 'open'"
+)
+ENSURE_STATEMENTS.append(
+    "CREATE TABLE IF NOT EXISTS learning_revisions (tenant_id TEXT PRIMARY KEY, revision INTEGER NOT NULL)"
+)
+for _learning_table in LEARNING_TABLES:
+    for _learning_op, _learning_side in (("INSERT", "NEW"), ("UPDATE", "NEW"), ("DELETE", "OLD")):
+        ENSURE_STATEMENTS.append(
+            f"CREATE TRIGGER IF NOT EXISTS {_learning_table}_revision_{_learning_op.lower()} "
+            f"AFTER {_learning_op} ON {_learning_table} BEGIN "
+            f"INSERT INTO learning_revisions VALUES ({_learning_side}.tenant_id, 1) "
+            f"ON CONFLICT(tenant_id) DO UPDATE SET revision = revision + 1; END"
+        )
 
 # Transaction-coupled source changes let maintained answers revalidate only the
 # affected source dependency closure. These tables contain identifiers only.
@@ -580,12 +666,27 @@ ENSURE_STATEMENTS.extend([
     "CREATE TABLE IF NOT EXISTS memory_source_changes (tenant_id TEXT NOT NULL, revision INTEGER NOT NULL, collection TEXT NOT NULL, branch TEXT NOT NULL, item_id TEXT NOT NULL, PRIMARY KEY (tenant_id, revision))",
     "CREATE INDEX IF NOT EXISTS memory_source_changes_item_idx ON memory_source_changes(tenant_id, collection, item_id)",
 ])
-for _source_table in ("evidence", "assertions", "relations", "preferences"):
+_RELATION_UPDATE_WHEN = (
+    "WHEN OLD.tenant_id IS NOT NEW.tenant_id OR OLD.branch IS NOT NEW.branch "
+    "OR OLD.source IS NOT NEW.source OR OLD.predicate IS NOT NEW.predicate "
+    "OR OLD.target IS NOT NEW.target OR OLD.confidence IS NOT NEW.confidence "
+    "OR OLD.weight IS NOT NEW.weight OR OLD.valid_from IS NOT NEW.valid_from "
+    "OR OLD.valid_to IS NOT NEW.valid_to OR OLD.expired_at IS NOT NEW.expired_at "
+    "OR OLD.justification_id IS NOT NEW.justification_id OR OLD.status IS NOT NEW.status "
+    "OR OLD.source_evidence_cids IS NOT NEW.source_evidence_cids "
+    "OR OLD.access_policy IS NOT NEW.access_policy "
+)
+for _source_table in ("evidence", "assertions", "relations", "preferences", "observations"):
     for _operation in ("INSERT", "UPDATE", "DELETE"):
         _sides = ("OLD", "NEW") if _operation == "UPDATE" else (("OLD",) if _operation == "DELETE" else ("NEW",))
         _body = []
         for _side in _sides:
-            _id = f"{_side}.cid" if _source_table == "evidence" else f"{_side}.id"
+            if _source_table == "evidence":
+                _id = f"{_side}.cid"
+            elif _source_table == "observations":
+                _id = f"{_side}.observation_id"
+            else:
+                _id = f"{_side}.id"
             _branch = "'*'" if _source_table == "preferences" else f"{_side}.branch"
             if _operation == "DELETE":
                 _body.append(f"DELETE FROM memory_source_changes WHERE tenant_id = OLD.tenant_id AND collection = '{_source_table}' AND item_id = {_id};")
@@ -596,6 +697,7 @@ for _source_table in ("evidence", "assertions", "relations", "preferences"):
                 f"INSERT INTO memory_source_revisions VALUES ({_side}.tenant_id, 1) ON CONFLICT(tenant_id) DO UPDATE SET revision = revision + 1;",
                 f"INSERT INTO memory_source_changes SELECT {_side}.tenant_id, revision, '{_collection}', {_branch}, {_id} FROM memory_source_revisions WHERE tenant_id = {_side}.tenant_id;",
             ])
+        _when = _RELATION_UPDATE_WHEN if (_source_table == "relations" and _operation == "UPDATE") else ""
         ENSURE_STATEMENTS.append(
-            f"CREATE TRIGGER IF NOT EXISTS memory_source_{_source_table}_{_operation.lower()} AFTER {_operation} ON {_source_table} BEGIN {' '.join(_body)} END"
+            f"CREATE TRIGGER IF NOT EXISTS memory_source_{_source_table}_{_operation.lower()} AFTER {_operation} ON {_source_table} {_when}BEGIN {' '.join(_body)} END"
         )

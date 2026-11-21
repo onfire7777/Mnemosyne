@@ -1303,3 +1303,357 @@ class MemoryContextCompiler:
             temporal_anchors=all_anchors,
             premise_alert=premise_alert,
         )
+
+    @staticmethod
+    def compile_retrieved_context(
+        query: str,
+        *,
+        hits: Sequence[Any] = (),
+        observations: Sequence[Any] = (),
+        mental_models: Sequence[Any] = (),
+        knowledge_pages: Sequence[Any] = (),
+        evaluated_at: datetime | None = None,
+        max_items: int = 16,
+    ) -> dict[str, Any]:
+        """Lightweight deterministic formatter for live retrieval & grounded answering.
+
+        Annotates retrieved items with inline ISO dates, exact calendar deltas,
+        epistemic status tags, and supersession/contradiction links without
+        invoking external LLMs or building a full PassageIndex.
+        """
+        return compile_retrieved_context(
+            query,
+            hits=hits,
+            observations=observations,
+            mental_models=mental_models,
+            knowledge_pages=knowledge_pages,
+            evaluated_at=evaluated_at,
+            max_items=max_items,
+        )
+
+
+def _coerce_utc_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+    if isinstance(value, str) and value.strip():
+        raw = value.strip()
+        if raw.endswith("Z"):
+            raw = raw[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(raw)
+        except ValueError:
+            return None
+        return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+    return None
+
+
+def _item_as_mapping(item: Any) -> Mapping[str, Any]:
+    if isinstance(item, Mapping):
+        return item
+    if hasattr(item, "to_dict") and callable(item.to_dict):
+        try:
+            data = item.to_dict()
+            if isinstance(data, Mapping):
+                return data
+        except Exception:
+            pass
+    out: dict[str, Any] = {}
+    for attr in (
+        "id",
+        "cid",
+        "observation_id",
+        "model_id",
+        "page_id",
+        "kind",
+        "text",
+        "content",
+        "answer",
+        "title",
+        "name",
+        "question",
+        "subject",
+        "topic",
+        "status",
+        "standing",
+        "actor",
+        "created_at",
+        "valid_from",
+        "valid_to",
+        "updated_at",
+        "provenance",
+        "source_evidence_cids",
+        "source_cids",
+        "metadata",
+    ):
+        if hasattr(item, attr):
+            val = getattr(item, attr)
+            if val is not None:
+                out[attr] = val
+    return out
+
+
+def _epistemic_tag_for(row: Mapping[str, Any], meta: Mapping[str, Any], kind: str) -> str:
+    status = str(meta.get("status") or row.get("status") or "").strip().lower()
+    if meta.get("superseded_by") or status == "superseded":
+        return "SUPERSEDED"
+    if meta.get("contested") or meta.get("conflicting_assertion_ids") or status == "contested":
+        return "CONTESTED"
+    if kind == "mental_model":
+        return "MENTAL MODEL"
+    if kind == "observation":
+        return "OBSERVATION"
+    if kind == "knowledge_page":
+        return "KNOWLEDGE PAGE"
+    epistemic_cls = str(meta.get("epistemic_class") or "").strip().lower()
+    if epistemic_cls == "reported_belief":
+        return "REPORTED BELIEF"
+    if meta.get("supersedes"):
+        return "CURRENT"
+    if kind in {"assertion", "preference"}:
+        return "CONFIRMED"
+    if kind == "working":
+        return "WORKING"
+    if kind == "intention":
+        return "COMMITMENT"
+    actor = str(meta.get("actor") or row.get("actor") or "").strip().lower()
+    if actor == "user":
+        return "USER"
+    if actor == "assistant":
+        return "ASSISTANT"
+    return "EVIDENCE"
+
+
+def annotate_hit_temporal_epistemic(
+    item: Any,
+    *,
+    evaluated_at: datetime | None = None,
+    kind_hint: str | None = None,
+    resolve_inline_dates: bool = True,
+) -> dict[str, Any]:
+    """Compute compact temporal, epistemic, and supersession annotations for one memory item."""
+    eval_utc = _coerce_utc_datetime(evaluated_at) or datetime.now(UTC)
+    query_d = eval_utc.date()
+    row = _item_as_mapping(item)
+    meta = row.get("metadata") if isinstance(row.get("metadata"), Mapping) else {}
+    kind = str(kind_hint or row.get("kind") or meta.get("memory_type") or "evidence").strip().lower()
+    item_id = str(
+        row.get("id")
+        or row.get("cid")
+        or row.get("observation_id")
+        or row.get("model_id")
+        or row.get("page_id")
+        or ""
+    )
+    if kind == "mental_model":
+        text = " ".join(
+            str(p).strip()
+            for p in (row.get("name"), row.get("answer") or row.get("text") or row.get("content"))
+            if p and str(p).strip()
+        )
+    elif kind == "observation":
+        text = str(row.get("content") or row.get("text") or "").strip()
+    elif kind == "knowledge_page":
+        title = str(row.get("title") or "").strip()
+        body = str(row.get("text") or row.get("content") or row.get("content_markdown") or "").strip()
+        text = f"{title}: {body}".strip(": ") if title and title not in body else (body or title)
+    else:
+        text = str(row.get("text") or row.get("content") or row.get("statement") or "").strip()
+
+    created_dt = (
+        _coerce_utc_datetime(meta.get("created_at"))
+        or _coerce_utc_datetime(meta.get("_candidate_created_at"))
+        or _coerce_utc_datetime(row.get("created_at"))
+        or _coerce_utc_datetime(meta.get("valid_from"))
+        or _coerce_utc_datetime(row.get("valid_from"))
+        or _coerce_utc_datetime(row.get("updated_at"))
+    )
+    created_date: str | None = None
+    delta_days: int | None = None
+    delta_months: int | None = None
+    elapsed_label: str | None = None
+    inline_dates: list[dict[str, Any]] = []
+    if created_dt is not None:
+        anchor_d = created_dt.date()
+        created_date = _format_date_with_wd(anchor_d)
+        cal_delta = compute_calendar_delta(eval_utc, created_dt)
+        delta_days = cal_delta.delta_days
+        delta_months = cal_delta.delta_months
+        elapsed_label = _format_days_to_current(anchor_d, query_d)
+        if resolve_inline_dates and text:
+            speaker = str(meta.get("actor") or row.get("actor") or "user")
+            for anc in resolve_inline_temporal_expressions(
+                text[:2000],
+                session_index=0,
+                turn_index=0,
+                speaker=speaker,
+                anchor_date=anchor_d,
+                query_date=query_d,
+            ):
+                if anc.is_ambiguous:
+                    continue
+                inline_dates.append(
+                    {
+                        "expression": anc.expression,
+                        "resolved_date": anc.resolved_date.isoformat(),
+                        "days_to_query_date": anc.days_to_query_date,
+                        "note": anc.note,
+                    }
+                )
+                if len(inline_dates) >= 3:
+                    break
+
+    epistemic_tag = _epistemic_tag_for(row, meta, kind)
+    supersession_note: str | None = None
+    if meta.get("superseded_by"):
+        succ = meta.get("superseded_by")
+        succ_list = succ if isinstance(succ, (list, tuple)) else [succ]
+        supersession_note = f"superseded_by={','.join(str(x) for x in succ_list if x)}"
+    elif meta.get("supersedes"):
+        supersession_note = f"supersedes={meta['supersedes']}"
+
+    contested_note: str | None = None
+    conflicts = meta.get("conflicting_assertion_ids")
+    if isinstance(conflicts, (list, tuple)) and conflicts:
+        contested_note = f"conflicts_with={','.join(str(x) for x in conflicts if x)}"
+    elif epistemic_tag == "CONTESTED":
+        contested_note = "contested"
+
+    cids = list(
+        dict.fromkeys(
+            str(c)
+            for c in (
+                row.get("source_evidence_cids")
+                or row.get("source_cids")
+                or meta.get("source_evidence_cids")
+                or row.get("provenance")
+                or ([item_id] if kind == "evidence" and item_id else [])
+            )
+            if c
+        )
+    )
+    annotation: dict[str, Any] = {
+        "id": item_id,
+        "kind": kind,
+        "epistemic_tag": epistemic_tag,
+        "created_at": created_dt.isoformat() if created_dt is not None else None,
+        "created_date": created_date,
+        "calendar_delta_days": delta_days,
+        "calendar_delta_months": delta_months,
+        "elapsed_label": elapsed_label,
+        "inline_dates": inline_dates,
+        "supersession_note": supersession_note,
+        "contested_note": contested_note,
+        "source_cids": cids,
+        "text": text,
+    }
+    annotation["header_tag"] = format_compiled_hit_prefix(annotation)
+    return annotation
+
+
+def format_compiled_hit_prefix(annotation: Mapping[str, Any]) -> str:
+    """Render a compact bracketed temporal-epistemic prefix for a single memory."""
+    parts: list[str] = [str(annotation.get("epistemic_tag") or "EVIDENCE")]
+    created_date = annotation.get("created_date")
+    delta_days = annotation.get("calendar_delta_days")
+    if created_date:
+        if isinstance(delta_days, int):
+            if delta_days == 0:
+                delta_str = "today"
+            elif delta_days > 0:
+                delta_str = f"{delta_days}d ago"
+            else:
+                delta_str = f"in {-delta_days}d"
+            parts.append(f"{created_date} | {delta_str}")
+        else:
+            parts.append(str(created_date))
+    if annotation.get("supersession_note"):
+        parts.append(str(annotation["supersession_note"]))
+    if annotation.get("contested_note"):
+        parts.append(str(annotation["contested_note"]))
+    return "[" + " | ".join(parts) + "]"
+
+
+def compile_retrieved_context(
+    query: str,
+    *,
+    hits: Sequence[Any] = (),
+    observations: Sequence[Any] = (),
+    mental_models: Sequence[Any] = (),
+    knowledge_pages: Sequence[Any] = (),
+    evaluated_at: datetime | None = None,
+    max_items: int = 16,
+) -> dict[str, Any]:
+    """Compile retrieved memory records into a lightweight temporal-epistemic digest.
+
+    Preserves full source CIDs, resolves inline relative dates against item
+    timestamps, computes exact calendar deltas relative to ``evaluated_at``,
+    and surfaces epistemic tags, supersession chains, and active conflicts.
+    """
+    eval_utc = _coerce_utc_datetime(evaluated_at) or datetime.now(UTC)
+    query_d = eval_utc.date()
+    limit = max(1, int(max_items))
+
+    entries: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    ordered_inputs: list[tuple[str | None, Sequence[Any]]] = [
+        ("mental_model", mental_models),
+        ("observation", observations),
+        ("knowledge_page", knowledge_pages),
+        (None, hits),
+    ]
+    for hint, seq in ordered_inputs:
+        for item in seq:
+            if len(entries) >= limit:
+                break
+            ann = annotate_hit_temporal_epistemic(
+                item,
+                evaluated_at=eval_utc,
+                kind_hint=hint,
+                resolve_inline_dates=True,
+            )
+            key = (ann["kind"], ann["id"] or ann["text"][:64])
+            if key in seen or not ann["text"]:
+                continue
+            seen.add(key)
+            entries.append(ann)
+
+    temporal_query = bool(_MULTI_OR_TEMPORAL_CUE_RE.search(query or ""))
+    if temporal_query and len(entries) > 1:
+        dated = [e for e in entries if e["created_at"]]
+        undated = [e for e in entries if not e["created_at"]]
+        dated.sort(key=lambda e: str(e["created_at"]))
+        entries = dated + undated
+
+    inline_anchors: list[dict[str, Any]] = []
+    lines: list[str] = [
+        f"### Compiled Memory Context (Reference Date: {_format_date_with_wd(query_d)})"
+    ]
+    for entry in entries:
+        snippet = " ".join(entry["text"].split())
+        if len(snippet) > 480:
+            snippet = snippet[:477] + "..."
+        cid_suffix = (
+            f" (sources: {', '.join(entry['source_cids'])})"
+            if entry["source_cids"]
+            else ""
+        )
+        inline_suffix = ""
+        if entry["inline_dates"]:
+            resolved_bits = [
+                f'"{d["expression"]}"={d["resolved_date"]}'
+                for d in entry["inline_dates"]
+            ]
+            inline_suffix = " [dates: " + "; ".join(resolved_bits) + "]"
+            for d in entry["inline_dates"]:
+                inline_anchors.append({"item_id": entry["id"], **d})
+        lines.append(f"- {entry['header_tag']} {snippet}{inline_suffix}{cid_suffix}")
+
+    return {
+        "reference_date": _format_date_with_wd(query_d),
+        "evaluated_at": eval_utc.isoformat(),
+        "temporal_ordered": temporal_query,
+        "item_count": len(entries),
+        "items": entries,
+        "inline_dates": inline_anchors,
+        "text": "\n".join(lines) if entries else "",
+    }

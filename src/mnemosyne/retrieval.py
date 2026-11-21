@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import array
 import calendar
 import copy
 import hashlib
@@ -10,7 +11,9 @@ import math
 import os
 import re
 import sqlite3
+import struct
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.error
@@ -39,7 +42,16 @@ from mnemosyne.media_limits import (
     enforce_byte_limit,
     validate_byte_limit,
 )
-from mnemosyne.models import Hit, iso_utc, parse_dt, utc_now
+from mnemosyne.models import (
+    Assertion,
+    Evidence,
+    Hit,
+    Preference,
+    Relation,
+    iso_utc,
+    parse_dt,
+    utc_now,
+)
 from mnemosyne.network_safety import safe_urlopen, validate_fetch_url
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.security import TrustTier, sanitize_retrieved_text, trust_weight
@@ -1840,6 +1852,35 @@ _RECOGNIZED_COMPOUND_ANCHORS = (
 )
 
 
+def _has_semantically_verified_hit(hits: Sequence[Hit]) -> bool:
+    """True when at least one top candidate carries strong neural semantic verification."""
+    for hit in hits:
+        meta = hit.metadata or {}
+        score_kind = meta.get("rerank_score_kind")
+        raw_rerank = meta.get("rerank_raw_score")
+        if raw_rerank is not None and not isinstance(raw_rerank, bool):
+            try:
+                raw_val = float(raw_rerank)
+            except (TypeError, ValueError):
+                raw_val = float("nan")
+            if math.isfinite(raw_val):
+                if score_kind == "logit" and raw_val >= 2.0:
+                    return True
+                if score_kind == "similarity" and raw_val >= 0.80:
+                    return True
+        if (
+            meta.get("stored_embedding_used") is True
+            or meta.get("score_scale") == "cosine"
+        ):
+            try:
+                hit_score = float(hit.score)
+            except (TypeError, ValueError):
+                hit_score = 0.0
+            if math.isfinite(hit_score) and hit_score >= 0.65:
+                return True
+    return False
+
+
 def _extract_user_grounding_text(text: str, allow_assistant: bool = False) -> str:
     if allow_assistant:
         return text
@@ -2283,7 +2324,10 @@ def query_support(
     # When a query references a specific past conversation or specifies >= 4 domain terms
     # without multi-hop bridge context, at least one candidate hit must cover a coherent
     # share of those domain terms rather than pooling isolated unigrams across 5 unrelated chats.
-    if not extra_texts and hit_texts:
+    # Semantically verified hits (high cross-encoder score or real dense cosine) are exempt
+    # from this lexical-only cap so paraphrased/conceptual matches do not falsely abstain.
+    semantically_verified = _has_semantically_verified_hit(hits[:5])
+    if not extra_texts and hit_texts and not semantically_verified:
         domain_terms = [
             t
             for t in query_terms
@@ -3212,10 +3256,11 @@ class HttpEmbeddingProvider:
                 _http_embedding_cache_put(cache_key, cached, self.cache_size)
                 return cached
         normalized = self.embed_sensitive(text)
+        if _http_embedding_disk_cache_safe(self, text):
+            normalized = _http_embedding_disk_cache_put(
+                self, cache_key, text, normalized, self.cache_size
+            )
         _http_embedding_cache_put(cache_key, normalized, self.cache_size)
-        _http_embedding_disk_cache_put(
-            self, cache_key, text, normalized, self.cache_size
-        )
         return normalized
 
     def embed_sensitive(self, text: str) -> list[float]:
@@ -3249,15 +3294,16 @@ class HttpEmbeddingProvider:
         path = os.path.expanduser(self.cache_path)
         if not os.path.exists(path):
             return
+        resolved = os.path.realpath(path)
         scope_hash = _http_embedding_cache_digest(scope)
-        with (
-            _HTTP_EMBEDDING_CACHE_LOCK,
-            _http_embedding_disk_cache_connect(self) as conn,
-        ):
-            conn.execute(
-                "DELETE FROM http_embedding_cache WHERE scope_sha256 = ?",
-                (scope_hash,),
-            )
+        with _HTTP_EMBEDDING_CACHE_LOCK:
+            conn = _http_embedding_disk_cache_connect(self)
+            with conn:
+                conn.execute(
+                    "DELETE FROM http_embedding_cache WHERE scope_sha256 = ?",
+                    (scope_hash,),
+                )
+            _HTTP_EMBEDDING_DISK_PUT_COUNTS.pop((resolved, scope_hash), None)
 
     def embed_many(self, texts: Sequence[str]) -> list[list[float]]:
         """Embed a batch of texts through the service's OpenAI-style list input.
@@ -3311,10 +3357,11 @@ class HttpEmbeddingProvider:
             return [vector for vector in results if vector is not None]
         for (index, _text, cache_key), vector in zip(missing, vectors, strict=True):
             normalized = _normalize_vector(vector, self.dims)
+            if _http_embedding_disk_cache_safe(self, _text):
+                normalized = _http_embedding_disk_cache_put(
+                    self, cache_key, _text, normalized, self.cache_size
+                )
             _http_embedding_cache_put(cache_key, normalized, self.cache_size)
-            _http_embedding_disk_cache_put(
-                self, cache_key, _text, normalized, self.cache_size
-            )
             results[index] = normalized
         return [vector for vector in results if vector is not None]
 
@@ -3416,21 +3463,133 @@ def _http_embedding_disk_cache_safe(provider: HttpEmbeddingProvider, text: str) 
     )
 
 
+_HTTP_EMBEDDING_DISK_CONNS: dict[str, tuple[sqlite3.Connection, tuple[int, int] | None]] = {}
+_HTTP_EMBEDDING_DISK_PUT_COUNTS: dict[tuple[str, str], int] = {}
+_HTTP_EMBEDDING_DISK_ACCESS_THROTTLE_SECONDS = 3600.0
+_HTTP_EMBEDDING_DISK_EVICT_INTERVAL = 64
+_EMBED_BLOB_MAGIC_F16 = b"MN16"
+_EMBED_BLOB_MAGIC_F32 = b"MN32"
+_EMBED_BLOB_MAGIC_F64 = b"MN64"
+
+
+def _embedding_cache_dtype(dims: int) -> str:
+    configured = os.environ.get("MNEMOSYNE_EMBEDDING_CACHE_DTYPE", "").strip().lower()
+    if configured in {"f16", "f32", "f64"}:
+        return configured
+    # Small fixture vectors (<32 dims) stay lossless float64; high-dim neural vectors
+    # pack as float32 (16 KB vs 88 KB ASCII JSON for 4096-d -> ~5.5x smaller).
+    return "f32" if dims >= 32 else "f64"
+
+
+def _pack_embedding_cache_blob(vector: Sequence[float]) -> tuple[bytes, list[float]]:
+    dims = len(vector)
+    dtype = _embedding_cache_dtype(dims)
+    if dtype == "f16":
+        raw = struct.pack(f"<{dims}e", *(float(value) for value in vector))
+        return _EMBED_BLOB_MAGIC_F16 + raw, list(struct.unpack(f"<{dims}e", raw))
+    if dtype == "f32":
+        buf = array.array("f", (float(value) for value in vector))
+        canonical = list(buf)
+        if sys.byteorder != "little":
+            buf.byteswap()
+        return _EMBED_BLOB_MAGIC_F32 + buf.tobytes(), canonical
+    buf64 = array.array("d", (float(value) for value in vector))
+    canonical64 = list(buf64)
+    if sys.byteorder != "little":
+        buf64.byteswap()
+    return _EMBED_BLOB_MAGIC_F64 + buf64.tobytes(), canonical64
+
+
+def _unpack_embedding_cache_blob(blob: bytes | memoryview, expected_dims: int) -> list[float]:
+    raw = bytes(blob)
+    if len(raw) >= 4:
+        magic = raw[:4]
+        body = raw[4:]
+        if magic == _EMBED_BLOB_MAGIC_F16:
+            if len(body) != expected_dims * 2:
+                raise ValueError("embedding cache f16 blob length mismatch")
+            values = list(struct.unpack(f"<{expected_dims}e", body))
+            if not all(math.isfinite(v) for v in values):
+                raise ValueError("embedding cache f16 blob contains non-finite value")
+            return values
+        if magic == _EMBED_BLOB_MAGIC_F32:
+            if len(body) != expected_dims * 4:
+                raise ValueError("embedding cache f32 blob length mismatch")
+            buf = array.array("f")
+            buf.frombytes(body)
+            if sys.byteorder != "little":
+                buf.byteswap()
+            values = list(buf)
+            if not all(math.isfinite(v) for v in values):
+                raise ValueError("embedding cache f32 blob contains non-finite value")
+            return values
+        if magic == _EMBED_BLOB_MAGIC_F64:
+            if len(body) != expected_dims * 8:
+                raise ValueError("embedding cache f64 blob length mismatch")
+            buf64 = array.array("d")
+            buf64.frombytes(body)
+            if sys.byteorder != "little":
+                buf64.byteswap()
+            values = list(buf64)
+            if not all(math.isfinite(v) for v in values):
+                raise ValueError("embedding cache f64 blob contains non-finite value")
+            return values
+    # Fallback for headerless raw f32/f16/f64 blobs
+    if len(raw) == expected_dims * 4:
+        buf = array.array("f")
+        buf.frombytes(raw)
+        if sys.byteorder != "little":
+            buf.byteswap()
+        return list(buf)
+    if len(raw) == expected_dims * 2:
+        return list(struct.unpack(f"<{expected_dims}e", raw))
+    if len(raw) == expected_dims * 8:
+        buf64 = array.array("d")
+        buf64.frombytes(raw)
+        if sys.byteorder != "little":
+            buf64.byteswap()
+        return list(buf64)
+    raise ValueError("unrecognized embedding cache blob format")
+
+
+def _file_inode(path: str) -> tuple[int, int] | None:
+    try:
+        st = os.stat(path)
+        return (st.st_dev, st.st_ino)
+    except OSError:
+        return None
+
+
 def _http_embedding_disk_cache_connect(
     provider: HttpEmbeddingProvider,
 ) -> sqlite3.Connection:
     if not provider.cache_path:
         raise ValueError("HTTP embedding durable cache path is not configured")
     path = os.path.expanduser(provider.cache_path)
+    resolved = os.path.realpath(path)
+    cached_entry = _HTTP_EMBEDDING_DISK_CONNS.get(resolved)
+    current_inode = _file_inode(resolved)
+    if cached_entry is not None:
+        cached_conn, cached_inode = cached_entry
+        if current_inode is not None and current_inode == cached_inode:
+            return cached_conn
+        try:
+            cached_conn.close()
+        except sqlite3.Error:
+            pass
+        _HTTP_EMBEDDING_DISK_CONNS.pop(resolved, None)
+
     parent = os.path.dirname(path)
     if parent:
         os.makedirs(parent, exist_ok=True)
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, check_same_thread=False)
     try:
         os.chmod(path, 0o600)
     except OSError:
         pass
     conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS http_embedding_cache (
@@ -3441,7 +3600,8 @@ def _http_embedding_disk_cache_connect(
             dims INTEGER NOT NULL,
             api_key_sha256 TEXT NOT NULL,
             text_sha256 TEXT NOT NULL,
-            vector_json TEXT NOT NULL,
+            vector_json TEXT NOT NULL DEFAULT '',
+            vector_blob BLOB,
             created_at REAL NOT NULL,
             last_access_at REAL NOT NULL,
             PRIMARY KEY (
@@ -3456,6 +3616,20 @@ def _http_embedding_disk_cache_connect(
         )
         """
     )
+    columns = {
+        str(row[1])
+        for row in conn.execute("PRAGMA table_info(http_embedding_cache)").fetchall()
+    }
+    if "vector_blob" not in columns:
+        conn.execute("ALTER TABLE http_embedding_cache ADD COLUMN vector_blob BLOB")
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS http_embedding_cache_lru_idx
+        ON http_embedding_cache (scope_sha256, last_access_at)
+        """
+    )
+    conn.commit()
+    _HTTP_EMBEDDING_DISK_CONNS[resolved] = (conn, _file_inode(resolved))
     return conn
 
 
@@ -3467,15 +3641,14 @@ def _http_embedding_disk_cache_get(
     if not _http_embedding_disk_cache_safe(provider, text):
         return None
     disk_key = _http_embedding_disk_cache_key(key)
+    expected_dims = int(disk_key[4])
     now = time.time()
     ttl = float(provider.cache_ttl_seconds)
-    with (
-        _HTTP_EMBEDDING_CACHE_LOCK,
-        _http_embedding_disk_cache_connect(provider) as conn,
-    ):
+    with _HTTP_EMBEDDING_CACHE_LOCK:
+        conn = _http_embedding_disk_cache_connect(provider)
         row = conn.execute(
             """
-            SELECT vector_json, created_at
+            SELECT vector_blob, vector_json, created_at, last_access_at
             FROM http_embedding_cache
             WHERE scope_sha256 = ?
               AND url_sha256 = ?
@@ -3489,53 +3662,63 @@ def _http_embedding_disk_cache_get(
         ).fetchone()
         if row is None:
             return None
-        if ttl > 0 and now - float(row[1]) > ttl:
-            conn.execute(
-                """
-                DELETE FROM http_embedding_cache
-                WHERE scope_sha256 = ?
-                  AND url_sha256 = ?
-                  AND model_sha256 = ?
-                  AND model_revision_sha256 = ?
-                  AND dims = ?
-                  AND api_key_sha256 = ?
-                  AND text_sha256 = ?
-                """,
-                disk_key,
-            )
+        blob_val, json_val, created_at, last_access_at = row
+        if ttl > 0 and now - float(created_at) > ttl:
+            with conn:
+                conn.execute(
+                    """
+                    DELETE FROM http_embedding_cache
+                    WHERE scope_sha256 = ?
+                      AND url_sha256 = ?
+                      AND model_sha256 = ?
+                      AND model_revision_sha256 = ?
+                      AND dims = ?
+                      AND api_key_sha256 = ?
+                      AND text_sha256 = ?
+                    """,
+                    disk_key,
+                )
             return None
         try:
-            decoded = json.loads(str(row[0]))
-            vector = [float(value) for value in decoded]
-        except (TypeError, ValueError, json.JSONDecodeError):
-            conn.execute(
-                """
-                DELETE FROM http_embedding_cache
-                WHERE scope_sha256 = ?
-                  AND url_sha256 = ?
-                  AND model_sha256 = ?
-                  AND model_revision_sha256 = ?
-                  AND dims = ?
-                  AND api_key_sha256 = ?
-                  AND text_sha256 = ?
-                """,
-                disk_key,
-            )
+            if blob_val:
+                vector = _unpack_embedding_cache_blob(blob_val, expected_dims)
+            else:
+                decoded = json.loads(str(json_val))
+                vector = [float(value) for value in decoded]
+                if len(vector) != expected_dims:
+                    raise ValueError("embedding cache json length mismatch")
+        except (TypeError, ValueError, json.JSONDecodeError, struct.error):
+            with conn:
+                conn.execute(
+                    """
+                    DELETE FROM http_embedding_cache
+                    WHERE scope_sha256 = ?
+                      AND url_sha256 = ?
+                      AND model_sha256 = ?
+                      AND model_revision_sha256 = ?
+                      AND dims = ?
+                      AND api_key_sha256 = ?
+                      AND text_sha256 = ?
+                    """,
+                    disk_key,
+                )
             return None
-        conn.execute(
-            """
-            UPDATE http_embedding_cache
-            SET last_access_at = ?
-            WHERE scope_sha256 = ?
-              AND url_sha256 = ?
-              AND model_sha256 = ?
-              AND model_revision_sha256 = ?
-              AND dims = ?
-              AND api_key_sha256 = ?
-              AND text_sha256 = ?
-            """,
-            (now, *disk_key),
-        )
+        if now - float(last_access_at) > _HTTP_EMBEDDING_DISK_ACCESS_THROTTLE_SECONDS:
+            with conn:
+                conn.execute(
+                    """
+                    UPDATE http_embedding_cache
+                    SET last_access_at = ?
+                    WHERE scope_sha256 = ?
+                      AND url_sha256 = ?
+                      AND model_sha256 = ?
+                      AND model_revision_sha256 = ?
+                      AND dims = ?
+                      AND api_key_sha256 = ?
+                      AND text_sha256 = ?
+                    """,
+                    (now, *disk_key),
+                )
         return vector
 
 
@@ -3545,66 +3728,75 @@ def _http_embedding_disk_cache_put(
     text: str,
     vector: Sequence[float],
     max_size: int,
-) -> None:
+) -> list[float]:
     if not _http_embedding_disk_cache_safe(provider, text):
-        return
+        return [float(value) for value in vector]
     disk_key = _http_embedding_disk_cache_key(key)
+    blob, canonical = _pack_embedding_cache_blob(vector)
     now = time.time()
-    with (
-        _HTTP_EMBEDDING_CACHE_LOCK,
-        _http_embedding_disk_cache_connect(provider) as conn,
-    ):
-        conn.execute(
-            """
-            INSERT INTO http_embedding_cache (
-                scope_sha256,
-                url_sha256,
-                model_sha256,
-                model_revision_sha256,
-                dims,
-                api_key_sha256,
-                text_sha256,
-                vector_json,
-                created_at,
-                last_access_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (
-                scope_sha256,
-                url_sha256,
-                model_sha256,
-                model_revision_sha256,
-                dims,
-                api_key_sha256,
-                text_sha256
-            )
-            DO UPDATE SET
-                vector_json = excluded.vector_json,
-                created_at = excluded.created_at,
-                last_access_at = excluded.last_access_at
-            """,
-            (
-                *disk_key,
-                json.dumps([float(value) for value in vector], separators=(",", ":")),
-                now,
-                now,
-            ),
-        )
-        if max_size > 0:
+    resolved = os.path.realpath(os.path.expanduser(str(provider.cache_path)))
+    with _HTTP_EMBEDDING_CACHE_LOCK:
+        conn = _http_embedding_disk_cache_connect(provider)
+        with conn:
             conn.execute(
                 """
-                DELETE FROM http_embedding_cache
-                WHERE scope_sha256 = ?
-                  AND rowid NOT IN (
-                      SELECT rowid
-                      FROM http_embedding_cache
-                      WHERE scope_sha256 = ?
-                      ORDER BY last_access_at DESC
-                      LIMIT ?
-                  )
+                INSERT INTO http_embedding_cache (
+                    scope_sha256,
+                    url_sha256,
+                    model_sha256,
+                    model_revision_sha256,
+                    dims,
+                    api_key_sha256,
+                    text_sha256,
+                    vector_json,
+                    vector_blob,
+                    created_at,
+                    last_access_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?)
+                ON CONFLICT (
+                    scope_sha256,
+                    url_sha256,
+                    model_sha256,
+                    model_revision_sha256,
+                    dims,
+                    api_key_sha256,
+                    text_sha256
+                )
+                DO UPDATE SET
+                    vector_json = excluded.vector_json,
+                    vector_blob = excluded.vector_blob,
+                    created_at = excluded.created_at,
+                    last_access_at = excluded.last_access_at
                 """,
-                (disk_key[0], disk_key[0], max_size),
+                (
+                    *disk_key,
+                    blob,
+                    now,
+                    now,
+                ),
             )
+            if max_size > 0:
+                counter_key = (resolved, disk_key[0])
+                puts = _HTTP_EMBEDDING_DISK_PUT_COUNTS.get(counter_key, 0) + 1
+                _HTTP_EMBEDDING_DISK_PUT_COUNTS[counter_key] = puts
+                if max_size <= _HTTP_EMBEDDING_DISK_EVICT_INTERVAL or (
+                    puts % _HTTP_EMBEDDING_DISK_EVICT_INTERVAL == 0
+                ):
+                    conn.execute(
+                        """
+                        DELETE FROM http_embedding_cache
+                        WHERE rowid IN (
+                            SELECT rowid
+                            FROM http_embedding_cache
+                            WHERE scope_sha256 = ?
+                            ORDER BY last_access_at DESC
+                            LIMIT -1 OFFSET ?
+                        )
+                        """,
+                        (disk_key[0], max_size),
+                    )
+    return canonical
 
 
 def _http_embedding_disk_cache_stats(
@@ -3616,18 +3808,32 @@ def _http_embedding_disk_cache_stats(
         path = os.path.expanduser(provider.cache_path)
         if not os.path.exists(path):
             return {"durable_entries": 0}
+        resolved = os.path.realpath(path)
         scope_hash = _http_embedding_cache_digest(_http_embedding_cache_scope(provider))
-        with (
-            _HTTP_EMBEDDING_CACHE_LOCK,
-            sqlite3.connect(f"file:{path}?mode=ro", uri=True) as conn,
-        ):
-            try:
-                row = conn.execute(
-                    "SELECT COUNT(*) FROM http_embedding_cache WHERE scope_sha256 = ?",
-                    (scope_hash,),
-                ).fetchone()
-            except sqlite3.OperationalError:
-                row = (0,)
+        with _HTTP_EMBEDDING_CACHE_LOCK:
+            cached_entry = _HTTP_EMBEDDING_DISK_CONNS.get(resolved)
+            current_inode = _file_inode(resolved)
+            if (
+                cached_entry is not None
+                and current_inode is not None
+                and cached_entry[1] == current_inode
+            ):
+                try:
+                    row = cached_entry[0].execute(
+                        "SELECT COUNT(*) FROM http_embedding_cache WHERE scope_sha256 = ?",
+                        (scope_hash,),
+                    ).fetchone()
+                except sqlite3.OperationalError:
+                    row = (0,)
+            else:
+                with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as conn:
+                    try:
+                        row = conn.execute(
+                            "SELECT COUNT(*) FROM http_embedding_cache WHERE scope_sha256 = ?",
+                            (scope_hash,),
+                        ).fetchone()
+                    except sqlite3.OperationalError:
+                        row = (0,)
         return {"durable_entries": int(row[0]) if row else 0}
     except Exception as exc:  # noqa: BLE001 - status reporting must not break provider checks.
         return {"durable_error": str(exc)}
@@ -3834,6 +4040,123 @@ class CommandGraphRetriever:
         )
 
 
+_RERANK_MAX_WINDOW_CHARS = 1500
+_RERANK_MAX_WINDOWS_PER_HIT = 2
+_RERANK_MAX_QUERY_CHARS = 2000
+
+
+def _rerank_windows(
+    query: str,
+    text: str,
+    *,
+    window_chars: int = _RERANK_MAX_WINDOW_CHARS,
+    max_windows: int = _RERANK_MAX_WINDOWS_PER_HIT,
+) -> list[str]:
+    """Select up to ``max_windows`` query-centered windows of <= ``window_chars`` chars.
+
+    Short documents (``len(text) <= window_chars``) pass through verbatim so
+    contract payloads and short-fact batches stay untouched.
+    """
+    if len(text) <= window_chars or max_windows <= 1:
+        return [text[:window_chars] if len(text) > window_chars else text]
+
+    q_tokens = {
+        normalise_query_term(tok)
+        for tok in tokenize(query)
+        if len(tok) > 2 and normalise_query_term(tok) not in QUERY_SUPPORT_STOPWORDS
+    }
+    if not q_tokens:
+        q_tokens = {normalise_query_term(tok) for tok in tokenize(query) if tok}
+
+    text_len = len(text)
+    stride = max(256, window_chars // 2)
+    starts = list(range(0, max(1, text_len - window_chars + 1), stride))
+    tail_start = max(0, text_len - window_chars)
+    if not starts or starts[-1] < tail_start:
+        starts.append(tail_start)
+    # Cap candidate windows on multi-megabyte documents while preserving head & tail.
+    if len(starts) > 96:
+        step = len(starts) / 95.0
+        sampled = [starts[min(len(starts) - 1, int(round(i * step)))] for i in range(95)]
+        if tail_start not in sampled:
+            sampled.append(tail_start)
+        starts = sorted(set(sampled))
+
+    scored_spans: list[tuple[float, set[str], int, int, str]] = []
+    for raw_start in starts:
+        end = min(text_len, raw_start + window_chars)
+        start = raw_start
+        # Nudge boundaries to nearby whitespace when available without exceeding window_chars.
+        if start > 0:
+            ws = text.find(" ", start, min(end, start + 64))
+            nl = text.find("\n", start, min(end, start + 64))
+            cut = nl if nl != -1 else ws
+            if cut != -1 and cut + 1 < end:
+                start = cut + 1
+        if end < text_len and end - start > 128:
+            ws_r = text.rfind(" ", max(start + 128, end - 64), end)
+            nl_r = text.rfind("\n", max(start + 128, end - 64), end)
+            cut_r = max(ws_r, nl_r)
+            if cut_r > start:
+                end = cut_r
+        snippet = text[start:end].strip()
+        if not snippet:
+            snippet = text[raw_start : min(text_len, raw_start + window_chars)]
+        if len(snippet) > window_chars:
+            snippet = snippet[:window_chars]
+        if q_tokens:
+            win_toks = [normalise_query_term(tok) for tok in tokenize(snippet) if tok]
+            win_set = set(win_toks)
+            matched = q_tokens & win_set
+            tf_bonus = sum(min(3, win_toks.count(tok)) for tok in matched) * 0.1
+            score = float(len(matched)) + tf_bonus
+        else:
+            matched = set()
+            score = 0.0
+        scored_spans.append((score, matched, start, end, snippet))
+
+    if not scored_spans:
+        return [text[:window_chars]]
+
+    best_score = max(item[0] for item in scored_spans)
+    if best_score <= 0.0:
+        # No lexical overlap: take leading window + trailing window so opening context
+        # and latest updates/conclusions both get scored by the cross-encoder.
+        head = scored_spans[0][4]
+        tail = scored_spans[-1][4]
+        return [head] if head == tail else [head, tail]
+
+    scored_spans.sort(key=lambda item: (-item[0], item[2]))
+    chosen: list[tuple[int, int, str]] = []
+    covered_tokens: set[str] = set()
+    first_score, first_matched, f_start, f_end, f_snip = scored_spans[0]
+    chosen.append((f_start, f_end, f_snip))
+    covered_tokens.update(first_matched)
+
+    for _ in range(1, max_windows):
+        best_next: tuple[float, int, int, str, set[str]] | None = None
+        for score, matched, start, end, snip in scored_spans:
+            if any(
+                (min(end, c_end) - max(start, c_start))
+                > 0.30 * min(end - start, c_end - c_start)
+                for c_start, c_end, _ in chosen
+            ):
+                continue
+            novel = len(matched - covered_tokens)
+            combined = score + 1.5 * novel
+            if best_next is None or combined > best_next[0]:
+                best_next = (combined, start, end, snip, matched)
+        if best_next is None:
+            break
+        _, n_start, n_end, n_snip, n_matched = best_next
+        if n_snip not in {c[2] for c in chosen}:
+            chosen.append((n_start, n_end, n_snip))
+            covered_tokens.update(n_matched)
+
+    chosen.sort(key=lambda item: item[0])
+    return [snip for _, _, snip in chosen]
+
+
 @dataclass(frozen=True, slots=True)
 class HttpReranker:
     """HTTP JSON reranker for cross-encoder-style providers.
@@ -3850,15 +4173,36 @@ class HttpReranker:
     query_prefix: str = "query: "
     score_kind: str = "similarity"
     loopback_only: bool = False
+    max_window_chars: int = _RERANK_MAX_WINDOW_CHARS
+    max_windows_per_hit: int = _RERANK_MAX_WINDOWS_PER_HIT
 
     def rerank(self, query: str, hits: Sequence[Hit], k: int) -> list[Hit]:
         if k <= 0 or not hits:
             return []
-        documents = [hit.text for hit in hits]
+        effective_query = (
+            query[:_RERANK_MAX_QUERY_CHARS]
+            if len(query) > _RERANK_MAX_QUERY_CHARS
+            else query
+        )
+        window_docs: list[str] = []
+        window_parents: list[int] = []
+        parent_window_counts: list[int] = []
+        for parent_idx, hit in enumerate(hits):
+            windows = _rerank_windows(
+                effective_query,
+                hit.text,
+                window_chars=max(256, int(self.max_window_chars)),
+                max_windows=max(1, int(self.max_windows_per_hit)),
+            )
+            parent_window_counts.append(len(windows))
+            for win_text in windows:
+                window_docs.append(win_text)
+                window_parents.append(parent_idx)
+        has_split = len(window_docs) > len(hits)
         payload: dict[str, object] = {
-            "query": _with_query_prefix(query, self.query_prefix),
-            "documents": documents,
-            "top_n": k,
+            "query": _with_query_prefix(effective_query, self.query_prefix),
+            "documents": window_docs,
+            "top_n": len(window_docs) if has_split else k,
         }
         if self.model:
             payload["model"] = self.model
@@ -3867,21 +4211,52 @@ class HttpReranker:
             **({"loopback_only": True} if self.loopback_only else {}),
         )
         scored = _extract_rerank_scores(response)
-        ranked: list[Hit] = []
-        seen: set[int] = set()
+        seen_windows: set[int] = set()
+        best_raw_by_parent: dict[int, float] = {}
         for index, score in scored:
-            if index < 0 or index >= len(hits):
+            if index < 0 or index >= len(window_docs):
                 raise ValueError(f"reranker response index {index} is out of range")
-            if index in seen:
+            if index in seen_windows:
                 raise ValueError(f"reranker response contains duplicate index {index}")
-            seen.add(index)
-            hit = hits[index]
-            raw_score = float(score)
+            seen_windows.add(index)
+            parent_idx = window_parents[index]
+            raw_val = float(score)
+            prev = best_raw_by_parent.get(parent_idx)
+            if prev is None or raw_val > prev:
+                best_raw_by_parent[parent_idx] = raw_val
+
+        max_pre_score = max((max(float(hit.score), 0.0) for hit in hits), default=0.0)
+        ranked: list[Hit] = []
+        for parent_idx, raw_score in best_raw_by_parent.items():
+            hit = hits[parent_idx]
             if self.score_kind == "logit":
                 clamped = max(-40.0, min(40.0, raw_score))
-                effective_score = 1.0 / (1.0 + math.exp(-clamped))
+                sigmoid_score = 1.0 / (1.0 + math.exp(-clamped))
+                pre_rank_norm = (
+                    max(float(hit.score), 0.0) / max_pre_score
+                    if max_pre_score > 0.0
+                    else sigmoid_score
+                )
+                # Calibrated 0.75*sigmoid + 0.25*pre_rank_norm blend modulated by
+                # cross-encoder uncertainty 4*p*(1-p): full 0.25 pre-rank signal near
+                # uncertain logits (~0), tapering smoothly near decisive logits so
+                # confirmed matches stay >0.95 and rejected distractors stay <0.05.
+                uncertainty = 4.0 * sigmoid_score * (1.0 - sigmoid_score)
+                pre_weight = 0.25 * uncertainty
+                effective_score = (1.0 - pre_weight) * sigmoid_score + pre_weight * pre_rank_norm
+                rerank_score_meta = sigmoid_score
             else:
                 effective_score = raw_score
+                rerank_score_meta = effective_score
+            meta = {
+                **hit.metadata,
+                "reranker": self.name,
+                "rerank_score": rerank_score_meta,
+                "rerank_raw_score": raw_score,
+                "rerank_score_kind": self.score_kind,
+            }
+            if parent_window_counts[parent_idx] > 1:
+                meta["rerank_windows"] = parent_window_counts[parent_idx]
             ranked.append(
                 Hit(
                     id=hit.id,
@@ -3894,13 +4269,7 @@ class HttpReranker:
                     provenance=shared_or_copy(hit.provenance),
                     trust_tier=hit.trust_tier,
                     sensitivity=hit.sensitivity,
-                    metadata={
-                        **hit.metadata,
-                        "reranker": self.name,
-                        "rerank_score": effective_score,
-                        "rerank_raw_score": raw_score,
-                        "rerank_score_kind": self.score_kind,
-                    },
+                    metadata=meta,
                 )
             )
         return sorted(ranked, key=lambda item: item.score, reverse=True)[:k]
@@ -4446,6 +4815,16 @@ def _evidence_sources_readable(
     lookup = getattr(ops, "get_evidence", None)
     if not callable(lookup):
         return False
+    # Fast read-only path for un-monkeypatched LocalMemoryEngine instances:
+    # avoids deep-copying every cited Evidence row during custody validation.
+    ro_lookup = getattr(ops, "_get_evidence_readonly", None)
+    orig_get = getattr(type(ops), "_get_evidence_orig", None)
+    if (
+        callable(ro_lookup)
+        and orig_get is not None
+        and getattr(lookup, "__func__", None) is orig_get
+    ):
+        lookup = ro_lookup
     active: set[str] = set()
     complete: set[str] = set()
     while stack:
@@ -5265,10 +5644,26 @@ def _redact_denied_cids(text: str, denied_cids: set[str]) -> str:
     return redacted
 
 
+_MODEL_ITEM_TYPES = (Evidence, Assertion, Hit, Preference, Relation)
+
+
 def _item_field(item: Any, name: str, default: Any = None) -> Any:
+    itype = type(item)
+    if itype is dict:
+        return item.get(name, default)
+    if itype in _MODEL_ITEM_TYPES:
+        return getattr(item, name, default)
     if isinstance(item, Mapping):
         return item.get(name, default)
     return getattr(item, name, default)
+
+
+_DEFAULT_ACTIVATION_WEIGHTS: dict[str, float] = {
+    "base_level": 0.35,
+    "semantic": 0.35,
+    "importance": 0.20,
+    "recency": 0.10,
+}
 
 
 def apply_activation_scores(
@@ -5280,7 +5675,21 @@ def apply_activation_scores(
         return []
     moment = now or utc_now()
     max_relevance = max((max(hit.score, 0.0) for hit in hits), default=0.0)
-    weights = dict(policy.activation_weights)
+    has_verified_demand = any(
+        _bounded_int(hit.metadata.get("demand_outcome_count", 0)) > 0
+        and _bounded_int(hit.metadata.get("demand_count", 0)) > 0
+        for hit in hits
+    )
+    if not has_verified_demand and policy.activation_weights == _DEFAULT_ACTIVATION_WEIGHTS:
+        weights = dict(
+            getattr(
+                policy,
+                "cold_start_activation_weights",
+                {"base_level": 0.10, "semantic": 0.55, "importance": 0.20, "recency": 0.15},
+            )
+        )
+    else:
+        weights = dict(policy.activation_weights)
     total_weight = max(sum(max(float(value), 0.0) for value in weights.values()), 0.01)
     # ACT-R spreading activation (blueprint §22.4: the `w_s · spreading(m, q)` term).
     # It is opt-in via a `spreading` activation weight so the default policy — and

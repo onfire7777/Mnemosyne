@@ -102,6 +102,7 @@ pub fn app(state: AppState) -> Router {
 struct EmbedRequest {
     input: EmbedInput,
     model: Option<String>,
+    dimensions: Option<usize>,
 }
 
 #[derive(Deserialize)]
@@ -165,6 +166,10 @@ struct HealthResponse {
 struct ProviderHealth {
     model: String,
     deterministic_backend: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dimensions: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    vector_space_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -215,17 +220,33 @@ impl IntoResponse for ApiError {
 
 async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     let deterministic_backend = state.deterministic_backend();
+    let vector_space_id = format!("{}@{}", state.embedding_model, state.dims);
     Json(HealthResponse {
         status: "ok",
         embedding: ProviderHealth {
             model: state.embedding_model,
             deterministic_backend,
+            dimensions: Some(state.dims),
+            vector_space_id: Some(vector_space_id),
         },
         reranker: ProviderHealth {
             model: state.reranker_model,
             deterministic_backend,
+            dimensions: None,
+            vector_space_id: None,
         },
     })
+}
+
+fn resolve_target_dims(requested: Option<usize>, configured: usize) -> Result<usize, ApiError> {
+    match requested {
+        None => Ok(configured),
+        Some(0) => Err(ApiError::bad("dimensions must be positive")),
+        Some(dims) if dims > configured => Err(ApiError::bad(format!(
+            "dimensions ({dims}) exceed configured maximum ({configured})"
+        ))),
+        Some(dims) => Ok(dims),
+    }
 }
 
 async fn embed(
@@ -234,6 +255,7 @@ async fn embed(
     Json(request): Json<EmbedRequest>,
 ) -> Result<Json<EmbedResponse>, ApiError> {
     authorize(&state, &headers)?;
+    let target_dims = resolve_target_dims(request.dimensions, state.dims)?;
     let model = request
         .model
         .unwrap_or_else(|| state.embedding_model.clone());
@@ -242,16 +264,16 @@ async fn embed(
             if input.is_empty() {
                 return Err(ApiError::bad("input must be non-empty"));
             }
-            let dims = state.dims;
             // Model inference is CPU-bound and holds the backend mutex; run it on
             // the blocking pool so it cannot stall the async worker threads.
-            let embedding = tokio::task::spawn_blocking(move || embed_text(&state, &input))
-                .await
-                .map_err(|_| ApiError::unavailable("embedding backend failed"))??;
+            let embedding =
+                tokio::task::spawn_blocking(move || embed_text(&state, &input, target_dims))
+                    .await
+                    .map_err(|_| ApiError::unavailable("embedding backend failed"))??;
             Ok(Json(EmbedResponse::Single {
                 embedding,
                 model,
-                dimensions: dims,
+                dimensions: target_dims,
             }))
         }
         EmbedInput::Batch(inputs) => {
@@ -267,26 +289,23 @@ async fn embed(
             if let Some(index) = inputs.iter().position(|input| input.is_empty()) {
                 return Err(ApiError::bad(format!("input[{index}] must be non-empty")));
             }
-            let dims = state.dims;
-            let data = tokio::task::spawn_blocking(move || {
-                inputs
-                    .iter()
-                    .enumerate()
-                    .map(|(index, input)| {
-                        embed_text(&state, input).map(|embedding| EmbedDatum {
-                            object: "embedding",
-                            index,
-                            embedding,
-                        })
-                    })
-                    .collect::<Result<Vec<_>, _>>()
-            })
-            .await
-            .map_err(|_| ApiError::unavailable("embedding backend failed"))??;
+            let vectors =
+                tokio::task::spawn_blocking(move || embed_texts(&state, &inputs, target_dims))
+                    .await
+                    .map_err(|_| ApiError::unavailable("embedding backend failed"))??;
+            let data = vectors
+                .into_iter()
+                .enumerate()
+                .map(|(index, embedding)| EmbedDatum {
+                    object: "embedding",
+                    index,
+                    embedding,
+                })
+                .collect();
             Ok(Json(EmbedResponse::Batch {
                 object: "list",
                 model,
-                dimensions: dims,
+                dimensions: target_dims,
                 data,
             }))
         }
@@ -344,16 +363,34 @@ fn authorize(state: &AppState, headers: &HeaderMap) -> Result<(), ApiError> {
     }
 }
 
-fn embed_text(state: &AppState, input: &str) -> Result<Vec<f32>, ApiError> {
+fn embed_text(state: &AppState, input: &str, dims: usize) -> Result<Vec<f32>, ApiError> {
     match &state.backend {
-        Backend::Deterministic => Ok(deterministic_embedding(input, state.dims)),
+        Backend::Deterministic => Ok(deterministic_embedding(input, dims)),
         #[cfg(feature = "models")]
         Backend::FastEmbed(backend) => {
             let mut backend = backend
                 .lock()
                 .map_err(|_| ApiError::unavailable("embedding backend failed"))?;
             backend
-                .embed(input, state.dims)
+                .embed(input, dims)
+                .map_err(|_| ApiError::unavailable("embedding backend failed"))
+        }
+    }
+}
+
+fn embed_texts(state: &AppState, inputs: &[String], dims: usize) -> Result<Vec<Vec<f32>>, ApiError> {
+    match &state.backend {
+        Backend::Deterministic => Ok(inputs
+            .iter()
+            .map(|input| deterministic_embedding(input, dims))
+            .collect()),
+        #[cfg(feature = "models")]
+        Backend::FastEmbed(backend) => {
+            let mut backend = backend
+                .lock()
+                .map_err(|_| ApiError::unavailable("embedding backend failed"))?;
+            backend
+                .embed_batch(inputs, dims)
                 .map_err(|_| ApiError::unavailable("embedding backend failed"))
         }
     }
@@ -459,7 +496,7 @@ fn model_backend(embedding_model: &str, reranker_model: &str) -> Result<Backend,
 #[cfg(feature = "models")]
 struct FastEmbedBackend {
     embedder: fastembed::TextEmbedding,
-    reranker: fastembed::TextRerank,
+    reranker: Option<fastembed::TextRerank>,
 }
 
 #[cfg(feature = "models")]
@@ -474,13 +511,22 @@ impl FastEmbedBackend {
         let embed_options = TextInitOptions::new(parse_embedding_model(embedding_model)?)
             .with_cache_dir(PathBuf::from(&cache_dir))
             .with_show_download_progress(false);
-        let rerank_options = RerankInitOptions::new(parse_reranker_model(reranker_model)?)
-            .with_cache_dir(PathBuf::from(cache_dir))
-            .with_show_download_progress(false);
+        let disable_reranker = std::env::var("MNEME_PROVIDERS_DISABLE_RERANKER")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+            || reranker_model.is_empty()
+            || reranker_model.eq_ignore_ascii_case("none");
+        let reranker = if disable_reranker {
+            None
+        } else {
+            let rerank_options = RerankInitOptions::new(parse_reranker_model(reranker_model)?)
+                .with_cache_dir(PathBuf::from(cache_dir))
+                .with_show_download_progress(false);
+            Some(fastembed::TextRerank::try_new(rerank_options).map_err(|err| err.to_string())?)
+        };
         Ok(Self {
             embedder: TextEmbedding::try_new(embed_options).map_err(|err| err.to_string())?,
-            reranker: fastembed::TextRerank::try_new(rerank_options)
-                .map_err(|err| err.to_string())?,
+            reranker,
         })
     }
 
@@ -495,15 +541,33 @@ impl FastEmbedBackend {
         fit_vector(vector, dims)
     }
 
+    fn embed_batch(&mut self, inputs: &[String], dims: usize) -> Result<Vec<Vec<f32>>, String> {
+        let refs: Vec<&str> = inputs.iter().map(String::as_str).collect();
+        let vectors = self
+            .embedder
+            .embed(refs, Some(32))
+            .map_err(|err| err.to_string())?;
+        if vectors.len() != inputs.len() {
+            return Err("embedding backend returned mismatched batch length".to_string());
+        }
+        vectors
+            .into_iter()
+            .map(|vector| fit_vector(vector, dims))
+            .collect()
+    }
+
     fn rerank(
         &mut self,
         query: &str,
         documents: &[String],
         top_n: usize,
     ) -> Result<Vec<RerankResult>, String> {
-        let document_refs: Vec<&str> = documents.iter().map(String::as_str).collect();
-        let mut results: Vec<RerankResult> = self
+        let reranker = self
             .reranker
+            .as_mut()
+            .ok_or_else(|| "reranker is disabled on this sidecar".to_string())?;
+        let document_refs: Vec<&str> = documents.iter().map(String::as_str).collect();
+        let mut results: Vec<RerankResult> = reranker
             .rerank(query, document_refs, false, None)
             .map_err(|err| err.to_string())?
             .into_iter()
@@ -532,6 +596,10 @@ fn parse_embedding_model(name: &str) -> Result<fastembed::EmbeddingModel, String
             Ok(EmbeddingModel::EmbeddingGemma300MQ4)
         }
         "BGESmallENV15" | "BAAI/bge-small-en-v1.5" => Ok(EmbeddingModel::BGESmallENV15),
+        "BGESmallENV15Q" | "BAAI/bge-small-en-v1.5-q" => Ok(EmbeddingModel::BGESmallENV15Q),
+        "NomicEmbedTextV15" | "nomic-ai/nomic-embed-text-v1.5" => {
+            Ok(EmbeddingModel::NomicEmbedTextV15)
+        }
         other => Err(format!(
             "unsupported embedding model for fastembed backend: {other}"
         )),
@@ -700,9 +768,50 @@ mod tests {
 
         assert_eq!(response.status, "ok");
         assert_eq!(response.embedding.model, "deterministic-test-embedding");
+        assert_eq!(response.embedding.dimensions, Some(8));
+        assert_eq!(
+            response.embedding.vector_space_id.as_deref(),
+            Some("deterministic-test-embedding@8")
+        );
         assert_eq!(response.reranker.model, "deterministic-test-reranker");
         assert!(response.embedding.deterministic_backend);
         assert!(response.reranker.deterministic_backend);
+    }
+
+    #[tokio::test]
+    async fn mrl_dimensions_truncates_and_rejects_out_of_range() {
+        let req_ok: EmbedRequest = serde_json::from_value(serde_json::json!({
+            "input": ["alpha", "beta"],
+            "dimensions": 4
+        }))
+        .unwrap();
+        let Json(resp) = embed(State(AppState::deterministic(8)), HeaderMap::new(), Json(req_ok))
+            .await
+            .unwrap();
+        match resp {
+            EmbedResponse::Batch {
+                dimensions, data, ..
+            } => {
+                assert_eq!(dimensions, 4);
+                assert_eq!(data.len(), 2);
+                assert!(data.iter().all(|row| row.embedding.len() == 4));
+            }
+            EmbedResponse::Single { .. } => panic!("expected batch response"),
+        }
+
+        for bad_dims in [0usize, 16usize] {
+            let req_bad: EmbedRequest = serde_json::from_value(serde_json::json!({
+                "input": "alpha",
+                "dimensions": bad_dims
+            }))
+            .unwrap();
+            let Err(err) =
+                embed(State(AppState::deterministic(8)), HeaderMap::new(), Json(req_bad)).await
+            else {
+                panic!("expected dimensions={bad_dims} to be rejected");
+            };
+            assert_eq!(err.status, StatusCode::BAD_REQUEST);
+        }
     }
 
     #[tokio::test]

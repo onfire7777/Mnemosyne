@@ -15,6 +15,7 @@ codex or claude) and "embed_deadline" (seconds)} in, one JSON line out:
 {"result": ..., "mode": "provider"|"local"} or {"error": "<exception type>"}.
 """
 
+import contextlib
 import json
 import os
 import socketserver
@@ -25,25 +26,42 @@ import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 
-os.environ.setdefault('MNEMOSYNE_INTERACTIVE_READ', '1')  # provider calls use the interactive (short) timeouts
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dataclasses import replace  # noqa: E402
 
+import runtime as _runtime  # noqa: E402
 from runtime import AGENT, ROOT, STATE, configure_retrieval, invoke, open_facade  # noqa: E402
 
+TENANT = getattr(_runtime, 'TENANT', os.environ.get('MNEMOSYNE_TENANT', 'personal'))
+USER = getattr(_runtime, 'USER', os.environ.get('MNEMOSYNE_USER', 'jake'))
+
 SOCKET = STATE / 'recall.sock'
-# The query-embedding provider usually answers in <1 s but sometimes stalls for ~9 s. Past this
-# deadline the request is answered by local recall (lexical/graph/working memory, no vectors),
-# the same fallback the cold path's bounded read uses.
-EMBED_TIMEOUT = float(os.environ.get('MNEMOSYNE_RECALL_EMBED_TIMEOUT', '2.0'))
-# Slow provider replies are per request (most answer in <1 s); a second identical request
-# after this delay usually wins. Same provider, same vectors; the extra cost is one cheap call.
-EMBED_HEDGE_AFTER = float(os.environ.get('MNEMOSYNE_RECALL_EMBED_HEDGE_AFTER', '0.6'))
+# The query-embedding provider (OpenRouter/SiliconFlow) typically answers in ~0.8–1.2 s
+# with occasional 2–3 s tail latency. With local recall work now ~0.2 s, a 4.0 s budget
+# avoids premature fallback to local-only mode while staying well under the 6.5–8 s hook
+# deadlines. Hedging at 1.4 s avoids duplicate requests on normal responses while still
+# rescuing stalled upstream connections.
+EMBED_TIMEOUT = float(os.environ.get('MNEMOSYNE_RECALL_EMBED_TIMEOUT', '4.0'))
+EMBED_HEDGE_AFTER = float(os.environ.get('MNEMOSYNE_RECALL_EMBED_HEDGE_AFTER', '1.4'))
 READ_TOOLS = {'prepare_context', 'search', 'deep_search'}
+CODEX_PROMPT_TOOL = 'codex_user_prompt'
 HOST_AGENTS = {'claude', 'codex'}
 MAX_EMBED_DEADLINE = 8.0
 WATCHED = [ROOT / 'codex/runtime.py', ROOT / 'codex/active-release.json', Path(__file__).resolve()]
 MAX_REQUEST = 1 << 20
+
+
+def configure_warm_server_env(env=None):
+    """Enable opt-in warm-daemon SQLite flags strictly inside warm recall_server.py."""
+    target = os.environ if env is None else env
+    target.setdefault('MNEMOSYNE_INTERACTIVE_READ', '1')  # provider calls use interactive timeouts
+    target.setdefault('MNEMOSYNE_SQLITE_SYNCHRONOUS', 'NORMAL')
+    target.setdefault('MNEMOSYNE_ASYNC_ACCESS_TRACKING', '1')
+    return target
+
+
+class _ClientAbandoned(Exception):
+    """Internal control flow signal when a client disconnects before reply."""
 
 
 def fingerprint():
@@ -56,22 +74,45 @@ class HedgedEmbedder:
     def __init__(self, base, hedge_after, deadline):
         self.base, self.hedge_after = base, hedge_after
         self.pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix='embed')
+        self._local = threading.local()
         self.set_deadline(deadline)
 
     def set_deadline(self, seconds):
-        """Per request (requests are serialized); each HTTP attempt gets the same timeout."""
+        """Set default deadline; concurrent requests should prefer request_deadline()."""
         self.deadline = seconds
         self.inner = replace(self.base, timeout_seconds=seconds)
 
+    @contextlib.contextmanager
+    def request_deadline(self, seconds):
+        """Thread-local per-request deadline so concurrent prefetch never races."""
+        prev_deadline = getattr(self._local, 'deadline', None)
+        prev_inner = getattr(self._local, 'inner', None)
+        self._local.deadline = seconds
+        self._local.inner = replace(self.base, timeout_seconds=seconds)
+        try:
+            yield
+        finally:
+            self._local.deadline = prev_deadline
+            self._local.inner = prev_inner
+
+    def _current(self):
+        inner = getattr(self._local, 'inner', None) or self.inner
+        deadline = getattr(self._local, 'deadline', None)
+        if deadline is None:
+            deadline = self.deadline
+        return inner, deadline
+
     def __getattr__(self, name):
-        return getattr(self.inner, name)
+        inner = getattr(self._local, 'inner', None) or self.inner
+        return getattr(inner, name)
 
     def _hedged(self, method, text):
         """A second request once the first is slow, a fresh one when a request fails, at most
         three in all; the first success wins."""
-        call = getattr(self.inner, method)
+        inner, deadline = self._current()
+        call = getattr(inner, method)
         start = time.monotonic()
-        end, hedge_at = start + self.deadline, start + self.hedge_after
+        end, hedge_at = start + deadline, start + self.hedge_after
         pending, attempts, error = {self.pool.submit(call, text)}, 1, None
         while pending and time.monotonic() < end:
             now = time.monotonic()
@@ -147,31 +188,119 @@ def recall(facade, tool, arguments, session_id, agent):
         return local_invoke(facade, tool, dict(arguments), session_id, agent), 'local'
 
 
+def _deadline_context(embedder, deadline):
+    if hasattr(embedder, 'request_deadline'):
+        return embedder.request_deadline(deadline)
+    if embedder is not None and hasattr(embedder, 'set_deadline'):
+        embedder.set_deadline(deadline)
+    return contextlib.nullcontext()
+
+
+def _execute_recall(server, tool, arguments, session_id, agent, deadline, connection=None):
+    """Prefetch remote query embedding outside server.lock so network waits never block local reads."""
+    args = dict(arguments) if isinstance(arguments, dict) else {}
+    query = args.get('query')
+    prefetch_error = None
+    scoped = getattr(server, 'scoped_embedder', None)
+    if (
+        isinstance(query, str)
+        and query.strip()
+        and scoped is not None
+        and os.environ.get('MNEMOSYNE_LOCAL_RECALL') != '1'
+    ):
+        if connection is not None and client_gone(connection):
+            raise _ClientAbandoned()
+        with _deadline_context(getattr(server, 'embedder', None), deadline):
+            try:
+                scoped.embed_query(query)
+            except PermissionError:
+                raise
+            except Exception as error:
+                prefetch_error = error
+    with server.lock:
+        if connection is not None and client_gone(connection):
+            raise _ClientAbandoned()
+        if prefetch_error is not None:
+            print(
+                f'provider recall failed ({type(prefetch_error).__name__}); answering by local recall',
+                file=sys.stderr,
+                flush=True,
+            )
+            return local_invoke(server.facade, tool, args, session_id, agent), 'local'
+        with _deadline_context(getattr(server, 'embedder', None), deadline):
+            return recall(server.facade, tool, args, session_id, agent)
+
+
+def _handle_codex_user_prompt(server, payload, deadline, connection=None):
+    """Run CodexAdapter UserPromptSubmit bookkeeping in-process against the warm facade."""
+    if not isinstance(payload, dict) or payload.get('hook_event_name') != 'UserPromptSubmit':
+        raise PermissionError('codex_user_prompt serves UserPromptSubmit only')
+    from mnemosyne.hosts.codex import CodexAdapter
+
+    mode_box = ['provider']
+
+    def warm_adapter_invoke(facade, name, arguments, session_id=None):
+        if name != 'prepare_context':
+            raise PermissionError('codex_user_prompt invokes prepare_context only')
+        result, mode = _execute_recall(
+            server, name, arguments, session_id, 'codex', deadline, connection=connection,
+        )
+        mode_box[0] = mode
+        return result
+
+    hook_script = getattr(server, 'hook_script', None) or Path(__file__).resolve().with_name('hook.py')
+    state_dir = getattr(server, 'state_dir', STATE)
+    tenant_id = getattr(server, 'tenant_id', TENANT)
+    user_id = getattr(server, 'user_id', USER)
+    codex_adapter = CodexAdapter(
+        state_dir=state_dir,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        open_facade=lambda: contextlib.nullcontext(server.facade),
+        locked=contextlib.nullcontext,
+        invoke=warm_adapter_invoke,
+        require_delivery_confirmation=True,
+        report_command=[sys.executable, str(hook_script), '--report-use'],
+    )
+    output = codex_adapter.handle(payload)
+    if isinstance(output, dict) and isinstance(output.get('_mnemosyne_delivery'), dict):
+        output['_mnemosyne_delivery']['degraded'] = (mode_box[0] == 'local')
+    return output, mode_box[0]
+
+
 class Handler(socketserver.StreamRequestHandler):
     def handle(self):
         server = self.server
         try:
             request = json.loads(self.rfile.readline(MAX_REQUEST))
             tool = request.get('tool')
-            if tool not in READ_TOOLS:
-                raise PermissionError('recall server serves read tools only')
             agent = request.get('agent_id') or AGENT
             if agent not in HOST_AGENTS:
                 raise PermissionError('unknown host agent')
             deadline = min(max(float(request.get('embed_deadline') or EMBED_TIMEOUT), 0.5), MAX_EMBED_DEADLINE)
-            with server.lock:
-                # Requests are served one at a time; one the client abandoned while queued
-                # would only delay the prompts behind it.
-                if client_gone(self.connection):
-                    return
-                server.embedder.set_deadline(deadline)
-                result, mode = recall(server.facade, tool, request.get('arguments') or {},
-                                      request.get('session_id'), agent)
+            if tool == CODEX_PROMPT_TOOL:
+                if agent != 'codex':
+                    raise PermissionError('codex_user_prompt requires codex host agent')
+                result, mode = _handle_codex_user_prompt(
+                    server, request.get('payload'), deadline, connection=self.connection,
+                )
+            elif tool in READ_TOOLS:
+                result, mode = _execute_recall(
+                    server, tool, request.get('arguments') or {},
+                    request.get('session_id'), agent, deadline, connection=self.connection,
+                )
+            else:
+                raise PermissionError('recall server serves read tools only')
             reply = {'result': result, 'mode': mode}
+        except _ClientAbandoned:
+            return
         except Exception as error:  # the error type only: messages can carry private query text
             reply = {'error': type(error).__name__}
-        self.wfile.write((json.dumps(reply, default=str) + '\n').encode())
-        self.wfile.flush()
+        try:
+            self.wfile.write((json.dumps(reply, default=str) + '\n').encode())
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # Client timed out and closed the socket before the reply finished.
 
 
 def exit_on_redeploy(server):
@@ -187,6 +316,7 @@ class Server(socketserver.ThreadingUnixStreamServer):
 
 
 def main():
+    configure_warm_server_env()
     STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(STATE, 0o700)
     SOCKET.unlink(missing_ok=True)
@@ -196,14 +326,25 @@ def main():
         embedder = scoped.provider = HedgedEmbedder(scoped.provider, EMBED_HEDGE_AFTER, EMBED_TIMEOUT)
         facade.engine.adapters = replace(facade.engine.adapters,
                                          reranker=RetryingReranker(facade.engine.adapters.reranker))
-        # Warm the retrieval caches before accepting requests. `search` records no learning receipt.
-        # The time-window question builds the passage index once (~30 s on a large store);
-        # without it the first dated question a user asks pays that build.
-        for query in ('recent work', 'what did we discuss yesterday about recent work'):
-            try:
-                invoke(facade, 'search', {'tenant_id': 'personal', 'query': query}, 'recall-server-warmup')
-            except Exception:  # a cold cache is slower, not broken; never crash-loop on warm-up
-                pass
+        # Warm the fast retrieval, learning, and knowledge-page caches before accepting
+        # requests. `search` records no learning receipt.
+        try:
+            invoke(facade, 'search', {'tenant_id': 'personal', 'query': 'recent work'}, 'recall-server-warmup')
+        except Exception:  # a cold cache is slower, not broken; never crash-loop on warm-up
+            pass
+        try:
+            facade.tools._learning_runtime().writer.read('personal')
+        except Exception:
+            pass
+        try:
+            from mnemosyne.knowledge_maintenance import _cached_knowledge_pages
+            _cached_knowledge_pages(facade.engine, 'personal', 'main')
+        except Exception:
+            pass
+        try:
+            import mnemosyne.hosts.codex  # noqa: F401 - warm adapter import before first prompt
+        except Exception:
+            pass
         old_umask = os.umask(0o177)  # socket file is user-only (0600)
         try:
             server = Server(str(SOCKET), Handler)
@@ -211,12 +352,40 @@ def main():
             os.umask(old_umask)
         server.facade, server.lock, server.started_with = facade, threading.Lock(), started_with
         server.embedder = embedder
+        server.scoped_embedder = scoped
         server.stopping = threading.Event()
+
+        def warm_passages():
+            warmup_query = 'what did we discuss yesterday about recent work'
+            try:
+                if hasattr(scoped, 'embed_query'):
+                    scoped.embed_query(warmup_query)
+            except Exception:
+                pass
+            with server.lock:
+                if server.stopping.is_set():
+                    return
+                try:
+                    invoke(
+                        facade,
+                        'search',
+                        {'tenant_id': 'personal', 'query': warmup_query},
+                        'recall-server-warmup',
+                    )
+                except Exception:
+                    pass
+
+        threading.Thread(target=warm_passages, daemon=True).start()
         threading.Thread(target=exit_on_redeploy, args=(server,), daemon=True).start()
         try:
             server.serve_forever()
         finally:
             server.stopping.set()
+            if hasattr(facade.engine, 'flush_access_tracking'):
+                try:
+                    facade.engine.flush_access_tracking()
+                except Exception:
+                    pass
             server.server_close()
             SOCKET.unlink(missing_ok=True)
 

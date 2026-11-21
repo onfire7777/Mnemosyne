@@ -56,6 +56,8 @@ import copy
 import hashlib
 import json
 import math
+import os
+import queue
 import re
 import secrets
 import sqlite3
@@ -84,6 +86,7 @@ from mnemosyne.access_policy import (
     vector_partition_for_item,
 )
 from mnemosyne.calibration import CalibrationSet
+from mnemosyne.cid_lists import intern_cids
 from mnemosyne.engine import (
     _CANDIDATE_MEMO_SIZE,
     _clone_candidate_hit,
@@ -175,6 +178,7 @@ from mnemosyne.privacy import ErasureMode
 from mnemosyne.projections import ProjectionRegistry, ProjectionSpec
 from mnemosyne.retrieval import (
     derived_evidence_readable,
+    evidence_current_for_context,
     filter_derived_adapter_hits,
     read_evidence_for_context,
     HashingEmbeddingProvider,
@@ -182,6 +186,8 @@ from mnemosyne.retrieval import (
     RetrievalAdapters,
     embed_query,
     is_raptor_summary_item,
+    is_retired_summary_metadata,
+    scored_channel_for_hit,
     validate_adapter_hit_scope,
 )
 from mnemosyne.security import TrustTier
@@ -189,6 +195,8 @@ from mnemosyne.sqlite_schema import (
     ENSURE_STATEMENTS,
     PRAGMA_STATEMENTS,
     SCHEMA_VERSION,
+    _RELATION_UPDATE_WHEN,
+    embedding_blob_to_f64_bytes,
     json_text,
     pack_embedding,
     unpack_embedding,
@@ -482,71 +490,119 @@ def _relation_insert_values(rel: Relation) -> tuple[Any, ...]:
     )
 
 
+_PACKED_EMBEDDING_PRESENT: Any = (0.0,)
+_SCHEMA_FAST_STAMP = 20261121
+_FTS5_BYPASS_THRESHOLD = 2500
+_INTEGRITY_CHECK_MAX_BYTES = 16 * 1024 * 1024
+_GRAPH_EVIDENCE_COLUMNS = (
+    "tenant_id, branch, cid, user_id, actor, source_type, content, "
+    "source_identity, document_segment_id, retired_at, session_id, metadata, "
+    "content_pointer, modality, NULL AS embedding, signed_provenance, trust_tier, "
+    "capability_tags, sensitivity, access_policy, created_at, erased"
+)
+
+
 def _evidence_from_row(row: sqlite3.Row) -> Evidence:
     """Rehydrate an evidence row through the exact model constructor."""
     signed_provenance = row["signed_provenance"]
-    return Evidence.from_dict(
-        {
-            "tenant_id": row["tenant_id"],
-            "user_id": row["user_id"],
-            "actor": row["actor"],
-            "source_type": row["source_type"],
-            "content": row["content"],
-            "source_identity": row["source_identity"],
-            "document_segment_id": row["document_segment_id"]
-            if "document_segment_id" in row.keys()
-            else None,
-            "retired_at": row["retired_at"] if "retired_at" in row.keys() else None,
-            "session_id": row["session_id"],
-            "metadata": json.loads(row["metadata"]),
-            "content_pointer": row["content_pointer"],
-            "modality": row["modality"],
-            "embedding": unpack_embedding(row["embedding"]),
-            "signed_provenance": None
-            if signed_provenance is None
-            else json.loads(signed_provenance),
-            "trust_tier": row["trust_tier"],
-            "capability_tags": json.loads(row["capability_tags"]),
-            "sensitivity": row["sensitivity"],
-            "access_policy": json.loads(row["access_policy"]),
-            "branch": row["branch"],
-            "cid": row["cid"],
-            "created_at": row["created_at"],
-            "erased": bool(row["erased"]),
-        }
+    keys = row.keys()
+    return Evidence(
+        tenant_id=row["tenant_id"],
+        user_id=row["user_id"],
+        actor=row["actor"],
+        source_type=row["source_type"],
+        content=row["content"],
+        source_identity=row["source_identity"],
+        document_segment_id=row["document_segment_id"]
+        if "document_segment_id" in keys
+        else None,
+        retired_at=parse_dt(row["retired_at"]) if "retired_at" in keys else None,
+        session_id=row["session_id"],
+        metadata=json.loads(row["metadata"]),
+        content_pointer=row["content_pointer"],
+        modality=row["modality"],
+        embedding=unpack_embedding(row["embedding"]),
+        signed_provenance=None
+        if signed_provenance is None
+        else json.loads(signed_provenance),
+        trust_tier=row["trust_tier"],
+        capability_tags=json.loads(row["capability_tags"]),
+        sensitivity=row["sensitivity"],
+        access_policy=json.loads(row["access_policy"]),
+        branch=row["branch"],
+        cid=row["cid"],
+        created_at=parse_dt(row["created_at"]) or utc_now(),
+        erased=bool(row["erased"]),
+    )
+
+
+def _evidence_from_row_packed(row: sqlite3.Row) -> Evidence:
+    """Rehydrate a scan-oracle evidence row without unpacking its f64 BLOB.
+
+    Raw BLOBs stay in ``raw_blobs`` for ``dense_scan_packed``; fallback paths
+    that need Python float lists unpack on demand.
+    """
+    signed_provenance = row["signed_provenance"]
+    keys = row.keys()
+    raw_emb = row["embedding"]
+    return Evidence(
+        tenant_id=row["tenant_id"],
+        user_id=row["user_id"],
+        actor=row["actor"],
+        source_type=row["source_type"],
+        content=row["content"],
+        source_identity=row["source_identity"],
+        document_segment_id=row["document_segment_id"]
+        if "document_segment_id" in keys
+        else None,
+        retired_at=parse_dt(row["retired_at"]) if "retired_at" in keys else None,
+        session_id=row["session_id"],
+        metadata=json.loads(row["metadata"]),
+        content_pointer=row["content_pointer"],
+        modality=row["modality"],
+        embedding=_PACKED_EMBEDDING_PRESENT if raw_emb else None,
+        signed_provenance=None
+        if signed_provenance is None
+        else json.loads(signed_provenance),
+        trust_tier=row["trust_tier"],
+        capability_tags=json.loads(row["capability_tags"]),
+        sensitivity=row["sensitivity"],
+        access_policy=json.loads(row["access_policy"]),
+        branch=row["branch"],
+        cid=row["cid"],
+        created_at=parse_dt(row["created_at"]) or utc_now(),
+        erased=bool(row["erased"]),
     )
 
 
 def _assertion_from_row(row: sqlite3.Row) -> Assertion:
-    """Rehydrate an assertion row through ``Assertion.from_dict`` (Task-5 writers
+    """Rehydrate an assertion row through ``Assertion`` (Task-5 writers
     populate these columns; Task-3 export reads them so exports stay complete)."""
-    return Assertion.from_dict(
-        {
-            "tenant_id": row["tenant_id"],
-            "branch": row["branch"],
-            "id": row["id"],
-            "user_id": row["user_id"],
-            "subject": row["subject"],
-            "predicate": row["predicate"],
-            "object": row["object"],
-            "scope": json.loads(row["scope"]),
-            "confidence": row["confidence"],
-            "calibration": json.loads(row["calibration"]),
-            "valid_from": row["valid_from"],
-            "valid_to": row["valid_to"],
-            "transaction_time": row["transaction_time"],
-            "expired_at": row["expired_at"],
-            "justification_id": row["justification_id"],
-            "source_evidence_cids": json.loads(row["source_evidence_cids"]),
-            "status": row["status"],
-            "version": row["version"],
-            "superseded_by": row["superseded_by"],
-            "trust_tier": row["trust_tier"],
-            "sensitivity": row["sensitivity"],
-            "access_policy": json.loads(row["access_policy"]),
-            "last_accessed": row["last_accessed"],
-            "access_count": row["access_count"],
-        }
+    return Assertion(
+        tenant_id=row["tenant_id"],
+        branch=row["branch"],
+        id=row["id"],
+        user_id=row["user_id"],
+        subject=row["subject"],
+        predicate=row["predicate"],
+        object=row["object"],
+        scope=json.loads(row["scope"]),
+        confidence=row["confidence"],
+        calibration=json.loads(row["calibration"]),
+        valid_from=parse_dt(row["valid_from"]) or utc_now(),
+        valid_to=parse_dt(row["valid_to"]),
+        transaction_time=parse_dt(row["transaction_time"]) or utc_now(),
+        expired_at=parse_dt(row["expired_at"]),
+        justification_id=row["justification_id"],
+        source_evidence_cids=json.loads(row["source_evidence_cids"]),
+        status=row["status"],
+        version=row["version"],
+        superseded_by=row["superseded_by"],
+        trust_tier=row["trust_tier"],
+        sensitivity=row["sensitivity"],
+        access_policy=json.loads(row["access_policy"]),
+        last_accessed=parse_dt(row["last_accessed"]),
+        access_count=row["access_count"],
     )
 
 
@@ -603,8 +659,40 @@ def _observation_from_row(row: sqlite3.Row) -> Observation:
     )
 
 
+def _split_kp_embedding(
+    maintenance: dict[str, Any] | None,
+) -> tuple[dict[str, Any], bytes | None, bool]:
+    """Strip ``maintenance['embedding']`` into a packed BLOB for ``knowledge_pages.embedding``.
+
+    Returns ``(clean_maintenance, blob_or_none, had_embedding_key)`` so updates
+    know whether the caller explicitly supplied or cleared ``embedding``.
+    """
+    if not isinstance(maintenance, dict):
+        return {}, None, False
+    if "embedding" not in maintenance:
+        return dict(maintenance), None, False
+    emb = maintenance.get("embedding")
+    clean = {k: v for k, v in maintenance.items() if k != "embedding"}
+    if isinstance(emb, list) and emb:
+        return clean, pack_embedding([float(v) for v in emb]), True
+    return clean, None, True
+
+
 def _knowledge_page_from_row(row: sqlite3.Row) -> KnowledgePage:
     """Rehydrate a knowledge page row through ``KnowledgePage.from_dict``."""
+    maint = json.loads(row["maintenance"])
+    if not isinstance(maint, dict):
+        maint = {}
+    emb_blob = row["embedding"] if "embedding" in row.keys() else None
+    if emb_blob is not None:
+        unpacked = unpack_embedding(emb_blob)
+        if unpacked is not None:
+            maint["embedding"] = unpacked
+    elif (
+        maint.get("schema") == "mnemosyne.automatic-knowledge/v1"
+        and "embedding" not in maint
+    ):
+        maint["embedding"] = []
     return KnowledgePage.from_dict(
         {
             "tenant_id": row["tenant_id"],
@@ -623,7 +711,7 @@ def _knowledge_page_from_row(row: sqlite3.Row) -> KnowledgePage:
             "trust_tier": row["trust_tier"],
             "sensitivity": row["sensitivity"],
             "access_policy": json.loads(row["access_policy"]),
-            "maintenance": json.loads(row["maintenance"]),
+            "maintenance": maint,
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         }
@@ -1001,8 +1089,16 @@ class SqliteEngine:
         # any committed change re-hydrates. Shares the Local candidate-memo
         # kill-switch MNEMOSYNE_CANDIDATE_MEMO=0 (CONFIG-DRIFT-CHECKS.md).
         self._scan_oracle_memo: OrderedDict[
-            tuple[Any, ...], tuple[LocalMemoryEngine, dict[str, bytes | None]]
+            tuple[Any, ...], Any
         ] = OrderedDict()
+        self._graph_oracle_memo: OrderedDict[
+            tuple[Any, ...], Any
+        ] = OrderedDict()
+        self._validated_owners: dict[str, tuple[str, int]] = {}
+        # Opt-in background worker for MNEMOSYNE_ASYNC_ACCESS_TRACKING=1 (default off/sync).
+        self._async_access_queue: queue.Queue[list[Hit] | threading.Event | None] | None = None
+        self._async_access_thread: threading.Thread | None = None
+        self._async_access_lock = threading.Lock()
         # Observability checklist §1-3 signals (evidence-durability, rebuild-lag,
         # per-write audit stream, erasure-propagation). The engine emits directly
         # into this registry — durability is the highest SLO (§15) so the loss
@@ -1057,7 +1153,11 @@ class SqliteEngine:
             key = str(path)
             cached = self._connections.get(key)
             if cached is not None:
-                self._validate_tenant_file_owner(cached, tenant_id)
+                validated = self._validated_owners.get(key)
+                if validated is None or validated[0] != tenant_id:
+                    self._validate_tenant_file_owner(cached, tenant_id)
+                    dv = int(cached.execute("PRAGMA data_version").fetchone()[0])
+                    self._validated_owners[key] = (tenant_id, dv)
                 return cached
             existed = path.exists()
             conn = sqlite3.connect(
@@ -1069,6 +1169,13 @@ class SqliteEngine:
                     self._validate_tenant_file_owner(conn, tenant_id)
                     for pragma in PRAGMA_STATEMENTS:
                         conn.execute(pragma)
+                    if (
+                        os.environ.get("MNEMOSYNE_SQLITE_SYNCHRONOUS", "")
+                        .strip()
+                        .upper()
+                        == "NORMAL"
+                    ):
+                        conn.execute("PRAGMA synchronous=NORMAL")
                     if key not in self._integrity_checked:
                         self._run_integrity_check(conn, path)
                         self._integrity_checked.add(key)
@@ -1083,14 +1190,29 @@ class SqliteEngine:
             if not existed:
                 path.chmod(0o600)
             self._connections[key] = conn
+            dv = int(conn.execute("PRAGMA data_version").fetchone()[0])
+            self._validated_owners[key] = (tenant_id, dv)
             return conn
 
     @staticmethod
     def _run_integrity_check(conn: sqlite3.Connection, path: Path) -> None:
-        row = conn.execute("PRAGMA integrity_check").fetchone()
-        result = row[0] if row else "missing integrity_check result"
-        if result != "ok":
-            raise RuntimeError(f"sqlite integrity_check failed for {path}: {result}")
+        # Always verify SQLite header and schema readability (instant fail-closed on
+        # non-database/truncated files). Full B-tree integrity_check scans every page
+        # of the database (seconds on 500MB+ stores); run it automatically on small
+        # stores or whenever MNEMOSYNE_SQLITE_FULL_INTEGRITY_CHECK=1 is set.
+        conn.execute("SELECT count(*) FROM sqlite_master").fetchone()
+        full_check = os.environ.get("MNEMOSYNE_SQLITE_FULL_INTEGRITY_CHECK") == "1"
+        if not full_check:
+            try:
+                size = path.stat().st_size if path.exists() else 0
+            except OSError:
+                size = 0
+            full_check = size <= _INTEGRITY_CHECK_MAX_BYTES
+        if full_check:
+            row = conn.execute("PRAGMA integrity_check").fetchone()
+            result = row[0] if row else "missing integrity_check result"
+            if result != "ok":
+                raise RuntimeError(f"sqlite integrity_check failed for {path}: {result}")
 
     @staticmethod
     def _validate_tenant_file_owner(conn: sqlite3.Connection, tenant_id: str) -> None:
@@ -1110,12 +1232,117 @@ class SqliteEngine:
 
     @staticmethod
     def _ensure_schema(conn: sqlite3.Connection, tenant_id: str) -> None:
+        # Fast read-only check: when our schema stamp matches SQLite's own
+        # schema_version (which bumps automatically on any DDL) and the main
+        # branch exists, avoid acquiring a BEGIN IMMEDIATE write lock on open.
+        try:
+            schema_ver = int(conn.execute("PRAGMA schema_version").fetchone()[0])
+            expected_stamp = f"{_SCHEMA_FAST_STAMP}:{schema_ver}"
+            stamp_row = conn.execute(
+                "SELECT value FROM meta WHERE key = 'schema_fast_stamp'"
+            ).fetchone()
+            if (
+                stamp_row is not None
+                and stamp_row[0] == expected_stamp
+                and conn.execute(
+                    "SELECT 1 FROM branches WHERE tenant_id = ? AND name = 'main'",
+                    (tenant_id,),
+                ).fetchone()
+                is not None
+            ):
+                SqliteEngine._validate_tenant_file_owner(conn, tenant_id)
+                return
+        except sqlite3.OperationalError:
+            pass
         with conn:
             # Serialize first-owner admission across independently opened engines.
             conn.execute("BEGIN IMMEDIATE")
             SqliteEngine._validate_tenant_file_owner(conn, tenant_id)
             for statement in ENSURE_STATEMENTS:
                 conn.execute(statement)
+            # Migrate legacy evidence_fts triggers so metadata-only updates do not
+            # re-index content and learning_tool_result operational rows stay excluded.
+            fts_triggers = {
+                row[0]: (row[1] or "")
+                for row in conn.execute(
+                    "SELECT name, sql FROM sqlite_master WHERE type = 'trigger' "
+                    "AND name IN ('evidence_fts_ai', 'evidence_fts_ad', 'evidence_fts_au')"
+                ).fetchall()
+            }
+            if (
+                "learning_tool_result" not in fts_triggers.get("evidence_fts_ai", "")
+                or "learning_tool_result" not in fts_triggers.get("evidence_fts_ad", "")
+                or "learning_tool_result" not in fts_triggers.get("evidence_fts_au", "")
+                or "AFTER UPDATE OF" not in fts_triggers.get("evidence_fts_au", "")
+            ):
+                conn.execute("DROP TRIGGER IF EXISTS evidence_fts_ai")
+                conn.execute("DROP TRIGGER IF EXISTS evidence_fts_ad")
+                conn.execute("DROP TRIGGER IF EXISTS evidence_fts_au")
+                conn.execute(
+                    """
+                    CREATE TRIGGER IF NOT EXISTS evidence_fts_ai AFTER INSERT ON evidence
+                    WHEN new.source_type != 'learning_tool_result'
+                    BEGIN
+                        INSERT INTO evidence_fts(rowid, cid, tenant_id, branch, content)
+                        VALUES (new.rowid, new.cid, new.tenant_id, new.branch, new.content);
+                    END
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TRIGGER IF NOT EXISTS evidence_fts_ad AFTER DELETE ON evidence
+                    WHEN old.source_type != 'learning_tool_result'
+                    BEGIN
+                        DELETE FROM evidence_fts WHERE rowid = old.rowid;
+                    END
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TRIGGER IF NOT EXISTS evidence_fts_au
+                    AFTER UPDATE OF cid, tenant_id, branch, content, source_type ON evidence
+                    BEGIN
+                        DELETE FROM evidence_fts WHERE rowid = old.rowid;
+                        INSERT INTO evidence_fts(rowid, cid, tenant_id, branch, content)
+                        SELECT new.rowid, new.cid, new.tenant_id, new.branch, new.content
+                        WHERE new.source_type != 'learning_tool_result';
+                    END
+                    """
+                )
+                conn.execute(
+                    "DELETE FROM evidence_fts WHERE rowid IN "
+                    "(SELECT rowid FROM evidence WHERE source_type = 'learning_tool_result')"
+                )
+            # Migrate legacy memory_source_relations_update trigger to skip no-op rewrites.
+            rel_upd_row = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'trigger' "
+                "AND name = 'memory_source_relations_update'"
+            ).fetchone()
+            if rel_upd_row is not None and "WHEN" not in (rel_upd_row[0] or ""):
+                conn.execute("DROP TRIGGER IF EXISTS memory_source_relations_update")
+                conn.execute(
+                    f"""
+                    CREATE TRIGGER IF NOT EXISTS memory_source_relations_update
+                    AFTER UPDATE ON relations
+                    {_RELATION_UPDATE_WHEN}
+                    BEGIN
+                        INSERT INTO memory_source_revisions(tenant_id, revision)
+                        VALUES (new.tenant_id, 1)
+                        ON CONFLICT(tenant_id) DO UPDATE SET revision = revision + 1;
+                        INSERT INTO memory_source_changes(tenant_id, revision, collection, branch, item_id)
+                        SELECT new.tenant_id, revision, 'relations', new.branch, new.id
+                        FROM memory_source_revisions
+                        WHERE tenant_id = new.tenant_id;
+                        DELETE FROM memory_source_changes
+                        WHERE tenant_id = new.tenant_id
+                          AND revision < (
+                              SELECT revision - 4096
+                              FROM memory_source_revisions
+                              WHERE tenant_id = new.tenant_id
+                          );
+                    END
+                    """
+                )
             # FTS5 only marks deleted terms; secure-delete removes them, so a forgotten token leaves the index.
             # shortcut: needs SQLite 3.42, older builds keep erased terms until segments merge; a store that
             # has this option set can no longer be opened by SQLite older than 3.42.
@@ -1126,6 +1353,14 @@ class SqliteEngine:
             page_columns = {row[1] for row in conn.execute("PRAGMA table_info(knowledge_pages)")}
             if "maintenance" not in page_columns:
                 conn.execute("ALTER TABLE knowledge_pages ADD COLUMN maintenance TEXT NOT NULL DEFAULT '{}'")
+            if "embedding" not in page_columns:
+                conn.execute("ALTER TABLE knowledge_pages ADD COLUMN embedding BLOB")
+            for _emb_table in ("assertions", "preferences", "observations"):
+                _cols = {
+                    row[1] for row in conn.execute(f"PRAGMA table_info({_emb_table})")
+                }
+                if "embedding" not in _cols:
+                    conn.execute(f"ALTER TABLE {_emb_table} ADD COLUMN embedding BLOB")
             evidence_columns = {
                 row[1] for row in conn.execute("PRAGMA table_info(evidence)")
             }
@@ -1192,14 +1427,32 @@ class SqliteEngine:
                 "VALUES (?, 'main', NULL, 'protected', ?)",
                 (tenant_id, dt_to_json(utc_now())),
             )
+            schema_ver = int(conn.execute("PRAGMA schema_version").fetchone()[0])
+            conn.execute(
+                "INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_fast_stamp', ?)",
+                (f"{_SCHEMA_FAST_STAMP}:{schema_ver}",),
+            )
 
     def close(self) -> None:
         """Close every cached tenant connection (tests / shutdown)."""
+        thread: threading.Thread | None = None
+        with self._async_access_lock:
+            if self._async_access_queue is not None:
+                self._async_access_queue.put(None)
+                thread = self._async_access_thread
+                self._async_access_queue = None
+                self._async_access_thread = None
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=5.0)
         with self._lock:
             for conn in self._connections.values():
                 conn.close()
             self._connections.clear()
+            self._validated_owners.clear()
             self._scan_oracle_memo.clear()
+            self._graph_oracle_memo.clear()
+            self.__dict__.pop("_learning_state_cache", None)
+            self.__dict__.pop("_knowledge_context_cache", None)
             self._retrieval_result_cache_nonce = secrets.token_hex(16)
 
     def _insert_evidence(self, ev: Evidence) -> None:
@@ -2293,6 +2546,7 @@ class SqliteEngine:
                 state["ending"] = True
                 sqlite3.Connection.rollback(conn)
                 self._scan_oracle_memo.clear()
+                self._graph_oracle_memo.clear()
                 self._registries.clear()
                 self._passage_bm25_index = None
                 self._retrieval_result_cache_nonce = secrets.token_hex(16)
@@ -2770,6 +3024,7 @@ class SqliteEngine:
                 (tenant_id, branch),
             )
             self._scan_oracle_memo.clear()
+            self._graph_oracle_memo.clear()
             self._registries.clear()
             self._passage_bm25_index = None
             self._retrieval_result_cache_nonce = secrets.token_hex(16)
@@ -3005,6 +3260,49 @@ class SqliteEngine:
                         found[str(row["cid"])] = created
         return found
 
+    def evidence_metadata_many(
+        self, tenant_id: str, cids: Sequence[str], branch: str = "main"
+    ) -> dict[str, dict[str, Any]]:
+        """Metadata of live evidence rows in one batched query without unpacking embeddings."""
+        wanted = [cid for cid in dict.fromkeys(cids) if cid]
+        if not wanted:
+            return {}
+        conn = self._connect(tenant_id)
+        found: dict[str, dict[str, Any]] = {}
+        with self._lock:
+            for start in range(0, len(wanted), 500):
+                chunk = wanted[start : start + 500]
+                placeholders = ",".join("?" for _ in chunk)
+                rows = conn.execute(
+                    "SELECT cid, metadata FROM evidence "
+                    f"WHERE tenant_id = ? AND branch = ? AND erased = 0 AND cid IN ({placeholders})",
+                    (tenant_id, branch, *chunk),
+                ).fetchall()
+                for row in rows:
+                    found[str(row["cid"])] = json.loads(row["metadata"])
+        return found
+
+    def evidence_turn_scope(
+        self, tenant_id: str, cid: str, branch: str = "main"
+    ) -> tuple[str | None, str, str | None, str, str] | None:
+        """Lightweight turn-dedup scope fields without reading content or embedding."""
+        conn = self._connect(tenant_id)
+        with self._lock:
+            row = conn.execute(
+                "SELECT user_id, actor, content_pointer, source_type, modality FROM evidence "
+                "WHERE tenant_id = ? AND branch = ? AND cid = ? AND erased = 0",
+                (tenant_id, branch, cid),
+            ).fetchone()
+        if row is None:
+            return None
+        return (
+            row["user_id"],
+            row["actor"],
+            row["content_pointer"],
+            row["source_type"],
+            row["modality"],
+        )
+
     def assertions_citing(
         self, tenant_id: str, cids: Sequence[str], branch: str = "main"
     ) -> list[Assertion]:
@@ -3178,6 +3476,477 @@ class SqliteEngine:
                     capability_tags=ev.capability_tags,
                 )
             return True
+
+    def _sources_allow_embedding_sql(
+        self,
+        conn: sqlite3.Connection,
+        tenant_id: str,
+        branch: str,
+        source_cids: list[str],
+    ) -> bool:
+        if not source_cids:
+            return True
+        placeholders = ",".join("?" for _ in source_cids)
+        rows = conn.execute(
+            f"SELECT erased, sensitivity, access_policy FROM evidence "
+            f"WHERE tenant_id = ? AND branch = ? AND cid IN ({placeholders})",
+            (tenant_id, branch, *source_cids),
+        ).fetchall()
+        for row in rows:
+            erased = bool(row["erased"])
+            if erased or not may_embed_item(
+                sensitivity=int(row["sensitivity"]),
+                access_policy=json.loads(row["access_policy"]),
+                erased=erased,
+            ):
+                return False
+        return True
+
+    def set_assertion_embedding(
+        self,
+        tenant_id: str,
+        assertion_id: str,
+        embedding: list[float] | None,
+        branch: str = "main",
+        *,
+        actor: str = "consolidation",
+        source: str = "embedder",
+        only_if_missing: bool = False,
+    ) -> bool:
+        with self._lock:
+            conn = self._connect(tenant_id)
+            row = conn.execute(
+                "SELECT status, sensitivity, access_policy, trust_tier, source_evidence_cids, embedding "
+                "FROM assertions WHERE tenant_id = ? AND branch = ? AND id = ?",
+                (tenant_id, branch, assertion_id),
+            ).fetchone()
+            if row is None:
+                return False
+            if embedding is None:
+                with conn:
+                    conn.execute(
+                        "UPDATE assertions SET embedding = NULL "
+                        "WHERE tenant_id = ? AND branch = ? AND id = ?",
+                        (tenant_id, branch, assertion_id),
+                    )
+                return True
+            status = str(row["status"])
+            if status not in {"active", "contested"}:
+                return False
+            if only_if_missing and row["embedding"] is not None:
+                return False
+            sensitivity = int(row["sensitivity"])
+            access_policy = json.loads(row["access_policy"])
+            source_cids = json.loads(row["source_evidence_cids"] or "[]")
+            if not may_embed_item(
+                sensitivity=sensitivity,
+                access_policy=access_policy,
+                status=status,
+            ) or not self._sources_allow_embedding_sql(
+                conn, tenant_id, branch, source_cids
+            ):
+                with conn:
+                    self._audit_row(
+                        conn,
+                        tenant_id,
+                        actor,
+                        "set_assertion_embedding.blocked_policy",
+                        assertion_id,
+                        {"branch": branch, "reason": "embedding_not_allowed"},
+                        source=source,
+                        trust_tier=int(row["trust_tier"]),
+                    )
+                return False
+            blob = pack_embedding([float(v) for v in embedding])
+            with conn:
+                conn.execute(
+                    "UPDATE assertions SET embedding = ? "
+                    "WHERE tenant_id = ? AND branch = ? AND id = ?",
+                    (blob, tenant_id, branch, assertion_id),
+                )
+            return True
+
+    def set_observation_embedding(
+        self,
+        tenant_id: str,
+        observation_id: str,
+        embedding: list[float] | None,
+        branch: str = "main",
+        *,
+        actor: str = "consolidation",
+        source: str = "embedder",
+        only_if_missing: bool = False,
+    ) -> bool:
+        with self._lock:
+            conn = self._connect(tenant_id)
+            row = conn.execute(
+                "SELECT status, sensitivity, access_policy, source_evidence_cids, embedding "
+                "FROM observations WHERE tenant_id = ? AND branch = ? AND observation_id = ?",
+                (tenant_id, branch, observation_id),
+            ).fetchone()
+            if row is None:
+                return False
+            if embedding is None:
+                with conn:
+                    conn.execute(
+                        "UPDATE observations SET embedding = NULL "
+                        "WHERE tenant_id = ? AND branch = ? AND observation_id = ?",
+                        (tenant_id, branch, observation_id),
+                    )
+                return True
+            status = str(row["status"])
+            if status != "active":
+                return False
+            if only_if_missing and row["embedding"] is not None:
+                return False
+            sensitivity = int(row["sensitivity"])
+            access_policy = json.loads(row["access_policy"])
+            source_cids = json.loads(row["source_evidence_cids"] or "[]")
+            if not may_embed_item(
+                sensitivity=sensitivity,
+                access_policy=access_policy,
+                status=status,
+            ) or not self._sources_allow_embedding_sql(
+                conn, tenant_id, branch, source_cids
+            ):
+                with conn:
+                    self._audit_row(
+                        conn,
+                        tenant_id,
+                        actor,
+                        "set_observation_embedding.blocked_policy",
+                        observation_id,
+                        {"branch": branch, "reason": "embedding_not_allowed"},
+                        source=source,
+                    )
+                return False
+            blob = pack_embedding([float(v) for v in embedding])
+            with conn:
+                conn.execute(
+                    "UPDATE observations SET embedding = ? "
+                    "WHERE tenant_id = ? AND branch = ? AND observation_id = ?",
+                    (blob, tenant_id, branch, observation_id),
+                )
+            return True
+
+    def set_preference_embedding(
+        self,
+        tenant_id: str,
+        pref_id: str,
+        embedding: list[float] | None,
+        *,
+        actor: str = "consolidation",
+        source: str = "embedder",
+        only_if_missing: bool = False,
+    ) -> bool:
+        with self._lock:
+            conn = self._connect(tenant_id)
+            row = conn.execute(
+                "SELECT record, embedding FROM preferences WHERE tenant_id = ? AND id = ?",
+                (tenant_id, pref_id),
+            ).fetchone()
+            if row is None:
+                return False
+            if embedding is None:
+                with conn:
+                    conn.execute(
+                        "UPDATE preferences SET embedding = NULL WHERE tenant_id = ? AND id = ?",
+                        (tenant_id, pref_id),
+                    )
+                return True
+            pref = Preference.from_dict(json.loads(row["record"]))
+            if pref.status != "active":
+                return False
+            if only_if_missing and row["embedding"] is not None:
+                return False
+            if not may_embed_item(
+                sensitivity=0,
+                access_policy=pref.access_policy,
+                status=pref.status,
+            ):
+                with conn:
+                    self._audit_row(
+                        conn,
+                        tenant_id,
+                        actor,
+                        "set_preference_embedding.blocked_policy",
+                        pref_id,
+                        {"reason": "embedding_not_allowed"},
+                        source=source,
+                    )
+                return False
+            blob = pack_embedding([float(v) for v in embedding])
+            with conn:
+                conn.execute(
+                    "UPDATE preferences SET embedding = ? WHERE tenant_id = ? AND id = ?",
+                    (blob, tenant_id, pref_id),
+                )
+            return True
+
+    def set_knowledge_page_embedding(
+        self,
+        tenant_id: str,
+        page_id: str,
+        embedding: list[float] | None,
+        branch: str = "main",
+        *,
+        actor: str = "consolidation",
+        source: str = "embedder",
+        only_if_missing: bool = False,
+    ) -> bool:
+        with self._lock:
+            conn = self._connect(tenant_id)
+            row = conn.execute(
+                "SELECT status, sensitivity, access_policy, source_evidence_cids, maintenance, embedding "
+                "FROM knowledge_pages WHERE tenant_id = ? AND branch = ? AND page_id = ?",
+                (tenant_id, branch, page_id),
+            ).fetchone()
+            if row is None:
+                return False
+            if embedding is None:
+                maint = json.loads(row["maintenance"] or "{}")
+                if isinstance(maint, dict) and "embedding" in maint:
+                    maint.pop("embedding", None)
+                with conn:
+                    conn.execute(
+                        "UPDATE knowledge_pages SET embedding = NULL, maintenance = ? "
+                        "WHERE tenant_id = ? AND branch = ? AND page_id = ?",
+                        (json_text(maint), tenant_id, branch, page_id),
+                    )
+                return True
+            status = str(row["status"])
+            if status in {"archived", "retired"}:
+                return False
+            if only_if_missing and row["embedding"] is not None:
+                return False
+            sensitivity = int(row["sensitivity"])
+            access_policy = json.loads(row["access_policy"])
+            source_cids = json.loads(row["source_evidence_cids"] or "[]")
+            if not may_embed_item(
+                sensitivity=sensitivity,
+                access_policy=access_policy,
+                status=status,
+            ) or not self._sources_allow_embedding_sql(
+                conn, tenant_id, branch, source_cids
+            ):
+                with conn:
+                    self._audit_row(
+                        conn,
+                        tenant_id,
+                        actor,
+                        "set_knowledge_page_embedding.blocked_policy",
+                        page_id,
+                        {"branch": branch, "reason": "embedding_not_allowed"},
+                        source=source,
+                    )
+                return False
+            blob = pack_embedding([float(v) for v in embedding])
+            with conn:
+                conn.execute(
+                    "UPDATE knowledge_pages SET embedding = ? "
+                    "WHERE tenant_id = ? AND branch = ? AND page_id = ?",
+                    (blob, tenant_id, branch, page_id),
+                )
+            return True
+
+    def list_unembedded_targets(
+        self,
+        tenant_id: str,
+        branch: str = "main",
+        *,
+        limit: int = 128,
+    ) -> dict[str, list[dict[str, Any]]]:
+        cap = max(0, int(limit))
+        if cap == 0:
+            return {
+                "evidence": [],
+                "assertions": [],
+                "observations": [],
+                "preferences": [],
+                "knowledge_pages": [],
+            }
+        conn = self._connect(tenant_id)
+        with self._lock:
+            ev_targets: list[dict[str, Any]] = []
+            for row in conn.execute(
+                "SELECT cid, user_id, content, source_type, sensitivity, access_policy, metadata "
+                "FROM evidence WHERE tenant_id = ? AND branch = ? AND erased = 0 "
+                "AND retired_at IS NULL AND embedding IS NULL "
+                "AND source_type != 'learning_tool_result' ORDER BY cid",
+                (tenant_id, branch),
+            ):
+                if len(ev_targets) >= cap:
+                    break
+                meta = json.loads(row["metadata"] or "{}")
+                if is_retired_summary_metadata(meta):
+                    continue
+                policy_dict = json.loads(row["access_policy"] or "{}")
+                sens = int(row["sensitivity"])
+                if not may_embed_item(
+                    sensitivity=sens, access_policy=policy_dict, erased=False
+                ):
+                    continue
+                ev_targets.append(
+                    {
+                        "cid": row["cid"],
+                        "user_id": row["user_id"],
+                        "content": row["content"],
+                        "text": row["content"],
+                        "source_type": row["source_type"],
+                        "sensitivity": sens,
+                        "access_policy": policy_dict,
+                    }
+                )
+
+            as_targets: list[dict[str, Any]] = []
+            for row in conn.execute(
+                "SELECT id, user_id, subject, predicate, object, status, sensitivity, "
+                "access_policy, source_evidence_cids "
+                "FROM assertions WHERE tenant_id = ? AND branch = ? "
+                "AND status IN ('active', 'contested') AND embedding IS NULL ORDER BY id",
+                (tenant_id, branch),
+            ):
+                if len(as_targets) >= cap:
+                    break
+                policy_dict = json.loads(row["access_policy"] or "{}")
+                sens = int(row["sensitivity"])
+                if not may_embed_item(
+                    sensitivity=sens,
+                    access_policy=policy_dict,
+                    status=str(row["status"]),
+                ):
+                    continue
+                as_targets.append(
+                    {
+                        "id": row["id"],
+                        "user_id": row["user_id"],
+                        "subject": row["subject"],
+                        "predicate": row["predicate"],
+                        "object": row["object"],
+                        "text": f"{row['subject']} {row['predicate']} {row['object']}".strip(),
+                        "source_evidence_cids": json.loads(
+                            row["source_evidence_cids"] or "[]"
+                        ),
+                        "sensitivity": sens,
+                        "access_policy": policy_dict,
+                    }
+                )
+
+            obs_targets: list[dict[str, Any]] = []
+            for row in conn.execute(
+                "SELECT observation_id, user_id, subject, topic, content, status, "
+                "sensitivity, access_policy, source_evidence_cids "
+                "FROM observations WHERE tenant_id = ? AND branch = ? "
+                "AND status = 'active' AND embedding IS NULL ORDER BY observation_id",
+                (tenant_id, branch),
+            ):
+                if len(obs_targets) >= cap:
+                    break
+                policy_dict = json.loads(row["access_policy"] or "{}")
+                sens = int(row["sensitivity"])
+                if not may_embed_item(
+                    sensitivity=sens,
+                    access_policy=policy_dict,
+                    status="active",
+                ):
+                    continue
+                content = str(row["content"] or "")
+                obs_targets.append(
+                    {
+                        "observation_id": row["observation_id"],
+                        "user_id": row["user_id"],
+                        "subject": row["subject"],
+                        "topic": row["topic"],
+                        "statement": content,
+                        "content": content,
+                        "text": content,
+                        "source_evidence_cids": json.loads(
+                            row["source_evidence_cids"] or "[]"
+                        ),
+                        "status": str(row["status"]),
+                    }
+                )
+
+            pref_targets: list[dict[str, Any]] = []
+            for row in conn.execute(
+                "SELECT id, record FROM preferences WHERE tenant_id = ? "
+                "AND embedding IS NULL ORDER BY id",
+                (tenant_id,),
+            ):
+                if len(pref_targets) >= cap:
+                    break
+                pref = Preference.from_dict(json.loads(row["record"]))
+                if pref.status != "active" or not may_embed_item(
+                    sensitivity=0,
+                    access_policy=pref.access_policy,
+                    status=pref.status,
+                ):
+                    continue
+                pref_targets.append(
+                    {
+                        "id": pref.id,
+                        "user_id": pref.user_id,
+                        "category": pref.category,
+                        "statement": pref.statement,
+                        "text": pref.statement,
+                        "source_evidence_cids": list(pref.source_evidence_cids),
+                        "access_policy": dict(pref.access_policy or {}),
+                    }
+                )
+
+            kp_targets: list[dict[str, Any]] = []
+            for row in conn.execute(
+                "SELECT page_id, user_id, path, title, content_markdown, status, "
+                "sensitivity, access_policy, source_evidence_cids, maintenance "
+                "FROM knowledge_pages WHERE tenant_id = ? AND branch = ? "
+                "AND status = 'active' AND embedding IS NULL ORDER BY page_id",
+                (tenant_id, branch),
+            ):
+                if len(kp_targets) >= cap:
+                    break
+                policy_dict = json.loads(row["access_policy"] or "{}")
+                sens = int(row["sensitivity"])
+                if not may_embed_item(
+                    sensitivity=sens,
+                    access_policy=policy_dict,
+                    status="active",
+                ):
+                    continue
+                maint = json.loads(row["maintenance"] or "{}")
+                if isinstance(maint, dict) and isinstance(maint.get("embedding"), list) and maint["embedding"]:
+                    continue
+                title = str(row["title"] or "")
+                body = str(row["content_markdown"] or "")
+                page_text = (
+                    f"{title}\n{body}".strip() if title and body else (title or body)
+                )
+                kp_targets.append(
+                    {
+                        "page_id": row["page_id"],
+                        "user_id": row["user_id"],
+                        "path": row["path"],
+                        "title": title,
+                        "summary": str(
+                            (maint.get("summary") if isinstance(maint, dict) else None)
+                            or title
+                        ),
+                        "body": body,
+                        "content_markdown": body,
+                        "text": page_text,
+                        "source_evidence_cids": json.loads(
+                            row["source_evidence_cids"] or "[]"
+                        ),
+                        "status": str(row["status"]),
+                    }
+                )
+
+            return {
+                "evidence": ev_targets,
+                "assertions": as_targets,
+                "observations": obs_targets,
+                "preferences": pref_targets,
+                "knowledge_pages": kp_targets,
+            }
 
     def list_raptor_summaries(
         self, tenant_id: str, branch: str = "main"
@@ -3569,6 +4338,64 @@ class SqliteEngine:
         max_sensitivity = effective_max_sensitivity(filt, self.policy.max_sensitivity)
         return tenant_id, branch, max_trust, max_sensitivity
 
+    @staticmethod
+    def _source_revision_unlocked(conn: sqlite3.Connection, tenant_id: str) -> int:
+        row = conn.execute(
+            "SELECT revision FROM memory_source_revisions WHERE tenant_id = ?",
+            (tenant_id,),
+        ).fetchone()
+        return int(row[0]) if row is not None else 0
+
+    def _ensure_oracle_embeddings_unpacked(
+        self,
+        oracle: LocalMemoryEngine,
+        raw_blobs: dict[str, bytes | None],
+    ) -> None:
+        if getattr(oracle, "_embeddings_unpacked", True):
+            return
+        with self._lock:
+            if getattr(oracle, "_embeddings_unpacked", True):
+                return
+            for key, ev in oracle.evidence.items():
+                if ev.embedding is _PACKED_EMBEDDING_PRESENT:
+                    ev.embedding = unpack_embedding(raw_blobs.get(key))
+            item_raw = getattr(oracle, "_item_raw_blobs", None)
+            if item_raw:
+                for emb_key, blob in item_raw.items():
+                    if blob is not None and emb_key not in oracle._item_embeddings:
+                        vec = unpack_embedding(blob)
+                        if vec is not None:
+                            oracle._item_embeddings[emb_key] = vec
+            oracle._embeddings_unpacked = True
+
+    @staticmethod
+    def _assertion_lifecycle_only_equal(old_a: Assertion, new_a: Assertion) -> bool:
+        """True iff every field on ``Assertion`` except ``last_accessed`` / ``access_count`` matches."""
+        return (
+            old_a.tenant_id == new_a.tenant_id
+            and old_a.branch == new_a.branch
+            and old_a.id == new_a.id
+            and old_a.user_id == new_a.user_id
+            and old_a.subject == new_a.subject
+            and old_a.predicate == new_a.predicate
+            and old_a.object == new_a.object
+            and old_a.scope == new_a.scope
+            and old_a.confidence == new_a.confidence
+            and old_a.calibration == new_a.calibration
+            and old_a.valid_from == new_a.valid_from
+            and old_a.valid_to == new_a.valid_to
+            and old_a.transaction_time == new_a.transaction_time
+            and old_a.expired_at == new_a.expired_at
+            and old_a.justification_id == new_a.justification_id
+            and list(old_a.source_evidence_cids) == list(new_a.source_evidence_cids)
+            and old_a.status == new_a.status
+            and old_a.version == new_a.version
+            and old_a.superseded_by == new_a.superseded_by
+            and old_a.trust_tier == new_a.trust_tier
+            and old_a.sensitivity == new_a.sensitivity
+            and old_a.access_policy == new_a.access_policy
+        )
+
     def _scan_oracle(
         self, filt: dict[str, Any], *, with_blobs: bool = False
     ) -> LocalMemoryEngine | tuple[LocalMemoryEngine, dict[str, bytes | None]]:
@@ -3576,103 +4403,597 @@ class SqliteEngine:
 
         One hydration (and, via the oracle's own candidate memo, ONE
         may_read_item+redaction scan) serves both the dense and lexical
-        channels of a retrieve. The cache key carries the indexable scope
-        bounds plus two sqlite write fingerprints — ``conn.total_changes``
-        (this engine's writes go through the one cached tenant connection) and
-        ``PRAGMA data_version`` (commits by any other connection) — so any
-        committed change re-hydrates; byte parity with an unmemoized hydration
-        is proven in tests/test_engine_perf_lanes.py. Kill-switch:
-        MNEMOSYNE_CANDIDATE_MEMO=0 (shared with the Local candidate memo).
+        channels of a retrieve. Uses ``memory_source_revisions`` and
+        ``memory_source_changes`` so writes to non-source tables (learning,
+        audit, working memory) do not invalidate the scan oracle, and small
+        source updates (such as ``record_access`` or newly captured turns)
+        patch only the touched rows in place while preserving exact
+        ``ORDER BY rowid`` parity. Pure lifecycle-only updates preserve the
+        packed dense buffer and candidate memo. Kill-switch: ``MNEMOSYNE_CANDIDATE_MEMO=0``.
         """
         if not _candidate_memo_enabled():
-            oracle, raw_blobs = self._hydrate_scan_oracle(filt)
+            oracle, raw_blobs, _meta = self._hydrate_scan_oracle(filt)
             return (oracle, raw_blobs) if with_blobs else oracle
         tenant_id, branch, max_trust, max_sensitivity = self._candidate_scope_bounds(
             filt
         )
-        cached: tuple[LocalMemoryEngine, dict[str, bytes | None]]
+        exclude_operational = bool(filt.get("_exclude_operational_evidence"))
+        include_synthesized = bool(filt.get("include_synthesized", False))
         if tenant_id:
+            conn = self._connect(tenant_id)
             with self._lock:
-                key = (
+                scope_key = (
                     tenant_id,
                     branch,
                     max_trust,
                     max_sensitivity,
-                    *self.write_fingerprint(tenant_id),
+                    exclude_operational,
+                    include_synthesized,
                 )
-                cached = self._scan_oracle_memo.get(key)
-                if cached is None:
-                    cached = self._hydrate_scan_oracle(filt)
-                    self._scan_oracle_memo[key] = cached
-                    self._scan_oracle_memo.move_to_end(key)
+                fp = (
+                    conn.total_changes,
+                    int(conn.execute("PRAGMA data_version").fetchone()[0]),
+                )
+                entry = self._scan_oracle_memo.get(scope_key)
+                if entry is not None:
+                    if entry["fp"] == fp:
+                        self._scan_oracle_memo.move_to_end(scope_key)
+                    else:
+                        current_rev = self._source_revision_unlocked(conn, tenant_id)
+                        if current_rev == entry["source_rev"]:
+                            entry["fp"] = fp
+                            self._scan_oracle_memo.move_to_end(scope_key)
+                        elif self._try_patch_scan_oracle(
+                            conn,
+                            entry,
+                            tenant_id=tenant_id,
+                            branch=branch,
+                            max_trust=max_trust,
+                            max_sensitivity=max_sensitivity,
+                            exclude_operational=exclude_operational,
+                            include_synthesized=include_synthesized,
+                            current_rev=current_rev,
+                            fp=fp,
+                        ):
+                            self._scan_oracle_memo.move_to_end(scope_key)
+                        else:
+                            entry = None
+                if entry is None:
+                    oracle, raw_blobs, meta = self._hydrate_scan_oracle(filt)
+                    entry = {
+                        "oracle": oracle,
+                        "raw_blobs": raw_blobs,
+                        "fp": fp,
+                        **meta,
+                    }
+                    self._scan_oracle_memo[scope_key] = entry
+                    self._scan_oracle_memo.move_to_end(scope_key)
                     while len(self._scan_oracle_memo) > _CANDIDATE_MEMO_SIZE:
                         self._scan_oracle_memo.popitem(last=False)
-                else:
-                    self._scan_oracle_memo.move_to_end(key)
+                oracle = entry["oracle"]
+                raw_blobs = entry["raw_blobs"]
+                oracle.policy = self.policy
+                oracle.adapters = self.adapters
         else:
-            cached = self._hydrate_scan_oracle(filt)
-        oracle, raw_blobs = cached
+            oracle, raw_blobs, _meta = self._hydrate_scan_oracle(filt)
         return (oracle, raw_blobs) if with_blobs else oracle
+
+    def _try_patch_scan_oracle(
+        self,
+        conn: sqlite3.Connection,
+        entry: dict[str, Any],
+        *,
+        tenant_id: str,
+        branch: str,
+        max_trust: int,
+        max_sensitivity: int,
+        exclude_operational: bool,
+        include_synthesized: bool = False,
+        current_rev: int,
+        fp: tuple[int, int],
+    ) -> bool:
+        prev_rev = entry["source_rev"]
+        delta = current_rev - prev_rev
+        if delta <= 0 or delta > 128:
+            return False
+        changes = conn.execute(
+            "SELECT collection, branch, item_id FROM memory_source_changes "
+            "WHERE tenant_id = ? AND revision > ? AND revision <= ? ORDER BY revision LIMIT 129",
+            (tenant_id, prev_rev, current_rev),
+        ).fetchall()
+        if len(changes) != delta:
+            return False
+        relevant: list[tuple[str, str]] = []
+        seen_relevant: set[tuple[str, str]] = set()
+        for row in changes:
+            collection = row[0]
+            row_branch = row[1]
+            item_id = row[2]
+            if collection == "*":
+                return False
+            if include_synthesized and collection in {"observations", "knowledge_pages"}:
+                if row_branch in {branch, "*"}:
+                    return False
+                continue
+            if collection not in {"evidence", "assertions", "preferences"}:
+                continue
+            if collection != "preferences" and row_branch not in {branch, "*"}:
+                continue
+            pair = (collection, item_id)
+            if pair not in seen_relevant:
+                seen_relevant.add(pair)
+                relevant.append(pair)
+        if not relevant:
+            entry["source_rev"] = current_rev
+            entry["fp"] = fp
+            return True
+
+        oracle: LocalMemoryEngine = entry["oracle"]
+        raw_blobs: dict[str, bytes | None] = entry["raw_blobs"]
+        old_item_blobs: dict[tuple[str, str, str, str], bytes | None] = dict(
+            getattr(oracle, "_item_raw_blobs", None) or {}
+        )
+        cited_op: set[str] = entry["cited_operational_cids"]
+        ev_rows_to_apply: list[tuple[str, Evidence | None, bytes | None, int | None]] = []
+        a_rows_to_apply: list[tuple[str, Assertion | None, bytes | None, int | None]] = []
+        p_rows_to_apply: list[tuple[str, Preference | None, bytes | None, int | None]] = []
+        extra_cited_cids: set[str] = set()
+
+        for collection, item_id in relevant:
+            if collection == "evidence":
+                row = conn.execute(
+                    "SELECT rowid, * FROM evidence WHERE tenant_id = ? AND branch = ? AND cid = ?",
+                    (tenant_id, branch, item_id),
+                ).fetchone()
+                key = oracle._evidence_key(tenant_id, branch, item_id)
+                if (
+                    row is None
+                    or row["erased"] != 0
+                    or row["trust_tier"] > max_trust
+                    or row["sensitivity"] > max_sensitivity
+                    or (
+                        exclude_operational
+                        and row["source_type"] == "learning_tool_result"
+                        and item_id not in cited_op
+                    )
+                ):
+                    ev_rows_to_apply.append((key, None, None, None))
+                else:
+                    rowid = int(row["rowid"])
+                    if key not in oracle.evidence and rowid <= entry["max_ev_rowid"]:
+                        return False
+                    ev = _evidence_from_row_packed(row)
+                    if getattr(oracle, "_embeddings_unpacked", False):
+                        ev.embedding = unpack_embedding(row["embedding"])
+                    ev_rows_to_apply.append((key, ev, row["embedding"], rowid))
+                    if exclude_operational:
+                        from mnemosyne.retrieval import derived_source_cids
+
+                        sources, valid = derived_source_cids(ev)
+                        if valid:
+                            extra_cited_cids.update(sources)
+            elif collection == "assertions":
+                row = conn.execute(
+                    "SELECT rowid, * FROM assertions WHERE tenant_id = ? AND branch = ? AND id = ?",
+                    (tenant_id, branch, item_id),
+                ).fetchone()
+                if (
+                    row is None
+                    or row["status"] not in ("active", "contested")
+                    or row["trust_tier"] > max_trust
+                    or row["sensitivity"] > max_sensitivity
+                ):
+                    a_rows_to_apply.append((item_id, None, None, None))
+                else:
+                    rowid = int(row["rowid"])
+                    if item_id not in oracle.assertions and rowid <= entry["max_a_rowid"]:
+                        return False
+                    assertion = _assertion_from_row(row)
+                    if isinstance(assertion.source_evidence_cids, list):
+                        assertion.source_evidence_cids = intern_cids(assertion.source_evidence_cids)
+                    a_blob = row["embedding"] if "embedding" in row.keys() else None
+                    a_rows_to_apply.append((item_id, assertion, a_blob, rowid))
+                    if exclude_operational:
+                        extra_cited_cids.update(assertion.source_evidence_cids)
+            elif collection == "preferences":
+                row = conn.execute(
+                    "SELECT rowid, record, embedding FROM preferences WHERE tenant_id = ? AND id = ?",
+                    (tenant_id, item_id),
+                ).fetchone()
+                if row is None:
+                    p_rows_to_apply.append((item_id, None, None, None))
+                else:
+                    rowid = int(row["rowid"])
+                    if item_id not in oracle.preferences and rowid <= entry["max_p_rowid"]:
+                        return False
+                    pref = Preference.from_dict(json.loads(row["record"]))
+                    if isinstance(pref.source_evidence_cids, list):
+                        pref.source_evidence_cids = intern_cids(pref.source_evidence_cids)
+                    p_rows_to_apply.append((item_id, pref, row["embedding"], rowid))
+
+        if exclude_operational and extra_cited_cids:
+            missing_cited = [
+                cid
+                for cid in extra_cited_cids
+                if oracle._evidence_key(tenant_id, branch, cid) not in oracle.evidence
+            ]
+            if missing_cited:
+                # A newly inserted/updated assertion cites an operational row we
+                # skipped during pushdown; full hydrate keeps custody exact.
+                return False
+
+        # Determine whether EVERY mutated row is a pure lifecycle-only update
+        # (no inserts, no deletes, no content/custody/embedding/preference changes).
+        # Only in that strict case may we carry forward the packed dense buffer
+        # and candidate memo; any other mutation invalidates them fail-closed.
+        lifecycle_only = not p_rows_to_apply
+        touched_ev_lifecycle: dict[str, dict[str, Any] | None] = {}
+        touched_a_lifecycle: dict[str, tuple[str | None, int]] = {}
+        if lifecycle_only:
+            for key, ev, blob, _rowid in ev_rows_to_apply:
+                old_ev = oracle.evidence.get(key)
+                if (
+                    ev is None
+                    or old_ev is None
+                    or not self._evidence_graph_custody_equal(old_ev, ev)
+                    or raw_blobs.get(key) != blob
+                ):
+                    lifecycle_only = False
+                    break
+                if ev.cid:
+                    lc = ev.metadata.get("lifecycle")
+                    touched_ev_lifecycle[ev.cid] = dict(lc) if isinstance(lc, dict) else None
+        if lifecycle_only:
+            for item_id, assertion, a_blob, _rowid in a_rows_to_apply:
+                old_a = oracle.assertions.get(item_id)
+                emb_key = ("assertion", tenant_id, branch, item_id)
+                if (
+                    assertion is None
+                    or old_a is None
+                    or not self._assertion_lifecycle_only_equal(old_a, assertion)
+                    or old_item_blobs.get(emb_key) != a_blob
+                ):
+                    lifecycle_only = False
+                    break
+                touched_a_lifecycle[item_id] = (
+                    assertion.last_accessed.isoformat() if assertion.last_accessed else None,
+                    int(assertion.access_count),
+                )
+
+        # Copy into a fresh LocalMemoryEngine shell when rows actually change so
+        # concurrent readers and identity-based invalidation tests never observe
+        # in-place mutation of a previously returned oracle.
+        next_ev = dict(oracle.evidence)
+        next_blobs = dict(raw_blobs)
+        next_assertions = dict(oracle.assertions)
+        next_prefs = dict(oracle.preferences)
+        next_item_blobs = dict(old_item_blobs)
+        next_item_embs = dict(getattr(oracle, "_item_embeddings", None) or {})
+        unpacked = getattr(oracle, "_embeddings_unpacked", False)
+        mutated = False
+        for key, ev, blob, rowid in ev_rows_to_apply:
+            if ev is None:
+                if key in next_ev:
+                    del next_ev[key]
+                    next_blobs.pop(key, None)
+                    mutated = True
+            else:
+                next_ev[key] = ev
+                next_blobs[key] = blob
+                if rowid is not None and rowid > entry["max_ev_rowid"]:
+                    entry["max_ev_rowid"] = rowid
+                mutated = True
+        for item_id, assertion, a_blob, rowid in a_rows_to_apply:
+            emb_key = ("assertion", tenant_id, branch, item_id)
+            if assertion is None:
+                if item_id in next_assertions:
+                    del next_assertions[item_id]
+                    next_item_blobs.pop(emb_key, None)
+                    next_item_embs.pop(emb_key, None)
+                    mutated = True
+            else:
+                next_assertions[item_id] = assertion
+                if a_blob is not None:
+                    next_item_blobs[emb_key] = a_blob
+                    if unpacked:
+                        vec = unpack_embedding(a_blob)
+                        if vec is not None:
+                            next_item_embs[emb_key] = vec
+                else:
+                    next_item_blobs.pop(emb_key, None)
+                    next_item_embs.pop(emb_key, None)
+                if rowid is not None and rowid > entry["max_a_rowid"]:
+                    entry["max_a_rowid"] = rowid
+                mutated = True
+        for item_id, pref, p_blob, rowid in p_rows_to_apply:
+            emb_key = ("preference", tenant_id, "*", item_id)
+            if pref is None:
+                if item_id in next_prefs:
+                    del next_prefs[item_id]
+                    next_item_blobs.pop(emb_key, None)
+                    next_item_embs.pop(emb_key, None)
+                    mutated = True
+            else:
+                next_prefs[item_id] = pref
+                if p_blob is not None:
+                    next_item_blobs[emb_key] = p_blob
+                    if unpacked:
+                        vec = unpack_embedding(p_blob)
+                        if vec is not None:
+                            next_item_embs[emb_key] = vec
+                else:
+                    next_item_blobs.pop(emb_key, None)
+                    next_item_embs.pop(emb_key, None)
+                if rowid is not None and rowid > entry["max_p_rowid"]:
+                    entry["max_p_rowid"] = rowid
+                mutated = True
+
+        if mutated:
+            new_oracle = LocalMemoryEngine(policy=self.policy, adapters=self.adapters)
+            new_oracle._embeddings_unpacked = unpacked
+            new_oracle._packed_dense_cache = {}
+            new_oracle._bm25_avgdl_cache = {}
+            new_oracle.evidence.update(next_ev)
+            new_oracle.assertions.update(next_assertions)
+            new_oracle.preferences.update(next_prefs)
+            if oracle.observations:
+                new_oracle.observations.update(oracle.observations)
+            if oracle.knowledge_pages:
+                new_oracle.knowledge_pages.update(oracle.knowledge_pages)
+            new_oracle._item_raw_blobs = next_item_blobs
+            new_oracle._item_embeddings = next_item_embs
+            if lifecycle_only:
+                # Carry forward candidate templates (shallow-updating only touched
+                # rows' lifecycle metadata into fresh Hit copies) and remap the
+                # packed dense buffer + BM25 avgdl cache with zero rebuild cost.
+                old_packed = getattr(oracle, "_packed_dense_cache", None) or {}
+                old_avgdl = getattr(oracle, "_bm25_avgdl_cache", None) or {}
+                id_remap: dict[int, int] = {}
+                with oracle._candidate_memo_lock:
+                    old_memo_items = list(oracle._candidate_memo.items())
+                for memo_key, (deadline, old_templates) in old_memo_items:
+                    updated_templates: list[Hit] = []
+                    for tpl in old_templates:
+                        if tpl.kind == "evidence" and tpl.id in touched_ev_lifecycle:
+                            cloned = _clone_candidate_hit(tpl)
+                            lc_val = touched_ev_lifecycle[tpl.id]
+                            if lc_val is not None:
+                                cloned.metadata["lifecycle"] = dict(lc_val)
+                            else:
+                                cloned.metadata.pop("lifecycle", None)
+                            updated_templates.append(cloned)
+                        elif tpl.kind == "assertion" and tpl.id in touched_a_lifecycle:
+                            cloned = _clone_candidate_hit(tpl)
+                            last_acc, acc_cnt = touched_a_lifecycle[tpl.id]
+                            cloned.metadata["last_accessed"] = last_acc
+                            cloned.metadata["access_count"] = acc_cnt
+                            updated_templates.append(cloned)
+                        else:
+                            updated_templates.append(tpl)
+                    new_oracle._candidate_memo[memo_key] = (deadline, updated_templates)
+                    id_remap[id(old_templates)] = id(updated_templates)
+                for p_key, p_val in old_packed.items():
+                    new_tid = id_remap.get(p_key[0])
+                    if new_tid is not None:
+                        new_oracle._packed_dense_cache[(new_tid, *p_key[1:])] = p_val
+                for old_tid, avgdl_val in old_avgdl.items():
+                    new_tid = id_remap.get(old_tid)
+                    if new_tid is not None:
+                        new_oracle._bm25_avgdl_cache[new_tid] = avgdl_val
+            entry["oracle"] = new_oracle
+            entry["raw_blobs"] = next_blobs
+        entry["source_rev"] = current_rev
+        entry["fp"] = fp
+        return True
 
     def _hydrate_scan_oracle(
         self, filt: dict[str, Any]
-    ) -> tuple[LocalMemoryEngine, dict[str, bytes | None]]:
+    ) -> tuple[LocalMemoryEngine, dict[str, bytes | None], dict[str, Any]]:
         """Hydrate a candidate-scope oracle by SQL-PREDICATE PUSHDOWN (Task 7,
         spec §4.2 binding scale requirement): rather than loading the whole
         (tenant, branch) — O(tenant-rows) — the WHERE pushes the cheap, indexable
         subset of ``_candidate_hits``'s filter (tenant, branch, NOT erased,
         ``trust_tier <= max_trust``, ``sensitivity <= max_sensitivity``, and for
         assertions ``status IN ('active','contested')``) so only the O(candidates)
-        superset is read. The scoped oracle then runs Local's ACTUAL
-        ``_candidate_hits`` app-side, applying ``may_read_item`` +
-        quarantine/retired/redaction — a superset-preserving narrowing, so the
-        result is BYTE-IDENTICAL to Local (the Python gate only removes MORE
-        rows). ``ORDER BY rowid`` preserves Local's dict-insertion iteration
-        order. Preferences stay tenant-scoped (few, tenant-bounded not
-        evidence-bounded; their ``status='active'`` lives in the JSON record and
-        is filtered app-side). The raw packed embedding BLOBs are always
-        collected (cheap row-value references), keyed by evidence key for the
-        dense seam; :meth:`_scan_oracle` hands them out on ``with_blobs``."""
+        superset is read. When ``_exclude_operational_evidence`` is set, unreferenced
+        ``learning_tool_result`` rows are skipped in SQL while any operational rows
+        cited by assertions or derived evidence are still hydrated for exact custody
+        parity. Raw packed embedding BLOBs stay packed in ``raw_blobs``."""
         tenant_id, branch, max_trust, max_sensitivity = self._candidate_scope_bounds(
             filt
         )
+        exclude_operational = bool(filt.get("_exclude_operational_evidence"))
+        include_synthesized = bool(filt.get("include_synthesized", False))
         oracle = LocalMemoryEngine(policy=self.policy, adapters=self.adapters)
+        oracle._embeddings_unpacked = False
+        oracle._packed_dense_cache = {}
+        oracle._bm25_avgdl_cache = {}
         raw_blobs: dict[str, bytes | None] = {}
+        item_blobs: dict[tuple[str, str, str, str], bytes | None] = {}
+        oracle._item_raw_blobs = item_blobs
+        meta: dict[str, Any] = {
+            "source_rev": 0,
+            "max_ev_rowid": 0,
+            "max_a_rowid": 0,
+            "max_p_rowid": 0,
+            "cited_operational_cids": set(),
+        }
         if tenant_id:
             conn = self._connect(tenant_id)
             with self._lock:
-                # ORDER BY rowid == insertion order, matching LocalMemoryEngine's
-                # dict-values iteration order (a bare WHERE would use the PK
-                # index and return cid/id order, breaking equal-score tie parity).
-                # The trust/sensitivity/erased predicates are the pushed-down
-                # superset of _candidate_hits' per-row skips.
-                ev_rows = conn.execute(
-                    "SELECT * FROM evidence WHERE tenant_id = ? AND branch = ? "
-                    "AND erased = 0 AND trust_tier <= ? AND sensitivity <= ? ORDER BY rowid",
-                    (tenant_id, branch, max_trust, max_sensitivity),
-                ).fetchall()
+                meta["source_rev"] = self._source_revision_unlocked(conn, tenant_id)
                 a_rows = conn.execute(
-                    "SELECT * FROM assertions WHERE tenant_id = ? AND branch = ? "
+                    "SELECT rowid, * FROM assertions WHERE tenant_id = ? AND branch = ? "
                     "AND status IN ('active', 'contested') "
                     "AND trust_tier <= ? AND sensitivity <= ? ORDER BY rowid",
                     (tenant_id, branch, max_trust, max_sensitivity),
                 ).fetchall()
                 p_rows = conn.execute(
-                    "SELECT record FROM preferences WHERE tenant_id = ? ORDER BY rowid",
+                    "SELECT rowid, record, embedding FROM preferences WHERE tenant_id = ? ORDER BY rowid",
                     (tenant_id,),
                 ).fetchall()
-            for row in ev_rows:
-                ev = _evidence_from_row(row)
-                key = oracle._evidence_key(ev.tenant_id, ev.branch, ev.cid or "")
-                oracle.evidence[key] = ev
-                raw_blobs[key] = row["embedding"]
-            for row in a_rows:
-                assertion = _assertion_from_row(row)
-                oracle.assertions[assertion.id] = assertion
-            for row in p_rows:
-                pref = Preference.from_dict(json.loads(row["record"]))
-                oracle.preferences[pref.id] = pref
-        return oracle, raw_blobs
+                if exclude_operational:
+                    ev_rows = conn.execute(
+                        "SELECT rowid, * FROM evidence WHERE tenant_id = ? AND branch = ? "
+                        "AND erased = 0 AND source_type != 'learning_tool_result' "
+                        "AND trust_tier <= ? AND sensitivity <= ? ORDER BY rowid",
+                        (tenant_id, branch, max_trust, max_sensitivity),
+                    ).fetchall()
+                else:
+                    ev_rows = conn.execute(
+                        "SELECT rowid, * FROM evidence WHERE tenant_id = ? AND branch = ? "
+                        "AND erased = 0 AND trust_tier <= ? AND sensitivity <= ? ORDER BY rowid",
+                        (tenant_id, branch, max_trust, max_sensitivity),
+                    ).fetchall()
+
+                for row in a_rows:
+                    assertion = _assertion_from_row(row)
+                    if isinstance(assertion.source_evidence_cids, list):
+                        assertion.source_evidence_cids = intern_cids(assertion.source_evidence_cids)
+                    oracle.assertions[assertion.id] = assertion
+                    a_blob = row["embedding"] if "embedding" in row.keys() else None
+                    if a_blob is not None:
+                        item_blobs[("assertion", tenant_id, branch, assertion.id)] = a_blob
+                    rowid = int(row["rowid"])
+                    if rowid > meta["max_a_rowid"]:
+                        meta["max_a_rowid"] = rowid
+                for row in p_rows:
+                    pref = Preference.from_dict(json.loads(row["record"]))
+                    if isinstance(pref.source_evidence_cids, list):
+                        pref.source_evidence_cids = intern_cids(pref.source_evidence_cids)
+                    oracle.preferences[pref.id] = pref
+                    p_blob = row["embedding"] if "embedding" in row.keys() else None
+                    if p_blob is not None:
+                        item_blobs[("preference", tenant_id, "*", pref.id)] = p_blob
+                    rowid = int(row["rowid"])
+                    if rowid > meta["max_p_rowid"]:
+                        meta["max_p_rowid"] = rowid
+                for row in ev_rows:
+                    ev = _evidence_from_row_packed(row)
+                    key = oracle._evidence_key(ev.tenant_id, ev.branch, ev.cid or "")
+                    oracle.evidence[key] = ev
+                    raw_blobs[key] = row["embedding"]
+                    rowid = int(row["rowid"])
+                    if rowid > meta["max_ev_rowid"]:
+                        meta["max_ev_rowid"] = rowid
+
+                if include_synthesized:
+                    obs_rows = conn.execute(
+                        "SELECT * FROM observations WHERE tenant_id = ? AND branch = ? "
+                        "AND status = 'active' AND trust_tier <= ? AND sensitivity <= ? ORDER BY rowid",
+                        (tenant_id, branch, max_trust, max_sensitivity),
+                    ).fetchall()
+                    for row in obs_rows:
+                        obs_dict = _observation_from_row(row).to_dict()
+                        oid = obs_dict["observation_id"]
+                        oracle.observations[(tenant_id, oid, branch)] = obs_dict
+                        o_blob = row["embedding"] if "embedding" in row.keys() else None
+                        if o_blob is not None:
+                            item_blobs[("observation", tenant_id, branch, oid)] = o_blob
+                    kp_rows = conn.execute(
+                        "SELECT * FROM knowledge_pages WHERE tenant_id = ? AND branch = ? "
+                        "AND status = 'active' AND trust_tier <= ? AND sensitivity <= ? ORDER BY rowid",
+                        (tenant_id, branch, max_trust, max_sensitivity),
+                    ).fetchall()
+                    for row in kp_rows:
+                        kp_dict = _knowledge_page_from_row(row).to_dict()
+                        pid = kp_dict["page_id"]
+                        oracle.knowledge_pages[(tenant_id, pid, branch)] = kp_dict
+                        k_blob = row["embedding"] if "embedding" in row.keys() else None
+                        if k_blob is not None:
+                            item_blobs[("knowledge_page", tenant_id, branch, pid)] = k_blob
+
+                if exclude_operational:
+                    # Hydrate the transitive custody closure of operational rows cited
+                    # by loaded assertions, preferences, synthesized rows, or derived
+                    # evidence. These rows are never emitted as candidate hits (Local
+                    # skips learning_tool_result under _exclude_operational_evidence),
+                    # so row order does not affect hit tie-breaking while custody checks
+                    # remain 100% exact.
+                    from mnemosyne.retrieval import derived_source_cids
+
+                    pending: set[str] = set()
+                    for assertion in oracle.assertions.values():
+                        pending.update(assertion.source_evidence_cids)
+                    for pref in oracle.preferences.values():
+                        pending.update(pref.source_evidence_cids)
+                    if include_synthesized:
+                        for obs_row in oracle.observations.values():
+                            pending.update(obs_row.get("source_evidence_cids") or ())
+                        for kp_row in oracle.knowledge_pages.values():
+                            pending.update(kp_row.get("source_evidence_cids") or ())
+                    for ev in oracle.evidence.values():
+                        sources, valid = derived_source_cids(ev)
+                        if valid:
+                            pending.update(sources)
+                    seen_cids = {
+                        ev.cid for ev in oracle.evidence.values() if ev.cid
+                    }
+                    pending.difference_update(seen_cids)
+                    cited_op: set[str] = meta["cited_operational_cids"]
+                    while pending:
+                        batch = list(pending)[:500]
+                        pending.difference_update(batch)
+                        seen_cids.update(batch)
+                        placeholders = ",".join("?" for _ in batch)
+                        op_rows = conn.execute(
+                            f"SELECT rowid, {_GRAPH_EVIDENCE_COLUMNS} FROM evidence "
+                            "WHERE tenant_id = ? AND branch = ? AND erased = 0 "
+                            f"AND trust_tier <= ? AND sensitivity <= ? AND cid IN ({placeholders})",
+                            (tenant_id, branch, max_trust, max_sensitivity, *batch),
+                        ).fetchall()
+                        for row in op_rows:
+                            ev = _evidence_from_row_packed(row)
+                            key = oracle._evidence_key(ev.tenant_id, ev.branch, ev.cid or "")
+                            oracle.evidence[key] = ev
+                            raw_blobs[key] = None
+                            if ev.cid:
+                                cited_op.add(ev.cid)
+                            rowid = int(row["rowid"])
+                            if rowid > meta["max_ev_rowid"]:
+                                meta["max_ev_rowid"] = rowid
+                            sources, valid = derived_source_cids(ev)
+                            if valid:
+                                pending.update(cid for cid in sources if cid not in seen_cids)
+        return oracle, raw_blobs, meta
+
+    @staticmethod
+    def _evidence_graph_custody_equal(old_ev: Evidence, new_ev: Evidence) -> bool:
+        """True iff every field affecting graph/candidate security & content is identical.
+
+        Allows ``record_access`` lifecycle-only metadata updates to preserve the
+        memoized graph/scan oracles without losing fail-closed custody invalidation.
+        """
+        if (
+            old_ev.erased != new_ev.erased
+            or old_ev.content != new_ev.content
+            or old_ev.trust_tier != new_ev.trust_tier
+            or old_ev.sensitivity != new_ev.sensitivity
+            or old_ev.access_policy != new_ev.access_policy
+            or old_ev.retired_at != new_ev.retired_at
+            or old_ev.source_type != new_ev.source_type
+            or old_ev.source_identity != new_ev.source_identity
+            or old_ev.actor != new_ev.actor
+            or old_ev.user_id != new_ev.user_id
+            or old_ev.created_at != new_ev.created_at
+            or old_ev.modality != new_ev.modality
+            or old_ev.content_pointer != new_ev.content_pointer
+            or old_ev.document_segment_id != new_ev.document_segment_id
+            or old_ev.capability_tags != new_ev.capability_tags
+            or old_ev.signed_provenance != new_ev.signed_provenance
+        ):
+            return False
+        old_meta = old_ev.metadata
+        new_meta = new_ev.metadata
+        if old_meta == new_meta:
+            return True
+        if not isinstance(old_meta, dict) or not isinstance(new_meta, dict):
+            return False
+        old_keys = set(old_meta.keys()) - {"lifecycle"}
+        new_keys = set(new_meta.keys()) - {"lifecycle"}
+        if old_keys != new_keys:
+            return False
+        return all(old_meta[k] == new_meta[k] for k in old_keys)
 
     def _graph_oracle(
         self,
@@ -3680,28 +5001,118 @@ class SqliteEngine:
         branch: str | None,
         filt: dict[str, Any] | None,
     ) -> LocalMemoryEngine:
-        """Hydrate a graph-scope oracle: relations plus the evidence their
-        source-CID security lookups read. Scoped to (tenant, branch) when a
-        branch is given, else tenant-wide (Local considers all branches)."""
+        """Hydrate (or reuse) a graph-scope oracle: relations plus the evidence
+        their source-CID security lookups read. Memoized keyed on
+        ``memory_source_revisions`` (preserving ``_relation_verdict_memo`` and
+        avoiding repeated SQLite reads and embedding BLOB I/O)."""
         target = tenant_id or dict(filt or {}).get("tenant_id")
-        oracle = LocalMemoryEngine(policy=self.policy, adapters=self.adapters)
         if not target:
-            return oracle
+            return LocalMemoryEngine(policy=self.policy, adapters=self.adapters)
+        has_adapter = self.adapters.graph_retriever is not None
         conn = self._connect(target)
+        memo_enabled = _candidate_memo_enabled()
+        if memo_enabled:
+            with self._lock:
+                gkey = (target, branch, has_adapter)
+                fp = (
+                    conn.total_changes,
+                    int(conn.execute("PRAGMA data_version").fetchone()[0]),
+                )
+                cached = self._graph_oracle_memo.get(gkey)
+                if cached is not None:
+                    if cached["fp"] == fp:
+                        self._graph_oracle_memo.move_to_end(gkey)
+                        oracle = cached["oracle"]
+                        oracle.policy = self.policy
+                        oracle.adapters = self.adapters
+                        return oracle
+                    current_rev = self._source_revision_unlocked(conn, target)
+                    if current_rev == cached["source_rev"]:
+                        cached["fp"] = fp
+                        self._graph_oracle_memo.move_to_end(gkey)
+                        oracle = cached["oracle"]
+                        oracle.policy = self.policy
+                        oracle.adapters = self.adapters
+                        return oracle
+                    # Check if only unrelated rows (or lifecycle-only metadata on
+                    # cited evidence rows) changed.
+                    delta = current_rev - cached["source_rev"]
+                    if 0 < delta <= 128 and not has_adapter:
+                        changes = conn.execute(
+                            "SELECT collection, branch, item_id FROM memory_source_changes "
+                            "WHERE tenant_id = ? AND revision > ? AND revision <= ? "
+                            "ORDER BY revision LIMIT 129",
+                            (target, cached["source_rev"], current_rev),
+                        ).fetchall()
+                        if len(changes) == delta:
+                            ev_cids: set[str] = cached["ev_cids"]
+                            affects_graph = False
+                            touched_ev: list[tuple[str, str]] = []
+                            for col, r_branch, item_id in changes:
+                                if col == "*" or col == "relations":
+                                    if col == "*" or branch is None or r_branch in {branch, "*"}:
+                                        affects_graph = True
+                                        break
+                                elif col == "evidence":
+                                    if branch is None or r_branch in {branch, "*"}:
+                                        if r_branch == "*" or item_id == "*":
+                                            affects_graph = True
+                                            break
+                                        if item_id in ev_cids:
+                                            touched_ev.append((r_branch, item_id))
+                            if not affects_graph and touched_ev:
+                                cached_oracle = cached["oracle"]
+                                for ev_branch, ev_cid in dict.fromkeys(touched_ev):
+                                    old_ev = cached_oracle.evidence.get(
+                                        cached_oracle._evidence_key(target, ev_branch, ev_cid)
+                                    )
+                                    if old_ev is None:
+                                        affects_graph = True
+                                        break
+                                    ev_row = conn.execute(
+                                        f"SELECT {_GRAPH_EVIDENCE_COLUMNS} FROM evidence "
+                                        "WHERE tenant_id = ? AND branch = ? AND cid = ?",
+                                        (target, ev_branch, ev_cid),
+                                    ).fetchone()
+                                    if ev_row is None:
+                                        affects_graph = True
+                                        break
+                                    new_ev = _evidence_from_row(ev_row)
+                                    if not self._evidence_graph_custody_equal(old_ev, new_ev):
+                                        affects_graph = True
+                                        break
+                            if not affects_graph:
+                                cached["source_rev"] = current_rev
+                                cached["fp"] = fp
+                                self._graph_oracle_memo.move_to_end(gkey)
+                                oracle = cached["oracle"]
+                                oracle.policy = self.policy
+                                oracle.adapters = self.adapters
+                                return oracle
+
+        oracle = LocalMemoryEngine(policy=self.policy, adapters=self.adapters)
         if branch is not None:
             rel_sql = "SELECT * FROM relations WHERE tenant_id = ? AND branch = ? ORDER BY rowid"
-            ev_sql = "SELECT * FROM evidence WHERE tenant_id = ? AND branch = ? ORDER BY rowid"
+            ev_sql = f"SELECT {_GRAPH_EVIDENCE_COLUMNS} FROM evidence WHERE tenant_id = ? AND branch = ? ORDER BY rowid"
             params: tuple[str, ...] = (target, branch)
         else:
             rel_sql = "SELECT * FROM relations WHERE tenant_id = ? ORDER BY rowid"
-            ev_sql = "SELECT * FROM evidence WHERE tenant_id = ? ORDER BY rowid"
+            ev_sql = f"SELECT {_GRAPH_EVIDENCE_COLUMNS} FROM evidence WHERE tenant_id = ? ORDER BY rowid"
             params = (target,)
         with self._lock:
+            source_rev = self._source_revision_unlocked(conn, target)
+            fp = (
+                conn.total_changes,
+                int(conn.execute("PRAGMA data_version").fetchone()[0]),
+            )
             rel_rows = conn.execute(rel_sql, params).fetchall()
         for row in rel_rows:
             rel = _relation_from_row(row)
+            if isinstance(rel.source_evidence_cids, list):
+                rel.source_evidence_cids = intern_cids(rel.source_evidence_cids)
             oracle.relations[rel.id] = rel
-        if self.adapters.graph_retriever is not None:
+        ev_cids_loaded: set[str] = set()
+        if has_adapter:
             # An external graph adapter may return sources absent from the
             # native relations; retain its complete scoped custody surface.
             with self._lock:
@@ -3709,6 +5120,8 @@ class SqliteEngine:
             for row in ev_rows:
                 ev = _evidence_from_row(row)
                 oracle.evidence[oracle._evidence_key(ev.tenant_id, ev.branch, ev.cid or "")] = ev
+                if ev.cid:
+                    ev_cids_loaded.add(ev.cid)
         else:
             # Native graph traversal reads only relation sources and their
             # transitive custody. Do not hydrate unrelated (potentially large)
@@ -3726,10 +5139,12 @@ class SqliteEngine:
                 keys = {(source_branch, cid) for cid in batch}
                 pending.difference_update(keys)
                 seen.update(keys)
+                ev_cids_loaded.update(batch)
                 placeholders = ",".join("?" for _ in batch)
                 with self._lock:
                     rows = conn.execute(
-                        "SELECT * FROM evidence WHERE tenant_id = ? AND branch = ? "
+                        f"SELECT {_GRAPH_EVIDENCE_COLUMNS} FROM evidence "
+                        "WHERE tenant_id = ? AND branch = ? "
                         f"AND cid IN ({placeholders})",
                         (target, source_branch, *batch),
                     ).fetchall()
@@ -3740,28 +5155,36 @@ class SqliteEngine:
                     if valid:
                         pending.update((ev.branch, cid) for cid in sources
                                        if (ev.branch, cid) not in seen)
+        if memo_enabled:
+            with self._lock:
+                gkey = (target, branch, has_adapter)
+                self._graph_oracle_memo[gkey] = {
+                    "oracle": oracle,
+                    "source_rev": source_rev,
+                    "fp": fp,
+                    "ev_cids": ev_cids_loaded,
+                }
+                self._graph_oracle_memo.move_to_end(gkey)
+                while len(self._graph_oracle_memo) > _CANDIDATE_MEMO_SIZE:
+                    self._graph_oracle_memo.popitem(last=False)
         return oracle
 
-    def _packed_embedding_for_hit(
+    def _packed_embedding_for_template(
         self,
-        hit: Hit,
+        template: Hit,
         filt: dict[str, Any] | None,
-        dims: int,
         *,
         oracle: LocalMemoryEngine,
         raw_blobs: dict[str, bytes | None],
-    ) -> bytes | None:
-        """Packed-BLOB analogue of ``LocalMemoryEngine._embedding_for_hit``
-        (allow_fallback default): identical gating and identical metadata
-        side-effects, but returns the RAW stored packed f64 BLOB (zero per-call
-        conversion) when the gate passes, packs a fresh re-embed exactly once for
-        the fallback branch, and returns ``None`` where Local returns ``None``.
-        The uniform-dims guard in :meth:`vector_search` handles heterogeneous
-        BLOB widths."""
-        if hit.kind == "evidence":
-            key = oracle._evidence_key(hit.tenant_id, hit.branch, hit.id)
+    ) -> tuple[bytes | None, bool]:
+        """Like :meth:`_packed_embedding_for_hit` without mutating ``template``."""
+        embedder = self.adapters.embedding
+        is_hashing = type(embedder) is HashingEmbeddingProvider
+        item_blobs = getattr(oracle, "_item_raw_blobs", None) or {}
+        if template.kind == "evidence":
+            key = oracle._evidence_key(template.tenant_id, template.branch, template.id)
             ev = oracle.evidence.get(key)
-            if ev and ev.embedding:
+            if ev and ev.embedding and evidence_current_for_context(ev, filt):
                 decision = may_read_item(
                     item_tenant_id=ev.tenant_id,
                     sensitivity=int(ev.sensitivity),
@@ -3777,32 +5200,184 @@ class SqliteEngine:
                     access_policy=ev.access_policy,
                     embedding_partition=ev.metadata.get("embedding_partition"),
                 ):
-                    hit.metadata["stored_embedding_used"] = True
-                    return raw_blobs.get(key)
+                    f64 = embedding_blob_to_f64_bytes(raw_blobs.get(key))
+                    if f64 is not None and not (
+                        is_hashing
+                        and len(f64) != int(embedder.dims) * 8
+                        and not ev.metadata.get("media_embedding")
+                    ):
+                        return f64, True
+        elif template.kind == "assertion":
+            blob = item_blobs.get(
+                ("assertion", template.tenant_id, template.branch, template.id)
+            )
+            if blob is not None:
+                assertion = oracle.assertions.get(template.id)
+                if assertion is None:
+                    assertion = oracle.assertions.get(
+                        oracle._branch_key(template.tenant_id, template.branch, template.id)
+                    )
+                if assertion is not None and assertion.status in {"active", "contested"}:
+                    decision = may_read_item(
+                        item_tenant_id=assertion.tenant_id,
+                        sensitivity=int(assertion.sensitivity),
+                        access_policy=assertion.access_policy,
+                        context=filt,
+                        policy_max_sensitivity=self.policy.max_sensitivity,
+                        status=assertion.status,
+                        erased=False,
+                    )
+                    if may_use_stored_embedding(
+                        decision=decision,
+                        sensitivity=int(assertion.sensitivity),
+                        access_policy=assertion.access_policy,
+                    ):
+                        f64 = embedding_blob_to_f64_bytes(blob)
+                        if f64 is not None and not (
+                            is_hashing and len(f64) != int(embedder.dims) * 8
+                        ):
+                            return f64, True
+        elif template.kind == "preference":
+            blob = item_blobs.get(("preference", template.tenant_id, "*", template.id))
+            if blob is not None:
+                pref = oracle.preferences.get(template.id)
+                if (
+                    pref is not None
+                    and pref.tenant_id == template.tenant_id
+                    and pref.status == "active"
+                ):
+                    decision = may_read_item(
+                        item_tenant_id=pref.tenant_id,
+                        sensitivity=0,
+                        access_policy=pref.access_policy,
+                        context=filt,
+                        policy_max_sensitivity=self.policy.max_sensitivity,
+                        status=pref.status,
+                        erased=False,
+                    )
+                    if may_use_stored_embedding(
+                        decision=decision,
+                        sensitivity=0,
+                        access_policy=pref.access_policy,
+                    ):
+                        f64 = embedding_blob_to_f64_bytes(blob)
+                        if f64 is not None and not (
+                            is_hashing and len(f64) != int(embedder.dims) * 8
+                        ):
+                            return f64, True
+        elif template.kind == "observation":
+            blob = item_blobs.get(
+                ("observation", template.tenant_id, template.branch, template.id)
+            )
+            if blob is not None:
+                obs = oracle.observations.get(
+                    (template.tenant_id, template.id, template.branch)
+                )
+                if obs is not None and str(obs.get("status", "active")) == "active":
+                    obs_sens = int(obs.get("sensitivity", 0) or 0)
+                    obs_policy = obs.get("access_policy")
+                    decision = may_read_item(
+                        item_tenant_id=template.tenant_id,
+                        sensitivity=obs_sens,
+                        access_policy=obs_policy,
+                        context=filt,
+                        policy_max_sensitivity=self.policy.max_sensitivity,
+                        status="active",
+                        erased=False,
+                    )
+                    if may_use_stored_embedding(
+                        decision=decision,
+                        sensitivity=obs_sens,
+                        access_policy=obs_policy,
+                    ):
+                        f64 = embedding_blob_to_f64_bytes(blob)
+                        if f64 is not None and not (
+                            is_hashing and len(f64) != int(embedder.dims) * 8
+                        ):
+                            return f64, True
+        elif template.kind == "knowledge_page":
+            blob = item_blobs.get(
+                ("knowledge_page", template.tenant_id, template.branch, template.id)
+            )
+            if blob is not None:
+                kp = oracle.knowledge_pages.get(
+                    (template.tenant_id, template.id, template.branch)
+                )
+                if kp is not None and str(kp.get("status", "active")) == "active":
+                    kp_sens = int(kp.get("sensitivity", 0) or 0)
+                    kp_policy = kp.get("access_policy")
+                    decision = may_read_item(
+                        item_tenant_id=template.tenant_id,
+                        sensitivity=kp_sens,
+                        access_policy=kp_policy,
+                        context=filt,
+                        policy_max_sensitivity=self.policy.max_sensitivity,
+                        status="active",
+                        erased=False,
+                    )
+                    if may_use_stored_embedding(
+                        decision=decision,
+                        sensitivity=kp_sens,
+                        access_policy=kp_policy,
+                    ):
+                        f64 = embedding_blob_to_f64_bytes(blob)
+                        if f64 is not None and not (
+                            is_hashing and len(f64) != int(embedder.dims) * 8
+                        ):
+                            return f64, True
         partition = str(
-            hit.metadata.get("embedding_partition") or VECTOR_PARTITION_PUBLIC
+            template.metadata.get("embedding_partition") or VECTOR_PARTITION_PUBLIC
         )
         if partition == "none" or not self.adapters.embed_missing_on_read:
-            return None
-        hit.metadata["stored_embedding_used"] = False
-        return array.array("d", self._embed_text(hit.text)).tobytes()
+            return None, False
+        return array.array("d", self._embed_text(template.text)).tobytes(), False
+
+    def _packed_embedding_for_hit(
+        self,
+        hit: Hit,
+        filt: dict[str, Any] | None,
+        dims: int,
+        *,
+        oracle: LocalMemoryEngine,
+        raw_blobs: dict[str, bytes | None],
+    ) -> bytes | None:
+        chunk, stored_used = self._packed_embedding_for_template(
+            hit, filt, oracle=oracle, raw_blobs=raw_blobs
+        )
+        if chunk is not None:
+            hit.metadata["stored_embedding_used"] = stored_used
+        return chunk
 
     @staticmethod
     def _apply_dense_channel(hit: Hit, score: float) -> None:
         hit.score = score
         stored_raw = bool(hit.metadata.get("stored_embedding_used"))
-        hit.channel = (
+        base = (
             "dense_media"
             if stored_raw and hit.metadata.get("stored_media_embedding")
             else "dense_hash"
         )
+        hit.channel = scored_channel_for_hit(kind=hit.kind, base_channel=base)
 
     def _fts_candidate_cids(
         self, conn: sqlite3.Connection, tenant_id: str, branch: str, tokens: list[str]
     ) -> set[str]:
         """FTS5 MATCH recall set: evidence cids whose content matches ANY query
         token (OR-of-quoted-terms). Prefilter only — never ranking."""
-        match_query = " OR ".join(f'"{token}"' for token in tokens)
+        return self._fts_candidate_cids_clauses(
+            conn, tenant_id, branch, [f'"{token}"' for token in tokens]
+        )
+
+    def _fts_candidate_cids_clauses(
+        self,
+        conn: sqlite3.Connection,
+        tenant_id: str,
+        branch: str,
+        clauses: list[str],
+    ) -> set[str]:
+        if not clauses:
+            return set()
+        match_query = " OR ".join(clauses)
         with self._lock:
             rows = conn.execute(
                 "SELECT cid FROM evidence_fts "
@@ -3814,31 +5389,27 @@ class SqliteEngine:
     def vector_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
         """Dense scan over the PACKED-BLOB seam (spec §8 Phase-1 exit item).
 
-        Candidates come from the hydrated-oracle ``_candidate_hits`` (byte
-        identical to Local). The native path feeds the RAW stored packed f64
-        BLOBs to ``dense_scan_packed`` with ZERO per-call float conversion
-        (bit-parity-proven vs ``dense_scan`` over equal-dims inputs); the
-        fallback re-embed is packed exactly once. GUARD: if any PRESENT stored
-        BLOB length != ``dims*8`` (heterogeneous dims — e.g. a media embedding),
-        the whole call falls back to the list ``dense_scan`` path (still native,
-        byte-parity) so mixed-width corpora stay correct; a uniform-dims corpus
-        hits the packed fast path. Pure mode uses the per-hit ``cosine`` loop.
-        Channels: dense_hash / dense_media."""
+        Scores memoized ``_candidate_templates`` directly and clones only the
+        kept top-``k`` hits. Only candidates with non-null embeddings are
+        packed into the contiguous buffer for ``dense_scan_packed`` (and the
+        packed buffer is cached on the oracle so repeated queries allocate zero
+        bytes). Guard: heterogeneous BLOB widths fall back to list
+        ``dense_scan`` (still byte-parity). Channels: dense_hash / dense_media."""
         query_vec = embed_query(self.adapters.embedding, query)
         dims = len(query_vec)
         oracle, raw_blobs = self._scan_oracle(filt, with_blobs=True)
+        templates = oracle._candidate_templates(filt)
+        finish = getattr(templates, "finish", None)
         hits: list[Hit] = []
         if (
             text_kernels.NATIVE is None
             and self.adapters.embed_missing_on_read
             and type(self.adapters.embedding) is HashingEmbeddingProvider
         ):
-            # Local's exact sparse path (see LocalMemoryEngine.vector_search): score the memoized
-            # candidates and clone only the hits kept; same scores, metadata and order as the loop below.
+            self._ensure_oracle_embeddings_unpacked(oracle, raw_blobs)
             sparse = SparseCosine(query_vec)
-            templates = oracle._candidate_templates(filt)
-            finish = getattr(templates, "finish", None)
-            for template in templates:
+            scored_sparse: list[tuple[float, int, bool]] = []
+            for idx, template in enumerate(templates):
                 stored_vec = oracle._stored_embedding_value(template, filt)
                 if stored_vec is None and str(
                     template.metadata.get("embedding_partition") or VECTOR_PARTITION_PUBLIC
@@ -3850,29 +5421,71 @@ class SqliteEngine:
                     else sparse.hashing(template.text, int(self.adapters.embedding.dims))
                 )
                 if score > 0:
-                    hit = _clone_candidate_hit(template)
-                    if finish is not None:
-                        hit = finish(hit, template)
-                    hit.metadata["stored_embedding_used"] = stored_vec is not None
-                    self._apply_dense_channel(hit, score)
-                    hits.append(hit)
-            return LocalMemoryEngine._mark_retrieved_text_as_data(
-                sorted(hits, key=lambda item: item.score, reverse=True)[:k]
-            )
-        candidates = oracle._candidate_hits(filt)
+                    scored_sparse.append((score, idx, stored_vec is not None))
+            scored_sparse.sort(key=lambda item: item[0], reverse=True)
+            for score, idx, stored_used in scored_sparse[: max(0, k)]:
+                template = templates[idx]
+                hit = _clone_candidate_hit(template)
+                if finish is not None:
+                    hit = finish(hit, template)
+                hit.metadata["stored_embedding_used"] = stored_used
+                self._apply_dense_channel(hit, score)
+                hits.append(hit)
+            return LocalMemoryEngine._mark_retrieved_text_as_data(hits)
+
         if text_kernels.NATIVE is not None:
-            chunks = [
-                self._packed_embedding_for_hit(
-                    hit, filt, dims, oracle=oracle, raw_blobs=raw_blobs
-                )
-                for hit in candidates
-            ]
-            heterogeneous = any(
-                chunk is not None and len(chunk) != dims * 8 for chunk in chunks
+            cache_dict = getattr(oracle, "_packed_dense_cache", None)
+            embed_on_read = bool(self.adapters.embed_missing_on_read)
+            cache_key = (
+                id(templates),
+                dims,
+                embed_on_read,
+                id(self.adapters.embedding) if embed_on_read else 0,
+                repr(sorted(filt.items())),
             )
-            if heterogeneous:
-                # GUARD path: mixed embedding widths — reuse Local's exact list
-                # dense_scan fast path (byte-parity), never the packed seam.
+            packed_entry = None
+            if cache_dict is not None and _candidate_memo_enabled():
+                with self._lock:
+                    packed_entry = cache_dict.get(cache_key)
+            if packed_entry is None:
+                active_indices: list[int] = []
+                active_chunks: list[bytes] = []
+                active_stored: list[bool] = []
+                heterogeneous = False
+                expected_bytes = dims * 8
+                for idx, template in enumerate(templates):
+                    chunk, stored_used = self._packed_embedding_for_template(
+                        template, filt, oracle=oracle, raw_blobs=raw_blobs
+                    )
+                    if chunk is None:
+                        continue
+                    if len(chunk) != expected_bytes:
+                        heterogeneous = True
+                        break
+                    active_indices.append(idx)
+                    active_chunks.append(chunk)
+                    active_stored.append(stored_used)
+                if heterogeneous:
+                    packed_entry = ("heterogeneous",)
+                else:
+                    rows_bytes = b"".join(active_chunks)
+                    row_mask = b"\x01" * len(active_chunks)
+                    packed_entry = (
+                        "packed",
+                        active_indices,
+                        active_stored,
+                        rows_bytes,
+                        row_mask,
+                    )
+                if cache_dict is not None and _candidate_memo_enabled():
+                    with self._lock:
+                        cache_dict[cache_key] = packed_entry
+                        if len(cache_dict) > 8:
+                            cache_dict.pop(next(iter(cache_dict)))
+
+            if packed_entry[0] == "heterogeneous":
+                self._ensure_oracle_embeddings_unpacked(oracle, raw_blobs)
+                candidates = oracle._candidate_hits(filt)
                 vectors = [oracle._embedding_for_hit(hit, filt) for hit in candidates]
                 scores = text_kernels.NATIVE.dense_scan(query_vec, vectors)
                 for hit, hit_vec, score in zip(
@@ -3884,21 +5497,29 @@ class SqliteEngine:
                         self._apply_dense_channel(hit, score)
                         hits.append(hit)
             else:
-                rows_bytes = b"".join(
-                    chunk if chunk else b"\x00" * (dims * 8) for chunk in chunks
-                )
-                row_mask = bytes(1 if chunk else 0 for chunk in chunks)
-                query_bytes = array.array("d", query_vec).tobytes()
-                scores = text_kernels.NATIVE.dense_scan_packed(
-                    query_bytes, rows_bytes, dims, row_mask
-                )
-                for hit, chunk, score in zip(candidates, chunks, scores, strict=True):
-                    if chunk is None:
-                        continue
-                    if score > 0:
+                _, active_indices, active_stored, rows_bytes, row_mask = packed_entry
+                if active_indices:
+                    query_bytes = array.array("d", query_vec).tobytes()
+                    scores = text_kernels.NATIVE.dense_scan_packed(
+                        query_bytes, rows_bytes, dims, row_mask
+                    )
+                    scored_rows = [
+                        (score, active_indices[pos], active_stored[pos])
+                        for pos, score in enumerate(scores)
+                        if score > 0
+                    ]
+                    scored_rows.sort(key=lambda item: item[0], reverse=True)
+                    for score, idx, stored_used in scored_rows[: max(0, k)]:
+                        template = templates[idx]
+                        hit = _clone_candidate_hit(template)
+                        if finish is not None:
+                            hit = finish(hit, template)
+                        hit.metadata["stored_embedding_used"] = stored_used
                         self._apply_dense_channel(hit, score)
                         hits.append(hit)
         else:
+            self._ensure_oracle_embeddings_unpacked(oracle, raw_blobs)
+            candidates = oracle._candidate_hits(filt)
             for hit in candidates:
                 hit_vec = oracle._embedding_for_hit(hit, filt)
                 if hit_vec is None:
@@ -3909,7 +5530,12 @@ class SqliteEngine:
                     hits.append(hit)
         if not self.adapters.embed_missing_on_read:
             from .dense_projection import expand_source_vectors
-            hits = expand_source_vectors(self, query, hits, candidates, k, filt)
+
+            hits = LocalMemoryEngine._dedup_expanded_hits(
+                expand_source_vectors(
+                    self, query, hits, templates, k, filt, oracle=oracle
+                )
+            )
         return LocalMemoryEngine._mark_retrieved_text_as_data(
             sorted(hits, key=lambda item: item.score, reverse=True)[:k]
         )
@@ -3964,7 +5590,8 @@ class SqliteEngine:
         ``lexical_score`` rescore over the surviving candidates is the SOLE
         ranking authority, so results byte-match Local's full-scan. Assertions
         and preferences are always rescored (never FTS-narrowed — the index
-        covers evidence content only). Channel: lexical."""
+        covers evidence content only). Clones only the kept top-``k`` hits.
+        Channel: lexical."""
         tenant_id = str(filt.get("tenant_id") or "")
         branch = str(filt.get("branch") or "main")
         if self.adapters.lexical_retriever is not None:
@@ -3983,46 +5610,70 @@ class SqliteEngine:
                 rank_passages(self, query, self.passage_candidates(filt), k)
             )
         oracle = self._scan_oracle(filt)
-        candidates = oracle._candidate_hits(filt)
+        templates = oracle._candidate_templates(filt)
+        finish = getattr(templates, "finish", None)
         allowed_evidence_cids: set[str] | None = None
+        include_operational = bool(filt.get("include_operational", False))
+        ev_count = sum(1 for template in templates if template.kind == "evidence")
         tokens = tokenize(query)
-        if tenant_id and tokens and fts_safe_query(tokens):
-            conn = self._connect(tenant_id)
-            allowed_evidence_cids = self._fts_candidate_cids(
-                conn, tenant_id, branch, tokens
+        if (
+            not include_operational
+            and ev_count > _FTS5_BYPASS_THRESHOLD
+            and tenant_id
+            and tokens
+            and fts_safe_query(tokens)
+        ):
+            clauses = text_kernels.bm25_fts_match_clauses(query)
+            if clauses:
+                conn = self._connect(tenant_id)
+                allowed_evidence_cids = self._fts_candidate_cids_clauses(
+                    conn, tenant_id, branch, clauses
+                )
+        if allowed_evidence_cids is None:
+            scored_templates = templates
+            scores = text_kernels.bm25_lexical_scan(
+                query, [template.text for template in templates]
             )
-        scored = [
-            hit
-            for hit in candidates
-            if not (
-                allowed_evidence_cids is not None
-                and hit.kind == "evidence"
-                and hit.id not in allowed_evidence_cids
-                # unicode61 and the app tokenizer only agree on ASCII rows
-                and hit.text.isascii()
-            )
-        ]
-        hits = []
-        if text_kernels.NATIVE is not None:
-            scores = text_kernels.lexical_scan(
-                query, [hit.text for hit in scored]
-            )
-            for hit, score in zip(scored, scores, strict=True):
-                if score > 0:
-                    hit.score = score
-                    hit.channel = "lexical"
-                    hits.append(hit)
         else:
-            score_text = text_kernels.lexical_scorer(query)
-            for hit in scored:
-                score = score_text(hit.text)
-                if score > 0:
-                    hit.score = score
-                    hit.channel = "lexical"
-                    hits.append(hit)
-        return LocalMemoryEngine._mark_retrieved_text_as_data(
-            sorted(hits, key=lambda item: item.score, reverse=True)[:k]
-        )
+            scored_templates = [
+                template
+                for template in templates
+                if not (
+                    template.kind == "evidence"
+                    and template.id not in allowed_evidence_cids
+                    # unicode61 and the app tokenizer only agree on ASCII rows
+                    and template.text.isascii()
+                )
+            ]
+            avgdl_cache = getattr(oracle, "_bm25_avgdl_cache", None)
+            avg_dl = avgdl_cache.get(id(templates)) if avgdl_cache is not None else None
+            if avg_dl is None:
+                avg_dl = text_kernels.bm25_corpus_avg_doc_len(
+                    [template.text for template in templates]
+                )
+                if avgdl_cache is not None:
+                    avgdl_cache[id(templates)] = avg_dl
+            scores = text_kernels.bm25_lexical_scan(
+                query,
+                [template.text for template in scored_templates],
+                corpus_size=len(templates),
+                avg_doc_len=avg_dl,
+            )
+        scored_pairs: list[tuple[float, Hit]] = [
+            (score, template)
+            for template, score in zip(scored_templates, scores, strict=True)
+            if score > 0
+        ]
+        scored_pairs.sort(key=lambda item: item[0], reverse=True)
+        hits: list[Hit] = []
+        for score, template in scored_pairs[: max(0, k)]:
+            hit = _clone_candidate_hit(template)
+            if finish is not None:
+                hit = finish(hit, template)
+            hit.score = score
+            hit.channel = scored_channel_for_hit(kind=hit.kind, base_channel="lexical")
+            hits.append(hit)
+        return LocalMemoryEngine._mark_retrieved_text_as_data(hits)
 
     def graph_ppr(
         self,
@@ -4456,7 +6107,9 @@ class SqliteEngine:
         conn = self._connect(tenant_id)
         with self._lock:
             rows = conn.execute(
-                "SELECT branch, cid, content FROM evidence WHERE tenant_id = ? ORDER BY branch, cid",
+                "SELECT branch, cid, content FROM evidence "
+                "WHERE tenant_id = ? AND source_type != 'learning_tool_result' "
+                "ORDER BY branch, cid",
                 (tenant_id,),
             ).fetchall()
         encoded = json.dumps(
@@ -4467,7 +6120,7 @@ class SqliteEngine:
         return hashlib.sha256(encoded).hexdigest()
 
     def _rebuild_evidence_fts(self, tenant_id: str) -> None:
-        """Re-derive the FTS5 candidate-recall index from evidence rows (the
+        """Re-derive the FTS5 candidate-recall index from non-operational evidence rows (the
         triggers keep it in lockstep in steady state; this is the disaster/first-
         run rebuild path the ProjectionRegistry drives on a fingerprint miss)."""
         conn = self._connect(tenant_id)
@@ -4475,7 +6128,8 @@ class SqliteEngine:
             conn.execute("DELETE FROM evidence_fts")
             conn.execute(
                 "INSERT INTO evidence_fts(rowid, cid, tenant_id, branch, content) "
-                "SELECT rowid, cid, tenant_id, branch, content FROM evidence WHERE tenant_id = ?",
+                "SELECT rowid, cid, tenant_id, branch, content FROM evidence "
+                "WHERE tenant_id = ? AND source_type != 'learning_tool_result'",
                 (tenant_id,),
             )
 
@@ -4936,8 +6590,17 @@ class SqliteEngine:
             item = copy.deepcopy(relation)
             item.access_policy = access_policy
             item.branch = branch
+            new_values = _relation_insert_values(item)
+            existing_row = conn.execute(
+                "SELECT * FROM relations WHERE tenant_id = ? AND branch = ? AND id = ?",
+                (item.tenant_id, branch, item.id),
+            ).fetchone()
+            if existing_row is not None and _relation_insert_values(
+                _relation_from_row(existing_row)
+            ) == new_values:
+                return item.id
             with conn:
-                conn.execute(_RELATION_UPSERT, _relation_insert_values(item))
+                conn.execute(_RELATION_UPSERT, new_values)
                 self._audit_row(
                     conn,
                     item.tenant_id,
@@ -5787,20 +7450,35 @@ class SqliteEngine:
     )
 
     def _hits_oracle(self, hits: list[Hit]) -> LocalMemoryEngine:
-        """Hydrate a minimal oracle with ONLY the evidence rows the given hits
-        reference (each hit's own cid when it is evidence, plus its provenance
-        and metadata ``source_evidence_cids``) — the exact rows Local's
-        ``_embedding_for_hit`` / ``_independent_corroboration_report`` read for
-        these hits. O(hits), never O(tenant-rows). Fetched by cid WITHOUT the
-        trust/erased prefilter (corroboration inspects erased/low-trust sources
-        too), so the store-touching pipeline helpers delegate to Local's ACTUAL
-        bodies with byte-identical inputs."""
+        """Hydrate a minimal oracle with ONLY the rows the given hits reference
+        (batched SQL ``IN (...)`` queries, O(hits), never O(tenant-rows)):
+        evidence by cid/provenance plus assertion/preference/observation/page
+        rows and stored embeddings so ``_mmr``, ``_apply_standing_scores``, and
+        ``_reality_monitoring_report`` reuse Local's exact bodies with byte parity."""
         oracle = LocalMemoryEngine(policy=self.policy, adapters=self.adapters)
-        wanted: dict[str, dict[str, set[str]]] = {}
+        wanted_ev: dict[str, dict[str, set[str]]] = {}
+        wanted_assertions: dict[str, dict[str, set[str]]] = {}
+        wanted_prefs: dict[str, set[str]] = {}
+        wanted_obs: dict[str, dict[str, set[str]]] = {}
+        wanted_kps: dict[str, dict[str, set[str]]] = {}
         for hit in hits:
             cids: set[str] = set()
             if hit.kind == "evidence" and hit.id:
                 cids.add(str(hit.id))
+            elif hit.kind == "assertion" and hit.id and hit.tenant_id:
+                wanted_assertions.setdefault(hit.tenant_id, {}).setdefault(
+                    hit.branch, set()
+                ).add(str(hit.id))
+            elif hit.kind == "preference" and hit.id and hit.tenant_id:
+                wanted_prefs.setdefault(hit.tenant_id, set()).add(str(hit.id))
+            elif hit.kind == "observation" and hit.id and hit.tenant_id:
+                wanted_obs.setdefault(hit.tenant_id, {}).setdefault(
+                    hit.branch, set()
+                ).add(str(hit.id))
+            elif hit.kind == "knowledge_page" and hit.id and hit.tenant_id:
+                wanted_kps.setdefault(hit.tenant_id, {}).setdefault(
+                    hit.branch, set()
+                ).add(str(hit.id))
             for cid in hit.provenance:
                 if cid:
                     cids.add(str(cid))
@@ -5814,32 +7492,124 @@ class SqliteEngine:
             elif isinstance(raw, str) and raw:
                 cids.add(raw)
             if cids and hit.tenant_id:
-                wanted.setdefault(hit.tenant_id, {}).setdefault(
+                wanted_ev.setdefault(hit.tenant_id, {}).setdefault(
                     hit.branch, set()
                 ).update(cids)
-        for tenant_id, branches in wanted.items():
+        all_tenants = (
+            set(wanted_ev)
+            | set(wanted_assertions)
+            | set(wanted_prefs)
+            | set(wanted_obs)
+            | set(wanted_kps)
+        )
+        for tenant_id in all_tenants:
             conn = self._connect(tenant_id)
             with self._lock:
-                for branch, cids in branches.items():
-                    for cid in sorted(cids):
-                        row = conn.execute(
-                            "SELECT * FROM evidence WHERE tenant_id = ? AND branch = ? AND cid = ?",
-                            (tenant_id, branch, cid),
-                        ).fetchone()
-                        if row is not None:
+                for branch, cids in wanted_ev.get(tenant_id, {}).items():
+                    cid_list = sorted(cids)
+                    for start in range(0, len(cid_list), 500):
+                        batch = cid_list[start : start + 500]
+                        placeholders = ",".join("?" for _ in batch)
+                        for row in conn.execute(
+                            f"SELECT * FROM evidence WHERE tenant_id = ? AND branch = ? AND cid IN ({placeholders})",
+                            (tenant_id, branch, *batch),
+                        ).fetchall():
                             ev = _evidence_from_row(row)
                             oracle.evidence[
                                 oracle._evidence_key(
                                     ev.tenant_id, ev.branch, ev.cid or ""
                                 )
                             ] = ev
+                for branch, aids in wanted_assertions.get(tenant_id, {}).items():
+                    aid_list = sorted(aids)
+                    for start in range(0, len(aid_list), 500):
+                        batch = aid_list[start : start + 500]
+                        placeholders = ",".join("?" for _ in batch)
+                        for row in conn.execute(
+                            f"SELECT * FROM assertions WHERE tenant_id = ? AND branch = ? AND id IN ({placeholders})",
+                            (tenant_id, branch, *batch),
+                        ).fetchall():
+                            a = _assertion_from_row(row)
+                            oracle.assertions[
+                                oracle._branch_key(a.tenant_id, a.branch, a.id)
+                            ] = a
+                            a_blob = row["embedding"] if "embedding" in row.keys() else None
+                            if a_blob is not None:
+                                vec = unpack_embedding(a_blob)
+                                if vec is not None:
+                                    oracle._item_embeddings[
+                                        ("assertion", a.tenant_id, a.branch, a.id)
+                                    ] = vec
+                pids = wanted_prefs.get(tenant_id)
+                if pids:
+                    pid_list = sorted(pids)
+                    for start in range(0, len(pid_list), 500):
+                        batch = pid_list[start : start + 500]
+                        placeholders = ",".join("?" for _ in batch)
+                        for row in conn.execute(
+                            f"SELECT id, record, embedding FROM preferences WHERE tenant_id = ? AND id IN ({placeholders})",
+                            (tenant_id, *batch),
+                        ).fetchall():
+                            pref = Preference.from_dict(json.loads(row["record"]))
+                            oracle.preferences[pref.id] = pref
+                            p_blob = row["embedding"] if "embedding" in row.keys() else None
+                            if p_blob is not None:
+                                vec = unpack_embedding(p_blob)
+                                if vec is not None:
+                                    oracle._item_embeddings[
+                                        ("preference", tenant_id, "*", pref.id)
+                                    ] = vec
+                for branch, oids in wanted_obs.get(tenant_id, {}).items():
+                    oid_list = sorted(oids)
+                    for start in range(0, len(oid_list), 500):
+                        batch = oid_list[start : start + 500]
+                        placeholders = ",".join("?" for _ in batch)
+                        for row in conn.execute(
+                            f"SELECT * FROM observations WHERE tenant_id = ? AND branch = ? AND observation_id IN ({placeholders})",
+                            (tenant_id, branch, *batch),
+                        ).fetchall():
+                            obs_dict = _observation_from_row(row).to_dict()
+                            oid = obs_dict["observation_id"]
+                            oracle.observations[(tenant_id, oid, branch)] = obs_dict
+                            o_blob = row["embedding"] if "embedding" in row.keys() else None
+                            if o_blob is not None:
+                                vec = unpack_embedding(o_blob)
+                                if vec is not None:
+                                    oracle._item_embeddings[
+                                        ("observation", tenant_id, branch, oid)
+                                    ] = vec
+                for branch, kpids in wanted_kps.get(tenant_id, {}).items():
+                    kpid_list = sorted(kpids)
+                    for start in range(0, len(kpid_list), 500):
+                        batch = kpid_list[start : start + 500]
+                        placeholders = ",".join("?" for _ in batch)
+                        for row in conn.execute(
+                            f"SELECT * FROM knowledge_pages WHERE tenant_id = ? AND branch = ? AND page_id IN ({placeholders})",
+                            (tenant_id, branch, *batch),
+                        ).fetchall():
+                            kp_dict = _knowledge_page_from_row(row).to_dict()
+                            pid = kp_dict["page_id"]
+                            oracle.knowledge_pages[(tenant_id, pid, branch)] = kp_dict
+                            k_blob = row["embedding"] if "embedding" in row.keys() else None
+                            if k_blob is not None:
+                                vec = unpack_embedding(k_blob)
+                                if vec is not None:
+                                    oracle._item_embeddings[
+                                        ("knowledge_page", tenant_id, branch, pid)
+                                    ] = vec
         return oracle
 
-    def _mmr(self, query: str, hits: list[Hit], k: int) -> list[Hit]:
+    def _mmr(
+        self,
+        query: str,
+        hits: list[Hit],
+        k: int,
+        filt: dict[str, Any] | None = None,
+    ) -> list[Hit]:
         """Security-gated MMR (spec §4.0): Local's ACTUAL ``_mmr`` over a hits-
         scoped oracle so the embedding sourcing (``_embedding_for_hit``,
         stored-embedding gating + metadata side-effects) is byte-identical."""
-        return LocalMemoryEngine._mmr(self._hits_oracle(hits), query, hits, k)
+        return LocalMemoryEngine._mmr(self._hits_oracle(hits), query, hits, k, filt)
 
     def _apply_standing_scores(self, hits: list[Hit]) -> list[Hit]:
         """Standing re-rank (spec §4.1): Local's ACTUAL body over a hits-scoped
@@ -5854,12 +7624,105 @@ class SqliteEngine:
             self._hits_oracle(hits), hits
         )
 
+    def _async_access_worker_loop(
+        self, q: queue.Queue[list[Hit] | threading.Event | None]
+    ) -> None:
+        while True:
+            item = q.get()
+            if item is None:
+                q.task_done()
+                return
+            if isinstance(item, threading.Event):
+                item.set()
+                q.task_done()
+                continue
+            fences: list[threading.Event] = []
+            stop_after = False
+            try:
+                # Drain any queued batches to coalesce writes under contention.
+                merged = list(item)
+                while True:
+                    try:
+                        nxt = q.get_nowait()
+                    except queue.Empty:
+                        break
+                    if nxt is None:
+                        stop_after = True
+                        q.task_done()
+                        break
+                    if isinstance(nxt, threading.Event):
+                        fences.append(nxt)
+                        q.task_done()
+                        continue
+                    merged.extend(nxt)
+                    q.task_done()
+                self._record_retrieval_access_sync(merged)
+            except Exception:
+                pass
+            finally:
+                for fence in fences:
+                    fence.set()
+                q.task_done()
+            if stop_after:
+                return
+
+    def _enqueue_retrieval_access(self, hits: list[Hit]) -> None:
+        with self._async_access_lock:
+            if self._async_access_queue is None:
+                q: queue.Queue[list[Hit] | threading.Event | None] = queue.Queue()
+                t = threading.Thread(
+                    target=self._async_access_worker_loop,
+                    args=(q,),
+                    name="mnemosyne-async-access",
+                    daemon=True,
+                )
+                self._async_access_queue = q
+                self._async_access_thread = t
+                t.start()
+            self._async_access_queue.put(list(hits))
+
+    def flush_access_tracking(self, timeout: float = 5.0) -> None:
+        """Block until all queued async retrieval-access updates have committed."""
+        with self._async_access_lock:
+            q = self._async_access_queue
+            t = self._async_access_thread
+        if q is None or t is None or not t.is_alive():
+            return
+        fence = threading.Event()
+        q.put(fence)
+        fence.wait(timeout=timeout)
+
     def _record_retrieval_access(self, hits: list[Hit]) -> dict[str, int]:
+        """Write-on-read lifecycle tracking (synchronous by default for exact parity).
+
+        When ``MNEMOSYNE_ASYNC_ACCESS_TRACKING=1`` is explicitly opted into (e.g.
+        in long-lived recall daemons), lifecycle writes are dispatched to a
+        background worker thread flushed cleanly on :meth:`close`.
+        """
+        if not hits:
+            return {"assertions": 0, "evidence": 0}
+        if os.environ.get("MNEMOSYNE_ASYNC_ACCESS_TRACKING") == "1":
+            a_seen: set[tuple[str, str, str]] = set()
+            ev_seen: set[tuple[str, str, str]] = set()
+            for hit in hits:
+                if hit.kind == "working":
+                    continue
+                if hit.kind == "assertion" and hit.id and hit.tenant_id:
+                    a_seen.add((hit.tenant_id, hit.branch, hit.id))
+                elif hit.kind == "evidence" and hit.id and hit.tenant_id:
+                    ev_seen.add((hit.tenant_id, hit.branch, hit.id))
+                for cid in hit.provenance:
+                    if cid and hit.tenant_id:
+                        ev_seen.add((hit.tenant_id, hit.branch, str(cid)))
+            self._enqueue_retrieval_access(hits)
+            return {"assertions": len(a_seen), "evidence": len(ev_seen)}
+        return self._record_retrieval_access_sync(hits)
+
+    def _record_retrieval_access_sync(self, hits: list[Hit]) -> dict[str, int]:
         """SYNCHRONOUS write-on-read, byte-parity with
-        ``LocalMemoryEngine._record_retrieval_access`` (the async-telemetry
-        optimization is DEFERRED — shipped-engine parity wins). Run Local's
-        ACTUAL body over an oracle hydrated with ONLY the assertions and evidence
-        the hits reference (O(hits), not O(tenant-rows)), then persist the touched
+        ``LocalMemoryEngine._record_retrieval_access``. Run Local's ACTUAL body
+        over an oracle hydrated with ONLY the assertions and evidence the hits
+        reference (O(hits), not O(tenant-rows)), then persist the touched
         assertion lifecycle fields + evidence lifecycle metadata back to SQLite
         and return Local's counts verbatim."""
         if not hits:
@@ -6313,7 +8176,7 @@ class SqliteEngine:
                         # A belief with no source left must not keep the erased text (object, quote).
                         conn.execute(
                             "UPDATE assertions SET status = 'retracted', expired_at = ?, source_evidence_cids = ?, "
-                            "subject = '[erased]', predicate = 'erased', object = '[erased]', scope = '{}', calibration = ? "
+                            "subject = '[erased]', predicate = 'erased', object = '[erased]', scope = '{}', calibration = ?, embedding = NULL "
                             "WHERE tenant_id = ? AND branch = ? AND id = ?",
                             (
                                 dt_to_json(utc_now()),
@@ -6338,6 +8201,10 @@ class SqliteEngine:
                     if surviving:
                         pref.source_evidence_cids = surviving
                         propagated["trimmed_preferences"].append(pref.id)
+                        conn.execute(
+                            "UPDATE preferences SET record = ? WHERE id = ?",
+                            (json_text(pref.to_dict()), pref.id),
+                        )
                     else:
                         pref.status = "retracted"
                         pref.valid_to = utc_now()
@@ -6346,10 +8213,23 @@ class SqliteEngine:
                         pref.scope = {}
                         pref.exceptions = {}
                         propagated["retracted_preferences"].append(pref.id)
-                    conn.execute(
-                        "UPDATE preferences SET record = ? WHERE id = ?",
-                        (json_text(pref.to_dict()), pref.id),
-                    )
+                        conn.execute(
+                            "UPDATE preferences SET record = ?, embedding = NULL WHERE id = ?",
+                            (json_text(pref.to_dict()), pref.id),
+                        )
+                # Clear embeddings on observations citing erased/affected sources.
+                for row in conn.execute(
+                    "SELECT observation_id, source_evidence_cids FROM observations "
+                    "WHERE tenant_id = ? AND branch = ? AND embedding IS NOT NULL",
+                    (tenant_id, branch),
+                ).fetchall():
+                    obs_sources = json.loads(row["source_evidence_cids"] or "[]")
+                    if affected_cids.intersection(obs_sources):
+                        conn.execute(
+                            "UPDATE observations SET embedding = NULL "
+                            "WHERE tenant_id = ? AND branch = ? AND observation_id = ?",
+                            (tenant_id, branch, row["observation_id"]),
+                        )
                 # Relations (branch-scoped).
                 for row in conn.execute(
                     "SELECT id, source_evidence_cids, source, predicate, target FROM relations "
@@ -7395,7 +9275,7 @@ class SqliteEngine:
             version = obs.version + 1
             updated_at = dt_to_json(utc_now())
             conn.execute(
-                "UPDATE observations SET status = 'retracted', standing = 0.0, version = ?, updated_at = ? "
+                "UPDATE observations SET status = 'retracted', standing = 0.0, version = ?, updated_at = ?, embedding = NULL "
                 "WHERE tenant_id = ? AND branch = ? AND observation_id = ?",
                 (version, updated_at, tenant_id, branch, observation_id),
             )
@@ -7472,7 +9352,7 @@ class SqliteEngine:
         for row in scrub_automatic_pages(records, affected_cids):
             conn.execute("UPDATE knowledge_pages SET title = ?, path = ?, content_markdown = '', "
                          "source_evidence_cids = '[]', source_assertion_ids = '[]', source_observation_ids = '[]', "
-                         "maintenance = ?, version = ?, status = ?, updated_at = ? "
+                         "maintenance = ?, version = ?, status = ?, updated_at = ?, embedding = NULL "
                          "WHERE tenant_id = ? AND branch = ? AND page_id = ?",
                          (row["title"], row["path"], json_text(row["maintenance"]), row["version"],
                           row["status"], row["updated_at"], tenant_id, branch, row["page_id"]))
@@ -7553,14 +9433,15 @@ class SqliteEngine:
             now_iso = dt_to_json(utc_now())
             created_at = dt_to_json(kp.created_at) or now_iso
             updated_at = dt_to_json(kp.updated_at) or now_iso
+            clean_maint, emb_blob, _ = _split_kp_embedding(kp.maintenance)
             conn.execute(
                 """
                 INSERT INTO knowledge_pages (
                     tenant_id, branch, page_id, user_id, path, title, content_markdown,
                     source_observation_ids, source_assertion_ids, source_evidence_cids,
                     tags, version, status, trust_tier, sensitivity, access_policy, maintenance,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    created_at, updated_at, embedding
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     tenant_id,
@@ -7579,9 +9460,10 @@ class SqliteEngine:
                     kp.trust_tier,
                     kp.sensitivity,
                     json_text(kp.access_policy),
-                    json_text(kp.maintenance),
+                    json_text(clean_maint),
                     created_at,
                     updated_at,
+                    emb_blob,
                 ),
             )
             self._audit_row(
@@ -7657,13 +9539,20 @@ class SqliteEngine:
                     )
             new_version = current.version + 1
             updated_at = dt_to_json(utc_now())
+            clean_maint, emb_blob, had_emb_key = _split_kp_embedding(kp.maintenance)
+            if kp.status in {"archived", "retired"}:
+                final_emb_blob: bytes | None = None
+            elif had_emb_key:
+                final_emb_blob = emb_blob
+            else:
+                final_emb_blob = row["embedding"] if "embedding" in row.keys() else None
             changed = conn.execute(
                 """
                 UPDATE knowledge_pages SET
                     user_id = ?, path = ?, title = ?, content_markdown = ?,
                     source_observation_ids = ?, source_assertion_ids = ?, source_evidence_cids = ?,
                     tags = ?, version = ?, status = ?, trust_tier = ?, sensitivity = ?,
-                    access_policy = ?, maintenance = ?, updated_at = ?
+                    access_policy = ?, maintenance = ?, updated_at = ?, embedding = ?
                 WHERE tenant_id = ? AND branch = ? AND page_id = ? AND version = ?
                 """,
                 (
@@ -7680,8 +9569,9 @@ class SqliteEngine:
                     kp.trust_tier,
                     kp.sensitivity,
                     json_text(kp.access_policy),
-                    json_text(kp.maintenance),
+                    json_text(clean_maint),
                     updated_at,
+                    final_emb_blob,
                     tenant_id,
                     branch,
                     kp.page_id,
@@ -7874,7 +9764,7 @@ class SqliteEngine:
             new_version = page.version + 1
             updated_at = dt_to_json(utc_now())
             conn.execute(
-                "UPDATE knowledge_pages SET status = 'archived', version = ?, updated_at = ? "
+                "UPDATE knowledge_pages SET status = 'archived', version = ?, updated_at = ?, embedding = NULL "
                 "WHERE tenant_id = ? AND branch = ? AND page_id = ?",
                 (new_version, updated_at, tenant_id, branch, page.page_id),
             )

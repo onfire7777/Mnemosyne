@@ -26,7 +26,15 @@ _DISCOURSE_LEAD = re.compile(
     r"(?=(?:I|We|My|Our)(?:\s|['’]))", re.I,
 )
 _DIRECTIVE = re.compile(
-    r"^(?:please\s+(?:use|keep|respond)\b|from\s+now\s+on\b|(?:use|write|respond)\b.+\binstead\b)", re.I,
+    r"^(?:"
+    r"(?:please\s+)?(?:always|never)\s+(?:use|keep|respond|write|format|prefer|avoid|include|omit|show|explain|reply|answer|run|check|test|verify|commit|push|ask|confirm|preserve|follow|output|return)\b"
+    r"|please\s+(?:use|keep|respond|avoid|prefer|format|do\s+not|don['’]t)\b"
+    r"|(?:do\s+not|don['’]t)\s+(?:use|modify|edit|touch|commit|push|delete|remove|run|invent|guess|summarize|skip|auto-?commit|change|rewrite)\b"
+    r"|from\s+now\s+on\b"
+    r"|remember\s+(?:that|to)\b"
+    r"|(?:use|write|respond|prefer|keep|format)\b.+\binstead\b"
+    r")",
+    re.I,
 )
 # A correction often opens with an interjection ("No, use bullets instead.").
 # It is still the user's own directive: profile mode matches past the opener
@@ -110,7 +118,8 @@ def memory_source_clauses(source_or_text) -> list[str]:
         stripped = re.sub(r"^(?:[-*]\s+|\d+[.)]\s+)", "", stripped)
         for clause in re.split(r"(?<=[.!?])\s+|;\s*|\s+and\s+(?=(?:I|We|My|Our)\b)", stripped):
             clause = _DISCOURSE_LEAD.sub("", clause.strip())
-            if clause and not clause.endswith("?") and "`" not in clause:
+            is_standalone_code = clause.startswith("`") and clause.endswith("`") and clause.count("`") == 2
+            if clause and not clause.endswith("?") and "```" not in clause and not is_standalone_code:
                 clauses.append(clause)
     return list(dict.fromkeys(clauses))
 
@@ -128,10 +137,100 @@ def direct_user_clauses(source_or_text, *, include_directives: bool = False) -> 
         return bool(
             (_FIRST_PERSON.match(_strip_temporal_affixes(body)) or include_directives and _DIRECTIVE.match(body))
             and not _HYPOTHETICAL.search(clause)
-            and not re.search(r"\b(?:says|said|told|claims|believes|according to)\b", clause, re.I)
+            and not re.search(r"\b(?:says|said|told|claims|claimed|believes|believed|thinks|thought|suspects|guesses|according to)\b", clause, re.I)
             and not re.match(r"I\s+(?:said|wrote|quoted|read|asked|ran|clicked|opened|mean|meant|want\s+you|need\s+you)\b", body, re.I)
         )
     return [clause for clause in memory_source_clauses(source_or_text) if owned(clause)]
+
+
+def _scoped_assertions(engine, tenant_id: str, branch: str) -> list[dict]:
+    """Read branch assertions via keyset scan without exporting raw evidence."""
+    batch_fn = getattr(engine, "knowledge_source_batch", None)
+    if callable(batch_fn):
+        rows, after = [], ""
+        while True:
+            chunk = batch_fn(tenant_id, branch, collection="assertions", after=after, limit=4096)
+            rows.extend(chunk)
+            if len(chunk) < 4096:
+                return rows
+            after = chunk[-1]["id"]
+    return [row for row in engine.export_tenant(tenant_id).get("assertions", []) if row.get("branch", "main") == branch]
+
+
+def _scoped_relation_ids(engine, tenant_id: str, branch: str) -> set[str]:
+    """Read branch relation IDs without exporting the full tenant archive."""
+    if hasattr(engine, "_connect") and hasattr(engine, "_lock"):
+        try:
+            with engine._lock:
+                conn = engine._connect(tenant_id)
+                return {
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT id FROM relations WHERE tenant_id = ? AND branch = ?",
+                        (tenant_id, branch),
+                    ).fetchall()
+                }
+        except Exception:
+            pass
+    relations = getattr(engine, "relations", None)
+    if isinstance(relations, dict):
+        return {
+            rel.id
+            for rel in relations.values()
+            if getattr(rel, "tenant_id", None) == tenant_id and getattr(rel, "branch", "main") == branch
+        }
+    return {row["id"] for row in engine.export_tenant(tenant_id).get("relations", []) if row.get("branch", "main") == branch}
+
+
+def _scoped_user_evidence(engine, source, branch: str) -> list[dict]:
+    """Read only user-actor evidence rows for entity-context focus without exporting tool logs."""
+    if hasattr(engine, "_connect") and hasattr(engine, "_lock"):
+        try:
+            with engine._lock:
+                conn = engine._connect(source.tenant_id)
+                rows = conn.execute(
+                    "SELECT cid, user_id, actor, branch, metadata, created_at, session_id, content "
+                    "FROM evidence WHERE tenant_id = ? AND branch = ? AND user_id = ? AND actor = 'user'",
+                    (source.tenant_id, branch, source.user_id),
+                ).fetchall()
+            result = []
+            for row in rows:
+                raw_meta = row[4]
+                if isinstance(raw_meta, str):
+                    try:
+                        meta = json.loads(raw_meta)
+                    except ValueError:
+                        meta = {}
+                else:
+                    meta = raw_meta if isinstance(raw_meta, dict) else {}
+                result.append({
+                    "cid": row[0],
+                    "user_id": row[1],
+                    "actor": row[2],
+                    "branch": row[3],
+                    "metadata": meta,
+                    "created_at": row[5],
+                    "session_id": row[6],
+                    "content": row[7],
+                })
+            return result
+        except Exception:
+            pass
+    evidence_map = getattr(engine, "evidence", None)
+    if isinstance(evidence_map, dict):
+        return [
+            item.to_dict()
+            for item in evidence_map.values()
+            if getattr(item, "tenant_id", None) == source.tenant_id
+            and getattr(item, "branch", "main") == branch
+            and getattr(item, "user_id", None) == source.user_id
+            and getattr(item, "actor", None) == "user"
+        ]
+    return [
+        row
+        for row in engine.export_tenant(source.tenant_id).get("evidence", [])
+        if row.get("branch", "main") == branch and row.get("user_id") == source.user_id and row.get("actor") == "user"
+    ]
 
 
 def restated_segment_id(engine, evidence, branch: str = "main") -> str | None:
@@ -152,7 +251,7 @@ def restated_segment_id(engine, evidence, branch: str = "main") -> str | None:
             break
         seen.add(cid)
         if rows is None:
-            rows = engine.export_tenant(evidence.tenant_id)["assertions"]
+            rows = _scoped_assertions(engine, evidence.tenant_id, branch)
         # superseded_by with valid_to means a newer value replaced it; trust-rejected and commitment rows lack one.
         replaced = sorted(row["superseded_by"] for row in rows if row.get("branch", "main") == branch
                           and cid in row.get("source_evidence_cids", []) and row["status"] == "superseded"
@@ -165,13 +264,20 @@ def restated_segment_id(engine, evidence, branch: str = "main") -> str | None:
 
 _DURABLE_PREDICATES = frozenset({
     "residence", "has_pet", "has_family", "breed", "count", "expense", "education",
-    "milestone", "like", "dislike", "love", "hate", "prefer", "own", "use", "speak",
-    "know", "allergic_to", "has_allergy", "has_hobby", "has_interest", "is_a", "name",
+    "milestone", "like", "dislike", "love", "hate", "prefer", "prefers", "own", "owns",
+    "use", "uses", "speak", "speaks", "know", "knows", "allergic_to", "has_allergy",
+    "has_hobby", "has_interest", "is_a", "name",
     "work_at", "work_for", "work_as", "study_at", "study", "studies", "studied",
     "decided_to", "plan_to", "intend_to", "committed_to", "promised_to",
     "timezone", "time_zone", "occupation", "profession", "job", "birthday",
     "first_name", "last_name", "pronouns", "preferred_language", "native_language",
     "favorite_color", "favourite_colour", "favorite_editor", "preferred_editor",
+    "prefers_tool", "uses_stack", "project_goal", "workflow_rule", "decision",
+    "constraint", "avoid", "avoids", "owns_repo", "maintain", "maintains",
+    "build", "builds", "built", "deploy", "deploys", "host", "hosts",
+    "run", "runs", "store", "stores", "require", "requires", "depend_on", "depends_on",
+    "follow", "follows", "always_use", "never_use", "switched_to", "migrated_to",
+    "not_use", "not_prefer", "not_like", "do_not_use", "never_prefer",
 })
 
 
@@ -220,9 +326,12 @@ def project_direct_user_memory(
     if not all_clauses:
         result["reason"] = "no_supported_direct_claim"
         return result
-    snapshot = engine.export_tenant(tenant_id)
-    retained_assertions = [row for row in snapshot["assertions"] if row.get("branch", "main") == branch]
-    retained_relations = {row["id"] for row in snapshot["relations"] if row.get("branch", "main") == branch}
+    retained_assertions = _scoped_assertions(engine, tenant_id, branch)
+    retained_relations = _scoped_relation_ids(engine, tenant_id, branch)
+    snapshot = {
+        "assertions": retained_assertions,
+        "evidence": _scoped_user_evidence(engine, source, branch),
+    }
     batches = []
     timezone = timezone or source.metadata.get("timezone") or source.metadata.get("time_zone")
     commitments = commitment_changes(source, all_clauses, timezone)
@@ -230,8 +339,9 @@ def project_direct_user_memory(
     for clause in clauses:
         if is_owned_entity_clause(clause):
             continue  # The entity projector owns canonical identity and project scope.
+        parser_text = re.sub(r"`([^`\n]{1,80})`", r"\1", clause.replace("’", "'"))
         parser_text = _CONTRACTION_PATTERN.sub(
-            lambda match: _CONTRACTIONS[match.group().lower()], clause.replace("’", "'"),
+            lambda match: _CONTRACTIONS[match.group().lower()], parser_text,
         )
         facts = extract_episodic_facts(
             parser_text, tenant_id=tenant_id, user_id=source.user_id, branch=branch,
@@ -304,7 +414,18 @@ def project_direct_user_memory(
                 identifier = retained["id"]
             if identifier not in result["assertion_ids"]:
                 result["assertion_ids"].append(identifier)
-        stored_assertions = engine.export_tenant(tenant_id)["assertions"]
+        if facts.relations:
+            batch_fn = getattr(engine, "knowledge_source_batch", None)
+            if callable(batch_fn) and result["assertion_ids"]:
+                stored_assertions = batch_fn(
+                    tenant_id, branch, collection="assertions", ids=list(result["assertion_ids"])
+                )
+            elif result["assertion_ids"]:
+                stored_assertions = engine.export_tenant(tenant_id)["assertions"]
+            else:
+                stored_assertions = []
+        else:
+            stored_assertions = []
         for relation in facts.relations:
             supporting_rows = [row for row in stored_assertions
                                if row["id"] in result["assertion_ids"]

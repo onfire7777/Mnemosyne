@@ -12,6 +12,8 @@ from __future__ import annotations
 from array import array
 from collections import defaultdict
 from collections.abc import Callable, Collection, Mapping, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from itertools import chain
 import math
 
@@ -19,6 +21,18 @@ from mnemosyne import text
 from mnemosyne.cid_lists import shared_or_copy
 from mnemosyne.retrieval import Hit
 from mnemosyne.text import approx_tokens, cosine
+
+_MMR_NORMALIZED_MODE: ContextVar[bool] = ContextVar("_MMR_NORMALIZED_MODE", default=False)
+
+
+@contextmanager
+def normalized_mmr_context(enabled: bool = True):
+    """Enable normalized hit-score MMR with Jaccard fallback within the current call scope."""
+    token = _MMR_NORMALIZED_MODE.set(bool(enabled))
+    try:
+        yield
+    finally:
+        _MMR_NORMALIZED_MODE.reset(token)
 
 
 def rrf_fuse(
@@ -294,6 +308,83 @@ def _mmr_select_once(
     return [hits[i] for i in selected]
 
 
+def _is_finite_vector(vec: list[float] | None) -> bool:
+    return bool(vec) and all(isinstance(v, (int, float)) and math.isfinite(v) for v in vec)
+
+
+def _mmr_select_normalized(
+    hits: list[Hit],
+    k: int,
+    *,
+    embed_hit: Callable[[Hit], list[float] | None],
+    mmr_lambda: float,
+) -> list[Hit]:
+    """Scale-invariant MMR using normalized ``hit.score`` relevance + Jaccard diversity fallback.
+
+    Eliminates asymmetric dense-cosine bonuses when some candidates (assertions,
+    relations, unembedded evidence) lack stored vectors, and ensures pairwise
+    diversity deduplication still applies via token-set Jaccard when either hit
+    has no vector. Calls ``embed_hit`` at most once per hit.
+    """
+    if k <= 0 or not hits:
+        return []
+    vectors = [embed_hit(hit) for hit in hits]
+    valid_vecs: list[list[float] | None] = [
+        vec if _is_finite_vector(vec) else None for vec in vectors
+    ]
+    raw_scores = [
+        max(float(hit.score), 0.0) if math.isfinite(float(hit.score)) else 0.0
+        for hit in hits
+    ]
+    max_score = max(raw_scores, default=0.0)
+    relevance = [
+        (score / max_score) if max_score > 0.0 else 0.0 for score in raw_scores
+    ]
+    token_sets: dict[int, set[str]] = {}
+    pair_sim: dict[tuple[int, int], float] = {}
+
+    def _tokens_for(idx: int) -> set[str]:
+        toks = token_sets.get(idx)
+        if toks is None:
+            toks = set(text.tokenize(hits[idx].text))
+            token_sets[idx] = toks
+        return toks
+
+    def _similarity(i: int, j: int) -> float:
+        key = (i, j) if i < j else (j, i)
+        cached = pair_sim.get(key)
+        if cached is not None:
+            return cached
+        vi, vj = valid_vecs[i], valid_vecs[j]
+        if vi is not None and vj is not None and len(vi) == len(vj):
+            sim = max(0.0, min(1.0, float(cosine(vi, vj))))
+        else:
+            ti, tj = _tokens_for(i), _tokens_for(j)
+            union = len(ti | tj)
+            sim = (len(ti & tj) / union) if union else 0.0
+        pair_sim[key] = sim
+        return sim
+
+    selected: list[int] = []
+    remaining = list(range(len(hits)))
+    while remaining and len(selected) < k:
+        best: int | None = None
+        best_score = float("-inf")
+        for i in remaining:
+            diversity_penalty = (
+                max(_similarity(i, j) for j in selected) if selected else 0.0
+            )
+            score = mmr_lambda * relevance[i] - (1.0 - mmr_lambda) * diversity_penalty
+            if score > best_score:
+                best = i
+                best_score = score
+        if best is None:
+            break
+        selected.append(best)
+        remaining.remove(best)
+    return [hits[i] for i in selected]
+
+
 def mmr_select(
     hits: list[Hit],
     k: int,
@@ -302,6 +393,7 @@ def mmr_select(
     embed_hit: Callable[[Hit], list[float] | None],
     mmr_lambda: float,
     embed_once: bool = False,
+    normalized_relevance: bool | None = None,
 ) -> list[Hit]:
     """Maximal-marginal-relevance selection (spec §4.1 kernel ABI).
 
@@ -309,6 +401,10 @@ def mmr_select(
     max_similarity + hit.score``. A missing vector (``embed_hit`` returns
     ``None``) means relevance 0.0 AND no diversity penalty; the strict ``>``
     argmax gives first-wins tie-breaking on input order.
+
+    When ``normalized_relevance=True`` (or active via :func:`normalized_mmr_context`),
+    uses normalized ``hit.score`` for relevance and token-Jaccard fallback
+    similarity whenever either candidate lacks a stored vector.
 
     Embedding sourcing is deliberately NOT unified (spec §4.0): the two
     engines stay behaviorally divergent via ``embed_hit`` —
@@ -328,6 +424,15 @@ def mmr_select(
         # materializing embed_hit for every hit — the only mode-divergent
         # side effect — when nothing can be selected.
         return []
+    use_normalized = (
+        normalized_relevance
+        if normalized_relevance is not None
+        else _MMR_NORMALIZED_MODE.get()
+    )
+    if use_normalized:
+        return _mmr_select_normalized(
+            hits, k, embed_hit=embed_hit, mmr_lambda=mmr_lambda
+        )
     if text.NATIVE is not None:
         # Index-aligned 1:1 with hits (the kernel raises ValueError on a
         # length mismatch); one embed_hit call per hit preserves the

@@ -184,11 +184,28 @@ def _output(source, event):
     value = event.get("output") or event.get("stdout") or event.get("evidence")
     if isinstance(value, str) and value and value in source.content:
         return value
+    output_span = event.get("output_span")
+    if (
+        isinstance(output_span, (list, tuple))
+        and len(output_span) == 2
+        and type(output_span[0]) is int
+        and type(output_span[1]) is int
+        and 0 <= output_span[0] < output_span[1] <= len(source.content)
+    ):
+        return source.content[output_span[0]:output_span[1]]
     argv = _argv(event)
     if argv:
         for command in (shlex.join(argv), " ".join(argv)):
             if source.content.startswith(command + "\n"):
                 return source.content[len(command) + 1:]
+    if source.content.startswith("{") and "\n" in source.content:
+        first_line, rest = source.content.split("\n", 1)
+        try:
+            header = json.loads(first_line)
+        except ValueError:
+            header = None
+        if isinstance(header, dict) and header.get("type") == "tool_action":
+            return rest
     return source.content
 
 
@@ -375,7 +392,7 @@ def extract_observed_claims(source, *, event=None, workspace=None):
 
 def _provider_claims(source, event, workspace, proposer, reviewer, *, synthesis=None, cursor=None):
     """One bounded, resumable proposal and independent claim reviews."""
-    from mnemosyne.semantic_memory import SourceSpan, validate_semantic_entailment
+    from mnemosyne.semantic_memory import SourceSpan, validate_semantic_entailments
     from mnemosyne.projection_coverage import select_windows, advance_coverage
 
     if proposer is None or not _independent_content(event):
@@ -442,6 +459,7 @@ def _provider_claims(source, event, workspace, proposer, reviewer, *, synthesis=
         return [], [{"reason": "invalid_proposal_schema"}], advance_coverage(cursor, windows, remaining, None, claim_limit=4)
     claims, rejected = [], []
     allowed = {(span["start"], span["end"]): span for span in windows}
+    valid_candidates = []
     for row in response["claims"][:4]:
         data = row.get("span") if isinstance(row, dict) else None
         if not isinstance(data, dict) or type(data.get("start")) is not int or type(data.get("end")) is not int or allowed.get((data["start"], data["end"])) != data:
@@ -452,7 +470,12 @@ def _provider_claims(source, event, workspace, proposer, reviewer, *, synthesis=
                 or _SECRET_KEY.search(row["predicate"]) or _UNSAFE.search(data["quote"])):
             rejected.append({"reason": "invalid_observed_claim"})
             continue
-        verdict = validate_semantic_entailment(row, SourceSpan(**data), reviewer=reviewer)
+        valid_candidates.append((row, SourceSpan(**data), data))
+    verdicts = validate_semantic_entailments(
+        [(row, span) for row, span, _ in valid_candidates],
+        reviewer=reviewer,
+    )
+    for (row, _, data), verdict in zip(valid_candidates, verdicts):
         if not verdict.get("entailed"):
             rejected.append({"reason": "not_entailed", "review": verdict})
             continue
@@ -465,7 +488,11 @@ def _provider_claims(source, event, workspace, proposer, reviewer, *, synthesis=
         claims.append(ObservedClaim(row["subject"], row["predicate"], row["object"], data,
                                     scope, "reviewed_fact", review=verdict))
     coverage = advance_coverage(cursor, windows, remaining, response, claim_limit=4)
-    if any(row.get("review", {}).get("method") in {"reviewer_unavailable", "review_failed"} for row in rejected):
+    if any(
+        row.get("review", {}).get("reason") in {"reviewer_unavailable", "review_failed"}
+        or row.get("review", {}).get("method") in {"reviewer_unavailable", "review_failed"}
+        for row in rejected
+    ):
         coverage = {"provider_pending": True, "provider_cursor": cursor}
     return claims, rejected, coverage
 
@@ -581,6 +608,27 @@ def project_observed_memory(engine, tenant_id, source_cid, branch="main", *, eve
     return _persist_claims(engine, source, branch, claims, report, retained, event)
 
 
+def _active_relation_exists(engine, tenant_id, branch, relation_id) -> bool:
+    """O(1) check whether an active relation already exists without exporting the store."""
+    if hasattr(engine, "_connect") and hasattr(engine, "_lock"):
+        try:
+            with engine._lock:
+                conn = engine._connect(tenant_id)
+                row = conn.execute(
+                    "SELECT 1 FROM relations WHERE tenant_id = ? AND branch = ? AND id = ? AND valid_to IS NULL LIMIT 1",
+                    (tenant_id, branch, relation_id),
+                ).fetchone()
+                return row is not None
+        except Exception:
+            return False
+    relations = getattr(engine, "relations", None)
+    branch_key = getattr(engine, "_branch_key", None)
+    if isinstance(relations, dict) and callable(branch_key):
+        existing = relations.get(branch_key(tenant_id, branch, relation_id))
+        return existing is not None and getattr(existing, "valid_to", None) is None
+    return False
+
+
 def _persist_claims(engine, source, branch, claims, report, retained, event=None):
     tenant_id = source.tenant_id
     # A complete snapshot at least as recent and as trusted as this source
@@ -623,6 +671,7 @@ def _persist_claims(engine, source, branch, claims, report, retained, event=None
                 "entailment_review": claim.review,
                 "event_time": {"status": "resolved", "precision": "instant", "start": source.created_at.isoformat()},
                 "tool_call_id": _event(source, event).get("call_id")})
+        created_now = False
         if identifier not in retained:
             # Refresh a repeated observation without merging incompatible
             # citation sets into one assertion or keeping its old expiry.
@@ -646,14 +695,16 @@ def _persist_claims(engine, source, branch, claims, report, retained, event=None
                         access_policy=row["access_policy"], id=relation_id), branch=branch)
             identifier = engine.upsert_assertion(assertion, branch=branch)
             report["created_count"] += 1
+            created_now = True
             retained[identifier] = next(row for row in engine.knowledge_source_batch(tenant_id, branch, ids=[identifier]) if row["id"] == identifier)
         report["assertion_ids"].append(identifier)
         # Command outcomes are observations about execution, never graph instructions.
         if claim.kind != "command_outcome" and retained[identifier]["status"] in {"active", "contested"}:
             relation_id = str(uuid5(NAMESPACE_URL, "project-observation-relation:" + identifier))
-            engine.add_relation(Relation(tenant_id, claim.subject, claim.predicate, claim.object, branch=branch,
-                confidence=assertion.confidence, valid_from=source.created_at, source_evidence_cids=[source.cid],
-                access_policy=policy, id=relation_id), branch=branch)
+            if created_now or not _active_relation_exists(engine, tenant_id, branch, relation_id):
+                engine.add_relation(Relation(tenant_id, claim.subject, claim.predicate, claim.object, branch=branch,
+                    confidence=assertion.confidence, valid_from=source.created_at, source_evidence_cids=[source.cid],
+                    access_policy=policy, id=relation_id), branch=branch)
             report["relation_ids"].append(relation_id)
     report["reason"] = "projected" if report["assertion_ids"] else "no_supported_project_observation"
     return report

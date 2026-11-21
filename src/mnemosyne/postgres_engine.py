@@ -1379,6 +1379,14 @@ class PostgresEngine:
         return cur.fetchone() is not None
 
     @staticmethod
+    def _table_exists(cur: Any, table_name: str) -> bool:
+        """Privilege-free probe for a table by name (search_path-resolved)."""
+        if not hasattr(cur, "fetchone"):
+            return True
+        cur.execute("SELECT 1 WHERE to_regclass(%s) IS NOT NULL", (table_name,))
+        return cur.fetchone() is not None
+
+    @staticmethod
     def _constraint_exists(cur: Any, conname: str) -> bool:
         """Privilege-free probe for a named constraint."""
         if not hasattr(cur, "fetchone"):
@@ -3904,6 +3912,710 @@ class PostgresEngine:
                 )
         return True
 
+    def _sources_allow_embedding_pg(
+        self,
+        cur: Any,
+        db_tenant_id: str,
+        branch: str,
+        source_cids: Sequence[str],
+    ) -> bool:
+        """Return True iff every declared source evidence row exists and may be embedded."""
+        unique_cids = list(dict.fromkeys(cid for cid in source_cids if cid))
+        if not unique_cids:
+            return True
+        cid_bytes: list[bytes] = []
+        for cid in unique_cids:
+            raw = _cid_bytes_or_none(cid)
+            if raw is None:
+                return False
+            cid_bytes.append(raw)
+        cur.execute(
+            """
+            SELECT cid, sensitivity, access_policy, erased
+            FROM evidence
+            WHERE tenant_id = %s AND branch = %s AND cid = ANY(%s)
+            """,
+            (db_tenant_id, branch, cid_bytes),
+        )
+        rows = list(cur.fetchall())
+        if len(rows) != len(cid_bytes):
+            return False
+        for row in rows:
+            if not may_embed_item(
+                sensitivity=int(row["sensitivity"]),
+                access_policy=dict(row["access_policy"] or {}),
+                erased=bool(row["erased"]),
+            ):
+                return False
+        return True
+
+    def set_assertion_embedding(
+        self,
+        tenant_id: str,
+        assertion_id: str,
+        embedding: list[float] | None,
+        branch: str = "main",
+        *,
+        actor: str = "consolidation",
+        source: str = "embedder",
+        only_if_missing: bool = False,
+    ) -> bool:
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                self._acquire_tenant_source_write_lock(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    SELECT status, sensitivity, access_policy, trust_tier,
+                           source_evidence_cids, embedding
+                    FROM assertions
+                    WHERE tenant_id = %s AND branch = %s AND id = %s::uuid
+                    FOR UPDATE
+                    """,
+                    (db_tenant_id, branch, assertion_id),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return False
+                if embedding is None:
+                    cur.execute(
+                        """
+                        UPDATE assertions
+                        SET embedding = NULL
+                        WHERE tenant_id = %s AND branch = %s AND id = %s::uuid
+                        """,
+                        (db_tenant_id, branch, assertion_id),
+                    )
+                    return True
+                status = str(row["status"])
+                if status not in {"active", "contested"}:
+                    return False
+                if only_if_missing and row["embedding"] is not None:
+                    return False
+                sensitivity = int(row["sensitivity"])
+                access_policy = dict(row["access_policy"] or {})
+                source_cids = _bytes_list_to_cids(row["source_evidence_cids"])
+                embedding_partition = vector_partition_for_item(
+                    sensitivity=sensitivity,
+                    access_policy=access_policy,
+                    status=status,
+                )
+                if (
+                    embedding_partition == "none"
+                    or not may_embed_item(
+                        sensitivity=sensitivity,
+                        access_policy=access_policy,
+                        status=status,
+                    )
+                    or not self._sources_allow_embedding_pg(
+                        cur, db_tenant_id, branch, source_cids
+                    )
+                ):
+                    self._audit(
+                        cur,
+                        db_tenant_id,
+                        actor,
+                        "set_assertion_embedding.blocked_policy",
+                        assertion_id,
+                        {"branch": branch, "reason": "embedding_not_allowed"},
+                        source=source,
+                        trust_tier=row["trust_tier"],
+                    )
+                    return False
+                cur.execute(
+                    """
+                    UPDATE assertions
+                    SET embedding = %s::vector, embedding_partition = %s
+                    WHERE tenant_id = %s AND branch = %s AND id = %s::uuid
+                    """,
+                    (
+                        _vector_literal([float(v) for v in embedding]),
+                        embedding_partition,
+                        db_tenant_id,
+                        branch,
+                        assertion_id,
+                    ),
+                )
+                self._audit(
+                    cur,
+                    db_tenant_id,
+                    actor,
+                    "set_assertion_embedding",
+                    assertion_id,
+                    {
+                        "branch": branch,
+                        "embedding_dims": len(embedding),
+                        "embedding_partition": embedding_partition,
+                    },
+                    source=source,
+                    trust_tier=row["trust_tier"],
+                )
+        return True
+
+    def set_observation_embedding(
+        self,
+        tenant_id: str,
+        observation_id: str,
+        embedding: list[float] | None,
+        branch: str = "main",
+        *,
+        actor: str = "consolidation",
+        source: str = "embedder",
+        only_if_missing: bool = False,
+    ) -> bool:
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                self._acquire_tenant_source_write_lock(cur, db_tenant_id)
+                if not self._table_exists(cur, "observations"):
+                    return False
+                if not self._column_exists(cur, "observations", "embedding"):
+                    self._apply_optional_ddl(
+                        cur,
+                        "ALTER TABLE observations ADD COLUMN IF NOT EXISTS embedding VECTOR",
+                        description="observations.embedding column",
+                    )
+                    if not self._column_exists(cur, "observations", "embedding"):
+                        return False
+                cur.execute(
+                    """
+                    SELECT status, sensitivity, access_policy, trust_tier,
+                           source_evidence_cids, embedding
+                    FROM observations
+                    WHERE tenant_id = %s AND branch = %s AND observation_id = %s
+                    FOR UPDATE
+                    """,
+                    (db_tenant_id, branch, observation_id),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return False
+                if embedding is None:
+                    cur.execute(
+                        """
+                        UPDATE observations
+                        SET embedding = NULL
+                        WHERE tenant_id = %s AND branch = %s AND observation_id = %s
+                        """,
+                        (db_tenant_id, branch, observation_id),
+                    )
+                    return True
+                status = str(row["status"])
+                if status != "active":
+                    return False
+                if only_if_missing and row["embedding"] is not None:
+                    return False
+                sensitivity = int(row["sensitivity"])
+                access_policy = dict(row["access_policy"] or {})
+                source_cids = list(row["source_evidence_cids"] or [])
+                if not may_embed_item(
+                    sensitivity=sensitivity,
+                    access_policy=access_policy,
+                    status=status,
+                ) or not self._sources_allow_embedding_pg(
+                    cur, db_tenant_id, branch, source_cids
+                ):
+                    self._audit(
+                        cur,
+                        db_tenant_id,
+                        actor,
+                        "set_observation_embedding.blocked_policy",
+                        observation_id,
+                        {"branch": branch, "reason": "embedding_not_allowed"},
+                        source=source,
+                        trust_tier=row["trust_tier"],
+                    )
+                    return False
+                cur.execute(
+                    """
+                    UPDATE observations
+                    SET embedding = %s::vector
+                    WHERE tenant_id = %s AND branch = %s AND observation_id = %s
+                    """,
+                    (
+                        _vector_literal([float(v) for v in embedding]),
+                        db_tenant_id,
+                        branch,
+                        observation_id,
+                    ),
+                )
+                self._audit(
+                    cur,
+                    db_tenant_id,
+                    actor,
+                    "set_observation_embedding",
+                    observation_id,
+                    {"branch": branch, "embedding_dims": len(embedding)},
+                    source=source,
+                    trust_tier=row["trust_tier"],
+                )
+        return True
+
+    def set_preference_embedding(
+        self,
+        tenant_id: str,
+        pref_id: str,
+        embedding: list[float] | None,
+        *,
+        actor: str = "consolidation",
+        source: str = "embedder",
+        only_if_missing: bool = False,
+    ) -> bool:
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                self._acquire_tenant_source_write_lock(cur, db_tenant_id)
+                if not self._column_exists(cur, "preferences", "embedding"):
+                    self._apply_optional_ddl(
+                        cur,
+                        "ALTER TABLE preferences ADD COLUMN IF NOT EXISTS embedding VECTOR",
+                        description="preferences.embedding column",
+                    )
+                    if not self._column_exists(cur, "preferences", "embedding"):
+                        return False
+                cur.execute(
+                    """
+                    SELECT status, access_policy, source_evidence_cids, embedding
+                    FROM preferences
+                    WHERE tenant_id = %s AND id = %s::uuid
+                    FOR UPDATE
+                    """,
+                    (db_tenant_id, pref_id),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return False
+                if embedding is None:
+                    cur.execute(
+                        "UPDATE preferences SET embedding = NULL WHERE tenant_id = %s AND id = %s::uuid",
+                        (db_tenant_id, pref_id),
+                    )
+                    return True
+                status = str(row["status"])
+                if status != "active":
+                    return False
+                if only_if_missing and row["embedding"] is not None:
+                    return False
+                access_policy = dict(row["access_policy"] or {})
+                source_cids = _bytes_list_to_cids(row["source_evidence_cids"])
+                if not may_embed_item(
+                    sensitivity=0,
+                    access_policy=access_policy,
+                    status=status,
+                ) or not self._sources_allow_embedding_pg(
+                    cur, db_tenant_id, "main", source_cids
+                ):
+                    self._audit(
+                        cur,
+                        db_tenant_id,
+                        actor,
+                        "set_preference_embedding.blocked_policy",
+                        pref_id,
+                        {"reason": "embedding_not_allowed"},
+                        source=source,
+                    )
+                    return False
+                cur.execute(
+                    """
+                    UPDATE preferences
+                    SET embedding = %s::vector
+                    WHERE tenant_id = %s AND id = %s::uuid
+                    """,
+                    (
+                        _vector_literal([float(v) for v in embedding]),
+                        db_tenant_id,
+                        pref_id,
+                    ),
+                )
+                self._audit(
+                    cur,
+                    db_tenant_id,
+                    actor,
+                    "set_preference_embedding",
+                    pref_id,
+                    {"embedding_dims": len(embedding)},
+                    source=source,
+                )
+        return True
+
+    def set_knowledge_page_embedding(
+        self,
+        tenant_id: str,
+        page_id: str,
+        embedding: list[float] | None,
+        branch: str = "main",
+        *,
+        actor: str = "consolidation",
+        source: str = "embedder",
+        only_if_missing: bool = False,
+    ) -> bool:
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                self._acquire_tenant_source_write_lock(cur, db_tenant_id)
+                if not self._table_exists(cur, "knowledge_pages"):
+                    return False
+                has_emb_col = self._column_exists(cur, "knowledge_pages", "embedding")
+                if not has_emb_col:
+                    has_emb_col = self._apply_optional_ddl(
+                        cur,
+                        "ALTER TABLE knowledge_pages ADD COLUMN IF NOT EXISTS embedding VECTOR",
+                        description="knowledge_pages.embedding column",
+                    ) and self._column_exists(cur, "knowledge_pages", "embedding")
+                emb_select = "embedding" if has_emb_col else "NULL AS embedding"
+                cur.execute(
+                    f"""
+                    SELECT status, sensitivity, access_policy, trust_tier,
+                           source_evidence_cids, maintenance, {emb_select}
+                    FROM knowledge_pages
+                    WHERE tenant_id = %s AND branch = %s AND page_id = %s
+                    FOR UPDATE
+                    """,
+                    (db_tenant_id, branch, page_id),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return False
+                maint = dict(row["maintenance"] or {})
+                if embedding is None:
+                    maint.pop("embedding", None)
+                    if has_emb_col:
+                        cur.execute(
+                            """
+                            UPDATE knowledge_pages
+                            SET embedding = NULL, maintenance = %s
+                            WHERE tenant_id = %s AND branch = %s AND page_id = %s
+                            """,
+                            (self._jsonb(maint), db_tenant_id, branch, page_id),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            UPDATE knowledge_pages
+                            SET maintenance = %s
+                            WHERE tenant_id = %s AND branch = %s AND page_id = %s
+                            """,
+                            (self._jsonb(maint), db_tenant_id, branch, page_id),
+                        )
+                    return True
+                status = str(row["status"])
+                if status in {"archived", "retired"}:
+                    return False
+                has_existing = row["embedding"] is not None or (
+                    isinstance(maint.get("embedding"), list) and bool(maint["embedding"])
+                )
+                if only_if_missing and has_existing:
+                    return False
+                sensitivity = int(row["sensitivity"])
+                access_policy = dict(row["access_policy"] or {})
+                source_cids = list(row["source_evidence_cids"] or [])
+                if not may_embed_item(
+                    sensitivity=sensitivity,
+                    access_policy=access_policy,
+                    status=status,
+                ) or not self._sources_allow_embedding_pg(
+                    cur, db_tenant_id, branch, source_cids
+                ):
+                    self._audit(
+                        cur,
+                        db_tenant_id,
+                        actor,
+                        "set_knowledge_page_embedding.blocked_policy",
+                        page_id,
+                        {"branch": branch, "reason": "embedding_not_allowed"},
+                        source=source,
+                        trust_tier=row["trust_tier"],
+                    )
+                    return False
+                floats = [float(v) for v in embedding]
+                if has_emb_col:
+                    maint.pop("embedding", None)
+                    cur.execute(
+                        """
+                        UPDATE knowledge_pages
+                        SET embedding = %s::vector, maintenance = %s
+                        WHERE tenant_id = %s AND branch = %s AND page_id = %s
+                        """,
+                        (
+                            _vector_literal(floats),
+                            self._jsonb(maint),
+                            db_tenant_id,
+                            branch,
+                            page_id,
+                        ),
+                    )
+                else:
+                    maint["embedding"] = floats
+                    cur.execute(
+                        """
+                        UPDATE knowledge_pages
+                        SET maintenance = %s
+                        WHERE tenant_id = %s AND branch = %s AND page_id = %s
+                        """,
+                        (self._jsonb(maint), db_tenant_id, branch, page_id),
+                    )
+                self._audit(
+                    cur,
+                    db_tenant_id,
+                    actor,
+                    "set_knowledge_page_embedding",
+                    page_id,
+                    {"branch": branch, "embedding_dims": len(floats)},
+                    source=source,
+                    trust_tier=row["trust_tier"],
+                )
+        return True
+
+    def list_unembedded_targets(
+        self,
+        tenant_id: str,
+        branch: str = "main",
+        *,
+        limit: int = 128,
+    ) -> dict[str, list[dict[str, Any]]]:
+        cap = max(0, int(limit))
+        empty: dict[str, list[dict[str, Any]]] = {
+            "evidence": [],
+            "assertions": [],
+            "observations": [],
+            "preferences": [],
+            "knowledge_pages": [],
+        }
+        if cap == 0:
+            return empty
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        ev_targets: list[dict[str, Any]] = []
+        as_targets: list[dict[str, Any]] = []
+        obs_targets: list[dict[str, Any]] = []
+        pref_targets: list[dict[str, Any]] = []
+        kp_targets: list[dict[str, Any]] = []
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    SELECT cid, metadata->>'_external_user_id' AS user_id, content,
+                           source_type, sensitivity, access_policy, metadata
+                    FROM evidence
+                    WHERE tenant_id = %s AND branch = %s AND erased = false
+                      AND retired_at IS NULL AND embedding IS NULL
+                      AND source_type <> 'learning_tool_result'
+                    ORDER BY cid ASC
+                    LIMIT %s
+                    """,
+                    (db_tenant_id, branch, cap * 2),
+                )
+                for row in cur.fetchall():
+                    if len(ev_targets) >= cap:
+                        break
+                    meta = dict(row["metadata"] or {})
+                    if is_retired_summary_metadata(meta):
+                        continue
+                    policy_dict = dict(row["access_policy"] or {})
+                    sens = int(row["sensitivity"])
+                    if not may_embed_item(
+                        sensitivity=sens, access_policy=policy_dict, erased=False
+                    ):
+                        continue
+                    cid = _bytes_to_cid(row["cid"])
+                    content = str(row["content"] or "")
+                    ev_targets.append(
+                        {
+                            "cid": cid,
+                            "user_id": str(row.get("user_id") or ""),
+                            "content": content,
+                            "text": content,
+                            "source_type": str(row["source_type"]),
+                            "sensitivity": sens,
+                            "access_policy": policy_dict,
+                        }
+                    )
+
+                cur.execute(
+                    """
+                    SELECT id::text AS id, user_id::text AS user_id, subject, predicate,
+                           object, status, sensitivity, access_policy, source_evidence_cids
+                    FROM assertions
+                    WHERE tenant_id = %s AND branch = %s
+                      AND status IN ('active', 'contested')
+                      AND embedding IS NULL
+                    ORDER BY id ASC
+                    LIMIT %s
+                    """,
+                    (db_tenant_id, branch, cap * 2),
+                )
+                for row in cur.fetchall():
+                    if len(as_targets) >= cap:
+                        break
+                    policy_dict = dict(row["access_policy"] or {})
+                    sens = int(row["sensitivity"])
+                    status = str(row["status"])
+                    if not may_embed_item(
+                        sensitivity=sens, access_policy=policy_dict, status=status
+                    ):
+                        continue
+                    as_targets.append(
+                        {
+                            "id": str(row["id"]),
+                            "user_id": str(row.get("user_id") or ""),
+                            "subject": str(row["subject"]),
+                            "predicate": str(row["predicate"]),
+                            "object": str(row["object"]),
+                            "text": f"{row['subject']} {row['predicate']} {row['object']}".strip(),
+                            "source_evidence_cids": _bytes_list_to_cids(
+                                row["source_evidence_cids"]
+                            ),
+                            "sensitivity": sens,
+                            "access_policy": policy_dict,
+                        }
+                    )
+
+                if self._table_exists(cur, "observations"):
+                    obs_emb_cond = (
+                        "AND embedding IS NULL"
+                        if self._column_exists(cur, "observations", "embedding")
+                        else ""
+                    )
+                    cur.execute(
+                        f"""
+                        SELECT observation_id, user_id, subject, topic, content, status,
+                               sensitivity, access_policy, source_evidence_cids
+                        FROM observations
+                        WHERE tenant_id = %s AND branch = %s AND status = 'active'
+                          {obs_emb_cond}
+                        ORDER BY observation_id ASC
+                        LIMIT %s
+                        """,
+                        (db_tenant_id, branch, cap * 2),
+                    )
+                    for row in cur.fetchall():
+                        if len(obs_targets) >= cap:
+                            break
+                        policy_dict = dict(row["access_policy"] or {})
+                        sens = int(row["sensitivity"])
+                        if not may_embed_item(
+                            sensitivity=sens, access_policy=policy_dict, status="active"
+                        ):
+                            continue
+                        content = str(row["content"] or "")
+                        obs_targets.append(
+                            {
+                                "observation_id": str(row["observation_id"]),
+                                "user_id": str(row.get("user_id") or ""),
+                                "subject": str(row.get("subject") or ""),
+                                "topic": str(row.get("topic") or ""),
+                                "statement": content,
+                                "content": content,
+                                "text": content,
+                                "source_evidence_cids": list(
+                                    row.get("source_evidence_cids") or []
+                                ),
+                                "status": str(row.get("status") or "active"),
+                            }
+                        )
+
+                pref_emb_cond = (
+                    "AND embedding IS NULL"
+                    if self._column_exists(cur, "preferences", "embedding")
+                    else ""
+                )
+                cur.execute(
+                    f"""
+                    SELECT id::text AS id, user_id::text AS user_id, category, statement,
+                           status, source_evidence_cids, access_policy
+                    FROM preferences
+                    WHERE tenant_id = %s AND status = 'active' {pref_emb_cond}
+                    ORDER BY id ASC
+                    LIMIT %s
+                    """,
+                    (db_tenant_id, cap * 2),
+                )
+                for row in cur.fetchall():
+                    if len(pref_targets) >= cap:
+                        break
+                    policy_dict = dict(row["access_policy"] or {})
+                    if not may_embed_item(
+                        sensitivity=0, access_policy=policy_dict, status="active"
+                    ):
+                        continue
+                    statement = str(row["statement"] or "")
+                    pref_targets.append(
+                        {
+                            "id": str(row["id"]),
+                            "user_id": str(row.get("user_id") or ""),
+                            "category": str(row["category"] or ""),
+                            "statement": statement,
+                            "text": statement,
+                            "source_evidence_cids": _bytes_list_to_cids(
+                                row["source_evidence_cids"]
+                            ),
+                            "access_policy": policy_dict,
+                        }
+                    )
+
+                if self._table_exists(cur, "knowledge_pages"):
+                    kp_emb_cond = (
+                        "AND embedding IS NULL"
+                        if self._column_exists(cur, "knowledge_pages", "embedding")
+                        else ""
+                    )
+                    cur.execute(
+                        f"""
+                        SELECT page_id, user_id, path, title, content_markdown, status,
+                               sensitivity, access_policy, source_evidence_cids, maintenance
+                        FROM knowledge_pages
+                        WHERE tenant_id = %s AND branch = %s AND status = 'active'
+                          {kp_emb_cond}
+                        ORDER BY page_id ASC
+                        LIMIT %s
+                        """,
+                        (db_tenant_id, branch, cap * 2),
+                    )
+                    for row in cur.fetchall():
+                        if len(kp_targets) >= cap:
+                            break
+                        policy_dict = dict(row["access_policy"] or {})
+                        sens = int(row["sensitivity"])
+                        if not may_embed_item(
+                            sensitivity=sens, access_policy=policy_dict, status="active"
+                        ):
+                            continue
+                        maint = dict(row["maintenance"] or {})
+                        if isinstance(maint.get("embedding"), list) and maint["embedding"]:
+                            continue
+                        title = str(row["title"] or "")
+                        body = str(row["content_markdown"] or "")
+                        page_text = (
+                            f"{title}\n{body}".strip() if title and body else (title or body)
+                        )
+                        kp_targets.append(
+                            {
+                                "page_id": str(row["page_id"]),
+                                "user_id": str(row.get("user_id") or ""),
+                                "path": str(row["path"] or ""),
+                                "title": title,
+                                "summary": str(maint.get("summary") or title),
+                                "body": body,
+                                "content_markdown": body,
+                                "text": page_text,
+                                "source_evidence_cids": list(
+                                    row["source_evidence_cids"] or []
+                                ),
+                                "status": str(row["status"]),
+                            }
+                        )
+        return {
+            "evidence": ev_targets,
+            "assertions": as_targets,
+            "observations": obs_targets,
+            "preferences": pref_targets,
+            "knowledge_pages": kp_targets,
+        }
+
     def update_evidence_metadata(
         self,
         tenant_id: str,
@@ -4594,10 +5306,67 @@ class PostgresEngine:
         )
         self.ensure_tenant_and_branch(relation.tenant_id, branch)
         db_tenant_id = _stable_uuid("tenant", relation.tenant_id)
+        expected_cids = _bytes_list_to_cids(
+            _cid_list_to_bytes(relation.source_evidence_cids)
+        )
+        expected_vf = _to_utc_opt(relation.valid_from)
+        expected_vt = _to_utc_opt(relation.valid_to)
+        expected_policy = dict(access_policy or {})
         with self.connect() as conn:
             with conn.cursor() as cur:
                 self._set_tenant(cur, db_tenant_id)
                 self._acquire_tenant_source_write_lock(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    SELECT source, predicate, target, confidence, valid_from, valid_to,
+                           source_evidence_cids, access_policy
+                    FROM relations
+                    WHERE tenant_id = %s AND branch = %s AND id = %s
+                    FOR UPDATE
+                    """,
+                    (db_tenant_id, branch, relation.id),
+                )
+                existing = cur.fetchone() if hasattr(cur, "fetchone") else None
+                if existing is not None:
+                    if isinstance(existing, Mapping):
+                        ex_src = existing.get("source")
+                        ex_pred = existing.get("predicate")
+                        ex_tgt = existing.get("target")
+                        ex_conf = existing.get("confidence")
+                        ex_vf = existing.get("valid_from")
+                        ex_vt = existing.get("valid_to")
+                        ex_cids = existing.get("source_evidence_cids")
+                        ex_ap = existing.get("access_policy")
+                    else:
+                        (
+                            ex_src,
+                            ex_pred,
+                            ex_tgt,
+                            ex_conf,
+                            ex_vf,
+                            ex_vt,
+                            ex_cids,
+                            ex_ap,
+                        ) = existing
+                    if isinstance(ex_ap, str):
+                        ex_ap = json.loads(ex_ap)
+                    if (
+                        ex_src == relation.source
+                        and ex_pred == relation.predicate
+                        and ex_tgt == relation.target
+                        and ex_conf is not None
+                        and math.isclose(
+                            float(ex_conf),
+                            float(relation.confidence),
+                            rel_tol=1e-6,
+                            abs_tol=1e-6,
+                        )
+                        and _to_utc_opt(parse_dt(ex_vf)) == expected_vf
+                        and _to_utc_opt(parse_dt(ex_vt)) == expected_vt
+                        and _bytes_list_to_cids(ex_cids) == expected_cids
+                        and dict(ex_ap or {}) == expected_policy
+                    ):
+                        return relation.id
                 cur.execute(
                     """
                     INSERT INTO relations (
@@ -5231,6 +6000,20 @@ class PostgresEngine:
                             },
                         )
                     )
+                if bool(filt.get("include_synthesized", False)):
+                    hits.extend(
+                        self._synthesized_lexical_hits(
+                            cur,
+                            query=query,
+                            tenant_id=tenant_id,
+                            db_tenant_id=db_tenant_id,
+                            branch=branch,
+                            max_trust=max_trust,
+                            max_sensitivity=max_sensitivity,
+                            filt=filt,
+                            channel="postgres_fts",
+                        )
+                    )
         if not hits:
             return self._local_rank(query, k, filt, channel="postgres_lexical_fallback")
         return self._mark_retrieved_text_as_data(
@@ -5636,9 +6419,466 @@ class PostgresEngine:
                             metadata=hit_metadata,
                         )
                     )
+                if bool(filt.get("include_synthesized", False)):
+                    hits.extend(
+                        self._synthesized_vector_hits(
+                            cur,
+                            query_vec=query_vec,
+                            tenant_id=tenant_id,
+                            db_tenant_id=db_tenant_id,
+                            branch=branch,
+                            max_trust=max_trust,
+                            max_sensitivity=max_sensitivity,
+                            filt=filt,
+                        )
+                    )
         return self._mark_retrieved_text_as_data(
             sorted(hits, key=lambda item: item.score, reverse=True)[:k]
         )
+
+    def _synthesized_lexical_hits(
+        self,
+        cur: Any,
+        *,
+        query: str,
+        tenant_id: str,
+        db_tenant_id: str,
+        branch: str,
+        max_trust: int,
+        max_sensitivity: int,
+        filt: dict[str, Any],
+        channel: str,
+    ) -> list[Hit]:
+        hits: list[Hit] = []
+        if self._table_exists(cur, "observations"):
+            cur.execute(
+                """
+                SELECT observation_id, branch, subject, topic, content,
+                       source_evidence_cids, standing, salience, contradiction_history,
+                       status, trust_tier, sensitivity, access_policy, created_at, updated_at
+                FROM observations
+                WHERE tenant_id = %s AND branch = %s AND status = 'active'
+                  AND trust_tier <= %s AND sensitivity <= %s
+                """,
+                (db_tenant_id, branch, max_trust, max_sensitivity),
+            )
+            for row in cur.fetchall():
+                status = str(row.get("status") or "active")
+                obs_trust = int(row.get("trust_tier") or 0)
+                obs_sens = int(row.get("sensitivity") or 0)
+                obs_policy = dict(row.get("access_policy") or {})
+                obs_cids = list(row.get("source_evidence_cids") or [])
+                decision = may_read_item(
+                    item_tenant_id=tenant_id,
+                    sensitivity=obs_sens,
+                    access_policy=obs_policy,
+                    context=filt,
+                    policy_max_sensitivity=self.policy.max_sensitivity,
+                    status=status,
+                    erased=False,
+                )
+                if not decision.allowed:
+                    continue
+                if not projection_sources_readable(
+                    self,
+                    obs_cids,
+                    tenant_id=tenant_id,
+                    branch=branch,
+                    filt=filt,
+                    policy=self.policy,
+                ):
+                    continue
+                raw_text = str(
+                    row.get("content")
+                    or f"{row.get('subject', '')} {row.get('topic', '')}".strip()
+                )
+                text, privacy_metadata = apply_text_redactions(
+                    raw_text, obs_policy, decision
+                )
+                score = lexical_score(query, text)
+                if score <= 0:
+                    continue
+                contradiction_history = row.get("contradiction_history") or []
+                if isinstance(contradiction_history, str):
+                    contradiction_history = json.loads(contradiction_history)
+                hits.append(
+                    Hit(
+                        id=str(row["observation_id"]),
+                        kind="observation",
+                        tenant_id=tenant_id,
+                        branch=str(row.get("branch") or branch),
+                        text=text,
+                        score=score,
+                        channel=channel,
+                        provenance=obs_cids,
+                        trust_tier=obs_trust,
+                        sensitivity=obs_sens,
+                        metadata={
+                            "subject": str(row.get("subject") or ""),
+                            "topic": str(row.get("topic") or ""),
+                            "status": status,
+                            "standing": float(row.get("standing") or 0.51),
+                            "salience": float(row.get("salience") or 0.5),
+                            "memory_type": "observation",
+                            "contradiction_history": list(contradiction_history),
+                            "created_at": iso_utc(row.get("created_at")),
+                            "updated_at": iso_utc(row.get("updated_at")),
+                            "embedding_partition": vector_partition_for_item(
+                                sensitivity=obs_sens,
+                                access_policy=obs_policy,
+                                status=status,
+                            ),
+                            "backend": self.adapters.lexical_backend,
+                            "privacy": privacy_metadata,
+                        },
+                    )
+                )
+        if self._table_exists(cur, "knowledge_pages"):
+            cur.execute(
+                """
+                SELECT page_id, branch, path, title, content_markdown,
+                       source_evidence_cids, tags, version, status,
+                       trust_tier, sensitivity, access_policy, created_at, updated_at
+                FROM knowledge_pages
+                WHERE tenant_id = %s AND branch = %s AND status = 'active'
+                  AND trust_tier <= %s AND sensitivity <= %s
+                """,
+                (db_tenant_id, branch, max_trust, max_sensitivity),
+            )
+            for row in cur.fetchall():
+                status = str(row.get("status") or "active")
+                kp_trust = int(row.get("trust_tier") or 0)
+                kp_sens = int(row.get("sensitivity") or 0)
+                kp_policy = dict(row.get("access_policy") or {})
+                kp_cids = list(row.get("source_evidence_cids") or [])
+                decision = may_read_item(
+                    item_tenant_id=tenant_id,
+                    sensitivity=kp_sens,
+                    access_policy=kp_policy,
+                    context=filt,
+                    policy_max_sensitivity=self.policy.max_sensitivity,
+                    status=status,
+                    erased=False,
+                )
+                if not decision.allowed:
+                    continue
+                if not projection_sources_readable(
+                    self,
+                    kp_cids,
+                    tenant_id=tenant_id,
+                    branch=branch,
+                    filt=filt,
+                    policy=self.policy,
+                ):
+                    continue
+                title = str(row.get("title") or "")
+                body = str(row.get("content_markdown") or "")
+                raw_text = (
+                    f"{title}\n{body}".strip() if title and body else (title or body)
+                )
+                text, privacy_metadata = apply_text_redactions(
+                    raw_text, kp_policy, decision
+                )
+                score = lexical_score(query, text)
+                if score <= 0:
+                    continue
+                tags = row.get("tags") or []
+                if isinstance(tags, str):
+                    tags = json.loads(tags)
+                hits.append(
+                    Hit(
+                        id=str(row["page_id"]),
+                        kind="knowledge_page",
+                        tenant_id=tenant_id,
+                        branch=str(row.get("branch") or branch),
+                        text=text,
+                        score=score,
+                        channel=channel,
+                        provenance=kp_cids,
+                        trust_tier=kp_trust,
+                        sensitivity=kp_sens,
+                        metadata={
+                            "page_id": str(row["page_id"]),
+                            "path": str(row.get("path") or ""),
+                            "title": title,
+                            "version": int(row.get("version") or 1),
+                            "status": status,
+                            "memory_type": "knowledge_page",
+                            "tags": list(tags),
+                            "created_at": iso_utc(row.get("created_at")),
+                            "updated_at": iso_utc(row.get("updated_at")),
+                            "embedding_partition": vector_partition_for_item(
+                                sensitivity=kp_sens,
+                                access_policy=kp_policy,
+                                status=status,
+                            ),
+                            "backend": self.adapters.lexical_backend,
+                            "privacy": privacy_metadata,
+                        },
+                    )
+                )
+        return hits
+
+    def _synthesized_vector_hits(
+        self,
+        cur: Any,
+        *,
+        query_vec: list[float],
+        tenant_id: str,
+        db_tenant_id: str,
+        branch: str,
+        max_trust: int,
+        max_sensitivity: int,
+        filt: dict[str, Any],
+    ) -> list[Hit]:
+        hits: list[Hit] = []
+        if self._table_exists(cur, "observations"):
+            has_obs_emb = self._column_exists(cur, "observations", "embedding")
+            emb_expr = (
+                "embedding::text AS embedding_literal"
+                if has_obs_emb
+                else "NULL AS embedding_literal"
+            )
+            cur.execute(
+                f"""
+                SELECT observation_id, branch, subject, topic, content,
+                       source_evidence_cids, standing, salience, contradiction_history,
+                       status, trust_tier, sensitivity, access_policy, created_at, updated_at,
+                       {emb_expr}
+                FROM observations
+                WHERE tenant_id = %s AND branch = %s AND status = 'active'
+                  AND trust_tier <= %s AND sensitivity <= %s
+                """,
+                (db_tenant_id, branch, max_trust, max_sensitivity),
+            )
+            for row in cur.fetchall():
+                status = str(row.get("status") or "active")
+                obs_trust = int(row.get("trust_tier") or 0)
+                obs_sens = int(row.get("sensitivity") or 0)
+                obs_policy = dict(row.get("access_policy") or {})
+                obs_cids = list(row.get("source_evidence_cids") or [])
+                decision = may_read_item(
+                    item_tenant_id=tenant_id,
+                    sensitivity=obs_sens,
+                    access_policy=obs_policy,
+                    context=filt,
+                    policy_max_sensitivity=self.policy.max_sensitivity,
+                    status=status,
+                    erased=False,
+                )
+                if not decision.allowed:
+                    continue
+                if not projection_sources_readable(
+                    self,
+                    obs_cids,
+                    tenant_id=tenant_id,
+                    branch=branch,
+                    filt=filt,
+                    policy=self.policy,
+                ):
+                    continue
+                partition = vector_partition_for_item(
+                    sensitivity=obs_sens, access_policy=obs_policy, status=status
+                )
+                if partition == "none":
+                    continue
+                raw_text = str(
+                    row.get("content")
+                    or f"{row.get('subject', '')} {row.get('topic', '')}".strip()
+                )
+                text, privacy_metadata = apply_text_redactions(
+                    raw_text, obs_policy, decision
+                )
+                stored_vec = _vector_from_literal(row.get("embedding_literal"))
+                used_stored = False
+                vec: list[float] | None = None
+                if (
+                    stored_vec is not None
+                    and len(stored_vec) == len(query_vec)
+                    and may_use_stored_embedding(
+                        decision=decision,
+                        sensitivity=obs_sens,
+                        access_policy=obs_policy,
+                        embedding_partition=partition,
+                    )
+                ):
+                    vec = stored_vec
+                    used_stored = True
+                elif self.adapters.embed_missing_on_read and may_embed_item(
+                    sensitivity=obs_sens, access_policy=obs_policy, status=status
+                ):
+                    vec = _partition_embed(self.adapters.embedding, text, partition)
+                if vec is None:
+                    continue
+                score = cosine(query_vec, vec)
+                if score <= 0:
+                    continue
+                contradiction_history = row.get("contradiction_history") or []
+                if isinstance(contradiction_history, str):
+                    contradiction_history = json.loads(contradiction_history)
+                hits.append(
+                    Hit(
+                        id=str(row["observation_id"]),
+                        kind="observation",
+                        tenant_id=tenant_id,
+                        branch=str(row.get("branch") or branch),
+                        text=text,
+                        score=score,
+                        channel=(
+                            "postgres_pgvector"
+                            if used_stored
+                            else "postgres_dense_fallback"
+                        ),
+                        provenance=obs_cids,
+                        trust_tier=obs_trust,
+                        sensitivity=obs_sens,
+                        metadata={
+                            "subject": str(row.get("subject") or ""),
+                            "topic": str(row.get("topic") or ""),
+                            "status": status,
+                            "standing": float(row.get("standing") or 0.51),
+                            "salience": float(row.get("salience") or 0.5),
+                            "memory_type": "observation",
+                            "contradiction_history": list(contradiction_history),
+                            "created_at": iso_utc(row.get("created_at")),
+                            "updated_at": iso_utc(row.get("updated_at")),
+                            "embedding_partition": partition,
+                            "stored_embedding": used_stored,
+                            "backend": self.adapters.embedding.name,
+                            "embedding_dims": self.adapters.embedding.dims,
+                            "privacy": privacy_metadata,
+                        },
+                    )
+                )
+        if self._table_exists(cur, "knowledge_pages"):
+            has_kp_emb = self._column_exists(cur, "knowledge_pages", "embedding")
+            emb_expr = (
+                "embedding::text AS embedding_literal"
+                if has_kp_emb
+                else "NULL AS embedding_literal"
+            )
+            cur.execute(
+                f"""
+                SELECT page_id, branch, path, title, content_markdown,
+                       source_evidence_cids, tags, version, status,
+                       trust_tier, sensitivity, access_policy, maintenance,
+                       created_at, updated_at, {emb_expr}
+                FROM knowledge_pages
+                WHERE tenant_id = %s AND branch = %s AND status = 'active'
+                  AND trust_tier <= %s AND sensitivity <= %s
+                """,
+                (db_tenant_id, branch, max_trust, max_sensitivity),
+            )
+            for row in cur.fetchall():
+                status = str(row.get("status") or "active")
+                kp_trust = int(row.get("trust_tier") or 0)
+                kp_sens = int(row.get("sensitivity") or 0)
+                kp_policy = dict(row.get("access_policy") or {})
+                kp_cids = list(row.get("source_evidence_cids") or [])
+                decision = may_read_item(
+                    item_tenant_id=tenant_id,
+                    sensitivity=kp_sens,
+                    access_policy=kp_policy,
+                    context=filt,
+                    policy_max_sensitivity=self.policy.max_sensitivity,
+                    status=status,
+                    erased=False,
+                )
+                if not decision.allowed:
+                    continue
+                if not projection_sources_readable(
+                    self,
+                    kp_cids,
+                    tenant_id=tenant_id,
+                    branch=branch,
+                    filt=filt,
+                    policy=self.policy,
+                ):
+                    continue
+                partition = vector_partition_for_item(
+                    sensitivity=kp_sens, access_policy=kp_policy, status=status
+                )
+                if partition == "none":
+                    continue
+                title = str(row.get("title") or "")
+                body = str(row.get("content_markdown") or "")
+                raw_text = (
+                    f"{title}\n{body}".strip() if title and body else (title or body)
+                )
+                text, privacy_metadata = apply_text_redactions(
+                    raw_text, kp_policy, decision
+                )
+                stored_vec = _vector_from_literal(row.get("embedding_literal"))
+                if stored_vec is None:
+                    maint = row.get("maintenance") or {}
+                    if isinstance(maint, str):
+                        maint = json.loads(maint)
+                    if isinstance(maint, dict) and isinstance(maint.get("embedding"), list):
+                        try:
+                            stored_vec = [float(v) for v in maint["embedding"]]
+                        except (TypeError, ValueError):
+                            stored_vec = None
+                used_stored = False
+                vec = None
+                if (
+                    stored_vec is not None
+                    and len(stored_vec) == len(query_vec)
+                    and may_use_stored_embedding(
+                        decision=decision,
+                        sensitivity=kp_sens,
+                        access_policy=kp_policy,
+                        embedding_partition=partition,
+                    )
+                ):
+                    vec = stored_vec
+                    used_stored = True
+                elif self.adapters.embed_missing_on_read and may_embed_item(
+                    sensitivity=kp_sens, access_policy=kp_policy, status=status
+                ):
+                    vec = _partition_embed(self.adapters.embedding, text, partition)
+                if vec is None:
+                    continue
+                score = cosine(query_vec, vec)
+                if score <= 0:
+                    continue
+                tags = row.get("tags") or []
+                if isinstance(tags, str):
+                    tags = json.loads(tags)
+                hits.append(
+                    Hit(
+                        id=str(row["page_id"]),
+                        kind="knowledge_page",
+                        tenant_id=tenant_id,
+                        branch=str(row.get("branch") or branch),
+                        text=text,
+                        score=score,
+                        channel=(
+                            "postgres_pgvector"
+                            if used_stored
+                            else "postgres_dense_fallback"
+                        ),
+                        provenance=kp_cids,
+                        trust_tier=kp_trust,
+                        sensitivity=kp_sens,
+                        metadata={
+                            "page_id": str(row["page_id"]),
+                            "path": str(row.get("path") or ""),
+                            "title": title,
+                            "version": int(row.get("version") or 1),
+                            "status": status,
+                            "memory_type": "knowledge_page",
+                            "tags": list(tags),
+                            "created_at": iso_utc(row.get("created_at")),
+                            "updated_at": iso_utc(row.get("updated_at")),
+                            "embedding_partition": partition,
+                            "stored_embedding": used_stored,
+                            "backend": self.adapters.embedding.name,
+                            "embedding_dims": self.adapters.embedding.dims,
+                            "privacy": privacy_metadata,
+                        },
+                    )
+                )
+        return hits
 
     def graph_ppr(
         self,
@@ -8345,6 +9585,20 @@ class PostgresEngine:
                                 },
                             )
                         )
+                if bool(filt.get("include_synthesized", False)):
+                    candidates.extend(
+                        self._synthesized_lexical_hits(
+                            cur,
+                            query=query,
+                            tenant_id=tenant_id,
+                            db_tenant_id=db_tenant_id,
+                            branch=branch,
+                            max_trust=max_trust,
+                            max_sensitivity=max_sensitivity,
+                            filt=filt,
+                            channel=channel,
+                        )
+                    )
         return self._mark_retrieved_text_as_data(
             sorted(candidates, key=lambda item: item.score, reverse=True)[:k]
         )
@@ -9173,7 +10427,14 @@ class PostgresEngine:
             ranked_lists, k, rrf_k=self.policy.rrf_k, annotate_channel_scores=True, channel_weights=channel_weights
         )
 
-    def _mmr(self, query: str, hits: list[Hit], k: int) -> list[Hit]:
+    def _mmr(
+        self,
+        query: str,
+        hits: list[Hit],
+        k: int,
+        filt: dict[str, Any] | None = None,
+    ) -> list[Hit]:
+        del filt  # PostgresEngine MMR uses per-hit privacy metadata / hashing space.
         if os.environ.get("MNEMOSYNE_PG_MMR_SPACE", "hashing") == "stored":
             # Opt-in (MNEMOSYNE_PG_MMR_SPACE=stored): run MMR diversity in the
             # engine's real embedding space by reusing the stored pgvector

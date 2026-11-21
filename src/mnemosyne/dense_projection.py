@@ -8,7 +8,7 @@ from mnemosyne.retrieval import projection_sources_readable, scored_channel_for_
 from mnemosyne.text import lexical_score
 
 
-def expand_source_vectors(engine, query, hits, candidates, k, filt):
+def expand_source_vectors(engine, query, hits, candidates, k, filt, *, oracle=None):
     """Propose readable projections for the normal downstream text reranker.
 
     The score belongs to a source, not to a made-up assertion embedding. Keep
@@ -20,6 +20,10 @@ def expand_source_vectors(engine, query, hits, candidates, k, filt):
     ranked = sorted(hits, key=lambda hit: hit.score, reverse=True)[:max(0, k)]
     if k < 2 or not ranked:
         return ranked
+    from mnemosyne.engine import _clone_candidate_hit
+
+    lookup = oracle if oracle is not None else engine
+    finish = getattr(candidates, "finish", None)
     sources = {(hit.tenant_id, hit.branch, hit.id): hit for hit in ranked if hit.kind == "evidence"}
     grouped = {}
     for candidate in candidates:
@@ -29,11 +33,23 @@ def expand_source_vectors(engine, query, hits, candidates, k, filt):
                    if (candidate.tenant_id, candidate.branch, cid) in sources]
         if not anchors:
             continue
-        projection = engine._get_projection_for_adapter(candidate.tenant_id, candidate.branch,
-                                                         candidate.kind, candidate.id)
+        if oracle is not None:
+            if candidate.kind == "assertion":
+                projection = oracle.assertions.get(candidate.id)
+                if projection is None:
+                    projection = oracle.assertions.get(
+                        oracle._branch_key(candidate.tenant_id, candidate.branch, candidate.id)
+                    )
+            else:
+                projection = oracle.preferences.get(candidate.id)
+            if projection is not None and projection.tenant_id != candidate.tenant_id:
+                projection = None
+        else:
+            projection = engine._get_projection_for_adapter(candidate.tenant_id, candidate.branch,
+                                                             candidate.kind, candidate.id)
         if projection is None:
             continue
-        if not projection_sources_readable(engine, candidate.provenance, tenant_id=candidate.tenant_id,
+        if not projection_sources_readable(lookup, candidate.provenance, tenant_id=candidate.tenant_id,
             branch=candidate.branch, filt=filt, policy=engine.policy):
             continue
         sensitivity = int(getattr(projection, "sensitivity", 0))
@@ -44,11 +60,14 @@ def expand_source_vectors(engine, query, hits, candidates, k, filt):
                                         access_policy=projection.access_policy):
             continue
         anchor = max(anchors, key=lambda hit: hit.score)
-        proposed = replace(candidate, score=anchor.score,
-            channel=scored_channel_for_hit(kind=candidate.kind, base_channel="dense"),
-            metadata={**candidate.metadata, "source_vector_proxy": True,
+        cloned = _clone_candidate_hit(candidate)
+        if finish is not None:
+            cloned = finish(cloned, candidate)
+        proposed = replace(cloned, score=anchor.score,
+            channel=scored_channel_for_hit(kind=cloned.kind, base_channel="dense"),
+            metadata={**cloned.metadata, "source_vector_proxy": True,
                       "dense_source_cids": [hit.id for hit in anchors], "stored_embedding_used": False})
-        grouped.setdefault(anchor.id, []).append((lexical_score(query, candidate.text), proposed))
+        grouped.setdefault(anchor.id, []).append((lexical_score(query, cloned.text), proposed))
     proposed = []
     for rows in grouped.values():
         proposed.extend(hit for _, hit in sorted(rows, key=lambda pair: (-pair[0], pair[1].id))[:2])

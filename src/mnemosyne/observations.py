@@ -432,18 +432,42 @@ def reconcile_observation(
     *,
     now: datetime | None = None,
     evidence_getter: Any = None,
+    reconciliation_mode: Literal["auto", "corroborate", "refine", "supersede_evolved"] = "auto",
 ) -> tuple[Observation, bool]:
     """Reconcile an incoming observation with an existing active observation.
+
+    Parameters
+    ----------
+    reconciliation_mode:
+        - ``"auto"`` (default): whitespace-normalized identical content corroborates;
+          differing content supersedes with a contradiction standing penalty.
+        - ``"corroborate"``: merges proof quotes and independent sources while
+          preserving ``existing.content``.
+        - ``"refine"``: merges proof quotes and updates ``content`` to
+          ``incoming.content`` without applying a contradiction penalty.
+        - ``"supersede_evolved"``: records a ``ContradictionSnapshot`` in the
+          preserved history chain and supersedes ``existing`` for valid temporal
+          belief evolution without penalizing grounded standing below
+          ``GROUNDED_FLOOR``.
 
     Returns:
         (reconciled_observation, is_contradiction)
     """
+    if reconciliation_mode not in {"auto", "corroborate", "refine", "supersede_evolved"}:
+        raise ValueError(f"Unsupported reconciliation_mode: {reconciliation_mode!r}")
+
     now = now or utc_now()
     if evidence_getter is not None:
         verify_observation_proof_quotes(incoming, evidence_getter)
-    # Check if contents are identical or harmonious
-    if existing.content.strip().lower() == incoming.content.strip().lower():
-        # Reinforcement / corroboration
+
+    existing_norm = " ".join(existing.content.split()).casefold()
+    incoming_norm = " ".join(incoming.content.split()).casefold()
+    is_reinforcement = reconciliation_mode in {"corroborate", "refine"} or (
+        reconciliation_mode == "auto" and existing_norm == incoming_norm
+    )
+
+    # Check if contents are identical or explicitly marked as corroboration/refinement
+    if is_reinforcement:
         all_cids = list(dict.fromkeys(list(existing.source_evidence_cids) + list(incoming.source_evidence_cids)))
         existing_quotes: dict[tuple[str, int | None, str], ProofQuote] = {
             (q.cid, q.block_index, q.quote): q for q in existing.proof_quotes
@@ -469,9 +493,42 @@ def reconcile_observation(
             )
 
         delta_sources = max(0, new_sources - old_sources)
+        updated_content = incoming.content if reconciliation_mode == "refine" else existing.content
         if delta_sources == 0:
-            # Repeated evidence does not earn standing or refresh salience.
-            return existing, False
+            if reconciliation_mode != "refine" or existing_norm == incoming_norm:
+                # Repeated evidence does not earn standing or refresh salience.
+                return existing, False
+            # Refinement with no new independent source preserves standing/salience
+            # without read/self-amplification while updating the refined wording.
+            refined = Observation(
+                tenant_id=existing.tenant_id,
+                user_id=existing.user_id,
+                subject=existing.subject,
+                topic=existing.topic,
+                content=updated_content,
+                branch=existing.branch,
+                observation_id=existing.observation_id,
+                proof_quotes=merged_quotes,
+                source_evidence_cids=all_cids,
+                independent_source_count=existing.independent_source_count,
+                corroboration_velocity=existing.corroboration_velocity,
+                contradiction_history=list(existing.contradiction_history),
+                standing=existing.standing,
+                salience=existing.salience,
+                access_velocity=existing.access_velocity,
+                access_count=existing.access_count,
+                last_accessed_at=existing.last_accessed_at,
+                status="active",
+                version=existing.version + 1,
+                freshness_watermark=dt_to_json(now),
+                trust_tier=max(existing.trust_tier, incoming.trust_tier),
+                sensitivity=max(existing.sensitivity, incoming.sensitivity),
+                access_policy=dict(existing.access_policy),
+                created_at=existing.created_at,
+                updated_at=now,
+            )
+            return refined, False
+
         hours_elapsed = max(0.01, (now - existing.updated_at).total_seconds() / 3600.0)
         v_c = delta_sources / hours_elapsed
 
@@ -494,14 +551,14 @@ def reconcile_observation(
             user_id=existing.user_id,
             subject=existing.subject,
             topic=existing.topic,
-            content=existing.content,
+            content=updated_content,
             branch=existing.branch,
             observation_id=existing.observation_id,
             proof_quotes=merged_quotes,
             source_evidence_cids=all_cids,
             independent_source_count=new_sources,
             corroboration_velocity=round(v_c, 4),
-            contradiction_history=existing.contradiction_history,
+            contradiction_history=list(existing.contradiction_history),
             standing=standing,
             salience=salience,
             access_velocity=v_acc,
@@ -518,19 +575,33 @@ def reconcile_observation(
         )
         return reconciled, False
 
-    # Contradiction: incoming supersedes existing
+    # Contradiction or temporal evolution: incoming supersedes existing while
+    # preserving the full prior contradiction history chain.
+    rationale = (
+        f"Belief evolved from {existing.content!r} to {incoming.content!r}"
+        if reconciliation_mode == "supersede_evolved"
+        else f"Content updated from {existing.content!r} to {incoming.content!r}"
+    )
     snapshot = ContradictionSnapshot(
         prior_observation_id=existing.observation_id,
         content=existing.content,
         superseded_at=now,
         superseding_evidence_cids=list(incoming.source_evidence_cids),
-        rationale=f"Content updated from {existing.content!r} to {incoming.content!r}",
+        rationale=rationale,
     )
-    new_history = list(incoming.contradiction_history) + [snapshot]
+    seen_snapshots: set[tuple[str, str, str]] = set()
+    new_history: list[ContradictionSnapshot] = []
+    for item in (*existing.contradiction_history, *incoming.contradiction_history, snapshot):
+        key = (item.prior_observation_id, item.content, dt_to_json(item.superseded_at))
+        if key not in seen_snapshots:
+            seen_snapshots.add(key)
+            new_history.append(item)
+
+    effective_contradictions = 0 if reconciliation_mode == "supersede_evolved" else len(new_history)
     standing = compute_dynamic_standing(
         independent_source_count=incoming.independent_source_count,
         corroboration_velocity=incoming.corroboration_velocity,
-        contradiction_count=len(new_history),
+        contradiction_count=effective_contradictions,
         access_velocity=incoming.access_velocity,
     )
     salience, v_acc = compute_dynamic_salience(

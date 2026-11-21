@@ -90,12 +90,129 @@ def _command_text(command):
     return command if isinstance(command, str) else ""
 
 
-def _pytest_invocation(command, *, runner="pytest"):
-    """Identify one real pytest invocation, not a command that prints its log.
+def _is_safe_setup_command(setup, assignment):
+    """Allow only output-free shell setup commands before &&."""
+    if not setup:
+        return False
+    if len(setup) == 2 and setup[0] == "cd" and not setup[1].startswith("-"):
+        return True
+    if (
+        len(setup) == 2
+        and setup[0] in {"source", "."}
+        and not setup[1].startswith("-")
+        and Path(setup[1]).parts[-2:] in {("bin", "activate"), ("Scripts", "activate")}
+    ):
+        return True
+    if len(setup) >= 2 and setup[0] == "export" and all(assignment.match(tok) for tok in setup[1:]):
+        return True
+    if len(setup) >= 2 and setup[0] == "set":
+        index = 1
+        while index < len(setup):
+            tok = setup[index]
+            if tok in {"-e", "-u", "-eu", "-ue"}:
+                index += 1
+            elif tok in {"-o", "-eo", "-uo", "-euo", "-ueo"} and index + 1 < len(setup) and setup[index + 1] == "pipefail":
+                index += 2
+            else:
+                return False
+        return True
+    return False
 
-    Only output-free shell setup and known exec-style wrappers are accepted.
-    Pipelines, substitutions, redirects, fallback commands, and arbitrary shell
-    programs make attribution ambiguous and deliberately remain ungraded.
+
+def _strip_stderr_to_stdout(stage):
+    """Strip exact 2>&1 redirections from a command stage while leaving other redirects intact."""
+    cleaned = []
+    index = 0
+    while index < len(stage):
+        if index + 2 < len(stage) and stage[index:index + 3] == ["2", ">&", "1"]:
+            index += 3
+            continue
+        cleaned.append(stage[index])
+        index += 1
+    return cleaned
+
+
+def _is_safe_output_filter_stage(stage):
+    """Validate an output-filtering pipe stage (tail/head/tee/grep) that cannot read forged files."""
+    if not stage:
+        return False
+    if any(tok and all(char in ";&|<>()" for char in tok) for tok in stage):
+        return False
+    exe = Path(stage[0]).name
+    args = stage[1:]
+    if exe in {"tail", "head"}:
+        expect_count = False
+        for arg in args:
+            if expect_count:
+                if not re.fullmatch(r"[+-]?\d+[kKmMgGbB]?", arg):
+                    return False
+                expect_count = False
+            elif arg in {"-n", "-c", "--lines", "--bytes"}:
+                expect_count = True
+            elif arg in {"-q", "--quiet", "--silent"}:
+                continue
+            elif re.fullmatch(r"(?:-[ncq]+|--(?:lines|bytes)=)[+-]?\d+[kKmMgGbB]?", arg):
+                continue
+            elif re.fullmatch(r"-\d+", arg):
+                continue
+            else:
+                return False
+        return not expect_count
+    if exe == "tee":
+        has_path = False
+        for arg in args:
+            if arg in {"-a", "--append", "-i", "--ignore-interrupts"}:
+                continue
+            if arg.startswith("-") or not arg:
+                return False
+            has_path = True
+        return has_path
+    if exe == "grep":
+        expect_value = False
+        saw_explicit_pattern = False
+        positionals = 0
+        value_flags = {
+            "-e", "--regexp", "-m", "--max-count",
+            "-A", "--after-context", "-B", "--before-context", "-C", "--context",
+            "--color", "--colour", "--label",
+        }
+        for arg in args:
+            if expect_value:
+                expect_value = False
+                continue
+            if arg == "--":
+                continue
+            if arg in {"-f", "--file", "-r", "-R", "--recursive", "--dereference-recursive"} or arg.startswith("--file="):
+                return False
+            if arg in value_flags:
+                if arg in {"-e", "--regexp"}:
+                    saw_explicit_pattern = True
+                expect_value = True
+                continue
+            if arg.startswith("--regexp="):
+                saw_explicit_pattern = True
+                continue
+            if arg.startswith("-"):
+                if re.fullmatch(r"-[EFiIvncqHhloswx]+", arg):
+                    continue
+                if re.fullmatch(r"-(?:m|A|B|C)\d+", arg) or arg.startswith(("--color=", "--colour=", "--max-count=")):
+                    continue
+                return False
+            positionals += 1
+            if saw_explicit_pattern or positionals > 1:
+                return False
+        return not expect_value and (saw_explicit_pattern or positionals == 1)
+    return False
+
+
+def _pytest_invocation(command, *, runner="pytest"):
+    """Identify one real test-runner invocation, not a command that prints its log.
+
+    Only output-free shell setup, known exec-style wrappers, stderr-to-stdout
+    merging (2>&1), and verified output-filtering pipes (tail/head/tee/grep
+    without external input files) are accepted. Arbitrary pipelines,
+    substitutions, file redirects, fallback commands, and arbitrary shell
+    programs remain ungraded.
     """
     text = _command_text(command).strip()
     if any(char in text for char in ("\n", "$", "`")):
@@ -112,14 +229,27 @@ def _pytest_invocation(command, *, runner="pytest"):
         return _pytest_invocation(tokens[2], runner=runner)
     assignment = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
     # A setup command cannot print a forged summary. Requiring && also means
-    # the final exit status belongs to pytest only after successful setup.
+    # the final exit status belongs to the runner only after successful setup.
     while "&&" in tokens:
         boundary = tokens.index("&&")
         setup, tokens = tokens[:boundary], tokens[boundary + 1:]
-        if not (len(setup) == 2 and setup[0] == "cd" and not setup[1].startswith("-")):
+        if not _is_safe_setup_command(setup, assignment):
             return None
+    # Split single output-filtering pipes while rejecting ||, ;, file redirects, etc.
+    stages = [[]]
+    for tok in tokens:
+        if tok == "|":
+            stages.append([])
+        else:
+            stages[-1].append(tok)
+    if not stages or len(stages) > 4 or any(not stage for stage in stages):
+        return None
+    tokens = _strip_stderr_to_stdout(stages[0])
     if any(token and all(char in ";&|<>()" for char in token) for token in tokens):
         return None
+    for filter_stage in stages[1:]:
+        if not _is_safe_output_filter_stage(filter_stage):
+            return None
     while tokens and assignment.match(tokens[0]):
         tokens.pop(0)
     if tokens and Path(tokens[0]).name == "env":
@@ -808,6 +938,8 @@ class CodexAdapter:
         path = Path(path).expanduser().resolve()
         turns = _read_transcript(path, session)
         state["transcript_path"] = str(path)
+        state.pop("transcript_missing", None)
+        state.pop("transcript_missing_at", None)
         if turns is None:
             state["unsupported_origin"] = "subagent"
             return None
@@ -1046,15 +1178,58 @@ class CodexAdapter:
             state["tool_events"] = []
         self._save(path, state)
 
-    def recover_completed(self, *, max_sessions=8):
+    @staticmethod
+    def _can_gc_session(path: Path, state: dict, now_ts: float, max_age_seconds: float) -> bool:
+        try:
+            if now_ts - path.stat().st_mtime < max_age_seconds:
+                return False
+        except OSError:
+            return False
+        if path.with_suffix(".spool.jsonl").exists():
+            return False
+        if state.get("late_tool_events") or state.get("pending_observations") or state.get("pending_tool_events"):
+            return False
+        if state.get("end_requested") and not state.get("ended_at"):
+            return False
+        return True
+
+    def _gc_session_files(self, path: Path, now_ts: float, max_age_seconds: float) -> tuple[int, int]:
+        lock_path = path.with_suffix(".lock")
+        spool_lock = path.with_suffix(".spool.lock")
+        removed_session = 0
+        removed_locks = 0
+        try:
+            with bounded_lock(lock_path, timeout=0.05):
+                if not path.exists():
+                    return 0, 0
+                fresh = json.loads(path.read_text())
+                if not self._can_gc_session(path, fresh, now_ts, max_age_seconds):
+                    return 0, 0
+                path.unlink(missing_ok=True)
+                removed_session = 1
+                if spool_lock.exists():
+                    spool_lock.unlink(missing_ok=True)
+                    removed_locks += 1
+        except (OSError, ValueError, TimeoutError):
+            return 0, 0
+        if removed_session and not path.exists():
+            try:
+                lock_path.unlink(missing_ok=True)
+                removed_locks += 1
+            except OSError:
+                pass
+        return removed_session, removed_locks
+
+    def recover_completed(self, *, max_sessions=8, gc_max_age_days=14):
         """Retry known host sessions using their complete transcript records."""
         report = {"checked_sessions": 0, "captured_turns": 0, "errors": [],
-                  "pending_late_event_sessions": 0, "pending_late_events": 0}
+                  "pending_late_event_sessions": 0, "pending_late_events": 0,
+                  "transcript_missing_marked": 0, "gc_sessions": 0, "gc_locks": 0}
+        now_ts = datetime.now(UTC).timestamp()
+        max_age_seconds = max(0, int(gc_max_age_days)) * 86400 if gc_max_age_days is not None else None
         paths = sorted(self.state_dir.glob("session-*.json"),
                        key=lambda item: item.stat().st_mtime, reverse=True)
         for path in paths:
-            if report["checked_sessions"] >= max_sessions:
-                break
             try:
                 state = json.loads(path.read_text())
                 session = state.get("session_id")
@@ -1065,16 +1240,49 @@ class CodexAdapter:
                     report["pending_late_event_sessions"] += 1
                     report["pending_late_events"] += sum(
                         len(row.get("tool_events", [])) for row in late.values())
-                turns = self._transcript({}, state, session, all_completed=True) or []
+                transcript_missing = bool(state.get("transcript_missing"))
+                turns = []
+                if not transcript_missing:
+                    try:
+                        turns = self._transcript({}, state, session, all_completed=True) or []
+                    except FileNotFoundError:
+                        matches = list(self.transcript_root.glob(f"**/rollout-*-{session}.jsonl"))
+                        if len(matches) == 1 and matches[0].exists():
+                            turns = self._transcript({"transcript_path": str(matches[0])}, state, session, all_completed=True) or []
+                        else:
+                            try:
+                                with bounded_lock(path.with_suffix(".lock"), timeout=0.5):
+                                    fresh = json.loads(path.read_text()) if path.exists() else {}
+                                    recorded = fresh.get("transcript_path")
+                                    if fresh.get("session_id") == session and (not recorded or not Path(recorded).expanduser().exists()):
+                                        fresh["transcript_missing"] = True
+                                        fresh["transcript_missing_at"] = datetime.now(UTC).isoformat()
+                                        self._save(path, fresh)
+                                        state = fresh
+                                        transcript_missing = True
+                                        report["transcript_missing_marked"] += 1
+                            except TimeoutError:
+                                continue
                 observed = set(state.get("observed_turns", {}))
                 skipped = set(state.get("skipped_legacy_turns", {}))
-                if not late and not state.get("pending_observations") and not any(
-                    turn["turn_id"] not in observed | skipped for turn in turns
-                ):
+                has_unobserved = any(turn["turn_id"] not in observed | skipped for turn in turns)
+                if not late and not state.get("pending_observations") and not has_unobserved:
+                    if (
+                        max_age_seconds is not None
+                        and report["gc_sessions"] < 64
+                        and self._can_gc_session(path, state, now_ts, max_age_seconds)
+                    ):
+                        gc_s, gc_l = self._gc_session_files(path, now_ts, max_age_seconds)
+                        report["gc_sessions"] += gc_s
+                        report["gc_locks"] += gc_l
+                    continue
+                if report["checked_sessions"] >= max_sessions:
                     continue
                 report["checked_sessions"] += 1
-                self.handle({"hook_event_name": "Stop", "session_id": session,
-                             "transcript_path": state.get("transcript_path")})
+                stop_payload = {"hook_event_name": "Stop", "session_id": session}
+                if not transcript_missing and state.get("transcript_path"):
+                    stop_payload["transcript_path"] = state.get("transcript_path")
+                self.handle(stop_payload)
                 after = json.loads(path.read_text())
                 report["captured_turns"] += len(set(after.get("observed_turns", {})) - observed)
                 if late:
@@ -1084,6 +1292,20 @@ class CodexAdapter:
                         len(row.get("tool_events", [])) for row in late.values())
             except Exception as error:
                 report["errors"].append({"state_file": path.name, "error": type(error).__name__})
+        if max_age_seconds is not None:
+            for pattern, suffix_len in (("session-*.spool.lock", len(".spool.lock")), ("session-*.lock", len(".lock"))):
+                for lock_file in self.state_dir.glob(pattern):
+                    if report["gc_locks"] >= 128:
+                        break
+                    base = lock_file.name[:-suffix_len] + ".json"
+                    if (self.state_dir / base).exists():
+                        continue
+                    try:
+                        if now_ts - lock_file.stat().st_mtime >= max_age_seconds:
+                            lock_file.unlink(missing_ok=True)
+                            report["gc_locks"] += 1
+                    except OSError:
+                        continue
         return report
 
     def handle(self, payload):
@@ -1207,7 +1429,15 @@ class CodexAdapter:
                 if state.get("observed_turn"):
                     state.setdefault("observed_turns", {}).setdefault(state["observed_turn"], None)
                 self._stage("transcript", session, payload.get("turn_id"))
-                self._transcript(payload, state, session)
+                if not (state.get("transcript_missing") and not payload.get("transcript_path")):
+                    try:
+                        self._transcript(payload, state, session)
+                    except FileNotFoundError:
+                        if not payload.get("transcript_path") and state.get("transcript_path"):
+                            state["transcript_missing"] = True
+                            state["transcript_missing_at"] = datetime.now(UTC).isoformat()
+                        else:
+                            raise
                 if state.get("unsupported_origin"):
                     self._save(path, state)
                     return {}
@@ -1359,7 +1589,18 @@ class CodexAdapter:
                 return {}
             self._reconcile_late_events(facade, state, session)
             self._stage("transcript", session, state.get("turn_id"))
-            recovered = self._transcript(payload, state, session, all_completed=True)
+            if state.get("transcript_missing") and not payload.get("transcript_path"):
+                recovered = []
+            else:
+                try:
+                    recovered = self._transcript(payload, state, session, all_completed=True)
+                except FileNotFoundError:
+                    if not payload.get("transcript_path") and state.get("transcript_path"):
+                        state["transcript_missing"] = True
+                        state["transcript_missing_at"] = datetime.now(UTC).isoformat()
+                        recovered = []
+                    else:
+                        raise
             if state.get("unsupported_origin"):
                 return {}
             recovered = recovered or []

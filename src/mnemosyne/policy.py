@@ -112,6 +112,7 @@ class OperatingPolicy:
     top_k: int = 8
     deep_top_k: int = 24
     token_budget: int = 4096
+    delivery_byte_budget: int = 16384
     rrf_k: int = 60
     rerank_width: int = 32
     mmr_lambda: float = 0.72
@@ -217,6 +218,19 @@ class OperatingPolicy:
             "semantic": 0.35,
             "importance": 0.20,
             "recency": 0.10,
+        }
+    )
+    # Rebalanced activation weights applied automatically when a retrieval batch
+    # has zero verified outcome demand (demand_outcome_count == 0) and the
+    # caller has not overridden activation_weights. Keeps activation_weights
+    # defaults byte-stable for config-drift checks while preventing dead
+    # base_level=0.0 from wasting 35% of the cold-start activation budget.
+    cold_start_activation_weights: dict[str, float] = field(
+        default_factory=lambda: {
+            "base_level": 0.10,
+            "semantic": 0.55,
+            "importance": 0.20,
+            "recency": 0.15,
         }
     )
     immutable_rails: dict[str, Any] = field(

@@ -81,8 +81,12 @@ class Trajectory(_RecordModel):
         return _RecordModel.from_dict.__func__(cls, data)
 
     @classmethod
-    def from_record(cls, record: dict[str, Any]) -> "Trajectory":
-        row = copy.deepcopy(record)
+    def from_record(cls, record: dict[str, Any], *, _cow: bool = False) -> "Trajectory":
+        from mnemosyne.experience.store import _CowDict
+        if _cow and isinstance(record, _CowDict):
+            row = _CowDict(record._origin) if not record._dirty else copy.deepcopy(record)
+        else:
+            row = copy.deepcopy(record)
         legacy = row.get("status") == "legacy"
         item = cls(
             tenant_id=row["tenant_id"], user_id=row.get("user_id", ""),
@@ -157,8 +161,12 @@ class FailureAttribution:
 
 class _ArtifactModel(_RecordModel):
     @classmethod
-    def from_record(cls, record: dict[str, Any]):
-        row = copy.deepcopy(record)
+    def from_record(cls, record: dict[str, Any], *, _cow: bool = False):
+        from mnemosyne.experience.store import _CowDict
+        if _cow and isinstance(record, _CowDict):
+            row = _CowDict(record._origin) if not record._dirty else copy.deepcopy(record)
+        else:
+            row = copy.deepcopy(record)
         common = dict(tenant_id=row.get("tenant_id", ""), id=row["id"],
                       status=row.get("state", "candidate"),
                       source_episode_ids=row.get("source_episode_ids", []),
@@ -266,8 +274,12 @@ class LearningSystem:
         self._baselines: dict[tuple[str, str, str], dict] = {}
 
     def _refresh(self, tenant: str, state: dict) -> None:
+        from mnemosyne.experience.store import _CowDict
+
         self._native_tenants = getattr(self, "_native_tenants", set()) | {tenant}
         baselines = getattr(self, "_baselines", {})
+        refreshed_origins = getattr(self, "_refreshed_origins", {})
+        field_snapshots = getattr(self, "_field_snapshots", {})
         retained = {key: item for collection in (self.trajectories, self.lessons, self.procedures)
                     for key, item in collection.items() if item.tenant_id == tenant}
 
@@ -278,6 +290,22 @@ class LearningSystem:
                     setattr(existing, entry.name, getattr(item, entry.name))
                 return existing
             return item
+
+        def _origin_of(row):
+            if isinstance(row, _CowDict) and not row._dirty:
+                return row._origin
+            return None
+
+        def _snapshot_fields(item, attr=None):
+            return (
+                tuple(
+                    getattr(item, entry.name)
+                    for entry in fields(item)
+                    if entry.name != "_native"
+                ),
+                None if attr is None else (attr.trajectory_id, attr.signature, attr.cause, tuple(attr.evidence), attr.confidence),
+            )
+
         for collection in (self.trajectories, self.lessons, self.procedures):
             for key, item in list(collection.items()):
                 if item.tenant_id == tenant:
@@ -285,27 +313,99 @@ class LearningSystem:
         for key, row in state["episodes"].items():
             if row.get("status") == "erased":
                 self.attributions.pop(key, None)
+                refreshed_origins.pop((tenant, "episodes", key), None)
+                field_snapshots.pop((tenant, "episodes", key), None)
                 continue
-            self.trajectories[key] = retain(Trajectory.from_record(row))
+            origin = _origin_of(row)
+            existing = retained.get(key)
+            if (
+                origin is not None
+                and isinstance(existing, Trajectory)
+                and refreshed_origins.get((tenant, "episodes", key)) is origin
+                and not (isinstance(existing._native, _CowDict) and existing._native._dirty)
+            ):
+                self.trajectories[key] = existing
+                continue
+            item = retain(Trajectory.from_record(row, _cow=True))
+            self.trajectories[key] = item
             attribution = row.get("failure_attribution")
             if attribution:
                 if key in self.attributions:
-                    existing = self.attributions[key]
+                    existing_attr = self.attributions[key]
                     for name, value in attribution.items():
-                        setattr(existing, name, copy.deepcopy(value))
+                        setattr(existing_attr, name, copy.deepcopy(value))
                 else:
                     self.attributions[key] = FailureAttribution.from_dict(attribution)
             else:
                 self.attributions.pop(key, None)
-            baselines[(tenant, "episodes", key)] = copy.deepcopy(row)
+            baselines[(tenant, "episodes", key)] = origin if origin is not None else copy.deepcopy(row)
+            if origin is not None:
+                refreshed_origins[(tenant, "episodes", key)] = origin
+                field_snapshots[(tenant, "episodes", key)] = _snapshot_fields(item, self.attributions.get(key))
+            else:
+                refreshed_origins.pop((tenant, "episodes", key), None)
+                field_snapshots.pop((tenant, "episodes", key), None)
         for key, row in state["artifacts"].items():
             if row.get("erased") or row.get("kind") not in {"lesson", "procedure"}:
+                refreshed_origins.pop((tenant, "artifacts", key), None)
+                field_snapshots.pop((tenant, "artifacts", key), None)
                 continue
             model = Lesson if row["kind"] == "lesson" else Procedure
-            item = model.from_record(row)
-            (self.lessons if model is Lesson else self.procedures)[key] = retain(item)
-            baselines[(tenant, "artifacts", key)] = copy.deepcopy(row)
+            origin = _origin_of(row)
+            existing = retained.get(key)
+            if (
+                origin is not None
+                and type(existing) is model
+                and refreshed_origins.get((tenant, "artifacts", key)) is origin
+                and not (isinstance(existing._native, _CowDict) and existing._native._dirty)
+            ):
+                (self.lessons if model is Lesson else self.procedures)[key] = existing
+                continue
+            item = retain(model.from_record(row, _cow=True))
+            (self.lessons if model is Lesson else self.procedures)[key] = item
+            baselines[(tenant, "artifacts", key)] = origin if origin is not None else copy.deepcopy(row)
+            if origin is not None:
+                refreshed_origins[(tenant, "artifacts", key)] = origin
+                field_snapshots[(tenant, "artifacts", key)] = _snapshot_fields(item)
+            else:
+                refreshed_origins.pop((tenant, "artifacts", key), None)
+                field_snapshots.pop((tenant, "artifacts", key), None)
         self._baselines = baselines
+        self._refreshed_origins = refreshed_origins
+        self._field_snapshots = field_snapshots
+
+    def _item_unmodified_from_baseline(self, tenant: str, name: str, item: Any) -> bool:
+        from mnemosyne.experience.store import _CowDict, _CowList
+        key = (tenant, name, item.id)
+        snap = getattr(self, "_field_snapshots", {}).get(key)
+        if snap is None:
+            return False
+        if isinstance(item._native, _CowDict) and item._native._dirty:
+            return False
+        saved_fields, saved_attr = snap
+        current_fields = tuple(
+            getattr(item, entry.name)
+            for entry in fields(item)
+            if entry.name != "_native"
+        )
+        if len(current_fields) != len(saved_fields):
+            return False
+        for cur, prev in zip(current_fields, saved_fields):
+            if cur is prev:
+                if isinstance(cur, (_CowDict, _CowList)) and cur._dirty:
+                    return False
+            elif cur != prev:
+                return False
+        if name == "episodes":
+            attr = self.attributions.get(item.id)
+            cur_attr = (
+                None
+                if attr is None
+                else (attr.trajectory_id, attr.signature, attr.cause, tuple(attr.evidence), attr.confidence)
+            )
+            if cur_attr != saved_attr:
+                return False
+        return True
 
     def persist_native(self, tenants: list[str] | None = None) -> list[str]:
         """Merge edited compatibility fields into their sole native records.

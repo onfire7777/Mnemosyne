@@ -9,6 +9,12 @@ import time
 from mnemosyne.experience.receipts import digest
 
 PROJECTION_VERSION = 3
+MAX_ATTEMPTS = 8
+DEFAULT_WORKER_PROVIDER_LIMIT = 8
+_RETRYABLE_REASONS = (
+    'provider_failed', 'provider_unavailable', 'reviewer_unavailable',
+    'review_failed', 'provider_input_budget',
+)
 
 
 def maintenance_context(engine, tenant_id, user_id):
@@ -22,16 +28,39 @@ def maintenance_context(engine, tenant_id, user_id):
                              max_trust_tier=engine.policy.max_trust_tier)
 
 
-def _retryable(value):
+def _safe_error_token(value):
+    if not isinstance(value, str) or not value or len(value) > 64:
+        return None
+    if not all(ch.isalnum() or ch in {'_', '-', ':'} for ch in value):
+        return None
+    return value
+
+
+def _retryable_reason(value):
+    """Return a bounded, privacy-safe retryable reason token, or None."""
     if isinstance(value, dict):
-        if value.get('provider_unavailable') or value.get('coverage_stalled') or value.get('reason') in {
-            'provider_failed', 'provider_unavailable', 'reviewer_unavailable', 'review_failed', 'provider_input_budget',
-        }:
-            return True
-        return any(_retryable(item) for item in value.values())
-    if isinstance(value, list):
-        return any(_retryable(item) for item in value)
-    return False
+        reason = value.get('reason')
+        if reason in _RETRYABLE_REASONS:
+            err = _safe_error_token(value.get('error_type'))
+            return f'{reason}:{err}' if err else reason
+        if value.get('provider_unavailable'):
+            return 'provider_unavailable'
+        if value.get('coverage_stalled'):
+            return 'coverage_stalled'
+        for item in value.values():
+            found = _retryable_reason(item)
+            if found is not None:
+                return found
+    elif isinstance(value, list):
+        for item in value:
+            found = _retryable_reason(item)
+            if found is not None:
+                return found
+    return None
+
+
+def _retryable(value):
+    return _retryable_reason(value) is not None
 
 
 def _save_checkpoint(path, state):
@@ -49,6 +78,31 @@ def _next_attempt(previous, timestamp):
     attempts = previous.get('attempts', 0) + 1
     return {'attempts': attempts, 'last_attempt': timestamp,
             'next_attempt': timestamp + min(3600, 15 * 2 ** min(attempts, 8))}
+
+
+def _dead_record(item, timestamp, error_type=None):
+    record = {
+        name: item[name]
+        for name in ('episode_id', 'source_cid', 'fingerprint', 'attempts', 'last_attempt')
+        if name in item
+    }
+    record['last_error_type'] = (
+        _safe_error_token(error_type)
+        or _safe_error_token(item.get('last_error_type'))
+        or 'max_attempts_exceeded'
+    )
+    record['dead_at'] = timestamp
+    return record
+
+
+def _error_histogram(provider_queue, provider_dead):
+    counts = {}
+    for collection in (provider_queue, provider_dead):
+        for item in collection.values():
+            token = _safe_error_token(item.get('last_error_type'))
+            if token:
+                counts[token] = counts.get(token, 0) + 1
+    return counts
 
 
 def advance_project_memory(runtime, tenant_id, user_id, checkpoint_path, *, limit=4, provider_limit=2):
@@ -74,12 +128,14 @@ def advance_project_memory(runtime, tenant_id, user_id, checkpoint_path, *, limi
     retries = checkpoint.get('retries', {}) if compatible else {}
     provider_queue = checkpoint.get('provider_queue', {}) if compatible else {}
     provider_completed = checkpoint.get('provider_completed', {}) if compatible else {}
+    provider_dead = checkpoint.get('provider_dead', {}) if compatible else {}
     if compatible and checkpoint.get('version') != PROJECTION_VERSION:
         # Earlier checkpoints declared whole sources done after a single
         # bounded proposal. Revisit deterministic snapshots and source coverage
         # once while retaining genuine failures' retry backoff.
         completed = {}
         provider_completed = {}
+        provider_dead = {}
     timestamp = time.time()
     state = runtime.writer.read(tenant_id)
     rows = sorted((row for row in state['episodes'].values()
@@ -95,13 +151,19 @@ def advance_project_memory(runtime, tenant_id, user_id, checkpoint_path, *, limi
                 and item.get('fingerprint') == fingerprints[episode['id']])
     provider_queue = {key: item for key, item in provider_queue.items() if current_source(item)}
     provider_completed = {key: item for key, item in provider_completed.items() if current_source(item)}
+    provider_dead = {key: item for key, item in provider_dead.items() if current_source(item)}
+    # Retire any already-exhausted legacy queue items before processing new work.
+    for key in [k for k, item in provider_queue.items() if item.get('attempts', 0) >= MAX_ATTEMPTS]:
+        provider_dead[key] = _dead_record(provider_queue.pop(key), timestamp)
     state = {'version': PROJECTION_VERSION, 'scope': scope, 'completed': completed, 'retries': retries,
-             'provider_queue': provider_queue, 'provider_completed': provider_completed}
+             'provider_queue': provider_queue, 'provider_completed': provider_completed,
+             'provider_dead': provider_dead}
     pending = [(row, fingerprints[row['id']]) for row in rows]
     pending = [(row, fingerprint) for row, fingerprint in pending
                if completed.get(row['id']) != fingerprint]
     report = {'processed': 0, 'created': 0, 'pending': len(pending), 'errors': [],
-              'provider_processed': 0, 'provider_pending': 0, 'provider_deferred': 0}
+              'provider_processed': 0, 'provider_pending': 0, 'provider_deferred': 0,
+              'provider_dead': len(provider_dead), 'provider_error_histogram': {}}
     eligible = [(row, fingerprint) for row, fingerprint in pending
                 if retries.get(row['id'], {}).get('next_attempt', 0) <= timestamp]
     # Retry failures later without allowing a few old failures to starve all
@@ -120,8 +182,10 @@ def advance_project_memory(runtime, tenant_id, user_id, checkpoint_path, *, limi
                     continue
                 if any(done.get('source_cid') == cid for done in provider_completed.values()):
                     continue
+                if any(dead.get('source_cid') == cid for dead in provider_dead.values()):
+                    continue
                 key = digest([row['id'], cid])
-                if key not in provider_completed and not any(
+                if key not in provider_completed and key not in provider_dead and not any(
                     queued.get('source_cid') == cid for queued in provider_queue.values()
                 ):
                     provider_queue.setdefault(key, {'episode_id': row['id'], 'source_cid': cid,
@@ -148,8 +212,10 @@ def advance_project_memory(runtime, tenant_id, user_id, checkpoint_path, *, limi
     for key, item in eligible_sources[:provider_limit]:
         # A killed process leaves this source retryable with backoff. Sources
         # never attempted remain first in line on the next worker run.
-        item.update(_next_attempt(item, time.time()))
+        attempt_ts = time.time()
+        item.update(_next_attempt(item, attempt_ts))
         _save_checkpoint(path, state)
+        failure_type = None
         try:
             options = {'provider_cids': {item['source_cid']}}
             if 'cursor' in item:
@@ -163,17 +229,26 @@ def advance_project_memory(runtime, tenant_id, user_id, checkpoint_path, *, limi
                 # Keep the position and stall count even while backing off,
                 # so a window that adds nothing is eventually passed.
                 item['cursor'] = continuation['provider_cursor']
-            if not _retryable(results):
+            failure_type = _retryable_reason(results)
+            if failure_type is None:
                 if continuation is not None:
                     item['attempts'] = 0
                     item['next_attempt'] = 0
+                    item.pop('last_error_type', None)
                 else:
                     provider_completed[key] = {name: item[name] for name in ('episode_id', 'source_cid', 'fingerprint')}
                     provider_queue.pop(key, None)
         except Exception as error:
+            failure_type = type(error).__name__
             report['errors'].append({'episode_id': item['episode_id'], 'source_cid': item['source_cid'],
-                                     'phase': 'provider', 'type': type(error).__name__})
+                                     'phase': 'provider', 'type': failure_type})
+        if failure_type is not None and key in provider_queue:
+            item['last_error_type'] = failure_type
+            if item.get('attempts', 0) >= MAX_ATTEMPTS:
+                provider_dead[key] = _dead_record(provider_queue.pop(key), time.time(), failure_type)
         _save_checkpoint(path, state)
     report['pending'] -= sum(completed.get(row['id']) == fingerprint for row, fingerprint in pending)
     report['provider_pending'] = len(provider_queue)
+    report['provider_dead'] = len(provider_dead)
+    report['provider_error_histogram'] = _error_histogram(provider_queue, provider_dead)
     return report

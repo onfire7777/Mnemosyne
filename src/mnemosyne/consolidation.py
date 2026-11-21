@@ -30,7 +30,7 @@ from mnemosyne.gate import (
 )
 from mnemosyne.learning import Lesson, Procedure
 from mnemosyne.lifecycle import FidelityTier, LifecycleState, apply_rehearsal_schedule, demotion_decision
-from mnemosyne.models import Assertion, Evidence, Hit, Relation, parse_dt, utc_now
+from mnemosyne.models import Assertion, Contradiction, Evidence, Hit, Relation, parse_dt, utc_now
 from mnemosyne.policy import OperatingPolicy, validate_cadence_tier
 from mnemosyne.privacy import detect_pii_tags, redact_pii_text
 from mnemosyne.retrieval import HashingEmbeddingProvider, derived_source_cids, is_retired_summary_metadata
@@ -54,6 +54,7 @@ DEFAULT_CONSOLIDATION_PASSES = [
     "forgetter",
     "embedder",
     "promotion_gate",
+    "observation_synthesizer",
     "user_model_updater",
     "learning_reflect",
 ]
@@ -680,6 +681,7 @@ class ConsolidationWorker:
         self.security = security or SecurityPolicy()
         self.gate = PromotionGate(engine, gate_cases)
         self.learning = learning
+        self._custom_entity_resolver = entity_resolver is not None
         self.entity_resolver = entity_resolver or ContextualEntityResolver(engine=engine)
         self.candidate_extractor = candidate_extractor or DeterministicCandidateExtractor()
         self.summarizer = summarizer or DeterministicEvidenceSummarizer()
@@ -932,7 +934,8 @@ class ConsolidationWorker:
                 extractor_details = dict(extractor_result["details"])
                 extractor_details["candidate_count"] = len(candidates)
                 pass_results.append(PassResult("extractor", "complete", extractor_details))
-                resolver_result = self.entity_resolver.resolve(tenant_id, candidates)
+                resolver = self._entity_resolver_for_tenant(tenant_id)
+                resolver_result = resolver.resolve(tenant_id, candidates)
                 candidates = resolver_result["candidates"]
                 pass_results.append(
                     PassResult(
@@ -966,8 +969,14 @@ class ConsolidationWorker:
                 gate_results, gate_group_stats = self.run_jobs(
                     gate_jobs, mutation_budget=mutation_budget, batch_size=gate_batch_size
                 )
+                contradictions_recorded = self._persist_contested_contradictions(
+                    tenant_id, branch, gate_jobs, gate_results
+                )
                 candidate_results.extend(result.to_dict() for result in gate_results)
-                pass_results.append(PassResult("belief_reviser", "complete", {"candidate_count": len(candidates)}))
+                belief_details: dict[str, Any] = {"candidate_count": len(candidates)}
+                if contradictions_recorded:
+                    belief_details["contradictions_recorded"] = contradictions_recorded
+                pass_results.append(PassResult("belief_reviser", "complete", belief_details))
             else:
                 skipped.append("candidate_extraction_not_configured")
                 pass_results.append(PassResult("extractor", "skipped", {"reason": "no_deterministic_candidate"}))
@@ -984,7 +993,7 @@ class ConsolidationWorker:
                     skipped.append("runtime_limit")
                 pass_results.append(PassResult(pass_name, "skipped", {"reason": "runtime_limit"}))
                 continue
-            if no_write_data and pass_name in {"summarizer", "user_model_updater"}:
+            if no_write_data and pass_name in {"summarizer", "user_model_updater", "observation_synthesizer"}:
                 skipped.append(f"{pass_name}_source_marked_data_only")
                 pass_results.append(
                     PassResult(pass_name, "skipped", {"reason": "source_marked_data_only"})
@@ -1054,9 +1063,31 @@ class ConsolidationWorker:
                     gate_details.update(gate_group_stats)
                 pass_results.append(PassResult(pass_name, "complete", gate_details))
                 continue
+            if pass_name == "observation_synthesizer":
+                obs_result = self._run_observation_synthesizer(
+                    tenant_id, branch, evidence, candidates, payload
+                )
+                status = "complete" if obs_result.get("backend_supported") else "skipped"
+                if status == "skipped":
+                    skipped.append("observation_synthesizer_backend_unavailable")
+                    obs_result["reason"] = "engine_observation_reconcile_unavailable"
+                pass_results.append(PassResult(pass_name, status, obs_result))
+                continue
             skipped_name = f"{pass_name}_not_implemented"
             skipped.append(skipped_name)
             pass_results.append(PassResult(pass_name, "skipped", {"reason": "not_implemented"}))
+
+        batch_processed_cids = [cid for cid in work_cids if cid not in missing]
+        if (
+            batch_processed_cids
+            and not no_write_data
+            and (sleep_deadline is None or self._clock() < sleep_deadline)
+        ):
+            mm_refresh = self._trigger_mental_models_on_consolidation(
+                tenant_id, branch, batch_processed_cids, payload
+            )
+            if mm_refresh is not None:
+                pass_results.append(PassResult("mental_model_refresh", "complete", mm_refresh))
 
         pass_results.append(PassResult("mutation_rails", "complete", mutation_budget.to_dict()))
         if cadence_tier is not None:
@@ -2096,6 +2127,472 @@ class ConsolidationWorker:
             "candidate_count": len(candidates),
             "summary": summary,
         }
+
+    def _entity_resolver_for_tenant(self, tenant_id: str) -> EntityResolver:
+        if self._custom_entity_resolver:
+            if isinstance(self.entity_resolver, ContextualEntityResolver):
+                _attach_engine_entity_resolver(self.engine, tenant_id, self.entity_resolver)
+            return self.entity_resolver
+        resolver = get_engine_entity_resolver(self.engine, tenant_id)
+        self.entity_resolver = resolver
+        return resolver
+
+    def _persist_contested_contradictions(
+        self,
+        tenant_id: str,
+        branch: str,
+        gate_jobs: Sequence[ConsolidationJob],
+        gate_results: Sequence[GateResult],
+    ) -> int:
+        """Persist Contradiction records for conflicting active/contested assertions."""
+        add_contra = getattr(self.engine, "add_contradiction", None)
+        as_of = getattr(self.engine, "as_of", None)
+        if not callable(add_contra) or not callable(as_of):
+            return 0
+        pairs: set[tuple[str, str]] = {
+            (job.candidate_subject, job.candidate_predicate)
+            for job, result in zip(gate_jobs, gate_results)
+            if result.promoted
+        }
+        if not pairs:
+            return 0
+        recorded: set[tuple[str, str]] = set()
+        now = self._clock()
+        for subject, predicate in sorted(pairs):
+            try:
+                rows = list(as_of(subject, predicate, now, tenant_id=tenant_id, branch=branch) or [])
+            except Exception:
+                continue
+            by_scope: dict[tuple[str | None, str], list[Assertion]] = defaultdict(list)
+            for row in rows:
+                if getattr(row, "status", None) not in {"active", "contested"} or getattr(row, "superseded_by", None):
+                    continue
+                scope_key = json.dumps(getattr(row, "scope", None) or {}, sort_keys=True)
+                by_scope[(getattr(row, "user_id", None), scope_key)].append(row)
+            for group in by_scope.values():
+                if len(group) < 2:
+                    continue
+                for i in range(len(group)):
+                    for j in range(i + 1, len(group)):
+                        left, right = group[i], group[j]
+                        if str(left.object).strip().lower() == str(right.object).strip().lower():
+                            continue
+                        pair_ids = (left.id, right.id) if left.id <= right.id else (right.id, left.id)
+                        if pair_ids in recorded:
+                            continue
+                        try:
+                            add_contra(
+                                Contradiction(
+                                    tenant_id=tenant_id,
+                                    a=pair_ids[0],
+                                    b=pair_ids[1],
+                                    status="open",
+                                )
+                            )
+                            recorded.add(pair_ids)
+                        except Exception:
+                            continue
+        return len(recorded)
+
+    @staticmethod
+    def _obs_content_tokens(text: str) -> set[str]:
+        stop = {"a", "an", "the", "is", "are", "was", "were", "to", "of", "in", "on", "for", "and", "or", "with", "at", "by"}
+        return {tok for tok in re.findall(r"[a-z0-9_+#.-]+", (text or "").lower()) if len(tok) >= 2 and tok not in stop}
+
+    @staticmethod
+    def _verbatim_proof_quote(ev: Evidence, subject_text: str, object_text: str) -> Any | None:
+        from mnemosyne.observations import ProofQuote
+
+        content = ev.content or ""
+        if not ev.cid or not content.strip():
+            return None
+        subj_l = (subject_text or "").strip().lower()
+        obj_l = (object_text or "").strip().lower()
+        spans: list[tuple[int, int, str, int]] = []
+        cursor = 0
+        for line in content.splitlines(keepends=True):
+            line_start = cursor
+            cursor += len(line)
+            stripped_line = line.strip()
+            if not stripped_line:
+                continue
+            local_pos = 0
+            for seg in re.split(r"(?<=[.!?])\s+", stripped_line):
+                piece = seg.strip()
+                if not piece:
+                    continue
+                idx = content.find(piece, line_start + local_pos)
+                if idx < 0:
+                    continue
+                local_pos = (idx - line_start) + len(piece)
+                if len(piece) > 400:
+                    piece = content[idx : idx + 400].rstrip()
+                if not piece or content[idx : idx + len(piece)] != piece:
+                    continue
+                low = piece.lower()
+                score = (2 if subj_l and subj_l in low else 0) + (2 if obj_l and obj_l in low else 0)
+                spans.append((score, -idx, piece, idx))
+        if spans:
+            spans.sort(reverse=True)
+            _, _, best_piece, best_idx = spans[0]
+            return ProofQuote(cid=ev.cid, quote=best_piece, start=best_idx, end=best_idx + len(best_piece))
+        stripped = content.strip()[:400].rstrip()
+        idx = content.find(stripped)
+        if idx < 0 or not stripped:
+            return None
+        return ProofQuote(cid=ev.cid, quote=stripped, start=idx, end=idx + len(stripped))
+
+    @classmethod
+    def _classify_observation_reconciliation_mode(
+        cls,
+        existing_obs: Any,
+        incoming_obs: Any,
+        supporting_evs: Sequence[Evidence],
+    ) -> str:
+        existing_norm = " ".join(str(existing_obs.content).split()).casefold()
+        incoming_norm = " ".join(str(incoming_obs.content).split()).casefold()
+        if existing_norm == incoming_norm:
+            return "corroborate"
+        neg_re = re.compile(r"\b(?:not|never|no longer|cannot|disabled|stopped|removed|dropped)\b|n['’]t\b", re.I)
+        neg_existing = bool(neg_re.search(str(existing_obs.content)))
+        neg_incoming = bool(neg_re.search(str(incoming_obs.content)))
+        tok_existing = cls._obs_content_tokens(str(existing_obs.content))
+        tok_incoming = cls._obs_content_tokens(str(incoming_obs.content))
+        if neg_existing == neg_incoming and tok_existing and tok_existing < tok_incoming:
+            return "refine"
+        evolve_re = re.compile(
+            r"\b(?:switched|migrated|moved|updated|upgraded|changed|replaced|transitioned|now)\b", re.I
+        )
+        newest_created = max((ev.created_at for ev in supporting_evs if getattr(ev, "created_at", None)), default=None)
+        existing_updated = getattr(existing_obs, "updated_at", None)
+        if (
+            newest_created is not None
+            and existing_updated is not None
+            and newest_created > existing_updated
+            and any(evolve_re.search(ev.content or "") for ev in supporting_evs)
+        ):
+            return "supersede_evolved"
+        return "auto"
+
+    def _run_observation_synthesizer(
+        self,
+        tenant_id: str,
+        branch: str,
+        evidence: list[Evidence],
+        candidates: list[dict[str, Any]],
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Synthesize and reconcile grounded Observation records using neighbor fusion."""
+        reconcile_fn = getattr(self.engine, "observation_reconcile", None)
+        if not callable(reconcile_fn):
+            return {
+                "synthesized": 0,
+                "corroborated": 0,
+                "refined": 0,
+                "evolved": 0,
+                "contradictions": 0,
+                "neighbors_used": 0,
+                "backend_supported": False,
+            }
+
+        from mnemosyne.observations import (
+            Observation,
+            compute_dynamic_standing,
+            compute_independent_source_count,
+            reconcile_observation,
+        )
+
+        def _is_eligible_obs_evidence(ev: Evidence | None) -> bool:
+            if ev is None or not ev.cid or ev.erased or ev.retired_at is not None:
+                return False
+            if self._is_derived_evidence_record(ev) or ev.source_type == "learning_tool_result":
+                return False
+            if ev.actor == "assistant" or int(ev.trust_tier) > 3:
+                return False
+            if ev.metadata.get("quarantine_reason"):
+                return False
+            if ev.metadata.get("reality_class") in {"self_generated", "simulated"}:
+                return False
+            if self._contains_no_write_data([ev], {}):
+                return False
+            return bool((ev.content or "").strip())
+
+        eligible_by_cid: dict[str, Evidence] = {
+            ev.cid: ev for ev in evidence if _is_eligible_obs_evidence(ev) and ev.cid
+        }
+        working_candidates = list(candidates)
+        if not working_candidates and eligible_by_cid:
+            extracted = self.candidate_extractor.extract(tenant_id, payload, list(eligible_by_cid.values()))
+            raw_cands = list(extracted.get("candidates") or [])
+            if raw_cands:
+                resolver = self._entity_resolver_for_tenant(tenant_id)
+                working_candidates = list(resolver.resolve(tenant_id, raw_cands).get("candidates") or [])
+
+        if not working_candidates:
+            return {
+                "synthesized": 0,
+                "corroborated": 0,
+                "refined": 0,
+                "evolved": 0,
+                "contradictions": 0,
+                "neighbors_used": 0,
+                "backend_supported": True,
+            }
+
+        list_obs = getattr(self.engine, "list_observation_records", None)
+        upsert_obs = getattr(self.engine, "observation_upsert", None)
+        add_contra = getattr(self.engine, "add_contradiction", None)
+        policy_max_sens = _policy_max_sensitivity(self.policy)
+        synthesized = 0
+        corroborated = 0
+        refined = 0
+        evolved = 0
+        contradictions = 0
+        neighbors_used = 0
+        seen_pairs: set[tuple[str, str, str]] = set()
+        max_observations = 16
+
+        for cand in working_candidates:
+            if synthesized + corroborated + refined + evolved + contradictions >= max_observations:
+                break
+            subj_label = str(cand.get("candidate_subject") or "").strip()
+            pred_label = str(cand.get("candidate_predicate") or "").strip()
+            obj_label = str(cand.get("candidate_object") or "").strip()
+            if not (subj_label and pred_label and obj_label):
+                continue
+            subject_key = str(cand.get("entity_key") or _entity_key(subj_label)).strip()
+            topic_key = re.sub(r"\s+", "_", pred_label.lower()).strip("_")
+            if not subject_key or not topic_key:
+                continue
+
+            supporting_by_cid: dict[str, Evidence] = {}
+            for raw_cid in cand.get("source_evidence_cids") or []:
+                cid_str = str(raw_cid or "").strip()
+                if not cid_str:
+                    continue
+                ev = eligible_by_cid.get(cid_str)
+                if ev is None:
+                    ev = self.engine.get_evidence(tenant_id, cid_str, branch=branch)
+                if _is_eligible_obs_evidence(ev):
+                    supporting_by_cid[cid_str] = ev  # type: ignore[assignment]
+            if not supporting_by_cid:
+                continue
+
+            owners = {ev.user_id for ev in supporting_by_cid.values() if ev.user_id}
+            if len(owners) != 1:
+                continue
+            owner_id = next(iter(owners))
+            pair_dedup = (owner_id, subject_key, topic_key)
+            if pair_dedup in seen_pairs:
+                continue
+            seen_pairs.add(pair_dedup)
+
+            statement = f"{subj_label} {pred_label.replace('_', ' ')} {obj_label}".strip()
+            read_filt = {"tenant_id": tenant_id, "user_id": owner_id, "principal": owner_id, "role": "reader"}
+            needle = self._obs_content_tokens(f"{subj_label} {obj_label}")
+            if len(needle) >= 2:
+                try:
+                    neighbor_hits = self.find_consolidation_neighbors(
+                        tenant_id, f"{subj_label} {pred_label} {obj_label}", branch=branch, k=8, filt=read_filt
+                    )
+                except Exception:
+                    neighbor_hits = []
+                for hit in neighbor_hits:
+                    if hit.kind != "evidence" or not hit.id or hit.id in supporting_by_cid:
+                        continue
+                    nb = self.engine.get_evidence(tenant_id, hit.id, branch=branch)
+                    if not _is_eligible_obs_evidence(nb) or nb.user_id != owner_id:  # type: ignore[union-attr]
+                        continue
+                    decision = may_read_item(
+                        item_tenant_id=tenant_id,
+                        sensitivity=int(nb.sensitivity),  # type: ignore[union-attr]
+                        access_policy=nb.access_policy,  # type: ignore[union-attr]
+                        context=read_filt,
+                        policy_max_sensitivity=policy_max_sens,
+                        erased=nb.erased,  # type: ignore[union-attr]
+                    )
+                    if not decision.allowed or decision.redacted:
+                        continue
+                    if needle <= self._obs_content_tokens(nb.content or ""):  # type: ignore[union-attr]
+                        supporting_by_cid[nb.cid] = nb  # type: ignore[union-attr,index]
+                        neighbors_used += 1
+
+            supporting_evs = list(supporting_by_cid.values())
+            proof_quotes = []
+            valid_cids: list[str] = []
+            for ev in supporting_evs:
+                pq = self._verbatim_proof_quote(ev, subj_label, obj_label)
+                if pq is not None and ev.cid:
+                    proof_quotes.append(pq)
+                    valid_cids.append(ev.cid)
+            if not proof_quotes:
+                continue
+
+            valid_evs = [supporting_by_cid[c] for c in valid_cids]
+            indep_count = compute_independent_source_count(valid_evs)
+            standing = compute_dynamic_standing(independent_source_count=indep_count)
+            merged_policy = merge_access_policies(
+                [ev.access_policy for ev in valid_evs] + [{"tenant": tenant_id, "allow_principals": [owner_id]}],
+                tenant_id=tenant_id,
+            )
+            incoming = Observation(
+                tenant_id=tenant_id,
+                user_id=owner_id,
+                subject=subject_key,
+                topic=topic_key,
+                content=statement,
+                branch=branch,
+                proof_quotes=proof_quotes,
+                source_evidence_cids=valid_cids,
+                independent_source_count=indep_count,
+                standing=standing,
+                trust_tier=max(int(ev.trust_tier) for ev in valid_evs),
+                sensitivity=max(int(ev.sensitivity) for ev in valid_evs),
+                access_policy=merged_policy,
+            )
+
+            existing_obs: Observation | None = None
+            other_owner_active = False
+            if callable(list_obs):
+                try:
+                    existing_rows = list_obs(
+                        tenant_id, branch=branch, subject=subject_key, topic=topic_key, status="active"
+                    )
+                    for row in existing_rows or []:
+                        if row.get("user_id") == owner_id:
+                            existing_obs = Observation.from_dict(row)
+                            break
+                        other_owner_active = True
+                except Exception:
+                    existing_obs = None
+
+            if existing_obs is None and other_owner_active:
+                continue
+
+            try:
+                if existing_obs is None:
+                    _, is_contra = reconcile_fn(tenant_id, branch, observation=incoming)
+                    if is_contra:
+                        contradictions += 1
+                    else:
+                        synthesized += 1
+                else:
+                    mode = self._classify_observation_reconciliation_mode(existing_obs, incoming, valid_evs)
+                    if mode == "auto" or not callable(upsert_obs):
+                        reconciled, is_contra = reconcile_fn(tenant_id, branch, observation=incoming)
+                        if is_contra:
+                            contradictions += 1
+                            if callable(add_contra):
+                                try:
+                                    add_contra(
+                                        Contradiction(
+                                            tenant_id=tenant_id,
+                                            a=existing_obs.observation_id,
+                                            b=reconciled.observation_id,
+                                            status="open",
+                                        )
+                                    )
+                                except Exception:
+                                    pass
+                        else:
+                            corroborated += 1
+                    else:
+                        reconciled, is_contra = reconcile_observation(
+                            existing_obs,
+                            incoming,
+                            evidence_getter=lambda cid: self.engine.get_evidence(tenant_id, cid, branch=branch),
+                            reconciliation_mode=mode,  # type: ignore[arg-type]
+                        )
+                        if is_contra:
+                            evolved_standing = float(reconciled.standing)
+                            existing_obs.status = "superseded"
+                            existing_obs.superseded_by = reconciled.observation_id
+                            existing_obs.updated_at = utc_now()
+                            upsert_obs(existing_obs, branch=branch)
+                            upsert_obs(reconciled, branch=branch)
+                            if mode == "supersede_evolved":
+                                # Preserve non-penalized evolved standing computed by
+                                # reconcile_observation(..., reconciliation_mode="supersede_evolved")
+                                # after observation_upsert verifies proof quotes and persists.
+                                reconciled.standing = evolved_standing
+                                self._preserve_evolved_observation_standing(
+                                    tenant_id, branch, reconciled
+                                )
+                                evolved += 1
+                            else:
+                                contradictions += 1
+                        else:
+                            upsert_obs(reconciled, branch=branch)
+                            if mode == "refine":
+                                refined += 1
+                            else:
+                                corroborated += 1
+            except Exception:
+                continue
+
+        return {
+            "synthesized": synthesized,
+            "corroborated": corroborated,
+            "refined": refined,
+            "evolved": evolved,
+            "contradictions": contradictions,
+            "neighbors_used": neighbors_used,
+            "backend_supported": True,
+        }
+
+    def _preserve_evolved_observation_standing(
+        self, tenant_id: str, branch: str, reconciled: Any
+    ) -> None:
+        if hasattr(self.engine, "_connect") and hasattr(self.engine, "_lock"):
+            try:
+                with self.engine._lock:
+                    conn = self.engine._connect(tenant_id)
+                    with conn:
+                        conn.execute(
+                            "UPDATE observations SET standing = ? "
+                            "WHERE tenant_id = ? AND branch = ? AND observation_id = ?",
+                            (float(reconciled.standing), tenant_id, branch, reconciled.observation_id),
+                        )
+                return
+            except Exception:
+                return
+        save_fn = getattr(self.engine, "save_observation_record", None)
+        if callable(save_fn):
+            try:
+                save_fn(tenant_id, reconciled.observation_id, reconciled.to_dict(), branch=branch)
+            except Exception:
+                pass
+
+    def _trigger_mental_models_on_consolidation(
+        self,
+        tenant_id: str,
+        branch: str,
+        processed_cids: Sequence[str],
+        payload: Mapping[str, Any],
+    ) -> dict[str, Any] | None:
+        """Notify scoped mental models after consolidation (zero-cost when none exist)."""
+        list_mm = getattr(self.engine, "list_mental_model_records", None)
+        if not callable(list_mm):
+            return None
+        try:
+            existing = list_mm(tenant_id, branch)
+        except Exception:
+            return None
+        if not existing:
+            return None
+        try:
+            from mnemosyne.mental_model_refresh import trigger_on_consolidation
+
+            return trigger_on_consolidation(
+                self.engine,
+                new_evidence_cids=list(processed_cids),
+                tenant_id=tenant_id,
+                user_id=str(payload["user_id"]) if payload.get("user_id") else None,
+                branch=branch,
+                refresh_now=bool(payload.get("refresh_mental_models", False)),
+            )
+        except Exception:
+            return None
 
     def _run_summarizer_pass(
         self,
@@ -5586,6 +6083,216 @@ def _resolved_entities_with_provenance(candidates: list[dict[str, Any]]) -> list
             if cid and str(cid) not in entity["source_evidence_cids"]:
                 entity["source_evidence_cids"].append(str(cid))
     return list(entities.values())
+
+
+def _attach_engine_entity_resolver(
+    engine: Any, tenant_id: str, resolver: ContextualEntityResolver
+) -> None:
+    if engine is None or not hasattr(engine, "__dict__"):
+        return
+    resolvers = engine.__dict__.setdefault("_contextual_entity_resolvers", {})
+    if isinstance(resolvers, dict):
+        resolvers[str(tenant_id or "default")] = resolver
+
+
+def get_engine_entity_resolver(engine: Any, tenant_id: str = "default") -> ContextualEntityResolver:
+    """Return the tenant-scoped ContextualEntityResolver bound to ``engine``."""
+    tenant_key = str(tenant_id or "default")
+    if engine is not None and hasattr(engine, "__dict__"):
+        resolvers = engine.__dict__.setdefault("_contextual_entity_resolvers", {})
+        if isinstance(resolvers, dict):
+            existing = resolvers.get(tenant_key)
+            if isinstance(existing, ContextualEntityResolver):
+                return existing
+            created = ContextualEntityResolver(tenant_id=tenant_key, engine=engine)
+            resolvers[tenant_key] = created
+            return created
+    return ContextualEntityResolver(tenant_id=tenant_key, engine=engine)
+
+
+def _load_persisted_entity(engine: Any, tenant_id: str, canonical: str) -> dict[str, Any] | None:
+    if hasattr(engine, "_connect") and hasattr(engine, "_lock"):
+        try:
+            with engine._lock:
+                conn = engine._connect(tenant_id)
+                row = conn.execute(
+                    "SELECT record FROM entities WHERE tenant_id = ? AND canonical = ?",
+                    (tenant_id, canonical),
+                ).fetchone()
+            if row is not None:
+                data = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+                return dict(data) if isinstance(data, Mapping) else None
+        except Exception:
+            pass
+    entities_map = getattr(engine, "entities", None)
+    if isinstance(entities_map, dict):
+        row = entities_map.get((tenant_id, canonical))
+        if isinstance(row, Mapping):
+            return deepcopy(dict(row))
+    export_tenant = getattr(engine, "export_tenant", None)
+    if callable(export_tenant):
+        for row in export_tenant(tenant_id).get("entities", []):
+            if isinstance(row, Mapping) and row.get("canonical") == canonical:
+                return deepcopy(dict(row))
+    return None
+
+
+def _persist_entity_row_update(engine: Any, tenant_id: str, canonical: str, record: dict[str, Any]) -> None:
+    if hasattr(engine, "_connect") and hasattr(engine, "_lock"):
+        try:
+            with engine._lock:
+                conn = engine._connect(tenant_id)
+                with conn:
+                    conn.execute(
+                        "UPDATE entities SET record = ? WHERE tenant_id = ? AND canonical = ?",
+                        (json.dumps(record, sort_keys=True), tenant_id, canonical),
+                    )
+            return
+        except Exception:
+            pass
+    entities_map = getattr(engine, "entities", None)
+    if isinstance(entities_map, dict) and (tenant_id, canonical) in entities_map:
+        entities_map[(tenant_id, canonical)] = deepcopy(record)
+        persist = getattr(engine, "_persist", None)
+        if callable(persist):
+            try:
+                persist()
+            except Exception:
+                pass
+
+
+def engine_unmerge_entity(
+    engine: Any,
+    tenant_id: str,
+    merged_entity_id: str,
+    *,
+    split_canonical_key: str | None = None,
+    branch: str = "main",
+) -> dict[str, Any]:
+    """Reverse an entity merge on an engine, persisting split entities and future split guards.
+
+    Checks the engine-attached tenant ``ContextualEntityResolver`` merge history first,
+    then falls back to persisted ``entities`` rows (for post-restart unmerges).
+    Raises ``_MergeNotFoundError`` (subclass of ``KeyError`` and ``ValueError``) when
+    no matching merged entity exists.
+    """
+    target_id = str(merged_entity_id or "").strip()
+    if not target_id:
+        raise _MergeNotFoundError("merged_entity_id must be a non-empty string")
+    resolver = get_engine_entity_resolver(engine, tenant_id)
+    register_fn = getattr(engine, "register_entity", None)
+
+    if target_id in resolver.merge_history:
+        result = resolver.unmerge_entity(target_id, split_canonical_key=split_canonical_key)
+        persisted_row = _load_persisted_entity(engine, tenant_id, result["merged_entity_id"])
+        restored_entities = list(result.get("entities") or [])
+        base_policy = (
+            dict(persisted_row.get("access_policy") or {"tenant": tenant_id})
+            if persisted_row is not None
+            else {"tenant": tenant_id}
+        )
+        for ent in restored_entities:
+            ent_key = str(ent.get("key") or "").strip()
+            if not ent_key:
+                continue
+            ent_aliases = [str(a) for a in (ent.get("aliases") or []) if str(a).strip()]
+            ent_cids = [str(c) for c in (ent.get("source_evidence_cids") or []) if str(c).strip()]
+            if ent_key == result["merged_entity_id"] and persisted_row is not None:
+                updated = deepcopy(persisted_row)
+                updated["aliases"] = sorted(set(ent_aliases or [ent_key]))
+                updated["source_evidence_cids"] = ent_cids
+                updated["updated_at"] = utc_now().isoformat()
+                _persist_entity_row_update(engine, tenant_id, ent_key, updated)
+            elif callable(register_fn):
+                for alias in ent_aliases or [ent_key]:
+                    register_fn(
+                        tenant_id,
+                        ent_key,
+                        alias=alias,
+                        entity_type=str(persisted_row.get("type", "unknown")) if persisted_row else "unknown",
+                        source_evidence_cids=ent_cids,
+                        access_policy=base_policy,
+                    )
+        return {
+            **result,
+            "tenant_id": tenant_id,
+            "branch": branch,
+        }
+
+    persisted_row = _load_persisted_entity(engine, tenant_id, target_id)
+    if persisted_row is None:
+        raise _MergeNotFoundError(f"Merged entity {target_id!r} not found for tenant {tenant_id!r}")
+
+    aliases = [str(a) for a in (persisted_row.get("aliases") or []) if str(a).strip()]
+    cids = [str(c) for c in (persisted_row.get("source_evidence_cids") or []) if str(c).strip()]
+    if split_canonical_key is not None:
+        split_key = str(split_canonical_key).strip()
+        if not split_key:
+            raise _MergeNotFoundError("split_canonical_key must be non-empty when provided")
+    else:
+        distinct = [a for a in aliases if _entity_key(a) != _entity_key(target_id)]
+        if not distinct:
+            raise _MergeNotFoundError(
+                f"Entity {target_id!r} has no distinct alias to unmerge; specify split_canonical_key"
+            )
+        split_key = _entity_key(distinct[-1])
+
+    split_norm = _entity_key(split_key)
+    split_aliases = [a for a in aliases if a == split_key or _entity_key(a) == split_norm] or [split_key]
+    remaining_aliases = [a for a in aliases if a not in split_aliases] or [target_id]
+
+    updated_remaining = deepcopy(persisted_row)
+    updated_remaining["aliases"] = sorted(set(remaining_aliases))
+    updated_remaining["updated_at"] = utc_now().isoformat()
+    _persist_entity_row_update(engine, tenant_id, target_id, updated_remaining)
+
+    base_policy = dict(persisted_row.get("access_policy") or {"tenant": tenant_id})
+    if callable(register_fn):
+        for alias in split_aliases:
+            register_fn(
+                tenant_id,
+                split_key,
+                alias=alias,
+                entity_type=str(persisted_row.get("type") or "unknown"),
+                summary=persisted_row.get("summary"),
+                source_evidence_cids=cids,
+                access_policy=base_policy,
+            )
+
+    resolver._unmerged_pairs.add((_entity_key(target_id), split_norm))
+    resolver._forced_key_overrides[split_norm] = split_key
+
+    remaining_entity = {
+        "key": target_id,
+        "entity_key": target_id,
+        "label": remaining_aliases[0],
+        "aliases": sorted(set(remaining_aliases)),
+        "source_evidence_cids": list(cids),
+        "candidate_signatures": [],
+    }
+    split_entity = {
+        "key": split_key,
+        "entity_key": split_key,
+        "label": split_aliases[0],
+        "aliases": sorted(set(split_aliases)),
+        "source_evidence_cids": list(cids),
+        "candidate_signatures": [],
+    }
+    restored_list = [remaining_entity, split_entity]
+    restored_provenance = {target_id: list(cids), split_key: list(cids)}
+    return {
+        "unmerged": True,
+        "status": "unmerged",
+        "tenant_id": tenant_id,
+        "branch": branch,
+        "merged_entity_id": target_id,
+        "split_canonical_key": split_key,
+        "entities": restored_list,
+        "restored_provenance": restored_provenance,
+        "source_evidence_cids_by_entity": restored_provenance,
+        "remaining_entity": remaining_entity,
+        "split_entity": split_entity,
+    }
 
 
 def unmerge_entity(

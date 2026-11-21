@@ -4,18 +4,24 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import unicodedata
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from typing import Any, Literal, Mapping, Protocol, Sequence
 
+from mnemosyne.algorithms import cosine
 from mnemosyne.engine import MemoryEngine
 from mnemosyne.event_ledger import EventLedger, canonical_speaker_spans
 from mnemosyne.premise_verifier import PremiseConsistencyVerifier
 from mnemosyne.providers.deterministic_synthesis import DeterministicSynthesizer
-from mnemosyne.retrieval import QUERY_SUPPORT_STOPWORDS, normalise_query_term
-from mnemosyne.text import tokenize
+from mnemosyne.retrieval import (
+    QUERY_SUPPORT_STOPWORDS,
+    embed_query,
+    normalise_query_term,
+)
+from mnemosyne.text import bm25_lexical_scan, tokenize
 
 
 _PUBLIC_ABSTENTION = "insufficient_authorized_evidence"
@@ -779,9 +785,25 @@ class GroundedAnswerOrchestrator:
         mission: str | None = None,
         hierarchy_first: bool = False,
         adaptive_synthesis: bool = False,
+        agentic: bool = False,
+        max_iterations: int = 6,
     ) -> GroundedAnswer:
         """Validate model-proposed atomic claims against freshly replayed evidence."""
         disp = coerce_disposition(disposition, mission=mission)
+        if agentic:
+            controller = AgenticReflectController(
+                self.engine,
+                decomposer=self.decomposer,
+                reader=reader,
+                limits=self.limits,
+                max_iterations=max_iterations,
+            )
+            return controller.reflect(
+                request,
+                disposition=disp,
+                mission=disp.mission if disp is not None else mission,
+                adaptive_synthesis=adaptive_synthesis,
+            ).answer
         use_hierarchy = bool(
             hierarchy_first
             or (disp is not None and disp.abstraction > 0.6 and disp.literalism <= 0.7)
@@ -793,6 +815,7 @@ class GroundedAnswerOrchestrator:
                 request.context,
                 disposition=disp,
                 mission=disp.mission if disp is not None else mission,
+                include_evidence_fallback=False,
             )
             if (
                 hierarchical["resolved_layer"]
@@ -1164,12 +1187,13 @@ class GroundedAnswerOrchestrator:
     ) -> tuple[set[str], set[str]]:
         if not query or len(query) > self.limits.max_query_characters:
             raise ValueError("query budget exceeded")
+        retrieve_filter = {**context.to_filter(), "include_synthesized": True}
         result = self.engine.retrieve(
             query,
             tenant_id=context.tenant_id,
             branch=context.branch,
             deep=True,
-            filt=context.to_filter(),
+            filt=retrieve_filter,
             record_access=False,
         )
         if result.abstained:
@@ -1203,6 +1227,29 @@ class GroundedAnswerOrchestrator:
                     # A real evidence passage outranks generated projection text.
                     windows[str(hit.id)] = hit.text
                 continue
+            if hit.kind in {"observation", "knowledge_page"}:
+                raw_source_cids = hit.metadata.get("source_evidence_cids")
+                source_cids = _strict_source_cids(
+                    raw_source_cids if raw_source_cids is not None else hit.provenance
+                )
+                if set(str(cid) for cid in hit.provenance) != set(source_cids):
+                    raise ValueError("synthesized hit provenance is inconsistent")
+                quote_windows = self._validated_synthesized_windows(
+                    hit, context, source_cids
+                )
+                if quote_windows is None:
+                    continue
+                referenced.update(source_cids)
+                if windows is not None:
+                    for cid in source_cids:
+                        if cid in quote_windows and (
+                            cid not in windows
+                            or isinstance(windows[cid], _ProjectionWindow)
+                        ):
+                            windows[cid] = quote_windows[cid]
+                        else:
+                            windows.setdefault(cid, _ProjectionWindow(hit.text))
+                continue
             if hit.kind not in {"assertion", "relation", "preference"}:
                 raise ValueError("retrieval returned an unknown hit kind")
             source_cids = _strict_source_cids(hit.metadata.get("source_evidence_cids"))
@@ -1216,6 +1263,105 @@ class GroundedAnswerOrchestrator:
                     # to resolve canonically just like a direct evidence hit.
                     windows.setdefault(cid, _ProjectionWindow(hit.text))
         return referenced, channels
+
+    def _validated_synthesized_windows(
+        self,
+        hit: Any,
+        context: AnswerReadContext,
+        source_cids: Sequence[str],
+    ) -> dict[str, str] | None:
+        """Custody-check a synthesized observation or knowledge_page hit and map verified quotes."""
+        meta = hit.metadata if isinstance(hit.metadata, Mapping) else {}
+        if meta.get("status", "active") != "active" or bool(meta.get("stale", False)):
+            return None
+        allowed_cids = set(source_cids)
+        quote_windows: dict[str, str] = {}
+        if hit.kind == "observation":
+            obs_obj = None
+            get_obs = getattr(self.engine, "observation_get", None)
+            if callable(get_obs):
+                try:
+                    obs_obj = get_obs(context.tenant_id, str(hit.id), context.branch)
+                except TypeError:
+                    try:
+                        obs_obj = get_obs(context.tenant_id, str(hit.id))
+                    except Exception:
+                        obs_obj = None
+                except Exception:
+                    obs_obj = None
+            if obs_obj is not None:
+                obs_dict = (
+                    obs_obj.to_dict()
+                    if hasattr(obs_obj, "to_dict")
+                    else (dict(obs_obj) if isinstance(obs_obj, Mapping) else {})
+                )
+                if obs_dict.get("status", "active") != "active":
+                    return None
+                if (
+                    context.user_id
+                    and obs_dict.get("user_id")
+                    and obs_dict.get("user_id") != context.user_id
+                ):
+                    return None
+                for raw_pq in obs_dict.get("proof_quotes") or []:
+                    if isinstance(raw_pq, Mapping):
+                        cid = str(raw_pq.get("cid") or "")
+                        quote = raw_pq.get("quote")
+                        if cid in allowed_cids and isinstance(quote, str) and quote.strip():
+                            quote_windows.setdefault(cid, quote)
+            return quote_windows
+
+        if hit.kind == "knowledge_page":
+            page_obj = None
+            get_page = getattr(self.engine, "knowledge_page_get", None)
+            if callable(get_page):
+                try:
+                    page_obj = get_page(context.tenant_id, str(hit.id), context.branch)
+                except TypeError:
+                    try:
+                        page_obj = get_page(context.tenant_id, str(hit.id))
+                    except Exception:
+                        page_obj = None
+                except Exception:
+                    page_obj = None
+            if page_obj is not None:
+                page_dict = (
+                    page_obj.to_dict()
+                    if hasattr(page_obj, "to_dict")
+                    else (dict(page_obj) if isinstance(page_obj, Mapping) else {})
+                )
+                if page_dict.get("status", "active") != "active" or bool(
+                    page_dict.get("stale", False)
+                ):
+                    return None
+                if (
+                    context.user_id
+                    and page_dict.get("user_id")
+                    and page_dict.get("user_id") != context.user_id
+                ):
+                    return None
+                maint = page_dict.get("maintenance")
+                if isinstance(maint, Mapping):
+                    if maint.get("schema") == "automatic-knowledge/v1":
+                        try:
+                            from mnemosyne.knowledge_maintenance import automatic_page_current
+
+                            if not automatic_page_current(self.engine, page_obj, context):
+                                return None
+                        except Exception:
+                            return None
+                    for raw_claim in maint.get("claims") or []:
+                        if not isinstance(raw_claim, Mapping):
+                            continue
+                        for raw_span in raw_claim.get("spans") or []:
+                            if not isinstance(raw_span, Mapping):
+                                continue
+                            cid = str(raw_span.get("cid") or "")
+                            quote = raw_span.get("quote")
+                            if cid in allowed_cids and isinstance(quote, str) and quote.strip():
+                                quote_windows.setdefault(cid, quote)
+            return quote_windows
+        return None
 
     def _queries(self, value: object, *, sources: tuple[str, ...]) -> tuple[str, ...]:
         return _source_bound_anchors(self._query_proposals(value), sources, self.limits)
@@ -1789,6 +1935,154 @@ def _verify_live_authorized_evidence(
     return verified
 
 
+def _finite_vector(value: Any) -> list[float] | None:
+    if isinstance(value, (list, tuple)) and value:
+        out: list[float] = []
+        for x in value:
+            if isinstance(x, bool) or not isinstance(x, (int, float)):
+                return None
+            fx = float(x)
+            if not math.isfinite(fx):
+                return None
+            out.append(fx)
+        return out
+    return None
+
+
+def _stored_item_embedding(
+    engine: Any,
+    tenant_id: str,
+    branch: str,
+    kind: str,
+    item_id: str,
+    item_dict: Mapping[str, Any],
+    filt: Mapping[str, Any] | None = None,
+) -> list[float] | None:
+    vec = _finite_vector(item_dict.get("embedding"))
+    if vec is not None:
+        return vec
+    maint = item_dict.get("maintenance")
+    if isinstance(maint, Mapping):
+        vec = _finite_vector(maint.get("embedding"))
+        if vec is not None:
+            return vec
+    lookup = getattr(engine, "_stored_embedding_value", None)
+    if callable(lookup) and item_id:
+        try:
+            from mnemosyne.models import Hit
+
+            probe = Hit(
+                id=item_id,
+                kind=kind,
+                tenant_id=tenant_id,
+                branch=branch,
+                text="",
+                score=0.0,
+                channel="hierarchy",
+            )
+            raw = lookup(probe, dict(filt) if filt is not None else None)
+            return _finite_vector(raw)
+        except Exception:
+            return None
+    return None
+
+
+def _query_embedding_if_semantic(engine: Any, question: str) -> list[float] | None:
+    adapters = getattr(engine, "adapters", None)
+    embedder = getattr(adapters, "embedding", None)
+    if embedder is None or getattr(embedder, "name", "local-hashing") == "local-hashing":
+        return None
+    if not question.strip():
+        return None
+    try:
+        return _finite_vector(embed_query(embedder, question))
+    except Exception:
+        return None
+
+
+def _hybrid_layer_scores(
+    question: str,
+    texts: Sequence[str],
+    vectors: Sequence[list[float] | None],
+    *,
+    q_terms: set[str],
+    mission_terms: set[str],
+    query_vec: list[float] | None,
+) -> list[tuple[int, float, float, float]]:
+    """Return (term_overlap, bm25_score, dense_cos, hybrid_score) per candidate."""
+    if not texts:
+        return []
+    try:
+        bm25_scores = list(bm25_lexical_scan(question, list(texts)))
+    except Exception:
+        bm25_scores = [0.0] * len(texts)
+    max_bm25 = max(bm25_scores, default=0.0)
+    results: list[tuple[int, float, float, float]] = []
+    for text, vec, bm25 in zip(texts, vectors, bm25_scores, strict=True):
+        c_terms = _query_substantive_terms(text)
+        overlap = len(q_terms & c_terms)
+        mission_ov = len(mission_terms & c_terms) if mission_terms else 0
+        dense_cos = 0.0
+        if (
+            query_vec is not None
+            and vec is not None
+            and len(vec) == len(query_vec)
+        ):
+            try:
+                dense_cos = max(0.0, float(cosine(query_vec, vec)))
+            except Exception:
+                dense_cos = 0.0
+        bm25_norm = (bm25 / max_bm25) if max_bm25 > 0.0 else 0.0
+        lex_ratio = (overlap / max(1, len(q_terms))) if q_terms else 0.0
+        lexical_signal = max(bm25_norm, lex_ratio)
+        if query_vec is not None and vec is not None:
+            hybrid = 0.55 * dense_cos + 0.45 * lexical_signal + 0.20 * mission_ov
+        else:
+            hybrid = lexical_signal + 0.20 * mission_ov
+        results.append((overlap + 2 * mission_ov, float(bm25), dense_cos, float(hybrid)))
+    return results
+
+
+def _concise_query_span(
+    content: str, q_terms: set[str], *, max_chars: int = 480
+) -> tuple[int, int, str]:
+    """Return a concise verified (start, end, slice_text) span centered on query terms."""
+    stripped = content.strip() or content
+    if len(stripped) <= max_chars:
+        start = content.find(stripped)
+        if start < 0:
+            start = 0
+            stripped = content
+        return start, start + len(stripped), content[start : start + len(stripped)]
+    # Pick the sentence/line with the highest substantive query overlap.
+    best_span: tuple[int, int, int] | None = None
+    for match in re.finditer(r"[^\n.!?]+[.!?]?", content):
+        seg = match.group(0).strip()
+        if not seg:
+            continue
+        ov = len(q_terms & _query_substantive_terms(seg)) if q_terms else 0
+        seg_start = match.start() + match.group(0).find(seg)
+        seg_end = min(len(content), seg_start + min(len(seg), max_chars))
+        cand = (ov, -seg_start, seg_end)
+        if best_span is None or cand[0] > best_span[0]:
+            best_span = (ov, seg_start, seg_end)
+    if best_span is not None and best_span[0] > 0:
+        _, s, e = best_span
+        # Expand gently within max_chars if the matched sentence is very short.
+        if e - s < max_chars:
+            extra = (max_chars - (e - s)) // 2
+            s = max(0, s - extra)
+            e = min(len(content), s + max_chars)
+        slice_text = content[s:e].strip()
+        if slice_text:
+            actual_s = content.find(slice_text, s)
+            if actual_s >= 0:
+                return actual_s, actual_s + len(slice_text), slice_text
+    head = content[:max_chars].strip() or content[:max_chars]
+    actual_s = max(0, content.find(head))
+    return actual_s, actual_s + len(head), content[actual_s : actual_s + len(head)]
+
+
 def resolve_hierarchical_evidence(
     engine: Any,
     question: str = "",
@@ -1799,8 +2093,11 @@ def resolve_hierarchical_evidence(
     branch: str = "main",
     disposition: ReflectDisposition | Mapping[str, Any] | None = None,
     mission: str | None = None,
+    include_evidence_fallback: bool = True,
 ) -> dict[str, Any]:
-    """Resolve evidence hierarchically: MentalModels -> Observations/KnowledgePages -> Raw Evidence."""
+    """Resolve evidence hierarchically using hybrid dense+BM25 scoring:
+    MentalModels -> Observations -> KnowledgePages -> Raw Evidence.
+    """
     if context is None:
         context = AnswerReadContext(
             tenant_id=str(tenant_id or "default"),
@@ -1812,6 +2109,15 @@ def resolve_hierarchical_evidence(
     mission_terms = (
         _query_substantive_terms(disp.mission) if disp and disp.mission else set()
     )
+    query_vec: list[float] | None = None
+    query_vec_loaded = False
+
+    def _get_query_vec() -> list[float] | None:
+        nonlocal query_vec, query_vec_loaded
+        if not query_vec_loaded:
+            query_vec = _query_embedding_if_semantic(engine, question)
+            query_vec_loaded = True
+        return query_vec
 
     layers_checked: list[str] = []
     matched_models: list[dict[str, Any]] = []
@@ -1822,7 +2128,7 @@ def resolve_hierarchical_evidence(
     claims: list[AnswerClaim] = []
     verified_rows: dict[str, dict[str, Any]] = {}
 
-    # Layer 1: Ready, non-stale MentalModels
+    # Layer 1: Ready, non-stale MentalModels (hybrid dense + BM25)
     layers_checked.append("mental_model")
     if context.user_id and not context.break_glass:
         try:
@@ -1832,16 +2138,39 @@ def resolve_hierarchical_evidence(
             models = mm_service.list(context)
         except Exception:
             models = []
+        ready_models: list[dict[str, Any]] = []
+        model_texts: list[str] = []
+        model_vecs: list[list[float] | None] = []
         for model in models:
             if not isinstance(model, Mapping):
                 continue
             if model.get("status") != "ready" or bool(model.get("stale", False)):
                 continue
-            m_text = f"{model.get('name', '')} {model.get('question', '')} {model.get('answer', '')}"
-            m_terms = _query_substantive_terms(m_text)
-            if _comparison(str(model.get("question", ""))) != _comparison(
+            m_dict = dict(model)
+            ready_models.append(m_dict)
+            model_texts.append(
+                f"{m_dict.get('name', '')} {m_dict.get('question', '')} {m_dict.get('answer', '')}"
+            )
+            model_vecs.append(_finite_vector(m_dict.get("embedding")))
+        q_vec_mm = _get_query_vec() if any(v is not None for v in model_vecs) else None
+        mm_scores = _hybrid_layer_scores(
+            question,
+            model_texts,
+            model_vecs,
+            q_terms=q_terms,
+            mission_terms=mission_terms,
+            query_vec=q_vec_mm,
+        )
+        scored_models: list[
+            tuple[bool, float, dict[str, Any], list[AnswerClaim], dict[str, dict[str, Any]]]
+        ] = []
+        for model, (overlap, bm25, dense_cos, hybrid_sc) in zip(
+            ready_models, mm_scores, strict=True
+        ):
+            exact_q = _comparison(str(model.get("question", ""))) == _comparison(
                 question
-            ) and not (q_terms & m_terms):
+            )
+            if not exact_q and overlap == 0 and bm25 <= 0.0 and dense_cos < 0.45:
                 continue
             cids = list(model.get("source_evidence_cids") or [])
             if not cids:
@@ -1851,7 +2180,6 @@ def resolve_hierarchical_evidence(
             )
             if len(live_map) != len(set(cids)):
                 continue
-            # Build verified AnswerClaims from model claims or live evidence spans
             model_claims: list[AnswerClaim] = []
             for raw_claim in model.get("claims") or []:
                 if not isinstance(raw_claim, Mapping):
@@ -1889,13 +2217,16 @@ def resolve_hierarchical_evidence(
                         )
                     )
             if model_claims:
-                matched_models.append(dict(model))
-                verified_rows.update(live_map)
-                claims.extend(model_claims)
+                scored_models.append((exact_q, hybrid_sc, model, model_claims, live_map))
+        scored_models.sort(key=lambda item: (not item[0], -item[1]))
+        for _, _, model, model_claims, live_map in scored_models:
+            matched_models.append(model)
+            verified_rows.update(live_map)
+            claims.extend(model_claims)
         if matched_models and claims:
             resolved_layer = "mental_model"
 
-    # Layer 2: Active corroborated Observations & KnowledgePages
+    # Layer 2: Active corroborated Observations (hybrid dense + BM25)
     if resolved_layer == "none":
         layers_checked.append("observation")
         raw_obs_list: list[Any] = []
@@ -1925,11 +2256,9 @@ def resolve_hierarchical_evidence(
 
         from mnemosyne.observations import ProofQuote, verify_proof_quote
 
-        scored_obs: list[
-            tuple[
-                int, float, dict[str, Any], list[AnswerClaim], dict[str, dict[str, Any]]
-            ]
-        ] = []
+        candidate_obs: list[dict[str, Any]] = []
+        obs_texts: list[str] = []
+        obs_vecs: list[list[float] | None] = []
         for item in raw_obs_list:
             obs_dict = (
                 item.to_dict()
@@ -1954,13 +2283,43 @@ def resolve_hierarchical_evidence(
                 and (indep_sources < 2 and standing < 0.6)
             ):
                 continue
-            obs_text = f"{obs_dict.get('subject', '')} {obs_dict.get('topic', '')} {obs_dict.get('content', '')}"
-            obs_terms = _query_substantive_terms(obs_text)
-            overlap = len(q_terms & obs_terms)
-            if mission_terms:
-                overlap += 2 * len(mission_terms & obs_terms)
-            if overlap == 0 and q_terms:
+            obs_id = str(obs_dict.get("observation_id") or obs_dict.get("id") or "")
+            candidate_obs.append(obs_dict)
+            obs_texts.append(
+                f"{obs_dict.get('subject', '')} {obs_dict.get('topic', '')} {obs_dict.get('content', '')}"
+            )
+            obs_vecs.append(
+                _stored_item_embedding(
+                    engine,
+                    context.tenant_id,
+                    context.branch,
+                    "observation",
+                    obs_id,
+                    obs_dict,
+                    filt=context.to_filter(),
+                )
+            )
+
+        q_vec_obs = _get_query_vec() if any(v is not None for v in obs_vecs) else None
+        obs_scores = _hybrid_layer_scores(
+            question,
+            obs_texts,
+            obs_vecs,
+            q_terms=q_terms,
+            mission_terms=mission_terms,
+            query_vec=q_vec_obs,
+        )
+        scored_obs: list[
+            tuple[
+                float, float, dict[str, Any], list[AnswerClaim], dict[str, dict[str, Any]]
+            ]
+        ] = []
+        for obs_dict, (overlap, bm25, dense_cos, hybrid_sc) in zip(
+            candidate_obs, obs_scores, strict=True
+        ):
+            if q_terms and overlap == 0 and bm25 <= 0.0 and dense_cos < 0.45:
                 continue
+            standing = float(obs_dict.get("standing", 0.51) or 0.51)
             raw_quotes = [
                 ProofQuote.from_dict(q) for q in (obs_dict.get("proof_quotes") or [])
             ]
@@ -2014,12 +2373,9 @@ def resolve_hierarchical_evidence(
             if not quotes_valid:
                 continue
             if not valid_spans:
-                # Fallback span from first source_evidence_cid
                 first_cid = obs_cids[0]
                 ev_content = live_map[first_cid]["content"]
-                quote_text = ev_content.strip() or ev_content
-                start = ev_content.find(quote_text)
-                end = start + len(quote_text)
+                start, end, quote_text = _concise_query_span(ev_content, q_terms)
                 valid_spans.append(
                     AnswerSpan(
                         first_cid,
@@ -2047,7 +2403,7 @@ def resolve_hierarchical_evidence(
                 spans=tuple(valid_spans),
                 synthesis_operation=None,
             )
-            scored_obs.append((-overlap, -standing, obs_dict, [obs_claim], live_map))
+            scored_obs.append((-hybrid_sc, -standing, obs_dict, [obs_claim], live_map))
 
         scored_obs.sort(key=lambda item: (item[0], item[1]))
         for _, _, obs_dict, obs_claims, live_map in scored_obs:
@@ -2057,6 +2413,7 @@ def resolve_hierarchical_evidence(
         if matched_observations and claims:
             resolved_layer = "observation"
 
+    # Layer 2b: Active KnowledgePages (hybrid dense + BM25, structured maintenance["claims"] spans)
     if resolved_layer == "none":
         layers_checked.append("knowledge_page")
         raw_pages: list[Any] = []
@@ -2076,6 +2433,9 @@ def resolve_hierarchical_evidence(
                         pass
                 except Exception:
                     pass
+        candidate_pages: list[tuple[Any, dict[str, Any]]] = []
+        page_texts: list[str] = []
+        page_vecs: list[list[float] | None] = []
         for page in raw_pages:
             page_dict = (
                 page.to_dict()
@@ -2094,9 +2454,58 @@ def resolve_hierarchical_evidence(
                 and page_dict.get("user_id") != context.user_id
             ):
                 continue
-            p_text = f"{page_dict.get('path', '')} {page_dict.get('title', '')} {page_dict.get('content_markdown', '')}"
-            p_terms = _query_substantive_terms(p_text)
-            if not (q_terms & p_terms):
+            maint = page_dict.get("maintenance")
+            if isinstance(maint, Mapping) and maint.get("schema") == "automatic-knowledge/v1":
+                try:
+                    from mnemosyne.knowledge_maintenance import automatic_page_current
+
+                    if not automatic_page_current(engine, page, context):
+                        continue
+                except Exception:
+                    continue
+            page_id = str(page_dict.get("page_id") or page_dict.get("id") or "")
+            maint_claim_text = (
+                " ".join(
+                    str(c.get("text") or "")
+                    for c in (maint.get("claims") or [])
+                    if isinstance(c, Mapping)
+                )
+                if isinstance(maint, Mapping)
+                else ""
+            )
+            candidate_pages.append((page, page_dict))
+            page_texts.append(
+                f"{page_dict.get('path', '')} {page_dict.get('title', '')} "
+                f"{maint_claim_text or page_dict.get('content_markdown', '')}"
+            )
+            page_vecs.append(
+                _stored_item_embedding(
+                    engine,
+                    context.tenant_id,
+                    context.branch,
+                    "knowledge_page",
+                    page_id,
+                    page_dict,
+                    filt=context.to_filter(),
+                )
+            )
+
+        q_vec_kp = _get_query_vec() if any(v is not None for v in page_vecs) else None
+        kp_scores = _hybrid_layer_scores(
+            question,
+            page_texts,
+            page_vecs,
+            q_terms=q_terms,
+            mission_terms=mission_terms,
+            query_vec=q_vec_kp,
+        )
+        scored_pages: list[
+            tuple[float, dict[str, Any], list[AnswerClaim], dict[str, dict[str, Any]]]
+        ] = []
+        for (_, page_dict), (overlap, bm25, dense_cos, hybrid_sc) in zip(
+            candidate_pages, kp_scores, strict=True
+        ):
+            if q_terms and overlap == 0 and bm25 <= 0.0 and dense_cos < 0.45:
                 continue
             p_cids = list(page_dict.get("source_evidence_cids") or [])
             if not p_cids:
@@ -2106,39 +2515,129 @@ def resolve_hierarchical_evidence(
             )
             if len(live_map) != len(set(p_cids)):
                 continue
-            page_spans: list[AnswerSpan] = []
-            for cid in p_cids:
-                ev_content = live_map[cid]["content"]
-                quote_text = ev_content.strip() or ev_content
-                start = ev_content.find(quote_text)
-                end = start + len(quote_text)
-                page_spans.append(
-                    AnswerSpan(
-                        cid,
-                        start,
-                        end,
-                        hashlib.sha256(quote_text.encode("utf-8")).hexdigest(),
-                    )
-                )
-            if page_spans:
-                matched_pages.append(page_dict)
-                verified_rows.update(live_map)
-                claims.append(
-                    AnswerClaim(
-                        text=" ".join(
+
+            page_claims: list[AnswerClaim] = []
+            maint = page_dict.get("maintenance")
+            raw_maint_claims = (
+                list(maint.get("claims") or []) if isinstance(maint, Mapping) else []
+            )
+            if raw_maint_claims:
+                ranked_maint_claims: list[tuple[int, int, AnswerClaim]] = []
+                for idx_c, raw_claim in enumerate(raw_maint_claims):
+                    if not isinstance(raw_claim, Mapping):
+                        continue
+                    c_spans: list[AnswerSpan] = []
+                    for raw_span in raw_claim.get("spans") or []:
+                        if not isinstance(raw_span, Mapping):
+                            continue
+                        scid = str(raw_span.get("cid") or "")
+                        start = raw_span.get("start")
+                        end = raw_span.get("end")
+                        expected_quote = raw_span.get("quote")
+                        if (
+                            scid in live_map
+                            and isinstance(start, int)
+                            and isinstance(end, int)
+                            and 0 <= start < end <= len(live_map[scid]["content"])
+                        ):
+                            actual_slice = live_map[scid]["content"][start:end]
+                            if (
+                                expected_quote is None
+                                or expected_quote == actual_slice
+                            ):
+                                c_spans.append(
+                                    AnswerSpan(
+                                        scid,
+                                        start,
+                                        end,
+                                        hashlib.sha256(
+                                            actual_slice.encode("utf-8")
+                                        ).hexdigest(),
+                                    )
+                                )
+                    if not c_spans:
+                        continue
+                    c_text = (
+                        str(raw_claim.get("text") or "").strip()
+                        or " ".join(
                             live_map[s.cid]["content"][s.start : s.end]
-                            for s in page_spans
-                        ),
-                        evidence_cids=tuple(dict.fromkeys(s.cid for s in page_spans)),
-                        spans=tuple(page_spans),
-                        synthesis_operation=None,
+                            for s in c_spans
+                        ).strip()
                     )
-                )
+                    if not c_text:
+                        continue
+                    claim_ov = (
+                        len(q_terms & _query_substantive_terms(c_text))
+                        if q_terms
+                        else 1
+                    )
+                    ranked_maint_claims.append(
+                        (
+                            -claim_ov,
+                            idx_c,
+                            AnswerClaim(
+                                text=c_text,
+                                evidence_cids=tuple(
+                                    dict.fromkeys(s.cid for s in c_spans)
+                                ),
+                                spans=tuple(c_spans),
+                                synthesis_operation=None,
+                            ),
+                        )
+                    )
+                if ranked_maint_claims:
+                    ranked_maint_claims.sort(key=lambda item: (item[0], item[1]))
+                    relevant_only = [
+                        item[2] for item in ranked_maint_claims if item[0] < 0
+                    ]
+                    page_claims = (
+                        relevant_only[:10]
+                        if relevant_only
+                        else [item[2] for item in ranked_maint_claims[:10]]
+                    )
+            if not page_claims:
+                # Legacy / manual knowledge pages without maintenance["claims"]:
+                # emit concise query-centered verified spans rather than dumping
+                # multi-KB raw source transcripts into a single concatenated claim.
+                page_spans: list[AnswerSpan] = []
+                for cid in p_cids[:8]:
+                    ev_content = live_map[cid]["content"]
+                    start, end, quote_text = _concise_query_span(ev_content, q_terms)
+                    page_spans.append(
+                        AnswerSpan(
+                            cid,
+                            start,
+                            end,
+                            hashlib.sha256(quote_text.encode("utf-8")).hexdigest(),
+                        )
+                    )
+                if page_spans:
+                    page_claims.append(
+                        AnswerClaim(
+                            text=" ".join(
+                                live_map[s.cid]["content"][s.start : s.end]
+                                for s in page_spans
+                            ),
+                            evidence_cids=tuple(
+                                dict.fromkeys(s.cid for s in page_spans)
+                            ),
+                            spans=tuple(page_spans),
+                            synthesis_operation=None,
+                        )
+                    )
+            if page_claims:
+                scored_pages.append((-hybrid_sc, page_dict, page_claims, live_map))
+
+        scored_pages.sort(key=lambda item: item[0])
+        for _, page_dict, page_claims, live_map in scored_pages:
+            matched_pages.append(page_dict)
+            verified_rows.update(live_map)
+            claims.extend(page_claims)
         if matched_pages and claims:
             resolved_layer = "knowledge_page"
 
     # Layer 3: Raw Evidence / Assertion fallback
-    if resolved_layer == "none":
+    if resolved_layer == "none" and include_evidence_fallback:
         layers_checked.append("evidence")
         try:
             retrieved = engine.retrieve(
@@ -2146,7 +2645,7 @@ def resolve_hierarchical_evidence(
                 tenant_id=context.tenant_id,
                 branch=context.branch,
                 deep=True,
-                filt=context.to_filter(),
+                filt={**context.to_filter(), "include_synthesized": True},
                 record_access=False,
             )
             fallback_cids: list[str] = []
@@ -2156,8 +2655,12 @@ def resolve_hierarchical_evidence(
                 else:
                     fallback_cids.extend(
                         str(c)
-                        for c in (getattr(hit, "metadata", {}) or {}).get(
-                            "source_evidence_cids", []
+                        for c in (
+                            (getattr(hit, "metadata", {}) or {}).get(
+                                "source_evidence_cids"
+                            )
+                            or getattr(hit, "provenance", ())
+                            or ()
                         )
                         if c
                     )
@@ -2582,3 +3085,831 @@ def adaptive_synthesize(
         "cited_cids": cited_cids,
         "disposition": disp.to_dict() if disp is not None else None,
     }
+
+
+MAX_REFLECT_ITERATIONS = 6
+AGENTIC_REFLECT_TOOLS: tuple[str, ...] = (
+    "search_mental_models",
+    "search_observations",
+    "search_knowledge_pages",
+    "recall_facts",
+    "expand_source_evidence",
+    "done",
+)
+
+
+def compile_answer_context(
+    question: str,
+    *,
+    evidence: Sequence[AnswerEvidence] = (),
+    observations: Sequence[Mapping[str, Any]] = (),
+    mental_models: Sequence[Mapping[str, Any]] = (),
+    knowledge_pages: Sequence[Mapping[str, Any]] = (),
+    evaluated_at: datetime | None = None,
+    max_items: int = 16,
+) -> dict[str, Any]:
+    """Compile authorized answer records with inline dates, calendar deltas, and epistemic tags."""
+    from mnemosyne.compiler_context import compile_retrieved_context
+
+    hit_rows = [
+        {
+            "id": row.cid,
+            "kind": "evidence",
+            "text": row.content,
+            "actor": row.actor,
+            "created_at": row.created_at,
+            "valid_from": row.valid_from,
+            "valid_to": row.valid_to,
+            "provenance": [row.cid],
+            "metadata": {
+                "memory_type": "evidence",
+                "actor": row.actor,
+                "created_at": row.created_at,
+                "valid_from": row.valid_from,
+                "valid_to": row.valid_to,
+            },
+        }
+        for row in evidence
+    ]
+    return compile_retrieved_context(
+        question,
+        hits=hit_rows,
+        observations=observations,
+        mental_models=mental_models,
+        knowledge_pages=knowledge_pages,
+        evaluated_at=evaluated_at,
+        max_items=max_items,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ReflectToolStep:
+    """One bounded read-only step executed by the Agentic Reflect Controller."""
+
+    iteration: int
+    tool: str
+    query: str
+    result_count: int
+    cids: tuple[str, ...] = ()
+    note: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "iteration": self.iteration,
+            "tool": self.tool,
+            "query": self.query,
+            "result_count": self.result_count,
+            "cids": list(self.cids),
+            "note": self.note,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AgenticReflectResult:
+    """Result of bounded CARA-style agentic reflection with custody replay verification."""
+
+    answer: GroundedAnswer
+    steps: tuple[ReflectToolStep, ...]
+    resolved_layer: str
+    compiled_context: dict[str, Any]
+    custody_verified: bool
+    iterations: int
+
+    def to_public_dict(
+        self,
+        disclosure: dict[str, object] | None = None,
+        *,
+        include_derivation: bool = True,
+    ) -> dict[str, Any]:
+        payload = dict(
+            public_grounded_answer(
+                self.answer,
+                disclosure or {},
+                include_derivation=include_derivation,
+            )
+        )
+        payload["agentic_reflect"] = {
+            "resolved_layer": self.resolved_layer,
+            "iterations": self.iterations,
+            "custody_verified": self.custody_verified,
+            "steps": [step.to_dict() for step in self.steps],
+        }
+        payload["compiled_context"] = self.compiled_context
+        return payload
+
+
+class AgenticReflectController:
+    """Bounded <=6-step CARA-style read-only reflection controller.
+
+    Explores Mnemosyne's cognitive hierarchy (MentalModels -> Observations ->
+    KnowledgePages -> Facts/Evidence -> Source Expansion) under strict caller
+    authorization, compiles temporal-epistemic context, and performs mandatory
+    post-generation custody replay and span SHA-256 citation verification.
+    """
+
+    def __init__(
+        self,
+        engine: MemoryEngine,
+        *,
+        decomposer: QueryDecomposer | None = None,
+        reader: GroundedReader | None = None,
+        limits: AnswerLimits | None = None,
+        max_iterations: int = MAX_REFLECT_ITERATIONS,
+    ) -> None:
+        if isinstance(max_iterations, bool) or not isinstance(max_iterations, int):
+            raise ValueError("max_iterations must be an integer")
+        if not (1 <= max_iterations <= MAX_REFLECT_ITERATIONS):
+            raise ValueError(
+                f"max_iterations must be between 1 and {MAX_REFLECT_ITERATIONS}"
+            )
+        self.engine = engine
+        self.decomposer = decomposer
+        self.reader = reader
+        self.limits = limits or AnswerLimits()
+        self.max_iterations = max_iterations
+
+    def reflect(
+        self,
+        request: AnswerRequest,
+        *,
+        disposition: ReflectDisposition | Mapping[str, Any] | None = None,
+        mission: str | None = None,
+        adaptive_synthesis: bool = True,
+        evaluated_at: datetime | None = None,
+    ) -> AgenticReflectResult:
+        if len(request.question) > self.limits.max_query_characters:
+            raise ValueError("question budget exceeded")
+        disp = coerce_disposition(disposition, mission=mission)
+        context = request.context
+        effective_mission = disp.mission if disp is not None else mission
+        steps: list[ReflectToolStep] = []
+        authorized_rows: dict[str, dict[str, Any]] = {}
+        matched_models: list[dict[str, Any]] = []
+        matched_observations: list[dict[str, Any]] = []
+        matched_pages: list[dict[str, Any]] = []
+        hierarchy_claims: list[AnswerClaim] = []
+        resolved_layer = "none"
+        hops: list[AnswerHop] = []
+
+        def _record_authorized(live_map: Mapping[str, dict[str, Any]]) -> list[str]:
+            added: list[str] = []
+            for cid, row in live_map.items():
+                if cid in authorized_rows:
+                    continue
+                if len(authorized_rows) >= self.limits.max_evidence:
+                    break
+                current_chars = sum(
+                    len(str(item.get("content") or ""))
+                    for item in authorized_rows.values()
+                )
+                if current_chars + len(str(row.get("content") or "")) > self.limits.max_characters:
+                    continue
+                authorized_rows[cid] = dict(row)
+                added.append(cid)
+            return added
+
+        def _run_tool(
+            iteration: int, tool: str, tool_query: str, cids_arg: Sequence[str] = ()
+        ) -> tuple[str, list[str]]:
+            nonlocal resolved_layer
+            clean_q = (tool_query or request.question).strip()[: self.limits.max_query_characters]
+            if tool == "search_mental_models":
+                hier = resolve_hierarchical_evidence(
+                    self.engine,
+                    clean_q,
+                    context,
+                    disposition=disp,
+                    mission=effective_mission,
+                    include_evidence_fallback=False,
+                )
+                models = list(hier.get("mental_models") or [])
+                if hier.get("resolved_layer") == "mental_model" and models:
+                    live = _verify_live_authorized_evidence(
+                        self.engine, context, hier.get("evidence_cids") or [], disposition=disp
+                    )
+                    _record_authorized(live)
+                    for m in models:
+                        if m not in matched_models:
+                            matched_models.append(m)
+                    hierarchy_claims.extend(hier.get("claims") or [])
+                    if resolved_layer == "none":
+                        resolved_layer = "mental_model"
+                    cids_found = sorted(live)
+                else:
+                    cids_found = []
+                steps.append(
+                    ReflectToolStep(
+                        iteration=iteration,
+                        tool=tool,
+                        query=clean_q,
+                        result_count=len(models),
+                        cids=tuple(cids_found),
+                    )
+                )
+                return "mental_model" if models else "none", cids_found
+
+            if tool == "search_observations":
+                hier = resolve_hierarchical_evidence(
+                    self.engine,
+                    clean_q,
+                    context,
+                    disposition=disp,
+                    mission=effective_mission,
+                    include_evidence_fallback=False,
+                )
+                obs_list = list(hier.get("observations") or [])
+                if hier.get("resolved_layer") == "observation" and obs_list:
+                    live = _verify_live_authorized_evidence(
+                        self.engine, context, hier.get("evidence_cids") or [], disposition=disp
+                    )
+                    _record_authorized(live)
+                    for item in obs_list:
+                        if item not in matched_observations:
+                            matched_observations.append(item)
+                    hierarchy_claims.extend(hier.get("claims") or [])
+                    if resolved_layer == "none":
+                        resolved_layer = "observation"
+                    cids_found = sorted(live)
+                else:
+                    cids_found = []
+                steps.append(
+                    ReflectToolStep(
+                        iteration=iteration,
+                        tool=tool,
+                        query=clean_q,
+                        result_count=len(obs_list),
+                        cids=tuple(cids_found),
+                    )
+                )
+                return "observation" if obs_list else "none", cids_found
+
+            if tool == "search_knowledge_pages":
+                hier = resolve_hierarchical_evidence(
+                    self.engine,
+                    clean_q,
+                    context,
+                    disposition=disp,
+                    mission=effective_mission,
+                    include_evidence_fallback=False,
+                )
+                pages = list(hier.get("knowledge_pages") or [])
+                if hier.get("resolved_layer") == "knowledge_page" and pages:
+                    live = _verify_live_authorized_evidence(
+                        self.engine, context, hier.get("evidence_cids") or [], disposition=disp
+                    )
+                    _record_authorized(live)
+                    for page in pages:
+                        if page not in matched_pages:
+                            matched_pages.append(page)
+                    hierarchy_claims.extend(hier.get("claims") or [])
+                    if resolved_layer == "none":
+                        resolved_layer = "knowledge_page"
+                    cids_found = sorted(live)
+                else:
+                    cids_found = []
+                steps.append(
+                    ReflectToolStep(
+                        iteration=iteration,
+                        tool=tool,
+                        query=clean_q,
+                        result_count=len(pages),
+                        cids=tuple(cids_found),
+                    )
+                )
+                return "knowledge_page" if pages else "none", cids_found
+
+            if tool == "recall_facts":
+                try:
+                    retrieved = self.engine.retrieve(
+                        clean_q,
+                        tenant_id=context.tenant_id,
+                        branch=context.branch,
+                        deep=True,
+                        filt={**context.to_filter(), "include_synthesized": True},
+                        record_access=False,
+                    )
+                except Exception:
+                    steps.append(
+                        ReflectToolStep(
+                            iteration=iteration,
+                            tool=tool,
+                            query=clean_q,
+                            result_count=0,
+                            note="retrieve_error",
+                        )
+                    )
+                    return "none", []
+                cids_cand: list[str] = []
+                channels_seen: set[str] = set()
+                for hit in getattr(retrieved, "hits", []) or []:
+                    channels_seen.add(str(getattr(hit, "channel", "")))
+                    if getattr(hit, "kind", None) == "evidence":
+                        cids_cand.append(str(hit.id))
+                    else:
+                        meta = getattr(hit, "metadata", {}) or {}
+                        cids_cand.extend(
+                            str(c)
+                            for c in (
+                                meta.get("source_evidence_cids")
+                                or getattr(hit, "provenance", ())
+                                or ()
+                            )
+                            if c
+                        )
+                live = _verify_live_authorized_evidence(
+                    self.engine, context, cids_cand, disposition=disp
+                )
+                _record_authorized(live)
+                if live:
+                    if resolved_layer == "none":
+                        resolved_layer = "evidence"
+                    hops.append(
+                        AnswerHop(
+                            index=len(hops),
+                            queries=(clean_q,),
+                            retrieved_cids=tuple(sorted(live)),
+                            channels=tuple(sorted(c for c in channels_seen if c)),
+                            evidence_fingerprint=_fingerprint(live),
+                            context=context,
+                        )
+                    )
+                steps.append(
+                    ReflectToolStep(
+                        iteration=iteration,
+                        tool=tool,
+                        query=clean_q,
+                        result_count=len(live),
+                        cids=tuple(sorted(live)),
+                    )
+                )
+                return ("evidence" if live else "none"), sorted(live)
+
+            if tool == "expand_source_evidence":
+                req_cids = [str(c) for c in cids_arg if isinstance(c, str) and c.strip()][:8]
+                live = _verify_live_authorized_evidence(
+                    self.engine, context, req_cids, disposition=disp
+                )
+                _record_authorized(live)
+                steps.append(
+                    ReflectToolStep(
+                        iteration=iteration,
+                        tool=tool,
+                        query=",".join(req_cids),
+                        result_count=len(live),
+                        cids=tuple(sorted(live)),
+                    )
+                )
+                return ("evidence" if live else "none"), sorted(live)
+
+            steps.append(
+                ReflectToolStep(
+                    iteration=iteration,
+                    tool="done",
+                    query=clean_q,
+                    result_count=len(authorized_rows),
+                    cids=tuple(sorted(authorized_rows)),
+                )
+            )
+            return "done", sorted(authorized_rows)
+
+        # Check if a pluggable tool-calling provider is attached (`reflect_step` / `tool_step`).
+        step_fn = (
+            getattr(self.reader, "reflect_step", None)
+            or getattr(self.reader, "tool_step", None)
+            or getattr(self.decomposer, "reflect_step", None)
+            or getattr(self.decomposer, "tool_step", None)
+        )
+        provider_proposal: Any = None
+        if callable(step_fn):
+            for iteration in range(1, self.max_iterations + 1):
+                compiled_now = compile_answer_context(
+                    request.question,
+                    evidence=tuple(
+                        GroundedAnswerOrchestrator._evidence(cid, row, 0)
+                        for cid, row in sorted(
+                            authorized_rows.items(),
+                            key=lambda item: _episode_key(item[1], item[0]),
+                        )
+                    ),
+                    observations=matched_observations,
+                    mental_models=matched_models,
+                    knowledge_pages=matched_pages,
+                    evaluated_at=evaluated_at,
+                )
+                step_payload = {
+                    "question": request.question,
+                    "iteration": iteration,
+                    "max_iterations": self.max_iterations,
+                    "available_tools": list(AGENTIC_REFLECT_TOOLS),
+                    "compiled_context": compiled_now["text"],
+                    "evidence": [
+                        {"cid": cid, "content": row["content"]}
+                        for cid, row in sorted(authorized_rows.items())
+                    ],
+                }
+                try:
+                    decision = step_fn(step_payload)
+                except Exception:
+                    return self._fail_closed(
+                        request.question,
+                        steps=steps,
+                        resolved_layer=resolved_layer,
+                        compiled_context=compiled_now,
+                        failure_kind="reader_error",
+                    )
+                if not isinstance(decision, Mapping):
+                    break
+                tool_name = str(decision.get("tool") or "done").strip()
+                if tool_name not in AGENTIC_REFLECT_TOOLS:
+                    break
+                if tool_name == "done":
+                    if "claims" in decision and "unresolved" in decision:
+                        provider_proposal = {
+                            "claims": decision["claims"],
+                            "unresolved": decision["unresolved"],
+                        }
+                    _run_tool(iteration, "done", request.question)
+                    break
+                _run_tool(
+                    iteration,
+                    tool_name,
+                    str(decision.get("query") or request.question),
+                    decision.get("cids") or (),
+                )
+        else:
+            # Deterministic bounded <=6-step hierarchical + multi-hop CARA escalation:
+            # 1) single hierarchical probe covering MentalModels -> Observations -> KnowledgePages
+            # 2) recall_facts on the primary question if hierarchy didn't resolve
+            # 3) entity-bridge follow-up recall_facts if decomposer/entity spans reveal uncovered hops
+            # 4) done
+            iteration = 0
+            hier = resolve_hierarchical_evidence(
+                self.engine,
+                request.question,
+                context,
+                disposition=disp,
+                mission=effective_mission,
+                include_evidence_fallback=False,
+            )
+            for layer_name, tool_name, key_name in (
+                ("mental_model", "search_mental_models", "mental_models"),
+                ("observation", "search_observations", "observations"),
+                ("knowledge_page", "search_knowledge_pages", "knowledge_pages"),
+            ):
+                if layer_name not in (hier.get("layers_checked") or []):
+                    continue
+                if iteration >= self.max_iterations - 1:
+                    break
+                iteration += 1
+                items_found = list(hier.get(key_name) or [])
+                if hier.get("resolved_layer") == layer_name and items_found:
+                    live = _verify_live_authorized_evidence(
+                        self.engine, context, hier.get("evidence_cids") or [], disposition=disp
+                    )
+                    _record_authorized(live)
+                    if layer_name == "mental_model":
+                        matched_models.extend(items_found)
+                    elif layer_name == "observation":
+                        matched_observations.extend(items_found)
+                    elif layer_name == "knowledge_page":
+                        matched_pages.extend(items_found)
+                    hierarchy_claims.extend(hier.get("claims") or [])
+                    resolved_layer = layer_name
+                    hops.append(
+                        AnswerHop(
+                            index=len(hops),
+                            queries=(request.question,),
+                            retrieved_cids=tuple(sorted(live)),
+                            channels=(f"hierarchy:{layer_name}",),
+                            evidence_fingerprint=_fingerprint(live),
+                            context=context,
+                        )
+                    )
+                    steps.append(
+                        ReflectToolStep(
+                            iteration=iteration,
+                            tool=tool_name,
+                            query=request.question,
+                            result_count=len(items_found),
+                            cids=tuple(sorted(live)),
+                        )
+                    )
+                    break
+                steps.append(
+                    ReflectToolStep(
+                        iteration=iteration,
+                        tool=tool_name,
+                        query=request.question,
+                        result_count=0,
+                    )
+                )
+
+            if not hierarchy_claims and iteration < self.max_iterations:
+                iteration += 1
+                _, first_cids = _run_tool(iteration, "recall_facts", request.question)
+                if first_cids and iteration < self.max_iterations - 1:
+                    follow_queries: list[str] = []
+                    seen_q = {_comparison(request.question)}
+                    sources_tuple = tuple(
+                        str(row.get("content") or "") for row in authorized_rows.values()
+                    )
+                    if self.decomposer is not None:
+                        try:
+                            decomp_resp = self.decomposer.decompose(
+                                {
+                                    "question": request.question,
+                                    "evidence": [
+                                        {"cid": cid, "content": row["content"]}
+                                        for cid, row in sorted(authorized_rows.items())
+                                    ],
+                                }
+                            )
+                            proposals = GroundedAnswerOrchestrator(
+                                self.engine, self.decomposer, limits=self.limits
+                            )._query_proposals(decomp_resp)
+                            follow_queries.extend(
+                                _later_hop_anchors(
+                                    proposals, sources_tuple, seen_q, self.limits
+                                )
+                            )
+                        except Exception:
+                            pass
+                    if not follow_queries:
+                        q_terms = _query_substantive_terms(request.question)
+                        for src in sources_tuple[:2]:
+                            for span in _entity_spans(src):
+                                s_terms = _query_substantive_terms(span)
+                                if s_terms and not s_terms.issubset(q_terms):
+                                    if _comparison(span) not in seen_q:
+                                        follow_queries.append(span)
+                                        seen_q.add(_comparison(span))
+                                    if len(follow_queries) >= 2:
+                                        break
+                            if len(follow_queries) >= 2:
+                                break
+                    for fq in follow_queries[:2]:
+                        if iteration >= self.max_iterations - 1:
+                            break
+                        iteration += 1
+                        _run_tool(iteration, "recall_facts", fq)
+
+            if iteration < self.max_iterations:
+                iteration += 1
+                _run_tool(iteration, "done", request.question)
+
+        evidence_tuple = tuple(
+            GroundedAnswerOrchestrator._evidence(cid, row, 0)
+            for cid, row in sorted(
+                authorized_rows.items(),
+                key=lambda item: _episode_key(item[1], item[0]),
+            )
+        )
+        compiled_ctx = compile_answer_context(
+            request.question,
+            evidence=evidence_tuple,
+            observations=matched_observations,
+            mental_models=matched_models,
+            knowledge_pages=matched_pages,
+            evaluated_at=evaluated_at,
+        )
+        if not authorized_rows:
+            return self._fail_closed(
+                request.question,
+                steps=steps,
+                resolved_layer=resolved_layer,
+                compiled_context=compiled_ctx,
+                failure_kind=None,
+            )
+
+        # Synthesize claims if hierarchy didn't already yield verified claims.
+        candidate_claims: tuple[AnswerClaim, ...] = ()
+        if hierarchy_claims:
+            candidate_claims = tuple(hierarchy_claims)
+        else:
+            evidence_map = {cid: row["content"] for cid, row in authorized_rows.items()}
+            proposal = provider_proposal
+            if proposal is None and self.reader is not None:
+                try:
+                    proposal = self.reader.read(
+                        {
+                            "question": request.question,
+                            "evidence": [
+                                {"cid": row.cid, "content": row.content}
+                                for row in evidence_tuple
+                            ],
+                        }
+                    )
+                except Exception:
+                    return self._fail_closed(
+                        request.question,
+                        steps=steps,
+                        resolved_layer=resolved_layer,
+                        compiled_context=compiled_ctx,
+                        failure_kind="reader_error",
+                    )
+            if proposal is not None:
+                try:
+                    candidate_claims = GroundedAnswerOrchestrator._claims(
+                        proposal, evidence_map
+                    )
+                except Exception:
+                    return self._fail_closed(
+                        request.question,
+                        steps=steps,
+                        resolved_layer=resolved_layer,
+                        compiled_context=compiled_ctx,
+                        failure_kind="invalid_reader_proposal",
+                    )
+            if not candidate_claims and adaptive_synthesis:
+                synth = adaptive_synthesize(
+                    request.question, evidence_tuple, disposition=disp
+                )
+                if not synth.get("abstained") and synth.get("claims"):
+                    try:
+                        candidate_claims = GroundedAnswerOrchestrator._claims(
+                            _adaptive_quote_proposal(synth), evidence_map
+                        )
+                    except Exception:
+                        candidate_claims = ()
+
+        if disp is not None and candidate_claims:
+            candidate_claims = _apply_disposition_to_claims(
+                candidate_claims, disp, evidence_tuple
+            )
+            candidate_claims = candidate_claims[: disp.max_claims(len(candidate_claims))]
+
+        if not candidate_claims:
+            return self._fail_closed(
+                request.question,
+                steps=steps,
+                resolved_layer=resolved_layer,
+                compiled_context=compiled_ctx,
+                failure_kind=None,
+            )
+
+        # Mandatory post-generation custody replay & span SHA-256 citation verification.
+        return self._verify_and_finalize(
+            request.question,
+            context=context,
+            disp=disp,
+            claims=candidate_claims,
+            pre_rows=authorized_rows,
+            hops=hops,
+            steps=steps,
+            resolved_layer=resolved_layer,
+            compiled_context=compiled_ctx,
+        )
+
+    def _verify_and_finalize(
+        self,
+        question: str,
+        *,
+        context: AnswerReadContext,
+        disp: ReflectDisposition | None,
+        claims: tuple[AnswerClaim, ...],
+        pre_rows: Mapping[str, dict[str, Any]],
+        hops: Sequence[AnswerHop],
+        steps: Sequence[ReflectToolStep],
+        resolved_layer: str,
+        compiled_context: dict[str, Any],
+    ) -> AgenticReflectResult:
+        cited_cids = list(
+            dict.fromkeys(
+                cid
+                for claim in claims
+                for cid in (*claim.evidence_cids, *(span.cid for span in claim.spans))
+            )
+        )
+        if not cited_cids or any(cid not in pre_rows for cid in cited_cids):
+            return self._fail_closed(
+                question,
+                steps=steps,
+                resolved_layer=resolved_layer,
+                compiled_context=compiled_context,
+                failure_kind="invalid_reader_proposal",
+            )
+        try:
+            replayed_rows = _verify_live_authorized_evidence(
+                self.engine, context, cited_cids, disposition=disp
+            )
+        except Exception:
+            return self._fail_closed(
+                question,
+                steps=steps,
+                resolved_layer=resolved_layer,
+                compiled_context=compiled_context,
+                failure_kind="replay_error",
+            )
+        pre_subset = {cid: pre_rows[cid] for cid in cited_cids}
+        if (
+            set(replayed_rows) != set(cited_cids)
+            or _fingerprint(replayed_rows) != _fingerprint(pre_subset)
+        ):
+            return self._fail_closed(
+                question,
+                steps=steps,
+                resolved_layer=resolved_layer,
+                compiled_context=compiled_context,
+                failure_kind="replay_drift",
+            )
+        for claim in claims:
+            if not claim.spans:
+                return self._fail_closed(
+                    question,
+                    steps=steps,
+                    resolved_layer=resolved_layer,
+                    compiled_context=compiled_context,
+                    failure_kind="invalid_reader_proposal",
+                )
+            for span in claim.spans:
+                live_row = replayed_rows.get(span.cid)
+                if live_row is None:
+                    return self._fail_closed(
+                        question,
+                        steps=steps,
+                        resolved_layer=resolved_layer,
+                        compiled_context=compiled_context,
+                        failure_kind="replay_drift",
+                    )
+                live_content = str(live_row.get("content") or "")
+                if not (0 <= span.start < span.end <= len(live_content)):
+                    return self._fail_closed(
+                        question,
+                        steps=steps,
+                        resolved_layer=resolved_layer,
+                        compiled_context=compiled_context,
+                        failure_kind="invalid_reader_proposal",
+                    )
+                actual_sha = hashlib.sha256(
+                    live_content[span.start : span.end].encode("utf-8")
+                ).hexdigest()
+                if actual_sha != span.slice_sha256:
+                    return self._fail_closed(
+                        question,
+                        steps=steps,
+                        resolved_layer=resolved_layer,
+                        compiled_context=compiled_context,
+                        failure_kind="replay_drift",
+                    )
+
+        verified_evidence = tuple(
+            GroundedAnswerOrchestrator._evidence(cid, row, 0)
+            for cid, row in sorted(
+                replayed_rows.items(),
+                key=lambda item: _episode_key(item[1], item[0]),
+            )
+        )
+        fp = _fingerprint(replayed_rows)
+        trace_hops = tuple(hops) or (
+            AnswerHop(
+                index=0,
+                queries=(question,),
+                retrieved_cids=tuple(sorted(replayed_rows)),
+                channels=(f"agentic:{resolved_layer}",),
+                evidence_fingerprint=fp,
+                context=context,
+            ),
+        )
+        grounded = GroundedAnswer(
+            answer="\n".join(claim.text for claim in claims),
+            claims=claims,
+            evidence=verified_evidence,
+            episodes=_episodes(verified_evidence),
+            trace=AnswerTrace(trace_hops, fp),
+            abstained=False,
+        )
+        return AgenticReflectResult(
+            answer=grounded,
+            steps=tuple(steps),
+            resolved_layer=resolved_layer,
+            compiled_context=compiled_context,
+            custody_verified=True,
+            iterations=len(steps),
+        )
+
+    @staticmethod
+    def _fail_closed(
+        question: str,
+        *,
+        steps: Sequence[ReflectToolStep],
+        resolved_layer: str,
+        compiled_context: dict[str, Any],
+        failure_kind: GroundedFailureKind | None,
+    ) -> AgenticReflectResult:
+        return AgenticReflectResult(
+            answer=GroundedAnswer(
+                answer="",
+                claims=(),
+                evidence=(),
+                episodes=(),
+                trace=AnswerTrace((), ""),
+                abstained=True,
+                public_reason=_PUBLIC_ABSTENTION,
+                failure_kind=failure_kind,
+            ),
+            steps=tuple(steps),
+            resolved_layer=resolved_layer,
+            compiled_context=compiled_context,
+            custody_verified=False,
+            iterations=len(steps),
+        )
